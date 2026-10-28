@@ -92,8 +92,9 @@ def test_refuses_symlink_and_nonregular_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("fixed_prefix", [False, True])
+@pytest.mark.parametrize("budgeted", [False, True])
 async def test_agent_accepts_at_boundaries_without_adjacent_users(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_prefix: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_prefix: bool, budgeted: bool
 ) -> None:
     import json
 
@@ -127,7 +128,13 @@ async def test_agent_accepts_at_boundaries_without_adjacent_users(
             transport=httpx.MockTransport(reply),
         ),
         options=AgentOptions(
-            memory=False, max_steps=2, attempt_policy="none", fixed_prefix=fixed_prefix
+            memory=False,
+            max_steps=2,
+            attempt_policy="none",
+            fixed_prefix=fixed_prefix,
+            context_window=8000 if budgeted else None,
+            output_reserve=100 if budgeted else None,
+            safety_margin=100 if budgeted else None,
         ),
     )
     try:
