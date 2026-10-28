@@ -218,6 +218,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The scheduler simulator's importer reads a chat call's kind from the
+  `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
+  file a proxy record names with `bodies.headers`. Retrieval and
+  step-estimate calls, which have no tools, no longer replay as `reflect`;
+  pre-R1 records and records without `--log-bodies` keep the old guess, an
+  unknown header value keeps the guess and is counted, and the import
+  report counts the records of each kind source ([#61]).
 - A `shell_exec` command no longer inherits melo's standard input: it reads
   `/dev/null` in every mode. A shell whose stdin was a pty that was not
   melo's controlling terminal took that pty as its controlling terminal at
@@ -327,3 +334,4 @@ earlier milestones.
 [#58]: https://github.com/localmelo/localmelo/pull/58
 [#59]: https://github.com/localmelo/localmelo/pull/59
 [#60]: https://github.com/localmelo/localmelo/pull/60
+[#61]: https://github.com/localmelo/localmelo/pull/61
