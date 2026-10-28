@@ -22,7 +22,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   at P5) or pruned by retention; an unpaused task returns 409 `not_paused`.
   Retention discards old terminal gate identities while keeping their rows.
   PATCH rejects `first` until S6b
-  ([#NN]).
+  ([#119]).
 
 - Reasoning and recall options now work in the interactive UI, including
   `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
@@ -871,3 +871,4 @@ earlier milestones.
 [#114]: https://github.com/localmelo/localmelo/pull/114
 [#115]: https://github.com/localmelo/localmelo/pull/115
 [#116]: https://github.com/localmelo/localmelo/pull/116
+[#119]: https://github.com/localmelo/localmelo/pull/119
