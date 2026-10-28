@@ -51,7 +51,9 @@ and open the one-use link within 60 seconds. The HTTP API and web workspace are 
 `http://127.0.0.1:8401/`.
 The interactive UI accepts the same [reasoning and recall options](docs/reference/cli.md#interactive-ui)
 as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
-also honor the saved reasoning mode (default `legacy`).
+also honor the saved reasoning mode (default `legacy`). The separate
+[`melo-task` command](docs/reference/scheduler.md#task-command) creates,
+inspects and controls gateway tasks; it requires the local gateway to be running.
 
 ## Learn more
 
