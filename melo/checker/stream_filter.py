@@ -72,9 +72,11 @@ def _split_for_display(text: str) -> tuple[str, str]:
 class StreamFilter:
     """Collect fragments and return ``(thinking, content)`` display deltas.
 
-    ``feed(fragment)`` always returns ``('', '')``. ``finish()`` returns the
-    separately redacted thinking and content exactly once; subsequent feed or
-    finish calls raise RuntimeError. Content whitespace is preserved, while
+    Feed only content fragments, never a provider's separate reasoning field.
+    ``feed(fragment)`` always returns ``('', '')``. Call ``finish()`` only after
+    a completed reply; on error call ``abort()`` to discard the buffered text.
+    ``finish()`` returns separately redacted thinking and content exactly once;
+    subsequent feed or finish calls raise RuntimeError. Content whitespace is preserved, while
     thinking is stripped, matching split_thinking's strip_answer=False mode
     for ordinary single-block responses. Use a fresh instance per response.
     """
@@ -96,6 +98,11 @@ class StreamFilter:
             raise ValueError("stream display exceeds size limit")
         self._parts.append(fragment)
         return "", ""
+
+    def abort(self) -> None:
+        """Discard provisional text after a failed or cancelled stream."""
+        self._parts.clear()
+        self._finished = True
 
     def finish(self) -> tuple[str, str]:
         if self._finished:

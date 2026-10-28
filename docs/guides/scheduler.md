@@ -35,7 +35,8 @@ The `[scheduler]` table of `config.toml` sets the policy:
 | `lock_gate` | `"record"` | `record` only shows the lock; `wait` holds every workspace call while a foreign lock is present |
 
 The lane is the chat being typed in: `POST /api/presence` sets it while you
-type (the legacy `POST /v1/playground/presence` still does), and every run
+type (the legacy `POST /v1/playground/presence` does so only when the
+playground is enabled, under the in-progress security-1b changes), and every run
 sets it too — a turn through the turn routes, a retry, and a create with a
 first turn. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's

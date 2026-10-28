@@ -16,7 +16,7 @@ An embedding backend adds vector-similarity search for entries with vectors.
 Text-only entries are still found with BM25. In `compress` and
 `compress+replay`, the `auto` retriever also uses the embedding provider to
 rank task-local recall; without one, `auto` uses the LLM at start and attempt
-and BM25 at step. The [recall reference](../concepts/memory.md#recall-in-the-loop)
+and BM25 at step and tool. The [recall reference](../concepts/memory.md#recall-in-the-loop)
 explains the triggers and other modes.
 
 An offline comparison measured the three retrievers at capped grade-2

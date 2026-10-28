@@ -97,6 +97,16 @@ def test_size_limit_fails_closed() -> None:
         stream.finish()
 
 
+def test_abort_discards_partial_response() -> None:
+    stream = StreamFilter()
+    assert stream.feed("partial secret answer") == ("", "")
+    stream.abort()
+    with pytest.raises(RuntimeError):
+        stream.finish()
+    with pytest.raises(RuntimeError):
+        stream.feed("late")
+
+
 def test_lifecycle_and_empty_input() -> None:
     stream = StreamFilter()
     assert stream.feed("") == ("", "")

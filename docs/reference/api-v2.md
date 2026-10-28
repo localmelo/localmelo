@@ -2,14 +2,19 @@
 
 API v2 is the web console's HTTP API. It is served under `/api/` on the
 gateway, only when the gateway listens on a loopback address
-(`127.0.0.1`, `localhost` or `::1`). It has no login: do not expose the
-gateway. See [Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).
+(`127.0.0.1`, `localhost` or `::1`). Protected routes require a bearer
+token or signed-in browser cookie; do not expose the gateway. See [Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).
 
-The API only grows: endpoints, optional request fields and response keys
-are added, never renamed or removed. A client may ignore keys it does not
+Apart from the authentication requirement, API fields remain additive:
+endpoints, optional request fields and response keys are added. A client may ignore keys it does not
 know. This page documents every API v2 route: health, settings, key status,
 connection test, model listing, sessions, turns, SSE events, blobs,
 submissions, approvals, tools, grants, memory, runs and scheduler tasks.
+
+`POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
+`POST /api/auth/logout` revokes the cookie. `POST /api/auth/rotate` requires
+the bearer and rotates it. The login exchange requires a matching Origin.
+See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
@@ -63,8 +68,12 @@ Readiness, the API and event schema versions, the settings' model, the
 cached model-server check, the limits and the store's state. Health is
 served while the store is unavailable.
 
+The examples pipe the gateway bearer token from its private file to curl, keeping
+it out of command-line arguments and shell history. Do not enable verbose curl
+output or log the header; same-user processes can still read the token file.
+
 ```bash
-curl http://127.0.0.1:8401/api/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/health
 ```
 
 ```json
@@ -111,7 +120,7 @@ key values, plus the wizard's per-section defaults, backend choices and the
 file's revision.
 
 ```bash
-curl http://127.0.0.1:8401/api/settings
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/settings
 ```
 
 ```json
@@ -153,7 +162,7 @@ Save settings atomically to `config.toml` and apply them to new console
 sessions.
 
 ```bash
-curl -X PUT http://127.0.0.1:8401/api/settings \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PUT http://127.0.0.1:8401/api/settings \
   -H "Content-Type: application/json" \
   -d '{"chat_backend":"ollama","embedding_backend":"none","workspace":"~/localmelo-workspace","sections":{"ollama":{"chat_url":"http://127.0.0.1:11434","chat_model":"qwen3:8b"}},"revision":""}'
 ```
@@ -179,10 +188,13 @@ curl -X PUT http://127.0.0.1:8401/api/settings \
 
 Check candidate settings with a one-message chat ping and, when an
 embedding backend is selected, a one-word embedding ping, bounded to 30
-seconds. Takes the `PUT /api/settings` body without `revision`.
+seconds. Takes the `PUT /api/settings` body without `revision`. In the
+in-progress security-1b changes, authenticated probes accept explicitly
+typed absolute HTTP or HTTPS URLs and do not follow redirects; a redirect
+is a failed probe. These probes can contact the supplied host.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/settings/test \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/settings/test \
   -H "Content-Type: application/json" \
   -d '{"chat_backend":"ollama","embedding_backend":"none","workspace":"~/localmelo-workspace","sections":{"ollama":{"chat_url":"http://127.0.0.1:11434","chat_model":"qwen3:8b"}}}'
 ```
@@ -200,7 +212,7 @@ Whether an environment variable is non-empty in the gateway's environment.
 Never returns the variable's value.
 
 ```bash
-curl 'http://127.0.0.1:8401/api/settings/key-status?name=OPENAI_API_KEY'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/settings/key-status?name=OPENAI_API_KEY'
 ```
 
 ```json
@@ -213,9 +225,12 @@ curl 'http://127.0.0.1:8401/api/settings/key-status?name=OPENAI_API_KEY'
 ## GET /api/models
 
 List the models of a local backend (`GET <url>/models` with a 5 s timeout).
+In the in-progress security-1b changes, authenticated requests may supply an
+absolute HTTP or HTTPS URL; redirects are not followed. The supplied host
+can be contacted.
 
 ```bash
-curl 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1%3A11434%2Fv1'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1%3A11434%2Fv1'
 ```
 
 ```json
@@ -300,7 +315,7 @@ existing task and does not restart it.
 The newest sessions first. Only `chat` sessions are listed by default.
 
 ```bash
-curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 ```
 
 ```json
@@ -368,7 +383,7 @@ One session, its pending approvals, its session grants, and its output
 token total.
 
 ```bash
-curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```
 
 ```json
@@ -409,7 +424,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 The session's turns, oldest first within the page.
 
 ```bash
-curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns?limit=10&events=true'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns?limit=10&events=true'
 ```
 
 ```json
@@ -438,9 +453,9 @@ A Server-Sent Events stream of the session's events: the stored ones after
 the start point, then live ones.
 
 ```bash
-curl -N 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/events?after=789'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -N 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/events?after=789'
 # catch up once and stop:
-curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/events?after=789&follow=false'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/events?after=789&follow=false'
 ```
 
 ```text
@@ -475,7 +490,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 An image a turn's tool returned, by its SHA-256 digest.
 
 ```bash
-curl -o shot.png http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blobs/823ceb99fcef5252333ede1b2202341c3b287b6d47571963e6b0ddf393a24f82
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -o shot.png http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blobs/823ceb99fcef5252333ede1b2202341c3b287b6d47571963e6b0ddf393a24f82
 ```
 
 - `sha256` is exactly 64 lowercase hex characters; anything else, an
@@ -497,7 +512,7 @@ same lookup without a session is `GET /api/submissions/{client_request_id}`,
 for a client that never learned the new session's id.
 
 ```bash
-curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07
 ```
 
 ```json
@@ -567,7 +582,7 @@ and three resume keys:
 Create a session, usually with its first turn.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/sessions \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions \
   -H 'Content-Type: application/json' \
   -d '{"workspace": "~/demo-project", "turn": {"text": "list the folder", "client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07"}}'
 ```
@@ -601,7 +616,7 @@ Start a turn in an existing session. The body is a create's `turn`; there
 is no `workspace` here — the session's own folder is the Agent's.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns \
   -H 'Content-Type: application/json' \
   -d '{"text": "list the folder", "client_request_id": "curl-turn-1"}'
 ```
@@ -625,7 +640,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns \
 Run the newest finished turn's text again.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/retry \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/retry \
   -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
 ```
 
@@ -642,7 +657,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/retry \
 Stop a running turn, from the id the events gave.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/cancel
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/cancel
 ```
 
 ```json
@@ -664,7 +679,7 @@ Cancel a message by the key it was sent with.
 session, for a create whose answer was lost.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07/cancel \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07/cancel \
   -H 'Content-Type: application/json' -d '{"text": "list the folder"}'
 ```
 
@@ -694,7 +709,7 @@ Answer an approval card. The id comes from `approval.requested` on the
 event stream, or from `pending_approvals`.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/approvals/386183e1811b4ba68c3768bfb96ac8e6 \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/approvals/386183e1811b4ba68c3768bfb96ac8e6 \
   -H 'Content-Type: application/json' -d '{"choice": "session"}'
 ```
 
@@ -717,7 +732,7 @@ curl -X POST http://127.0.0.1:8401/api/approvals/386183e1811b4ba68c3768bfb96ac8e
 Rename the session, move it to another folder, or both.
 
 ```bash
-curl -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
   -H 'Content-Type: application/json' -d '{"title": "Release notes"}'
 ```
 
@@ -738,23 +753,24 @@ curl -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
 ## DELETE /api/sessions/{id}
 
 ```bash
-curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```
 
 - A task session returns 409 `task_session_read_only`; it cannot be deleted as a chat.
 - 204 with no body: the session's row, turns, events and blobs are gone.
-- A running turn is stopped first, finished `cancelled` with cause
-  `closed`; its card is withdrawn.
-- 404 `not_found` for an unknown session. 409 `session_busy` when a turn
-  is still running after this gateway stopped it — rare: the row, its
-  turns and its events stay as they were, and the call can be repeated.
+- In the in-progress security-1b changes, 409 `session_busy` refuses a
+  delete while a turn is running or a start is queued; it does not cancel
+  the turn or delete its row. Cancel or wait for it to finish, then retry.
+  A maintenance operation holding the session lock can also briefly return
+  this error, even when no turn is running; wait and retry.
+- 404 `not_found` for an unknown session.
 
 ## POST /api/sessions/{id}/level
 
 Set a chat's scheduler level, P1 to P4.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/level \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/level \
   -H 'Content-Type: application/json' -d '{"level": 1}'
 ```
 
@@ -779,7 +795,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/level \
 The page's typing heartbeat: this chat is the lane's focused chat.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/api/presence \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/presence \
   -H 'Content-Type: application/json' -d '{"session_id": "3f9c2a7b1d4e"}'
 ```
 
@@ -799,7 +815,7 @@ curl -X POST http://127.0.0.1:8401/api/presence \
 Every tool the session's Agent offers, with whether this session allows it.
 
 ```bash
-curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
 ```
 
 ```json
@@ -824,7 +840,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
 Take back one session grant, so the tool asks again next time.
 
 ```bash
-curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
 - 204 with no body; both `grants` and `granted_at` of
@@ -838,7 +854,7 @@ curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exe
 What the session's Agent remembers in its window.
 
 ```bash
-curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/memory
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/memory
 ```
 
 ```json
@@ -863,7 +879,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/memory
 Each finished turn's run record, newest page first like the turns list.
 
 ```bash
-curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/runs?limit=20'
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/runs?limit=20'
 ```
 
 ```json
@@ -884,6 +900,5 @@ and MCP tools in the console are not built yet; the shapes above are the
 ones later changes extend.
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
-reference. Run the API only on the loopback address. A gateway on `0.0.0.0`
-mounts no console and no `/api`, and logs a warning at startup; see
+reference. Non-loopback binds are refused at startup; see
 [Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).

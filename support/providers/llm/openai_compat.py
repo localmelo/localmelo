@@ -356,6 +356,7 @@ class OpenAICompatLLM(BaseLLMProvider):
             timeout=timeout,
             headers=headers,
             transport=transport,
+            follow_redirects=False,
         )
 
     async def chat(
@@ -460,7 +461,9 @@ class OpenAICompatLLM(BaseLLMProvider):
                             raise ProviderError("Malformed SSE usage")
                         emitted = True
                         yield StreamFragment(kind="usage", usage=usage)
-                    choices = obj.get("choices")
+                    choices = obj.get(
+                        "choices", [] if obj.get("usage") is not None else None
+                    )
                     if not isinstance(choices, list):
                         raise ProviderError("Malformed SSE choices")
                     for choice in choices:
@@ -468,7 +471,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                             raise ProviderError("Malformed SSE choice")
                         if choice.get("index", 0) != 0:
                             continue
-                        delta = choice.get("delta")
+                        delta = choice.get("delta", {})
                         if not isinstance(delta, dict):
                             raise ProviderError("Malformed SSE delta")
                         if finish and delta:
@@ -530,7 +533,11 @@ class OpenAICompatLLM(BaseLLMProvider):
                                             raise ProviderError(
                                                 "SSE tool fields exceed size limit"
                                             )
-                                        call[key] += value
+                                        if (
+                                            key not in ("id", "name")
+                                            or value != call[key]
+                                        ):
+                                            call[key] += value
                                 emitted = True
                                 yield StreamFragment(kind="tool", tool_index=index)
                         final = choice.get("finish_reason")
@@ -542,7 +549,7 @@ class OpenAICompatLLM(BaseLLMProvider):
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}", retryable=not emitted
             ) from exc
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, httpx.StreamError) as exc:
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}"
             ) from exc
@@ -550,13 +557,17 @@ class OpenAICompatLLM(BaseLLMProvider):
             raise ProviderError(
                 "Streaming response ended before completion", retryable=not emitted
             )
-        if calls and finish != "tool_calls":
+        if bool(calls) != (finish == "tool_calls"):
             raise ProviderError("Tool calls were not completed")
         raw_calls = []
         for index in sorted(calls):
             call = calls[index]
             try:
-                args = json.loads(call["arguments"], parse_constant=_reject_nonfinite)
+                args = (
+                    json.loads(call["arguments"], parse_constant=_reject_nonfinite)
+                    if call["arguments"].strip()
+                    else {}
+                )
             except ValueError as exc:
                 raise ProviderError("Malformed completed tool arguments") from exc
             if not isinstance(args, dict) or not call["name"]:

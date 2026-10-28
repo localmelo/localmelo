@@ -190,15 +190,20 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   `StreamFragment` values: provisional `content` and `reasoning` text, `tool`
   indices (never partial arguments), `usage`, then one `reply` containing a
   completed `Message` and `finish_reason`. Providers without streaming call
-  `chat()` and yield one `reply`. `OpenAICompatLLM` sends `stream=true` only
-  for this method and validates complete tool calls before returning them.
+  `chat()` and yield one `reply` with an empty `finish_reason`. `OpenAICompatLLM`
+  sends `stream=true` only for this method and validates complete tool calls
+  before returning them. Usage is returned only if the server sends it; where
+  supported, request it with `extra_body={"stream_options": {"include_usage": True}}`.
   Failures raise `ProviderError`; after any fragment is yielded, transport or
   premature-end errors are not retryable. Cancellation propagates. Close the generator
   with `aclose()` on early exit. Deltas and the final message can contain
   sensitive text: do not persist raw deltas, and do not display them directly.
   `localmelo.melo.checker.stream_filter.StreamFilter` is the separate display
-  policy: it buffers a complete text response, separates thinking and applies
-  pattern-based redaction at `finish()`. It does not guarantee secret removal,
+  policy: feed it only content fragments, not a separate reasoning field. It
+  buffers the response, separates inline thinking and applies pattern-based
+  redaction at `finish()`; call `finish()` only after a completed reply, and
+  call `abort()` on error or cancellation to discard provisional text. It does
+  not guarantee secret removal,
   and emits no live text. This contract has no agent or UI consumer yet;
   existing `chat()` behavior is unchanged. Callers must not silently retry a
   stream after showing provisional output.

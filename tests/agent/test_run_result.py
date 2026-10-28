@@ -51,9 +51,9 @@ SPEC_FIELDS = [
     "config",
 ]
 
-# The dataclass gained R2's memory_stats; to_dict() omits it while it is None,
+# Optional memory, context accounting and prefix telemetry are omitted while None,
 # so SPEC_FIELDS stays the legacy JSON line's shape.
-DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats", "context_budget"]
+DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats", "context_budget", "prefix_cache"]
 
 
 class TestRunResult:

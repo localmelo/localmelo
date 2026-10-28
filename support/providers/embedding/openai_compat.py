@@ -54,6 +54,7 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
             timeout=timeout,
             headers=headers,
             transport=transport,
+            follow_redirects=False,
         )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

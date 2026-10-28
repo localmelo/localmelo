@@ -223,7 +223,6 @@ async def test_cancellation_closes_response() -> None:
         ("[]", "tool_calls"),
         ('{"x":1}', "length"),
         ('{"x":NaN}', "tool_calls"),
-        ("", "tool_calls"),
     ],
 )
 async def test_incomplete_tools_are_never_returned(arguments: str, finish: str) -> None:
@@ -379,6 +378,99 @@ async def test_error_body_is_bounded() -> None:
         assert body.consumed <= 9 and body.closed == 1
     finally:
         await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_interleaved_tools_and_repeated_identifiers() -> None:
+    def chunk(calls: list[dict], finish: str | None = None) -> bytes:
+        return frame(
+            {"choices": [{"delta": {"tool_calls": calls}, "finish_reason": finish}]}
+        )
+
+    raw = (
+        chunk(
+            [
+                {"index": 0, "id": "a", "function": {"name": "read", "arguments": '{"x":'}},
+                {"index": 1, "id": "b", "function": {"name": "noop"}},
+            ]
+        )
+        + chunk(
+            [
+                {"index": 1, "id": "b", "function": {"name": "noop", "arguments": " "}},
+                {"index": 0, "id": "a", "function": {"name": "read", "arguments": "3}"}},
+            ],
+            "tool_calls",
+        )
+        + b"data: [DONE]\n\n"
+    )
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+    )
+    try:
+        events = [event async for event in provider.stream_chat([])]
+        reply = events[-1].reply
+        assert reply is not None
+        assert [(call.id, call.tool_name, call.arguments) for call in reply.tool_calls] == [
+            ("a", "read", {"x": 3}),
+            ("b", "noop", {}),
+        ]
+    finally:
+        await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        frame({"error": {"message": "failed"}}),
+        frame({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
+        + b"data: [DONE]\n\n",
+        b'data: {"choices":',
+    ],
+)
+async def test_error_frames_and_incomplete_calls(raw: bytes) -> None:
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+    )
+    try:
+        with pytest.raises(ProviderError):
+            _ = [event async for event in provider.stream_chat([])]
+    finally:
+        await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_usage_opt_in_and_compatible_final_frames() -> None:
+    requests: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content)
+        requests.append(body)
+        raw = frame({"choices": [{"finish_reason": "stop"}]})
+        if body.get("stream_options", {}).get("include_usage"):
+            raw += frame({"usage": {"prompt_tokens": 2, "completion_tokens": 3}})
+        return httpx.Response(200, stream=Bytes([raw + b"data: [DONE]\n\n"]))
+
+    for options in ({}, {"stream_options": {"include_usage": True}}):
+        provider = OpenAICompatLLM(
+            "http://example.test/v1",
+            "test",
+            extra_body=options,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            events = [event async for event in provider.stream_chat([])]
+            reply = events[-1].reply
+            assert reply is not None
+            assert (reply.usage is not None) == bool(options)
+        finally:
+            await provider.close()
+    assert "stream_options" not in requests[0]
+    assert requests[1]["stream_options"] == {"include_usage": True}
 
 
 @pytest.mark.asyncio
