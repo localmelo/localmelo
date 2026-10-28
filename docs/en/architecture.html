@@ -210,20 +210,15 @@
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
         </p>
         <p>
-          At <code>/</code> it serves the web workspace, which does not read
-          the config file: it lists the models of a server whose URL you
-          enter, and keeps up to 12 chats of its own, with search, a draft for
-          each chat, and Stop, which ends the run as <code>cancelled</code>.
-          Each chat has its own agent, with the three built-in tools
-          <code>file_read</code>, <code>file_write</code> and
-          <code>python_exec</code> (no <code>shell_exec</code>) and its own
-          working memory. All chats save to one history and, with an
-          embedding model, one long-term memory, in
-          <code>~/.cache/localmelo/playground/</code>. Chats last while the
-          gateway runs, but creating a chat closes those idle for 2 hours
-          and, at 12 chats, replaces the oldest idle one. A chat's model calls
-          pass through the scheduler's policy, and the header shows the GPU
-          lock and the battery the gateway reads.
+          At <code>/</code> the web workspace uses the console's API v2 and
+          persistent session store. It shows the turn's work and answer,
+          connection settings, earlier turns, stopped or failed runs and
+          approval cards when requests are present; its default gateway mode
+          has no approval policy. Each chat uses the configured model and the
+          built-in <code>file_read</code>, <code>file_write</code> and
+          <code>python_exec</code> tools (no <code>shell_exec</code>). Model
+          calls share the scheduler gate, and the header shows its GPU lock
+          and battery readings.
         </p>
         <p>
           The gateway has no authentication. When it listens on

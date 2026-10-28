@@ -71,7 +71,7 @@
         <p>Planned:</p>
         <ul>
           <li>the interactive CLI's remaining parts: attached files and shell commands;</li>
-          <li>a console page that shows the agent's work live, and web-workspace chats that survive a gateway restart (the console's sessions already persist and reopen after one);</li>
+          <li>more workspace controls and polish for the console page;</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
         </ul>
@@ -87,6 +87,12 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-28-console-controls">
+          <h3>Workspace controls and recovery</h3>
+          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · Unreleased</p>
+          <p>The workspace adds connection settings, earlier-turn paging, failure and stopped controls, and per-tab outbox recovery. Approval cards render pending requests with a 500 ms guard; the gateway's default mode does not request approvals. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">web workspace guide</a>.</p>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-tool-modes">
           <h3>Gateway and console sessions no longer offer <code>shell_exec</code></h3>

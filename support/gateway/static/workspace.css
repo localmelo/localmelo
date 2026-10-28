@@ -1193,6 +1193,39 @@ dialog::backdrop {
   margin: 8px 0;
   border-radius: 8px;
 }
+.approval-card,
+.failure-card {
+  margin: 10px 13px;
+  padding: 12px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.failure-card[data-severity="error"] { border-color: var(--error); }
+.approval-title, .failure-title { margin: 0 0 8px; font-weight: 600; }
+.approval-content, .failure-details pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sidebar);
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.approval-actions, .failure-actions, .approval-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.approval-actions button, .deny-view button { font-size: 12px; }
+.approval-warning, .failure-hint { color: var(--muted); line-height: 1.5; }
+.failure-error { color: var(--error); overflow-wrap: anywhere; }
+.failure-details { margin-top: 8px; color: var(--muted); }
+.deny-view label { display: block; }
+.deny-reason { display: block; width: 100%; margin: 6px 0; }
+.deny-counter { display: block; color: var(--muted); font-size: 11px; }
+.approval-bar { margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--warn); border-radius: 8px; background: var(--surface); font-size: 12px; }
+.stopped-line { color: var(--muted); }
 .link-button {
   background: none;
   border: 0;

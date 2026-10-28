@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Workspace approval cards with a 500 ms guard, explicit allow/deny choices,
+  and a jump-to-approval control; failure and stopped states with retry,
+  continuation when eligible, copy-error and details; older-turn paging;
+  revision-checked connection settings; and per-tab outbox recovery. Session
+  update events also carry a display-safe workspace label. ([#NN])
+
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
@@ -29,9 +35,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   both surfaces share, and a console turn sets the gate's turn facts as a
   chat's message does. The page is plain ES modules with no build step
   (`workspace.js`, the new `turns.mjs` holding the event reducer and the
-  terminal's wording, `markdown.mjs`). Approval cards, the failure block's
-  `Continue`/`Try again`/`Copy error` and the settings dialog follow in a
-  later update; a waiting approval shows as `Needs approval` until then.
+  terminal's wording, `markdown.mjs`). The follow-up adds approval cards,
+  the failure block's actions and the settings dialog.
   `/` and every `/v1/*` route keep their behaviour ([#NN]).
 - API v2 settings, model listing, guard body limits and unconfigured gateway
   startup: `GET /api/settings`, `PUT /api/settings`,
