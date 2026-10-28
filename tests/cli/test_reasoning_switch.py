@@ -20,7 +20,7 @@ from localmelo.support.cli.theme import UNICODE
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.store import SessionStore
-from localmelo.tests.sessions.helpers import ScriptedLLM
+from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
 
 @pytest.mark.parametrize("with_mcp", [False, True])
@@ -129,7 +129,7 @@ async def test_model_switch_keeps_the_process_mode_and_full_conversation(
         ),
     )
     options = AgentOptions(reasoning=mode, retriever="off", replay_turns=2)
-    llm = ScriptedLLM([])
+    llm = ScriptedLLM([answer("The kept answer is established; verify it next.")])
     llm.reasoning_field = "auto"
     old = Agent(llm=llm, options=options)
     await old.start()
@@ -139,6 +139,10 @@ async def test_model_switch_keeps_the_process_mode_and_full_conversation(
             Message("assistant", "kept answer", thinking="kept thinking"),
         ]
     )
+    outcome = await old.run_task("Summarize the kept answer and the next step.")
+    assert outcome.status == "completed"
+    notes = old.notes()
+    assert bool(notes) == (mode in ("compress", "compress+replay"))
     conversation = old.conversation()
     factory = AgentFactory(
         backend=config_backend(cfg, None),
@@ -173,6 +177,7 @@ async def test_model_switch_keeps_the_process_mode_and_full_conversation(
         assert session.agent.options.replay_turns == 2
         assert session.agent.options.replay_scope == "window"
         assert session.agent.conversation() == conversation
+        assert session.agent.notes() == notes
         assert factory.backend.model == "new-model"
         assert factory.live_agents() == [session.agent]
         assert "Model: new-model" in out.text()

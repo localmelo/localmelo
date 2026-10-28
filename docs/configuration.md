@@ -161,9 +161,10 @@ tables of the chosen backends.
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` takes `auto` or `thinking` instead. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
-| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
+| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the saved default for direct runs, the interactive UI and API v2 console sessions. See [Reasoning](#reasoning). |
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
+| `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
@@ -226,8 +227,9 @@ replay_turns = 3          # optional; omit for every turn
 note_writer = "auto"      # optional: auto or heuristic
 ```
 
-`[retrieval]` sets recall's defaults; a direct-mode flag wins over it, and
-the table is accepted and inert in `legacy`. A value outside its range (an
+`[retrieval]` sets recall's defaults for direct runs, the interactive UI and
+console sessions; an explicit CLI flag wins over the matching key. The table
+is accepted and inert in `legacy`. A value outside its range (an
 unknown retriever or name, `k` outside 1-10, `min_score` outside 0-1) is a
 configuration error, exit 1 with one line.
 
@@ -244,9 +246,12 @@ min_score = 0.35          # 0-1
 `save` writes the table only when a value differs from its default, so an
 existing config file is unchanged.
 
-A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
-flags (it does not read this file). The interactive UI and the gateway do
-not read `[agent]` in this release.
+An explicit flag wins over `[agent]` in direct mode and the interactive UI.
+A `--base-url` session or run uses flags, not these saved defaults. API v2
+console sessions use the saved mode, defaulting to `legacy` when none is set;
+they keep the gateway's tool policy. The legacy `/v1` API is unchanged and
+does not inherit the reasoning/retrieval tables. `--retrieval-extra-body`
+is flag-only, never a saved key, and affects `retrieve` requests only.
 
 Each backend section can name the request key and say that the server
 requires replay:
@@ -262,17 +267,47 @@ requires_reasoning_replay = false     # true for a server that rejects a
 
 `auto` follows the key the last reply's reasoning came from, so a backend
 that emits either `reasoning_content` or `reasoning` works as it is; it
-sends no key before the first reply. The field is used only by `replay`
-and `compress+replay`: `legacy`, `drop` and `compress` ignore it, also when the gateway, a configured
-interactive session or a Python caller builds its provider from this file
-(direct mode with `--base-url` does not read the file). `replay` uses the
-current task's assistant turns by default; earlier turns of a `melo ""`
-loop or a session are not replayed. The `[ollama]` backend fixes its field
+sends no key before the first reply. For OpenAI-compatible backends, the
+field is used only by `replay` and `compress+replay`: `legacy`, `drop` and
+`compress` ignore it, including through scheduler wrappers. Native Ollama
+keeps its existing legacy wire behavior. `replay` uses the
+current task's assistant turns in direct runs and the `melo ""` loop;
+session builders select the retained conversation window instead. Session
+resume uses the current process's mode: pairs contain no old thinking,
+while a window checkpoint can replay its retained, redacted thinking.
+The `[ollama]` backend fixes its field
 to `thinking` (it may still write `"thinking"` or `"auto"`). With
 `requires_reasoning_replay = true`, `--reasoning drop` is refused, every
 assistant turn in the window is replayed (the task scope and
 `replay_turns` do not apply), and the agent evicts whole working-memory
 units instead of cutting reasoning.
+
+### Tool environment
+
+Shell and Python tools normally inherit only `HOME`, `LOGNAME`, `PATH`,
+`SHELL`, `TERM`, `USER`, `LANG`, `TMPDIR` and every `LC_*` variable. To
+explicitly expose additional variables from melo's process:
+
+```toml
+[agent]
+tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
+```
+
+This is a list of **names**, not `NAME=value` assignments. Names must match
+`[A-Za-z_][A-Za-z0-9_]*`; missing variables are skipped. Config-backed direct
+runs, the interactive UI and console sessions resolve the present values at
+startup. Only names are written to TOML; the option values are omitted from
+run configuration records. A `--base-url` run or session does not read this
+setting. Python callers can instead pass an explicit
+`AgentOptions(tool_env={...})` mapping. This does not change MCP's separate
+per-server `env` configuration.
+
+Treat each name as a capability grant. `SSH_AUTH_SOCK` lets tool subprocesses
+use your SSH agent to authenticate or sign, and a proxy variable can expose
+its address and credentials. Tools run with your permissions and can print,
+copy or transmit variables they receive; filtering the environment is not a
+sandbox. Leave the list empty unless a tool needs the capability, and never
+put secret values in TOML.
 
 ## Backends
 

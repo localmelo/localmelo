@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
@@ -272,8 +273,6 @@ def run_interactive(
         options = configured_session_options(choice.cfg, options, explicit=explicit)
     except (ValueError, config.ConfigError) as exc:
         parser.error(str(exc))
-    if validate_options is not None:
-        validate_options(options)
     if (
         getattr(args, "reasoning_field", None) is not None
         and choice.backend.key == "ollama"
@@ -281,6 +280,26 @@ def run_interactive(
         parser.error(
             "argument --reasoning-field: the ollama backend always reads and sends the thinking field"
         )
+    section = (
+        None
+        if choice.cfg is None
+        else getattr(choice.cfg, choice.cfg.chat_backend, None)
+    )
+    field = getattr(args, "reasoning_field", None)
+    if field is None:
+        field = (
+            "thinking"
+            if choice.backend.key == "ollama"
+            else getattr(section, "reasoning_field", None)
+        )
+    required = bool(getattr(section, "requires_reasoning_replay", False))
+    effective_mode = options.reasoning
+    if effective_mode == "compress" and required:
+        effective_mode = "compress+replay"
+    if refusal := reasoning_refusal(effective_mode, field, required):
+        parser.error("argument --reasoning: " + refusal)
+    if validate_options is not None:
+        validate_options(replace(options, reasoning=effective_mode))
     if options.retriever == "embedding":
         if not choice.backend.embedding:
             parser.error("argument --retriever: embedding needs an embedding provider")

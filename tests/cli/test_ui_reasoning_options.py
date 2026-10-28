@@ -167,6 +167,14 @@ async def test_console_uses_configured_mode_but_defaults_to_legacy(
             ["--memory", "off"],
             "embedding needs --memory on",
         ),
+        ("replay", "auto", [], "need a reasoning field"),
+        ("drop", "auto", [], "this backend requires reasoning replay"),
+        (
+            "compress",
+            "auto",
+            ["--recall-placement", "message"],
+            "message is not available in replay modes",
+        ),
         (
             "legacy",
             "auto",
@@ -187,6 +195,10 @@ def test_launch_refuses_invalid_effective_options_before_startup(
     cfg = configured()
     cfg.agent.reasoning = mode
     cfg.retrieval.retriever = retriever
+    if mode == "replay":
+        cfg.vllm.reasoning_field = ""
+    if mode == "drop" or "--recall-placement" in argv:
+        cfg.vllm.requires_reasoning_replay = True
     if "--memory" in argv:
         cfg.embedding_backend = "vllm"
         cfg.vllm.embedding_model = "synthetic-embedding"
@@ -205,7 +217,9 @@ def test_launch_refuses_invalid_effective_options_before_startup(
             return_value=launch.Choice(config_backend(cfg, None), cfg),
         ),
         mock.patch.object(launch, "configure_logging") as logging,
-        mock.patch.object(launch, "main_async") as startup,
+        mock.patch.object(
+            launch, "main_async", new_callable=mock.AsyncMock, return_value=(0, None)
+        ) as startup,
         pytest.raises(SystemExit) as exc,
     ):
         launch.run_interactive(

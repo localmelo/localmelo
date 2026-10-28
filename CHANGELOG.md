@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Reasoning and recall options now work in the interactive UI, including
+  `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
+  `[agent]`/`[retrieval]` defaults. Console sessions honor the configured
+  reasoning mode (default `legacy`) without changing legacy `/v1`. Session
+  replay uses the retained window; pairs resume without old thinking,
+  while checkpoint resume can replay retained, redacted thinking using the
+  current process's mode. Scheduler wrappers preserve replay capabilities;
+  rejected mode switches keep the old Agent and MCP state and close new
+  providers; successful switches retain the RAM-only notes/drafts.
+  Explicit-mode requests also remove legacy inline thinking
+  copies after resume without changing the stored window ([#NN]).
+- `[agent] tool_env` names extra environment variables inherited by
+  shell/Python tools in config-backed direct runs, the UI and console.
+  Names are validated and missing variables skipped; only names are saved.
+  SSH-agent and proxy access are explicit capability grants; defaults and
+  `--base-url` runs/sessions expose nothing new ([#NN]).
+
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo

@@ -48,6 +48,9 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 Run `melo` in a terminal to chat and save a configuration on the first run;
 `melo --serve` starts the gateway, with the HTTP API and the web workspace at
 `http://127.0.0.1:8401/`.
+The interactive UI accepts the same [reasoning and recall options](docs/cli.md#interactive-ui)
+as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
+also honor the saved reasoning mode (default `legacy`).
 
 ## Learn more
 
