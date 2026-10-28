@@ -129,6 +129,10 @@ def _run(
     ]
     if mcp:
         argv += ["--mcp-only", "--mcp-config", str(mcp_config)]
+    else:
+        # The built-in run draws its tool calls with shell_exec; P13b's
+        # direct default leaves it out unless it is named.
+        argv += ["--builtins", "all"]
     argv += ["--", task]
     done = subprocess.run(
         argv,

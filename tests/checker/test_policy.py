@@ -25,15 +25,13 @@ def test_every_mode_has_a_default_set() -> None:
 @pytest.mark.parametrize(
     ("mode", "shell"),
     [
-        ("direct", True),  # P13b flips this after the bench arm
+        ("direct", False),
         ("interactive", True),
         ("gateway", False),
-        ("python", True),
+        ("python", False),
     ],
 )
-def test_shell_exec_is_in_the_default_set_per_mode_in_this_release(
-    mode: ToolMode, shell: bool
-) -> None:
+def test_shell_exec_is_in_the_default_set_per_mode(mode: ToolMode, shell: bool) -> None:
     assert ("shell_exec" in DEFAULT_BUILTINS[mode]) is shell
 
 
@@ -44,19 +42,20 @@ def test_the_other_three_builtins_are_in_every_default_set(mode: ToolMode) -> No
 
 @pytest.mark.parametrize(
     ("mode", "asks"),
-    [("direct", False), ("interactive", True), ("gateway", False), ("python", True)],
+    [("direct", False), ("interactive", True), ("gateway", False), ("python", False)],
 )
 def test_mode_requires_approval(mode: ToolMode, asks: bool) -> None:
     assert mode_requires_approval(mode) is asks
 
 
 def test_approving_modes_are_the_ones_that_can_ask() -> None:
-    assert frozenset({"interactive", "python"}) == APPROVING_MODES
+    assert frozenset({"interactive"}) == APPROVING_MODES
 
 
 def test_an_explicit_set_wins_over_the_mode() -> None:
     assert builtin_set_for("gateway", {"shell_exec"}) == frozenset({"shell_exec"})
     assert builtin_set_for("interactive", ()) == frozenset()
+    assert builtin_set_for("direct", ALL_BUILTINS) == ALL_BUILTINS
 
 
 def test_no_names_resolves_the_mode_default() -> None:
@@ -71,18 +70,60 @@ def test_a_bad_checker_mode_raises_value_error() -> None:
         Checker(mode="bogus")  # type: ignore[arg-type]
 
 
-def test_a_gateway_refuses_shell_exec_but_keeps_python_exec() -> None:
+@pytest.mark.parametrize("mode", ["direct", "python"])
+def test_a_non_approving_mode_refuses_an_unnamed_shell_exec(mode: ToolMode) -> None:
+    reason = exec_refusal("shell_exec", "exec", mode)
+    assert reason is not None
+    assert mode in reason
+    assert "AgentOptions(builtins=...)" in reason or "--builtins all" in reason
+
+
+def test_the_gateway_refusal_names_no_false_remedy() -> None:
     reason = exec_refusal("shell_exec", "exec", "gateway")
     assert reason is not None
-    assert "gateway" in reason
-    assert "--builtins all" in reason
-    assert "direct run" in reason
-    assert exec_refusal("python_exec", "exec", "gateway") is None
+    assert "gateway mode has no approval policy" in reason
+    assert "does not offer" in reason
+    assert "--builtins" not in reason
 
 
-@pytest.mark.parametrize("mode", ["direct", "interactive", "python"])
-def test_an_approving_or_legacy_mode_refuses_no_exec_tool(mode: ToolMode) -> None:
-    assert exec_refusal("shell_exec", "exec", mode) is None
+def test_the_blocklist_symbols_are_gone() -> None:
+    import localmelo.melo.checker as checker_pkg
+    import localmelo.melo.checker.payloads as payloads
+    import localmelo.melo.checker.validators as validators
+
+    for module in (checker_pkg, payloads, validators):
+        for name in (
+            "BLOCKED_COMMANDS",
+            "_BLOCKED_RE",
+            "validate_executor_request",
+            "ExecutorRequest",
+        ):
+            assert not hasattr(module, name), f"{module.__name__}.{name}"
+
+
+@pytest.mark.parametrize("mode", ["direct", "python"])
+def test_a_named_shell_exec_is_the_callers_opt_in(mode: ToolMode) -> None:
+    assert exec_refusal("shell_exec", "exec", mode, frozenset({"shell_exec"})) is None
+
+
+def test_a_named_shell_exec_is_still_refused_in_gateway() -> None:
+    reason = exec_refusal("shell_exec", "exec", "gateway", frozenset({"shell_exec"}))
+    assert reason is not None
+    assert "gateway mode has no approval policy" in reason
+
+
+def test_an_explicit_empty_set_names_no_tool() -> None:
+    reason = exec_refusal("shell_exec", "exec", "direct", frozenset())
+    assert reason is not None
+
+
+@pytest.mark.parametrize("mode", list(DEFAULT_BUILTINS))
+def test_python_exec_is_never_refused(mode: ToolMode) -> None:
+    assert exec_refusal("python_exec", "exec", mode) is None
+
+
+def test_the_interactive_mode_refuses_no_exec_tool() -> None:
+    assert exec_refusal("shell_exec", "exec", "interactive") is None
 
 
 @pytest.mark.parametrize("mode", list(DEFAULT_BUILTINS))

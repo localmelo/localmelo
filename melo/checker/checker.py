@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 
 from localmelo.melo.checker.payloads import (
-    ExecutorRequest,
     ExecutorResultPayload,
     GatewayIngressPayload,
     MemoryCandidatePayload,
@@ -15,10 +15,7 @@ from localmelo.melo.checker.payloads import (
 from localmelo.melo.checker.policy import ToolMode, exec_refusal, validated_mode
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.checker.validators import (
-    _BLOCKED_RE,
-    BLOCKED_COMMANDS,  # noqa: F401 – re-exported for tests
     MAX_OUTPUT_LEN,  # noqa: F401 – re-exported for tests
-    validate_executor_request,
     validate_executor_result,
     validate_gateway_ingress,
     validate_memory_candidate,
@@ -46,19 +43,24 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
 
 
 class Checker:
-    def __init__(self, mode: ToolMode = "direct") -> None:
+    def __init__(
+        self,
+        mode: ToolMode = "direct",
+        *,
+        builtins: Collection[str] | None = None,
+    ) -> None:
         """A checker for a run of *mode*.
 
-        The default keeps the pre-P13 behaviour for a checker built on its
-        own, which is direct mode's; :class:`Agent` always passes its
-        ``AgentOptions.mode``. Direct and ``python`` mode still apply the
-        six-pattern blocklist in this release, also when a Python caller
-        passes no ``approval=``; the interactive and gateway modes let the
-        tier policy decide, and the executor still asks the run's approval
-        policy before an ``exec`` call when there is one.
+        The default is direct mode, which is what a checker built on its
+        own has; :class:`Agent` always passes its ``AgentOptions.mode``.
+        *builtins* is the explicit set the run's caller named, if any: an
+        ``exec`` tool in it is opt-in and runs in direct and ``python``
+        mode (gateway still refuses it), while one that only the mode's
+        default set would offer is refused in a mode with no approver (see
+        :func:`~melo.checker.policy.exec_refusal`).
         """
         self._mode = validated_mode(mode)
-        self._blocked = _BLOCKED_RE
+        self._named_builtins = None if builtins is None else frozenset(builtins)
 
     # ── Permission tiers ──
 
@@ -102,27 +104,9 @@ class Checker:
             )
 
         tier = self.tier(tool_def)
-        if self._mode in ("direct", "python"):
-            # P13a keeps direct mode and the library's default `python` mode
-            # byte-identical: the six-pattern blocklist still decides, also
-            # when a Python caller passes no approval policy, and P13b
-            # replaces it with the tier policy below for both. Of the exec
-            # built-ins only shell_exec takes a command line, so the tier
-            # scopes the patterns to the same inputs as before.
-            if tier == "exec" and tool_call.tool_name == "shell_exec":
-                cmd = tool_call.arguments.get("command", "")
-                if not isinstance(cmd, str):
-                    return CheckResult(
-                        allowed=False, reason="shell_exec command must be a string"
-                    )
-                for pattern in self._blocked:
-                    if pattern.search(cmd):
-                        return CheckResult(
-                            allowed=False, reason=f"Blocked command: {cmd[:100]}"
-                        )
-            return CheckResult(allowed=True)
-
-        refusal = exec_refusal(tool_call.tool_name, tier, self._mode)
+        refusal = exec_refusal(
+            tool_call.tool_name, tier, self._mode, self._named_builtins
+        )
         if refusal is not None:
             return CheckResult(allowed=False, reason=refusal)
         return CheckResult(allowed=True)
@@ -139,9 +123,6 @@ class Checker:
 
     def check_tool_resolution(self, result: ToolResolutionResult) -> ValidationResult:
         return validate_tool_resolution(result)
-
-    def check_executor_request(self, request: ExecutorRequest) -> ValidationResult:
-        return validate_executor_request(request)
 
     def check_executor_result(self, result: ExecutorResultPayload) -> ValidationResult:
         return validate_executor_result(result)

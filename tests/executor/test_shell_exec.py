@@ -135,7 +135,7 @@ async def test_its_own_timeout_is_reported_with_its_limit(
     # inside the tool as "Execution timed out after 60.0s".
     monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 0.5)
     hippo = Hippo()
-    executor = Executor(hippo, Checker())
+    executor = Executor(hippo, Checker(mode="python", builtins={"shell_exec"}))
     register_builtins(executor, hippo, names={"shell_exec"})
     outcome = await executor.execute_structured(
         ExecutionRequest(
@@ -155,7 +155,7 @@ async def test_the_executor_timeout_kills_the_command_and_its_children(
     pid_file: Path,
 ) -> None:
     hippo = Hippo()
-    executor = Executor(hippo, Checker())
+    executor = Executor(hippo, Checker(mode="python", builtins={"shell_exec"}))
     register_builtins(executor, hippo, names={"shell_exec"})
     outcome = await executor.execute_structured(
         ExecutionRequest(
@@ -229,7 +229,7 @@ async def test_no_process_of_the_group_survives_the_executor_timeout(
     pid_file: Path,
 ) -> None:
     hippo = Hippo()
-    executor = Executor(hippo, Checker())
+    executor = Executor(hippo, Checker(mode="python", builtins={"shell_exec"}))
     register_builtins(executor, hippo, names={"shell_exec"})
     outcome = await executor.execute_structured(
         ExecutionRequest(

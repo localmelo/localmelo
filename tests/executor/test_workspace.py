@@ -89,10 +89,13 @@ def _executor(
     """
     hippo = Hippo()
     workspace_root = None if root is None else str(root)
-    executor = Executor(hippo, Checker(), workspace_root=workspace_root)
+    executor = Executor(
+        hippo, Checker(mode="interactive"), workspace_root=workspace_root
+    )
     register_builtins(
         executor,
         hippo,
+        mode="interactive",
         workspace_root=workspace_root if rooted_tools else None,
         tool_timeout_s=tool_timeout_s,
         tool_env=tool_env,

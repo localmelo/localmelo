@@ -427,6 +427,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Direct mode and the Python API's default `python` mode no longer offer
+  `shell_exec`: their default built-ins are `file_read`, `file_write` and
+  `python_exec`, and an `exec` call that was registered anyway is refused
+  with a reason naming the mode and the way to enable it. `--builtins all`
+  (or naming `shell_exec`) restores the old set, and a named shell then
+  runs. A call to a built-in the run does not offer returns
+  `shell_exec is not available in this run. Available tools: …`, naming the
+  run's tools; an unknown name keeps the registry message. `--builtins` is
+  still a usage error with `--serve` and `--daemon`. The JSON line's
+  `config` gains `mode` (`"direct"` in a direct run), and `config.builtins`
+  and `config.tools` lose `shell_exec` there. The six-pattern command
+  blocklist, `validate_executor_request` and `ExecutorRequest` are gone: the
+  tool's tier and the mode decide, not the command's spelling. The `melo ""`
+  loop says once at start that `shell_exec` is off and that
+  `melo "" --builtins all` turns it on ([#110]).
 - `shell_exec` and `python_exec` start their child with a minimal
   environment instead of inheriting melo's: `PATH`, `HOME`, `USER`,
   `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`,
@@ -648,19 +663,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   new `gateway` tool mode, which registers `file_read`, `file_write` and
   `python_exec` only: `/v1` and the workspace have no approval policy, and
   the console's approvals arrive over the same unauthenticated loopback API,
-  so any local process could approve its own request. `AgentOptions` gains `mode` (`direct`,
-  `interactive`, `gateway` or `python`; `python` is the API default) and the
-  CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
-  behind its existing approval panel, and direct mode is unchanged in this
-  release. The six-pattern command blocklist still applies to `direct` and
-  `python` mode, so a Python caller that passes no `approval=` is not weaker
-  than before: the `python` mode, like `direct`, refuses `rm -rf /`, `mkfs`,
-  `dd if=`, fork bombs, `shutdown` and `reboot` with or without a policy;
-  the interactive UI asks its panel instead. A gateway or
-  console session cannot be given `shell_exec` by the default set; an
-  explicit `AgentOptions(builtins=…)` still names it, and the checker then
-  refuses the call in `gateway` mode with the mode and `--builtins all` in
-  the reason ([#104]).
+  so any local process could approve its own request. `AgentOptions` gains
+  `mode` (`direct`, `interactive`, `gateway` or `python`; `python` is the
+  API default) and the CLI sets its own surface's mode; the interactive UI
+  keeps `shell_exec` behind its existing approval panel. Direct mode and the
+  library's `python` default follow in the entry above. An explicit
+  `AgentOptions(builtins=…)` or `--builtins` still names `shell_exec` in
+  `direct` and `python` mode, and the call then runs; `gateway` refuses it
+  even when named ([#104]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the
@@ -756,3 +766,4 @@ earlier milestones.
 [#103]: https://github.com/localmelo/localmelo/pull/103
 [#104]: https://github.com/localmelo/localmelo/pull/104
 [#106]: https://github.com/localmelo/localmelo/pull/106
+[#110]: https://github.com/localmelo/localmelo/pull/110
