@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Developers · localmelo</title>
+  <meta name="description" content="Set up localmelo for development, run the tests and checks, add a backend, a built-in tool or a check, and send a change.">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/developers.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/developers.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/developers.html">
+  <link rel="icon" href="../assets/icon_small.png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="./quickstart.html">Quickstart</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./updates.html">Roadmap</a>
+        <a href="./developers.html" aria-current="page">Developers</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">Reference <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+      <nav class="lang-toggle" aria-label="Language">
+        <a href="./developers.html" hreflang="en" lang="en" aria-current="true">EN</a>
+        <a href="../zh-CN/developers.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="On this page">
+      <p class="sidebar-label">On this page</p>
+      <a href="#repository">The repository</a>
+      <a href="#setup">Set up</a>
+      <a href="#running">Run the CLI</a>
+      <a href="#tests">Tests</a>
+      <a href="#lint">Lint and types</a>
+      <a href="#backends">Add a backend</a>
+      <a href="#tools">Add a built-in tool</a>
+      <a href="#boundaries">Add a check</a>
+      <a href="#changes">Commits and pull requests</a>
+      <a href="#docs">Docs and the website</a>
+      <a href="#design">Design notes</a>
+    </nav>
+
+    <article class="content">
+      <header class="doc-hero">
+        <h1>Developers</h1>
+        <p class="lead">
+          Set up localmelo for development, run the tests and checks, add a
+          backend, a built-in tool or a check, and send a change.
+        </p>
+      </header>
+
+      <section class="section" id="repository">
+        <h2>The repository</h2>
+        <p>
+          The directory that holds <code>pyproject.toml</code> is the
+          <code>localmelo</code> package itself: <code>package-dir</code> maps
+          it to <code>localmelo</code>, and <code>packages.find</code> looks one
+          level up. There is no <code>localmelo/localmelo/</code> directory, so
+          <code>melo/agent/agent.py</code> is imported as
+          <code>localmelo.melo.agent.agent</code> and
+          <code>support/config.py</code> as <code>localmelo.support.config</code>.
+          Do not create a nested one, and keep the clone named
+          <code>localmelo</code>.
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Layout</figcaption>
+          <pre><code>localmelo/
+  __main__.py     the melo command
+  melo/           the agent: run loop, checks, executor, memory, contracts
+  support/        backends, providers, gateway, terminal UI, sessions, MCP,
+                  config, setup wizard, melo-retrieve, melo-procedures,
+                  scheduler
+  tests/          tests, mirroring melo/ and support/
+  docs/           the documentation and the website
+  tests_result/   archived results of real-backend runs</code></pre>
+        </figure>
+        <ul>
+          <li>
+            <code>melo/</code> is the core: the run loop, the checks, the
+            executor, memory and the provider contracts.
+          </li>
+          <li>
+            <code>support/</code> is everything around it: the backends and
+            model providers, the gateway, the terminal UI, MCP, configuration
+            and the setup wizard.
+          </li>
+          <li>
+            <code>tests/</code> mirrors the two. <code>docs/</code> holds the
+            Markdown pages and the website.
+          </li>
+        </ul>
+        <p>
+          <strong>The core does not import <code>support/</code>.</strong> The
+          one bridge is <code>Agent(config=...)</code>, which builds the
+          providers through <code>support/backends</code> when it is called.
+          <code>tests/test_layering.py</code> reads the AST of every module
+          under <code>melo/</code> and fails on an import of
+          <code>support/</code> in any form: plain, relative or through
+          <code>importlib.import_module</code>. The test records two allowed
+          imports: <code>Config</code>, imported only for type checking, and
+          <code>get_backend</code>, imported inside
+          <code>_providers_from_config</code> when an <code>Agent</code> is
+          built from a <code>Config</code>. It also holds a table of other
+          rules: the terminal UI's libraries (<code>prompt_toolkit</code> and
+          <code>rich</code>) stay out of the core and the backends, and the
+          sessions and the terminal UI stay clear of the gateway. If you need
+          code from <code>support/</code> in the core, push a contract into
+          <code>melo/contracts/</code> instead.
+        </p>
+      </section>
+
+      <section class="section" id="setup">
+        <h2>Set up</h2>
+        <p>
+          You need Python 3.11 or later, Git and <a href="https://docs.astral.sh/uv/">uv</a>.
+          Node (the version in <code>.nvmrc</code>) is needed only for the web
+          workspace's JavaScript tests.
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Development setup</figcaption>
+          <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo                 # keep this name: the package is built from it
+uv sync --extra dev --extra gateway</code></pre>
+        </figure>
+        <p>
+          <code>uv</code> creates <code>.venv/</code> from the committed
+          <code>uv.lock</code>, with Python 3.13 as pinned in
+          <code>.python-version</code>; localmelo itself supports Python 3.11
+          or later. <code>--extra dev</code> adds pytest, ruff, black, mypy and
+          pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn for
+          <code>melo --serve</code>.
+        </p>
+        <p>
+          Optionally install the hooks with <code>uv run pre-commit install</code>.
+          They run <code>ruff --fix</code>, <code>black</code>, <code>mypy</code>
+          and the whole pytest suite on every commit. A failed commit is
+          usually a real test break, not a hook to skip.
+        </p>
+      </section>
+
+      <section class="section" id="running">
+        <h2>Run the CLI</h2>
+        <p>
+          <code>melo</code> lands in <code>.venv/bin/</code> and is not on your
+          PATH. Inside the clone, run it through uv:
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">From the checkout</figcaption>
+          <pre><code>uv run melo "What is 6*7?"
+uv run melo --serve</code></pre>
+        </figure>
+        <p>
+          Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.
+          A run needs a model server: pass
+          <code>--base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b</code>,
+          or run <code>uv run melo --reconfigure</code> once to save a
+          configuration. Point <code>HOME</code> at a temporary directory for a
+          run or a test that must not read or write your own
+          <code>~/.cache/localmelo</code>.
+        </p>
+      </section>
+
+      <section class="section" id="tests">
+        <h2>Tests</h2>
+        <p>
+          While you work, run only the tests your change affects.
+          <code>pytest-testmon</code> records what each test covers, and after
+          its first full run it runs just the affected tests:
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">While working</figcaption>
+          <pre><code>uv run pytest --testmon -q</code></pre>
+        </figure>
+        <p>
+          Before you send a pull request, run the whole offline suite once, in
+          parallel:
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Before a pull request</figcaption>
+          <pre><code>uv run pytest -n auto -q</code></pre>
+        </figure>
+        <p>
+          It needs no model server and sends no request to one. A few CLI tests
+          serve a fake API on loopback to exercise timeouts and cancellation.
+          To run one directory directly, name it:
+          <code>uv run pytest tests/agent -q</code>.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Directory</th><th>What it tests</th><th>Needs</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>tests/agent</code></td><td>The run loop, run options, results, reflection, tool exposure, events, cancellation and approvals</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/backends</code></td><td>Backends, model providers, request timeouts, <code>extra_body</code></td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/checker</code></td><td>The checks, permission tiers, secret redaction and the sanitizer</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/cli</code></td><td>The <code>melo</code> command, the <code>melo ""</code> loop and <code>melo-retrieve</code></td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/contracts</code></td><td>The event and approval contracts</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/executor</code></td><td>The executor, the built-in tools, approvals and the workspace root</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/memory</code></td><td>Memory, SQLite persistence, BM25, memory notes and the retrievers</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/mcp</code></td><td>The MCP client and tool provider</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/scheduler</code></td><td>The scheduling policy, the simulator and the trace importer</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/sessions</code></td><td>Conversations in SQLite: the store, the runner, resume, restarts, approvals and the event window</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/gateway</code></td><td>Sessions, the HTTP API, the <code>Host</code> and <code>Origin</code> checks and the web workspace; the <code>.mjs</code> files test the workspace's JavaScript</td><td><code>dev</code> and <code>gateway</code>; Node for the <code>.mjs</code> files</td></tr>
+              <tr><td><code>tests/integration</code></td><td>Several parts together</td><td><code>dev</code> and <code>gateway</code></td></tr>
+              <tr><td><code>tests/smoke</code></td><td>Offline tests of the smoke tools (parsing, metrics, logging), plus the opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server for that file</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The web workspace's JavaScript has its own tests. They need Node (the
+          version in <code>.nvmrc</code>), and pytest does not run them:
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">JavaScript tests</figcaption>
+          <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
+        </figure>
+        <p>
+          Tests that talk to a real model server are opt-in. A plain run sends
+          no chat request, not even to the server you develop against:
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Real-backend smoke tests</figcaption>
+          <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
+        </figure>
+        <p>
+          They send a chat request to Ollama on <code>127.0.0.1:11434</code> and
+          to MLC LLM on <code>127.0.0.1:8400</code>, and skip the server that
+          does not answer. <code>tests/smoke/core_loop_test.py</code> runs
+          longer memory scenarios against real servers; see its
+          <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.
+        </p>
+      </section>
+
+      <section class="section" id="lint">
+        <h2>Lint and types</h2>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Checks</figcaption>
+          <pre><code>uv run ruff check .
+uv run black --check .
+uv run mypy .</code></pre>
+        </figure>
+        <p>
+          Black formats at 88 columns. Ruff selects <code>E</code>,
+          <code>W</code>, <code>F</code>, <code>I</code>, <code>N</code>,
+          <code>UP</code>, <code>B</code> and <code>SIM</code>; <code>E501</code>
+          is left to black. Mypy requires an annotation on every function
+          (<code>disallow_untyped_defs</code>), checks untyped function bodies,
+          and exempts <code>__main__.py</code>. The same three run from
+          pre-commit.
+        </p>
+      </section>
+
+      <section class="section" id="backends">
+        <h2>Add a backend</h2>
+        <p>
+          Backends are pure connectors: they validate configuration and build
+          provider objects, and never start or serve a model. To add one:
+        </p>
+        <ol>
+          <li>
+            Write a class in <code>support/backends/local/</code> or
+            <code>support/backends/cloud/</code> that implements
+            <code>BaseBackend</code> (<code>support/backends/base.py</code>):
+            <code>key</code>, <code>display_name</code>, <code>validate</code>,
+            <code>validate_embedding</code>, <code>has_embedding</code>,
+            <code>build_chat_provider</code> and <code>build_embedding_provider</code>.
+            Most servers share the OpenAI-compatible code in
+            <code>support/backends/openai_compat.py</code>.
+          </li>
+          <li>
+            Register it in <code>ensure_defaults_registered()</code> in
+            <code>support/backends/registry.py</code>.
+          </li>
+          <li>
+            Add its key to <code>VALID_CHAT_BACKENDS</code> in
+            <code>support/config.py</code>, and to
+            <code>VALID_EMBEDDING_BACKENDS</code> if it serves embeddings.
+          </li>
+          <li>
+            Give it a config table: a field on <code>Config</code> and its name
+            in <code>_LOCAL_SECTIONS</code> or <code>_CLOUD_SECTIONS</code>, so
+            that <code>load()</code> and <code>save()</code> handle it. When
+            you change the schema, add a migration in <code>load()</code>
+            rather than break existing config files.
+          </li>
+          <li>
+            Add it to the setup wizard in <code>support/onboard.py</code>:
+            <code>CHAT_BACKENDS</code>, <code>EMBEDDING_BACKENDS</code>, the
+            defaults (<code>_LOCAL_DEFAULTS</code>, <code>_CLOUD_DEFAULTS</code>
+            or <code>_EMBEDDING_DEFAULTS</code>) and <code>_CHAT_SETUP</code>.
+          </li>
+          <li>
+            Add tests in <code>tests/backends/</code>. Mock the connectivity
+            probes: never let a test contact a real server.
+          </li>
+          <li>
+            Document it: the backend table and an example in
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">docs/configuration.md</a>.
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="tools">
+        <h2>Add a built-in tool</h2>
+        <p>
+          A built-in is a <code>ToolDef</code> (a name, a description, JSON
+          parameters and semantic tags) and an async function that returns
+          text. Both live in <code>melo/executor/builtins.py</code>, and the
+          <code>_builtin()</code> decorator adds the pair to
+          <code>BUILTINS</code>. <code>register_builtins()</code> in
+          <code>melo/executor/__init__.py</code> registers every one with the
+          executor and the memory's tool registry, and marks the tools whose
+          permission tier is not <code>read</code> as requiring approval.
+        </p>
+        <ol>
+          <li>
+            Add the <code>ToolDef</code> and the function in
+            <code>melo/executor/builtins.py</code>, decorated with
+            <code>@_builtin(...)</code>. The semantic tags are the words a task
+            may use to name the tool. Every registered built-in is offered in
+            every step; the task's hints and the BM25 search rank the other,
+            provided tools.
+          </li>
+          <li>
+            Give it a permission tier: add its name to
+            <code>BUILTIN_TIERS</code> in <code>melo/checker/tiers.py</code>
+            (<code>read</code>, <code>write</code>, <code>exec</code> or
+            <code>network</code>). A test keeps that table equal to the
+            built-in names, so a new built-in cannot be added without one. A
+            run with an approval policy asks before every call whose tier is
+            not <code>read</code>; <code>APPROVAL_BUILTINS</code> is derived
+            from the table.
+          </li>
+          <li>
+            If it needs a workspace root, add its rooted variant to
+            <code>rooted_builtins()</code> in the same file. A tool that starts
+            a child process appends its status to <code>TOOL_EXIT_CODE</code>,
+            so <code>tool.finished</code> carries <code>exit_code</code>.
+          </li>
+          <li>
+            Add tests in <code>tests/executor/</code>.
+          </li>
+          <li>
+            Document it in
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">docs/tools.md</a>,
+            and in <code>docs/for-agents.md</code> and <code>docs/llms.txt</code>
+            when an agent has to know it.
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="boundaries">
+        <h2>Add a check</h2>
+        <p>
+          The checker validates at every boundary. A failed check is control
+          flow, not an exception: it returns <code>allowed=False</code> with a
+          reason, and the agent replans or reflects. A structured boundary is
+          three pieces and one call site:
+        </p>
+        <ol>
+          <li>
+            A payload dataclass in <code>melo/checker/payloads.py</code>.
+          </li>
+          <li>
+            A validator in <code>melo/checker/validators.py</code> that returns
+            a <code>ValidationResult</code>.
+          </li>
+          <li>
+            A method on <code>Checker</code> in
+            <code>melo/checker/checker.py</code> that calls the validator.
+          </li>
+          <li>
+            The call site, routed through that method.
+          </li>
+        </ol>
+        <p>
+          The Checker's own checkpoints, <code>pre_plan</code>,
+          <code>post_plan</code> and <code>pre_execute</code>, return a
+          <code>CheckResult</code> instead. The existing boundaries are the
+          gateway ingress, session transitions, tool resolution, executor
+          results, memory writes, the planning prompt and the tool-call shape.
+          Add tests in <code>tests/checker/</code>, naming the refused input
+          and the reason.
+        </p>
+      </section>
+
+      <section class="section" id="changes">
+        <h2>Commits and pull requests</h2>
+        <ul>
+          <li>
+            Write the commit subject as <code>[Area] Imperative summary</code>,
+            as in <code>[Agent] Sort the retrieved extra tools by name</code>.
+            Areas include CLI, Agent, Executor, Memory, Tests, Docs, Gateway,
+            Backends, Sessions and Scheduler.
+          </li>
+          <li>
+            Pull request titles add the type, as in
+            <code>[Feature][CLI] …</code> or <code>[Bug][Memory] …</code>.
+          </li>
+          <li>
+            Keep one focused change per pull request. For a larger change,
+            open an issue first; the roadmap is
+            <a href="https://github.com/localmelo/localmelo/issues/2">#2</a>.
+          </li>
+          <li>
+            A behaviour change needs tests. Never weaken or delete an existing
+            test to make a change pass; say in the pull request why a test had
+            to change.
+          </li>
+          <li>
+            Change the docs in the same pull request: the English page, the
+            Chinese twins (<code>README.zh-CN.md</code> and
+            <code>docs/zh-CN/</code>), <code>docs/for-agents.md</code> and
+            <code>docs/llms.txt</code> for behaviour agents rely on, and a
+            <code>CHANGELOG.md</code> entry under Unreleased with the pull
+            request's number, as <code>([#NN])</code>, and its link at the
+            bottom of the file.
+          </li>
+          <li>
+            A change to what <code>melo</code> draws in a terminal, or to the
+            website, comes with screenshots in the pull request.
+          </li>
+          <li>
+            Write the code, the comments, the tests and the documentation in
+            English.
+          </li>
+        </ul>
+      </section>
+
+      <section class="section" id="docs">
+        <h2>Docs and the website</h2>
+        <p>
+          The Markdown pages in <code>docs/</code> are English only; GitHub
+          Pages publishes the <code>docs/</code> folder of <code>main</code>.
+          The website pages are in <code>docs/en/</code> and
+          <code>docs/zh-CN/</code>: an English page and its Chinese twin share
+          element ids, sections and order, and keep code blocks identical. A
+          page in <code>docs/</code> links to files outside it with absolute
+          <code>github.com</code> URLs, so the links work on GitHub and on the
+          rendered site alike.
+        </p>
+        <p>
+          To add a Markdown page, add it to the index in
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md</a>.
+          A website page goes into both languages and into the navigation of
+          every page.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/maintaining.md">docs/maintaining.md</a>
+          has the layout, the publishing and the translation glossary.
+        </p>
+        <p>Preview the website locally:</p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Preview</figcaption>
+          <pre><code>python3 -m http.server 8080 --bind 127.0.0.1 --directory docs</code></pre>
+        </figure>
+        <p>
+          Then open <code>http://127.0.0.1:8080/en/</code>.
+        </p>
+      </section>
+
+      <section class="section" id="design">
+        <h2>Design notes</h2>
+        <ul>
+          <li>
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/how-it-works.md">How localmelo works</a>:
+            the run loop, reflection, memory and timeouts.
+          </li>
+          <li>
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md">Evaluations</a>:
+            the controlled comparisons behind the defaults, such as the
+            reflection gate.
+          </li>
+          <li>
+            <a href="./memory-design.html">Memory design</a>: the maintainer's
+            memory design, parts of which are not built yet.
+          </li>
+          <li>
+            <a href="./architecture.html">Architecture</a>: how the parts fit
+            together.
+          </li>
+        </ul>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>Pre-alpha: commands and APIs may change before v0.1.0.</p>
+      <nav class="footer-links" aria-label="Project">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">All documentation</a>
+        <a href="../for-agents.md">For AI agents</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">Security policy</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">License</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
