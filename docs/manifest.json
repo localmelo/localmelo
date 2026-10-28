@@ -46,6 +46,7 @@
     {"id": "guides-configure", "section": "guides", "order": 11, "en_source": "docs/guides/configure.md", "zh_source": null, "en_output": "en/guides/configure.html", "zh_output": null, "aliases": ["docs/guides/configure.md"], "fragments": {"docs/guides/configure.md": "same"}},
     {"id": "guides-scheduler", "section": "guides", "order": 12, "en_source": "docs/guides/scheduler.md", "zh_source": null, "en_output": "en/guides/scheduler.html", "zh_output": null, "aliases": ["docs/guides/scheduler.md"], "fragments": {"docs/guides/scheduler.md": "same"}},
     {"id": "reference-http-v1", "section": "reference", "order": 16, "en_source": "docs/reference/http-v1.md", "zh_source": null, "en_output": "en/reference/http-v1.html", "zh_output": null, "aliases": ["docs/reference/http-v1.md"], "fragments": {"docs/reference/http-v1.md": "same"}},
-    {"id": "guides-web-console", "section": "guides", "order": 13, "en_source": "docs/guides/web-console.md", "zh_source": null, "en_output": "en/guides/web-console.html", "zh_output": null, "aliases": ["docs/guides/web-console.md"], "fragments": {"docs/guides/web-console.md": "same"}}
+    {"id": "guides-web-console", "section": "guides", "order": 13, "en_source": "docs/guides/web-console.md", "zh_source": null, "en_output": "en/guides/web-console.html", "zh_output": null, "aliases": ["docs/guides/web-console.md"], "fragments": {"docs/guides/web-console.md": "same"}},
+    {"id": "guides-macos-app", "section": "guides", "order": 14, "en_source": "docs/guides/macos-app.md", "zh_source": null, "en_output": "en/guides/macos-app.html", "zh_output": null, "aliases": ["docs/guides/macos-app.md"], "fragments": {"docs/guides/macos-app.md": "same"}}
   ]
 }
