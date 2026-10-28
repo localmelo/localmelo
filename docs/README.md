@@ -53,7 +53,8 @@ tools and memory on your own model server or a cloud API. The website is at
 - [Evaluations](evaluations.md): the controlled comparisons behind the
   defaults, such as the reflection gate, with their conditions and limits.
 - [Scheduler](scheduler.md): the scheduling policy core and its simulator,
-  for maintainers and the benchmark. Runs do not use it yet.
+  for maintainers and the benchmark; the gateway's web chats are gated by
+  it, while direct runs and the CLI are not.
 - [Architecture](https://localmelo.github.io/localmelo/en/architecture.html)
   (website): how the parts fit together.
 - [Memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
