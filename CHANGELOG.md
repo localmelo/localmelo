@@ -41,6 +41,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   to start by writing. Runs without `--brief` and request bodies outside brief
   runs are unchanged ([#193]).
 
+- A `melo --brief` run verifies itself (#185): the commands on the brief's
+  `Check:` lines run in the workspace, as `shell_exec` calls under the same mode
+  policy, workspace root and timeout, before the run ends `completed`. A failing
+  check sends the model back to work with its command, exit code and last 60
+  lines of output (redacted), at most twice. A check that still fails ends the
+  run `completed` as before, but the worker result's `tests` is `failed` and a
+  `brief_check_failed` notice says so; when every check passes `tests` is
+  `passed`. Each run of a check is a `brief_check` notice and a `tests` item with
+  `source: "brief_check"`. A brief with no `Check:` line, and runs without
+  `--brief`, are unchanged ([#NN]).
+
 - The `reflection` event now records the decision's three flags (`flags`), the
   gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
   when the run does not continue, so a `gate_stopped` run shows which check
