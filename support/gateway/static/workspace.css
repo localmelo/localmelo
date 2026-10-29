@@ -1374,7 +1374,10 @@ dialog::backdrop {
   gap: 0 8px;
   height: 16px;
   overflow: hidden;
-  padding: 0 13px;
+  /* Aligned with the composer's text below it. */
+  max-width: 800px;
+  margin: 0 auto 6px;
+  padding: 0 17px;
   font-size: 11px;
   line-height: 16px;
   color: var(--muted);
