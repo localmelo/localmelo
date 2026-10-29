@@ -1,0 +1,39 @@
+<a id="tools-and-mcp"></a>
+
+# 工具与 MCP
+
+本页介绍模型可以调用的工具：内置工具、来自 MCP 服务器的工具、每一步提供哪些工具，以及检查做些什么。
+
+<a id="built-in-tools"></a>
+
+## 内置工具
+
+| 工具 | 作用 | 限制 |
+|---|---|---|
+| `shell_exec` | 以 `/dev/null` 作为标准输入运行 shell 命令，并返回它的输出。 | 30 秒后连同它启动的所有进程一起终止。只有 `interactive` 模式默认提供它：直接运行和 Python 调用方需要显式点名它的 `builtins` 集合；网关或控制台会话默认不提供它，即使点名也会拒绝。 |
+| `python_exec` | 在子进程中运行 Python 代码，并返回它打印的内容。 | 60 秒后连同它启动的所有进程一起终止。`sys.exit()` 只结束子进程。 |
+| `file_read` | 读取文本文件。 | 你的账户能读取的任何文件。 |
+| `file_write` | 把文本写入文件，创建或替换它。 | 你的账户能写入的任何文件。 |
+
+一次 `file_read` 或 `file_write` 调用最长可能用 60 秒，一次 MCP 工具调用最长用其服务器的 `timeout`。超过 50,000 个字符的输出会被截断。
+
+`python_exec` 的代码通过标准输入（一个管道）到达子进程，绝不出现在它的 `-c` 参数中：`ps` 看不到代码，调用也不受 `ARG_MAX` 限制（macOS 上约为 1 MiB 的 argv 和环境）。子进程运行一个固定的包装程序；它读完代码后就把文件描述符 0 指向 `/dev/null`，因此 `input()` 会得到 EOF。子进程最多可有 1,024 个打开的文件和一小时的 CPU 时间（POSIX 的 `RLIMIT_NOFILE` 和 `RLIMIT_CPU` 限制）。通常调用的时间限制会先结束它；CPU 限制只会停止比 melo 存活更久、或耗满一小时 CPU 的代码。不设置地址空间限制：macOS 不接受有限的地址空间限制。
+
+`shell_exec` 和 `python_exec` 以最小环境启动子进程：`PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，再加上 `AgentOptions(tool_env={...})` 添加的内容，别无其他。基于配置的运行和会话还可以另外继承 `[agent] tool_env` 中列出的名称；见[工具环境](../../reference/configuration.md#tool-environment)（英文）。melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点名或映射。`VIRTUAL_ENV`、`PYTHONPATH`、`SSH_AUTH_SOCK` 和代理变量默认不会被继承。暴露 `SSH_AUTH_SOCK` 会允许工具使用你的 SSH 代理，暴露代理变量也会暴露其中的任何凭据。
+
+在不带 `--workspace` 的直接运行和网关中，内置工具就是这样工作的。带 `--workspace DIR` 的直接运行和设置了 `workspace_root` 的 Python 智能体把文件工具限制在一个目录内，并在那里启动 `shell_exec` 和 `python_exec`（见[设置工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。交互式界面（单独的 `melo`）也以它的工作区为根目录，并在每次 `shell_exec`、`python_exec` 和 `file_write` 调用前询问，除非用了 `--yolo`（见[权限级别](../guides/tools-mcp.md#permission-tiers)）；直接模式没有审批策略，也不提供 `shell_exec`，有没有根目录都一样。交互式界面加载 `--mcp-config` 指定的 MCP 服务器，否则加载顶层 `mcp_config` 键指定的那些；启动失败的服务器会让该会话关闭 MCP（`/mcp` 会说明原因）。带审批策略的 Python 运行按同样的权限级别，用自身的策略处理 MCP 工具。
+
+<a id="how-tools-are-offered"></a>
+
+## 如何提供工具
+
+每个规划步骤向模型发送一份工具列表，该步只能运行列表中的工具。`--tool-exposure` 选择列表：
+
+- **`retrieve`**（默认值）：所有已注册的内置工具，按名称排序，然后是这一步的额外工具，同样按名称排序。额外的工具在其他工具（例如 MCP 工具）中选出：
+  - 模型在本次对话中已经调用过的工具，以及
+  - 与任务最匹配的 3 个工具，依据是对每个工具的名称、描述和标签做关键词搜索（带 IDF 的 Okapi BM25）。
+
+  只有模型的工具调用算作提示：任务中、工具结果中或召回的记忆中出现的工具名称不增添任何内容。
+- **`all`**：每一步都提供所有已注册的工具，按名称排序。列表从不变化，这对缓存提示前缀的服务器有帮助。
+
+调用这一步没有提供的工具会被拒绝，错误为 `Tool '<name>' was not offered in this step.`，也不会运行。这次拒绝会留在对话中，因此后续步骤可以再提供该工具。

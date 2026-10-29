@@ -45,13 +45,13 @@
 
 - 只保留最新的反思：每次反思替换上一条，以保持提示简短。超过约 2,000 个字符的反思会被截短以适应预算，决定不变：先删去列表末尾的条目，再截短摘要末尾。使用 `--reflection-gate utility` 时，超长反思会直接结束运行，除非它选择了 `done`。
 - 如果步骤或尝试次数已经用尽，无法开始下一次尝试，反思会收到这一信息。它仍可选择 `done`；否则运行以 `budget_exhausted` 结束，并以反思给出的最佳答案作为结果。
-- 如果回复没有反思，即没有包含四种行动之一的 JSON 对象，localmelo 会再请求一次。如果第二次回复仍没有反思，则不带新反思开始下一次尝试；如果不能再开始，运行以 `budget_exhausted` 结束。见[运行结果](../../reference/run-results.md#statuses)（英文）。
+- 如果回复没有反思，即没有包含四种行动之一的 JSON 对象，localmelo 会再请求一次。如果第二次回复仍没有反思，则不带新反思开始下一次尝试；如果不能再开始，运行以 `budget_exhausted` 结束。见[运行结果](../reference/run-results.md#statuses)。
 
 <a id="tools-in-each-step"></a>
 
 ## 每一步的工具
 
-每一步都向模型提供一份工具列表，只有列表中的工具能在该步运行。默认列表包含所有内置工具，以及与任务匹配或模型已经在本次对话中调用过的少数其他工具。见[如何提供工具](../../reference/tools.md#how-tools-are-offered)（英文）。
+每一步都向模型提供一份工具列表，只有列表中的工具能在该步运行。默认列表包含所有内置工具，以及与任务匹配或模型已经在本次对话中调用过的少数其他工具。见[如何提供工具](../reference/tools.md#how-tools-are-offered)。
 
 <a id="memory-in-the-loop"></a>
 
