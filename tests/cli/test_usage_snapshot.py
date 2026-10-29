@@ -153,6 +153,8 @@ def test_hide_empty_leaves_out_the_rows_with_nothing_to_say() -> None:
     ]
     assert usage_lines(snap, local=True, now=T0, steps=steps)[0].startswith("cache ")
     assert len(usage_lines(snap, local=True, now=T0, steps=steps)) == 4
+
+
 # ── The status row (#176 SL2) ──
 
 
