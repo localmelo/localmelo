@@ -2322,3 +2322,40 @@ test('a late answer for a task the user left is dropped', async () => {
   assert.equal(h.element('task-panel').children.length, 0);
   assert.equal(h.element('task-panel').hidden, true);
 });
+
+test('the Tasks header names Tasks, not the open chat, and the chat comes back', async () => {
+  const chat = session('a', {title: 'Chat about novels', model: 'Qwen-7B'});
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [chat], machine: null, has_more: false},
+    'GET /sessions/a': {session: chat, pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /tasks': {tasks: [taskRow('t1')]},
+    'GET /tasks/t1': {task: taskRow('t1')},
+  }));
+  await h.run('init()');
+  assert.equal(h.element('header-title').textContent, 'Chat about novels');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('header-title').textContent, 'Tasks');
+  assert.equal(h.element('header-model').textContent, 'Scheduler tasks');
+  assert.equal(h.element('task-panel').hidden, false);
+  h.context.location.hash = '#/tasks/t1';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('header-title').textContent, 'Tasks');
+  assert.equal(h.element('header-model').textContent, 'Scheduler tasks');
+  h.context.location.hash = '#/s/a';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('header-title').textContent, 'Chat about novels');
+  assert.equal(h.element('header-model').textContent, 'Qwen-7B');
+});
+test('Tasks hands the header to Workers and back without the chat', async () => {
+  const h = harness(baseRoutes({'GET /tasks': {tasks: [taskRow('t1')]}, 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+  await h.run('init()');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  h.context.location.hash = '#/workers';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('header-title').textContent, 'Workers');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('header-title').textContent, 'Tasks');
+});

@@ -469,3 +469,25 @@ def test_cache_report_has_a_row_per_request_and_totals_by_kind(tmp_path: Path) -
     assert "plan: 2 requests, 200 prompt tokens, 60 cached" in done.stdout
     assert "reflect: 1 requests, 100 prompt tokens, 50 cached" in done.stdout
     assert "total: 3 requests, 300 prompt tokens, 110 cached" in done.stdout
+
+
+def test_cache_report_prints_its_usage_for_help_and_for_no_arguments() -> None:
+    for flag in ("-h", "--help"):
+        done = subprocess.run(
+            [sys.executable, "-I", str(REPORT), flag],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr
+        assert done.stdout.startswith("Print the prompt-cache use")
+        assert "usage: python scripts/cache_report.py LOG [LOG ...]" in done.stdout
+    bare = subprocess.run(
+        [sys.executable, "-I", str(REPORT)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bare.returncode == 2
+    assert bare.stdout == ""
+    assert "usage: python scripts/cache_report.py LOG [LOG ...]" in bare.stderr

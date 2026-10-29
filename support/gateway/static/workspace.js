@@ -378,7 +378,11 @@ function syncUI() {
   $("details-trigger").disabled = !session;
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
-  if (workerMode) {
+  if (taskMode) {
+    $("header-title").textContent = "Tasks";
+    $("header-model").textContent = "Scheduler tasks";
+    document.title = "localmelo · Tasks";
+  } else if (workerMode) {
     const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
     $("header-title").textContent = heading;
     $("header-model").textContent = "Read-only history";
@@ -1794,6 +1798,7 @@ function showTasks(id) {
   $("tasks-link").setAttribute("aria-current", "page");
   $("chats-link").removeAttribute("aria-current");
   sidebar(false);
+  syncUI();
   tasks.show(id);
   $("task-panel").querySelector("h1")?.focus();
 }
