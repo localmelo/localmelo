@@ -1187,6 +1187,11 @@ class _RunState:
     check_commands: list[str] = dataclasses.field(default_factory=list)
     check_rounds: int = 0
     check_retries: int = 0
+    # The workspace digest when the checks last ran, the attempt the gate
+    # last ran in, and whether the running attempt is the run's last.
+    check_digest: str | None = None
+    check_attempt: int = 0
+    last_attempt: bool = False
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -4653,6 +4658,8 @@ class Agent:
         run.read_streak = 0
 
         for step in range(budget):
+            if budget - step == 2:
+                await self._deadline_check(run)
             pending = run.inbox.poll() if run.inbox is not None else []
             inserted = None
             if pending:
@@ -5118,6 +5125,7 @@ class Agent:
                         self.options.brief_probe, self._workspace_for_brief()
                     )
                     run.step_digest = run.workspace_digest
+                    run.check_digest = run.workspace_digest
                     self.hippo.working.on_drop = lambda gone: self._note_dropped(
                         run, gone
                     )
@@ -6048,6 +6056,10 @@ class Agent:
             # Never below 1: the previous attempt ended the run otherwise.
             budget = min(opts.steps_per_attempt, opts.max_steps - total_steps)
             run.attempts += 1
+            run.last_attempt = (
+                run.attempts >= opts.max_attempts
+                or total_steps + budget >= opts.max_steps
+            )
             steps_used, failure_type = await self._run_attempt(task, query, budget, run)
             total_steps += steps_used
 
@@ -6234,7 +6246,35 @@ class Agent:
         """Keep a line for each tool result that left the window of a brief run."""
         run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
-    async def _brief_gate(self, run: _RunState, *, can_retry: bool) -> str | None:
+    async def _deadline_check(self, run: _RunState) -> None:
+        """With two steps left in a brief run's last attempt, run the checks once.
+
+        Only when the workspace changed since the checks last ran and the
+        gate has not run in this attempt. A pass changes nothing; a failure
+        adds the gate's failure message to the window, so the next planning
+        request carries it, and uses one of the gate's retries.
+        """
+        if (
+            not run.brief
+            or not run.last_attempt
+            or not run.check_commands
+            or run.check_attempt == run.attempts
+            or run.check_digest is None
+            or self.options.brief_probe is None
+        ):
+            return
+        digest = await asyncio.to_thread(
+            self.options.brief_probe, self._workspace_for_brief()
+        )
+        if digest == run.check_digest:
+            return
+        retry = await self._brief_gate(run, can_retry=True, quiet=True)
+        if retry is not None:
+            self.hippo.working.append(Message(role="user", content=retry))
+
+    async def _brief_gate(
+        self, run: _RunState, *, can_retry: bool, quiet: bool = False
+    ) -> str | None:
         """Run a brief's checks before the run ends ``completed``.
 
         Returns ``None`` when the run may end: the brief names no check,
@@ -6242,12 +6282,20 @@ class Agent:
         retry left or *can_retry* false), which adds a ``brief_check_failed``
         notice. Otherwise it returns the user message for the model's next
         planning request, and the caller keeps the run going. The checks
-        run in order and the first failure stops the gate.
+        run in order and the first failure stops the gate. With *quiet*
+        (the deadline check) a failure that cannot send the run back adds
+        no ``brief_check_failed`` notice: the run goes on.
         """
         check = self.options.brief_check
         if check is None or not run.check_commands:
             return None
         run.check_rounds += 1
+        run.check_attempt = run.attempts
+        probe = self.options.brief_probe
+        if probe is not None and run.brief:
+            run.check_digest = await asyncio.to_thread(
+                probe, self._workspace_for_brief()
+            )
         for command in run.check_commands:
             result = await check(self.executor, command)
             run.events.brief_check(result, run.check_rounds)
@@ -6260,7 +6308,8 @@ class Agent:
             ):
                 run.check_retries += 1
                 return failure_message(result)
-            run.events.brief_check_failed(run.check_retries)
+            if not quiet:
+                run.events.brief_check_failed(run.check_retries)
             return None
         return None
 
@@ -6276,6 +6325,7 @@ class Agent:
         the run as ``budget_exhausted``, one that gets stuck as ``stuck``.
         """
         run.attempts += 1
+        run.last_attempt = True
         _, failure_type = await self._run_attempt(
             task, query, self.options.max_steps, run
         )

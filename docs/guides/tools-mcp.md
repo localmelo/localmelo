@@ -1,5 +1,7 @@
 # Guide: Tools MCP
 
+This guide shows how to choose the built-in tools, add tools from MCP servers, and understand the checks and permission tiers that guard them. Read it before you let a run read files or run commands; the tool list and options are in the [tools reference](../reference/tools.md).
+
 ## Choose the built-in tools
 
 ```bash

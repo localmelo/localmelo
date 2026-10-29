@@ -123,6 +123,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
 - Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
+- Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
 
@@ -135,6 +136,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   once a second while events arrive and on the page's existing polls; a narrow
   width drops segments right to left. A worker (CLI-store) session id is 404 until
   the console can read those events. ([#NN])
+- Every direct run (`melo "<task>"`, `melo --brief FILE`) is now recorded as a
+  worker session in `~/.cache/localmelo/cli/sessions.db` by default, so the web
+  console's Workers view and the macOS app show localmelo's own runs without a
+  flag. Opt out with `--no-save-session` or `[sessions] record_direct = false`;
+  `--parent-run` no longer needs `--save-session`. The model's requests, stdout,
+  the JSON result and the exit code are unchanged; a store that cannot be written
+  prints one stderr line and the run goes on unrecorded. The Workers list shows
+  runs that are still going, and an open unfinished run re-reads itself every
+  three seconds ([#217]).
 
 - Developer mode in the web console (#186). **Connection settings** has a
   Developer tab with one toggle, "Developer mode: show advanced settings and
@@ -855,6 +865,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A `--brief` run checks its work before the budget runs out: with `Check:` lines,
+  exactly two steps left in the last attempt, and a workspace that changed since
+  the checks last ran, the harness runs them once so the model can still fix a
+  failure (it uses one of the two retries). The `brief_check` notice and each
+  `tests.items` entry of a brief check gain `output_tail`, the last 20 lines of
+  the check's output, redacted, at most 4,000 characters. Part of #185 ([#214]).
+
 - Second-walkthrough polish (part of #200): the no-backend message says
   `Run melo in a terminal to set up`; the quickstart has a section on running a
   task through the gateway (`melo-task new`, `list`, `show`); `melo-task show`
@@ -1327,6 +1344,9 @@ earlier milestones.
 [#209]: https://github.com/localmelo/localmelo/pull/209
 [#210]: https://github.com/localmelo/localmelo/pull/210
 [#211]: https://github.com/localmelo/localmelo/pull/211
+[#214]: https://github.com/localmelo/localmelo/pull/214
+[#216]: https://github.com/localmelo/localmelo/pull/216
+[#217]: https://github.com/localmelo/localmelo/pull/217
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

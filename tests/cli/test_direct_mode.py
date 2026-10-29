@@ -81,14 +81,17 @@ class Ran:
 
 
 def _main(*argv: str, outcome: RunResult | None = None) -> Ran:
-    """Run main() with *argv*; the agent's run ends with *outcome*."""
+    """Run main() with *argv*; the agent's run ends with *outcome*.
+
+    The fake agent cannot be recorded, so the run opts out of the worker session.
+    """
     agent = _agent(outcome or _outcome("completed", result="42"))
     build = mock.MagicMock(return_value=agent)
     with (
         mock.patch.object(cli, "_register_backends"),
         mock.patch.object(cli, "_build_direct_mode_agent", build),
         mock.patch.object(cli, "_localmelo_version", return_value="v-test"),
-        mock.patch("sys.argv", ["melo", *argv]),
+        mock.patch("sys.argv", ["melo", "--no-save-session", *argv]),
     ):
         try:
             cli.main()

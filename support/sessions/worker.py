@@ -6,7 +6,9 @@ import ast
 import asyncio
 import os
 import shlex
+import sqlite3
 import subprocess
+import sys
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -170,6 +172,32 @@ def _git_metadata(workspace: str) -> dict[str, str]:
     return result
 
 
+def _warn_unrecorded(exc: BaseException) -> None:
+    reason = " ".join(str(exc).split()) or type(exc).__name__
+    print(
+        f"melo: could not record this run ({redact_secrets(reason)[0]}); "
+        "the run is unchanged",
+        file=sys.stderr,
+    )
+
+
+async def _run_unrecorded(
+    agent: Agent,
+    query: str,
+    observe: EventSink | None,
+    routine: str | None,
+    inbox: InboxSource | None,
+) -> RunResult:
+    kwargs: dict[str, Any] = {}
+    if observe is not None:
+        kwargs.update(observe=observe, progress=True)
+    if routine is not None:
+        kwargs["routine"] = routine
+    if inbox is not None:
+        kwargs["inbox"] = inbox
+    return await agent.run_task(query, **kwargs)
+
+
 async def run_worker(
     agent: Agent,
     query: str,
@@ -180,11 +208,16 @@ async def run_worker(
     routine: str | None = None,
     inbox: InboxSource | None = None,
 ) -> RunResult:
-    """Record a direct run in the CLI store without changing its options."""
+    """Record a direct run in the CLI store without changing its options.
+
+    A store that cannot be opened or written never fails the run: one line on
+    stderr, and the run goes on unrecorded.
+    """
     from localmelo.support.sessions.runner import SessionRunner
     from localmelo.support.sessions.store import (
         NewSession,
         SessionStore,
+        SessionStoreError,
         title_from_text,
     )
 
@@ -199,10 +232,22 @@ async def run_worker(
         "parent_run": parent_run,
         "tools": [tool.name for tool in agent.list_tools()],
     }
-    if workspace:
-        meta.update(await asyncio.to_thread(_git_metadata, workspace))
-    meta = redact_worker(meta)
     store = SessionStore(writer="cli")
+    # The file opens while git is asked for the workspace's branch.
+    opened, git = await asyncio.gather(
+        store.open(),
+        asyncio.to_thread(_git_metadata, workspace),
+        return_exceptions=True,
+    )
+    if isinstance(opened, BaseException):
+        await store.aclose()
+        if not isinstance(opened, Exception):
+            raise opened
+        _warn_unrecorded(opened)
+        return await _run_unrecorded(agent, query, observe, routine, inbox)
+    if isinstance(git, dict):
+        meta.update(git)
+    meta = redact_worker(meta)
     runner = SessionRunner(
         agent,
         store,
@@ -218,11 +263,17 @@ async def run_worker(
         inbox=inbox,
     )
     try:
-        outcome = await runner.run_turn(
-            query,
-            title=title or title_from_text(query.splitlines()[0]),
-            routine=routine,
-        )
+        try:
+            outcome = await runner.run_turn(
+                query,
+                title=title or title_from_text(query.splitlines()[0]),
+                routine=routine,
+            )
+        except (SessionStoreError, OSError, sqlite3.Error) as exc:
+            if runner.session_id is not None:
+                raise
+            _warn_unrecorded(exc)  # the turn never began, so nothing ran
+            return await _run_unrecorded(agent, query, observe, routine, inbox)
         meta.update(
             {
                 "tools": [tool.name for tool in agent.list_tools()],
@@ -237,7 +288,10 @@ async def run_worker(
             }
         )
         if runner.session_id:
-            await store.update_session(runner.session_id, meta=redact_worker(meta))
+            try:
+                await store.update_session(runner.session_id, meta=redact_worker(meta))
+            except (SessionStoreError, OSError, sqlite3.Error) as exc:
+                _warn_unrecorded(exc)
         return outcome
     finally:
         await runner.close()

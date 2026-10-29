@@ -70,3 +70,60 @@ test('new selection wins over a slow detail response', async () => {
   await old;
   assert.equal(history.state.session.id, 'new');
 });
+
+test('the open list and an unfinished run are read again on the scheduler tick, a finished run is not', async () => {
+  let ticks = [];
+  const every = (fn, ms) => { const tick = {fn, ms, stopped: false}; ticks.push(tick); return () => { tick.stopped = true; }; };
+  const calls = [];
+  let run = {id: 'w', kind: 'worker', status: 'running'};
+  const history = workerHistory(async (path) => {
+    calls.push(path);
+    if (path.startsWith('/sessions?')) return {sessions: [run], next_cursor: null};
+    if (path.includes('/turns')) return {turns: [{turn: 1, status: run.status, events: []}], has_earlier: false};
+    return {session: run};
+  }, () => {}, every);
+  await history.list();
+  assert.equal(ticks.length, 1);
+  assert.equal(ticks[0].ms, 3000);
+  run = {...run, status: 'completed'};
+  await ticks[0].fn();
+  assert.equal(history.state.rows[0].status, 'completed', 'the list follows the run');
+  await history.detail('w');
+  assert.equal(ticks.length, 1, 'one scheduler for the whole view');
+  const reads = calls.length;
+  await ticks[0].fn();
+  assert.equal(calls.length, reads, 'a finished run is not read again');
+  run = {...run, status: 'running'};
+  await history.detail('w');
+  run = {...run, status: 'completed'};
+  await ticks[0].fn();
+  assert.equal(history.state.session.status, 'completed', 'an unfinished run follows the store');
+  history.leave();
+  assert.equal(ticks[0].stopped, true);
+});
+
+test('a poll that fails or answers late draws nothing', async () => {
+  let ticks = [];
+  const every = (fn) => { ticks.push(fn); return () => {}; };
+  let fail = false;
+  let release;
+  let draws = 0;
+  const history = workerHistory(async () => {
+    if (fail) throw new Error('down');
+    if (release) await new Promise((resolve) => { release = resolve; });
+    return {sessions: [{id: 'a', status: 'running'}], next_cursor: null};
+  }, () => { draws++; }, every);
+  await history.list();
+  const drawn = draws;
+  fail = true;
+  await ticks[0]();
+  assert.equal(draws, drawn);
+  assert.equal(history.state.error, '', 'a failed poll shows no error; the next tick tries again');
+  fail = false;
+  release = () => {};
+  const late = ticks[0]();
+  history.leave();
+  release();
+  await late;
+  assert.equal(draws, drawn, 'a poll answered after leaving is dropped');
+});

@@ -55,12 +55,23 @@ again.
 
 ## Worker histories
 
-`--save-session [TITLE]` records a direct task as a `worker` session in the
-CLI sessions file. Put the task after `--`; without a title, the first task
-line supplies one. `--parent-run ID` requires `--save-session` and links a
-launcher. Without the flag, direct runs do not open the session store. Workers
-are not offered by `-c`, `-r`, or the chat picker. Workspace and git metadata
-use `--workspace` when supplied, otherwise the current working directory.
+Every direct run (`melo "<task>"` and `melo --brief FILE`) is recorded as a
+`worker` session in the CLI sessions file, `~/.cache/localmelo/cli/sessions.db`,
+so the web console's Workers view and the macOS app show it, a running one
+included. Recording changes nothing the run sends or prints: the model's
+requests, stdout, the JSON result and the exit code are the same, and a run
+costs about 20 ms more before its first request. Put the task after `--`; the
+first task line is the title, and `--save-session TITLE` sets another.
+`--parent-run ID` links a launcher and needs no other flag. Opt out for one run
+with `--no-save-session`, or for the whole home with `record_direct = false`
+under `[sessions]` in the config (see the
+[configuration reference](configuration.md)); an explicit `--save-session` or
+`--parent-run` records regardless of the config. A store that cannot be opened
+or written never fails the run: one line,
+`melo: could not record this run (<reason>); the run is unchanged`, goes to
+stderr and the run goes on unrecorded. Workers are not offered by `-c`, `-r`,
+or the chat picker. Workspace and git metadata use `--workspace` when supplied,
+otherwise the current working directory.
 
 `--import-session dsh-jsonl FILE [--title TITLE]` imports a dsh JSONL log
 without a task. Reimporting identical file contents is a no-op; unknown or
@@ -132,6 +143,7 @@ two equal.
 | `--import-session` | advanced |  |
 | `--title` | advanced |  |
 | `--save-session` | advanced |  |
+| `--no-save-session` | advanced |  |
 | `--parent-run` | advanced |  |
 | `--inbox` | advanced |  |
 | `--inbox-fd` | advanced |  |
@@ -556,8 +568,9 @@ recorded item contains the raw command or Python code, redacted and capped at
 With a `Check:` line, `tests` is the harness's own result instead (see below):
 `passed` or `failed`, with one item per command of the gate's last run, each
 with `command`, `command_truncated`, `exit_code`, `duration_s` and the source
-`brief_check`, plus `refused` (the reason) when the policy did not let the
-command run.
+`brief_check`, and `output_tail` (the last 20 lines of the check's output,
+redacted, at most 4,000 characters; absent from records of older versions),
+plus `refused` (the reason) when the policy did not let the command run.
 
 With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
@@ -575,7 +588,7 @@ redaction and omits some recognizable sensitive-file reads, including simple
 shell and Python reads. A startup error's text is redacted too, and the
 user's home directory is shown as `~`. Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
-before sharing. `--save-session` can record the same run.
+before sharing. Direct runs, this one included, are recorded by default (see above).
 
 A `--brief` run also differs from a plain task in four ways. The query is the
 brief followed by one fixed paragraph, the same on every request: make the
@@ -633,8 +646,13 @@ says so, and the exit code is 4 (see [Exit codes](#exit-codes); stderr gets one
 line, `melo: the brief's check failed: <command> (exit N)`, with `not run` for
 a refused check and `no exit status` for a timeout); when every check of the last round
 passes, `tests` is `passed`. Each run of a check emits a `brief_check` notice
-with its command, exit code and duration. A brief with no `Check:` line behaves
-as before, and the model's own account of its checks is still only that.
+with its command, exit code and duration. When the run is in its last attempt with exactly two steps of its budget left,
+the workspace has changed since the checks last ran (or since the run started),
+and the gate has not run in that attempt, the harness runs the checks once
+before the next planning request, so the model can still fix what they show. A
+pass changes nothing; a failure sends the same message as the gate and uses one
+of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
+line behaves as before, and the model's own account of its checks is still only that.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last

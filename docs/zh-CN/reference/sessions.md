@@ -73,7 +73,7 @@ wrapped OpenAICompatLLM
 | `PRAGMA synchronous` | `FULL`：操作系统崩溃不会丢失任何已提交的内容 | `NORMAL` |
 | 事件流（`SessionHub`） | 有 | 无 |
 
-worker 会话也使用命令行界面的文件：直接任务只在带 `--save-session` 时保存它们，dsh 日志可以按内容哈希导入。它们只有一轮，并被排除在交互式聊天选择之外。网关可以通过只读连接读取这个文件中的 worker 记录；它不会恢复、修改或跟随它们。读取期间 SQLite 可能创建 `-wal` 和 `-shm` 记账附属文件。脱敏限制见 [worker 历史记录](../../reference/cli.md#worker-histories)（英文）。
+worker 会话也使用命令行界面的文件：每个直接任务默认都会保存一个（`--no-save-session` 或 `[sessions] record_direct = false` 可退出），dsh 日志可以按内容哈希导入。它们只有一轮，并被排除在交互式聊天选择之外。网关可以通过只读连接读取这个文件中的 worker 记录；它不会恢复、修改或跟随它们。读取期间 SQLite 可能创建 `-wal` 和 `-shm` 记账附属文件。脱敏限制见 [worker 历史记录](../../reference/cli.md#worker-histories)（英文）。
 
 - **写入者标记。** 新文件会记录它的写入者。打开另一个写入者的文件会抛出 `SessionStoreError`，例如 `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`；标记缺失或未知的文件抛出 `<path> has no valid writer marker`；不是会话文件的文件（例如 `history.db`）抛出 `<path> is not a localmelo sessions file`。存储器在写入任何内容之前先在只读连接上读取这些信息，因此被拒绝的文件保持原样、逐字节不变；在 WAL 模式下，SQLite 仍可能在文件旁创建它的 `-wal` 和 `-shm` 文件。schema 更新的文件抛出 `<path> has schema version <n>; this localmelo reads version 2`。版本 1 的存储器通过添加可为空的 `turns.attachments` 元数据原地迁移。
 - **所有者锁。** 网关的存储器在其整个生命周期内持有 `<path>.owner` 上的锁。同一文件上的第二个网关会得到 `StoreOwnedError`：`Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.` 进程以任何方式结束时系统都会释放该锁，因此崩溃后下一个网关可以立即启动。文件必须位于本地磁盘上。

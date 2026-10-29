@@ -1,5 +1,7 @@
 # Concepts: Retrieval
 
+This page explains how each retriever ranks memory candidates and how a run recalls them. Read it when you need to know why a memory was recalled; the options and the offline comparison are in the [retrieval reference](../reference/retrieval.md).
+
 ## How each retriever ranks
 
 **`bm25`** scores the query's candidates with Okapi BM25, so how rare a word

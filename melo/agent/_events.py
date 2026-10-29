@@ -480,6 +480,7 @@ class _Emitter:
                 "exit_code": result.exit_code,
                 "duration_s": result.duration_s,
                 "refused": result.refused,
+                "output_tail": result.output_tail,
             },
         )
 

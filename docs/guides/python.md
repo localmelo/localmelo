@@ -1,5 +1,7 @@
 # Guide: Python
 
+This guide shows how to use localmelo from your own Python code: run a task, follow its events, stop a run, approve tool calls, work in a directory and keep answers between runs. Read it when you write a Python script; the classes and their fields are in the [Python API reference](../reference/python-api.md).
+
 ## Run a task
 
 ```python
