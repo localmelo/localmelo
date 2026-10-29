@@ -126,13 +126,13 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `attempts` | Attempts started: 1 when the first attempt answered. |
 | `n_llm` | Model requests that returned a response. |
 | `n_main` | Of those, requests that offered tools, other than reflections. |
-| `n_aux` | Of those, the rest: reflections (also under `--fixed-prefix`, where they offer the plan's tools to share its prefix), recall's retrieve requests, and planning requests in a step that offered no tool. |
+| `n_aux` | Of those, the rest: reflections (also under the default fixed prefix, where they offer the plan's tools to share its prefix), recall's retrieve requests, and planning requests in a step that offered no tool. |
 | `n_tool` | Tool calls handed to the executor, including refused calls. |
 | `llm_errors` | Model requests that failed, counting each failed attempt of a retried request. `n_llm + llm_errors` is the number of requests sent. |
 | `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |
 | `duration_s` | Wall-clock time of the run, in seconds. |
 | `config` | The options the run used (below). |
-| `prefix_cache` | With fixed prefix enabled: version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
+| `prefix_cache` | With fixed prefix enabled (the default; absent with `--fixed-prefix off`): version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
 | `context_budget` | When configured, a list of per-attempt planning/reflection accounting records; absent when disabled. See [context accounting](configuration.md#context-accounting). |
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 
@@ -144,8 +144,8 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
-| `window_eviction` | `chunk` or `boundary` when the run used one; absent for the default `slide`. |
-| `reflect_tool_guard` | `true` when the run used `--reflect-tool-guard on`; absent otherwise. |
+| `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
+| `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |
