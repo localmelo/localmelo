@@ -247,7 +247,14 @@ def _embedding_choices(cfg: config.Config, models: list[str]) -> list[EmbeddingC
 
 
 class _FullMenuError(Exception):
-    """The guided reconfigure found no server to keep: show the full menu."""
+    """The guided reconfigure found no server to keep: show the full menu.
+
+    *found* is the offered server the user declined, if one was offered.
+    """
+
+    def __init__(self, found: discovery.FoundServer | None = None) -> None:
+        super().__init__()
+        self.found = found
 
 
 def run_backend_setup(*, guided: bool = False) -> config.Config | None:
@@ -266,11 +273,12 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     successful, None if cancelled.
     """
 
+    declined: discovery.FoundServer | None = None
     if guided:
         try:
             setup = run_first_setup(ask_keep=True)
-        except _FullMenuError:
-            pass
+        except _FullMenuError as menu:
+            declined = menu.found
         else:
             return config.load() if setup is not None and setup.saved else None
 
@@ -280,9 +288,13 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     # ── 1. Chat backend ──
     chat_keys = [key for key, _ in CHAT_BACKENDS]
     chat_display = [name for _, name in CHAT_BACKENDS]
-    current_chat = (
-        chat_keys.index(cfg.chat_backend) + 1 if cfg.chat_backend in chat_keys else 1
-    )
+    # The default is the saved backend; with none saved, the declined server's
+    # kind, as the first run would save it (see _with_chat_server).
+    default_chat = cfg.chat_backend
+    if default_chat not in chat_keys and declined is not None:
+        ollama = asyncio.run(discovery.is_ollama(declined.url))
+        default_chat = "ollama" if ollama else "vllm"
+    current_chat = chat_keys.index(default_chat) + 1 if default_chat in chat_keys else 1
     choice = _ask_choice("Chat backend", chat_display, default=current_chat)
     selected_chat_key = CHAT_BACKENDS[choice - 1][0]
 
@@ -621,7 +633,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     urls = discovery.detect_urls()
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     if ask_keep and (found is None or not found.models):
-        raise _FullMenuError
+        raise _FullMenuError()
     keep = False
     if found is not None and found.models:
         count = len(found.models)
@@ -632,7 +644,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         default_url = found.url
         if ask_keep:
             if _choose("Use it? [Y/n]: ", "yn", "y") == "n":
-                raise _FullMenuError
+                raise _FullMenuError(found)
             keep = True
     elif found is not None:
         print(f"A model server at {found.url} answered, but {found.problem}.")

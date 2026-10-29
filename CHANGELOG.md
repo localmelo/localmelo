@@ -836,6 +836,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Second-walkthrough polish (part of #200): the no-backend message says
+  `Run melo in a terminal to set up`; the quickstart has a section on running a
+  task through the gateway (`melo-task new`, `list`, `show`); `melo-task show`
+  prints `Reason:` and `Waiting:` only when the task has one; in the guided
+  `melo --reconfigure`, after `n` the backend menu defaults to the saved backend,
+  else to the declined server's kind (Ollama or vLLM); the `--brief` help says
+  that `Check:` lines run and that a failed check exits 4; the bare `/` list shows
+  each command once, with `/clear` and `/quit` named in the `/new` and `/exit`
+  rows ([#NN]).
+
 - First-look fixes for the default mode: `melo --version` prints the banner's
   version and exits 0, and a usage error prints a short usage instead of every
   developer flag (`--developer` keeps the long one). The banner and

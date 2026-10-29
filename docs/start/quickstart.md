@@ -255,6 +255,44 @@ melo "What is 6*7?"
 
 To start the gateway again without the wizard, run `melo --serve`.
 
+## Run a task through the gateway
+
+With the gateway running, `melo-task` sends a brief to it, as in
+[Run a worker task](#run-a-worker-task), and lists the tasks:
+
+```bash
+melo-task new --brief brief.md
+melo-task list
+```
+
+Example output (the id and the model's work vary; the task works in the
+default workspace, `~/localmelo-workspace`):
+
+```text
+c5b2d38ceecc  queued
+ID            LEVEL  STATE  TITLE
+c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
+  Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
+```
+
+With the default settings a file write waits for your approval, so the task
+is `held` until you answer it. Run `melo --gateway-login` in a terminal, open
+the link it prints, and answer the request in the Tasks view. Then show the
+task:
+
+```bash
+melo-task show c5b2d38ceecc
+```
+
+```text
+c5b2d38ceecc  done
+  Title: Write hello.py so that it prints the word hello.
+  Level: P2
+```
+
+`show` adds `Reason:` and `Waiting:` lines only when the task has a reason or
+waits for something. `melo-task --help` lists the other commands.
+
 ## Interactive conversations
 
 Run `melo` without a task to chat in the terminal. Each tool call shows as

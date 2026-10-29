@@ -1052,3 +1052,22 @@ def test_a_guided_reconfigure_with_no_server_goes_straight_to_the_menu(
     answers = _Answers(*[""] * 10)
     assert _guided(answers, found=None) is not None
     assert answers.prompts[0] == "  Chat backend [3]: "
+
+
+@pytest.mark.parametrize(
+    ("saved", "ollama", "default"),
+    [(False, False, "3"), (False, True, "2"), (True, True, "3")],
+)
+def test_a_declined_server_is_the_menus_default_unless_a_backend_is_saved(
+    config_path: Path, saved: bool, ollama: bool, default: str
+) -> None:
+    if saved:
+        config.save(_configured())
+
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return ollama
+
+    answers = _Answers("n", *[""] * 10)
+    with mock.patch.object(discovery, "is_ollama", is_ollama):
+        _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
+    assert answers.prompts[1] == f"  Chat backend [{default}]: "

@@ -464,10 +464,19 @@ def test_show_gives_a_shell_command_and_keeps_a_recorded_reason() -> None:
     assert "  Reason: scheduler\n" in text
 
 
-def test_show_without_a_pending_approval_is_unchanged() -> None:
+def test_show_without_a_pending_approval_gives_the_wait_and_no_reason() -> None:
     task = {**_HELD, "pending_approvals": []}
     text = _run(["show", "abc"], {"task": task})
-    assert "  Waiting: approval\n" in text and "  Reason: not recorded\n" in text
+    assert "  Waiting: approval\n" in text
+    assert "Reason:" not in text and "not recorded" not in text
+
+
+def test_show_prints_only_the_reason_and_wait_a_task_has() -> None:
+    finished = {"task_id": "abc", "state": "done", "title": "Write it", "level": 2}
+    text = _run(["show", "abc"], {"task": finished})
+    assert text.splitlines()[1:] == ["  Title: Write it", "  Level: P2"]
+    text = _run(["show", "abc"], {"task": {**finished, "reason": "budget"}})
+    assert "  Reason: budget\n" in text and "Waiting:" not in text
 
 
 def test_list_adds_the_approval_line_under_a_waiting_task() -> None:

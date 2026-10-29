@@ -82,7 +82,12 @@ class SlashCompleter(Completer):
         name, space, argument = text[1:].partition(" ")
         if not space:
             for command in COMMANDS:
-                for alias in (command.name, *command.aliases):
+                # The bare "/" lists each command once; an alias row appears
+                # only for a typed prefix of it (the description names it).
+                spellings = (
+                    (command.name, *command.aliases) if name else (command.name,)
+                )
+                for alias in spellings:
                     if alias.startswith(name):
                         usage = f"/{alias}"
                         yield Completion(

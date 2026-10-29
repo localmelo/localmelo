@@ -204,6 +204,40 @@ melo "What is 6*7?"
 
 要跳过向导再次启动网关，运行 `melo --serve`。
 
+<a id="run-a-task-through-the-gateway"></a>
+
+## 通过网关运行任务
+
+网关运行时，`melo-task` 把简报发给它（简报写法见[运行 worker 任务](#run-a-worker-task)），并列出任务：
+
+```bash
+melo-task new --brief brief.md
+melo-task list
+```
+
+示例输出（任务 ID 和模型的工作每次不同；任务在默认工作区 `~/localmelo-workspace` 中进行）：
+
+```text
+c5b2d38ceecc  queued
+ID            LEVEL  STATE  TITLE
+c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
+  Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
+```
+
+默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。在终端中运行 `melo --gateway-login`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
+
+```bash
+melo-task show c5b2d38ceecc
+```
+
+```text
+c5b2d38ceecc  done
+  Title: Write hello.py so that it prints the word hello.
+  Level: P2
+```
+
+只有任务有原因或在等待某事时，`show` 才会增加 `Reason:` 和 `Waiting:` 行。`melo-task --help` 列出其他命令。
+
 <a id="interactive-conversations"></a>
 
 ## 交互式对话
