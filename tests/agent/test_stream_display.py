@@ -15,6 +15,12 @@ from localmelo.melo.contracts.providers import (
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import Message, ReasoningTags, ToolCall, ToolDef
+from localmelo.tests.agent.procedural_helpers import (
+    ScriptedLLM,
+    answer,
+    make_agent,
+    read,
+)
 
 
 class StreamLLM(BaseLLMProvider):
@@ -76,6 +82,9 @@ class Display:
     def __init__(self, hint: ReasoningTags | None = None) -> None:
         self.reasoning_tags = hint
         self.events: list[tuple[str, str]] = []
+
+    def step(self, number: int) -> None:
+        self.events.append(("step", str(number)))
 
     def opened(self) -> None:
         self.events.append(("opened", ""))
@@ -317,3 +326,16 @@ async def test_a_tool_call_preamble_is_released_before_the_complete_reply() -> N
 
 async def _no_sleep(seconds: float) -> None:
     return None
+
+
+async def test_the_agent_tells_the_display_each_step_before_it_streams() -> None:
+    """The display learns the step in-band, ahead of the stored events."""
+    display = Display()
+    agent = make_agent(ScriptedLLM([read("/p/a.py"), answer("done")]))
+    token = STREAM_DISPLAY.set(display)
+    try:
+        result = await agent.run_task("read a.py")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert result.status == "completed"
+    assert [value for kind, value in display.events if kind == "step"] == ["1", "2"]

@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import pyte
 import pytest
 
 from localmelo.tests.cli.test_e2e_pty import Melo
@@ -34,6 +35,20 @@ def _configure(
         f"[cli]\nstream = {'true' if stream else 'false'}\n{tags}",
         encoding="utf-8",
     )
+
+
+def screen(term: Melo, columns: int = 100) -> str:
+    """What the terminal shows, scrollback included.
+
+    ``Melo.text()`` is the byte stream with its escapes removed, so every
+    redraw of the live region repeats there; counts of printed lines need the
+    screen the redraws leave.
+    """
+    display = pyte.HistoryScreen(columns, 30, history=500)
+    pyte.Stream(display).feed(term.output.decode("utf-8", "replace"))
+    rows = [*display.history.top, *display.history.bottom]
+    lines = ["".join(row[c].data for c in range(columns)) for row in rows]
+    return "\n".join([*(line.rstrip() for line in lines), *display.display])
 
 
 @pytest.fixture
@@ -65,7 +80,7 @@ def test_a_streamed_reply_shows_live_then_prints_the_final_answer_once(
     term.see("The first line of the answer.")
     assert "Worked for" not in term.text()  # it is live, not the final print
     term.see("Worked for")
-    text = term.text()
+    text = screen(term)
     assert text.count("● The first line of the answer.") == 1
     assert "partial reply" not in text
     assert term.quit() == 0
@@ -82,7 +97,7 @@ def test_split_utf8_and_closing_tag_release_only_the_answer(
     term.see("Still streaming")
     assert "Worked for" not in term.text()  # it is live, not the final print
     term.see("Worked for")
-    text = term.text()
+    text = screen(term)
     assert "secret plan" not in text
     assert text.count("● 你好，世界") == 1
     assert term.quit() == 0
@@ -106,12 +121,13 @@ def test_a_tool_call_preamble_is_labelled_before_the_tool_block(
     streamed: Callable[..., Melo],
 ) -> None:
     term = streamed("stream_tool")
+    (term.workspace / "app.py").write_text("print('hello')\n", encoding="utf-8")
     term.see("Ask melo")
     term.type("read app.py\r")
     term.see("partial reply (tool call)")
     term.see("Let me read it.")
     term.see("The file prints hello.")
-    assert term.text().count("Let me read it.") == 1
+    assert screen(term).count("Let me read it.") == 1
     assert term.quit() == 0
 
 
@@ -125,7 +141,7 @@ def test_esc_mid_stream_closes_and_labels_the_partial_once(
     term.type(b"\x1b")
     term.see("partial reply (stopped)")
     term.see("Stopped")
-    assert term.text().count("partial reply (stopped)") == 1
+    assert screen(term).count("partial reply (stopped)") == 1
     assert term.quit() == 0
 
 

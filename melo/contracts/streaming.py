@@ -19,12 +19,16 @@ class StreamDisplay(Protocol):
     """What a turn's live region implements for one streamed planning reply.
 
     ``reasoning_tags`` is the per-model framing declaration the release filter
-    uses, or ``None`` for the conservative rule. ``opened`` starts one attempt;
+    uses, or ``None`` for the conservative rule. ``step`` says which planning
+    step the next attempts belong to (the agent calls it as the step starts,
+    ahead of the stored ``step.started`` event); ``opened`` starts one attempt;
     a retry opens again. ``held`` says text arrived but none is releasable yet;
     ``content`` carries a safe delta; ``closed`` ends the attempt, once.
     """
 
     reasoning_tags: ReasoningTags | None
+
+    def step(self, number: int) -> None: ...
 
     def opened(self) -> None: ...
 

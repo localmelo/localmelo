@@ -1,0 +1,17 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {
+      "stream": {
+        "chunks": [
+          "Here is the plan.\n",
+          "First, read the notes.\n",
+          "Then, check the results.\n",
+          "Last, write the summary.\n",
+          "Done.\n"
+        ],
+        "delay_s": 2.0
+      }
+    }
+  ]
+}

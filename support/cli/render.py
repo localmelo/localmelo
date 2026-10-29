@@ -291,6 +291,9 @@ class StreamFeed:
         self._renderer = renderer
         self.reasoning_tags = renderer.stream_hint()
 
+    def step(self, number: int) -> None:
+        self._renderer.stream_step(number)
+
     def opened(self) -> None:
         self._renderer.stream_opened()
 
@@ -329,7 +332,10 @@ class TurnRenderer:
         # Per model, from [cli.reasoning_tags]: trusted framing declarations
         # for the stream and for the whole-reply display.
         self.reasoning_tags = dict(reasoning_tags or {})
-        self._stream_text = ""
+        # Provisional streamed text per planning step (see stream_step).
+        self._stream_texts: dict[int, str] = {}
+        self._stream_step = 0
+        self._stream_open = False
         self._backend = backend
         self._clock = clock
         self.live: LiveState | None = None
@@ -390,7 +396,9 @@ class TurnRenderer:
         self._tool_count = 0
         self._stop_cause = ""
         self._held = ""
-        self._stream_text = ""
+        self._stream_texts = {}
+        self._stream_step = 0
+        self._stream_open = False
         self._turn += 1
         self._call_number = 0
 
@@ -407,9 +415,24 @@ class TurnRenderer:
         """A display for one turn's planning streams (set around the run)."""
         return StreamFeed(self)
 
+    def stream_step(self, number: int) -> None:
+        """The agent is about to plan step *number* (in-band, not an event).
+
+        Events reach the renderer after they are stored, so a step's first
+        delta can come before its own ``step.started``, and a fast tool lets
+        the next step stream before the last one's reply event. The text is
+        kept per step so each event finds its own.
+        """
+        self._stream_step = number
+
     def stream_opened(self) -> None:
         """A provider stream or its complete-reply fallback started."""
-        self._stream_text = ""
+        # An earlier attempt of this step that no reply claimed ended in an
+        # error: close it here, as its retry event may still be on its way.
+        self._flush_stream(
+            "retrying", since=self._stream_step, upto=self._stream_step + 1
+        )
+        self._stream_open = True
         if self.live is not None:
             self.live.stream_text = ""
             self.live.stream_held = True
@@ -422,49 +445,82 @@ class TurnRenderer:
 
     def stream_content(self, delta: str) -> None:
         """Keep and show a released, already-redacted content delta."""
-        self._stream_text += delta
+        step = self._stream_step
+        self._stream_texts[step] = self._stream_texts.get(step, "") + delta
         if self.live is not None:
             self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
             self.live.stream_held = False
             self.live.activity = "Replying"
 
     def stream_closed(self) -> None:
+        self._stream_open = False
         if self.live is not None:
             self.live.stream_held = False
+
+    def _claim_stream(self, step: object) -> bool:
+        """Take the text of *step*'s reply as claimed; whether it had any.
+
+        The completed reply is about to print (or be held), so the provisional
+        copy goes. The live region is cleared only when *step* is the one now
+        streaming.
+        """
+        key = step if isinstance(step, int) else self._stream_step
+        text = self._stream_texts.pop(key, "")
+        if key == self._stream_step and self.live is not None:
+            self.live.stream_text = ""
+            self.live.stream_held = False
+        return bool(text.strip())
 
     def _clear_stream(self) -> None:
-        """Drop provisional text without printing it."""
-        self._stream_text = ""
+        """Drop all provisional text without printing it."""
+        self._stream_texts.clear()
         if self.live is not None:
             self.live.stream_text = ""
             self.live.stream_held = False
 
-    def _flush_stream(self, label: str, *, answer: str = "") -> str:
-        """Print held provisional text once, its label saying how it ended.
+    def _flush_stream(
+        self,
+        label: str,
+        *,
+        answer: str = "",
+        since: int | None = None,
+        upto: int | None = None,
+    ) -> str:
+        """Print provisional text once, its label saying how it ended.
 
-        Returns the text printed, empty when there was none or it equals
-        *answer*. A held assistant message with the same text is dropped: it
-        is the completed copy of the same reply, not a second one.
+        Prints the text of the steps from *since* up to below *upto* (all when
+        ``None``) in step order and returns the last text printed, empty when there was none or
+        it equals *answer*. A held assistant message with the same text is
+        dropped: it is the completed copy of the same reply, not a second one.
         """
-        text, self._stream_text = self._stream_text, ""
+        keys = sorted(
+            k
+            for k in self._stream_texts
+            if (since is None or k >= since) and (upto is None or k < upto)
+        )
+        if not keys:
+            return ""
+        printed = ""
+        for key in keys:
+            shown = clean_output(self._stream_texts.pop(key)).strip()
+            if not shown:
+                continue
+            if self._held and _same_display_text(self._held, shown):
+                self._held = ""
+            if answer and _same_display_text(answer, shown):
+                continue
+            self.out.print(
+                Text(
+                    f"{self.symbols.queued} partial reply ({label})",
+                    style="muted",
+                )
+            )
+            self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
+            printed = shown
         if self.live is not None:
             self.live.stream_text = ""
             self.live.stream_held = False
-        shown = clean_output(text).strip()
-        if not shown:
-            return ""
-        if self._held and _same_display_text(self._held, shown):
-            self._held = ""
-        if answer and _same_display_text(answer, shown):
-            return ""
-        self.out.print(
-            Text(
-                f"{self.symbols.queued} partial reply ({label})",
-                style="muted",
-            )
-        )
-        self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
-        return shown
+        return printed
 
     @property
     def finished(self) -> bool:
@@ -546,7 +602,12 @@ class TurnRenderer:
         live.retry_until = 0.0
 
     def _on_step_started(self, data: Mapping[str, Any]) -> None:
-        self._flush_stream("not the final answer")
+        # Text of an earlier step that its reply did not claim. The event
+        # follows the agent's own stream_step, so this step's text stays.
+        step = data.get("step")
+        self._flush_stream(
+            "not the final answer", upto=step if isinstance(step, int) else None
+        )
         self._print_held()
         self._print_unstarted()
         if self.live is not None:
@@ -580,8 +641,7 @@ class TurnRenderer:
             self._held = text
             return
         self._held = ""
-        streamed = bool(self._stream_text.strip())
-        self._clear_stream()
+        streamed = self._claim_stream(data.get("step"))
         if text:
             if streamed:
                 self.out.print(
@@ -669,7 +729,8 @@ class TurnRenderer:
         kind = str(data.get("kind") or "")
         message = plain(str(data.get("message") or ""))
         if kind == "retry":
-            self._flush_stream("retrying")
+            if not self._stream_open:  # else the next attempt already closed it
+                self._flush_stream("retrying")
             line = Text(f"{self.symbols.retry} {message}", style="muted")
             line.truncate(self.out.width, overflow="ellipsis")
             self.out.print(line)
@@ -1218,9 +1279,11 @@ STREAM_LIVE_CHARS: Final = 16_384
 
 
 def _stream_rows(
-    text: str, width: int, symbols: Symbols
+    text: str, width: int, symbols: Symbols, limit: int = STREAM_LIVE_LINES
 ) -> list[list[tuple[str, str]]]:
     """The tail of released provisional text, wrapped and cut to *width*."""
+    if limit <= 0:
+        return []
     lines: list[str] = []
     for line in expand_tabs(clean_output(text)).split("\n"):
         if line:
@@ -1229,7 +1292,7 @@ def _stream_rows(
             lines.append("")
     while lines and not lines[0]:
         lines.pop(0)
-    shown = lines[-STREAM_LIVE_LINES:]
+    shown = lines[-limit:]
     rows: list[list[tuple[str, str]]] = []
     if len(lines) > len(shown):
         rows.append(
@@ -1252,8 +1315,12 @@ def live_rows(
     symbols: Symbols,
     *,
     frame: int | None = None,
+    stream_lines: int = STREAM_LIVE_LINES,
 ) -> list[list[tuple[str, str]]]:
     """The live area's rows as prompt_toolkit fragments, each within *width* cells.
+
+    *stream_lines* caps the rows of released streamed text; the app lowers it
+    on a short terminal so the draft and the panels keep their rows.
 
     Row 1 is the spinner line: the frame, the activity, the run's facts
     from P3's :func:`format_line`, the turn's output tokens and the stop
@@ -1322,7 +1389,7 @@ def live_rows(
     first = cut_cells(compose(extras), width, symbols.ellipsis)
     rows = [[("class:accent", first)]]
     if live.stream_text:
-        rows.extend(_stream_rows(live.stream_text, width, symbols))
+        rows.extend(_stream_rows(live.stream_text, width, symbols, stream_lines))
     elif live.stream_held and not live.waiting:
         rows.append(
             [
