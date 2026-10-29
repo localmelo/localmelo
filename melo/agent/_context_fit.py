@@ -68,12 +68,16 @@ def fit_request(
     estimate: Callable[[list[Message], list[ToolDef] | None], int],
     requires_replay: bool,
     force_smaller_than: int | None = None,
+    drop_target: float = 1.0,
 ) -> tuple[list[Message], dict[str, int]]:
     """Fit copies using the caller's assembled-request estimate.
 
     Counts are ``tool_results``, ``thinking`` and ``units``. A retry must
     additionally estimate strictly below ``force_smaller_than``. Failure is
     conservative: malformed/in-flight pairs, images and failure evidence stay.
+    When whole units must go, *drop_target* < 1 removes them down to that share
+    of *limit* (as far as the pinned context allows), so the next request's
+    retained history starts at the same unit.
     """
     units = group_turns(copy.deepcopy(messages), empty_prefix=True)
     counts = {"tool_results": 0, "thinking": 0, "units": 0}
@@ -81,9 +85,9 @@ def fit_request(
     def flatten() -> list[Message]:
         return [message for unit in units for message in unit]
 
-    def fits() -> bool:
+    def fits(share: float = 1.0) -> bool:
         size = estimate(flatten(), tools)
-        return size <= limit and (
+        return size <= limit * share and (
             force_smaller_than is None or size < force_smaller_than
         )
 
@@ -170,6 +174,7 @@ def fit_request(
             if fits():
                 return flatten(), counts
 
+    fitting: tuple[list[Message], dict[str, int]] | None = None
     for unit in list(units):
         if (
             unit is newest
@@ -190,8 +195,12 @@ def fit_request(
             continue
         units = [candidate for candidate in units if candidate is not unit]
         counts["units"] += 1
-        if fits():
+        if fits(drop_target):
             return flatten(), counts
+        if fitting is None and fits():
+            fitting = (flatten(), dict(counts))
+    if fitting is not None:
+        return fitting
 
     raise ContextFitError(
         "Request cannot fit without removing pinned context; increase the input "

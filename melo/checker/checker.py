@@ -71,13 +71,17 @@ class Checker:
     # ── Core → Memory boundary ──
 
     async def pre_plan(
-        self, messages: list[Message], *, count_thinking: bool = False
+        self,
+        messages: list[Message],
+        *,
+        count_thinking: bool = False,
+        cap_ratio: float = 1.0,
     ) -> CheckResult:
         # Tool-call arguments are replayed to the model with the assistant
         # message, so they count toward the prompt size as well. With
         # *count_thinking*, so does the reasoning a replay request sends.
         total = sum(_prompt_chars(m, count_thinking=count_thinking) for m in messages)
-        if total > 100_000:
+        if total > 100_000 * cap_ratio:
             return CheckResult(allowed=False, reason=f"Prompt too large: {total} chars")
         return CheckResult(allowed=True)
 
