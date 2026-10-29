@@ -376,11 +376,12 @@ is in `memory_stats.recall_log` and, with its item text, in
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
   first of these that applies, in this order:
   `unreadable_reply` (no decision, and no attempt could start),
-  `action_not_continue` (the action is `done`, `stop` or `decompose`),
+  `action_not_continue` (the action is `done`),
   `no_attempt_left` (`max_attempts` used; the run ends with `Max attempts
   reached`), `step_budget_used` (`max_steps` used; `Max steps reached`),
-  then the gate's checks: `not_feasible`, `not_concrete`, `not_novel`, and
-  with `"utility"` only `utility_below_threshold`. It is derived by the
+  then the gate's checks: `action_not_continue` (the action is `stop` or
+  `decompose`), `not_feasible`, `not_concrete`, `not_novel`, and with
+  `"utility"` only `utility_below_threshold`. It is derived by the
   code that decides, so it never disagrees with `continue_run`. A
   `gate_stopped` run whose rationale is blank reports it in `error`:
   `Stopped after attempt <n> (stop reason: <code>)`; with a rationale, the
