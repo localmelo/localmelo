@@ -1505,3 +1505,29 @@ async def test_a_command_without_output_leaves_nothing_to_attach(
     assert session.enter("/attach !") is None
     await setup.idle()
     assert "No ! output to attach" in setup.out.text()
+
+
+async def test_attach_bang_always_shows_the_exact_output_and_asks(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    # Nothing is redacted here, and a concealed line was never on screen.
+    assert session.enter("! printf 'ok\\n\\033[8mHIDDEN_MARK\\033[0m\\nend\\n'") is None
+    await setup.idle()
+    setup.app.answers.append("n")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert session.attachment_line == ""  # declined: asking is the default
+    shown = setup.out.text().split("Review the exact output that would be sent:")[1]
+    assert "ok" in shown and "end" in shown
+    assert "HIDDEN_MARK" not in shown.split("$ ")[0]
+    setup.app.answers.append("y")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert "shell output: " in session.attachment_line
+    assert session.enter("Why?") is None
+    await setup.idle()
+    [turn] = await setup.rows()
+    assert turn.attachments is not None
+    [attached] = turn.attachments
+    assert attached.text == "ok\n\nend\n" and "HIDDEN_MARK" not in attached.text

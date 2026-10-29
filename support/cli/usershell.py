@@ -46,10 +46,12 @@ KILL_AFTER_S: Final = 2.0
 DRAIN_S: Final = 0.25
 RESIZE_POLL_S: Final = 0.1
 
-# Leaves the cursor shown, attributes reset, mouse reporting and bracketed paste
-# off: what a program killed in mid-screen may have left on.
+# Leaves the cursor shown, attributes reset, the main screen, mouse reporting,
+# focus reporting, bracketed paste and application cursor keys off and the
+# scroll region whole: what a program killed in mid-screen may have left on.
 TERMINAL_RESET: Final = (
-    "\x1b[0m\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
+    "\x1b[0m\x1b[?25h\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l"
+    "\x1b[?1004l\x1b[?1l\x1b[?2004l\x1b[r"
 )
 
 # Writes the escape and the command as arguments, so nothing is quoted twice.
@@ -69,7 +71,7 @@ ESCAPE: Final = "\\!"
 HELP: Final = (
     "! COMMAND runs COMMAND in your shell ($SHELL, else /bin/sh), in the workspace, as you.",
     "It is not a sandbox: no approval, no checker, your account's full permissions, and it can leave the workspace.",
-    "Its output stays in the terminal. /attach ! attaches a redacted snapshot of the last output to your next message.",
+    "Its output stays in the terminal. /attach ! shows a redacted snapshot of the last output and, if you say yes, attaches it to your next message.",
     "melo must be idle. Ctrl+C and esc go to the command. Shell commands are not saved in the input history.",
     "\\! text sends a message that starts with ! (the backslash is dropped).",
 )
@@ -395,11 +397,57 @@ _ESCAPES: Final = re.compile(
     r"|\x1b[ -/]*[0-~]"  # the rest, two to three bytes
 )
 _OVERSTRIKE: Final = re.compile(r"[^\n]\x08")
+_CLEAR: Final = re.compile(r"\x1b\[[23]J")
+_SGR: Final = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def _concealed(params: str, now: bool) -> bool:
+    """Whether the text after an SGR with these parameters is concealed (SGR 8)."""
+    codes = [int(p) if p else 0 for p in params.split(";")]
+    i = 0
+    while i < len(codes):
+        code = codes[i]
+        if code in (38, 48, 58):  # a colour: its arguments are not attributes
+            i += 3 if i + 1 < len(codes) and codes[i + 1] == 5 else 5
+            continue
+        if code == 0 or code == 28:
+            now = False
+        elif code == 8:
+            now = True
+        i += 1
+    return now
+
+
+def _unseen_removed(text: str) -> str:
+    """Drop what a terminal never showed: before the last clear, and concealed."""
+    concealed = False
+    clears = list(_CLEAR.finditer(text))
+    if clears:
+        cut = clears[-1]
+        for sgr in _SGR.finditer(text, 0, cut.end()):
+            concealed = _concealed(sgr.group(1), concealed)
+        text = text[cut.end() :]
+    out: list[str] = []
+    position = 0
+    for sgr in _SGR.finditer(text):
+        out.append(_hide(text[position : sgr.start()], concealed))
+        concealed = _concealed(sgr.group(1), concealed)
+        position = sgr.end()
+    out.append(_hide(text[position:], concealed))
+    return "".join(out)
+
+
+def _hide(text: str, concealed: bool) -> str:
+    return re.sub(r"[^\r\n]", "", _ESCAPES.sub("", text)) if concealed else text
 
 
 def readable(output: bytes) -> str:
-    """The text a person saw: escapes dropped, ``\\r`` redraws and backspaces applied."""
-    text = output.decode("utf-8", errors="replace").lstrip("�")
+    """The text a person saw: escapes dropped, ``\\r`` redraws and backspaces applied.
+
+    Text under SGR 8 (concealed) and everything before the last screen clear
+    was never visible, so it is dropped.
+    """
+    text = _unseen_removed(output.decode("utf-8", errors="replace").lstrip("�"))
     text = _ESCAPES.sub("", text).replace("\r\n", "\n")
     text = "\n".join(line.rsplit("\r", 1)[-1] for line in text.split("\n"))
     while _OVERSTRIKE.search(text):
@@ -410,10 +458,13 @@ def readable(output: bytes) -> str:
 def snapshot(result: ShellResult) -> Attachment | None:
     """The offer: the output's tail, readable and redacted; None when empty.
 
-    ``changed`` says a secret was redacted, so that the caller shows the exact
-    snapshot and asks, as it does for a file.
+    ``changed`` says a secret was redacted; the caller shows the exact snapshot
+    and asks for every shell snapshot, redacted or not.
     """
-    readable_text = readable(result.output)
+    output = result.output
+    if result.truncated:  # the cut falls inside a line: its tail may hide a secret
+        output = output.partition(b"\n")[2]
+    readable_text = readable(output)
     text = readable_text
     if not text.strip():
         return None

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import signal
 import sys
+import termios
 from pathlib import Path
 
 import pytest
@@ -157,3 +158,81 @@ def test_a_snapshot_name_is_one_short_line() -> None:
     item = snapshot(_result(b"x\r\n", "echo a\n" + "b" * 100))
     assert item is not None
     assert "\n" not in item.path and len(item.path) <= 80 and item.path.endswith("…")
+
+
+def test_concealed_text_is_not_in_the_snapshot() -> None:
+    raw = (
+        b"visible\r\n\x1b[8mSECRET INSTRUCTION\x1b[0m\r\nline3\r\n"
+        b"\x1b[0;8mmore hidden\x1b[28m shown\r\n"
+        b"\x1b[38;5;8mgrey is not concealed\x1b[0m\r\n"
+    )
+    text = usershell.readable(raw)
+    assert text == "visible\n\nline3\n shown\ngrey is not concealed\n"
+    item = snapshot(_result(raw))
+    assert item is not None and "SECRET" not in item.content
+    assert "hidden" not in item.content
+
+
+def test_text_before_the_last_screen_clear_is_not_in_the_snapshot() -> None:
+    raw = b"old\r\n\x1b[2Jmiddle\r\n\x1b[H\x1b[3Jscreen cleared\r\n"
+    assert usershell.readable(raw) == "screen cleared\n"
+    # Concealment set before a clear still holds after it.
+    assert usershell.readable(b"\x1b[8mhid\x1b[2Jstill hid\x1b[0m seen") == " seen"
+
+
+def test_a_cut_tail_drops_its_partial_first_line_before_redaction() -> None:
+    sk = "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+    gh = "ghp_" + "a1B2c3D4" * 5
+    for key in (sk, gh):
+        output = (key[4:] + "\r\nafter\r\n").encode()  # cut four characters in
+        item = snapshot(ShellResult("x", "/tmp", 0.1, 0, output, len(output) + 9))
+        assert item is not None and key[4:] not in item.content
+        assert item.content.endswith("\nafter\n")
+        whole = snapshot(_result(output))  # not cut: nothing is dropped
+        assert whole is not None and key[4:] in whole.content
+    one_line = ShellResult("x", "/tmp", 0.1, 0, b"no newline", 99)
+    assert snapshot(one_line) is None
+
+
+async def _modes_after(stdin_fd: int, command: str, tmp_path: Path) -> list[int]:
+    run = ShellRun(command, str(tmp_path), shell="/bin/sh", stdin_fd=stdin_fd)
+    await run.run()
+    return termios.tcgetattr(stdin_fd)
+
+
+async def test_the_terminal_mode_is_restored_after_a_run(tmp_path: Path) -> None:
+    master, slave = os.openpty()
+    try:
+        before = termios.tcgetattr(slave)
+        assert await _modes_after(slave, "true", tmp_path) == before
+        assert await _modes_after(slave, "exit 4", tmp_path) == before  # failed
+        assert (
+            await _modes_after(slave, "echo $((1+1)); kill -9 $$", tmp_path) == before
+        )
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+async def test_the_terminal_mode_is_restored_after_a_cancelled_run(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    master, slave = os.openpty()
+    try:
+        before = termios.tcgetattr(slave)
+        run = ShellRun("sleep 30", str(tmp_path), shell="/bin/sh", stdin_fd=slave)
+        task = asyncio.ensure_future(run.run())
+        for _ in range(500):
+            if run._process is not None and termios.tcgetattr(slave) != before:
+                break  # raw mode is on
+            await asyncio.sleep(0.01)
+        assert termios.tcgetattr(slave) != before
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert termios.tcgetattr(slave) == before
+    finally:
+        os.close(master)
+        os.close(slave)

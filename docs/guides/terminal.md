@@ -239,18 +239,21 @@ from-the-child
   (`killed by SIGTERM`) and the elapsed time. The cursor, colours, terminal
   modes and the prompt are restored once, however the command ends.
 - **Output stays in the terminal.** It never reaches the model, the
-  conversation, the stored session or the events, and the command is not saved in
-  the input history. `/attach !` attaches a redacted snapshot of the last
-  output (its last 256 KiB, the same limits and confirmation as
-  [`/attach PATH`](#attach-text-files)) to your next message; nothing is
-  attached unless you ask.
+  conversation or the events, and the command is not saved in the input
+  history. `/attach !` attaches a redacted snapshot of the last output (its
+  last 256 KiB, without text a terminal never showed: concealed text and
+  anything before a screen clear; a cut start drops its partial first line) to
+  your next message. It always prints the exact snapshot and asks `[y/N]`
+  (default No), even when nothing was redacted; nothing is attached unless you
+  say yes. Once attached, the snapshot is stored with the session like any
+  [`/attach PATH`](#attach-text-files) file, unencrypted.
 - **Refused when busy.** During a turn, an approval, a session switch or another
   command, `! ...` is refused (`! runs only when melo is idle`) and the draft
   is kept.
 - `!` alone prints this help. To send a message that starts with `! `, write
   `\! text`: the backslash is dropped.
-- When melo exits or the terminal closes, the command's process group gets
-  SIGTERM, then SIGKILL after 2 seconds. Only that group is signalled; a
+- When melo exits, the command's process group gets SIGTERM; when the terminal
+  closes, SIGHUP; then SIGKILL after 2 seconds. Only that group is signalled; a
   program that detaches itself from it (`setsid`, `nohup`) keeps running.
 - Not available in direct mode (`melo "task"`) or the plain loop.
 

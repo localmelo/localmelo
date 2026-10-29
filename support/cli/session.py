@@ -749,16 +749,25 @@ class CliSession:
         else:
             item = await asyncio.to_thread(load_attachment, workspace, paths[0])
         updated = add_attachment(self._attachments, item)
-        if item.changed:
+        from_shell = paths[0] == "!"
+        if item.changed or from_shell:
             self.out.print(
                 self._text(
-                    "Attachment was redacted or cleaned; review the exact snapshot:",
+                    (
+                        "Attachment was redacted or cleaned; review the exact snapshot:"
+                        if item.changed
+                        else "Review the exact output that would be sent:"
+                    ),
                     "warn",
                 )
             )
             self.out.print(Text(item.content))
             answer = (
-                await self.app.ask("Attach this redacted snapshot? [y/N]")
+                await self.app.ask(
+                    "Attach this redacted snapshot? [y/N]"
+                    if item.changed
+                    else "Attach this output? [y/N]"
+                )
                 if self.app is not None
                 else None
             )

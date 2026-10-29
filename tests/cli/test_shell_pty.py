@@ -184,6 +184,8 @@ def test_the_terminal_is_given_back_exactly_as_it_was(
     # What the child left on is turned off, once, before the prompt comes back.
     assert text.rfind("\x1b[?25h") > text.rfind("\x1b[?25l")
     assert text.rfind("\x1b[?1000l") > text.rfind("\x1b[?1000h")
+    for off in ("\x1b[?1049l", "\x1b[?1004l", "\x1b[?1l", "\x1b[r"):
+        assert off in text
     term.type("hello\r")
     term.see("Hello! I am melo")  # the prompt draws and works again
     assert term.quit() == 0
@@ -207,6 +209,8 @@ def test_output_stays_out_of_the_next_model_request_unless_attached(
     term.see("/attach ! attaches")
     _ready(term, "/attach ! attaches")
     term.type("/attach !\r")
+    term.see("Attach this output? [y/N]")  # the exact output is shown first
+    term.type("y\r")
     term.see("✓ Attached shell output: echo ATTACH_ME_MARK")
     _ready(term, "Attached: shell output")
     sent = len(stub.requests)
