@@ -212,6 +212,48 @@ or omit it when the retained checkpoint or tail does not contain it fully. Reatt
 and send again if the model needs content that was not restored. Attachments
 are not supported in the plain `melo ""` loop or direct mode.
 
+### Run a shell command
+
+At an idle prompt, a message that starts with `! ` runs the rest as a command in
+your own shell (`$SHELL`, else `/bin/sh`), as you, in the workspace folder:
+
+```text
+! echo from-the-child; exit 3
+```
+
+```text
+! user shell · ~/demo-project
+$ echo from-the-child; exit 3
+from-the-child
+  └ exit 3 · 0.0s
+  └ /attach ! attaches this output (redacted, 15 bytes) to your next message
+```
+
+- **Not a sandbox.** The command is not a model tool: no approval, checker or
+  workspace policy applies, it has your account's full permissions and it can
+  leave the workspace. melo only gives it the terminal.
+- **The terminal is the command's** while it runs: programs that read input,
+  draw a screen or follow a resize work. Ctrl+C and Esc go to the command and
+  never cancel the agent; afterwards the usual Ctrl+C, draft and queue rules
+  apply. The block ends with the exit code (`exit 3`) or the signal
+  (`killed by SIGTERM`) and the elapsed time. The cursor, colours, terminal
+  modes and the prompt are restored once, however the command ends.
+- **Output stays in the terminal.** It never reaches the model, the
+  conversation, the stored session or the events, and the command is not saved in
+  the input history. `/attach !` attaches a redacted snapshot of the last
+  output (its last 256 KiB, the same limits and confirmation as
+  [`/attach PATH`](#attach-text-files)) to your next message; nothing is
+  attached unless you ask.
+- **Refused when busy.** During a turn, an approval, a session switch or another
+  command, `! ...` is refused (`! runs only when melo is idle`) and the draft
+  is kept.
+- `!` alone prints this help. To send a message that starts with `! `, write
+  `\! text`: the backslash is dropped.
+- When melo exits or the terminal closes, the command's process group gets
+  SIGTERM, then SIGKILL after 2 seconds. Only that group is signalled; a
+  program that detaches itself from it (`setsid`, `nohup`) keeps running.
+- Not available in direct mode (`melo "task"`) or the plain loop.
+
 ### Inspect, undo or copy a conversation
 
 `/title` can name a chat before any message is sent; it does not create a

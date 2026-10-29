@@ -57,6 +57,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Interactive `! COMMAND` runs a command in the user's own shell from an idle
+  prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
+  never the agent) and restored once afterwards. It is not a sandbox. Its output
+  stays in the terminal, out of model context, history and stored events;
+  `/attach !` attaches a bounded, redacted snapshot of the last output to the
+  next message. `!` alone shows help and `\! text` sends a literal leading `! `.
+  melo exiting ends only the command's own process group. [#NN]
+
 - Direct workers can read steering instructions from an inherited pipe with
   `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
   inbox, but the read end is close-on-exec before tools start. Python, shell
