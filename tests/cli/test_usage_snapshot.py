@@ -213,3 +213,7 @@ def test_tasks_segment_only_with_a_task_store() -> None:
     assert status_segments(snap, local=True, now=T0, tasks=counts) == [
         "tasks 1 running 2 queued"
     ]
+    held = TaskCounts(running=0, queued=0, held=1)
+    assert status_segments(snap, local=True, now=T0, tasks=held) == [
+        "tasks 0 running 0 queued 1 held"
+    ]

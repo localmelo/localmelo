@@ -1799,6 +1799,12 @@ const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWo
 const tasks = setupTasks({
   api,
   statusRow: setupStatusRow({ api, root: statusRowNode() }),
+  live: {
+    nodes: taskLiveNodes,
+    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
+    schedule: (fn, ms) => setTimeout(fn, ms),
+    cancel: (id) => clearTimeout(id),
+  },
   approvalCard,
   root: $("task-panel"),
   newId: newClientRequestId,
@@ -1903,6 +1909,31 @@ function leaveWorkers() {
   }
 }
 
+// A turn's work, answer and end state as the read-only views show them. `empty`
+// is the line for a turn without events, or "" to draw its work group.
+function turnWork(turn, sessionId, render, empty) {
+  const nodes = [];
+  if (empty) nodes.push(el("p", "muted", empty));
+  else {
+    const group = el("details", "work-group"); group.open = true;
+    group.append(el("summary", "work-summary", workSummary(turn, {})));
+    for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render}));
+    nodes.push(group);
+  }
+  if (turn.answer) nodes.push(answerNode(turn.answer));
+  if (turn.status) {
+    nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
+    const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
+    if (error) nodes.push(el("p", "failure-error", error));
+  }
+  return nodes;
+}
+
+// The Live section of a task card: its session's turns that hold work or an answer.
+function taskLiveNodes(view, render) {
+  return view.turns.flatMap((turn) => (turn.items.length || turn.answer ? turnWork(turn, view.id, render, "") : []));
+}
+
 function renderWorkers() {
   const state = workers.state;
   const root = $("worker-panel");
@@ -1969,19 +2000,7 @@ function renderWorkers() {
     nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
     for (const turn of state.view.turns) {
       nodes.push(el("h2", "", "Brief"), el("p", "worker-brief", turn.userText || "No brief recorded."), el("h2", "", "Work"));
-      if (!state.eventCounts[turn.turn]) nodes.push(el("p", "muted", "No recorded events."));
-      else {
-        const group = el("details", "work-group"); group.open = true;
-        group.append(el("summary", "work-summary", workSummary(turn, {})));
-        for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId: session.id, render: renderWorkers}));
-        nodes.push(group);
-      }
-      if (turn.answer) nodes.push(answerNode(turn.answer));
-      if (turn.status) {
-        nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
-        const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
-        if (error) nodes.push(el("p", "failure-error", error));
-      }
+      nodes.push(...turnWork(turn, session.id, renderWorkers, state.eventCounts[turn.turn] ? "" : "No recorded events."));
     }
   }
   root.replaceChildren(...nodes);

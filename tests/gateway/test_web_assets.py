@@ -340,6 +340,13 @@ async def test_tasks_module_is_served_and_the_shell_links_the_task_view(
     assert re.search(r'<section\b[^>]*\bid="task-panel"[^>]*\bhidden\b', page.text)
 
 
+async def test_task_live_module_is_served(client: httpx.AsyncClient) -> None:
+    response = await client.get("/assets/task-live.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "taskLive" in response.text
+
+
 async def test_status_row_module_is_served_and_the_shell_has_its_row(
     client: httpx.AsyncClient,
 ) -> None:

@@ -14,6 +14,8 @@ from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.task_policy import WorkspaceError
 from localmelo.support.gateway.task_store import TaskConflictError, TaskNotFoundError
 
+from .conftest import HOLDER, all_events, core_event
+
 
 class FakeWorkers:
     def __init__(self) -> None:
@@ -201,3 +203,27 @@ def test_task_errors_use_api_shape(client: TestClient, workers: FakeWorkers) -> 
     for body in ({}, {"level": True}, {"state": [], "other": 1}):
         response = client.patch("/api/tasks/task1", json=body)
         assert response.status_code == 400 and "error" in response.json()
+
+
+async def test_task_session_events_are_read_as_a_chat_reads_them(
+    console: Console, workspace: str, client: TestClient
+) -> None:
+    """The task card's Live section folds these two routes for the task id."""
+    task = await console.store.create_session(kind="task", workspace=workspace)
+    turn = await console.store.begin_turn(task.id, "an objective", holder=HOLDER)
+    await console.store.append_events(
+        task.id,
+        turn.turn,
+        [core_event("run.started"), core_event("assistant.message", content="plan")],
+        holder=HOLDER,
+        images=[],
+    )
+    stored = await all_events(console.store, task.id)
+    assert client.get(f"/api/sessions/{task.id}").json()["session"]["kind"] == "task"
+    rows = client.get(f"/api/sessions/{task.id}/turns?events=true").json()["turns"]
+    assert [event["id"] for event in rows[0]["events"]] == [e.id for e in stored]
+    after = stored[0].id
+    frames = client.get(
+        f"/api/sessions/{task.id}/events?after={after}&follow=false"
+    ).text
+    assert f"id: {stored[1].id}" in frames and f"id: {after}\n" not in frames

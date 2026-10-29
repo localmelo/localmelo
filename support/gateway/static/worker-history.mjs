@@ -17,6 +17,21 @@ export function foldWorkerTurns(id, rows) {
   return view;
 }
 
+/** All turns of a session with their events, oldest first, read a page at a time. */
+export async function readTurns(api, id) {
+  const path = `/sessions/${encodeURIComponent(id)}/turns?limit=50&events=true`;
+  let page = await api(path);
+  let rows = page.turns ?? [];
+  while (page.has_earlier && rows.length) {
+    const before = rows[0].turn;
+    page = await api(`${path}&before=${encodeURIComponent(before)}`);
+    const older = page.turns ?? [];
+    if (!older.length || older[0].turn >= before) break;
+    rows = [...older, ...rows];
+  }
+  return rows;
+}
+
 const POLL_MS = 3000;
 const PAGE = 50;
 // New frames are drawn together, at most this often; a failed stream is opened again after RETRY_MS.
@@ -101,17 +116,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
   }
   // The run and all its turns, with their events.
   async function readRun(id) {
-    const path = `/sessions/${encodeURIComponent(id)}`;
-    const [detail, first] = await Promise.all([api(path), api(`${path}/turns?limit=50&events=true`)]);
-    let page = first;
-    let rows = page.turns ?? [];
-    while (page.has_earlier && rows.length) {
-      const before = rows[0].turn;
-      page = await api(`${path}/turns?limit=50&events=true&before=${encodeURIComponent(before)}`);
-      const older = page.turns ?? [];
-      if (!older.length || older[0].turn >= before) break;
-      rows = [...older, ...rows];
-    }
+    const [detail, rows] = await Promise.all([api(`/sessions/${encodeURIComponent(id)}`), readTurns(api, id)]);
     return {session: detail.session, rows};
   }
   function showRun(id, {session, rows}) {
