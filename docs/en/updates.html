@@ -109,7 +109,7 @@
         <article class="update-entry" id="u-worker-brief">
           <h3>Worker briefs and event streams</h3>
           <p class="update-date">Unreleased</p>
-          <p>Direct workers read a brief and an explicit inbox, returning a versioned JSON result or event stream. Agent construction errors produce a startup result; output failure may prevent a final record.</p>
+          <p>Direct workers read a brief and an explicit inbox — a file outside the workspace or an inherited pipe fd (<code>--inbox-fd</code>) — returning a versioned JSON result or event stream. The fd is close-on-exec before tools start, so python, shell and MCP subprocesses cannot write the channel; use it for untrusted tasks. Agent construction errors produce a startup result; output failure may prevent a final record.</p>
         </article>
 
         <article class="update-entry" id="u-attach">

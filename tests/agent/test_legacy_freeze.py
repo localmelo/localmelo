@@ -105,6 +105,7 @@ LATER_OPTIONS = [
     "--save-session",
     "--brief",
     "--inbox",
+    "--inbox-fd",
     "--parent-run",
     "--import-session",
     "--title",

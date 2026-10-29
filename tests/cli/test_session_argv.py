@@ -75,7 +75,15 @@ U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None}
 WORKER_DEFAULTS = dict.fromkeys(
-    ("save_session", "parent_run", "import_session", "title", "brief", "inbox")
+    (
+        "save_session",
+        "parent_run",
+        "import_session",
+        "title",
+        "brief",
+        "inbox",
+        "inbox_fd",
+    )
 )
 
 
