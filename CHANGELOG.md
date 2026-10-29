@@ -108,6 +108,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The interactive status bar shows usage at a glance (#176 SL2): after the model
+  and workspace, `cache 83%` (the last request's cached share, `--` when the
+  server reports none, plus `idle 3m` for a local server), `ctx 12k/32k`, the
+  run's `step`/`attempt`/`phase` while it runs, and `tasks` when a task store is
+  reachable. Each segment hides without data; a narrow terminal drops them right
+  to left. It is built from events already received (no request, no timer).
+  `[cli] status_line = "off"` keeps the old bar; there is no flag. ([#NN])
+
 - Default mode and developer mode (#186). Every `melo` option has a tier (user,
   advanced or experimental) in one table, `support/option_tiers.py`, copied in the
   CLI reference. `melo --help` now shows the 15 user options and one line pointing

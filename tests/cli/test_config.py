@@ -1325,6 +1325,36 @@ class TestGatewayWorkspaceAndAtomicSave:
         assert not any("[gateway] workspace" in error for error in cfg.validate())
 
 
+class TestCliStatusLineConfig:
+    def test_the_default_is_auto_and_not_written(self, config_path: Path) -> None:
+        assert CliConfig().status_line == "auto"
+        save(_timeout_cfg())
+        assert "status_line" not in config_path.read_text(encoding="utf-8")
+
+    def test_off_round_trips(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.cli = CliConfig(status_line="off")
+        save(cfg)
+        assert 'status_line = "off"' in config_path.read_text(encoding="utf-8")
+        loaded = load()
+        assert loaded.cli.status_line == "off"
+        assert loaded.cli_errors() == []
+
+    @pytest.mark.parametrize("value", ['"sometimes"', "true", "1", '["auto"]'])
+    def test_a_bad_value_is_reported_and_is_not_a_config_error(
+        self, config_path: Path, value: str
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+            f"[cli]\nstatus_line = {value}\n",
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert any("status_line" in error for error in loaded.cli_errors())
+        loaded.validate_or_raise()
+
+
 class TestCliStreamConfig:
     def test_the_default_is_off_and_not_written(self, config_path: Path) -> None:
         save(_timeout_cfg())
