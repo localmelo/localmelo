@@ -41,6 +41,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   to start by writing. Runs without `--brief` and request bodies outside brief
   runs are unchanged ([#193]).
 
+- A `melo --brief` run keeps writing (#185): after 6 steps in a row without a
+  workspace change it adds one "write what you can already write" line and a
+  `no_change` notice with detail `{"scope": "step"}`; each planning request ends
+  with a note of the tool output the window dropped (tool, key argument, length,
+  newest 8); the reflection request asks for file paths with line numbers and the
+  first command or edit to run next, and the boundary line ends with "Start with:
+  <that direction>". Runs without `--brief` are unchanged ([#197]).
+
 - A `melo --brief` run verifies itself (#185): the commands on the brief's
   `Check:` lines run in the workspace, as `shell_exec` calls under the same mode
   policy, workspace root and timeout, before the run ends `completed`. A failing
@@ -1189,3 +1197,4 @@ earlier milestones.
 [#193]: https://github.com/localmelo/localmelo/pull/193
 [#194]: https://github.com/localmelo/localmelo/pull/194
 [#195]: https://github.com/localmelo/localmelo/pull/195
+[#197]: https://github.com/localmelo/localmelo/pull/197
