@@ -23,7 +23,7 @@ from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.support.usage_snapshot import TaskCounts, UsageSnapshot
 
 from .conftest import HOLDER, all_events, core_event, run_result
-from .test_events import _line_starting, _serve, _stop, parse_frames
+from .test_events import _collect, _line_starting, _serve, _stop, parse_frames
 from .test_status import run_events
 
 
@@ -40,7 +40,9 @@ async def begin_run(store: SessionStore, *events: dict[str, Any]) -> tuple[str, 
         None,
         "worker task",
         holder=HOLDER,
-        new_session=NewSession(kind="worker", model="test", meta={"source": "dsh"}),
+        new_session=NewSession(
+            kind="worker", model="test", meta={"source": "localmelo"}
+        ),
     )
     await store.append_events(turn.session_id, turn.turn, list(events), holder=HOLDER)
     return turn.session_id, turn.turn
@@ -346,3 +348,72 @@ def test_a_real_direct_run_is_served_and_summarised(
     del body["cache"]["idle_s"], expected["cache"]["idle_s"]
     assert body == expected
     assert body["cache"]["requests"] >= 1
+
+
+async def test_a_direct_run_held_mid_flight_is_followed_to_its_end(
+    tmp_path: Path,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stream carries a real run's steps while it is blocked, then ends."""
+    from localmelo.tests.fixtures.stub_llm import StubServer
+
+    monkeypatch.setattr(sse_mod, "SSE_POLL_S", 0.05)
+    (tmp_path / "notes.txt").write_text("three decisions\n")
+    scenario = {
+        "live": {
+            "models": ["stub-model"],
+            "replies": [
+                {
+                    "content": "Reading.",
+                    "tool_calls": [
+                        {"name": "file_read", "arguments": {"path": "notes.txt"}}
+                    ],
+                },
+                {"hold": True, "then": {"content": "Finished the job."}},
+            ],
+        }
+    }
+    stub = StubServer(scenario, default="live").start()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALMELO_")}
+    env["HOME"] = str(tmp_path)
+    run = subprocess.Popen(
+        [sys.executable, "-m", "localmelo", "--base-url", stub.base_url]
+        + ["--chat-model", "stub-model", "--", "read the notes"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+        cwd=tmp_path,
+    )
+    console.worker_history = WorkerReader(
+        str(tmp_path / ".cache/localmelo/cli/sessions.db")
+    )
+    server, task, port = await _serve(console)
+    base = f"http://127.0.0.1:{port}"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            sid = None
+            for _ in range(600):
+                rows = (await client.get(f"{base}/api/sessions?kind=worker")).json()
+                if rows["sessions"]:
+                    sid = rows["sessions"][0]["id"]
+                    break
+                await asyncio.sleep(0.1)
+            assert sid is not None
+            async with client.stream("GET", f"{base}/api/sessions/{sid}/events") as r:
+                lines = r.aiter_lines()
+                await _line_starting(lines, 'data: {"id":')
+                async for line in lines:
+                    if '"type":"tool.finished"' in line:
+                        break
+                assert run.poll() is None, "the run is still blocked on the model"
+                stub.released.set()
+                rest = await asyncio.wait_for(_collect(lines), timeout=60)
+            assert any('"type":"turn.finished"' in line for line in rest)
+        assert run.wait(timeout=60) == 0
+    finally:
+        stub.close()
+        if run.poll() is None:
+            run.kill()
+        await _stop(server, task)

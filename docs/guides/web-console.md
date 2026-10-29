@@ -37,8 +37,8 @@ for a nondefault port). Keep the link private; see [gateway security](gateway.md
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow
-   screen it drops segments from the right. A worker session has no row until
-   the console can read the CLI's events.
+   screen it drops segments from the right. An open worker run shows the same
+   row.
 
 The sidebar lists chats newest first, with search and switching, and closes a
 chat. Drafts stay with each chat in the current browser tab. The open chat's
@@ -61,9 +61,13 @@ open a run to inspect its recorded brief, metadata, work and answer. Every
 direct `melo` run is recorded there by default (`--no-save-session` or
 `[sessions] record_direct = false` opts out; see
 [Worker histories](../reference/cli.md#worker-histories)). The list shows runs
-that are still going, and an open unfinished run reads itself again every three
-seconds and redraws only when it changed; there is no live stream, and
-**Refresh** reads it at once. The view cannot send messages, approve calls or change grants; chat
+that are still going, and the list is read again every three seconds. An open
+unfinished run is read once, then followed on its event stream: new steps, tool
+calls and text appear within about a second, without reading the earlier work
+again, and the stream stops when the run finishes. A hidden tab stops
+following and catches up from the last event when shown. **Refresh** reads the
+run again at once. A run that holds notes, accepted messages, memory
+decisions or recalls shows each as one muted line. The view cannot send messages, approve calls or change grants; chat
 close and level controls are disabled while Workers is open. Connection
 settings remain available separately. **Chats** returns to the open chat.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
