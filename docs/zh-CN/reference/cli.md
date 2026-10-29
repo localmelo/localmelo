@@ -334,7 +334,7 @@ melo: error: argument --max-steps: must be at least 1, got 0
 
 另外三项辅助机制会让 brief 运行持续写作。自上一次看到的变化（或开始时）以来，连续 6 个步骤中工作区摘要没有变化后，会加入一条用户行：“You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue.”，并发出 detail 为 `{"scope": "step"}` 的 `no_change` 通知；计数在每次尝试开始时以及每次探测之后重置，因此这一行至多每 6 个步骤出现一次（边界行依然保留）。当窗口或适配丢弃了工具输出时，运行会为每个被丢弃的结果记住一行（工具、其关键参数缩短到 80 个字符、输出长度，以及最近的 8 条）；每个规划请求的末尾会附上“Earlier tool output no longer in your context: file_read support/sessions/runner.py (49,999 chars); shell_exec `grep -n ...` (2,310 chars). Read again what you need before you edit.”（若该步骤带有 inbox 行，则不附加）。反思请求的末尾附有一句话，要求在 `useful_evidence` 中给出带行号的确切文件路径，并要求把第一条要运行的命令或编辑作为 `next_promising_directions` 的第一项；当添加了上面的边界行时，它以“Start with: <that direction>”结尾（经过脱敏，最多 300 个字符）。
 
-第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用：与模型自己的调用使用相同的模式策略（不提供 `shell_exec` 的运行，即没有 `--builtins all` 或 `--builtins shell_exec` 的运行，会拒绝所有检查）、工作区根目录（`--workspace`）和 shell 超时。退出状态为 0 即通过。若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。若检查在最后仍然失败，运行仍以 `completed` 结束，退出码不变，但 `tests` 为 `failed`，并发出一条 `brief_check_failed` 通知；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
+第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用，无论运行是否向模型提供 `shell_exec`（直接模式下不提供，除非指定 `--builtins all` 或 `--builtins shell_exec`；`--builtins none` 也不会阻止检查：要跳过检查，请删除该行）。只有工具自身的这次调用能越过这一过滤：模型的工具列表和它自己的 `shell_exec` 调用保持不变。检查器的 `pre_execute`、工作区根目录（`--workspace`）、shell 超时和脱敏与模型自己的调用一样适用。退出状态为 0 即通过。若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。若检查在最后仍然失败，运行仍以 `completed` 结束，但 `tests` 为 `failed`，会发出一条 `brief_check_failed` 通知，退出码为 4（见[退出码](#exit-codes)；stderr 会输出一行 `melo: the brief's check failed: <command> (exit N)`，被拒绝的检查显示 `not run`，超时显示 `no exit status`）；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
 
 使用显式的 `--inbox FILE` 时，worker 会在每个规划步骤开始时读取完整的、以 LF 结尾的非空 UTF-8 行。未完成的最后一行会等待其换行符。该文件可以最初不存在，但除此之外必须是只追加的普通文件（不能是符号链接），总共不超过 1 MiB，每行不超过 16 KiB。写入者需要串行化，每次以一次写入追加完整的一行，并且每次运行使用新的收件箱。没有默认的收件箱：只使用 `--brief` 时不读取任何文件，收件箱路径也从不进入模型的上下文。
 
@@ -395,6 +395,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
 | 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
+| 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |
 | 130 | Ctrl+C（SIGINT）结束了运行。 |
 | 143 | SIGTERM 结束了运行。 |
@@ -438,5 +439,6 @@ fi
 ```
 
 - 退出码 2 涵盖多种状态。请读取 `status` 来区分它们；见[运行结果](run-results.md#statuses)。
+- 使用 `--brief` 时，退出码 4 表示运行已完成，但其 `Check:` 命令失败：`melo --brief brief.md && next-step` 不会运行 `next-step`。详情请读取记录中的 `tests.state`。
 - 应设置 `--timeout`。不设置时，没有任何东西会限制整个运行：一个在生成过程中持续发送保活字节的服务器永远不会超时。
 - 若要从监督进程停止 `melo`，请发送 SIGTERM，并等待约 10 秒后再发送 SIGKILL；`melo` 的清理最多需要 8 秒。
