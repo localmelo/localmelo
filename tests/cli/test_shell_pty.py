@@ -174,13 +174,16 @@ def test_the_terminal_is_given_back_exactly_as_it_was(
 ) -> None:
     term = melo()
     before = _modes(term)
-    term.type("! stty -a >/dev/null; printf '\\033[?25l\\033[31m'; exit 1\r")
+    term.type(
+        "! stty -a >/dev/null; printf '\\033[?25l\\033[?1000h\\033[31m'; exit 1\r"
+    )
     term.see("└ exit 1")
     _ready(term, "└ exit 1")
     assert _until(lambda: _modes(term) == before)
     text = term.output.decode(errors="replace")
     # What the child left on is turned off, once, before the prompt comes back.
     assert text.rfind("\x1b[?25h") > text.rfind("\x1b[?25l")
+    assert text.rfind("\x1b[?1000l") > text.rfind("\x1b[?1000h")
     term.type("hello\r")
     term.see("Hello! I am melo")  # the prompt draws and works again
     assert term.quit() == 0
@@ -284,7 +287,7 @@ def test_a_closed_terminal_ends_melo_and_the_childs_group(
 ) -> None:
     term = melo()
     marker = tmp_path / "pid"
-    term.type(f"! echo $$ > {marker}; sleep 60\r")
+    term.type(f"! trap '' HUP; echo $$ > {marker}; sleep 60\r")
     assert _until(lambda: marker.exists() and marker.read_text().strip() != "")
     pgid = int(marker.read_text())
     assert _alive(pgid) and pgid != os.getpgid(term.process.pid)
@@ -299,7 +302,7 @@ def test_sigterm_to_melo_ends_the_childs_group_and_leaves_the_terminal_cooked(
     term = melo()
     before = _modes(term)
     marker = tmp_path / "pid"
-    term.type(f"! echo $$ > {marker}; sleep 60 & sleep 60\r")
+    term.type(f"! trap '' HUP; echo $$ > {marker}; sleep 60 & sleep 60\r")
     assert _until(lambda: marker.exists() and marker.read_text().strip() != "")
     pgid = int(marker.read_text())
     term.process.send_signal(signal.SIGTERM)
