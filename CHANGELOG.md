@@ -109,8 +109,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Docs
 
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#NN]).
+- Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
 
 ### Added
+
+- The interactive status bar shows usage at a glance (#176 SL2): after the model
+  and workspace, `cache 83%` (the last request's cached share, `--` when the
+  server reports none, plus `idle 3m` for a local server), `ctx 12k/32k`, the
+  run's `step`/`attempt`/`phase` while it runs, and `tasks` when a task store is
+  reachable. Each segment hides without data; a narrow terminal drops them right
+  to left. It is built from events already received (no request, no timer).
+  `[cli] status_line = "off"` keeps the old bar; there is no flag. ([#201])
 
 - Default mode and developer mode (#186). Every `melo` option has a tier (user,
   advanced or experimental) in one table, `support/option_tiers.py`, copied in the
@@ -1224,3 +1233,5 @@ earlier milestones.
 [#197]: https://github.com/localmelo/localmelo/pull/197
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
+[#201]: https://github.com/localmelo/localmelo/pull/201
+[#202]: https://github.com/localmelo/localmelo/pull/202
