@@ -313,7 +313,10 @@ def execute(
             wait = task.get("wait_reason")
             reason = task.get("reason") or ("approval" if approval else None)
             print(f"  Reason: {_safe(reason or 'not recorded')}", file=out)
-            print(f"  Waiting: {_safe(approval or wait or 'not recorded')}", file=out)
+            if approval:
+                print(f"  {_safe(approval)}", file=out)
+            else:
+                print(f"  Waiting: {_safe(wait or 'not recorded')}", file=out)
         out.flush()
     return 0
 

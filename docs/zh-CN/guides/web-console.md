@@ -31,7 +31,7 @@
 **Tasks**（`#/tasks`）列出调度器的任务，按最近更新排在前面，显示状态、优先级和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、证据状态，以及它当前状态允许的操作。和 Workers 一样，打开这个视图时它会取代对话。
 
 - 已停放或中断的任务会显示 **Resume**。页面先询问服务器，只有服务器要求时才请你确认：对话框会写 "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once."，并提供 **Resume anyway** 和 **Cancel**。按 Escape 即取消。在你选择 **Resume anyway** 之前不会记录任何东西；确认在五分钟内有效，网关重启后失效。
-- 请求运行工具的任务会显示状态 "Waiting for your approval"，以及和对话相同的批准卡片，包含 **Allow once**、**Allow every ... call in this session** 和 **Deny…**（可附原因）。通过 `melo-task` 提交的任务也在这里等待批准，别处不会显示。回答后卡片消失，任务继续（允许）或收到拒绝（拒绝）；**Refresh** 会重新读取任务，暂停或停止任务会撤回卡片。
+- 请求运行工具的任务会显示状态 "Waiting for your approval"，以及和对话相同的批准卡片，包含 **Allow once**、**Allow every ... call in this session** 和 **Deny…**（可附原因）。通过 `melo-task` 提交的任务也在这里等待批准，别处不会显示。回答后卡片消失，任务继续（允许）或收到拒绝（拒绝）；暂停或停止任务会撤回卡片。视图打开时，每 3 秒重新读取任务（或列表），只重绘有变化的部分，因此之后到达的请求会自动出现。
 - **Stop** 使用任务自己的停止操作，而不是对话的停止。在任务结束前都可用，并且优先于正在进行的 Resume。
 - 已经开始但没有保存卡片的任务会显示 "Resume unavailable: recovery information is missing." 和 **Start again as a new task**，它会根据原始目标创建一个单独的新任务。之前那个任务的效果是未知的，也不会被撤销。
 

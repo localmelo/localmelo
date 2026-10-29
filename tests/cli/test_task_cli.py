@@ -445,7 +445,8 @@ _LINE = (
 
 def test_show_names_the_approval_a_held_task_waits_for() -> None:
     text = _run(["show", "abc"], {"task": _HELD})
-    assert f"  Waiting: {_LINE}\n" in text
+    assert f"  {_LINE}\n" in text
+    assert "Waiting: " not in text
     assert "  Reason: approval\n" in text
     assert "not recorded" not in text
 

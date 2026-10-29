@@ -1773,7 +1773,17 @@ function presence(force = false) {
 let workerMode = false;
 let taskMode = false;
 const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); });
-const tasks = setupTasks({ api, approvalCard, root: $("task-panel"), newId: newClientRequestId, navigate: (hash) => { globalThis.location.hash = hash; } });
+const tasks = setupTasks({
+  api,
+  approvalCard,
+  root: $("task-panel"),
+  newId: newClientRequestId,
+  navigate: (hash) => { globalThis.location.hash = hash; },
+  every: (fn, ms) => {
+    const timer = setInterval(fn, ms);
+    return () => globalThis.clearInterval?.(timer);
+  },
+});
 
 function taskRoute() {
   const match = /^#\/tasks(?:\/(.+))?$/.exec(globalThis.location?.hash || "");

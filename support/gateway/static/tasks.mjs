@@ -9,13 +9,25 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * details. `approvalCard(request, view)` draws the console's approval card
  * (view: rerender, answer, reload, workspace). `id` is a fresh request or
  * operation id. Every response is checked against an epoch, so a late one
- * never draws over a newer view or a task the user left.
+ * never draws over a newer view or a task the user left. While the view is
+ * open it is read again every POLL_MS and drawn only when it changed, so a
+ * task that starts waiting for an approval shows its card. `every(fn, ms)`
+ * schedules that and returns a function that stops it.
  */
-export function setupTasks({api, root, newId, navigate, approvalCard}) {
+const POLL_MS = 3000;
+
+function defaultEvery(fn, ms) {
+  const timer = setInterval(fn, ms);
+  timer?.unref?.();
+  return () => clearInterval(timer);
+}
+
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null};
   let active = false;
+  let stopPolling = null;
 
   function node(tag, text, className) {
     const element = doc.createElement(tag);
@@ -88,7 +100,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard}) {
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button(state.busy === 'resume' ? 'Resuming…' : 'Resume', () => resume(), Boolean(state.busy)));
     }
-    actions.append(button('Refresh', () => refresh(), Boolean(state.busy)));
     if (!FINISHED.has(task.state)) {
       actions.append(button(state.busy === 'stop' ? 'Stopping…' : 'Stop', () => stop(), state.busy === 'stop'));
     }
@@ -164,6 +175,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard}) {
 
   async function show(id) {
     active = true;
+    stopPolling ??= every(poll, POLL_MS);
     const epoch = ++state.epoch;
     Object.assign(state, {mode: id ? 'card' : 'list', error: '', notice: '', busy: '', evidence: '',
       dialog: null, pending: null, again: null, task: null});
@@ -208,6 +220,32 @@ export function setupTasks({api, root, newId, navigate, approvalCard}) {
       if (epoch === state.epoch && state.task?.task_id === id) state.task = data.task;
     } catch (error) {
       if (epoch === state.epoch) state.error = errorText(error);
+    }
+    render();
+  }
+
+  // Read the open view again; draw only what changed, so typing in a card is
+  // not disturbed while the task waits. A dialog or an action in flight wins.
+  async function poll() {
+    if (!active || state.busy || state.dialog || doc.visibilityState === 'hidden') return;
+    const id = state.mode === 'card' ? state.task?.task_id : null;
+    if (state.mode === 'card' && (!id || FINISHED.has(state.task.state))) return;
+    const epoch = state.epoch;
+    let data;
+    try {
+      data = await api(id ? path(id) : '/tasks');
+    } catch {
+      return;
+    }
+    if (epoch !== state.epoch || state.busy || state.dialog) return;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    if (id) {
+      if (state.task?.task_id !== id || same(data.task, state.task)) return;
+      state.task = data.task;
+    } else {
+      const tasks = data.tasks || [];
+      if (same(tasks, state.tasks)) return;
+      state.tasks = tasks;
     }
     render();
   }
@@ -289,6 +327,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard}) {
 
   function leave() {
     active = false;
+    stopPolling?.();
+    stopPolling = null;
     state.epoch++;
     state.dialog = null;
     root.hidden = true;
