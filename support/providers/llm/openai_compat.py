@@ -19,6 +19,7 @@ from localmelo.support.providers._http import (
     attempt_headers,
     malformed_body,
     post_json,
+    unreachable,
 )
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
@@ -545,6 +546,8 @@ class OpenAICompatLLM(BaseLLMProvider):
                             if not isinstance(final, str) or finish:
                                 raise ProviderError("Malformed SSE finish reason")
                             finish = final
+        except httpx.ConnectError as exc:
+            raise unreachable(self._http, exc, retryable=not emitted) from exc
         except httpx.TransportError as exc:
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}", retryable=not emitted

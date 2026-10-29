@@ -495,7 +495,7 @@ def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/")
     listed.see("Start a new session")
-    listed.type("\x1b[B" * 5)  # /help, three attachment commands, then /new
+    listed.type("\x1b[B" * 3)  # /model, /backend, then /new
     time.sleep(0.3)
     listed.type("\r")
     listed.see("─ New session ─")

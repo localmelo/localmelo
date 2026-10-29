@@ -80,12 +80,17 @@ def test_attachment_completions_are_workspace_files_only(tmp_path: Path) -> None
 def test_slash_lists_every_command_with_its_line() -> None:
     shown = _complete("/")
     assert [text for text, _, _ in shown] == [
+        "/model",
+        "/backend",
+        "/new",
+        "/clear",
+        "/status",
         "/help",
+        "/exit",
+        "/quit",
         "/attach",
         "/attachments",
         "/detach",
-        "/new",
-        "/clear",
         "/sessions",
         "/resume",
         "/title",
@@ -99,13 +104,8 @@ def test_slash_lists_every_command_with_its_line() -> None:
         "/expand",
         "/approvals",
         "/progress",
-        "/status",
         "/mcp",
         "/retry",
-        "/model",
-        "/backend",
-        "/exit",
-        "/quit",
     ]
     assert ("/help", "/help [command]", "Show commands and keys") in shown
 
@@ -155,6 +155,6 @@ def test_an_alias_row_names_the_other_spelling() -> None:
     assert _complete("/q") == [("/quit", "/quit", "Quit (also /exit, ctrl+d)")]
     assert _complete("/exi") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
     assert _complete("/ex") == [
-        ("/expand", "/expand [turn.call]", "Show a tool call's full output"),
         ("/exit", "/exit", "Quit (also /quit, ctrl+d)"),
+        ("/expand", "/expand [turn.call]", "Show a tool call's full output"),
     ]

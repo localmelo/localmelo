@@ -70,6 +70,10 @@ The answer is printed on stdout, and the command exits with code 0
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
 
+Direct tasks write files and run Python without asking, and have no shell
+unless you pass `--builtins all`. A brief's check (see
+[Run a worker task](#run-a-worker-task)) runs anyway.
+
 For every option, see the [command-line reference](../reference/cli.md).
 
 ## Get the result as JSON
@@ -93,6 +97,43 @@ is `completed`.
 or `provider_error`. The counters say how many steps, model requests and tool
 calls the run took, and `config` records the options it ran with. See
 [Run results](../reference/run-results.md) for every status and field.
+
+## Run a worker task
+
+A worker task is a brief in a file. A line that starts with `Check:` (no
+leading space) holds one shell command that tells whether the task is done:
+
+```bash
+cat > brief.md <<'EOF'
+Write hello.py so that it prints the word hello.
+Check: python3 hello.py | grep -x hello
+EOF
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
+echo "exit code: $?"
+python3 -c 'import json; r = json.load(open("result.json")); print(r["status"], r["tests"]["state"])'
+```
+
+When the model has finished, `melo` runs the check in the workspace (the
+current folder, or `--workspace`), whatever tools the run offers the model.
+If it fails, the model is sent back to fix it, twice at most. Example output
+of the last two commands (the model's work varies):
+
+```text
+exit code: 0
+completed passed
+```
+
+`tests.state` is `passed` when every check of the last round exited with 0,
+and `failed` when one did not, or could not run. A run that ends `completed`
+with a failed check exits with code 4, so a script can stop on it:
+
+```bash
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
+```
+
+The result is one JSON line with `status`, `exit_code`, `tests` and the run
+record. For every field and exit code, see the
+[command-line reference](../reference/cli.md#output).
 
 ## Save a configuration
 
@@ -122,6 +163,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   / commands · esc stop · ctrl+d quit
 ```
 
+The title shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0.
+
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
 embeddings probe. Type a message and press Enter, or `/exit` to leave. From
@@ -149,7 +192,7 @@ The wizard asks:
 | `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
-| `Start?` | Press Enter (yes) to continue. |
+| `Save and continue?` | Press Enter (yes) to save and continue. |
 | `Embedding backend` | `5` for `None (no long-term memory)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first as the default; choosing one is enough. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
@@ -169,7 +212,10 @@ embedding server fails, the wizard saves with embedding off and says so. On
 success it prints `Config saved to …`, the path of
 `~/.cache/localmelo/config.toml`, and then **starts the gateway** on
 `http://127.0.0.1:8401`. The gateway keeps running in this terminal.
-Without `--serve`, `melo --reconfigure` opens the interactive UI instead.
+Without `--serve`, `melo --reconfigure` opens the interactive UI instead, and in
+default mode it starts with the first run's question: it prints
+`Found a model server at …` and asks `Use it? [Y/n]:`. The full menu above
+follows only after `n`, when no server is found, or with `--developer`.
 
 ## Start the gateway
 

@@ -48,12 +48,12 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 按以下顺序使用第一项适用的配置：
 
-1. `--reconfigure`：运行配置向导，然后使用它保存的后端。不带任务时，不能与 `--base-url` 同用。
+1. `--reconfigure`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整的后端菜单。不带任务时，不能与 `--base-url` 同用。
 2. `--base-url URL`：使用该服务器，不使用配置文件。模型使用 `--chat-model` 指定的模型，否则使用 `GET URL/models` 列出的第一个模型；若列表中还有其他模型，则跳过 ID 包含 `embed` 或 `rerank` 的模型。没有 `/v1` 的 URL 会通过 `URL/v1/models` 获取列表，如果该地址有响应，界面也会使用 `URL/v1`。服务器没有响应模型列表请求或没有列出模型时，模型为 `default`，横幅下方的警告会说明原因。没有配置文件时会询问一次 `Save URL · MODEL as the default backend? [Y/n]`；按 Enter 保存，与首次运行相同。
 3. 已保存的后端；若指定 `--chat-model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. 没有已保存的后端：先回答[首次运行](#first-run)的问题，然后打开界面。
 
-横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了第一个，还会显示 `first of N; /model lists them`。
+横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了第一个，还会显示 `first of N; /model lists them`。
 
 <a id="keys"></a>
 
@@ -80,7 +80,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。列表以 `/model`、`/backend`、`/new`、`/status`、`/help` 和 `/exit` 开头。
 
 | 命令 | 作用 |
 |---|---|
@@ -102,7 +102,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
-| `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、文件和版本。 |
+| `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；`--developer` 显示所有行）、文件和版本。 |
 | `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp-config` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
 | `/retry` | 重新运行最近一个已完成轮次，即使恢复会话后也保留存储的原始输入文本。只有尚未撤销该轮时才先撤销；之前的轮次和文件仍保持原有更改。 |
 | `/model [name\|number]` | 单独使用时显示当前模型和服务器列出的模型。指定列表中的 ID 或编号时（尚未列出则 melo 先列出），从下一条消息起切换到该模型，并将其保存为默认值。 |
@@ -187,6 +187,26 @@ from-the-child
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及最多 3 行输出（使用 `/verbose` 时为 20 行），之后显示 `… +N lines (/expand T.C)`（若只剩一行则直接显示该行）。`/verbose` 还显示调用参数，图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会输出尽力生成的结果、[状态行](../../reference/cli.md#output)（英文）和提示，例如服务器无响应时显示 `Is the model server running at URL?`。
+
+<a id="the-status-bar"></a>
+
+### 状态栏
+
+输入框下方的状态栏显示本会话的用量，数据来自 melo 已收到的事件：不发请求、不轮询、没有定时器。
+在模型和工作区之后从左到右，每一段只在有数据时出现：
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
+  本地服务器在距上次请求超过一分钟后还会显示 `idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
+- `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
+- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。
+- `tasks 1 running 2 queued`：仅在能访问任务存储时出现。
+
+状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
+`/status` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
 
 <a id="streamed-replies"></a>
 
@@ -291,10 +311,10 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 Use nomic-embed-text for long-term memory? [Y/n]:
 ```
 
-- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器。按 Enter 接受 URL，或输入另一个 URL。探测时只请求模型列表；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出 `No model server answered on this machine (ports 8000, 8400, 11434, 30000).`，并提供 `http://127.0.0.1:8000/v1`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，此时提供列表中的第一个 URL；空值会关闭搜索。
+- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器。按 Enter 接受 URL，或输入另一个 URL。探测时只请求模型列表；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出 `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.`，并提供 `http://127.0.0.1:8000/v1`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，此时提供列表中的第一个 URL；空值会关闭搜索。
 - 列出多个模型的服务器会以编号列表显示模型并询问 `Model [N]:`；输入编号或 ID。默认选择跳过嵌入和重排模型。只列出这类模型的服务器也会以相同方式显示，并提示对话需要对话模型。
 - 对 `GET /api/version` 返回 `{"version": "…"}` 的 Ollama 服务器会保存为 `chat_backend = "ollama"`，并在其 `[ollama]` 表中保存 `chat_url` 和 `chat_model`；横幅随后显示 Ollama，对话请求使用 Ollama 原生 API 及其 300 秒超时。其他任何兼容 OpenAI 的服务器都保存为 `chat_backend = "vllm"`（适用于所有兼容 OpenAI 服务器的键），并在其 `[vllm]` 表中保存 `chat_url` 和 `chat_model`。文件中的其他设置保持不变。
 - 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Use <model> for long-term memory? [Y/n]:`，优先推荐 Qwen3-Embedding。`y` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `n`、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明原因；没有候选模型的提示会针对 Ollama 服务器给出 `ollama pull qwen3-embedding:0.6b`，否则给出 `Serve Qwen3-Embedding-0.6B on it`。参见[设置嵌入模型](embedding.md)。
-- 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `[r]etry, [s]tart anyway, [q]uit [r]:`。`r` 再次询问 URL，默认值为你输入的地址；`s` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`q` 以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
-- 选项按首字母选择，因此 `s`、`start` 和 `start anyway` 是同一回答；其他回答会重新询问。
+- 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `[r]etry, [s]tart without saving, [q]uit [r]:`。`r` 再次询问 URL，默认值为你输入的地址；`s` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`q` 以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
+- 选项按首字母选择，因此 `s`、`start` 和 `start without saving` 是同一回答；其他回答会重新询问。
 - 在问题处按 Ctrl-D 会输出 `Setup cancelled.` 并以退出码 0 退出；Ctrl+C 输出相同内容并以 130 退出。

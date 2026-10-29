@@ -27,6 +27,7 @@ from localmelo.support.sessions.store import SessionStoreError
 
 from .bodies import Body
 from .errors import ApiError
+from .shapes import approval_json
 
 if TYPE_CHECKING:
     from . import Console
@@ -110,6 +111,12 @@ async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
+def _approvals(console: Console, task: dict[str, Any]) -> dict[str, Any]:
+    """*task* with the approvals it waits for; the broker keys them by task id."""
+    pending = console.broker.pending(str(task.get("task_id")))
+    return {**task, "pending_approvals": [approval_json(r) for r in pending]}
+
+
 def add_routes(app: FastAPI, console: Console) -> None:
     """Install task routes before the catch-all /api handler."""
 
@@ -119,7 +126,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         task, repeated = await _call(
             console, console.workers.create(body.model_dump(exclude_unset=True))
         )
-        content: dict[str, Any] = {"task": task}
+        content: dict[str, Any] = {"task": _approvals(console, task)}
         if repeated:
             content["repeated"] = True
         return JSONResponse(content=content, status_code=200 if repeated else 202)
@@ -130,13 +137,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
     ) -> JSONResponse:
         console.require_store()
         tasks = await _call(console, console.workers.list(state=state, level=level))
-        return JSONResponse(content={"tasks": tasks})
+        return JSONResponse(content={"tasks": [_approvals(console, t) for t in tasks]})
 
     @app.get("/api/tasks/{task_id}")
     async def get_task(task_id: str) -> JSONResponse:
         console.require_store()
         task = await _call(console, console.workers.get(task_id))
-        return JSONResponse(content={"task": task})
+        return JSONResponse(content={"task": _approvals(console, task)})
 
     @app.patch("/api/tasks/{task_id}")
     async def update(task_id: str, body: UpdateTask) -> JSONResponse:
@@ -146,7 +153,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         task = await _call(
             console, console.workers.update(task_id, level=body.level, state=body.state)
         )
-        return JSONResponse(content={"task": task})
+        return JSONResponse(content={"task": _approvals(console, task)})
 
     @app.post("/api/tasks/{task_id}/resume")
     @app.post("/api/v2/tasks/{task_id}/resume", include_in_schema=False)
@@ -161,6 +168,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             ),
         )
         return JSONResponse(
-            content={"task": task, "operation_id": body.operation_id},
+            content={
+                "task": _approvals(console, task),
+                "operation_id": body.operation_id,
+            },
             status_code=202,
         )

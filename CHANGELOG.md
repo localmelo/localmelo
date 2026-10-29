@@ -31,6 +31,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A brief's `Check:` command now runs in a default `melo --brief` run. A direct
+  run offers no `shell_exec` to the model, so the harness's own check call was
+  refused, the run ended `completed` with exit 0 and `tests` `failed`, and only
+  the developer flag `--builtins all` made it run. The check now runs in every
+  `--builtins` setting (`none` included); the model's tool list and its own
+  `shell_exec` calls are unchanged, and `pre_execute`, the workspace root, the
+  shell timeout and redaction still apply ([#205]).
+
+- With `--window-eviction chunk` or `boundary`, the request fit of `--context-window`
+  keeps its cut across requests: after it drops to 70% of the input limit it starts
+  the next requests from the same unit and drops again only when a request would
+  pass the limit, so a tight context window no longer moves the history every step
+  ([#204]). `slide` is unchanged.
 - `scripts/cache_report.py` runs under Python 3.9 again: the `zip(..., strict=True)`
   call that needed 3.10 is replaced by an explicit length check. `-h` and `--help`
   print its usage and exit 0, and no arguments print the usage to stderr and exit 2,
@@ -106,6 +119,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
+### Docs
+
+- Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
+- Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
+
 ### Added
 
 - Developer mode in the web console (#186). **Connection settings** has a
@@ -120,6 +138,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `mode` and `advanced_options`; `PUT /api/settings` takes an optional `mode`.
   The default mode's drawer no longer shows the Runs tab's raw result fields.
   Nothing changes what runs. ([#NN])
+- A task that waits for a tool approval can be answered ([#208]). The task JSON
+  carries `pending_approvals` (the shape a chat session uses), the console's
+  Tasks view shows the same approval card and says "Waiting for your approval",
+  and `melo-task show` and `list` print `Waiting for your approval: <tool>
+  <target> (answer it in the web console, Tasks)`; `Reason:` reads `approval`
+  instead of `not recorded`. Answers use the existing `POST /api/approvals/{id}`.
+- The interactive status bar shows usage at a glance (#176 SL2): after the model
+  and workspace, `cache 83%` (the last request's cached share, `--` when the
+  server reports none, plus `idle 3m` for a local server), `ctx 12k/32k`, the
+  run's `step`/`attempt`/`phase` while it runs, and `tasks` when a task store is
+  reachable. Each segment hides without data; a narrow terminal drops them right
+  to left. It is built from events already received (no request, no timer).
+  `[cli] status_line = "off"` keeps the old bar; there is no flag. ([#201])
 
 - Default mode and developer mode (#186). Every `melo` option has a tier (user,
   advanced or experimental) in one table, `support/option_tiers.py`, copied in the
@@ -805,6 +836,37 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- First-look fixes for the default mode: `melo --version` prints the banner's
+  version and exits 0, and a usage error prints a short usage instead of every
+  developer flag (`--developer` keeps the long one). The banner and
+  `--version` show `melo 0.1.0 (baab21e)` on a git checkout (the JSON record's
+  and gateway's version fields are unchanged). `/status` hides the cache,
+  context, steps and tasks rows until they have data. The `/` list starts with
+  `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`. `melo-task
+  stop` says `stop requested; …` while the task has not stopped. In default
+  mode `melo --reconfigure` offers the server it finds before the full
+  backend menu, and the wizard's `Start?` is `Save and continue?` ([#207]).
+- The "no model server" screens now say what to do. A chat request that cannot
+  connect ends the run with `cannot reach the model server at URL. Start it, or
+  run melo to set one up.` (for a server beyond this computer and the local
+  network: `Check the URL and the network.`) and the raw cause after it, in the status line and
+  the JSON `error`; timeouts and HTTP errors keep their text. The first run with
+  no server found prints `No model server found on this computer (looked at
+  ports …)` before the URL question, and the retry prompt reads `[s]tart without
+  saving`. `melo --serve` prints `Sign in: run melo --gateway-login --port N in
+  another terminal` after `Web UI:`. Text only: exit codes and choices are
+  unchanged ([#206]).
+- A `melo --brief` run that ends `completed` while its brief's check failed for
+  good (`tests` is `failed`, a refused check included) exits with the new code
+  4, so `melo --brief f && next-step` stops. `status` stays `completed`, the
+  record's `exit_code` is 4, and stderr gets
+  `melo: the brief's check failed: <command> (exit N)`. Every other exit code is
+  unchanged, and a brief without a `Check:` line never exits 4 ([#205]).
+
+- Docs: the quickstart has a "Run a worker task" section (a brief with a
+  `Check:` line, `tests.state` and the exit code), and says that direct tasks
+  have no shell unless `--builtins all` ([#205]).
+
 - Organize Markdown documentation into start, guides, reference, concepts and
   project sections. Old paths retain readable links for each historical
   fragment; the agent entry points and printed CLI paths remain stable ([#129]).
@@ -1234,3 +1296,11 @@ earlier milestones.
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
 [#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#201]: https://github.com/localmelo/localmelo/pull/201
+[#202]: https://github.com/localmelo/localmelo/pull/202
+[#203]: https://github.com/localmelo/localmelo/pull/203
+[#204]: https://github.com/localmelo/localmelo/pull/204
+[#205]: https://github.com/localmelo/localmelo/pull/205
+[#206]: https://github.com/localmelo/localmelo/pull/206
+[#207]: https://github.com/localmelo/localmelo/pull/207
+[#208]: https://github.com/localmelo/localmelo/pull/208

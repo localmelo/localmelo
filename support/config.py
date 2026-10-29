@@ -58,6 +58,7 @@ RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
 REASONING_TAGS = ("explicit", "closing_only", "none")
 UI_MODES = ("default", "developer")
+STATUS_LINES = ("auto", "off")
 
 
 @dataclass
@@ -119,6 +120,9 @@ class CliConfig:
 
     stream: bool = False
     reasoning_tags: dict[str, str] = field(default_factory=dict)
+    # "auto" adds cache, context, step and task segments to the status bar;
+    # "off" keeps the bar as it was before #176.
+    status_line: str = "auto"
 
 
 @dataclass
@@ -359,6 +363,10 @@ class Config:
         cli = self.cli
         if not isinstance(cli.stream, bool):
             errors.append(f"[cli] stream must be a boolean, got {cli.stream!r}")
+        if cli.status_line not in STATUS_LINES:
+            errors.append(
+                f"[cli] status_line {cli.status_line!r} is not one of {STATUS_LINES}"
+            )
         tags = cli.reasoning_tags
         if not isinstance(tags, dict):
             return [*errors, f"[cli] reasoning_tags must be a table, got {tags!r}"]
@@ -755,6 +763,9 @@ def load() -> Config:
         section = data["cli"]
         if "stream" in section:
             cfg.cli.stream = section["stream"]
+        if "status_line" in section:
+            # A bad value is kept so Config.validate can report it.
+            cfg.cli.status_line = section["status_line"]
         if "reasoning_tags" in section:
             tags = section["reasoning_tags"]
             # Keep a malformed value so Config.validate can report it.
@@ -1021,6 +1032,8 @@ def save(cfg: Config) -> None:
     if cfg.cli != CliConfig():
         lines.append("[cli]")
         lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
+        if cfg.cli.status_line != CliConfig().status_line:
+            lines.append(f"status_line = {_toml_value(cfg.cli.status_line)}")
         if cfg.cli.reasoning_tags:
             lines.append(f"reasoning_tags = {_toml_value(cfg.cli.reasoning_tags)}")
         lines.append("")

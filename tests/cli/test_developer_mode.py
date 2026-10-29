@@ -9,6 +9,7 @@ import argparse
 import re
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 import pytest
 
@@ -24,7 +25,7 @@ from localmelo.support.option_tiers import (
 from localmelo.tests.cli.test_direct_mode import _main
 
 # Adding a user option is a deliberate change: update this number with it.
-USER_OPTION_COUNT = 15
+USER_OPTION_COUNT = 16
 
 HEADINGS = (
     "Options:",
@@ -268,3 +269,54 @@ def test_the_mode_survives_a_save_and_load(
     assert config.load().ui.mode == "developer"
     config.save(config.Config())
     assert "[ui]" not in (tmp_path / "config.toml").read_text()
+
+
+# -- --version and usage errors (T155 F2, F6) ------------------------------------
+
+
+def test_version_prints_the_banner_version_and_exits_0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_config(tmp_path, monkeypatch, "")
+    with mock.patch(
+        "localmelo.support.sessions.display.display_version",
+        return_value="0.1.0 (baab21e)",
+    ):
+        assert _main("--version").code == 0
+    out, err = capsys.readouterr()
+    assert (out, err) == ("melo 0.1.0 (baab21e)\n", "")
+
+
+def test_a_usage_error_in_default_mode_prints_a_short_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_config(tmp_path, monkeypatch, "")
+    assert _main("--no-such-flag").code == 2
+    assert capsys.readouterr().err == (
+        "usage: melo [options] [--] [task ...]\n"
+        "Run melo --help for options.\n"
+        "melo: error: unrecognized arguments: --no-such-flag\n"
+    )
+
+
+@pytest.mark.parametrize("developer", ["flag", "config"])
+def test_a_usage_error_in_developer_mode_keeps_the_long_usage(
+    developer: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        '[ui]\nmode = "developer"\n' if developer == "config" else "",
+    )
+    argv = ["--no-such-flag"] + (["--developer"] if developer == "flag" else [])
+    assert _main(*argv).code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("usage: melo [-h]") and "--reflection-gate" in err
+    assert "Run melo --help" not in err

@@ -525,3 +525,16 @@ def test_approval_target_does_not_follow_a_final_symlink_or_open_a_fifo(
         }
     )
     assert piped == {"path_label": "pipe", "exists": True, "size_bytes": 0}
+
+
+def test_the_displayed_version_is_the_package_version_then_the_commit() -> None:
+    with (
+        mock.patch.object(display, "localmelo_version", return_value="baab21e"),
+        mock.patch.object(display.importlib.metadata, "version", return_value="0.1.0"),
+    ):
+        assert display.display_version() == "0.1.0 (baab21e)"
+    with (
+        mock.patch.object(display, "localmelo_version", return_value="0.1.0"),
+        mock.patch.object(display.importlib.metadata, "version", return_value="0.1.0"),
+    ):
+        assert display.display_version() == "0.1.0"

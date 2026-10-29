@@ -10,7 +10,7 @@
 
 ```text
 $ melo
-No model server answered on this machine (ports 8000, 8400, 11434, 30000).
+No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.
 Model server URL [http://127.0.0.1:8000/v1]: http://127.0.0.1:8080/v1
 Models on http://127.0.0.1:8080/v1:
   [1] nomic-embed-text
@@ -76,6 +76,8 @@ melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
 向导会询问对话后端、其 URL 和模型，以及嵌入后端；[保存配置](../start/quickstart.md#save-a-configuration)列出了这些提示。它会向每个服务器发送简短的测试请求，保存配置文件，然后打开交互式界面，或者在使用 `--serve` 时启动网关。按 Ctrl+C 停止网关。
+
+不带 `--serve` 且在默认模式下，`melo --reconfigure` 像首次运行一样开始：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整菜单。
 
 - 每个问题都会在方括号中提供配置文件中的当前值：按 Enter 保留。嵌入问题提供已保存的后端；如果尚未保存，则提供对话服务器列出的第一个候选模型，没有候选时为 `None`。
 - 没有保存嵌入配置时，向导会列出一次对话服务器的模型（仅限本地对话后端），并将找到的每个嵌入模型作为选项 `6`、`7` 等追加在固定的五个选项之后。第一个候选模型是默认值；选择它会保存对话后端的 URL 和模型，不再询问端点。固定的 `1`–`4` 选项仍会询问另一个服务器的 URL 和模型，`5` 是 `None`。无法读取模型列表时，向导会静默回退到这五个选项；向导结束时的检查会报告无法连接的服务器。

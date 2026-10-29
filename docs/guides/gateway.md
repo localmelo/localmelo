@@ -34,6 +34,7 @@ melo --serve
     Embedding: none
     Gateway: http://127.0.0.1:8401
     Web UI:  http://127.0.0.1:8401/
+    Sign in: run melo --gateway-login --port 8401 in another terminal
   ```
 
 - Starting does not contact the model server. Run a task to check it.

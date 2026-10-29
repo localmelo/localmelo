@@ -70,6 +70,14 @@ state allows. Like Workers, the view replaces the chat while it is open.
   only once." with **Resume anyway** and **Cancel**. Escape cancels. Nothing is
   recorded until you choose **Resume anyway**, and the confirmation lasts five
   minutes and does not survive a gateway restart.
+- A task that asks to run a tool shows the state "Waiting for your approval"
+  and the same approval card as a chat, with **Allow once**, **Allow every
+  ... call in this session** and **Deny…** (with an optional reason). It is
+  also where a `melo-task` task waits: nothing else shows it. The card
+  disappears when you answer, and the task goes on (Allow) or gets the denial
+  (Deny); pausing or stopping the task withdraws the card. While it is open,
+  the view reads the task (or the list) again every 3 seconds and redraws only
+  what changed, so a request that arrives later appears by itself.
 - **Stop** uses the task's own stop, not the chat's. It is available until the
   task is finished and wins over a Resume in flight.
 - A started task without a saved card shows "Resume unavailable: recovery

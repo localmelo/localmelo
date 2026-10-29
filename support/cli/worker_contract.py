@@ -170,7 +170,8 @@ async def run_brief_check(executor: Executor, command: str) -> BriefCheckResult:
     started = time.perf_counter()
     try:
         outcome = await executor.execute_structured(
-            ExecutionRequest(tool_name="shell_exec", arguments={"command": wrapped})
+            ExecutionRequest(tool_name="shell_exec", arguments={"command": wrapped}),
+            harness=True,
         )
     finally:
         TOOL_EXIT_CODE.reset(slot)
@@ -361,6 +362,33 @@ class WorkerObserver:
             for detail in latest
         )
         return {"state": "passed" if passed else "failed", "items": items}
+
+    def failed_check(self) -> str:
+        """The last failing check of the gate's last round, as one line, or ``""``.
+
+        It reads ``<command> (exit N)``, with ``not run`` for a refused check
+        and ``no exit status`` for one that recorded none (a timeout). The
+        command is redacted already.
+        """
+        if not self.gate or self._gate_tests()["state"] != "failed":
+            return ""
+        last = max(detail.get("round", 0) for detail in self.gate)
+        failing = [
+            detail
+            for detail in self.gate
+            if detail.get("round", 0) == last
+            and not (detail.get("exit_code") == 0 and not detail.get("refused"))
+        ]
+        detail = failing[-1]
+        code = detail.get("exit_code")
+        if detail.get("refused"):
+            how = "not run"
+        elif type(code) is int:
+            how = f"exit {code}"
+        else:
+            how = "no exit status"
+        command = " ".join(redact_output(str(detail.get("command", ""))).split())
+        return f"{command} ({how})"
 
     def tests(self) -> dict[str, Any]:
         if self.gate:

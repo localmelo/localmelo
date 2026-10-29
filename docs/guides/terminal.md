@@ -49,8 +49,11 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 The first of these that applies:
 
-1. `--reconfigure`: the setup wizard, then the backend it saved. Without a
-   task it cannot be combined with `--base-url`.
+1. `--reconfigure`: the setup wizard, then the backend it saved. In default
+   mode it first offers the model server it finds on this computer (`Found a
+   model server at …`, `Use it? [Y/n]:`) with the first run's questions; the
+   full backend menu follows only after `n`, when none is found, or with
+   `--developer`. Without a task it cannot be combined with `--base-url`.
 2. `--base-url URL`: that server, without the config file. The model is
    `--chat-model`, else the first model that `GET URL/models` lists,
    skipping models whose id contains `embed` or `rerank` while another is
@@ -67,7 +70,8 @@ The first of these that applies:
    `⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. No saved backend: the [first-run](#first-run) questions, then the UI.
 
-The banner names the model and the server; when they are not the saved
+The banner's title shows the package version, and on a git checkout the short
+commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
 backend, a second line says where they come from (`from --base-url (not
 saved)`, `saved as the default`) and, when melo took the first of several
 models, `first of N; /model lists them`.
@@ -105,7 +109,8 @@ models, `first of N; /model lists them`.
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one.
+type more letters to narrow them, Tab or Enter to take one. The list starts
+with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 
 | Command | What it does |
 |---|---|
@@ -127,7 +132,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
-| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks), files and version. |
+| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks: a row appears once it has data; `--developer` shows every row), files and version. |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
@@ -157,7 +162,7 @@ type more letters to narrow them, Tab or Enter to take one.
   on the config as saved. In a `melo --base-url URL` session they switch for
   this session only, unless melo asked `Save URL · MODEL as the default
   backend?` (only when there is no config file yet) and you answered yes.
-  After `s` (start anyway) at the first run's questions, `/model` and
+  After `s` (start without saving) at the first run's questions, `/model` and
   `/backend` save the server, as the first run would have.
 - A model that does not start leaves the current one in place
   (`✗ Could not start NAME: …`). `/backend` keeps the current server when
@@ -340,6 +345,35 @@ happens without the explicit `/copy` command.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
+
+### The status bar
+
+The bar under the input box carries the usage figures of the session, taken
+from events melo has already received: no request, no polling, no timer.
+Left to right, after the model and the workspace, each segment appears only
+when it has data:
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%` is the share of the last request's prompt tokens the server
+  reported as cached (`cache --` when the server reports none, never 0%). For
+  a local server, `idle 3m` follows once a minute has passed since the last
+  request; a local server evicts its prefix cache by memory, not by time, so
+  there is no countdown.
+- `ctx 12k/32k` is the last measured prompt over the input limit, or just
+  `ctx 12k` when no limit is known.
+- `step 4 attempt 2 phase fix` are the run's progress facts while a run is
+  active, never a percent or `n/max`.
+- `tasks 1 running 2 queued` appears only when a task store is reachable.
+
+The bar redraws when an event arrives or you press a key, so `idle` is as of
+the last redraw. On a narrow terminal the title goes first, then the segments
+right to left, then the workspace is cut, and the bar never wraps. `/status`
+prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
+it was before these segments: the model, workspace, `ctx` of the last request
+and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
@@ -530,7 +564,7 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none
   answers, it prints
-  `No model server answered on this machine (ports 8000, 8400, 11434, 30000).`
+  `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.`
   and offers `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
@@ -556,7 +590,7 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
-  `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
+  `[r]etry, [s]tart without saving, [q]uit [r]:`. `r` asks for the URL again, with
   the one you typed as the default; `s` asks `Model name [default]:` and
   opens the UI without saving (`Not saved: melo asks again next time.`);
   `q` exits with code 0. The reasons are `connection refused`,
@@ -566,6 +600,6 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   follow), `the reply is not a model list`, `the reply could not be read`,
   `not a URL` and `it lists no models`.
 - An option is chosen by its first letter, so `s`, `start` and
-  `start anyway` are the same answer; another answer asks again.
+  `start without saving` are the same answer; another answer asks again.
 - Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;
   Ctrl+C prints the same and exits with 130.

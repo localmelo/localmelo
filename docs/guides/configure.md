@@ -8,7 +8,7 @@ server also lists an embedding model, it asks once whether to use it:
 
 ```text
 $ melo
-No model server answered on this machine (ports 8000, 8400, 11434, 30000).
+No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.
 Model server URL [http://127.0.0.1:8000/v1]: http://127.0.0.1:8080/v1
 Models on http://127.0.0.1:8080/v1:
   [1] nomic-embed-text
@@ -93,6 +93,11 @@ backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lis
 prompts. It sends a short test request to each server, saves the config
 file, and then opens the interactive UI or, with `--serve`, starts the
 gateway. Press Ctrl+C to stop the gateway.
+
+Without `--serve` and in default mode, `melo --reconfigure` starts as the first
+run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
+full menu follows only after `n`, when no server is found, or with
+`--developer`.
 
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers the saved backend; with
