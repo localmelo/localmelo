@@ -30,6 +30,7 @@ from localmelo.support.config import (
     LocalBackendConfig,
 )
 from localmelo.support.gateway.session import SessionManager
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -270,7 +271,7 @@ class TestSingleSystemMessageWithMemory:
         """When long-term memory returns [memory] items, plan_step merges
         them into the first system prompt under a [RECALL] section."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=legacy_options())
 
         # Seed long-term memory so retrieve_context returns system messages.
         await agent.hippo.long.add("fact alpha", [1.0, 0.0, 0.0, 0.0])

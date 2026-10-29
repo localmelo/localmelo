@@ -176,9 +176,9 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--inbox FILE` | 未设置 | 与 `--brief` 一起使用时，在规划边界接受完整的、追加写入的指令行。路径必须显式给出，相对于调用目录，并且必须解析到工作区之外。 |
 | `--inbox-fd N` | 未设置 | 与 `--brief` 一起使用时，从继承的、可读的管道文件描述符 `N` 接受同样的指令行。父进程必须保留写端；读端在工具启动前设置为 close-on-exec。不能与 `--inbox` 同时使用。 |
 | `--workspace DIR` | 当前文件夹 | 运行所在的文件夹：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动；见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)。 |
-| `--fixed-prefix on\|off` | `off` | 选择启用带版本号的固定系统前缀，本地日期在运行开始时冻结；它会覆盖 `[agent] fixed_prefix`。 |
-| `--window-eviction slide\|chunk\|boundary` | `slide` | 实验性。工作记忆如何丢弃旧轮次：`slide` 在窗口满后每步丢弃一个单元；`chunk` 每次丢弃八条消息；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
-| `--reflect-tool-guard on\|off` | `off` | 实验性。为 `on` 时，每个反思请求都提供该步骤规划请求的工具（列表、顺序和 schema 相同，因此服务器的提示前缀保持不变），且其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变。重试请求不变。见[配置](configuration.md#context-accounting)。 |
+| `--fixed-prefix on\|off` | `on` | 使用带版本号的固定系统前缀，本地日期在运行开始时冻结；`off` 会发送此前的请求。它会覆盖 `[agent] fixed_prefix`。 |
+| `--window-eviction slide\|chunk\|boundary` | `chunk` | 工作记忆如何丢弃旧轮次：`chunk` 每次丢弃八条消息；`slide`（此前的默认值）在窗口满后每步丢弃一个单元；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
+| `--reflect-tool-guard on\|off` | `on` | 为 `on` 时，每个反思请求都提供该步骤规划请求的工具（列表、顺序和 schema 相同，因此服务器的提示前缀保持不变），且其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变。重试请求不变。为 `off` 时，请求既不带工具，也没有那句话。它会覆盖 `[agent] reflect_tool_guard`；见[配置](configuration.md#context-accounting)。 |
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
 | `--max-steps N` | `30` | 整个运行最多可以使用的规划步数。 |

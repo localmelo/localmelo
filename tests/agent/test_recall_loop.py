@@ -22,6 +22,7 @@ from localmelo.melo.memory.retrieval.llm import LLMRetriever
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 CALL_ID = "call_1"
 
@@ -356,6 +357,7 @@ async def test_attempt_recall_runs_before_the_digest_and_fills_the_boundary() ->
             steps_per_attempt=1,
             max_attempts=2,
             max_steps=4,
+            **LEGACY_CACHE_OPTIONS,
         ),
     )
     assert agent.load_notes([preloaded]) == 1

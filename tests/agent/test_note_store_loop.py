@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -582,7 +583,7 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
     from localmelo.melo.schema import CheckResult, TaskRecord
 
     server = FakeLLM()
-    agent = _agent(server, _options(reasoning="compress"))
+    agent = _agent(server, _options(reasoning="compress", **LEGACY_CACHE_OPTIONS))
     agent.hippo.working.notes.add(
         "note",
         "found: a fact",

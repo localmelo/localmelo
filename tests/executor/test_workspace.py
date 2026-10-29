@@ -56,6 +56,7 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1254,7 +1255,7 @@ async def test_the_workspace_note_is_given_only_with_a_root(
     llm = _PromptRecorder()
     agent = Agent(
         llm=llm,
-        options=AgentOptions(
+        options=legacy_options(
             builtins=frozenset({"file_read"}),
             max_attempts=1,
             steps_per_attempt=1,

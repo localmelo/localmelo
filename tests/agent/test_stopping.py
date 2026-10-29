@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import Agent
 from localmelo.melo.agent._chat import (
     FINAL_REFLECTION_NOTE,
     REFLECTION_PROMPT,
@@ -31,6 +31,7 @@ from localmelo.melo.schema import (
     ToolDef,
     ToolResult,
 )
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Fakes and helpers ───────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ async def _echo(text: str) -> str:
 
 def _agent(llm: BaseLLMProvider, **options: Any) -> Agent:
     """An agent whose only tool is echo (named in every query below)."""
-    agent = Agent(llm=llm, options=AgentOptions(builtins=frozenset(), **options))
+    agent = Agent(llm=llm, options=legacy_options(builtins=frozenset(), **options))
     agent.hippo.register_tool(
         ToolDef(
             name="echo",

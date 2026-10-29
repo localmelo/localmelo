@@ -26,12 +26,13 @@ from dataclasses import dataclass, replace
 from typing import Any, Final, cast
 
 from localmelo.melo.agent import AgentOptions
-from localmelo.melo.agent.options import WindowEviction, reasoning_refusal
+from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
+    configured_cache_options,
     configured_context_options,
     configured_session_options,
 )
@@ -288,6 +289,7 @@ def run_interactive(
         for name in (
             "fixed_prefix",
             "window_eviction",
+            "reflect_tool_guard",
             "captured_history",
             "reasoning",
             "replay_turns",
@@ -304,16 +306,7 @@ def run_interactive(
     try:
         if choice.cfg is None:
             loaded = config.load()
-            if "fixed_prefix" not in explicit and loaded.agent.fixed_prefix:
-                options = replace(options, fixed_prefix=True)
-            if (
-                "window_eviction" not in explicit
-                and loaded.agent.window_eviction != "slide"
-            ):
-                options = replace(
-                    options,
-                    window_eviction=cast(WindowEviction, loaded.agent.window_eviction),
-                )
+            options = configured_cache_options(loaded, options, keep=explicit)
             if "captured_history" not in explicit and loaded.agent.captured_history:
                 options = replace(options, captured_history=True)
             options = configured_context_options(
@@ -426,7 +419,6 @@ async def main_async(
 
     Returns the exit code and the signal that ended the session, if one did.
     """
-    from typing import cast
 
     from prompt_toolkit.history import History, InMemoryHistory
     from prompt_toolkit.output.vt100 import Vt100_Output

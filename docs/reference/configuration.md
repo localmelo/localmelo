@@ -42,6 +42,9 @@ tables of the chosen backends.
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
 | `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
+| `fixed_prefix` | `[agent]` | `true` | `false` sends the requests from before the stable prefix became the default. See [Context accounting](#context-accounting). |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
+| `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
@@ -221,9 +224,10 @@ retry policy. Events and JSON results report the estimate, actual prompt count i
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
-`[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
+`[agent] fixed_prefix` (default `true`) gives direct, interactive and API v2 console runs
 `fixed-prefix-v2`; `--fixed-prefix on|off` overrides it for a direct or interactive
-run. It snapshots the local date and UTC offset at each run's start, including across
+run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests from before
+it became the default. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 Recall goes before the task; the latest reflection goes last, in a final user message
 after the window, so a new attempt changes only what follows the shared history.
@@ -237,21 +241,30 @@ as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional
 `reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
-The legacy `/v1` API and the default-off request bytes remain unchanged.
 
-`--reflect-tool-guard on` (experimental, hidden from default help; no config key) keeps a
+`[agent] reflect_tool_guard` (default `true`; `--reflect-tool-guard on|off` overrides it) keeps a
 reflection request from inviting a tool call. The request offers the tools of the step's
 planning request (same list, order and schema, with `fixed_prefix` already the case) and its
 last user message ends with `Answer with the JSON object only; do not call any tool.`;
 `tool_choice` is untouched, so a server's prompt prefix holds. The retry request is unchanged.
-`on` adds `reflect_tool_guard` to the JSON result's `config`; `off` (default) changes no request
-byte. Whatever the option, the `reflection` event's `unreadable_reason` says why a first reply
-was unreadable (see [Events](events.md)).
+The guard adds `reflect_tool_guard` to the JSON result's `config`; with `false` (or `off`) the
+reflection request has neither the tools nor the sentence. Whatever the option, the `reflection`
+event's `unreadable_reason` says why a first reply was unreadable (see [Events](events.md)).
 
-`[agent] window_eviction = "chunk"` or `"boundary"` (default `"slide"`; `--window-eviction`
-overrides it) changes when working memory drops old turns so the retained history stays the same
-for several steps and a server's prompt cache can reuse it. Experimental; `slide` leaves request
-bodies and the JSON result as before. See [Memory](memory.md#working-memory-window).
+`[agent] window_eviction` (default `"chunk"`; `"boundary"` and `"slide"` are the other values;
+`--window-eviction` overrides it) sets when working memory drops old turns. `chunk` and
+`boundary` keep the retained history the same for several steps, so a server's prompt cache can
+reuse it; `slide` drops the oldest unit at every step once the window is full, as before
+`chunk` became the default. See [Memory](memory.md#working-memory-window).
+
+The three settings became defaults after a same-build A/B on the benchmark's coding tasks with a
+local model. A key you set in `[agent]` stays as you set it; a file without the key has the
+default, and saving writes a key only when it differs from the default. `melo --developer --help`
+lists the three flags under Experimental, and
+`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` send the requests of the
+earlier defaults. API v2 console sessions, console workers and the legacy `/v1` sessions read
+these three keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
+`[retrieval]`.
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character

@@ -14,6 +14,7 @@ from localmelo.melo.memory.recall import (
     RECALL_START,
 )
 from localmelo.melo.schema import Message, ToolCall
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 from .test_recall_loop import (
     FakeEmbedding,
@@ -57,7 +58,12 @@ async def test_a_long_entry_is_redacted_before_the_block() -> None:
     llm = FakeLLM(_answer())
     agent = _agent(
         llm,
-        _options(reasoning="compress", retriever="embedding", max_steps=1),
+        _options(
+            reasoning="compress",
+            retriever="embedding",
+            max_steps=1,
+            **LEGACY_CACHE_OPTIONS,
+        ),
         embedding=FakeEmbedding(),
     )
     await agent.hippo.long.add(
@@ -144,7 +150,12 @@ async def test_the_block_ends_with_its_delimiter_after_sanitizing() -> None:
     llm = FakeLLM(_answer())
     agent = _agent(
         llm,
-        _options(reasoning="compress", retriever="embedding", max_steps=1),
+        _options(
+            reasoning="compress",
+            retriever="embedding",
+            max_steps=1,
+            **LEGACY_CACHE_OPTIONS,
+        ),
         embedding=FakeEmbedding(),
     )
     await agent.hippo.long.add(

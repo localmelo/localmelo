@@ -41,6 +41,9 @@ chat_model = "qwen3:8b"
 | `replay_turns` | `[agent]` | 未设置 | 使用 `replay` 或 `compress+replay` 时，发送多少条最近助手轮次的推理；省略则发送范围内的每一轮。 |
 | `note_writer` | `[agent]` | `"auto"` | 压缩模式下，`auto`（模型的 `<note>`，否则用启发式）或 `heuristic`。 |
 | `tool_env` | `[agent]` | `[]` | 配置支持的直接运行和会话中，shell/Python 工具额外继承的环境变量名称。值从不保存；见[工具环境](#tool-environment)。 |
+| `fixed_prefix` | `[agent]` | `true` | `false` 会发送稳定前缀成为默认值之前的请求。见[上下文统计](#context-accounting)。 |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
+| `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
 | `recall_at` | `[retrieval]` | 未设置 | 一个由 `start`、`attempt`、`step` 和 `tool` 组成的列表。省略则为 `start`、`attempt` 和 `step`；除非点名，`tool` 从不开启。 |
 | `k` | `[retrieval]` | `3` | 每次召回的任务内命中数，从 1 到 10。 |
@@ -152,11 +155,13 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 当估算超过输入上限时，智能体会适配一份请求副本：它把可裁剪的旧工具结果变成预览，移除可选的旧思考，然后淘汰旧的完整单元，同时保留任务、工具 schema、匹配的调用/结果对、图片和失败证据。它不改历史记录和保留的对话。如果固定的上下文无法装下，运行以 `context_budget_exceeded` 和一条修复提示结束。被归类为上下文溢出的回复最多获得一次更小的请求重试，且不重新运行工具；其他提供方错误保持其既有的重试策略。事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
 
-`[agent] fixed_prefix = true` 让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前，最新的反思放在最后（窗口之后的一条最终用户消息）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。`all` 为这次运行冻结排序后的工具定义；`retrieve` 和以前一样继续选择工具。JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。旧版 `/v1` API 和默认关闭时的请求字节保持不变。
+`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前，最新的反思放在最后（窗口之后的一条最终用户消息）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。`all` 为这次运行冻结排序后的工具定义；`retrieve` 和以前一样继续选择工具。JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。
 
-`--reflect-tool-guard on`（实验性，默认帮助中隐藏；没有配置键）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。重试请求不变。`on` 会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；`off`（默认）不改变任何请求字节。无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
+`[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
 
-`[agent] window_eviction = "chunk"` 或 `"boundary"`（默认 `"slide"`；`--window-eviction` 会覆盖它）改变工作记忆丢弃旧轮次的时机，让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它。这是实验性设置；`slide` 让请求内容和 JSON 结果保持原样。见 [Memory](../../reference/memory.md#working-memory-window)。
+`[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。见 [Memory](../../reference/memory.md#working-memory-window)。
+
+这三个设置是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入。`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这三个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
 
 用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。历史记录为每个结果保存一份独立的、按模式脱敏的副本，最多 200,000 个字符（错误优先），并给出相对于脱敏后捕获的精确略去计数。计数保存在 `capture_metadata` 中，而不是已存文本里的带内标记。`acquisition_omitted_chars` 为 null，因为工具可能已经限制了自己的输出。捕获不是完整的文件或无限制的标准输出；脱敏基于模式，可能漏掉密钥。模型看到的经过检查的预览仍可能包含原始文本；`Message.tool_result`、`tool.finished` 事件和 trace 使用脱敏后的副本。既有的历史记录保留和权限仍然适用。`Agent.run_tool()` 不写入捕获的历史，并保留其现有的结果检查。该选项默认关闭。
 

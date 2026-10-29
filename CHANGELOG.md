@@ -884,6 +884,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
+  is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
+  the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that
+  defaults to `true`. A same-build A/B on the benchmark's coding tasks with a local
+  model chose them: more runs passed, prompt-cache efficiency rose and fewer
+  reflections were unreadable. Direct runs, the interactive UI, the gateway and
+  `AgentOptions()` read the defaults; a config key you set keeps its value, a file
+  without the key has the default, and saving writes a key only when it differs from
+  the default. `--fixed-prefix off --window-eviction slide --reflect-tool-guard off`
+  (hidden from default help, listed by `melo --developer --help`) send the requests of
+  the earlier defaults byte for byte. A default run's JSON result now carries
+  `prefix_cache` and the `config` keys `window_eviction` and `reflect_tool_guard`.
+  ([#223])
+
 - First-run setup prefers a model that is already in memory: when the server
   reports which models are loaded (oMLX `GET /v1/models/status`, Ollama
   `GET /api/ps`), they are marked `(loaded)` and the default answer is the first
@@ -1378,6 +1392,7 @@ earlier milestones.
 [#219]: https://github.com/localmelo/localmelo/pull/219
 [#221]: https://github.com/localmelo/localmelo/pull/221
 [#222]: https://github.com/localmelo/localmelo/pull/222
+[#223]: https://github.com/localmelo/localmelo/pull/223
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
