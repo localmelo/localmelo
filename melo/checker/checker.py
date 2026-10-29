@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Collection
+from contextvars import ContextVar
 
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
@@ -40,6 +41,11 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
         total += len(tc.tool_name)
         total += len(json.dumps(tc.arguments, ensure_ascii=False, default=str))
     return total
+
+
+# True while the executor checks a call of the harness itself (see
+# Executor.execute_structured's ``harness``).
+HARNESS_CALL: ContextVar[bool] = ContextVar("localmelo_harness_call", default=False)
 
 
 class Checker:
@@ -102,15 +108,24 @@ class Checker:
     async def pre_execute(
         self, tool_call: ToolCall, tool_def: ToolDef | None
     ) -> CheckResult:
+        """Allow or refuse a call before it runs.
+
+        A call that :data:`HARNESS_CALL` marks, one the harness makes itself
+        (a brief's check), skips the mode's refusal of an ``exec`` tool: that
+        refusal keeps the tool from the model, and the person who wrote the
+        check chose it.
+        """
         if tool_def is None:
             return CheckResult(
                 allowed=False, reason=f"Unknown tool: {tool_call.tool_name}"
             )
 
         tier = self.tier(tool_def)
-        refusal = exec_refusal(
-            tool_call.tool_name, tier, self._mode, self._named_builtins
-        )
+        refusal = None
+        if not HARNESS_CALL.get():
+            refusal = exec_refusal(
+                tool_call.tool_name, tier, self._mode, self._named_builtins
+            )
         if refusal is not None:
             return CheckResult(allowed=False, reason=refusal)
         return CheckResult(allowed=True)
