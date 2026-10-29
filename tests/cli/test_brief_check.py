@@ -238,6 +238,24 @@ class TestTestsRecord:
         [item] = observer.tests()["items"]
         assert len(item["command"]) == 2000 and item["command_truncated"] is True
 
+    def test_the_output_tail_is_kept_redacted_and_bounded(self, tmp_path: Path) -> None:
+        observer = self._observer(tmp_path)
+        observer(_notice(1, "pytest -q", 1, output_tail="API_KEY=hunter2\nlast"))
+        [item] = observer.tests()["items"]
+        assert "hunter2" not in item["output_tail"]
+        assert item["output_tail"].endswith("\nlast")
+        observer(_notice(2, "pytest -q", 1, output_tail="y" * 9000))
+        [item] = observer.tests()["items"]
+        assert len(item["output_tail"]) == 4000
+
+    def test_an_old_notice_without_a_tail_gives_an_item_without_one(
+        self, tmp_path: Path
+    ) -> None:
+        observer = self._observer(tmp_path)
+        observer(_notice(1, "pytest -q", 1))
+        [item] = observer.tests()["items"]
+        assert "output_tail" not in item
+
 
 class TestCli:
     def _main(
@@ -337,6 +355,24 @@ class TestCli:
         assert item["source"] == "brief_check"
         assert len(bodies) == 2
         assert "Exit code: 1" in bodies[1]["messages"][-1]["content"]
+
+    def test_a_failing_check_records_the_tail_of_its_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record, _bodies, _built = self._main(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            "Do it.\nCheck: seq 1 30; echo API_KEY=hunter2; exit 4\n",
+            ["Done"],
+        )
+        [item] = record["tests"]["items"]
+        lines = item["output_tail"].splitlines()
+        assert (lines[0], len(lines)) == ("12", 20)
+        assert "hunter2" not in item["output_tail"]
 
     def test_a_check_that_keeps_failing_is_recorded_failed(
         self,
