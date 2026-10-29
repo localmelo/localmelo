@@ -186,6 +186,8 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    WINDOW_EVICT_CHUNK,
+    WINDOW_FIT_TARGET,
     CandidateItem,
     ImagePart,
     MemoryCandidate,
@@ -1046,6 +1048,8 @@ class _RunState:
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
     task_query_msg: Message | None = None
+    # User messages the run inserted mid-run (inbox): kept at a boundary drop.
+    pinned: list[Message] = dataclasses.field(default_factory=list)
     # An opt-in source of parent instructions at planning boundaries.
     inbox: InboxSource | None = None
     # Replay counters (see memory_stats on RunResult).
@@ -1572,12 +1576,17 @@ class Agent:
         # the documented behavior of that option: no long-term recall, no
         # long-term writes, no reflection promotion, and reflections are
         # still cleared. self._embedding stays set so close() closes it.
+        # window_eviction "chunk" and "boundary": drop in chunks (see schema).
+        self._evicts_in_chunks = self.options.window_eviction != "slide"
         self.hippo = Hippo(
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
             procedures=procedures_backend,
             short_term_empty_prefix=self.options.reasoning != "legacy",
+            short_term_evict_chunk=(
+                WINDOW_EVICT_CHUNK if self._evicts_in_chunks else 0
+            ),
             memory=self.options.memory,
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
@@ -1646,6 +1655,7 @@ class Agent:
             empty_prefix=self.options.reasoning != "legacy",
             context_budget=budget,
             fixed_prefix=self.options.fixed_prefix,
+            fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
         )
 
         names = (
@@ -3325,7 +3335,7 @@ class Agent:
             empty_prefix=self.hippo.working.empty_prefix,
         )
 
-        async def fits(kept: list[Message]) -> bool:
+        async def fits(kept: list[Message], target: float = 1.0) -> bool:
             sent = _as_sent(
                 kept,
                 self.options,
@@ -3338,6 +3348,7 @@ class Agent:
             check = await self.checker.pre_plan(
                 others + planned,
                 count_thinking=self._counts_thinking,
+                cap_ratio=target,
             )
             return check.allowed
 
@@ -3386,6 +3397,14 @@ class Agent:
                     break
             else:
                 return  # not even the newest unit fits: keep the window
+            if first and self._evicts_in_chunks:
+                # Drop to WINDOW_FIT_TARGET of the cap, so the next steps fit
+                # without dropping again (when no such cut fits, keep *first*).
+                for deeper in range(first + 1, len(units)):
+                    kept = [msg for unit in units[deeper:] for msg in unit]
+                    if await fits(kept, WINDOW_FIT_TARGET):
+                        first = deeper
+                        break
             if first:
                 dropped = self.hippo.working.drop_oldest_units(first)
                 logger.info(
@@ -4564,6 +4583,7 @@ class Agent:
                     role="user", content="\n\n".join(text for _, text in pending)
                 )
                 self.hippo.working.append(inserted)
+                run.pinned.append(inserted)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -5836,6 +5856,8 @@ class Agent:
             "timeout_s": opts.timeout_s,
             "tools": sorted(tool.name for tool in self.hippo.list_tools()),
         }
+        if opts.window_eviction != "slide":
+            config["window_eviction"] = opts.window_eviction
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns
@@ -6003,6 +6025,10 @@ class Agent:
                 continue
             assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
+            if opts.window_eviction == "boundary" and continue_run:
+                # The reflection carries the finished attempt; the next one
+                # starts from the query (and what the run pinned) alone.
+                self.hippo.working.drop_since(run.task_query_msg, run.pinned)
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":

@@ -70,6 +70,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `--window-eviction slide|chunk|boundary` (and `[agent] window_eviction`), an
+  experimental option for the prompt-cache A/B: `chunk` drops the working-memory
+  window in chunks of eight messages and the prompt-cap fit down to 70% of the
+  cap, so the retained history stays the same for several steps; `boundary` does
+  the same and also drops a finished attempt's turns when the next attempt starts
+  after a reflection. The default, `slide`, is unchanged, and non-default modes
+  add `window_eviction` to the JSON result's `config` ([#191]).
+
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
   with `stream_options.include_usage`; a missing key means not reported), and
@@ -1136,3 +1144,4 @@ earlier milestones.
 [#188]: https://github.com/localmelo/localmelo/pull/188
 [#189]: https://github.com/localmelo/localmelo/pull/189
 [#190]: https://github.com/localmelo/localmelo/pull/190
+[#191]: https://github.com/localmelo/localmelo/pull/191
