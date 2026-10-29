@@ -133,6 +133,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- What runs now, in the web console header and the macOS app (#213).
+  `GET /api/health` gains `status`: `running` counts the console's chats with a
+  turn in flight, scheduler tasks in `running`, and, from the CLI file under a
+  live lease, direct runs and terminal chats; `tasks` is the scheduler queue the
+  status row shows (`running`, `queued`, `held`, `top_level`); `items` lists
+  what runs, at most 20. The console header gets a "N running" chip, hidden at
+  0 and kept on a narrow screen, that opens that list with a link to each chat,
+  task card or Workers detail. The macOS app's menu-bar title reads `Melo · N`
+  while N sessions run, and its quit dialog names what would stop ("2 tasks and
+  1 chat are running"). One health call adds about 0.4 ms on a store of
+  1,000 sessions and 1,000 tasks: the task counts read only the live states by
+  their index (`TaskStore.list_tasks(states)`). ([#NN])
 - Terminal chats in the web console, read-only and redacted (#213). The Workers
   view has a Worker runs / Terminal chats chip pair; `GET /api/sessions?kind=terminal`
   lists the chats of interactive `melo` sessions from the CLI file (never in the
@@ -1413,6 +1425,7 @@ earlier milestones.
 [#223]: https://github.com/localmelo/localmelo/pull/223
 [#224]: https://github.com/localmelo/localmelo/pull/224
 [#226]: https://github.com/localmelo/localmelo/pull/226
+[#NN]: https://github.com/localmelo/localmelo/pull/NN
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -39,6 +39,14 @@ for a nondefault port). Keep the link private; see [gateway security](gateway.md
    most once a second while events arrive and on the page's polls; on a narrow
    screen it drops segments from the right. An open worker run shows the same
    row.
+5. A **N running** chip in the header counts what runs now: this console's
+   chats with a turn in flight, tasks, direct runs and terminal chats (a run or
+   terminal chat counts only while its process holds a live lease). It is
+   hidden at 0 and stays on a narrow screen. Select it for a short list, each
+   row naming the kind and the title and opening that chat, the task's card or
+   the Workers detail; Esc or a click elsewhere closes it. The numbers come
+   from `status` of `GET /api/health`, read with the page's 4-second poll; the
+   list shows 20 rows at most and says how many more run.
 
 The sidebar lists chats newest first, with search and switching, and closes a
 chat. Drafts stay with each chat in the current browser tab. The open chat's

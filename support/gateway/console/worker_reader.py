@@ -24,6 +24,7 @@ from localmelo.support.sessions.store import (
     _escape_like,
     _rows,
 )
+from localmelo.support.sessions.worker import redact_worker
 
 from .terminal_redaction import (
     redact_event,
@@ -200,6 +201,31 @@ class WorkerReader(SessionStore):
                     )
                 )
             return records
+
+    async def running(self) -> list[tuple[str, str, str]]:
+        """``(kind, id, title)`` of every worker run and terminal chat running now.
+
+        One query over the index of running turns; a turn counts only under a
+        live lease, so a run whose process died is not listed. Newest first.
+        A terminal chat's title is redacted, as on every other read.
+        """
+        if not os.path.exists(self.path):
+            return []
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT s.kind, s.id, s.title, s.lease_holder, s.lease_until "
+                "FROM turns t JOIN sessions s ON s.id = t.session_id "
+                "WHERE t.status = 'running' AND s.kind IN ('worker', 'chat') "
+                "ORDER BY t.started_at DESC, s.id DESC",
+            )
+            now = self._clock()
+        return [
+            (kind, sid, redact_worker(title) if kind == "chat" else title)
+            for kind, sid, title, holder, until in rows
+            if self._running_is_live(holder, until, now)
+        ]
 
     async def get_session(self, session_id: str) -> SessionInfo | None:
         if not os.path.exists(self.path):

@@ -895,6 +895,23 @@ async def test_create_writes_the_task_session_and_its_first_rows(
     assert [row[1] for row in logged] == ["task.created"]
 
 
+async def test_list_tasks_can_be_limited_to_states(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    first, _ = await create_task(tasks, spec("One"), origin="user")
+    second, _ = await create_task(tasks, spec("Two"), origin="user")
+    async with store.component_transaction("test_state") as conn:
+        await conn.execute(
+            "UPDATE tasks SET state = 'running' WHERE task_id = ?", (first.task_id,)
+        )
+    both = {first.task_id, second.task_id}
+    assert {r.task_id for r in await tasks.list_tasks()} == both
+    assert [r.task_id for r in await tasks.list_tasks(("running",))] == [first.task_id]
+    assert {r.task_id for r in await tasks.list_tasks(("running", "queued"))} == both
+    assert await tasks.list_tasks(("held",)) == []
+    assert await tasks.list_tasks(()) == []
+
+
 async def test_create_persists_validated_workspace_separately_from_request(
     store: SessionStore,
     tasks: TaskStore,

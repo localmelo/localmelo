@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from localmelo.support.sessions.store import SessionStore, SessionStoreError
-from localmelo.support.usage_snapshot import TaskCounts, UsageSnapshot
+from localmelo.support.sessions.store import SessionStore
+from localmelo.support.usage_snapshot import UsageSnapshot
 
 from .probe import LOCAL_BACKENDS
 from .routes_sessions import _read_session, _store_call
+from .running import live_tasks, task_counts
 
 if TYPE_CHECKING:
     from . import Console
@@ -30,19 +31,6 @@ if TYPE_CHECKING:
 # Sessions whose fold is kept; the least recently read one is dropped first.
 _CACHED_FOLDS = 64
 _PAGE = 1000
-_COUNTED = ("running", "queued", "held")
-
-
-async def _task_counts(console: Console) -> TaskCounts | None:
-    """The scheduler's queue, or ``None`` when the task store cannot be read."""
-    try:
-        records = await console.workers.tasks.list_tasks()
-    except (SessionStoreError, AttributeError):
-        return None
-    live = [record for record in records if record.state in _COUNTED]
-    counts = {name: sum(record.state == name for record in live) for name in _COUNTED}
-    top = min((record.level_eff for record in live), default=None)
-    return TaskCounts(counts["running"], counts["queued"], counts["held"], top)
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -80,7 +68,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         # A chat or task of the gateway's file, or a worker run of the CLI file.
         _, store = await _read_session(console, session_id)
         snap = await fold(session_id, store)
-        tasks = await _task_counts(console)
+        tasks = task_counts(await live_tasks(console))
         local = console.cfg.chat_backend in LOCAL_BACKENDS
         return JSONResponse(
             content={
