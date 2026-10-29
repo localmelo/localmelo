@@ -172,7 +172,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 暂停会关闭 worker 的围栏，并在一个已在运行的提供方或工具结束时记录待处理的暂停。在持有的计划、反思或未送达的审批处，worker 会停放，关闭其资源，并根据已持久化的证据保存一张卡片。未送达的审批会被撤回；恢复会从卡片开始，并再次询问。尚未启动的已暂停任务在恢复之前不会启动 worker。如果无法保存停放状态，worker 会在关闭围栏的情况下重试；三次失败之后，它会保存一个中断的任务和卡片。如果存储无法持久化该结果，恢复和停止会返回 503 `store_unavailable`，直到最终化成功。资源关闭失败会隔离该 worker，并保持其槽位被计数；重试之后，中断的任务会报告 `cleanup failed; slot held until restart`。
 
-任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
+任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
+/api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
 
 同一时间最多常驻四个 worker，包括被隔离的 worker。任务行在网关重启之后仍然保留。启动时会中断状态不确定的任务，保留有效的已停放卡片，并保留待处理的暂停，但不进行重放。每次创建都会在任何启动之前、在创建事务之内记录一个持久的“从未启动”证明；带有该证明的可运行排队任务，在启动围栏之后可以运行一次。历史状态不确定的已恢复任务会拒绝 `PATCH` 的恢复和优先级变更，直到使用受控恢复；停止仍然可用。无法持久化启动恢复会使存储保持不可用。用同一个 `request_key` 重试会返回已有任务，并且不会重新启动它。
 
