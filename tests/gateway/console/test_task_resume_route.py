@@ -17,6 +17,7 @@ from localmelo.support.gateway.resume_evidence import (
 )
 from localmelo.support.gateway.resume_tokens import ResumeBinding
 from localmelo.support.gateway.task_store import TaskNotFoundError
+from localmelo.support.sessions.store import SessionStoreError
 
 
 class FakeResumeWorkers:
@@ -42,6 +43,8 @@ class FakeResumeWorkers:
             raise StaleConfirmationError("The recovery evidence changed.")
         if operation_id == "unknown":
             raise RecoveryUnknownError()
+        if operation_id == "unavailable":
+            raise SessionStoreError("store unavailable")
         if operation_id == "blocked":
             raise ResumeRefusedError(
                 "Resume unavailable: recovery information is missing. "
@@ -104,6 +107,7 @@ def test_confirmation_required_carries_one_token_and_the_warning(
         ("stale", 409, "stale_confirmation", None),
         ("unknown", 409, "recovery_unknown", "unresolved_operation"),
         ("blocked", 409, "invalid_transition", "missing_card"),
+        ("unavailable", 503, "store_unavailable", None),
         ("missing", 404, "not_found", None),
     ],
 )

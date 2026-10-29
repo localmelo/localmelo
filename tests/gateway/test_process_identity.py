@@ -35,6 +35,8 @@ def test_process_group_absence_checks_boot_pid_and_start(
     # A verified boot change counts as gone; a malformed stored id is unknown.
     assert identity.gone((123, 123, other_boot, "old"))
     assert not identity.gone((123, 123, "other-boot", "old"))
+    # A stored id with the other platform's shape is malformed too.
+    assert not identity.gone((123, 123, "1:2", "old"))
 
 
 def test_unreadable_boot_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:

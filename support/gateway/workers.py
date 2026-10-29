@@ -616,7 +616,20 @@ class TaskWorkers:
                 raise SessionStoreError("store unavailable")
             current = await self.tasks.get_task(task_id)
             if await self.tasks.has_resume_receipt(task_id, operation_id):
-                # A matching retry returns the current row without a second turn.
+                # A matching retry returns the current row without a second
+                # turn, and re-admits a queue this process committed but did
+                # not finish registering (for example after a cancelled commit).
+                if (
+                    current.state == "queued"
+                    and current.level < 5
+                    and task_id not in self._quarantined
+                    and task_id not in self._stopping
+                ):
+                    self._register(current)
+                    self._eligible.add(task_id)
+                    self._ready[task_id].set()
+                    self.gate.update_task(task_id, paused=False)
+                    await self._schedule()
                 return await self._body(current)
             if task_id in self._quarantined:
                 raise RecoveryUnknownError(

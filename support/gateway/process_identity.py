@@ -15,16 +15,18 @@ _BOOT_UUID = re.compile(
 _BOOT_TIME = re.compile(r"^[0-9]+:[0-9]{1,6}$")
 
 
-def _known_boot(value: str) -> bool:
-    """Whether *value* has a boot-id shape this platform writes.
+def _boot_kind(value: str) -> str | None:
+    """The boot-id shape *value* has, or ``None`` when it does not parse.
 
-    A stored id that does not parse is malformed evidence, not a boot this
-    machine could have rebooted away from.
+    A stored id that does not parse, or that has the other platform's shape, is
+    malformed evidence, not a boot this machine could have rebooted away from.
     """
     if _BOOT_UUID.fullmatch(value):
-        return True
+        return "uuid"
     match = _BOOT_TIME.fullmatch(value)
-    return bool(match) and int(value.rsplit(":", 1)[1]) < 1_000_000
+    if match and int(value.rsplit(":", 1)[1]) < 1_000_000:
+        return "time"
+    return None
 
 
 class _BSDInfo(ctypes.Structure):
@@ -159,7 +161,8 @@ def gone(record: tuple[int, int, str, str]) -> bool:
     except (OSError, OverflowError, ValueError):
         return False
     if current_boot != boot:
-        return _known_boot(current_boot) and _known_boot(boot)
+        kind = _boot_kind(current_boot)
+        return kind is not None and kind == _boot_kind(boot)
     try:
         try:
             os.killpg(pgid, 0)

@@ -234,7 +234,7 @@ unsupported check is unknown, not proof that a process stopped.
 
 | Evidence | Action |
 |---|---|
-| Terminal task, invalid workspace, missing card on a started task, stale execution identity, or an unresolved recovery operation | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
+| Terminal task, invalid workspace, missing card on a started task, stale execution identity, unresolved recovery operation or unsettled worker cleanup | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
 | Proven never-started queued or parked task | Queue through the durable launch fence, first start, no card or confirmation |
 | Started task with a valid card, trusted complete capture for the whole execution, and every recorded group verifiably gone | Queue without confirmation |
 | Anything else, including missing, untrusted, partial or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
@@ -245,7 +245,7 @@ malformed record is unknown, so that path needs confirmation. An empty group set
 qualifies only when the capture is trusted and complete; missing rows alone
 prove nothing.
 
-The first unconfirmed `confirmation_required` (`409`, `details.reason` and
+An unconfirmed `confirmation_required` (`409`, `details.reason` and
 `details.warning`) carries a single-use token in `details.confirmation_token`
 with `details.expires_in_s` 300. The token lives in memory only and is bound to
 the task, source execution, evidence identity and CAS generation that the

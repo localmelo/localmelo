@@ -292,6 +292,25 @@ async def test_terminal_and_invalid_workspace_block_without_confirmation(
     assert terminal.value.reason == "terminal"
 
 
+async def test_stale_execution_identity_blocks_resume(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, _ = worker_setup
+    task_id = await _started(workers, workspace, capture=True)
+    await _open_and_freeze(workers, monkeypatch)
+    async with workers.store.component_transaction("seed_stale") as conn:
+        await conn.execute(
+            "UPDATE recovery_provenance SET execution_id = 'exec-other' "
+            "WHERE task_id = ?",
+            (task_id,),
+        )
+    with pytest.raises(ResumeRefusedError) as refused:
+        await _resume(workers, task_id, "resume-1")
+    assert refused.value.reason == "stale_identity"
+    assert (await workers.tasks.get_task(task_id)).state == "interrupted"
+
+
 async def test_paused_priority_survives_resume_and_snapshot_is_cleared(
     worker_setup: tuple[TaskWorkers, Path, SessionStore],
     monkeypatch: pytest.MonkeyPatch,
@@ -570,9 +589,12 @@ async def test_commit_boundary_is_reconciled(
         await _resume(workers, task_id, "resume-1", token)
     assert fired
     if after_commit:
-        # The receipt exists: the same operation returns success, no second turn.
+        # The receipt exists: the same operation returns success, no second
+        # turn, and the committed queue is admitted in this process.
         retried = await _resume(workers, task_id, "resume-1")
         assert retried["state"] == "queued"
+        assert task_id in workers._eligible
+        assert workers._ready[task_id].is_set()
         assert len(await _events(store, task_id, "sched.resume_confirmed")) == 1
     else:
         assert (await workers.tasks.get_task(task_id)).state == "interrupted"

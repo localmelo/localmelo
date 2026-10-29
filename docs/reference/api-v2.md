@@ -349,7 +349,8 @@ The route consumes evidence, never absence of evidence:
 - A terminal task, invalid workspace, missing card for a started task, or stale
   execution identity returns 409 `invalid_transition` with a `details.reason`;
   a missing card says to start again as a new task. An unresolved earlier
-  recovery operation returns 409 `recovery_unknown`.
+  recovery operation or an unsettled worker cleanup returns 409
+  `recovery_unknown`.
 
 A matching retry with the same `operation_id` returns 202 with the current task
 and never starts a second turn; a token is consumed at most once. Stop always
