@@ -57,6 +57,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Interactive `! COMMAND` runs a command in the user's own shell from an idle
+  prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
+  never the agent) and restored once afterwards. It is not a sandbox. Its output
+  stays in the terminal, out of model context, history and stored events;
+  `/attach !` attaches a bounded, redacted snapshot of the last output
+  (without concealed text or anything before a screen clear) to the next
+  message, after showing the exact snapshot and asking `[y/N]`. `!` alone shows help and `\! text` sends a literal leading `! `.
+  melo exiting ends only the command's own process group. [#180]
+
 - Controlled task Resume: `POST /api/tasks/{id}/resume` (also
   `/api/v2/tasks/{id}/resume`) queues a recovered task only through the
   evidence decision table. Every create records a durable never-started proof
@@ -1096,3 +1105,4 @@ earlier milestones.
 [#169]: https://github.com/localmelo/localmelo/pull/169
 [#175]: https://github.com/localmelo/localmelo/pull/175
 [#177]: https://github.com/localmelo/localmelo/pull/177
+[#180]: https://github.com/localmelo/localmelo/pull/180

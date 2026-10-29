@@ -670,6 +670,8 @@ async def main_async(
             signals.uninstall()
             with contextlib.suppress(NotImplementedError, RuntimeError):
                 loop.remove_signal_handler(signal.SIGINT)
+        if session.shell_ran:
+            restore()  # a ! command's end may have re-applied the prompt's raw mode
         if session.saved_resume_hint:
             out.print(session._text(session.saved_resume_hint))
         return session.exit_code, signals.received

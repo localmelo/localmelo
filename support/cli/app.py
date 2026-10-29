@@ -82,6 +82,7 @@ from localmelo.support.cli.text import (
     wrap_words,
 )
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
+from localmelo.support.cli.usershell import parse as parse_shell
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionInfo, SessionStore
 
@@ -1126,7 +1127,9 @@ class InteractiveApp:
             if hint:
                 self.hint(hint)
             return
-        buffer.reset(append_to_history=True)
+        # A shell command can hold a secret: it is not saved in the history.
+        shell = parse_shell(text)
+        buffer.reset(append_to_history=shell is None or shell.kind == "literal")
 
     def _escape(self) -> None:
         """Esc: close the menu, leave a question, else stop what runs."""

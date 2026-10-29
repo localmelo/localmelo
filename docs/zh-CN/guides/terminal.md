@@ -137,6 +137,32 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 已提交的快照随会话保存在 `~/.cache/localmelo/cli/sessions.db`（明文，未加密）；`/retry` 使用保存的快照，而不是重新打开文件。持久化并不意味着完整重放：`pairs` 恢复为用户文本和回答提供 32,000 个字符的预算，可能整轮省略附件；`window` 恢复在保留的检查点或尾部不完整包含它时，可能裁剪或省略它。如果模型需要的内容没有被恢复，请重新附加并再次发送。简单的 `melo ""` 循环和直接模式不支持附件。
 
+<a id="run-a-shell-command"></a>
+
+### 运行 shell 命令
+
+在空闲的提示符下，以 `! `（感叹号加空格）开头的消息会把其余部分交给你自己的 shell（`$SHELL`，否则 `/bin/sh`）运行：以你的身份，工作目录为工作区文件夹：
+
+```text
+! echo from-the-child; exit 3
+```
+
+```text
+! user shell · ~/demo-project
+$ echo from-the-child; exit 3
+from-the-child
+  └ exit 3 · 0.0s
+  └ /attach ! shows this output (redacted, 15 bytes) and asks before attaching it
+```
+
+- **不是沙箱。** 该命令不是模型工具：不经过审批、检查器或工作区策略，拥有你账户的全部权限，也可以离开工作区。melo 只把终端交给它。
+- **命令运行期间终端归它所有：**读取输入、绘制屏幕或响应窗口大小变化的程序都能正常工作。Ctrl+C 和 Esc 交给命令，绝不会取消代理；命令结束后，Ctrl+C、草稿和队列的规则不变。块的末尾显示退出码（`exit 3`）或信号（`killed by SIGTERM`）和耗时。无论命令如何结束，光标、颜色、终端模式和提示符都只恢复一次。
+- **输出只留在终端。**输出不会进入模型、对话或事件，命令也不会存入输入历史。`/attach !` 会把最近一次输出的脱敏快照（最后 256 KiB，不含终端从未显示的文本：隐藏文本和清屏之前的内容；截断后的开头不完整行会被丢弃）附加到你的下一条消息。它总会先打印将发送的原文并询问 `[y/N]`（默认 No），即使没有脱敏；你不回答 yes，就不会附加任何内容。附加后，快照会像 [`/attach PATH`](#attach-text-files) 的文件一样未加密地随会话保存。
+- **忙时拒绝。**在轮次、审批、会话切换或另一条命令进行期间，`! ...` 会被拒绝（`! runs only when melo is idle`），草稿保留。
+- 单独输入 `!` 会显示上述帮助。要发送以 `! ` 开头的消息，写成 `\! text`：反斜杠会被去掉。
+- melo 退出时命令的进程组收到 SIGTERM，终端关闭时收到 SIGHUP，2 秒后收到 SIGKILL。只会向该进程组发信号；自行脱离该进程组的程序（`setsid`、`nohup`）会继续运行。
+- 直接模式（`melo "task"`）和纯文本循环不支持此功能。
+
 <a id="inspect-undo-or-copy-a-conversation"></a>
 
 ### 查看、撤销或复制对话

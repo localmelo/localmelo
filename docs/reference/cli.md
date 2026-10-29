@@ -304,6 +304,15 @@ These options apply to `melo` without a task.
   snapshot, not the live file. Pairs resume has a 32,000-character user/answer
   budget and may omit a turn; window resume can clip or omit it too. See
   [Attach text files](../guides/terminal.md#attach-text-files).
+- Shell commands in the interactive UI: at an idle prompt `! COMMAND` runs
+  COMMAND in `$SHELL` (else `/bin/sh`) as the user, in the workspace, with the
+  terminal handed over (Ctrl+C and Esc go to the command). It is not a sandbox:
+  no approval, checker or policy applies. The output stays in the terminal, never
+  in model context, history or stored events; `/attach !` attaches a redacted
+  snapshot of the last output to the next message. `!` alone shows help,
+  `\! text` sends a literal leading `! `; during a turn, approval, switch or
+  another command it is refused and the draft kept. Not saved in the input
+  history. See [Run a shell command](../guides/terminal.md#run-a-shell-command).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see
   [Usage errors](#usage-errors).

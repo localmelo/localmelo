@@ -1386,3 +1386,148 @@ async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
     session.enter("/approvals forget file_write")
     await _until(lambda: "Approvals: ask · grants: none" in out.text())
     assert session.approvals.allowed_tools == frozenset()
+
+
+# ── ! commands ──
+
+
+async def test_a_shell_command_runs_prints_its_block_and_stays_out_of_the_model(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.enter("! echo SHELL_ONLY_MARK; exit 4") is None
+    assert session.state == "shell"
+    await setup.idle()
+    text = setup.out.text()
+    assert "! user shell · " in text and "$ echo SHELL_ONLY_MARK; exit 4" in text
+    assert "└ exit 4 · " in text
+    assert "/attach ! shows this output" in text
+    # The output is the child's to draw: this fake terminal has none, and
+    # nothing of it is printed by melo, stored, or sent.
+    assert session.enter("Summarize it") is None
+    await setup.idle()
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    sent = repr(model.requests)
+    assert "SHELL_ONLY_MARK" not in sent and "user shell" not in sent
+    [turn] = await setup.rows()
+    assert "SHELL_ONLY_MARK" not in repr(turn)
+    assert session.attachment_line == ""  # nothing is attached silently
+
+
+async def test_bang_alone_shows_help_and_runs_nothing(setup: Setup) -> None:
+    assert setup.session.enter("!") is None
+    assert setup.session.state == "idle"
+    text = setup.out.text()
+    assert "is not a sandbox" in text and "/attach !" in text
+    assert "user shell" not in text
+
+
+async def test_the_escape_sends_a_literal_leading_bang_to_the_model(
+    setup: Setup,
+) -> None:
+    assert setup.session.enter("\\! rm is a command") is None
+    await setup.idle()
+    [turn] = await setup.rows()
+    assert turn.typed_text == "! rm is a command"
+    assert "user shell" not in setup.out.text()
+
+
+async def test_bang_text_is_refused_and_the_draft_kept_while_busy(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.clear()  # the turn waits for a reply that never comes
+    assert session.enter("work") is None
+    await asyncio.wait_for(model.blocked.wait(), 5)
+    for text in ("! ls", "!"):
+        hint = session.enter(text)
+        assert hint is not None and "only when melo is idle" in hint
+    assert session.queued is None and "user shell" not in setup.out.text()
+    assert session.stop()
+    await setup.idle()
+    session._state = "switching"
+    assert "wait for the switch" in (session.enter("! ls") or "")
+    session._state = "idle"
+    # While a command runs, another is refused too, and so is a message.
+    assert session.enter("! sleep 30") is None
+    await _until(
+        lambda: session._shell is not None and session._shell._process is not None
+    )
+    assert session.enter("! ls") == "A ! command is already running."
+    assert session.enter("hello") == "A ! command is running."
+    assert session.enter("!") == "A ! command is already running."
+    await session.shutdown()  # melo exits: the command's group is ended
+    assert session.state == "idle"
+
+
+async def test_attach_bang_attaches_the_last_output_only_when_asked(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert "No ! output to attach" in setup.out.text()
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    assert session.enter(f"! echo ok; echo {secret}") is None
+    await setup.idle()
+    assert session.attachment_line == ""
+    setup.app.answers.append("n")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert session.attachment_line == ""  # redacted: shown, and declined
+    setup.app.answers.append("y")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert "shell output: echo ok" in session.attachment_line
+    # The command line the person typed is echoed as typed; the snapshot is not.
+    assert secret not in setup.out.text().split("review the exact snapshot")[1]
+    assert session.enter("Why?") is None
+    await setup.idle()
+    [turn] = await setup.rows()
+    assert turn.attachments is not None
+    [attached] = turn.attachments
+    assert attached.name.startswith("shell output: ") and secret not in attached.name
+    assert attached.text.strip() == "ok\n[redacted]"  # exactly what was shown
+
+
+async def test_a_command_without_output_leaves_nothing_to_attach(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.enter("! echo first") is None
+    await setup.idle()
+    assert session.enter("! true") is None
+    await setup.idle()
+    assert "/attach ! attaches" not in setup.out.text().split("$ true")[1]
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert "No ! output to attach" in setup.out.text()
+
+
+async def test_attach_bang_always_shows_the_exact_output_and_asks(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    # Nothing is redacted here, and a concealed line was never on screen.
+    assert session.enter("! printf 'ok\\n\\033[8mHIDDEN_MARK\\033[0m\\nend\\n'") is None
+    await setup.idle()
+    setup.app.answers.append("n")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert session.attachment_line == ""  # declined: asking is the default
+    shown = setup.out.text().split("Review the exact output that would be sent:")[1]
+    assert "ok" in shown and "end" in shown
+    assert "HIDDEN_MARK" not in shown.split("$ ")[0]
+    setup.app.answers.append("y")
+    assert session.enter("/attach !") is None
+    await setup.idle()
+    assert "shell output: " in session.attachment_line
+    assert session.enter("Why?") is None
+    await setup.idle()
+    [turn] = await setup.rows()
+    assert turn.attachments is not None
+    [attached] = turn.attachments
+    assert attached.text == "ok\n\nend\n" and "HIDDEN_MARK" not in attached.text

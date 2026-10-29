@@ -18,10 +18,14 @@ import contextlib
 import logging
 import os
 import shlex
+import sys
 import time
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from typing import Any, Final, Literal, cast
 
+from prompt_toolkit.application.application import attach_winch_signal_handler
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.application.run_in_terminal import in_terminal
 from prompt_toolkit.document import Document
 from rich.text import Text
 
@@ -33,7 +37,7 @@ from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import RunResult
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
-from localmelo.support.cli import commands
+from localmelo.support.cli import commands, usershell
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
@@ -170,11 +174,19 @@ def _progress_lines(payload: dict[str, Any], symbols: Any) -> list[str]:
 BELL_AFTER_S: Final = 30.0
 UNDO_HINT: Final = "Undoing the last turn; wait for it to finish."
 
-State = Literal["idle", "running", "stopping", "switching"]
+State = Literal["idle", "running", "stopping", "switching", "shell"]
 
 _STATE_HINTS: Final = {
     "stopping": "Stopping the turn; enter sends once it has stopped.",
     "switching": "Switching the session or model; esc cancels it.",
+    "shell": "A ! command is running.",
+}
+# Why a "! command" draft waits: the draft is kept.
+_SHELL_REFUSED: Final = {
+    "running": "! runs only when melo is idle (esc stops the turn).",
+    "stopping": "! runs only when melo is idle; the turn is stopping.",
+    "switching": "! runs only when melo is idle; wait for the switch to finish.",
+    "shell": "A ! command is already running.",
 }
 
 
@@ -213,6 +225,10 @@ class CliSession:
         self.app: InteractiveApp | None = None
         self.queued: str | None = None
         self._attachments: tuple[Attachment, ...] = ()
+        # The last ! command's output, as an attachment to offer; never stored.
+        self._shell_output: Attachment | None = None
+        self._shell: usershell.ShellRun | None = None
+        self.shell_ran = False
         self.activity: str | None = None
         self.title = ""
         self.models: list[str] = []
@@ -289,6 +305,11 @@ class CliSession:
 
     def enter(self, text: str) -> str | None:
         """Act on Enter: run a command, send, or queue (see the app's contract)."""
+        shell = usershell.parse(text)
+        if shell is not None:
+            if shell.kind != "literal":
+                return self._enter_shell(shell, text)
+            text = shell.text  # the escape: the message "! text"
         parsed = commands.parse_command(text)
         if parsed is not None:
             command, name, arguments = parsed
@@ -344,6 +365,22 @@ class CliSession:
             UNDO_HINT if self._pending_command == "undo" else _STATE_HINTS[self._state]
         )
 
+    def _enter_shell(self, shell: usershell.ShellInput, text: str) -> str | None:
+        """``! command`` and ``!``: only when idle, else the draft stays."""
+        if self._state != "idle":
+            return _SHELL_REFUSED[self._state]
+        if shell.kind == "help":
+            self.renderer.echo(text)
+            for line in usershell.HELP:
+                self.out.print(self._text(line, "muted"))
+            self.out.print(Text(""))
+            return None
+        if sys.platform == "win32":
+            return "! needs a POSIX terminal."
+        self._state = "shell"
+        self._work = self.spawn(self._run_shell(shell.text))
+        return None
+
     def take_queued(self) -> str | None:
         text, self.queued = self.queued, None
         return text
@@ -364,7 +401,7 @@ class CliSession:
     def _task_done(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)
         if task.cancelled():
-            if self._work is task and self._state == "switching":
+            if self._work is task and self._state in ("switching", "shell"):
                 self._work, self._state = None, "idle"
                 self._pending_command = None
                 if self.app is not None:
@@ -584,6 +621,74 @@ class CliSession:
                 self._pending_command = None
             self.out.print(Text(""))
 
+    # ── ! commands ──
+
+    @contextlib.asynccontextmanager
+    async def _terminal_handed_over(self) -> AsyncIterator[None]:
+        """Pause the prompt and give the terminal to the child.
+
+        The renderer and the input pause (prompt_toolkit's ``in_terminal``)
+        and come back once, whatever ends the command; what is printed
+        meanwhile waits. The prompt's resize handler would draw into the
+        child's screen and ask the terminal for the cursor position, whose
+        answer the child would read, so it is off meanwhile: the relay passes
+        the new size on, and the prompt reads it again when it comes back.
+        Without an app there is no terminal.
+        """
+        ui = getattr(self.app, "app", None)
+        if ui is None:
+            yield
+            return
+        held = getattr(self.out, "held", contextlib.nullcontext)
+        with set_app(ui), held(), attach_winch_signal_handler(lambda: None):
+            async with in_terminal():
+                yield
+
+    async def _run_shell(self, command: str) -> None:
+        cwd = self.agent.workspace_root or os.getcwd()
+        self.shell_ran = True
+        header = Text()
+        header.append("! user shell", style="bold")
+        header.append(f" · {home_label(cwd)}", style="muted")
+        self.out.print(self._text(), header)
+        for number, line in enumerate(command.splitlines() or [""]):
+            self.out.print(self._text(("$ " if number == 0 else "  ") + line))
+        await asyncio.sleep(0)  # the header is printed before the prompt is erased
+        ui = getattr(self.app, "app", None)
+        run = usershell.ShellRun(
+            command,
+            cwd,
+            stdin_fd=None if ui is None else ui.input.fileno(),
+            stdout_fd=None if ui is None else ui.output.fileno(),
+            clock=self._clock,
+        )
+        self._shell = run
+        try:
+            if self._closed:  # melo is exiting: nothing starts now
+                return
+            async with self._terminal_handed_over():
+                result = await run.run()
+            self._shell_output = usershell.snapshot(result)
+            line = f"  └ {result.status()} · {format_duration(result.elapsed_s)}"
+            self.out.print(
+                self._text(line, "muted" if result.returncode == 0 else "error")
+            )
+            if self._shell_output is not None:
+                self.out.print(
+                    self._text(
+                        "  └ /attach ! shows this output (redacted, "
+                        f"{self._shell_output.size_bytes:,} bytes) and asks before attaching it",
+                        "muted",
+                    )
+                )
+            self.out.print(Text(""))
+        finally:
+            self._shell = None
+            if self._work is asyncio.current_task():
+                self._work, self._state = None, "idle"
+            if self.app is not None:
+                self.app.invalidate()
+
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":
             self.out.print(commands.help_text(arguments, self.renderer.symbols))
@@ -637,18 +742,32 @@ class CliSession:
         if len(paths) != 1:
             raise ValueError("Use /attach PATH (quote paths containing spaces).")
         workspace = self.agent.workspace_root or os.getcwd()
-        item = await asyncio.to_thread(load_attachment, workspace, paths[0])
+        if paths[0] == "!":  # the last ! output (a file of that name is ./!)
+            if self._shell_output is None:
+                raise ValueError("No ! output to attach: run ! COMMAND first.")
+            item = self._shell_output
+        else:
+            item = await asyncio.to_thread(load_attachment, workspace, paths[0])
         updated = add_attachment(self._attachments, item)
-        if item.changed:
+        from_shell = paths[0] == "!"
+        if item.changed or from_shell:
             self.out.print(
                 self._text(
-                    "Attachment was redacted or cleaned; review the exact snapshot:",
+                    (
+                        "Attachment was redacted or cleaned; review the exact snapshot:"
+                        if item.changed
+                        else "Review the exact output that would be sent:"
+                    ),
                     "warn",
                 )
             )
             self.out.print(Text(item.content))
             answer = (
-                await self.app.ask("Attach this redacted snapshot? [y/N]")
+                await self.app.ask(
+                    "Attach this redacted snapshot? [y/N]"
+                    if item.changed
+                    else "Attach this output? [y/N]"
+                )
                 if self.app is not None
                 else None
             )
@@ -1318,6 +1437,8 @@ class CliSession:
             self._stop_wanted = True
             self.renderer.stopped_by(cause)
             self._try_cancel(reason, cause)
+        if self._shell is not None:
+            self._shell.stop()  # its group ends with melo
         work = self._work
         if work is not None and self._state == "switching":
             work.cancel()

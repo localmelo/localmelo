@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+from collections.abc import Iterator
 from typing import Protocol
 
 from prompt_toolkit.application import get_app_or_none
@@ -56,6 +57,7 @@ class TerminalOut:
         self._pending: list[str] = []
         self._scheduled = False
         self._detached = False
+        self._held = False
 
     @property
     def width(self) -> int:
@@ -77,9 +79,22 @@ class TerminalOut:
         if app is None or not app.is_running:
             self.flush()
             return
-        if not self._scheduled:
+        if not self._scheduled and not self._held:
             self._scheduled = True
             asyncio.get_running_loop().call_soon(self._print_above)
+
+    @contextlib.contextmanager
+    def held(self) -> Iterator[None]:
+        """Keep what is printed meanwhile for after: a child owns the terminal."""
+        self._held = True
+        try:
+            yield
+        finally:
+            self._held = False
+            if self._pending and not self._scheduled:
+                self._scheduled = True
+                with contextlib.suppress(RuntimeError):
+                    asyncio.get_running_loop().call_soon(self._print_above)
 
     def _print_above(self) -> None:
         """Write what is pending above the app, the terminal kept raw.
@@ -91,7 +106,7 @@ class TerminalOut:
         erased, the text written, and the app drawn again below it.
         """
         self._scheduled = False
-        if not self._pending:
+        if not self._pending or self._held:
             return
         app = get_app_or_none()
         if app is None or not app.is_running:
@@ -158,6 +173,9 @@ class RecordingOut:
     def write_control(self, sequence: str) -> bool:
         self.controls.append(sequence)
         return True
+
+    def held(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
 
     def text(self) -> str:
         """What was printed, with each line's trailing spaces removed."""
