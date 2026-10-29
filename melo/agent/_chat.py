@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from localmelo.melo.agent._context_fit import ContextFitError, fit_request
+from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
     Fingerprint,
@@ -491,6 +491,9 @@ class Chat:
     ) -> None:
         self.fixed_prefix = fixed_prefix
         self.fit_target = fit_target
+        # One held cut per request kind: a target below 1 (window_eviction
+        # chunk and boundary) keeps the context fit's cut across requests.
+        self._fit_cuts: dict[str, FitCut] = {}
         self.llm = llm
         self.system_notes = tuple(system_notes)
         self.note_instruction = note_instruction
@@ -627,9 +630,12 @@ class Chat:
             ratio = accounting.ratios.get((self.llm.model, kind), 1.0)
             return math.ceil(size * max(1.0, ratio))
 
-        if (
-            accounting is not None
-            and estimate(messages, tools) > accounting.budget.input_limit
+        cut = (
+            self._fit_cuts.setdefault(kind, FitCut()) if self.fit_target < 1.0 else None
+        )
+        if accounting is not None and (
+            estimate(messages, tools) > accounting.budget.input_limit
+            or (cut is not None and cut.key is not None)
         ):
             messages, pruned = fit_request(
                 messages,
@@ -638,6 +644,7 @@ class Chat:
                 estimate=estimate,
                 requires_replay=self.llm.requires_reasoning_replay,
                 drop_target=self.fit_target,
+                hold=cut,
             )
         if on_ready is not None:
             on_ready(messages)
@@ -677,6 +684,7 @@ class Chat:
                         estimate=estimate,
                         requires_replay=self.llm.requires_reasoning_replay,
                         force_smaller_than=proxy,
+                        hold=cut,
                     )
                     pruned = {name: pruned[name] + more[name] for name in pruned}
                     attempt += 1
