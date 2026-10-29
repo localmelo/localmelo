@@ -827,7 +827,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ports …)` before the URL question, and the retry prompt reads `[s]tart without
   saving`. `melo --serve` prints `Sign in: run melo --gateway-login --port N in
   another terminal` after `Web UI:`. Text only: exit codes and choices are
-  unchanged ([#NN]).
+  unchanged ([#206]).
 - A `melo --brief` run that ends `completed` while its brief's check failed for
   good (`tests` is `failed`, a refused check included) exits with the new code
   4, so `melo --brief f && next-step` stops. `status` stays `completed`, the
@@ -1272,3 +1272,4 @@ earlier milestones.
 [#203]: https://github.com/localmelo/localmelo/pull/203
 [#204]: https://github.com/localmelo/localmelo/pull/204
 [#205]: https://github.com/localmelo/localmelo/pull/205
+[#206]: https://github.com/localmelo/localmelo/pull/206
