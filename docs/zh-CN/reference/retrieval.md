@@ -162,7 +162,7 @@ melo-retrieve: error: queries.jsonl:1: relevant id 'demo:d9' is not in the corpu
 - 如果请求失败，运行会以退出码 1 停止：
 
   ```text
-  melo-retrieve: error: interleave request failed: POST /chat/completions failed: ConnectError: All connection attempts failed
+  melo-retrieve: error: interleave request failed: cannot reach the model server at http://127.0.0.1:11434/v1. Start it, or run melo to set one up. (ConnectError: All connection attempts failed)
   ```
 
 <a id="output"></a>

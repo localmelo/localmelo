@@ -98,7 +98,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-[r]etry, [s]tart anyway, [q]uit [r]:
+[r]etry, [s]tart without saving, [q]uit [r]:
 ```
 
 - **原因：** 对该 URL 的 `GET /v1/models` 失败。`connection refused`：那里没有进程在监听；`HTTP 401` 或 `HTTP 403`：服务器需要 API 密钥，而 localmelo 不会向本地服务器发送密钥；`it lists no models`：服务器尚未提供任何模型。
@@ -178,11 +178,11 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 ### ConnectError
 
 ```text
-melo: run ended with status provider_error: POST /chat/completions failed: ConnectError: All connection attempts failed
+melo: run ended with status provider_error: cannot reach the model server at http://127.0.0.1:11434/v1. Start it, or run melo to set one up. (ConnectError: All connection attempts failed)
 ```
 
 - **原因：** 该 URL 上没有进程在监听：服务器没有运行，或主机或端口有误。localmelo 尝试了三次，历时约 5 秒。
-- **修复：** 启动服务器并检查其 URL，例如用 `curl http://127.0.0.1:11434/v1/models` 检查。
+- **修复：** 启动服务器并检查其 URL，例如用 `curl http://127.0.0.1:11434/v1/models` 检查。若服务器不在本机或局域网内，消息会改为 `Check the URL and the network.`。
 
 ### HTTP 404 or another error status
 

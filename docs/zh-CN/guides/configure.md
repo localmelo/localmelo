@@ -10,7 +10,7 @@
 
 ```text
 $ melo
-No model server answered on this machine (ports 8000, 8400, 11434, 30000).
+No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.
 Model server URL [http://127.0.0.1:8000/v1]: http://127.0.0.1:8080/v1
 Models on http://127.0.0.1:8080/v1:
   [1] nomic-embed-text
