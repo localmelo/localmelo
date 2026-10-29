@@ -82,11 +82,11 @@ def test_new_multiline_rule_stays_buffered_even_after_hash_update(
     source = Path(redaction.__file__).read_text()
     source = source.replace(
         "def redact_secrets(text:",
-        '_PEM = re.compile(r"-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----", re.DOTALL)\n\n\ndef redact_secrets(text:',
+        '_UNREVIEWED = re.compile(r"-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----", re.DOTALL)\n\n\ndef redact_secrets(text:',
     )
     source = source.replace(
         "    text, keys = _KEY.subn(REDACTED, text)",
-        "    text, _ = _PEM.subn(REDACTED, text)\n    text, keys = _KEY.subn(REDACTED, text)",
+        "    text, _ = _UNREVIEWED.subn(REDACTED, text)\n    text, keys = _KEY.subn(REDACTED, text)",
     )
     path = tmp_path / "redaction.py"
     path.write_text(source)
@@ -109,7 +109,12 @@ def test_rule_inventory_requires_deliberate_update() -> None:
     # Any change, including a new pass, forces a review of line locality.
     assert redaction.__file__ is not None
     assert hashlib.sha256(Path(redaction.__file__).read_bytes()).hexdigest() == (
-        "7f17ad11ae7be99bb8095a0cb398b8e5233d2937ee0171a724a1768070a1110f"
+        "3500b204c8b2c598d748b5e241adc6c2eeac9275348c90315b2c73fa2f28ddca"
+    )
+    assert redaction._PEM.pattern == (
+        r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----)"
+        r"(.*?)"
+        r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----|\Z)"
     )
     assert redaction._KEY.pattern == (
         r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"

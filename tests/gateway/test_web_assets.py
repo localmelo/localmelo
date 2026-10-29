@@ -326,3 +326,15 @@ async def test_the_shell_keeps_the_machine_line_between_the_title_and_the_level(
     text = header.group(0)
     assert text.index('id="machine-state"') > text.index('id="header-model"')
     assert text.index('id="machine-state"') < text.index('id="level-btn"')
+
+
+async def test_tasks_module_is_served_and_the_shell_links_the_task_view(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/tasks.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "setupTasks" in response.text
+    page = await client.get("/")
+    assert 'href="#/tasks" id="tasks-link"' in page.text
+    assert re.search(r'<section\b[^>]*\bid="task-panel"[^>]*\bhidden\b', page.text)

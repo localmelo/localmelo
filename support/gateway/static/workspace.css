@@ -1389,6 +1389,54 @@ dialog::backdrop {
   color: var(--muted);
 }
 
+/* Task card, Resume and Stop */
+.task-panel button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--soft);
+  color: var(--ink);
+}
+.task-panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.task-panel h2 {
+  margin: 24px 0 8px;
+  font-size: 16px;
+}
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.task-card-text {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  white-space: pre-wrap;
+}
+.task-error {
+  color: var(--error);
+}
+.task-missing {
+  padding: 14px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+}
+.task-missing p {
+  margin: 0 0 8px;
+}
+.task-dialog p {
+  margin: 12px 0;
+}
+.task-dialog h2 {
+  margin: 0;
+}
+
 /* Read-only worker history */
 .worker-navigation {
   display: flex;

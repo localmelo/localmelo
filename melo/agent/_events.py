@@ -12,7 +12,7 @@ import inspect
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
@@ -68,6 +68,14 @@ def check_sink(on_event: object, name: str = "on_event") -> None:
             f"{name} must be synchronous: put events on a queue and consume "
             "them in a task"
         )
+
+
+class GateVerdict(NamedTuple):
+    """The gate in force after a reflection, and why the run stopped."""
+
+    gate: str
+    stop_reason: str | None
+    utility: float | None
 
 
 class _Emitter:
@@ -487,6 +495,7 @@ class _Emitter:
         reflected: tuple[ReflectionEntry, ReflectionDecision] | None,
         *,
         continue_run: bool,
+        verdict: GateVerdict,
     ) -> None:
         """The outcome of the reflection under way.
 
@@ -496,7 +505,8 @@ class _Emitter:
         ``duration_s`` cover the replies in :attr:`replies`, from
         ``reflection.started`` on; the extra usage fields of the requests
         (see :meth:`reflection_call`) are summed into ``usage`` and the first
-        request's prefix diagnostics are ``prefix``.
+        request's prefix diagnostics are ``prefix``. *verdict* is the gate in
+        force and why the run stopped, if it did.
         """
         if self._sink is None:
             return
@@ -512,12 +522,18 @@ class _Emitter:
         rationale: str | None = None
         summary: str | None = None
         best_effort: str | None = None
+        flags: dict[str, bool] | None = None
         if reflected is not None:
             entry, decision = reflected
             action = decision.recommended_action
             rationale = decision.rationale
             summary = entry.summary
             best_effort = decision.best_effort_result
+            flags = {
+                "task_still_feasible": decision.task_still_feasible,
+                "next_step_is_concrete": decision.next_step_is_concrete,
+                "next_step_is_novel": decision.next_step_is_novel,
+            }
         self._emit(
             "reflection",
             lambda: json_safe_payload(
@@ -525,6 +541,10 @@ class _Emitter:
                     "attempt": attempt,
                     "action": action,
                     "continue_run": continue_run,
+                    "flags": flags,
+                    "gate": verdict.gate,
+                    "utility": verdict.utility,
+                    "stop_reason": verdict.stop_reason,
                     "rationale": _redacted(rationale),
                     "summary": _redacted(summary),
                     "best_effort_result": _redacted(best_effort),

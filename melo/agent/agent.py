@@ -45,7 +45,7 @@ from localmelo.melo.agent._chat import (
     lacks_task_query,
 )
 from localmelo.melo.agent._context_fit import ContextFitError
-from localmelo.melo.agent._events import _Emitter, check_sink
+from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
@@ -760,6 +760,29 @@ def _utility(decision: ReflectionDecision) -> float:
     )
 
 
+def _gate_stop_reason(
+    decision: ReflectionDecision, gate: ReflectionGate = "flags"
+) -> str | None:
+    """The first check of the continuation gate that *decision* fails.
+
+    The codes are the ones in ``docs/reference/events.md``:
+    ``action_not_continue``, ``not_feasible``, ``not_concrete``,
+    ``not_novel`` and, with ``"utility"`` only, ``utility_below_threshold``.
+    ``None`` when every check holds, so that the next attempt may start.
+    """
+    if decision.recommended_action != "continue":
+        return "action_not_continue"
+    if not decision.task_still_feasible:
+        return "not_feasible"
+    if not decision.next_step_is_concrete:
+        return "not_concrete"
+    if not decision.next_step_is_novel:
+        return "not_novel"
+    if gate == "utility" and _utility(decision) < CONTINUATION_UTILITY_THRESHOLD:
+        return "utility_below_threshold"
+    return None
+
+
 def _should_continue(
     decision: ReflectionDecision, gate: ReflectionGate = "flags"
 ) -> bool:
@@ -772,17 +795,34 @@ def _should_continue(
     the gate from before that option, also requires :func:`_utility` to
     reach :data:`CONTINUATION_UTILITY_THRESHOLD`.
     """
-    if decision.recommended_action != "continue":
-        return False
-    if not decision.task_still_feasible:
-        return False
-    if not decision.next_step_is_concrete:
-        return False
-    if not decision.next_step_is_novel:
-        return False
-    if gate == "utility":
-        return _utility(decision) >= CONTINUATION_UTILITY_THRESHOLD
-    return True
+    return _gate_stop_reason(decision, gate) is None
+
+
+# The stop reasons of the budget boundaries, by the error that the run
+# ends with there.
+_OUT_OF_REASONS = {
+    "Max attempts reached": "no_attempt_left",
+    "Max steps reached": "step_budget_used",
+}
+
+
+def _stop_reason(
+    decision: ReflectionDecision | None, gate: ReflectionGate, out_of: str
+) -> str | None:
+    """Why the run does not go on after a reflection, ``None`` if it does.
+
+    *decision* is ``None`` for a reply that holds no reflection, and
+    *out_of* is the boundary's error (``""`` when another attempt can
+    start). The one place that decides: ``continue_run`` is whether this
+    is ``None``.
+    """
+    if decision is None:
+        return "unreadable_reply" if out_of else None
+    if decision.recommended_action == "done":
+        return "action_not_continue"
+    if out_of:
+        return _OUT_OF_REASONS[out_of]
+    return _gate_stop_reason(decision, gate)
 
 
 def _providers_from_config(
@@ -5843,8 +5883,10 @@ class Agent:
           :data:`CONTINUATION_UTILITY_THRESHOLD`. A gate that stops the
           run ends it as ``gate_stopped``, with the ``best_effort_result``
           as the result and the decision's rationale as the error, or
-          ``Stopped after attempt <n>`` (``n`` counting from 1) when the
-          rationale is blank.
+          ``Stopped after attempt <n> (stop reason: <code>)`` (``n``
+          counting from 1; the code is the check that stopped the run, see
+          :func:`_gate_stop_reason`) when the rationale is blank. The
+          ``reflection`` event carries the code in every case.
 
         With ``"flags"``, a reply that holds no reflection even when asked
         again (see :meth:`_do_reflect`) gives no decision and adds no
@@ -5905,16 +5947,20 @@ class Agent:
             )
             entry = None
             decision = None
-            continue_run = False
-            if reflection is None:  # only with reflection_gate="flags"
-                continue_run = not out_of
-            else:
+            if reflection is not None:
                 entry, decision = reflection
-                continue_run = (
-                    not out_of
-                    and decision.recommended_action != "done"
-                    and _should_continue(decision, opts.reflection_gate)
-                )
+            # None for a reply with no reflection, only with "flags".
+            stop_reason = _stop_reason(decision, opts.reflection_gate, out_of)
+            continue_run = stop_reason is None
+            verdict = GateVerdict(
+                opts.reflection_gate,
+                stop_reason,
+                (
+                    _utility(decision)
+                    if decision is not None and opts.reflection_gate == "utility"
+                    else None
+                ),
+            )
             if self._plan.attempt is not None:
                 if continue_run:
                     # The new attempt's block replaces the old one; do not
@@ -5937,7 +5983,7 @@ class Agent:
                     run.boundary_block = ""
             record_digest()
             if reflection is None:  # only with reflection_gate="flags"
-                run.events.reflection(None, continue_run=not out_of)
+                run.events.reflection(None, continue_run=continue_run, verdict=verdict)
                 if out_of:
                     logger.info(
                         "Reflection after attempt %d unreadable after a retry, "
@@ -5960,7 +6006,7 @@ class Agent:
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
-                run.events.reflection(reflection, continue_run=False)
+                run.events.reflection(reflection, continue_run=False, verdict=verdict)
                 if best_effort.strip():
                     answer = best_effort
                     run.answer_thinking = run.reflection_thinking
@@ -5970,21 +6016,27 @@ class Agent:
                 run.end("completed", result=answer)
                 return
             if out_of:
-                run.events.reflection(reflection, continue_run=False)
+                run.events.reflection(reflection, continue_run=False, verdict=verdict)
                 run.answer_thinking = run.reflection_thinking
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
-            if not _should_continue(decision, opts.reflection_gate):
-                run.events.reflection(reflection, continue_run=False)
-                stopped = f"Stopped after attempt {run.attempts}"
-                run.answer_thinking = run.reflection_thinking
-                run.end(
-                    "gate_stopped",
-                    result=best_effort,
-                    error=decision.rationale.strip() or stopped,
+            if not continue_run:
+                run.events.reflection(reflection, continue_run=False, verdict=verdict)
+                # The rationale is the model's own words (frozen by the
+                # legacy goldens); only the fallback names the check.
+                error = decision.rationale.strip() or (
+                    f"Stopped after attempt {run.attempts} "
+                    f"(stop reason: {stop_reason})"
                 )
+                logger.info(
+                    "Reflection gate stopped the run after attempt %d: %s",
+                    run.attempts,
+                    stop_reason,
+                )
+                run.answer_thinking = run.reflection_thinking
+                run.end("gate_stopped", result=best_effort, error=error)
                 return
-            run.events.reflection(reflection, continue_run=True)
+            run.events.reflection(reflection, continue_run=True, verdict=verdict)
 
     async def _run_single_attempt(
         self, task: TaskRecord, query: str, run: _RunState

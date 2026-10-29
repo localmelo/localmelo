@@ -130,6 +130,8 @@ def _ioreg(monkeypatch: pytest.MonkeyPatch, stdout: str, code: int = 0) -> list[
 
     monkeypatch.setattr(identity.sys, "platform", "darwin")
     monkeypatch.setattr(identity.subprocess, "run", run)
+    # The host id is cached per process; each call here fakes a new machine.
+    monkeypatch.setattr(identity, "_MACOS_HOST", None)
     return calls
 
 
@@ -189,6 +191,7 @@ def test_macos_host_identity_survives_a_failing_ioreg(
 
     monkeypatch.setattr(identity.sys, "platform", "darwin")
     monkeypatch.setattr(identity.subprocess, "run", run)
+    monkeypatch.setattr(identity, "_MACOS_HOST", None)
     with pytest.raises(OSError, match="cannot read host identity"):
         identity._host()
 
@@ -397,3 +400,45 @@ def test_absent_group_with_unknown_birth_is_not_gone(
     monkeypatch.setattr(identity.os, "killpg", absent)
     monkeypatch.setattr(identity, "_birth", denied)
     assert not identity.gone((123, 123, "boot", "start"))
+
+
+def test_macos_host_identity_is_read_once_and_a_failure_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hardware = "344C04E4-E246-5171-88DC-E77B2C596FAE"
+    calls = _ioreg(monkeypatch, "", 1)
+    for _ in range(2):
+        with pytest.raises(OSError, match="cannot read host identity"):
+            identity._host()
+    assert len(calls) == 2  # a failure is never cached
+    calls = _ioreg(monkeypatch, _registry(hardware))
+    monkeypatch.setattr(identity, "_MACOS_HOST", None)
+    first = identity._host()
+    assert [identity._host() for _ in range(5)] == [first] * 5
+    assert len(calls) == 1
+
+
+def test_macos_host_identity_is_read_once_across_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    import time
+
+    calls = _ioreg(monkeypatch, _registry("344C04E4-E246-5171-88DC-E77B2C596FAE"))
+    plain = identity.subprocess.run
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(0.05)
+        return plain(*args, **kwargs)
+
+    monkeypatch.setattr(identity.subprocess, "run", slow)
+    seen: list[str] = []
+    threads = [
+        threading.Thread(target=lambda: seen.append(identity._host())) for _ in range(6)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(set(seen)) == 1 and len(seen) == 6
+    assert len(calls) == 1

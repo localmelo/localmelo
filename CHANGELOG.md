@@ -22,7 +22,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   close/delete refuses running or queued starts with 409 rather than cancelling
   them ([#141]).
 
+- Redaction now covers PEM private key blocks (RSA, EC, DSA, OPENSSH, ENCRYPTED,
+  plain PKCS#8 and PGP `PRIVATE KEY BLOCK`): the BEGIN and END lines stay, the body becomes `[redacted]`,
+  and a block cut before its END line is redacted to the end of the text. Public
+  keys and certificates are unchanged. Streamed display text holds an open block
+  until its END line, or drops its body past 16 KiB, so a key never streams out
+  ([#188]).
+
 ### Fixed
+
+- The `reflection` event now records the decision's three flags (`flags`), the
+  gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
+  when the run does not continue, so a `gate_stopped` run shows which check
+  stopped it. A blank rationale's `gate_stopped` error names it too. Decisions
+  and request bodies are unchanged ([#187]).
 
 - A turn cancelled before its run reported `run.finished`, such as a SIGHUP
   during setup, now saves the cancel reason in the stored result, so saved
@@ -69,6 +82,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `scripts/cache_report.py LOG` prints the cache use per request (plan and
   reflect) from a `stream-json` log, with totals by kind. ([#NN])
 
+- The console has a **Tasks** view (`#/tasks`, `#/tasks/<id>`): the task list, and a card with the state, the saved recovery card, the evidence status, Resume (with a confirmation dialog only when the server asks for one), Stop and "Start again as a new task" for a started task without a recovery card. ([#189])
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
   prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
   never the agent) and restored once afterwards. It is not a sandbox. Its output
@@ -1118,3 +1132,6 @@ earlier milestones.
 [#175]: https://github.com/localmelo/localmelo/pull/175
 [#177]: https://github.com/localmelo/localmelo/pull/177
 [#180]: https://github.com/localmelo/localmelo/pull/180
+[#187]: https://github.com/localmelo/localmelo/pull/187
+[#188]: https://github.com/localmelo/localmelo/pull/188
+[#189]: https://github.com/localmelo/localmelo/pull/189

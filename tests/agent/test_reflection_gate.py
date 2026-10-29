@@ -459,10 +459,16 @@ class TestReadableReflection:
         ("reply", "error"),
         [
             # Read from the tool call's arguments: no action, so stop.
-            (TOOL_CALL_TEXT, "Stopped after attempt 1"),
+            (
+                TOOL_CALL_TEXT,
+                "Stopped after attempt 1 (stop reason: action_not_continue)",
+            ),
             (INVALID_ACTION, "go on"),
             # The first object wins, and it is the tool call's.
-            (f"{TOOL_CALL_TEXT}\n{DONE}", "Stopped after attempt 1"),
+            (
+                f"{TOOL_CALL_TEXT}\n{DONE}",
+                "Stopped after attempt 1 (stop reason: action_not_continue)",
+            ),
         ],
         ids=["tool_call", "invalid", "tool_call_then_reflection"],
     )
