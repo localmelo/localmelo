@@ -647,3 +647,26 @@ def test_cache_report_says_when_a_log_has_no_fresh_chars(tmp_path: Path) -> None
     assert done.returncode == 0, done.stderr
     assert "reusable: n/a (needs cached_tokens and fresh_chars" in done.stdout
     assert "cached share 42.0%" in done.stdout
+
+
+async def test_cache_report_reads_the_fresh_chars_of_a_recorded_run(
+    tmp_path: Path,
+) -> None:
+    stub = Stub([_call_reply(_cached(0)), _final_reply(_cached(64))])
+    events = await _plans(stub)
+    log = tmp_path / "run.jsonl"
+    log.write_text(
+        "\n".join(
+            json.dumps({"v": 1, "type": "event", "event": e.to_dict()}) for e in events
+        )
+        + "\n"
+    )
+    done = _report(log)
+    assert done.returncode == 0, done.stderr
+    [line] = [x for x in done.stdout.splitlines() if "reusable:" in x]
+    assert "1 requests after the first, 100 prompt tokens" in line
+    prefix = events[1].data["prefix"]
+    fresh = 100 * prefix["fresh_chars"] / prefix["request_chars"]
+    assert f"~{round(fresh)} fresh (estimated), 64 cached" in line
+    assert f"reusable share {100 * 64 / (100 - fresh):.1f}%" in line
+    assert "n/a" not in line

@@ -21,7 +21,13 @@ from localmelo.melo.agent._chat import (
 )
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.memory.short import WorkingMemory
-from localmelo.melo.schema import WINDOW_EVICT_CHUNK, Message, ToolCall, ToolDef
+from localmelo.melo.schema import (
+    EMPTY_REPLY_LABEL,
+    WINDOW_EVICT_CHUNK,
+    Message,
+    ToolCall,
+    ToolDef,
+)
 from localmelo.tests.agent.test_cache_telemetry import (
     Stub,
     _cached,
@@ -212,6 +218,26 @@ async def test_a_retry_without_tools_says_that_tools_are_unavailable() -> None:
         REFLECTION_RETRY_NOTE,
         "no JSON here",
     ]
+
+
+async def test_an_empty_reply_is_kept_as_the_agents_label_not_as_empty_text() -> None:
+    class Empty:
+        model = "stub"
+        reasoning_field = ""
+        requires_reasoning_replay = False
+
+        async def chat(self, messages: Any, tools: Any = None, **_: Any) -> Message:
+            return Message(role="assistant", content="")
+
+    chat = Chat(Empty(), fixed_prefix=True, window_reflection=True)  # type: ignore[arg-type]
+    token = chat.begin_prefix()
+    try:
+        short = [Message(role="user", content="q")]
+        await chat.plan_step([], short, [], "q")
+        await chat.reflect(short, "q", 0)
+    finally:
+        PREFIX_RUN.reset(token)
+    assert [m.content for m in chat.reflect_exchange][1:] == [EMPTY_REPLY_LABEL]
 
 
 async def test_an_unreadable_retry_keeps_nothing_of_the_reflection() -> None:

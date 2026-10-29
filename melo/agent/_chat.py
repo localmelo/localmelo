@@ -37,7 +37,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import EMPTY_REPLY_LABEL, Message, ToolDef
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import ReflectionEntry
@@ -272,10 +272,13 @@ def _as_text_reply(reply: Message) -> Message:
     """*reply* as an assistant message that holds no tool call.
 
     A reply's calls are written out as text (:func:`render_transcript`), so
-    a request or the window never holds a call without its result.
+    a request or the window never holds a call without its result, and an
+    empty reply is the agent's usual label for one.
     """
     if not reply.tool_calls:
-        return reply
+        if reply.content.strip():
+            return reply
+        return dataclasses.replace(reply, content=EMPTY_REPLY_LABEL)
     return dataclasses.replace(reply, content=render_transcript([reply]), tool_calls=[])
 
 
