@@ -35,7 +35,7 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   order, as a table whose header row names the ID, level, state and title columns; every column but the title is padded so the rows line up.
   `show ID` inspects one. A held task that waits for a tool approval prints
   `Waiting for your approval: <tool> <target> (answer it in the web console,
-  Tasks)` (under its row in `list`, on the `Waiting:` line in `show`) and
+  Tasks)` (under its row in `list`, in place of the `Waiting:` line in `show`) and
   `Reason: approval`; there is no `melo-task` verb to answer it. `pause ID`, `resume ID [--level Pn]`,
   `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
   not supported. Pause does not interrupt a running tool.
