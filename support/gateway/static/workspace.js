@@ -1772,7 +1772,10 @@ function presence(force = false) {
 // `workerMode` is true in every read-only side view; `taskMode` marks the task view.
 let workerMode = false;
 let taskMode = false;
-const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); });
+const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); }, (fn, ms) => {
+  const timer = setInterval(fn, ms);
+  return () => globalThis.clearInterval?.(timer);
+});
 const tasks = setupTasks({
   api,
   approvalCard,
@@ -1941,7 +1944,7 @@ function renderWorkers() {
     if (state.unsupported) nodes.push(el("p", "muted", "Some recorded event types cannot be shown."));
     if (state.view.turns.length > 1) nodes.push(el("p", "", "This run has multiple recorded turns."));
     if (!state.view.turns.length) nodes.push(el("p", "", "No recorded turn."));
-    if (session.status === "running") nodes.push(el("p", "", "Run not finished. This view does not update live."));
+    if (session.status === "running") nodes.push(el("p", "", "Run not finished. This view updates every few seconds."));
     nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
     for (const turn of state.view.turns) {
       nodes.push(el("h2", "", "Brief"), el("p", "worker-brief", turn.userText || "No brief recorded."), el("h2", "", "Work"));

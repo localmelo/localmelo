@@ -568,6 +568,9 @@ function harness(routes, {mobile = false} = {}) {
       timers.push({handler, ms, cleared: false, interval: true});
       return timers.length;
     },
+    clearInterval: (id) => {
+      if (timers[id - 1]) timers[id - 1].cleared = true;
+    },
     fetch: net.fetch,
     EventSource: FakeEventSource,
   });
@@ -1956,7 +1959,7 @@ test('worker detail is read-only and isolates the chat draft and stream', async 
   assert.equal(h.element('details-trigger').hidden, true);
   assert.match(h.text('worker-panel'), /Worker brief/);
   assert.match(h.text('worker-panel'), /Not recorded/);
-  assert.match(h.text('worker-panel'), /does not update live/);
+  assert.match(h.text('worker-panel'), /updates every few seconds/);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('approval-card')), null);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('live-row')), null);
   await h.run('send()');
@@ -2025,6 +2028,55 @@ test('worker back returns to the list header and Chats resumes the open chat', a
   assert.equal(h.state().activeId, 'a');
   assert.equal(h.element('connection-btn').hidden, false);
   assert.equal(h.stream().closed, false);
+});
+
+test('an open unfinished worker run updates without Refresh, redraws only on a change, and stops when finished', async () => {
+  let status = 'running';
+  let answer = '';
+  const turns = () => ({turns: [turnRow({user_text: 'Live brief', answer, status, events: [
+    {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Live brief'}},
+  ]})], has_earlier: false});
+  const h = harness(baseRoutes({
+    'GET /sessions/w': () => ({session: session('w', {kind: 'worker', title: 'Live', source: 'localmelo', status, steps: 0, tokens: null})}),
+    'GET /sessions/w/turns?limit=50&events=true': turns,
+  }));
+  await h.run('init()');
+  h.run('showWorkers("w")'); await settle();
+  const panel = h.element('worker-panel');
+  const poll = h.timers.findLast((timer) => timer.interval && timer.ms === 3000 && !timer.cleared);
+  assert.ok(poll, 'the Workers view polls every 3 seconds');
+  assert.match(flatten(panel), /Run not finished/);
+  const reads = () => h.net.calls.filter((call) => call.path.startsWith('/sessions/w')).length;
+  const before = panel.children[0];
+  await poll.handler(); await settle();
+  assert.equal(panel.children[0], before, 'an unchanged run is not redrawn');
+  answer = 'All done'; status = 'completed';
+  await poll.handler(); await settle();
+  assert.notEqual(panel.children[0], before);
+  assert.match(flatten(panel), /All done/);
+  assert.doesNotMatch(flatten(panel), /Run not finished/);
+  const settled = reads();
+  await poll.handler(); await settle();
+  assert.equal(reads(), settled, 'a finished run is not read again');
+  h.run('leaveWorkers()');
+  assert.equal(poll.cleared, true, 'leaving the view stops the polling');
+});
+
+test('the open worker list shows a run that starts later', async () => {
+  let rows = [{id: 'old', kind: 'worker', title: 'Old run', source: 'localmelo', status: 'completed'}];
+  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': () => ({sessions: rows, next_cursor: null})}));
+  await h.run('init()');
+  h.run('showWorkers("")'); await settle();
+  const panel = h.element('worker-panel');
+  const poll = h.timers.findLast((timer) => timer.interval && timer.ms === 3000 && !timer.cleared);
+  assert.ok(poll, 'the Workers list polls every 3 seconds');
+  const before = panel.children[0];
+  await poll.handler(); await settle();
+  assert.equal(panel.children[0], before, 'an unchanged list is not redrawn');
+  rows = [{id: 'new', kind: 'worker', title: 'New run', source: 'localmelo', status: 'running'}, ...rows];
+  await poll.handler(); await settle();
+  assert.match(flatten(panel), /New run/);
+  assert.match(flatten(panel), /localmelo · [^·]* · running/);
 });
 
 test('failed worker filters remain an error when navigating away and back', async () => {
