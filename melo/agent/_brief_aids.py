@@ -69,8 +69,14 @@ def dropped_notes(messages: Sequence[Message]) -> list[str]:
     return notes
 
 
-def render_dropped(notes: Sequence[str]) -> str:
-    """The tail line of a planning request; "" when nothing was dropped."""
+def render_dropped(notes: Sequence[str], window: Sequence[Message] = ()) -> str:
+    """The tail line of a planning request; "" when nothing was dropped.
+
+    A note whose tool and argument the *window* holds again (the model read
+    the file a second time) is left out: that output is in the context.
+    """
+    present = {note.rsplit(" (", 1)[0] for note in dropped_notes(window)}
+    notes = [note for note in notes if note.rsplit(" (", 1)[0] not in present]
     if not notes:
         return ""
     return (

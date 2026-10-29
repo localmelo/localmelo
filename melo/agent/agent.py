@@ -3636,7 +3636,7 @@ class Agent:
             plan_args["on_ready"] = on_ready
         elif run is not None and run.brief and run.dropped:
             # Not at a step that carries inbox lines: they must end the request.
-            plan_args["tail_note"] = render_dropped(run.dropped)
+            plan_args["tail_note"] = render_dropped(run.dropped, sent)
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,

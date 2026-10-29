@@ -177,6 +177,17 @@ class TestDroppedNote:
             "before you edit."
         )
 
+    def test_a_read_the_window_holds_again_is_left_out(self) -> None:
+        call = ToolCall(id="c1", tool_name="file_read", arguments={"path": "a.py"})
+        again = [
+            Message(role="assistant", content="", tool_calls=[call]),
+            Message(role="tool", content="x" * 10, tool_call_id="c1"),
+        ]
+        notes = ["file_read a.py (49,999 chars)", "file_read b.py (12 chars)"]
+        line = render_dropped(notes, again)
+        assert "a.py" not in line and "b.py" in line
+        assert render_dropped(notes[:1], again) == ""
+
     def test_a_secret_in_an_argument_is_redacted(self) -> None:
         call = ToolCall(
             "shell_exec",
