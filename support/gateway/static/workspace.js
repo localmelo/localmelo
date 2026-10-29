@@ -16,6 +16,7 @@ import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
 import { workerHistory } from "./worker-history.mjs";
+import { setupTasks } from "./tasks.mjs";
 import {
   activity,
   applyEvent,
@@ -1758,8 +1759,44 @@ function presence(force = false) {
 
 // ── Routing and the sidebar ──
 
+// `workerMode` is true in every read-only side view; `taskMode` marks the task view.
 let workerMode = false;
-const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); });
+let taskMode = false;
+const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); });
+const tasks = setupTasks({ api, root: $("task-panel"), newId: newClientRequestId, navigate: (hash) => { globalThis.location.hash = hash; } });
+
+function taskRoute() {
+  const match = /^#\/tasks(?:\/(.+))?$/.exec(globalThis.location?.hash || "");
+  if (!match) return null;
+  try { return match[1] ? decodeURIComponent(match[1]) : ""; }
+  catch { return ""; }
+}
+
+function showTasks(id) {
+  if (!workerMode) {
+    saveDraft();
+    closeStream();
+    drawer.close();
+    showLevelMenu(false);
+  }
+  workers.leave();
+  workerMode = true;
+  taskMode = true;
+  $("worker-panel").hidden = true;
+  $("scroll").hidden = true;
+  document.querySelector(".composer-area").hidden = true;
+  $("details-trigger").hidden = true;
+  $("level-btn").hidden = true;
+  $("connection-btn").hidden = true;
+  $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
+  renderSessions();
+  $("workers-link").removeAttribute("aria-current");
+  $("tasks-link").setAttribute("aria-current", "page");
+  $("chats-link").removeAttribute("aria-current");
+  sidebar(false);
+  tasks.show(id);
+  $("task-panel").querySelector("h1")?.focus();
+}
 
 function workerRoute() {
   const match = /^#\/workers(?:\/(.+))?$/.exec(globalThis.location?.hash || "");
@@ -1770,6 +1807,11 @@ function workerRoute() {
 
 function showWorkers(id) {
   const previousWorker = workers.state.selectedId;
+  if (taskMode) {
+    tasks.leave();
+    taskMode = false;
+    $("tasks-link").removeAttribute("aria-current");
+  }
   if (!workerMode) {
     saveDraft();
     closeStream();
@@ -1798,7 +1840,9 @@ function showWorkers(id) {
 function leaveWorkers() {
   if (!workerMode) return;
   workers.leave();
+  tasks.leave();
   workerMode = false;
+  taskMode = false;
   $("worker-panel").hidden = true;
   $("scroll").hidden = false;
   document.querySelector(".composer-area").hidden = false;
@@ -1807,6 +1851,7 @@ function leaveWorkers() {
   $("connection-btn").hidden = false;
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
+  $("tasks-link").removeAttribute("aria-current");
   $("chats-link").setAttribute("aria-current", "page");
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") checkSubmission(slot, entry.clientRequestId);
@@ -2034,6 +2079,7 @@ async function init() {
   // authoritative even when it is outside the list's first page: its 404
   // sends the page back to a new chat, as a gone chat does.
   const fromWorker = workerRoute();
+  const fromTask = taskRoute();
   const fromHash = hashId();
   const wantsNew = (globalThis.location?.hash || "") === "#/new";
   let wanted = "";
@@ -2045,7 +2091,9 @@ async function init() {
       ? saved
       : (S.sessions[0]?.id ?? "");
   }
-  if (fromWorker !== null) {
+  if (fromTask !== null) {
+    showTasks(fromTask);
+  } else if (fromWorker !== null) {
     showWorkers(fromWorker);
   } else if (wanted) {
     await openSession(wanted);
@@ -2138,6 +2186,8 @@ matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(fals
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async () => {
   if (!S.authenticated) return;
+  const task = taskRoute();
+  if (task !== null) { showTasks(task); return; }
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
   const wasWorker = workerMode;
