@@ -36,6 +36,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   print its usage and exit 0, and no arguments print the usage to stderr and exit 2,
   instead of reading `--help` as a log path ([#NN]).
 
+- The console's **Tasks** view (`#/tasks`) shows `Tasks` in the header, as the
+  Workers view does, instead of the open chat's title and model while the task list
+  or a task card is open. Opening a chat again shows the chat's header ([#NN]).
+
 - `melo --brief` runs follow a worker protocol (#185): a fixed paragraph appended
   to the brief asks for the smallest change as soon as the target is known, the
   task's check commands after each change, a read of the lines before editing and
