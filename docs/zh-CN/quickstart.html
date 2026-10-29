@@ -72,7 +72,7 @@ uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         <p>uv 会创建虚拟环境 <code>.venv/</code>（如果你没有 Python 3.13，它会自动安装），并安装 localmelo 及网关所需的依赖。</p>
         <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（<code>localmelo-main</code>）会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</p>
-        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS 开发应用（英文）</a>会在控制台外面构建一个未签名的原生窗口。它需要 release Xcode，而且是开发包，不是发行版或 Homebrew cask。</p>
+        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>会在控制台外面构建一个未签名的原生窗口。它需要 release Xcode，而且是开发包，不是发行版或 Homebrew cask。</p>
         <p>本教程后面的命令直接调用 <code>melo</code>。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 <code>source &lt;clone&gt;/.venv/bin/activate</code>，其中 <code>&lt;clone&gt;</code> 是你的 <code>localmelo</code> 目录。使用 uv 时，也可以在克隆目录中运行 <code>uv run melo …</code>，或在其他任何位置运行 <code>uv run --project &lt;clone&gt; melo …</code>。</p>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
