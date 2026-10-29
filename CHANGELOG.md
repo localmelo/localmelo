@@ -137,7 +137,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   deciding issue. When off they are hidden, not removed. `GET /api/settings` adds
   `mode` and `advanced_options`; `PUT /api/settings` takes an optional `mode`.
   The default mode's drawer no longer shows the Runs tab's raw result fields.
-  Nothing changes what runs. ([#NN])
+  Nothing changes what runs. ([#209])
 - A task that waits for a tool approval can be answered ([#208]). The task JSON
   carries `pending_approvals` (the shape a chat session uses), the console's
   Tasks view shows the same approval card and says "Waiting for your approval",
@@ -1295,7 +1295,7 @@ earlier milestones.
 [#197]: https://github.com/localmelo/localmelo/pull/197
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#209]: https://github.com/localmelo/localmelo/pull/209
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
