@@ -98,7 +98,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   of the latest planning request (the same system text, the same `tools` array, the same
   turns, then the turns since) and adds one final user message with the reflection prompt.
   A reply that calls a tool instead of answering is asked again as before. The default path
-  is unchanged. ([#NN])
+  is unchanged. ([#192])
 
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
   prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
@@ -1154,3 +1154,4 @@ earlier milestones.
 [#189]: https://github.com/localmelo/localmelo/pull/189
 [#190]: https://github.com/localmelo/localmelo/pull/190
 [#191]: https://github.com/localmelo/localmelo/pull/191
+[#192]: https://github.com/localmelo/localmelo/pull/192
