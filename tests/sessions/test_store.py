@@ -1270,6 +1270,21 @@ async def test_append_events_refuses_events_it_must_not_store(tmp_path: Path) ->
     await store.aclose()
 
 
+async def test_an_assistant_message_from_before_the_prefix_key_is_stored(
+    tmp_path: Path,
+) -> None:
+    store = cli(tmp_path / "s.db")
+    turn = await store.begin_turn(None, "hi", holder=HOLDER, new_session=NewSession())
+    old = core_event("assistant.message")
+    del old["data"]["prefix"]
+    await store.append_events(turn.session_id, 1, [old], holder=HOLDER)
+    event = core_event("assistant.message", prefix={"messages": 2})
+    await store.append_events(turn.session_id, 1, [event], holder=HOLDER)
+    types = [e.event["type"] for e in await store.list_events(turn.session_id)]
+    assert types.count("assistant.message") == 2
+    await store.aclose()
+
+
 async def test_listeners_run_after_the_commit(tmp_path: Path) -> None:
     path = tmp_path / "s.db"
     store = gateway(path)

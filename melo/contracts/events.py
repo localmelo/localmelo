@@ -26,7 +26,15 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "inbox.accepted": frozenset({"offset", "text", "step", "attempt"}),
         "step.started": frozenset({"step", "attempt"}),
         "assistant.message": frozenset(
-            {"step", "content", "thinking", "tool_calls", "usage", "duration_s"}
+            {
+                "step",
+                "content",
+                "thinking",
+                "tool_calls",
+                "usage",
+                "prefix",
+                "duration_s",
+            }
         ),
         "tool.started": frozenset({"step", "call_id", "name", "arguments", "preview"}),
         "tool.finished": frozenset(
@@ -127,6 +135,12 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         ),
         "run.finished": frozenset({"result"}),
     }
+)
+# Keys that a stored event from an older release may lack. Events the agent
+# emits now always carry every key of EVENT_FIELDS; a session store accepts
+# the older shape too.
+OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {"assistant.message": frozenset({"prefix"})}
 )
 EVENT_TYPES: Final = frozenset(EVENT_FIELDS)
 

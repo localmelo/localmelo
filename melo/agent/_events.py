@@ -32,6 +32,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
+    from localmelo.melo.agent._chat import CallTelemetry
     from localmelo.melo.memory.procedures.tracker import ProgressState
     from localmelo.melo.memory.recall import RecallRecord
 
@@ -190,8 +191,14 @@ class _Emitter:
         )
         self._planning_since = time.perf_counter()
 
-    def assistant_message(self, response: Message) -> None:
+    def assistant_message(
+        self, response: Message, call: CallTelemetry | None = None
+    ) -> None:
         """The planning reply of the current step.
+
+        *call* is what the request reported beyond the reply: its extra
+        usage fields join ``usage`` and its prefix diagnostics are the
+        ``prefix`` object (``None`` for the run's first planning request).
 
         Its ``thinking`` and ``content`` pass :func:`redact_secrets`, on the
         whole text and before the payload clips them; *response* itself
@@ -211,7 +218,8 @@ class _Emitter:
                     "content": redact_secrets(response.content)[0],
                     "thinking": redact_secrets(response.thinking)[0],
                     "tool_calls": [_call_entry(call) for call in response.tool_calls],
-                    "usage": _usage([response]),
+                    "usage": {**_usage([response]), **(call.details if call else {})},
+                    "prefix": call.prefix if call else None,
                     "duration_s": duration_s,
                 }
             )

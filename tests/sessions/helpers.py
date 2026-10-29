@@ -56,6 +56,7 @@ def core_event(
             "thinking": "",
             "tool_calls": [],
             "usage": {},
+            "prefix": None,
             "duration_s": 0.1,
         },
         "tool.started": {

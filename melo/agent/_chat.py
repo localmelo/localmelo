@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from localmelo.melo.agent._context_fit import ContextFitError, fit_request
+from localmelo.melo.agent._prefix_diag import Fingerprint, compare, fingerprint
 from localmelo.melo.agent._request_accounting import (
     ContextBudget,
     RequestAccounting,
@@ -330,6 +331,22 @@ def _build_system_prompt(
     return "\n\n".join(parts), non_system
 
 
+@dataclass(frozen=True)
+class CallTelemetry:
+    """What the latest request of :class:`Chat` reported, beyond its reply.
+
+    ``details`` is the usage the provider kept beyond prompt, completion and
+    total tokens (``cached_tokens``, ``reasoning_tokens``), only the fields
+    the server sent. ``prefix`` is :func:`~localmelo.melo.agent._prefix_diag.compare`
+    of a planning request with the run's previous one, ``None`` for the
+    first planning request or any other kind.
+    """
+
+    kind: str
+    details: dict[str, int]
+    prefix: dict[str, Any] | None
+
+
 @dataclass
 class RequestStats:
     """Counts of the LLM requests a :class:`Chat` sent, and their usage.
@@ -371,6 +388,22 @@ class RequestStats:
                 continue
             if isinstance(value, int) and not isinstance(value, bool):
                 self.details[name] = self.details.get(name, 0) + value
+
+
+def _merge_user_turns(messages: list[Message]) -> list[Message]:
+    """*messages* with each run of adjacent user turns joined into one."""
+    merged: list[Message] = []
+    for message in messages:
+        if merged and merged[-1].role == message.role == "user":
+            previous = merged[-1]
+            merged[-1] = dataclasses.replace(
+                previous,
+                content=previous.content + "\n\n" + message.content,
+                images=[*previous.images, *message.images],
+            )
+        else:
+            merged.append(message)
+    return merged
 
 
 def _quote_data_delimiter(text: str, delimiter: str) -> str:
@@ -423,6 +456,8 @@ class Chat:
         self.context_budget = context_budget
         self.on_context_budget: Callable[[dict[str, Any]], None] | None = None
         self._accounting: RequestAccounting | None = None
+        self.last_call: CallTelemetry | None = None
+        self._last_plan: Fingerprint | None = None
         self.reset_stats()
 
     def begin_prefix(self) -> contextvars.Token[tuple[object, str] | None]:
@@ -452,6 +487,8 @@ class Chat:
         cover one run.
         """
         self.stats = RequestStats()
+        self.last_call = None
+        self._last_plan = None
         self._accounting = (
             RequestAccounting(self.context_budget)
             if self.context_budget is not None
@@ -664,6 +701,24 @@ class Chat:
                     self.stats.prefix_cached_tokens or 0
                 ) + reported
         self._emit_context_budget(record)
+        prefix = None
+        if kind == "plan":
+            outgoing = _merge_user_turns(messages) if self.fixed_prefix else messages
+            current = fingerprint(outgoing, tools)
+            if self._last_plan is not None:
+                prefix = compare(self._last_plan, current)
+            self._last_plan = current
+        self.last_call = CallTelemetry(
+            kind,
+            {
+                name: value
+                for name, value in (full_usage or {}).items()
+                if name not in ("prompt_tokens", "completion_tokens", "total_tokens")
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+            },
+            prefix,
+        )
         recorder = CALL_RECORDER.get()
         if recorder is not None:
             await recorder.record(
@@ -694,18 +749,7 @@ class Chat:
             if self.fixed_prefix and kind in ("plan", "reflect"):
                 # Fit individual recall units first; merge adjacent user turns only
                 # on the outgoing copy for templates that require alternating roles.
-                merged: list[Message] = []
-                for message in messages:
-                    if merged and merged[-1].role == message.role == "user":
-                        previous = merged[-1]
-                        merged[-1] = dataclasses.replace(
-                            previous,
-                            content=previous.content + "\n\n" + message.content,
-                            images=[*previous.images, *message.images],
-                        )
-                    else:
-                        merged.append(message)
-                messages = merged
+                messages = _merge_user_turns(messages)
             display = STREAM_DISPLAY.get() if kind == "plan" else None
             if display is not None:
                 return await self._send_streaming(messages, tools, display)

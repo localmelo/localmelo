@@ -502,6 +502,7 @@ class TestFields:
                 "thinking",
                 "tool_calls",
                 "usage",
+                "prefix",
                 "duration_s",
             },
             "tool.started": {"step", "call_id", "name", "arguments", "preview"},
