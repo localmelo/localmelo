@@ -76,7 +76,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   without a second turn. A Resume committed before a restart is re-admitted on
   startup when its turn never started, even if the task had reached running, and a retry after that turn started
   returns 409 instead of replaying it. PATCH stays fenced for recovered work.
-  ([#NN])
+  ([#177])
 
 - Direct workers can read steering instructions from an inherited pipe with
   `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
@@ -1095,3 +1095,4 @@ earlier milestones.
 [#168]: https://github.com/localmelo/localmelo/pull/168
 [#169]: https://github.com/localmelo/localmelo/pull/169
 [#175]: https://github.com/localmelo/localmelo/pull/175
+[#177]: https://github.com/localmelo/localmelo/pull/177
