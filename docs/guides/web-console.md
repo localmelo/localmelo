@@ -31,6 +31,14 @@ for a nondefault port). Keep the link private; see [gateway security](gateway.md
    row while it runs, and the final answer with `Copy response`. Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline.
+4. A status row sits above the composer: the same segments as the terminal's
+   status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
+   2 queued`, read from `GET /api/sessions/{id}/status` so both agree. The cache
+   share reads `cache --` when the model server reports no cached tokens, never
+   0%; a local server shows its idle time, not a countdown. The row is read at
+   most once a second while events arrive and on the page's polls; on a narrow
+   screen it drops segments from the right. A worker session has no row until
+   the console can read the CLI's events.
 
 The sidebar lists chats newest first, with search and switching, and closes a
 chat. Drafts stay with each chat in the current browser tab. The open chat's
@@ -61,7 +69,8 @@ Records are redacted by patterns, not guaranteed secret-free; review before shar
 **Tasks** (`#/tasks`) lists the scheduler's tasks, newest update first, with
 state, priority and title. Open one (`#/tasks/<id>`) to see its state, the saved
 recovery card (shown as plain text), the evidence status and the actions its
-state allows. Like Workers, the view replaces the chat while it is open.
+state allows, and the same status row as a chat (a task has no row until it has
+run). Like Workers, the view replaces the chat while it is open.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A

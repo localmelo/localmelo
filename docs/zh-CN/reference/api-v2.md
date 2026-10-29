@@ -295,6 +295,31 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `follow=false` 发送起点之后已保存的事件，直到该请求读取到的最新事件 id，然后结束响应；它是一次性的追赶，而在它分页期间开始的轮次不会增加任何帧。
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
 
+## GET /api/sessions/{id}/status
+
+终端的 `/status` 和状态栏为一个会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。Worker 会话（由 `--save-session` 产生、位于 CLI 存储中）在控制台能读取这些事件之前返回 404 `not_found`。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
+```
+
+```json
+{
+  "session_id": "3f9c2a7b1d4e",
+  "local": true,
+  "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
+  "context": {"measured": 1000, "limit": 8000},
+  "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
+  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1}
+}
+```
+
+- `segments` 是终端状态栏从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
+- 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
+- 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，以及其中最高的优先级（`top_level`，没有任务时为 `null`）。
+- 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。
+
 ## GET /api/sessions/{id}/blobs/{sha256}
 
 轮次中某个工具返回的图片，通过其 SHA-256 摘要获取。

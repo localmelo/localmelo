@@ -12,6 +12,7 @@ This page moved. Choose a section below to open its new location.
 ## [GET /api/sessions/{id}](reference/api-v2.md#get-apisessionsid)
 ## [GET /api/sessions/{id}/turns](reference/api-v2.md#get-apisessionsidturns)
 ## [GET /api/sessions/{id}/events](reference/api-v2.md#get-apisessionsidevents)
+## [GET /api/sessions/{id}/status](reference/api-v2.md#get-apisessionsidstatus)
 ## [GET /api/sessions/{id}/blobs/{sha256}](reference/api-v2.md#get-apisessionsidblobssha256)
 ## [GET /api/sessions/{id}/submissions/{client\_request\_id}](reference/api-v2.md#get-apisessionsidsubmissionsclient_request_id)
 ## [Writes](reference/api-v2.md#writes)

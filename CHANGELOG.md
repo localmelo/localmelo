@@ -126,6 +126,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Status row in the web console (#176, #213). A chat shows one line above its
+  composer, and a task's card shows it under its facts: the same segments as the
+  terminal's status bar (`cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`,
+  `tasks 1 running 2 queued`), from the new `GET /api/sessions/{id}/status`, which
+  folds the session's stored events with the terminal's own code. A server that
+  reports no cached tokens shows `cache --`, never 0%. The row refetches at most
+  once a second while events arrive and on the page's existing polls; a narrow
+  width drops segments right to left. A worker (CLI-store) session id is 404 until
+  the console can read those events. ([#NN])
+
 - Developer mode in the web console (#186). **Connection settings** has a
   Developer tab with one toggle, "Developer mode: show advanced settings and
   debug views", saved as the same `[ui] mode` the CLI reads (revision-checked
