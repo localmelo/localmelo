@@ -7,6 +7,7 @@ retry it or report it without knowing about httpx.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -84,15 +85,32 @@ def unreachable(
 ) -> ProviderError:
     """The error for a request that could not connect to the model server.
 
-    It names the server's URL and the fix; the raw cause follows, for the
-    record's error detail. A timeout is not this: it keeps its own message.
+    It names the server's URL and the fix: start a server on this computer
+    or the local network, check the URL and the network for any other host.
+    The raw cause follows, for the record's error detail. A timeout is not
+    this: it keeps its own message.
     """
     url = str(client.base_url).rstrip("/")
+    fix = (
+        "Start it, or run melo to set one up."
+        if _is_local(client.base_url.host)
+        else "Check the URL and the network."
+    )
     return ProviderError(
-        f"{UNREACHABLE_PREFIX}{url}. Start it, or run melo to set one up. "
-        f"({_exception_text(exc)})",
+        f"{UNREACHABLE_PREFIX}{url}. {fix} ({_exception_text(exc)})",
         retryable=retryable,
     )
+
+
+def _is_local(host: str) -> bool:
+    """Whether *host* is this computer or a private-network address."""
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
 
 
 def malformed_body(response: httpx.Response, path: str, problem: str) -> ProviderError:

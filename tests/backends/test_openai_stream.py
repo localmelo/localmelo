@@ -281,7 +281,7 @@ async def test_a_refused_stream_names_the_server() -> None:
         assert failure.value.retryable
         assert str(failure.value) == (
             "cannot reach the model server at http://example.test/v1. "
-            "Start it, or run melo to set one up. "
+            "Check the URL and the network. "
             "(ConnectError: All connection attempts failed)"
         )
     finally:

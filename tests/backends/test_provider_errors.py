@@ -193,10 +193,28 @@ async def test_a_refused_connection_names_the_server_and_the_fix(kind: str) -> N
     assert (exc.status_code, exc.retryable) == (None, True)
     assert str(exc) == (
         f"cannot reach the model server at {BASE_URLS[kind]}. "
-        "Start it, or run melo to set one up. "
+        "Check the URL and the network. "
         "(ConnectError: All connection attempts failed)"
     )
     assert exc.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    ("host", "local"),
+    [
+        ("localhost", True),
+        ("127.0.0.1", True),
+        ("::1", True),
+        ("192.168.1.20", True),
+        ("studio.local", True),
+        ("api.example.com", False),
+        ("8.8.8.8", False),
+    ],
+)
+def test_only_a_local_server_is_told_to_start(host: str, local: bool) -> None:
+    from localmelo.support.providers._http import _is_local
+
+    assert _is_local(host) is local
 
 
 @pytest.mark.asyncio

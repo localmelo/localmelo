@@ -236,7 +236,9 @@ melo: run ended with status provider_error: cannot reach the model server at htt
 - **Cause:** nothing listens at the URL: the server is not running, or the
   host or port is wrong. localmelo tried three times, over about 5 seconds.
 - **Fix:** start the server and check its URL, for example with
-  `curl http://127.0.0.1:11434/v1/models`.
+  `curl http://127.0.0.1:11434/v1/models`. For a server that is not on this
+  computer or the local network, the message says `Check the URL and the
+  network.` instead.
 
 ### HTTP 404 or another error status
 
