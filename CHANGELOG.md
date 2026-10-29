@@ -31,6 +31,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- With `--window-eviction chunk` or `boundary`, the request fit of `--context-window`
+  keeps its cut across requests: after it drops to 70% of the input limit it starts
+  the next requests from the same unit and drops again only when a request would
+  pass the limit, so a tight context window no longer moves the history every step
+  ([#NN]). `slide` is unchanged.
 - `scripts/cache_report.py` runs under Python 3.9 again: the `zip(..., strict=True)`
   call that needed 3.10 is replaced by an explicit length check. `-h` and `--help`
   print its usage and exit 0, and no arguments print the usage to stderr and exit 2,

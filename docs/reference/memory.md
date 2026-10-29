@@ -43,10 +43,13 @@ experimental, for measuring prompt-cache reuse; the default is unchanged.
 
 A mode other than `slide` appears as `window_eviction` in the JSON result's
 `config`; `slide` adds nothing. The request fit (`--context-window`) also
-drops to 70% of the input limit under `chunk` and `boundary`, but it works on
-a copy of the whole window at each request, so it does not hold the cut
-between steps the way the window and the prompt-cap fit do. With a context
-budget small enough to drop at every step, requests still slide.
+holds its cut under `chunk` and `boundary`: when a request would pass the
+input limit it drops whole units down to 70% of the limit and remembers the
+oldest unit it kept, and the next requests start from that unit and drop again
+only when they would pass the limit. A window chunk drop or a boundary drop
+that removes the remembered unit resets the cut. Reasoning replay and the
+units the fit never drops (an unfinished tool call, the latest failing result,
+images) are unchanged.
 
 ## Digest recall
 
