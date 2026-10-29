@@ -30,6 +30,7 @@ URL = "http://127.0.0.1:8500/v1"
 
 # The real function, kept for tests that answer over an httpx.MockTransport.
 _REAL_IS_OLLAMA = discovery.is_ollama
+_REAL_LOADED_MODELS = discovery.loaded_models
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +41,16 @@ def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
         return False
 
     monkeypatch.setattr(discovery, "is_ollama", is_ollama)
+
+
+@pytest.fixture(autouse=True)
+def _nothing_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first run asks which models are in memory; these servers say none."""
+
+    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
 
 
 @pytest.fixture(autouse=True)
@@ -157,6 +168,70 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
     assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
+
+
+def test_a_loaded_model_is_marked_and_is_the_default(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+        assert url == URL
+        return {"Qwen3-Flash"}
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    models = ["Qwen3-27B", "Qwen3-Flash"]
+    answers = _Answers("", "", "n")
+    result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
+    assert result == FirstSetup(url=URL, model="Qwen3-Flash", saved=True)
+    assert answers.prompts[1] == "Model [2]: "
+    assert (
+        f"Models on {URL}:\n  [1] Qwen3-27B\n  [2] Qwen3-Flash  (loaded)\n"
+        in capsys.readouterr().out
+    )
+
+
+def test_without_a_loaded_answer_the_first_chat_model_stays_the_default(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models = ["Qwen3-27B", "Qwen3-Flash"]
+    answers = _Answers("", "", "n")
+    result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
+    assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
+    assert answers.prompts[1] == "Model [1]: "
+    assert "(loaded)" not in capsys.readouterr().out
+
+
+def test_one_chat_model_is_not_looked_up(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+        raise AssertionError("no choice to make")
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    answers = _Answers("", "", "n")
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["Qwen3-27B", "nomic-embed"])
+    )
+    assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
+
+
+def test_a_key_protected_server_keeps_the_first_chat_model(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The status route answers 401 as the listing does; the default is the old one."""
+    real = _REAL_LOADED_MODELS
+    transport = httpx.MockTransport(lambda request: httpx.Response(401))
+
+    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+        return await real(url, transport=transport)
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    answers = _Answers("", "", "n")
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["Qwen3-27B", "Qwen3-Flash"])
+    )
+    assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
 
 
 def test_a_first_run_offers_the_servers_embedding_model(

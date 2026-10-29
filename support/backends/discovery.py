@@ -1,16 +1,17 @@
 """Ask a local model server which models it serves, and find one.
 
 The requests here are ``GET <url>/models``, and ``GET <root>/api/version``
-to tell an Ollama server apart. Nothing is generated, so listing neither
-waits for a server to load a model nor competes with runs on it. Cloud
-vendors are not listed.
+to tell an Ollama server apart. A first run also asks which models are in
+memory: ``GET <url>/models/status`` (oMLX) and ``GET <root>/api/ps``
+(Ollama). Nothing is generated, so listing neither waits for a server to
+load a model nor competes with runs on it. Cloud vendors are not listed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -223,14 +224,76 @@ async def is_ollama(
     return isinstance(version, str) and bool(version.strip())
 
 
+LOADED_TIMEOUT_S: Final = 1.0
+
+
+def parse_loaded_ids(payload: Any) -> set[str]:
+    """The ids a status reply says are in memory.
+
+    Reads oMLX's ``{"models": [{"id": …, "loaded": true}]}`` and Ollama's
+    ``/api/ps`` list, whose items are all running models (``name`` or
+    ``model``). An item with ``loaded`` false is not counted.
+    """
+    items = payload.get("models") if isinstance(payload, dict) else None
+    ids: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and item.get("loaded") is False:
+            continue
+        ids.update(parse_model_ids({"models": [item]}))
+    return ids
+
+
+async def loaded_models(
+    url: str,
+    *,
+    timeout_s: float = LOADED_TIMEOUT_S,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> set[str]:
+    """The ids the server at *url* says are in memory; empty when unknown.
+
+    Asks oMLX (``GET <url>/models/status``) and Ollama (``GET <root>/api/ps``)
+    at once. Each source is optional: a server without the route, an HTTP
+    error (a server with an API key answers 401, as it does to the listing,
+    since no key is sent), a timeout or a body that is not JSON adds nothing.
+    *transport* replaces the network in tests.
+    """
+
+    async def ask(client: httpx.AsyncClient, target: str) -> set[str]:
+        try:
+            response = await client.get(target)
+            if response.status_code >= 300:  # not followed, as chat requests are not
+                return set()
+            return parse_loaded_ids(response.json())
+        except Exception:  # no answer, a malformed URL, a body that is not JSON
+            return set()
+
+    try:
+        status_url = f"{normalize_url(url).rstrip('/')}/models/status"
+        async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
+            found = await asyncio.gather(
+                ask(client, status_url), ask(client, f"{_ollama_root(url)}/api/ps")
+            )
+    except Exception:
+        return set()
+    return found[0] | found[1]
+
+
 def is_chat_model(model: str) -> bool:
     """Whether *model*'s id does not name an embedding or reranking model."""
     lowered = model.lower()
     return "embed" not in lowered and "rerank" not in lowered
 
 
-def pick_model(models: Sequence[str]) -> str | None:
-    """The first id that is not an embedding or reranking model, else the first."""
+def pick_model(models: Sequence[str], loaded: Collection[str] = ()) -> str | None:
+    """The model to default to.
+
+    The first id that is not an embedding or reranking model and is in
+    *loaded*, else the first chat id, else the first id. With nothing
+    loaded this is the first chat model.
+    """
+    for model in models:
+        if model in loaded and is_chat_model(model):
+            return model
     for model in models:
         if is_chat_model(model):
             return model

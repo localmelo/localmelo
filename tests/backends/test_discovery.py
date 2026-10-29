@@ -440,3 +440,103 @@ async def test_detection_prefers_a_chat_server_then_any_answer(
     assert (
         await detect_local_server(list(answers), transport=_servers(answers)) == found
     )
+
+
+# ── Which models are in memory ──
+
+
+def _server(routes: dict[str, httpx.Response | Exception]) -> httpx.MockTransport:
+    """Answers each path in *routes*; a path not in it is a 404."""
+    asked: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert "authorization" not in request.headers
+        asked.append(str(request.url))
+        answer = routes.get(request.url.path, httpx.Response(404))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    transport = httpx.MockTransport(handle)
+    transport.asked = asked  # type: ignore[attr-defined]
+    return transport
+
+
+_OMLX_STATUS = httpx.Response(
+    200,
+    json={
+        "models": [
+            {"id": "big", "loaded": False},
+            {"id": "small", "loaded": True},
+            {"id": "tiny", "loaded": False},
+        ]
+    },
+)
+
+
+async def test_omlx_status_names_the_loaded_models() -> None:
+    transport = _server({"/v1/models/status": _OMLX_STATUS})
+    assert await discovery.loaded_models(URL, transport=transport) == {"small"}
+
+
+async def test_ollama_ps_names_the_running_models() -> None:
+    ps = httpx.Response(
+        200, json={"models": [{"name": "qwen3:8b", "model": "qwen3:8b"}]}
+    )
+    transport = _server({"/api/ps": ps})
+    assert await discovery.loaded_models(URL, transport=transport) == {"qwen3:8b"}
+    assert transport.asked == [  # type: ignore[attr-defined]
+        "http://127.0.0.1:8500/v1/models/status",
+        "http://127.0.0.1:8500/api/ps",
+    ]
+
+
+async def test_a_server_without_a_status_route_has_nothing_loaded() -> None:
+    assert await discovery.loaded_models(URL, transport=_server({})) == set()
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(401, json={"detail": "Not authenticated"}),
+        httpx.Response(500),
+        httpx.Response(302, headers={"location": "http://elsewhere/"}),
+        httpx.Response(200, content=b"not json"),
+        httpx.Response(200, json=["small"]),
+        httpx.Response(200, json={"models": "small"}),
+        httpx.ReadTimeout("slow"),
+        httpx.ConnectError("refused"),
+        RuntimeError("anything"),
+    ],
+)
+async def test_a_failed_status_request_is_ignored(
+    answer: httpx.Response | Exception,
+) -> None:
+    transport = _server({"/v1/models/status": answer, "/api/ps": answer})
+    assert await discovery.loaded_models(URL, transport=transport) == set()
+
+
+async def test_one_failed_source_does_not_hide_the_other() -> None:
+    transport = _server(
+        {
+            "/v1/models/status": httpx.ReadTimeout("slow"),
+            "/api/ps": httpx.Response(200, json={"models": [{"name": "small"}]}),
+        }
+    )
+    assert await discovery.loaded_models(URL, transport=transport) == {"small"}
+
+
+async def test_a_url_without_v1_is_asked_at_both_places() -> None:
+    transport = _server({"/v1/models/status": _OMLX_STATUS})
+    found = await discovery.loaded_models("http://127.0.0.1:8500/", transport=transport)
+    assert found == {"small"}
+
+
+def test_pick_model_prefers_a_loaded_chat_model_in_server_order() -> None:
+    models = ["big", "embed-x", "small", "tiny"]
+    assert pick_model(models, {"tiny", "small"}) == "small"
+    assert pick_model(models, {"embed-x"}) == "big"  # not a chat model
+    assert pick_model(models, set()) == "big"
+    assert pick_model(models, {"gone"}) == "big"
+    assert pick_model(["embed-x"], {"embed-x"}) == "embed-x"
