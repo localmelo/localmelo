@@ -440,8 +440,9 @@ button:hover:not(:disabled) {
   background: var(--soft);
 }
 .running-kind {
+  /* Wide enough for the longest kind, so every title starts in one column. */
   flex: 0 0 auto;
-  min-width: 56px;
+  min-width: 84px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
