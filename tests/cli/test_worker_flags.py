@@ -17,7 +17,9 @@ from localmelo.__main__ import _build_parser, _check_args, main
     [
         ["--save-session"],
         ["--save-session", "--serve"],
-        ["--parent-run", "abc", "--", "task"],
+        ["--parent-run", "abc"],
+        ["--no-save-session", "--save-session", "--", "task"],
+        ["--no-save-session", "--parent-run", "abc", "--", "task"],
         ["--import-session", "wrong", "log"],
         ["--import-session", "dsh-jsonl", "log", "--", "task"],
         ["--title", "name"],

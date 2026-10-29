@@ -51,6 +51,7 @@ _ADVANCED = (
     "--import-session",
     "--title",
     "--save-session",
+    "--no-save-session",
     "--parent-run",
     "--inbox",
     "--inbox-fd",

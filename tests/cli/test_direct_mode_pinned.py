@@ -38,8 +38,11 @@ adds an opt-in flag and config fallback to the same two functions (default ``sli
 changes nothing). ``--reflect-tool-guard`` adds an opt-in flag (no config
 fallback) to ``_direct_options`` (default off changes nothing). The no-backend
 message now points at the first-run flow, in both the plain and the ``--brief``
-branch of ``_build_direct_mode_agent``, so it has a new hash. ``_check_args`` is
-not pinned.
+branch of ``_build_direct_mode_agent``, so it has a new hash. Recording every
+direct run as a worker session by default adds a ``record`` argument to
+``_run_direct`` and ``_run``, which turn it into the ``--save-session`` path; the
+model's requests, stdout, JSON and exit codes are the same, as the legacy golden
+and ``tests/cli/test_record_direct.py`` check. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -53,8 +56,8 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "97e9281d6ac524b259bdde8ec6b2aa2cff6ea3874e665c6d0fc46c48c3a3bcff",
-    "_run": "03c29e4466d8bfe09f0edd6a47cd435d9eda3ceb05fe8c99783c96fb9781f519",
+    "_run_direct": "1140042ce37895f4fa58eeaa48025283a1e96b26c48803e124cec59a58ca3aa3",
+    "_run": "3c226c89202da0e724a9d77c419b78ae30ea548c2000abd023897e38e365a1a5",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",

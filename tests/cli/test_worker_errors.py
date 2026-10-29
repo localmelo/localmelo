@@ -269,7 +269,9 @@ def test_legacy_direct_output_bytes(
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["melo", "--output-format", fmt, "--", "task"])
+    monkeypatch.setattr(
+        sys, "argv", ["melo", "--no-save-session", "--output-format", fmt, "--", "task"]
+    )
     monkeypatch.setattr(cli, "_build_direct_mode_agent", lambda *a, **kw: FakeAgent())
     monkeypatch.setattr(cli, "_localmelo_version", lambda: "fixed-version")
     cli.main()

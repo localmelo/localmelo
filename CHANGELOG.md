@@ -127,6 +127,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Every direct run (`melo "<task>"`, `melo --brief FILE`) is now recorded as a
+  worker session in `~/.cache/localmelo/cli/sessions.db` by default, so the web
+  console's Workers view and the macOS app show localmelo's own runs without a
+  flag. Opt out with `--no-save-session` or `[sessions] record_direct = false`;
+  `--parent-run` no longer needs `--save-session`. The model's requests, stdout,
+  the JSON result and the exit code are unchanged; a store that cannot be written
+  prints one stderr line and the run goes on unrecorded. The Workers list shows
+  runs that are still going, and an open unfinished run re-reads itself every
+  three seconds ([#217]).
+
 - Developer mode in the web console (#186). **Connection settings** has a
   Developer tab with one toggle, "Developer mode: show advanced settings and
   debug views", saved as the same `[ui] mode` the CLI reads (revision-checked
@@ -1327,6 +1337,7 @@ earlier milestones.
 [#211]: https://github.com/localmelo/localmelo/pull/211
 [#214]: https://github.com/localmelo/localmelo/pull/214
 [#216]: https://github.com/localmelo/localmelo/pull/216
+[#217]: https://github.com/localmelo/localmelo/pull/217
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

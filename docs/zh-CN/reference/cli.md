@@ -44,7 +44,7 @@ melo --developer --help                      # every option, grouped by tier
 
 ## Worker 历史记录
 
-`--save-session [TITLE]` 会把一次直接任务记录为 CLI 会话文件中的一个 `worker` 会话。把任务放在 `--` 之后；若没有标题，则以第一行任务作为标题。`--parent-run ID` 需要 `--save-session`，并把任务关联到启动器。没有该旗标时，直接运行不会打开会话存储。`-c`、`-r` 和对话选择器都不提供 worker 会话。提供了 `--workspace` 时，工作区和 git 元数据使用它；否则使用当前工作目录。
+每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。`-c`、`-r` 和对话选择器都不提供 worker 会话。提供了 `--workspace` 时，工作区和 git 元数据使用它；否则使用当前工作目录。
 
 `--import-session dsh-jsonl FILE [--title TITLE]` 不需要任务，即可导入 dsh 的 JSONL 日志。重复导入内容相同的文件不产生任何变化；无法识别或无效的行会被计数。网关可以通过只读的 [worker API](api-v2.md#get-apisessions) 列出并读取 worker 历史，但不能继续或编辑它。
 
@@ -103,6 +103,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--import-session` | advanced |  |
 | `--title` | advanced |  |
 | `--save-session` | advanced |  |
+| `--no-save-session` | advanced |  |
 | `--parent-run` | advanced |  |
 | `--inbox` | advanced |  |
 | `--inbox-fd` | advanced |  |
@@ -332,7 +333,7 @@ melo: error: argument --max-steps: must be at least 1, got 0
 
 **带 `--brief`**：JSON 是一个带版本的 worker 结果：`v`、`status`、`run_id`、`exit_code`、`head_sha`、`git_dirty`、`tests`、`run` 和 `error`。HEAD 和脏状态取自工作区，不可用时为 null。`run` 是去掉 `config` 的运行记录；启动或传输错误时为 null。如果简报中没有 `Check:` 行，`tests` 只有在最后一次运行中最后一个通过的、可识别的测试检查时才会被记录为 `recorded`，否则为 `not_recorded`。已记录的项目包含原始命令或 Python 代码，经过脱敏并限制在 2,000 个字符之内（超出时带 `command_truncated`），其可为 null 的退出码，以及 `tool_event` 来源。它只是工具输出的证据，并不保证任务正确。若有 `Check:` 行，则 `tests` 改为由工具自身的结果给出（见下文）：`passed` 或 `failed`，每个命令一项，取自门禁最后一次运行，每项包含 `command`、`command_truncated`、`exit_code`、`duration_s` 以及来源 `brief_check`；`output_tail`（检查输出的最后 20 行，经过脱敏，最多 4,000 个字符；旧版本的记录中没有该字段）；若策略不允许某个命令运行，则还包含 `refused`（原因）。
 
-带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。`--save-session` 可以记录同一次运行。
+带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。直接运行（包括这一次）默认都会被记录（见上文）。
 
 带 `--brief` 的运行与普通任务在四个方面有所不同。查询内容是简报，后面附加一段固定的段落，每次请求都相同：一旦知道改动该放在哪里，就做出满足任务的最小改动；每次改动之后运行任务的检查命令；修复你破坏的内容（包括断言旧行为的测试）；先读取即将编辑的行，因为较早的工具输出大约在十个步骤之后会离开上下文；并在最终回答中说明运行了哪些检查以及结果。若反思的动作是 `continue`，那么只要还有步骤和尝试，就会开始下一次尝试，不论其三个标志如何（`reflection` 事件仍会记录它们）。当某次尝试边界发现工作区自运行开始以来没有变化时，下一次尝试的第一个请求会带上这样一行：“Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.”，并发出一条 `no_change` 通知；不是 git 工作树的工作区两者都不会得到。不带 `--brief` 的运行不变。
 

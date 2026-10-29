@@ -49,9 +49,13 @@ connection problems without replacing other notices.
 
 **Workers** opens read-only worker history from the CLI sessions file. Filter
 by status, source or exact parent run, load more with the server's cursor, and
-open a run to inspect its recorded brief, metadata, work and answer. An
-unfinished run is a snapshot: **Refresh** reads it again, without a live
-stream. The view cannot send messages, approve calls or change grants; chat
+open a run to inspect its recorded brief, metadata, work and answer. Every
+direct `melo` run is recorded there by default (`--no-save-session` or
+`[sessions] record_direct = false` opts out; see
+[Worker histories](../reference/cli.md#worker-histories)). The list shows runs
+that are still going, and an open unfinished run reads itself again every three
+seconds and redraws only when it changed; there is no live stream, and
+**Refresh** reads it at once. The view cannot send messages, approve calls or change grants; chat
 close and level controls are disabled while Workers is open. Connection
 settings remain available separately. **Chats** returns to the open chat.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
