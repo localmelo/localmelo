@@ -72,7 +72,7 @@ sqlite3 procedures.db "SELECT routine_id, substr(query_text, 1, 60), place FROM 
 sqlite3 procedures.db "SELECT routine_id, status, steps, level, model FROM episodes ORDER BY created_at DESC LIMIT 10"
 ```
 
-`melo-procedures export` 将全部程序性记忆以 JSON 行形式输出；参见 [melo-procedures](../../reference/procedures.md#export-and-forget)（英文）。
+`melo-procedures export` 将全部程序性记忆以 JSON 行形式输出；参见 [melo-procedures](../reference/procedures.md#export-and-forget)。
 
 将 `<task_id>` 替换为任务列表中的 ID，或 JSON 行中的 `task_id`。
 

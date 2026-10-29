@@ -25,7 +25,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`load()` 读取 `~/.cache/localmelo/config.toml`，因此请先保存配置（[配置（英文）](../../reference/configuration.md)）。脚本输出状态和答案，例如 `completed 42`。
+`load()` 读取 `~/.cache/localmelo/config.toml`，因此请先保存配置（[配置](../reference/configuration.md)）。脚本输出状态和答案，例如 `completed 42`。
 
 <a id="follow-a-run-with-events"></a>
 
@@ -240,7 +240,7 @@ asyncio.run(main())
 - **模型会得到提示。** 每次规划请求都包含：`Working directory: <root>. Relative paths and shell and Python commands run there; file_read and file_write refuse paths outside it.`
 - `RunResult.config` 不包含根目录：可从 `agent.workspace_root` 和 `run.started` 事件获取。
 
-未设置根目录时，内置工具的行为与直接模式相同，见[工具和 MCP（英文）](../../reference/tools.md#built-in-tools)。
+未设置根目录时，内置工具的行为与直接模式相同，见[工具和 MCP](../reference/tools.md#built-in-tools)。
 
 <a id="keep-answers-between-runs"></a>
 
@@ -280,4 +280,4 @@ assistant Paris is the capital of France.
 - 超过 8,000 字符的答案会被截断，末尾为 `... [<n> more characters not shown]`。
 - 没有答案的运行会留下标签：`cancelled` 运行使用 `[interrupt: no assistant output for this turn]`，其他运行使用 `[no answer: the run ended with status <status>]`。
 
-要将对话保存在文件中，供跨进程和重启使用，见[会话（英文）](../../reference/sessions.md)。
+要将对话保存在文件中，供跨进程和重启使用，见[会话](../reference/sessions.md)。

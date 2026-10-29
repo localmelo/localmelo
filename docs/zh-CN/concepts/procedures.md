@@ -77,4 +77,4 @@
 ## 另请参阅
 
 - [记忆](../../reference/memory.md)（英文）：历史记录、长期记忆和文件位置。
-- [运行结果](../../reference/run-results.md)（英文）：状态和 JSON 行。
+- [运行结果](../reference/run-results.md)：状态和 JSON 行。
