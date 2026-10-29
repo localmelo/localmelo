@@ -1991,12 +1991,13 @@ test('worker images use the worker session id through detail rendering', async (
 });
 
 test('worker list uses server filters without opening worker streams', async () => {
-  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker', source: 'dsh', status: 'completed'})], next_cursor: null}}));
+  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker', source: 'dsh', status: 'completed', duration_s: 0.013850290997652337})], next_cursor: null}}));
   await h.run('init()');
   h.run('showWorkers("")');
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(h.text('worker-panel'), /Workers/);
   assert.match(h.text('worker-panel'), /dsh/);
+  assert.match(h.text('worker-panel'), /Duration: 0\.0s/);
   const apply = findNode(h.element('worker-panel'), (node) => node.textContent === 'Apply');
   assert.equal(apply.classList.contains('primary-button'), true);
   const css = readFileSync(new URL('../../support/gateway/static/workspace.css', import.meta.url), 'utf8');
@@ -2104,7 +2105,7 @@ test('worker metadata and errors preserve missing, zero and recorded values', as
   assert.match(h.text('worker-panel'), /dsh · Not recorded · crashed/);
   h.run('showWorkers("w")'); await new Promise((resolve) => setImmediate(resolve));
   assert.match(h.text('worker-panel'), /Steps 0 Tokens 0/);
-  assert.match(h.text('worker-panel'), /Duration 0 s/);
+  assert.match(h.text('worker-panel'), /Duration 0\.0s/);
   assert.match(h.text('worker-panel'), /Recorded error/);
 });
 

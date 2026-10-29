@@ -1918,7 +1918,7 @@ function renderWorkers() {
       link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
       link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
       const started = row.started_at == null ? "Not recorded" : new Date(row.started_at * 1000).toLocaleString();
-      const duration = row.duration_s == null ? "Not recorded" : `${row.duration_s} s`;
+      const duration = row.duration_s == null ? "Not recorded" : formatDuration(row.duration_s);
       link.append(el("span", "muted", `Started: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
       nodes.push(link);
     }
@@ -1937,7 +1937,7 @@ function renderWorkers() {
     const firstTurn = state.view.turns[0];
     const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
     const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
-    for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : `${duration} s`], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
+    for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : formatDuration(duration)], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
       meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
     }
     nodes.push(meta);
