@@ -1,5 +1,7 @@
 # Reference: Procedures
 
+This page is the reference for `melo-procedures`, which replays recorded runs, turns runs into episodes, and exports or forgets procedural memory. Read it when you manage procedural memory from the command line; the concept is explained in [procedural memory](../concepts/procedures.md).
+
 ## melo-procedures
 
 `melo-procedures` is installed with localmelo, next to `melo`, for example

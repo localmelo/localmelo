@@ -1,5 +1,7 @@
 # Reference: Http v1
 
+This page lists the gateway's HTTP v1 endpoints and notes the API v2 and legacy playground routes beside them. Use it when your own program calls the gateway over HTTP; to start and secure the gateway, see the [gateway guide](../guides/gateway.md).
+
 ## HTTP API
 
 Requests and responses are JSON. The examples use the default address. Any

@@ -2,6 +2,8 @@
 
 # 指南：API 客户端
 
+本指南说明脚本如何通过 HTTP API 驱动 localmelo：创建控制台会话、启动一次运行、批准一次工具调用，并读取结果。编写自己的客户端时请阅读本指南；端点的说明见 [API v2 参考](../reference/api-v2.md)。
+
 <a id="a-script-create-run-approve-read"></a>
 
 ## 脚本：创建、运行、审批、读取

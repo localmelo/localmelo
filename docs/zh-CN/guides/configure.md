@@ -2,6 +2,8 @@
 
 # 配置指南
 
+本指南介绍首次运行、配置向导，以及如何更新或卸载 localmelo。在一台机器上设置 localmelo 或修改其配置时请阅读本指南；各项设置见[配置参考](../reference/configuration.md)。
+
 <a id="first-run"></a>
 
 ## 首次运行

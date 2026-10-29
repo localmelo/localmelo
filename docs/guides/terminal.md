@@ -1,5 +1,7 @@
 # Guide: Terminal
 
+This guide explains the interactive terminal: how to chat, use its keys and commands, answer approvals and work in a workspace. Read it when you run `melo` without a task; the command-line options are in the [command-line reference](../reference/cli.md).
+
 ## The interactive UI
 
 `melo` without a task, in a terminal, opens a chat that shows its work as

@@ -2,6 +2,8 @@
 
 # 参考：HTTP v1
 
+本页列出网关的 HTTP v1 端点，并说明与之并列的 API v2 和旧版 playground 路由。你自己的程序通过 HTTP 调用网关时请使用本页；启动和保护网关的方法见[网关指南](../guides/gateway.md)。
+
 <a id="http-api"></a>
 
 ## HTTP 接口

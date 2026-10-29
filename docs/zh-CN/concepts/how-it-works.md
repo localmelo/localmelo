@@ -39,7 +39,7 @@
 | `stop` | 运行以 `gate_stopped` 结束。 |
 | `decompose` | 任务应当拆分。localmelo 不拆分任务，因此运行以 `gate_stopped` 结束。 |
 
-只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续。否则运行以 `gate_stopped` 结束。使用 `--reflection-gate utility` 时，也就是现有默认判定方式出现前的行为，反思还必须估计再次尝试的收益超过成本和重复风险：根据它自己的估计计算的效用分数必须达到 0.1。[评测](../../project/evaluations.md#reflection-gate)（英文）在编程练习上比较了两种判定和不使用反思的运行。
+只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续。否则运行以 `gate_stopped` 结束。使用 `--reflection-gate utility` 时，也就是现有默认判定方式出现前的行为，反思还必须估计再次尝试的收益超过成本和重复风险：根据它自己的估计计算的效用分数必须达到 0.1。[评测](../project/evaluations.md#reflection-gate)在编程练习上比较了两种判定和不使用反思的运行。
 
 关于反思的更多说明：
 

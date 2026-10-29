@@ -20,12 +20,13 @@ docs/
   llms.txt        the llms.txt index for AI agents (llmstxt.org format)
   index.html      the website's root page; it redirects to en/index.html
   en/             website pages in English
-  zh-CN/          website pages in Chinese
+  zh-CN/          Chinese twins of the Markdown pages, at the same paths; website pages in Chinese
   assets/         the website's stylesheet and images
 ```
 
-- The existing guides and reference pages are in English; the documentation
-  style guide has an English and Chinese pair.
+- Each page has a Chinese twin at the same path under `docs/zh-CN/`, except
+  `for-agents.md`, `llms.txt` and `index.html` (see [Translations](#translations)).
+  Root-level stubs have none.
 - The website has six pages in each language: Home, Quickstart,
   Architecture, Roadmap, Developers and Memory design. Each English page has
   a Chinese twin with the same element `id`s, the same sections in the same
@@ -81,6 +82,11 @@ unchanged to the new English quickstart. Do not commit the
 preview. See the [English style guide](../STYLE.md) and
 [Chinese style guide](../zh-CN/STYLE.md).
 
+The docs tests check the manifest and every tracked link and anchor. They also
+check that each Chinese twin listed in `tests/docs/test_manifest.py` keeps its
+English anchors, code blocks and inline code. Run them with
+`uv run pytest tests/docs -q`.
+
 In `docs/manifest.json`, a page's `fragments` maps each old source path to
 its migration rule. `"same"` sends every fragment to that language's output
 page with the same ID; a single output path instead sends every fragment to
@@ -94,8 +100,10 @@ historical fragment, not when merely adding a new heading to an unsplit page.
 
 ## Add or change a page
 
-- Add a new Markdown page to the index in `docs/README.md`. Add it
-  to the documentation table of the top-level `README.md` and
+- Add a new Markdown page to the index in `docs/README.md` and
+  `docs/zh-CN/README.md`, and add its Chinese twin at the same path under
+  `docs/zh-CN/` in the same pull request. List both in `docs/manifest.json`.
+  Add it to the documentation table of the top-level `README.md` and
   `README.zh-CN.md` only if a new user needs it; the table stays short and
   ends with a link to the index.
 - Add a new website page in both languages, and to the navigation of every
@@ -110,8 +118,12 @@ historical fragment, not when merely adding a new heading to an unsplit page.
 
 - English is the source. Change the Chinese counterpart in the same pull
   request as the English page.
-- The style guide and `README.zh-CN.md`, as well as `docs/zh-CN/*.html`,
-  currently have Chinese translations.
+- The Chinese twins of the Markdown pages are in `docs/zh-CN/`. The website's
+  Chinese pages are `docs/zh-CN/*.html`, and `README.zh-CN.md` is the Chinese
+  project README.
+- `for-agents.md` and `llms.txt` stay English-only by design: they are terse
+  entries for AI agents. `index.html` also stays English-only: it redirects to
+  `en/index.html` and links to `zh-CN/index.html`, the Chinese home page.
 - Chinese pages mark links to English-only pages with （英文）.
 - Keep code blocks identical in both languages; comments in shared code
   blocks are in English.

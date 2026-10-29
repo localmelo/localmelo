@@ -1,5 +1,7 @@
 # Guide: Model servers
 
+This guide shows how to run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vLLM, SGLang or a cloud API. Read it when you choose a backend; the setting names and defaults are in the [configuration reference](../reference/configuration.md).
+
 ## Serve a model with oMLX
 
 [oMLX](https://github.com/jundot/omlx) serves MLX models through an

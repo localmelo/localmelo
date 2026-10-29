@@ -2,6 +2,8 @@
 
 # 模型服务器指南
 
+本指南说明如何自行运行模型服务器并让 localmelo 连接到它，涵盖 oMLX、Ollama、MLC LLM、vLLM、SGLang 和云端 API。选择后端时请阅读本指南；设置名称和默认值见[配置参考](../reference/configuration.md)。
+
 <a id="serve-a-model-with-omlx"></a>
 
 ## 使用 oMLX 提供模型服务

@@ -1,5 +1,7 @@
 # Concepts: Memory
 
+This page explains what localmelo remembers and how a run recalls that memory. Read it before you change memory settings; the exact files and options are in the [memory reference](../reference/memory.md).
+
 ## What localmelo remembers
 
 | Memory | What it holds | Where |

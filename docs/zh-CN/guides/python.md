@@ -2,6 +2,8 @@
 
 # 指南：Python
 
+本指南说明如何在你自己的 Python 代码中使用 localmelo：运行任务、跟踪运行事件、停止运行、批准工具调用、在指定目录中工作，以及在多次运行之间保留回答。编写 Python 脚本时请阅读本指南；类及其字段见 [Python API 参考](../reference/python-api.md)。
+
 <a id="run-a-task"></a>
 
 ## 运行任务
