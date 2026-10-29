@@ -167,7 +167,7 @@ async def test_post_fence_failure_interrupts_and_counts_once(
     assert (await workers.update(task_id, state="stop"))["state"] == "cancelled"
 
 
-async def test_ordinary_create_remains_unproved(
+async def test_ordinary_create_records_the_never_started_proof(
     worker_setup: tuple[TaskWorkers, Path],
 ) -> None:
     workers, workspace = worker_setup
@@ -177,5 +177,8 @@ async def test_ordinary_create_remains_unproved(
     )
     assert not repeated
     provenance = await RecoveryStore(workers.store).provenance(task["task_id"])
-    assert provenance.first_start == "unknown"
+    # The production create writes the proof inside its durable transaction,
+    # before any launch, so a task that dies queued is never-started, not
+    # unknown.
+    assert provenance.first_start == "never_started"
     assert provenance.execution_id is None

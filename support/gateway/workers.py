@@ -33,8 +33,18 @@ from localmelo.support.gateway.chat_gate import (
 )
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
+from localmelo.support.gateway.process_identity import gone as process_gone
 from localmelo.support.gateway.process_identity import identity as process_identity
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.resume_evidence import (
+    ConfirmationRequiredError,
+    RecoveryUnknownError,
+    ResumeRefusedError,
+    StaleConfirmationError,
+    collect_evidence,
+    decide,
+)
+from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
@@ -161,6 +171,10 @@ class TaskWorkers:
         self._eligible: set[str] = set()
         self._restart_fenced: set[str] = set()
         self._restart_first: set[str] = set()
+        self._resume_tokens = ResumeTokens()
+        self._process_verifier: Callable[[tuple[int, int, str, str], str], bool] = (
+            process_gone
+        )
         self._pending_execution: dict[str, str] = {}
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
@@ -205,6 +219,28 @@ class TaskWorkers:
                         and provenance.first_start == "never_started"
                     ):
                         self._restart_first.add(record.task_id)
+                        self._register(record)
+                        self._eligible.add(record.task_id)
+                    elif (
+                        record.state == "queued"
+                        and record.level < 5
+                        and await self.tasks.resume_waiting_turn(record.task_id)
+                    ):
+                        # A Resume committed before the restart whose turn never
+                        # started is re-admitted, not fenced for another review.
+                        self._register(record)
+                        self._eligible.add(record.task_id)
+                    elif (
+                        record.state == "interrupted"
+                        and record.level < 5
+                        and await self.tasks.resume_waiting_turn(record.task_id)
+                    ):
+                        # The crash came after the task reached running but
+                        # before the resumed turn began: startup interrupted
+                        # it, and the committed Resume is queued again.
+                        record = await self.tasks.change(
+                            record.task_id, state="queued", actor="scheduler"
+                        )
                         self._register(record)
                         self._eligible.add(record.task_id)
                     else:
@@ -261,6 +297,7 @@ class TaskWorkers:
                 workspace=workspace,
                 request_key=key,
                 task_id=task_id,
+                _recovery_proof=True,
             )
             if not repeated:
                 self._register(record)
@@ -343,6 +380,10 @@ class TaskWorkers:
                 ):
                     raise SessionStoreError("store unavailable")
         async with self._lock:
+            if state == "stop":
+                # Stop wins: an old confirmation may not resume a task it
+                # previewed before this transition.
+                self._resume_tokens.invalidate(task_id)
             if task_id in self._unavailable:
                 raise SessionStoreError("store unavailable")
             if task_id in self._quarantined and state != "stop":
@@ -393,6 +434,11 @@ class TaskWorkers:
                 if not pending_resume:
                     raise TaskNotPausedError("task is not paused")
             if state == "stop" and task_id in self._runs:
+                # Set the stop flag under the same lock Resume holds, so a
+                # worker admitted by a Resume that finished committing just
+                # before this Stop cannot start its turn.
+                self._stopping.add(task_id)
+                self._ready[task_id].clear()
                 runner = self._runners.get(task_id)
                 if runner is not None:
                     runner.cancel(cause="user_stop")
@@ -567,6 +613,188 @@ class TaskWorkers:
                 self._ready[task_id].set()
             await self._schedule()
             return await self._body(record)
+
+    async def resume(
+        self,
+        task_id: str,
+        *,
+        operation_id: str,
+        confirmation_token: str | None = None,
+    ) -> dict:
+        """Resume one recovered task through the evidence decision table.
+
+        Without a token, an unverifiable execution raises
+        :class:`ConfirmationRequiredError` and changes nothing. A token authorizes
+        exactly the previewed evidence and CAS generation; an accepted
+        transition consumes it once. Stop invalidates it and wins without
+        replaying a delayed retry.
+        """
+        if (
+            not isinstance(operation_id, str)
+            or not operation_id.strip()
+            or len(operation_id) > 200
+        ):
+            raise ValueError("operation_id must be a non-empty string")
+        if confirmation_token is not None and (
+            not isinstance(confirmation_token, str) or not confirmation_token
+        ):
+            raise ValueError("confirmation_token must be a non-empty string")
+        async with self._lock:
+            if self._closed or task_id in self._unavailable:
+                raise SessionStoreError("store unavailable")
+            current = await self.tasks.get_task(task_id)
+            if await self.tasks.has_resume_receipt(task_id, operation_id):
+                # A matching retry returns the current row without a second
+                # turn, and re-admits a queue this process committed but did
+                # not finish registering (for example after a cancelled commit).
+                if current.state == "interrupted":
+                    # The restart interrupted the committed queue. Re-admit it
+                    # only when its turn never started; otherwise the work the
+                    # operation promised has begun and a retry must not replay.
+                    turn = await self.tasks.resume_turn(task_id, operation_id)
+                    if turn is None or await self.tasks.turn_started(
+                        task_id, turn=turn
+                    ):
+                        raise TaskConflictError(
+                            "The resumed turn already started; this operation "
+                            "cannot be replayed."
+                        )
+                    current = await self.tasks.change(
+                        task_id, state="queued", actor="scheduler"
+                    )
+                if (
+                    current.state == "queued"
+                    and current.level < 5
+                    and task_id not in self._quarantined
+                    and task_id not in self._stopping
+                ):
+                    self._restart_fenced.discard(task_id)
+                    self._restart_first.discard(task_id)
+                    self._invalid_workspace.discard(task_id)
+                    self._pause_requested.discard(task_id)
+                    self._register(current)
+                    self._eligible.add(task_id)
+                    self._ready[task_id].set()
+                    self.gate.update_task(task_id, paused=False)
+                    await self._schedule()
+                return await self._body(current)
+            if task_id in self._quarantined:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: the previous worker's cleanup has not "
+                    "settled; Stop stays available.",
+                    reason="cleanup_unresolved",
+                )
+            if task_id in self._stopping:
+                raise ResumeRefusedError(
+                    "Resume unavailable: Stop is in progress.", reason="stopping"
+                )
+            if confirmation_token is not None:
+                grant = self._resume_tokens.binding_for(confirmation_token)
+                if grant is None or grant.task_id != task_id:
+                    raise StaleConfirmationError(
+                        "The confirmation expired, was already used, or belongs "
+                        "to another task."
+                    )
+            if await self.tasks.operation_receipt(task_id, operation_id) is not None:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: this operation ID belongs to another transition."
+                )
+            recovery = RecoveryStore(self.store)
+            if await recovery.receipt(task_id, operation_id) is not None:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: this operation ID belongs to another recovery operation."
+                )
+            if await recovery.active_intent(task_id) is not None:
+                raise RecoveryUnknownError()
+            if current.state in TERMINAL_PHASES:
+                raise ResumeRefusedError(
+                    f"Task {task_id} is finished ({current.state}) and cannot be resumed.",
+                    reason="terminal",
+                )
+            if current.state not in {"interrupted", "parked"}:
+                raise ResumeRefusedError(
+                    f"Task {task_id} is not waiting for recovery.",
+                    reason="invalid_state",
+                )
+        # Reading the evidence is the slow part: workspace, five store reads
+        # and one liveness check per recorded group. Take it outside the worker
+        # lock so capture and Stop are not delayed by a large evidence set; the
+        # commit below re-checks Stop and CASes the evidence generation.
+        workspace_valid = await self._resume_workspace(task_id)
+        evidence = await collect_evidence(
+            self.tasks, recovery, current, verifier=self._process_verifier
+        )
+        decision = decide(evidence, workspace_valid=workspace_valid)
+        binding = ResumeBinding(
+            task_id=task_id,
+            execution_id=evidence.execution_id,
+            evidence_key=evidence.evidence_key,
+            generation=evidence.generation,
+            pending_operation_id=evidence.pending_operation_id,
+        )
+        async with self._lock:
+            if self._closed or task_id in self._unavailable:
+                raise SessionStoreError("store unavailable")
+            if task_id in self._stopping:
+                raise ResumeRefusedError(
+                    "Resume unavailable: Stop is in progress.", reason="stopping"
+                )
+            if task_id in self._quarantined:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: the previous worker's cleanup has not "
+                    "settled; Stop stays available.",
+                    reason="cleanup_unresolved",
+                )
+            if decision.kind == "confirm":
+                if confirmation_token is None:
+                    token = self._resume_tokens.issue(binding)
+                    raise ConfirmationRequiredError(binding, token=token)
+                if not self._resume_tokens.valid(confirmation_token, binding):
+                    raise StaleConfirmationError(
+                        "The recovery evidence or task identity changed; "
+                        "review it again."
+                    )
+            record = await self.tasks.resume_recovered(
+                task_id,
+                operation_id=operation_id,
+                expected_generation=evidence.generation,
+                expected_operation_id=evidence.pending_operation_id,
+                expected_execution_id=evidence.execution_id,
+                confirmed=decision.kind == "confirm",
+                first_start=decision.kind == "first_start",
+            )
+            if decision.kind == "confirm" and confirmation_token is not None:
+                # The token was validated under this lock, just before the
+                # commit. Consume it as a formality: an accepted transition
+                # must never fail after its durable commit.
+                self._resume_tokens.consume(confirmation_token, binding)
+            # An accepted transition retires every preview issued for it.
+            self._resume_tokens.invalidate(task_id)
+            self._restart_fenced.discard(task_id)
+            self._restart_first.discard(task_id)
+            self._invalid_workspace.discard(task_id)
+            self._pause_requested.discard(task_id)
+            self._register(record)
+            restored: int | str = (
+                record.level if record.level_source == "user" else "auto"
+            )
+            self.gate.set_task_level(task_id, restored, rank=record.user_rank)
+            if record.level >= 5:
+                self.gate.update_task(task_id, paused=True)
+                self._ready[task_id].clear()
+            else:
+                self.gate.update_task(task_id, paused=False)
+                self._eligible.add(task_id)
+                self._ready[task_id].set()
+            await self._schedule()
+            return await self._body(record)
+
+    async def _resume_workspace(self, task_id: str) -> bool:
+        try:
+            await self._workspace(task_id)
+        except WorkspaceError:
+            return False
+        return True
 
     def _select_park(self, task_id: str) -> None:
         point = self._points.get(task_id)
@@ -1040,7 +1268,7 @@ class TaskWorkers:
 
     async def _capture_process(self, task_id: str, execution_id: str, pid: int) -> None:
         try:
-            pgid, leader, boot, birth = process_identity(pid)
+            pgid, leader, host, boot, birth = process_identity(pid)
             async with self._lock:
                 if self._closed or task_id in self._stopping:
                     raise asyncio.CancelledError()
@@ -1052,6 +1280,7 @@ class TaskWorkers:
                     leader_pid=leader,
                     boot_id=boot,
                     start_token=birth,
+                    host_id=host,
                     expected_generation=generation,
                     expected_operation_id=previous,
                 )
@@ -1076,6 +1305,25 @@ class TaskWorkers:
         tool_token: contextvars.Token[Any] | None = None
         process_token: contextvars.Token[Any] | None = None
         try:
+            if execution_id is not None:
+                try:
+                    retired = (
+                        await RecoveryStore(self.store).active_capture(task_id)
+                        != execution_id
+                    )
+                except BaseException:
+                    launch_uncertain = True
+                    self._eligible.discard(task_id)
+                    self._store_unavailable(task_id)
+                    raise
+                if retired:
+                    # An intervening transition (Stop, pause then resume) retired
+                    # the fence's capture before its turn started, so nothing ran
+                    # under it: this launch mints a fresh execution instead of
+                    # failing post-fence.
+                    self._pending_execution.pop(task_id, None)
+                    execution_id = None
+                    launch_committed = False
             async with self._lock:
                 record = await self.tasks.get_task(task_id)
                 if record.state == "parked":
@@ -1223,19 +1471,29 @@ class TaskWorkers:
                                 _capture_execution=execution_id,
                                 _capture_existing=launch_committed,
                             )
-                        self.gate.update_task(task_id, phase="running")
-                        self.gate.turn_start(task_id)
-                        if record.card:
-                            await runner.resume()
-                        await runner.start_turn(
-                            record.card or str(record.spec["objective"]),
-                            approval=policy,
-                            client_request_id=(
-                                execution_id if launch_committed else None
-                            ),
-                        )
-                        turn_started = True
-                        self._pending_execution.pop(task_id, None)
+                        if (
+                            task_id in self._stopping
+                            or self._closed
+                            or task_id in self._invalid_workspace
+                        ):
+                            # Stop always wins: it sets its flag without waiting
+                            # for this lock, so the awaits above may have let it
+                            # in; no turn starts once it was requested.
+                            phase = "cancelled"
+                        else:
+                            self.gate.update_task(task_id, phase="running")
+                            self.gate.turn_start(task_id)
+                            if record.card:
+                                await runner.resume()
+                            await runner.start_turn(
+                                record.card or str(record.spec["objective"]),
+                                approval=policy,
+                                client_request_id=(
+                                    execution_id if launch_committed else None
+                                ),
+                            )
+                            turn_started = True
+                            self._pending_execution.pop(task_id, None)
             if phase != "cancelled" and not deferred:
                 result = await runner.wait()
                 while runner.busy:

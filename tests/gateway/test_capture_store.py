@@ -7,7 +7,11 @@ import pytest
 
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
+from localmelo.support.gateway.task_store import (
+    SCHEDULER_VERSION,
+    TaskStore,
+    TaskStoreError,
+)
 from localmelo.support.sessions.store import SessionStore
 
 
@@ -54,10 +58,10 @@ async def test_v3_capture_migration_rolls_back(
         assert await tasks.get_task(task.task_id) == task
         monkeypatch.setattr(store, "_before_commit", original)
         migrated = TaskStore(store)
-        assert await migrated.open() == 4
+        assert await migrated.open() == SCHEDULER_VERSION
         assert await migrated.get_task(task.task_id) == task
-        assert await migrated.open() == 4
-        async with store.component_transaction("check_v4") as conn:
+        assert await migrated.open() == SCHEDULER_VERSION
+        async with store.component_transaction("check_schema_tables") as conn:
             names = await (
                 await conn.execute(
                     "SELECT name FROM sqlite_master WHERE name IN "
@@ -68,6 +72,148 @@ async def test_v3_capture_migration_rolls_back(
             "recovery_capture",
             "recovery_one_capture",
         }
+    finally:
+        await store.aclose()
+
+
+async def test_v4_migration_adds_the_host_column(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        async with store.component_transaction("old_schema") as conn:
+            await conn.execute("ALTER TABLE recovery_processes DROP COLUMN host_id")
+            await conn.execute(
+                "UPDATE schema_components SET version = 4 WHERE name = 'scheduler'"
+            )
+        migrated = TaskStore(store)
+        assert await migrated.open() == SCHEDULER_VERSION
+        async with store.component_transaction("check_host") as conn:
+            columns = await (
+                await conn.execute("PRAGMA table_info(recovery_processes)")
+            ).fetchall()
+        assert "host_id" in {row[1] for row in columns}
+    finally:
+        await store.aclose()
+
+
+async def _host_columns(store: SessionStore) -> set[str]:
+    async with store.component_transaction("check_host") as conn:
+        rows = await (
+            await conn.execute("PRAGMA table_info(recovery_processes)")
+        ).fetchall()
+    return {row[1] for row in rows}
+
+
+async def test_v3_store_gains_the_host_column_and_records_a_host(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        await TaskStore(store).open()
+        async with store.component_transaction("old_schema") as conn:
+            # v3 had recovery_processes (without host_id) but no capture table.
+            await conn.execute("ALTER TABLE recovery_processes DROP COLUMN host_id")
+            await conn.execute("DROP TABLE recovery_capture")
+            await conn.execute(
+                "UPDATE schema_components SET version = 3 WHERE name = 'scheduler'"
+            )
+        tasks = TaskStore(store)
+        assert await tasks.open() == SCHEDULER_VERSION
+        assert "host_id" in await _host_columns(store)
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+            _recovery_proof=True,
+        )
+        recovery = RecoveryStore(store)
+        generation, previous = await tasks.park_identity(task.task_id)
+        await recovery.start(
+            task.task_id,
+            operation_id="start",
+            execution_id="run",
+            expected_generation=generation,
+            expected_operation_id=previous,
+            _capture=True,
+        )
+        await recovery.record_process(
+            task.task_id,
+            execution_id="run",
+            pgid=11,
+            leader_pid=11,
+            boot_id="boot",
+            start_token="start",
+            host_id="host-a",
+        )
+        assert await recovery.process_host(task.task_id, execution_id="run") == "host-a"
+    finally:
+        await store.aclose()
+
+
+async def test_v5_store_without_the_host_column_is_repaired_on_open(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        await TaskStore(store).open()
+        async with store.component_transaction("old_schema") as conn:
+            await conn.execute("ALTER TABLE recovery_processes DROP COLUMN host_id")
+        assert "host_id" not in await _host_columns(store)
+        repaired = TaskStore(store)
+        assert await repaired.open() == SCHEDULER_VERSION
+        assert "host_id" in await _host_columns(store)
+        assert await TaskStore(store).open() == SCHEDULER_VERSION
+    finally:
+        await store.aclose()
+
+
+async def test_process_host_is_unknown_unless_every_group_shares_it(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+            _recovery_proof=True,
+        )
+        recovery = RecoveryStore(store)
+        generation, previous = await tasks.park_identity(task.task_id)
+        await recovery.start(
+            task.task_id,
+            operation_id="start",
+            execution_id="run",
+            expected_generation=generation,
+            expected_operation_id=previous,
+            _capture=True,
+        )
+        assert await recovery.process_host(task.task_id, execution_id="run") == ""
+
+        async def record(pgid: int, host: str) -> None:
+            await recovery.record_process(
+                task.task_id,
+                execution_id="run",
+                pgid=pgid,
+                leader_pid=pgid,
+                boot_id="boot",
+                start_token="start",
+                host_id=host,
+            )
+
+        await record(11, "host-a")
+        await record(12, "host-a")
+        assert await recovery.process_host(task.task_id, execution_id="run") == "host-a"
+        # A group recorded on another host makes the whole set unknown.
+        await record(13, "host-b")
+        assert await recovery.process_host(task.task_id, execution_id="run") == ""
     finally:
         await store.aclose()
 

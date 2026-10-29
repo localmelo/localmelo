@@ -51,6 +51,13 @@ class StartupRecovery:
             return
         if task.state == "queued" and provenance.first_start == "never_started":
             return
+        if task.state == "queued" and await self.tasks.resume_waiting_turn(
+            task.task_id
+        ):
+            # A Resume committed before the restart whose turn never started
+            # stays queued: the scheduler re-admits it instead of fencing work
+            # the user already accepted.
+            return
         if task.state == "parked" and provenance.first_start == "never_started":
             return
         events: list[StoredEvent] = []

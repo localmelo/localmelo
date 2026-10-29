@@ -1,6 +1,8 @@
 """Orphan checks require known identity and never send a destructive signal."""
 
 import ctypes
+import hashlib
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,11 @@ from localmelo.support.gateway import process_identity as identity
 def test_process_group_absence_checks_boot_pid_and_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(identity, "_boot", lambda: "boot")
+    boot = "11111111-1111-1111-1111-111111111111"
+    other_boot = "22222222-2222-2222-2222-222222222222"
+    host = "host-a"
+    monkeypatch.setattr(identity, "_boot", lambda: boot)
+    monkeypatch.setattr(identity, "_host", lambda: host)
 
     def absent(pgid: int, sig: int) -> None:
         assert pgid == 123 and sig == 0
@@ -25,12 +31,30 @@ def test_process_group_absence_checks_boot_pid_and_start(
         raise ProcessLookupError()
 
     monkeypatch.setattr(identity, "_birth", missing)
-    assert identity.gone((123, 123, "boot", "old"))
+    assert identity.gone((123, 123, boot, "old"))
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "new"))
-    assert identity.gone((123, 123, "boot", "old"))
+    assert identity.gone((123, 123, boot, "old"))
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "old"))
-    assert not identity.gone((123, 123, "boot", "old"))
-    assert not identity.gone((123, 123, "other-boot", "old"))
+    assert not identity.gone((123, 123, boot, "old"))
+    # A verified boot change counts as gone on the host that recorded it; a
+    # malformed stored id, another host or an unknown host is unknown.
+    assert identity.gone((123, 123, other_boot, "old"), host)
+    monkeypatch.setattr(identity, "_host", lambda: "host-b")
+    assert not identity.gone((123, 123, other_boot, "old"), host)
+    assert not identity.gone((123, 123, other_boot, "old"))
+    monkeypatch.setattr(identity, "_host", lambda: host)
+    assert not identity.gone((123, 123, "other-boot", "old"), host)
+    # A stored id with the other platform's shape is malformed too.
+    assert not identity.gone((123, 123, "1:2", "old"), host)
+
+
+def test_unreadable_boot_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable() -> str:
+        raise OSError("cannot read boot identity")
+
+    monkeypatch.setattr(identity, "_boot", unreadable)
+    monkeypatch.setattr(identity.os, "killpg", lambda pgid, sig: None)
+    assert not identity.gone((123, 123, "11111111-1111-1111-1111-111111111111", "old"))
 
 
 def test_group_alive_or_permission_denied_is_not_gone(
@@ -62,6 +86,111 @@ def test_linux_boot_identity_is_normalized_and_invalid_is_unknown(
     monkeypatch.setattr(Path, "read_text", lambda path: "not-a-uuid")
     with pytest.raises(OSError, match="invalid Linux boot"):
         identity._boot()
+
+
+def test_unreadable_host_is_not_evidence_of_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other_boot = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr(
+        identity, "_boot", lambda: "11111111-1111-1111-1111-111111111111"
+    )
+
+    def unreadable() -> str:
+        raise OSError("cannot read host identity")
+
+    monkeypatch.setattr(identity, "_host", unreadable)
+    assert not identity.gone((123, 123, other_boot, "old"), "host-a")
+
+
+def test_linux_host_identity_is_normalized_and_invalid_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(identity.sys, "platform", "linux")
+    machine_id = Path("/etc/machine-id")
+
+    def read_id(path: Path) -> str:
+        if path == machine_id:
+            return " ABCDEF0123456789ABCDEF0123456789\n"
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(Path, "read_text", read_id)
+    assert identity._host() == "abcdef0123456789abcdef0123456789"
+    monkeypatch.setattr(Path, "read_text", lambda path: "not a machine id")
+    with pytest.raises(OSError, match="cannot read host identity"):
+        identity._host()
+
+
+def _ioreg(monkeypatch: pytest.MonkeyPatch, stdout: str, code: int = 0) -> list[Any]:
+    calls: list[Any] = []
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, code, stdout, "")
+
+    monkeypatch.setattr(identity.sys, "platform", "darwin")
+    monkeypatch.setattr(identity.subprocess, "run", run)
+    return calls
+
+
+def _registry(uuid: str) -> str:
+    return (
+        "+-o Root  <class IORegistryEntry>\n"
+        f'    "IOPlatformUUID" = "{uuid}"\n'
+        '    "IOPlatformSerialNumber" = "NOT-A-REAL-SERIAL"\n'
+    )
+
+
+def test_macos_host_identity_is_a_digest_of_the_hardware_uuid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hardware = "344C04E4-E246-5171-88DC-E77B2C596FAE"
+    calls = _ioreg(monkeypatch, _registry(hardware))
+    host = identity._host()
+    assert host == hashlib.sha256(hardware.lower().encode()).hexdigest()
+    assert hardware.lower() not in host and "344c04e4" not in host
+    assert calls[0][0][0] == "/usr/sbin/ioreg" and calls[0][1]["timeout"] > 0
+    # Another Mac is another host, whatever kernel build it runs.
+    _ioreg(monkeypatch, _registry("6569A121-C345-3BEC-9F67-AAF0F88B8DEB"))
+    assert identity._host() != host
+
+
+@pytest.mark.parametrize(
+    ("stdout", "code"),
+    [
+        ("", 0),
+        ("no uuid here", 0),
+        (_registry("not-a-uuid"), 0),
+        (_registry("344C04E4-E246-5171-88DC-E77B2C596FAE"), 1),
+    ],
+)
+def test_macos_host_identity_unreadable_is_unknown(
+    monkeypatch: pytest.MonkeyPatch, stdout: str, code: int
+) -> None:
+    _ioreg(monkeypatch, stdout, code)
+    with pytest.raises(OSError, match="cannot read host identity") as caught:
+        identity._host()
+    assert "344C04E4" not in str(caught.value)
+    boot = "11111111-1111-1111-1111-111111111111"
+    monkeypatch.setattr(
+        identity, "_boot", lambda: "22222222-2222-2222-2222-222222222222"
+    )
+    assert not identity.gone((123, 123, boot, "old"), "any-host")
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("no ioreg"), subprocess.TimeoutExpired("ioreg", 5)]
+)
+def test_macos_host_identity_survives_a_failing_ioreg(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    def run(*args: Any, **kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(identity.sys, "platform", "darwin")
+    monkeypatch.setattr(identity.subprocess, "run", run)
+    with pytest.raises(OSError, match="cannot read host identity"):
+        identity._host()
 
 
 def test_linux_birth_parses_command_with_spaces_and_parentheses(
@@ -232,7 +361,8 @@ def test_identity_requires_group_leader(monkeypatch: pytest.MonkeyPatch) -> None
         identity.identity(123)
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "start"))
     monkeypatch.setattr(identity, "_boot", lambda: "boot")
-    assert identity.identity(123) == (123, 123, "boot", "start")
+    monkeypatch.setattr(identity, "_host", lambda: "host")
+    assert identity.identity(123) == (123, 123, "host", "boot", "start")
 
 
 @pytest.mark.parametrize(

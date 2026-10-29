@@ -57,6 +57,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Controlled task Resume: `POST /api/tasks/{id}/resume` (also
+  `/api/v2/tasks/{id}/resume`) queues a recovered task only through the
+  evidence decision table. Every create records a durable never-started proof
+  before any launch, so a proved never-started task first-starts without a card
+  or confirmation; a started task resumes without confirmation only with a
+  trusted complete capture whose recorded groups are verifiably gone. A verified
+  boot change counts as gone only on the host that recorded the group: captures
+  now persist a durable host id (the macOS hardware UUID, kept only as a SHA-256
+  digest, or `/etc/machine-id`), and another or unknown host asks for
+  confirmation. Anything else returns 409 `confirmation_required` with a
+  five-minute, single-use, in-memory token bound to the task, execution,
+  evidence and CAS generation. Missing card, invalid workspace, stale identity,
+  terminal state and unresolved recovery operations block Resume; Stop always
+  wins and cancels a queued resumed turn before any provider or tool. An
+  operation ID
+  names one operation: a retry returns the committed row whatever its payload,
+  without a second turn. A Resume committed before a restart is re-admitted on
+  startup when its turn never started, even if the task had reached running, and a retry after that turn started
+  returns 409 instead of replaying it. PATCH stays fenced for recovered work.
+  ([#177])
+
 - Direct workers can read steering instructions from an inherited pipe with
   `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
   inbox, but the read end is close-on-exec before tools start. Python, shell
@@ -1074,3 +1095,4 @@ earlier milestones.
 [#168]: https://github.com/localmelo/localmelo/pull/168
 [#169]: https://github.com/localmelo/localmelo/pull/169
 [#175]: https://github.com/localmelo/localmelo/pull/175
+[#177]: https://github.com/localmelo/localmelo/pull/177
