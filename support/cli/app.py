@@ -115,6 +115,9 @@ class StatusBar:
     title: str
     mode: str
     mode_style: str = "class:muted"
+    # The usage segments (cache, ctx, steps, tasks) between the workspace and
+    # the title; empty with [cli] status_line = "off".
+    segments: tuple[str, ...] = ()
 
 
 class Controller(Protocol):
@@ -154,10 +157,10 @@ def status_fragments(
 ) -> StyleAndTextTuples:
     """The status bar at *width*: the mode always shows, at the right edge.
 
-    When the width is short, the title is cut first, then the workspace
-    (from the middle), then the context goes (and the workspace takes its
-    room back), then the model is cut. Every cut counts cells, and no
-    part is left as a bare ellipsis.
+    When the width is short, the title is cut first, then the usage segments
+    go right to left, then the workspace is cut (from the middle), then the
+    context goes (and the workspace takes its room back), then the model is
+    cut. Every cut counts cells, and no part is left as a bare ellipsis.
     """
     # Control characters (a pasted ^Z) count the cells they are drawn in.
     bar = StatusBar(
@@ -167,13 +170,16 @@ def status_fragments(
         title=shown(bar.title),
         mode=shown(bar.mode),
         mode_style=bar.mode_style,
+        segments=tuple(shown(segment) for segment in bar.segments),
     )
     mode = cut_cells(bar.mode, max(1, width - 3), ellipsis)
     room = width - 2 - cells(mode) - 1
     model, context, title = bar.model, bar.context, bar.title
+    segments = [segment for segment in bar.segments if segment]
 
     def joined(workspace: str) -> str:
-        return dot.join(part for part in (model, workspace, context, title) if part)
+        parts = (model, workspace, *segments, context, title)
+        return dot.join(part for part in parts if part)
 
     def fit_workspace() -> str:
         keep = room - cells(joined(bar.workspace)) + cells(bar.workspace)
@@ -186,6 +192,8 @@ def status_fragments(
         )
         if cells(title) < 6:
             title = ""
+    while segments and cells(joined(workspace)) > room:
+        segments.pop()
     if cells(joined(workspace)) > room:
         workspace = fit_workspace()
     if cells(joined(workspace)) > room and context:
