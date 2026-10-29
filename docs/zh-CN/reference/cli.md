@@ -14,7 +14,7 @@ melo [options]                               # the interactive UI (in a terminal
 melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
 melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
 melo --reconfigure                           # run setup, then the interactive UI
-melo --serve [--host HOST] [--port PORT]     # start the gateway
+melo --serve [--host HOST] [--port PORT]     # start the gateway (--port 0: a free port)
 melo --serve --enable-playground             # opt in to legacy playground (in progress)
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
@@ -265,7 +265,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 |---|---|---|
 | `--serve` | 关闭 | 启动网关：HTTP API 和网页工作区。 |
 | `--host HOST` | `127.0.0.1` | 网关监听的地址。 |
-| `--port PORT` | `8401` | 网关监听的端口。 |
+| `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
 | `--allow-unconfigured` | 关闭 | 与 `--serve` 一起使用时，即使没有配置任何后端或配置文件有校验错误，也启动网关，以便通过 `/api/settings` 进行配置。 |
 | `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use it? [Y/n]:`；回答 `n`、没有找到服务器或使用 `--developer` 时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
 | `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`。 |
@@ -297,6 +297,7 @@ melo: error: argument --max-steps: must be at least 1, got 0
 - `--yolo`、`-c` 或 `-r` 与任务、`--serve` 或 `--daemon` 同用，报告为 `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`；
 - `--base-url` 或 `--chat-model` 与 `--serve` 或 `--daemon` 同用，报告为 `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`；
 - 没有任务时使用 `--host` 或 `--port`，并且没有 `--serve`、`--daemon` 或网关认证命令，报告为 `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`；
+- `--port 0` 与 `--daemon` 或网关认证命令同用，报告为 `--port 0 picks a free port for --serve only; …`；
 - 没有任务的 `--reconfigure` 与 `--base-url` 同用，报告为 `--reconfigure sets up the config file, which --base-url does not use; give one of them`；
 - `legacy` 中的召回旗标，报告为 `argument --retriever/--recall-*/--retrieval-*: retrieval is not available in legacy; use --reasoning compress, compress+replay, drop or replay`；
 - 没有嵌入提供方或使用 `--memory off` 时的 `--retriever embedding`；

@@ -865,6 +865,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- First-run setup prefers a model that is already in memory: when the server
+  reports which models are loaded (oMLX `GET /v1/models/status`, Ollama
+  `GET /api/ps`), they are marked `(loaded)` and the default answer is the first
+  loaded chat model, so Enter does not load a large model. `melo --serve --port 0`
+  now binds a free port and prints the real address. The quickstart says a worker
+  task waits once per tool the model asks to use, and that `python_exec` can start
+  programs. ([#NN])
+
 - A `--brief` run checks its work before the budget runs out: with `Check:` lines,
   exactly two steps left in the last attempt, and a workspace that changed since
   the checks last ran, the harness runs them once so the model can still fix a

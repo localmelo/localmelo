@@ -13,7 +13,7 @@ melo [options]                               # the interactive UI (in a terminal
 melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
 melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
 melo --reconfigure                           # run setup, then the interactive UI
-melo --serve [--host HOST] [--port PORT]     # start the gateway
+melo --serve [--host HOST] [--port PORT]     # start the gateway (--port 0: a free port)
 melo --serve --enable-playground             # opt in to legacy playground (in progress)
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
@@ -438,7 +438,7 @@ These options apply to `melo` without a task.
 |---|---|---|
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
-| `--port PORT` | `8401` | The port the gateway listens on. |
+| `--port PORT` | `8401` | The port the gateway listens on. With `--serve`, `0` asks the system for a free port: the startup lines print the real address, the sign-in line names the port for `melo --gateway-login --port PORT`, and `melo-task` needs `--gateway URL`. `0` is refused with `--daemon` and the gateway authentication commands, and in `[gateway] port`. |
 | `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
 | `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use it? [Y/n]:`; the full menu after `n`, with none found, or with `--developer`), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
@@ -499,6 +499,8 @@ These are usage errors:
 - `--host` or `--port` without a task, `--serve`, `--daemon`, or a gateway
   authentication command, reported as
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
+- `--port 0` with `--daemon` or a gateway authentication command, reported as
+  `--port 0 picks a free port for --serve only; …`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
 - a recall flag in `legacy`, reported as

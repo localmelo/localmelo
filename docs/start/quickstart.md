@@ -70,8 +70,10 @@ The answer is printed on stdout, and the command exits with code 0
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
 
-Direct tasks write files and run Python without asking, and have no shell
-unless you pass `--builtins all`. A brief's check (see
+Direct tasks write files and run Python without asking, and have no
+`shell_exec` tool unless you pass `--builtins all`. That is not a sandbox:
+`python_exec` can still start programs (see the
+[warning above](#run-your-first-task)). A brief's check (see
 [Run a worker task](#run-a-worker-task)) runs anyway.
 
 For every option, see the [command-line reference](../reference/cli.md).
@@ -143,7 +145,11 @@ and the gateway work without `--base-url`.
 For a local server, run `melo` in a terminal. With no configuration yet, it
 looks for a model server on this computer, asks for its URL (press Enter to
 accept the one it found) and for a model from the server's list, saves
-`~/.cache/localmelo/config.toml` and opens the interactive UI:
+`~/.cache/localmelo/config.toml` and opens the interactive UI. When the list
+holds several chat models and the server says which are in memory (oMLX,
+Ollama), they are marked `(loaded)` and Enter chooses the first of them, so
+it does not load a large model that is not in memory; otherwise Enter chooses
+the first chat model:
 
 ```text
 $ melo
@@ -253,7 +259,10 @@ configuration:
 melo "What is 6*7?"
 ```
 
-To start the gateway again without the wizard, run `melo --serve`.
+To start the gateway again without the wizard, run `melo --serve`. With
+`melo --serve --port 0` the system picks a free port: the startup lines show
+the real address, and `melo --gateway-login --port PORT` and
+`melo-task --gateway URL` need it.
 
 ## Run a task through the gateway
 
@@ -276,7 +285,10 @@ c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
 ```
 
 With the default settings a file write waits for your approval, so the task
-is `held` until you answer it. Run `melo --gateway-login` in a terminal, open
+is `held` until you answer it. The task waits once for each tool the model
+asks to use: a model that runs its own check asks for `python_exec` too, and
+the task is `held` again until you answer that. `melo-task show` names the
+tool it waits for. Run `melo --gateway-login` in a terminal, open
 the link it prints, and answer the request in the Tasks view. Then show the
 task:
 
