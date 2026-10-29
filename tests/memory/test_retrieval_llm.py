@@ -214,7 +214,7 @@ async def test_a_long_entry_line_is_shortened() -> None:
 
 
 async def test_a_long_entry_line_carries_its_text_beside_the_date() -> None:
-    # T53R finding 1: a long doc's title is only its date, so without the
+    # Review finding 1: a long doc's title is only its date, so without the
     # text the catalog names nothing the retriever can select.
     docs = [
         Doc(

@@ -106,7 +106,7 @@ def test_a_slash_date_matches_an_iso_record_and_not_a_bare_number() -> None:
 
 
 def test_a_digest_with_a_task_line_is_content() -> None:
-    # T68b: a digest's task line and its outcome are content even when the
+    # A digest's task line and its outcome are content even when the
     # sentence reads like a completion claim (no dates or amounts at all).
     text = "task: transpose() … outcome: completed"
     assert not is_meta_claim(text)

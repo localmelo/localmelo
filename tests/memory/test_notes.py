@@ -275,7 +275,7 @@ def test_parse_note_block_caps() -> None:
     assert note.plan == "step " * 59 + "step…"
     assert len(note.plan) == 300
     # The first item, 249 characters, is cut at 199; empty items are
-    # dropped. An explicit note keeps up to 12 found items (T68): its cap
+    # dropped. An explicit note keeps up to 12 found items: its cap
     # is not lower than the 12 a factual reply may carry.
     assert note.found == ["long " * 39 + "long…", "b", "c", "d", "e"]
     assert note.decided == ["a", "b", "c"]
@@ -715,7 +715,7 @@ def test_observed_pytest_summary_is_the_last_one() -> None:
 
 @pytest.mark.parametrize("output", ["", "---\n===\n", "  \n"])
 def test_observed_without_output_is_not_recorded(output: str) -> None:
-    # T76: an empty or trivial result is no observation for a digest, so
+    # An empty or trivial result is no observation for a digest, so
     # it is not kept as one (the note used to say "(no output)").
     call = ToolCall("shell_exec", {"command": "true"})
     assert _note([call], [ToolResult("shell_exec", output)]).observed == []
@@ -830,7 +830,7 @@ def test_source_ids_skip_built_ins_and_failed_calls() -> None:
     assert (note.source_ids, note.observed) == ([], ["search: Error: boom"])
 
 
-# ── T62: an item's source is its own or an earlier observation ──
+# ── An item's source is its own or an earlier observation ──
 
 FACT = "Yoga starts 2026-04-11T09:00:00-04:00 at Studio Verde."
 UNRELATED = "The cafeteria serves lunch at noon."

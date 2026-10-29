@@ -1113,11 +1113,11 @@ class _RunState:
     candidates_refused: int = 0
     redactions: int = 0
     digests: int = 0
-    # The task's tool-result records, for a later note's items (T62): the
+    # The task's tool-result records, for a later note's items: the
     # results still in the window and the rest, both newest first, bounded.
     source_log: SourceRecordLog = dataclasses.field(default_factory=SourceRecordLog)
     # The current attempt's executed calls and their checked results, for
-    # its digest (T76): files written and the last check. Only the compress
+    # its digest: files written and the last check. Only the compress
     # modes fill it, and it is cleared at the attempt's start and after its
     # digest.
     attempt_calls: list[tuple[ToolCall, ToolResult]] = dataclasses.field(
@@ -2502,7 +2502,7 @@ class Agent:
         The note or draft it comes from was counted when it entered its own
         store; this pass is the one R6-lite requires before a candidate is
         staged, so the policy never compares raw text. ``candidates`` counts
-        boundary checks, not documents (T53R finding 11).
+        boundary checks, not documents (review finding 11).
         """
         run.candidates += 1
         check = self.checker.check_memory_candidate(
@@ -2989,7 +2989,7 @@ class Agent:
             self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
             run.rehearsed["restated"] += 1
             # The new note's candidate is superseded by the merged one; a
-            # request would otherwise be able to admit both (T53R finding 8).
+            # request would otherwise be able to admit both (review finding 8).
             self.hippo.staged.drop(note.note_id)
             self._propose_note_candidate(updated, run)
             decisions = await self.hippo.admit(updated.note_id, "rehearsal")
@@ -5143,7 +5143,7 @@ class Agent:
                         # Only the user's own text gives a user signal: a
                         # direct statement is admitted at once, while the
                         # fact a remember request carries is staged and
-                        # admitted with the digest at flush (T59).
+                        # admitted with the digest at flush.
                         signals = classify_user_text(query)
                         for candidate in user_candidates(
                             query,

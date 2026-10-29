@@ -387,7 +387,7 @@ def docs_from_entries(
     two docs and a hit joins back to the store. Rows that are not active,
     whose ``metadata["task_id"]`` is in *exclude_task_ids*, or whose score is
     under *min_score* are left out; a row tagged ``retrieval: bm25`` has no
-    absolute floor, because *min_score* is a cosine floor (T53R finding 3).
+    absolute floor, because *min_score* is a cosine floor (review finding 3).
     The rest are ordered by
     ``(created_at, entry id)``, so appending an entry never renumbers an old
     one while the store only grows.
@@ -405,7 +405,7 @@ def docs_from_entries(
         if isinstance(task_id, str) and task_id in excluded:
             continue
         # The floor is a cosine floor: a row that BM25 scored has no
-        # absolute one (T53R finding 3). Long vectors are stored as
+        # absolute one (review finding 3). Long vectors are stored as
         # float32, so an exact floor can read a little under itself; a
         # tolerance keeps "0.35 is kept" true.
         if meta.get("retrieval") != "bm25" and score < min_score - 1e-6:
@@ -768,7 +768,7 @@ def _item_line(item: RecallHit) -> str:
         head = f"[{item.alias}] {label}{step}{attempt} (superseded):"
         return f"{head}\n{text}".rstrip()
     if item.kind == "thought" and item.stage == "superseded":
-        # The same rule for the attempt's thinking chunks (T59): a chunk
+        # The same rule for the attempt's thinking chunks: a chunk
         # the boundary superseded is an earlier attempt's reasoning.
         attempt = f" · attempt {item.attempt}" if item.attempt else ""
         head = f"[{item.alias}] {label}{step}{attempt} (superseded):"

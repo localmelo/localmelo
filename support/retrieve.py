@@ -116,7 +116,7 @@ _EVALUATION_FLAGS = {
 }
 
 # The model flags reach a server only in an evaluation; the store modes and
-# --route accept and ignore them (Requirement 12, T53R finding 9).
+# --route accept and ignore them (Requirement 12, review finding 9).
 _MODEL_FLAGS = frozenset(
     {
         "--base-url",
@@ -729,7 +729,7 @@ def _missing_in_directory(target: str) -> bool:
     """Whether *target* is a directory with no ``long_term.db`` yet.
 
     A directory the run has not written to is an empty store, not a usage
-    error (T59); a path that is not a directory keeps one.
+    error; a path that is not a directory keeps one.
     """
     path = Path(target)
     return path.is_dir() and not (path / LONG_TERM_FILE).is_file()

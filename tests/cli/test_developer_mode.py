@@ -271,7 +271,7 @@ def test_the_mode_survives_a_save_and_load(
     assert "[ui]" not in (tmp_path / "config.toml").read_text()
 
 
-# -- --version and usage errors (T155 F2, F6) ------------------------------------
+# -- --version and usage errors ------------------------------------
 
 
 def test_version_prints_the_banner_version_and_exits_0(

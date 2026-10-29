@@ -12,7 +12,7 @@ from localmelo.tests._cache_guard import RealCacheGuard, real_cache_dir
 
 # The home the test process started with, before any fixture redirects it.
 _REAL_HOME = os.environ.get("HOME")
-# Refuses writes to, and resolutions of, the user's real cache (T52).
+# Refuses writes to, and resolutions of, the user's real cache.
 _REAL_CACHE_GUARD = RealCacheGuard(real_cache_dir())
 
 

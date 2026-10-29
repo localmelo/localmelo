@@ -268,7 +268,7 @@ def _entry_line(alias: str, doc: Doc) -> str:
     The step part appears when ``meta["step"]`` is a positive int. The
     title is ``doc.title``, else the text's first non-blank line, with
     whitespace collapsed. A long entry's title is only its date, so its
-    line also carries the text's first non-blank line (T53R finding 1):
+    line also carries the text's first non-blank line (review finding 1):
     without it the llm retriever's catalog names no fact to select, and
     the default ``auto`` start leg finds nothing when no embedding exists.
     """

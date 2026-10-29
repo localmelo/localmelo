@@ -88,7 +88,7 @@ async def test_a_restatement_compacts_into_the_older_note() -> None:
 async def test_a_restatement_merges_the_new_ids_and_drops_its_candidate(
     tmp_path: Path,
 ) -> None:
-    # T53R finding 8: the merged note keeps the new note's records, and the
+    # Review finding 8: the merged note keeps the new note's records, and the
     # superseded note's candidate cannot be admitted on its own.
     first = Message(
         role="assistant",
@@ -224,7 +224,7 @@ async def test_a_cited_note_is_rehearsed_and_counted() -> None:
 
 @pytest.mark.asyncio
 async def test_an_attempts_thought_chunks_are_superseded_with_its_notes() -> None:
-    # T59: a later attempt's boundary supersedes the earlier attempt's
+    # A later attempt's boundary supersedes the earlier attempt's
     # thinking chunks as well as its notes, so a recalled chunk is marked.
     server = FakeLLM(
         _note_reply(

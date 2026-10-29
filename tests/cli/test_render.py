@@ -1615,7 +1615,7 @@ def test_a_write_without_a_snapshot_shows_its_output() -> None:
     assert "  └ Written 2 bytes to todo.md" in text
 
 
-# ── T22R review fixes ──
+# ── Review fixes ──
 
 
 def test_a_file_write_block_uses_the_snapshots_counts() -> None:

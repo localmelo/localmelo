@@ -228,7 +228,7 @@ class LongTerm:
         target = self._find(target_id) if target_id is not None else None
         if action == "UPDATE" and (target is None or target.status != "active"):
             # The SQLite twin clears the target on this downgrade; the two
-            # stores must answer the same decision row (T53R finding 12).
+            # stores must answer the same decision row (review finding 12).
             action = "NEW"
             target = None
             target_id = None

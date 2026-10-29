@@ -69,7 +69,7 @@ _QUESTION_END = ("?", "？")
 
 # A remember request also states the fact it carries after the marker: "Remember
 # that the launch code is NECTAR-42." is one request, and the clause after
-# "that" is the fact itself (T59). These predicates keep a bare to-do or a
+# "that" is the fact itself. These predicates keep a bare to-do or a
 # pointer ("remember this for later") out of the store: decision 4 prefers
 # precision over recall.
 _DECLARATIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -91,7 +91,7 @@ _CLAUSE_THAT = re.compile(r"^(?:the\s+fact\s+)?that\b[\s,:;，：；]*", re.IGNO
 # "Remember to buy milk." is a to-do, not a fact.
 _INFINITIVE_LEAD = re.compile(r"^(?:to\b|去)", re.IGNORECASE)
 
-# A meta sentence is not a stable fact about the user (T53R finding 6):
+# A meta sentence is not a stable fact about the user (review finding 6):
 # "my task is …" and "我的任务是…" describe the work, not the person.
 _META_NOUNS = frozenset(
     {"task", "question", "request", "goal", "plan", "problem", "issue", "job", "point"}
@@ -109,7 +109,7 @@ class UserSignals:
     remember: bool = False
     facts: tuple[str, ...] = field(default_factory=tuple)
     # The facts a remember request carries after its marker; ``admit`` writes
-    # them with ``user_request`` beside the run's digest (T59).
+    # them with ``user_request`` beside the run's digest.
     request_facts: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -216,12 +216,12 @@ def classify_user_text(text: str) -> UserSignals:
     """The remember request and the fact sentences of one user message.
 
     Every marker needs a declarative sentence: a question never asks the
-    store to remember and never states a fact (T53R finding 6). ``my … is``
+    store to remember and never states a fact (review finding 6). ``my … is``
     and ``我的…是`` also refuse a meta noun, because a task, question or
     plan is not a stable fact. A remember request's clause after the marker
     is a ``request_facts`` entry, written with ``user_request`` beside the
     run's digest; a direct statement stays a ``facts`` entry, written at
-    once with ``user_statement`` (T59).
+    once with ``user_statement``.
     """
     remember = False
     facts: list[str] = []
