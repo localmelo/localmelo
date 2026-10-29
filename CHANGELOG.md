@@ -35,7 +35,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   that read a new sessions file just as another finished its schema saw version
   0 with tables and called the file foreign (`melo: could not record this run
   (... is not a localmelo sessions file)`); the version and the tables are now
-  read as one snapshot. A foreign file is still refused at once ([#NN]).
+  read as one snapshot. A foreign file is still refused at once ([#222]).
 
 - A brief's `Check:` command now runs in a default `melo --brief` run. A direct
   run offers no `shell_exec` to the model, so the harness's own check call was
@@ -1377,6 +1377,7 @@ earlier milestones.
 [#218]: https://github.com/localmelo/localmelo/pull/218
 [#219]: https://github.com/localmelo/localmelo/pull/219
 [#221]: https://github.com/localmelo/localmelo/pull/221
+[#222]: https://github.com/localmelo/localmelo/pull/222
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
