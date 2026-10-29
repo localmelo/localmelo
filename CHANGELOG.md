@@ -28,7 +28,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
   when the run does not continue, so a `gate_stopped` run shows which check
   stopped it. A blank rationale's `gate_stopped` error names it too. Decisions
-  and request bodies are unchanged ([#NN]).
+  and request bodies are unchanged ([#187]).
 
 - A turn cancelled before its run reported `run.finished`, such as a SIGHUP
   during setup, now saves the cancel reason in the stored result, so saved
@@ -1112,3 +1112,4 @@ earlier milestones.
 [#175]: https://github.com/localmelo/localmelo/pull/175
 [#177]: https://github.com/localmelo/localmelo/pull/177
 [#180]: https://github.com/localmelo/localmelo/pull/180
+[#187]: https://github.com/localmelo/localmelo/pull/187
