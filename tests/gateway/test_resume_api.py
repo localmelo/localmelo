@@ -676,6 +676,84 @@ async def test_stop_before_worker_registration_cancels_the_resumed_turn(
     assert not await _events(store, task_id, "turn.started")
 
 
+def _patch_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def build(**kwargs: Any) -> Agent:
+        agent = Agent(
+            llm=kwargs["wrap_llm"](_DoneLLM()),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        return agent
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+
+
+async def _wait_state(workers: TaskWorkers, task_id: str, state: str) -> None:
+    for _ in range(300):
+        if (await workers.tasks.get_task(task_id)).state == state:
+            return
+        await asyncio.sleep(0.01)
+    assert (await workers.tasks.get_task(task_id)).state == state
+
+
+async def test_run_with_a_retired_capture_mints_a_fresh_execution(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace)
+    await workers.open()
+    _patch_build(monkeypatch)
+    token = await _preview(workers, task_id, "resume-1")
+
+    original = RecoveryStore.active_capture
+
+    async def retired(self: RecoveryStore, task: str) -> str | None:
+        if asyncio.current_task() in workers._runs.values():
+            return None
+        return await original(self, task)
+
+    # A pause then resume while the first Resume still built its worker retired
+    # the fenced execution's capture before any turn started under it.
+    monkeypatch.setattr(RecoveryStore, "active_capture", retired)
+    workers._pending_execution[task_id] = "retired-execution"
+    await _resume(workers, task_id, "resume-1", token)
+    await _wait_state(workers, task_id, "done")
+    assert await _events(store, task_id, "turn.started")
+    assert task_id not in workers._pending_execution
+
+
+async def test_run_survives_a_store_error_reading_the_capture(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace)
+    await workers.open()
+    _patch_build(monkeypatch)
+    token = await _preview(workers, task_id, "resume-1")
+
+    original = RecoveryStore.active_capture
+
+    async def broken(self: RecoveryStore, task: str) -> str | None:
+        if asyncio.current_task() in workers._runs.values():
+            raise RuntimeError("store failed")
+        return await original(self, task)
+
+    monkeypatch.setattr(RecoveryStore, "active_capture", broken)
+    workers._pending_execution[task_id] = "pending-execution"
+    await _resume(workers, task_id, "resume-1", token)
+    for _ in range(300):
+        if task_id not in workers._runs:
+            break
+        await asyncio.sleep(0.01)
+    # The slot is released and the task is marked unavailable, not leaked.
+    assert task_id not in workers._runs
+    assert (await workers.tasks.get_task(task_id)).state == "queued"
+    assert task_id in workers._unavailable and task_id not in workers._eligible
+    assert not await _events(store, task_id, "turn.started")
+
+
 async def test_stop_started_before_resume_commits_still_wins(
     worker_setup: tuple[TaskWorkers, Path, SessionStore],
     monkeypatch: pytest.MonkeyPatch,
@@ -906,6 +984,31 @@ async def test_committed_resume_with_a_started_turn_conflicts_after_restart(
             await _resume(restarted, task_id, "resume-1")
         assert task_id not in restarted._eligible
         assert (await restarted.tasks.get_task(task_id)).state == "interrupted"
+    finally:
+        await restarted.aclose()
+        await gate.close()
+
+
+async def test_committed_resume_that_reached_running_is_readmitted_after_a_restart(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace, capture=True)
+    await _open_and_freeze(workers, monkeypatch)
+    workers._process_verifier = lambda record, host: True
+    assert (await _resume(workers, task_id, "resume-1"))["state"] == "queued"
+    # The crash came after the state change to running, before begin_turn.
+    await workers.tasks.change(task_id, state="running", actor="scheduler")
+    gate = ChatGate(policy="off")
+    restarted = TaskWorkers(store, gate, workers.settings, SessionHub(store))
+    try:
+        await restarted.open()
+        _freeze(restarted, monkeypatch)
+        assert task_id in restarted._eligible
+        assert task_id not in restarted._restart_fenced
+        assert (await restarted.tasks.get_task(task_id)).state == "queued"
+        assert (await _resume(restarted, task_id, "resume-1"))["state"] == "queued"
     finally:
         await restarted.aclose()
         await gate.close()

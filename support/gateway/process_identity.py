@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
 import re
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -13,6 +15,10 @@ _BOOT_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 _BOOT_TIME = re.compile(r"^[0-9]+:[0-9]{1,6}$")
+_PLATFORM_UUID = re.compile(
+    r'"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-'
+    r'[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})"'
+)
 _MACHINE_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 
@@ -101,7 +107,9 @@ def _host() -> str:
     A boot id changes on reboot and says nothing about which machine read it:
     a database copied to a second host would otherwise read its own boot id
     against the first host's and call a live group gone. ``/etc/machine-id``
-    and macOS's ``kern.uuid`` stay the same across reboots of one machine.
+    and macOS's IOPlatformUUID (the hardware UUID, kept as a SHA-256 digest)
+    stay the same across reboots of one machine. ``kern.uuid`` would not do:
+    it names a kernel build, shared by every Mac running that build.
     """
     if sys.platform.startswith("linux"):
         for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
@@ -114,23 +122,22 @@ def _host() -> str:
         raise OSError("cannot read host identity")
     if sys.platform != "darwin":
         raise OSError("host identity unavailable on this platform")
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.sysctlbyname.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_size_t),
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-    ]
-    libc.sysctlbyname.restype = ctypes.c_int
-    buffer = ctypes.create_string_buffer(64)
-    size = ctypes.c_size_t(ctypes.sizeof(buffer))
-    if libc.sysctlbyname(b"kern.uuid", buffer, ctypes.byref(size), None, 0) != 0:
-        raise OSError(ctypes.get_errno(), "cannot read host identity")
-    text = buffer.value.decode("ascii", "replace").strip().lower()
-    if not _BOOT_UUID.fullmatch(text):
-        raise OSError("invalid host identity")
-    return text
+    try:
+        done = subprocess.run(
+            ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OSError("cannot read host identity") from exc
+    match = _PLATFORM_UUID.search(done.stdout) if done.returncode == 0 else None
+    if match is None:
+        raise OSError("cannot read host identity")
+    # Only a digest is kept: the hardware UUID itself never reaches the
+    # database, a log or an error message.
+    return hashlib.sha256(match.group(1).lower().encode("ascii")).hexdigest()
 
 
 def _birth(pid: int) -> tuple[int, str]:

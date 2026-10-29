@@ -1,6 +1,8 @@
 """Orphan checks require known identity and never send a destructive signal."""
 
 import ctypes
+import hashlib
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -115,6 +117,78 @@ def test_linux_host_identity_is_normalized_and_invalid_is_unknown(
     monkeypatch.setattr(Path, "read_text", read_id)
     assert identity._host() == "abcdef0123456789abcdef0123456789"
     monkeypatch.setattr(Path, "read_text", lambda path: "not a machine id")
+    with pytest.raises(OSError, match="cannot read host identity"):
+        identity._host()
+
+
+def _ioreg(monkeypatch: pytest.MonkeyPatch, stdout: str, code: int = 0) -> list[Any]:
+    calls: list[Any] = []
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, code, stdout, "")
+
+    monkeypatch.setattr(identity.sys, "platform", "darwin")
+    monkeypatch.setattr(identity.subprocess, "run", run)
+    return calls
+
+
+def _registry(uuid: str) -> str:
+    return (
+        "+-o Root  <class IORegistryEntry>\n"
+        f'    "IOPlatformUUID" = "{uuid}"\n'
+        '    "IOPlatformSerialNumber" = "NOT-A-REAL-SERIAL"\n'
+    )
+
+
+def test_macos_host_identity_is_a_digest_of_the_hardware_uuid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hardware = "344C04E4-E246-5171-88DC-E77B2C596FAE"
+    calls = _ioreg(monkeypatch, _registry(hardware))
+    host = identity._host()
+    assert host == hashlib.sha256(hardware.lower().encode()).hexdigest()
+    assert hardware.lower() not in host and "344c04e4" not in host
+    assert calls[0][0][0] == "/usr/sbin/ioreg" and calls[0][1]["timeout"] > 0
+    # Another Mac is another host, whatever kernel build it runs.
+    _ioreg(monkeypatch, _registry("6569A121-C345-3BEC-9F67-AAF0F88B8DEB"))
+    assert identity._host() != host
+
+
+@pytest.mark.parametrize(
+    ("stdout", "code"),
+    [
+        ("", 0),
+        ("no uuid here", 0),
+        (_registry("not-a-uuid"), 0),
+        (_registry("344C04E4-E246-5171-88DC-E77B2C596FAE"), 1),
+    ],
+)
+def test_macos_host_identity_unreadable_is_unknown(
+    monkeypatch: pytest.MonkeyPatch, stdout: str, code: int
+) -> None:
+    _ioreg(monkeypatch, stdout, code)
+    with pytest.raises(OSError, match="cannot read host identity") as caught:
+        identity._host()
+    assert "344C04E4" not in str(caught.value)
+    boot = "11111111-1111-1111-1111-111111111111"
+    monkeypatch.setattr(
+        identity, "_boot", lambda: "22222222-2222-2222-2222-222222222222"
+    )
+    assert not identity.gone((123, 123, boot, "old"), "any-host")
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("no ioreg"), subprocess.TimeoutExpired("ioreg", 5)]
+)
+def test_macos_host_identity_survives_a_failing_ioreg(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    def run(*args: Any, **kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(identity.sys, "platform", "darwin")
+    monkeypatch.setattr(identity.subprocess, "run", run)
     with pytest.raises(OSError, match="cannot read host identity"):
         identity._host()
 

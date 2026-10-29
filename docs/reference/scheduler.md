@@ -205,8 +205,9 @@ and its priority snapshot survive interruption. Recovered tasks are fenced from
 Proved-never-started runnable queued tasks can start after a durable launch fence
 and workspace validation; every create writes that proof inside its own
 transaction, before any launch, so the proof covers ordinary tasks too. A
-committed Resume whose turn never started stays queued across a restart and is
-re-admitted without another review.
+committed Resume whose turn never started is re-admitted across a restart
+without another review, whether the task was still queued or had already reached
+running when the gateway died.
 A missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
@@ -236,8 +237,9 @@ transition.
 Every create records the never-started proof inside its create transaction,
 before any launch, so a task that dies before its first launch is proved
 never-started rather than unknown. A Resume committed before a restart reserves
-the turn number it will use; on startup the task stays queued and is re-admitted
-when no such turn exists yet, and a retry after that turn started returns 409
+the turn number it will use; on startup the task is queued again and re-admitted
+when no such turn exists yet (also when startup had interrupted it after it
+reached running), and a retry after that turn started returns 409
 `invalid_transition` instead of replaying the operation.
 
 Before acting, the route reads the persisted task, card, provenance, active
@@ -256,7 +258,9 @@ A verified boot change (both boot ids read, well formed and different) counts as
 gone only on the host that recorded the group: no process survives a reboot of
 that machine. The capture stores a durable host id beside the boot id, so a
 boot change read on another host, a record written before the host was kept, or
-an unreadable host id is unknown, and that path needs confirmation. An
+an unreadable host id is unknown, and that path needs confirmation. On macOS the
+host id is the hardware UUID (`IOPlatformUUID`), stored only as a SHA-256
+digest; on Linux it is `/etc/machine-id`. An
 unreadable boot id, a permission error, an unsupported platform or a
 malformed record is unknown too. An empty group set
 qualifies only when the capture is trusted and complete; missing rows alone

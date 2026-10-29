@@ -64,7 +64,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   or confirmation; a started task resumes without confirmation only with a
   trusted complete capture whose recorded groups are verifiably gone. A verified
   boot change counts as gone only on the host that recorded the group: captures
-  now persist a durable host id, and another or unknown host asks for
+  now persist a durable host id (the macOS hardware UUID, kept only as a SHA-256
+  digest, or `/etc/machine-id`), and another or unknown host asks for
   confirmation. Anything else returns 409 `confirmation_required` with a
   five-minute, single-use, in-memory token bound to the task, execution,
   evidence and CAS generation. Missing card, invalid workspace, stale identity,
@@ -73,7 +74,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   operation ID
   names one operation: a retry returns the committed row whatever its payload,
   without a second turn. A Resume committed before a restart is re-admitted on
-  startup when its turn never started, and a retry after that turn started
+  startup when its turn never started, even if the task had reached running, and a retry after that turn started
   returns 409 instead of replaying it. PATCH stays fenced for recovered work.
   ([#NN])
 

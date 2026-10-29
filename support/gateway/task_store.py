@@ -389,20 +389,17 @@ class TaskStore:
                 if current == 1:
                     await conn.execute(_SNAPSHOT_SCHEMA)
                     await self._migrate_snapshots(conn)
-                if current == 4:
-                    # v5 records the host beside each captured group, so a boot
-                    # change only reads as gone on the host that recorded it.
-                    await conn.execute(
-                        "ALTER TABLE recovery_processes ADD COLUMN host_id "
-                        "TEXT NOT NULL DEFAULT ''"
-                    )
-                else:
-                    for statement in _RECOVERY_SCHEMA:
-                        await conn.execute(statement)
+                for statement in _RECOVERY_SCHEMA:
+                    await conn.execute(statement)
+                await self._ensure_host_column(conn)
                 await conn.execute(
                     "UPDATE schema_components SET version = ? WHERE name = ?",
                     (SCHEDULER_VERSION, COMPONENT),
                 )
+            elif current == SCHEDULER_VERSION:
+                # A store marked v5 before the host column was settled may
+                # lack it; add it in place rather than bumping the version.
+                await self._ensure_host_column(conn)
             elif current > SCHEDULER_VERSION:
                 raise SessionStoreError(
                     f"{self._store.path} has scheduler schema version {current}; "
@@ -421,6 +418,22 @@ class TaskStore:
         # trace and idle rows as it opens, beside the session store's sweep.
         await self.apply_retention()
         return self._version
+
+    @staticmethod
+    async def _ensure_host_column(conn: Any) -> None:
+        """Record the host beside each captured group (idempotent).
+
+        A boot change only reads as gone on the host that recorded the group;
+        rows from before the column exist keep ``''``, which is unknown.
+        """
+        columns = {
+            row[1] for row in await _rows(conn, "PRAGMA table_info(recovery_processes)")
+        }
+        if columns and "host_id" not in columns:
+            await conn.execute(
+                "ALTER TABLE recovery_processes ADD COLUMN host_id "
+                "TEXT NOT NULL DEFAULT ''"
+            )
 
     async def _migrate_snapshots(self, conn: Any) -> None:
         # Reconstruct only pauses still supported by the v1 audit trail.

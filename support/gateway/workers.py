@@ -230,6 +230,19 @@ class TaskWorkers:
                         # started is re-admitted, not fenced for another review.
                         self._register(record)
                         self._eligible.add(record.task_id)
+                    elif (
+                        record.state == "interrupted"
+                        and record.level < 5
+                        and await self.tasks.resume_waiting_turn(record.task_id)
+                    ):
+                        # The crash came after the task reached running but
+                        # before the resumed turn began: startup interrupted
+                        # it, and the committed Resume is queued again.
+                        record = await self.tasks.change(
+                            record.task_id, state="queued", actor="scheduler"
+                        )
+                        self._register(record)
+                        self._eligible.add(record.task_id)
                     else:
                         self._restart_fenced.add(record.task_id)
             except Exception as exc:
@@ -1286,20 +1299,31 @@ class TaskWorkers:
         deferred = False
         launch_uncertain = False
         execution_id: str | None = self._pending_execution.get(task_id)
-        if execution_id is not None and (
-            await RecoveryStore(self.store).active_capture(task_id) != execution_id
-        ):
-            # An intervening transition (Stop, pause then resume) retired the
-            # fence's capture before its turn started, so nothing ran under it:
-            # this launch mints a fresh execution instead of failing post-fence.
-            self._pending_execution.pop(task_id, None)
-            execution_id = None
         launch_committed = execution_id is not None
         turn_started = False
         post_fence_failure = False
         tool_token: contextvars.Token[Any] | None = None
         process_token: contextvars.Token[Any] | None = None
         try:
+            if execution_id is not None:
+                try:
+                    retired = (
+                        await RecoveryStore(self.store).active_capture(task_id)
+                        != execution_id
+                    )
+                except BaseException:
+                    launch_uncertain = True
+                    self._eligible.discard(task_id)
+                    self._store_unavailable(task_id)
+                    raise
+                if retired:
+                    # An intervening transition (Stop, pause then resume) retired
+                    # the fence's capture before its turn started, so nothing ran
+                    # under it: this launch mints a fresh execution instead of
+                    # failing post-fence.
+                    self._pending_execution.pop(task_id, None)
+                    execution_id = None
+                    launch_committed = False
             async with self._lock:
                 record = await self.tasks.get_task(task_id)
                 if record.state == "parked":
