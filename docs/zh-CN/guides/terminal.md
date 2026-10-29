@@ -152,7 +152,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 $ echo from-the-child; exit 3
 from-the-child
   └ exit 3 · 0.0s
-  └ /attach ! attaches this output (redacted, 15 bytes) to your next message
+  └ /attach ! shows this output (redacted, 15 bytes) and asks before attaching it
 ```
 
 - **不是沙箱。** 该命令不是模型工具：不经过审批、检查器或工作区策略，拥有你账户的全部权限，也可以离开工作区。melo 只把终端交给它。

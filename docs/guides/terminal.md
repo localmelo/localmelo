@@ -226,7 +226,7 @@ your own shell (`$SHELL`, else `/bin/sh`), as you, in the workspace folder:
 $ echo from-the-child; exit 3
 from-the-child
   └ exit 3 · 0.0s
-  └ /attach ! attaches this output (redacted, 15 bytes) to your next message
+  └ /attach ! shows this output (redacted, 15 bytes) and asks before attaching it
 ```
 
 - **Not a sandbox.** The command is not a model tool: no approval, checker or

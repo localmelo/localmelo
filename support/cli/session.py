@@ -676,8 +676,8 @@ class CliSession:
             if self._shell_output is not None:
                 self.out.print(
                     self._text(
-                        "  └ /attach ! attaches this output (redacted, "
-                        f"{self._shell_output.size_bytes:,} bytes) to your next message",
+                        "  └ /attach ! shows this output (redacted, "
+                        f"{self._shell_output.size_bytes:,} bytes) and asks before attaching it",
                         "muted",
                     )
                 )

@@ -98,13 +98,13 @@ def test_a_command_shows_its_block_exit_code_and_output(
     term = melo()
     term.type("! echo from-the-child; exit 3\r")
     term.see("└ exit 3")
-    _ready(term, "/attach ! attaches")
+    _ready(term, "/attach ! shows")
     text = term.text()
     assert "! user shell" in text and "demo-project" in text
     assert "$ echo from-the-child; exit 3" in text
     assert text.index("$ echo from") < text.index("from-the-child\r\n")
     assert "from-the-child\r\n" in text and "└ exit 3 · " in text
-    assert "/attach ! attaches" in text
+    assert "/attach ! shows" in text
     term.type("! true\r")
     term.see("└ exit 0")
     assert term.quit() == 0
@@ -206,8 +206,8 @@ def test_output_stays_out_of_the_next_model_request_unless_attached(
     # Explicitly attached, the snapshot goes with the next message.
     term.type("! echo ATTACH_ME_MARK\r")
     term.see("ATTACH_ME_MARK\r\n")
-    term.see("/attach ! attaches")
-    _ready(term, "/attach ! attaches")
+    term.see("/attach ! shows")
+    _ready(term, "/attach ! shows")
     term.type("/attach !\r")
     term.see("Attach this output? [y/N]")  # the exact output is shown first
     term.type("y\r")

@@ -1401,7 +1401,7 @@ async def test_a_shell_command_runs_prints_its_block_and_stays_out_of_the_model(
     text = setup.out.text()
     assert "! user shell · " in text and "$ echo SHELL_ONLY_MARK; exit 4" in text
     assert "└ exit 4 · " in text
-    assert "/attach ! attaches this output" in text
+    assert "/attach ! shows this output" in text
     # The output is the child's to draw: this fake terminal has none, and
     # nothing of it is printed by melo, stored, or sent.
     assert session.enter("Summarize it") is None
