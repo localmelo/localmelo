@@ -42,7 +42,7 @@
 
 ### 会话一轮的原因
 
-一次[会话](../../reference/sessions.md)（英文）的一轮也以这些状态之一结束，并带有一个说明是什么结束了它的 `cause`：
+一次[会话](sessions.md)的一轮也以这些状态之一结束，并带有一个说明是什么结束了它的 `cause`：
 
 | `cause` | 结束该轮的原因 | 状态 |
 |---|---|---|
@@ -79,7 +79,7 @@
 | `duration_s` | 运行的挂钟时间，以秒计。 |
 | `config` | 本次运行使用的选项（见下文）。 |
 | `prefix_cache` | 启用固定前缀时：版本、观察到的规划 schema 变化，以及可选的、服务器报告的、在规划和反思回复上求和的缓存 token 数；schema 变化是预期内的失效，不是实测到的缓存未命中。 |
-| `context_budget` | 已配置时，是每次尝试的规划/反思记账记录列表；关闭时不存在。见[上下文记账](../../reference/configuration.md#context-accounting)（英文）。 |
+| `context_budget` | 已配置时，是每次尝试的规划/反思记账记录列表；关闭时不存在。见[上下文记账](configuration.md#context-accounting)。 |
 | `memory_stats` | 在 `legacy` 之外，是回放计数和笔记计数；`legacy` 行中没有此字段。 |
 
 `config` 包含：
@@ -150,7 +150,7 @@
 - 对话请求最多重试两次：1 秒后一次，再过 4 秒又一次。如果最后一次尝试也失败，运行以 `provider_error` 结束。
 - 嵌入请求不重试。
 - 错误会指出请求，并在服务器有回答时给出 HTTP 状态和回复体的前 500 个字符，例如 `POST /chat/completions failed with HTTP 500: <html> …`。
-- 每次尝试都等待完整的[对话请求超时](../../reference/configuration.md#chat-request-timeout)（英文）。因此，一个什么都不发送的服务器会在约 3 × 超时 + 5 秒后结束运行：使用默认的 120 秒时约为 365 秒。
+- 每次尝试都等待完整的[对话请求超时](configuration.md#chat-request-timeout)。因此，一个什么都不发送的服务器会在约 3 × 超时 + 5 秒后结束运行：使用默认的 120 秒时约为 365 秒。
 - 每个对话请求都在 `X-Localmelo-Attempt` HTTP 头中携带它的尝试序号（1、2 或 3），因此可以把代理的请求日志与 `n_llm` 和 `llm_errors` 对应起来。`X-Localmelo-Call-Kind` 对规划请求是 `plan`，对反思请求是 `reflect`。
 
 <a id="where-results-appear"></a>
