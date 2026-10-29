@@ -9,6 +9,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import StrictFloat, StrictInt, StrictStr
 
+from localmelo.support.gateway.resume_evidence import (
+    ConfirmationRequiredError,
+    RecoveryUnknownError,
+    ResumeRefusedError,
+    StaleConfirmationError,
+)
+from localmelo.support.gateway.resume_tokens import TOKEN_TTL_S
 from localmelo.support.gateway.task_policy import TaskPolicyError
 from localmelo.support.gateway.task_store import (
     TaskConflictError,
@@ -42,6 +49,11 @@ class UpdateTask(Body):
     state: StrictStr | None = None
 
 
+class ResumeTask(Body):
+    operation_id: StrictStr
+    confirmation_token: StrictStr | None = None
+
+
 async def _call(console: Console, operation: Awaitable[T]) -> T:
     try:
         return await operation
@@ -53,6 +65,43 @@ async def _call(console: Console, operation: Awaitable[T]) -> T:
         raise ApiError(404, "not_found", str(exc)) from exc
     except TaskNotPausedError as exc:
         raise ApiError(409, "not_paused", str(exc)) from exc
+    except TaskStoreError as exc:
+        raise ApiError(409, "invalid_transition", str(exc)) from exc
+    except SessionStoreError as exc:
+        raise await console.store_api_error(exc) from exc
+    except ValueError as exc:
+        raise ApiError(400, "invalid_request", str(exc)) from exc
+
+
+async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
+    try:
+        return await operation
+    except ConfirmationRequiredError as exc:
+        raise ApiError(
+            409,
+            "confirmation_required",
+            exc.warning,
+            details={
+                "reason": "unverified_processes",
+                "confirmation_token": exc.token,
+                "expires_in_s": int(TOKEN_TTL_S),
+                "warning": exc.warning,
+            },
+        ) from exc
+    except StaleConfirmationError as exc:
+        raise ApiError(409, "stale_confirmation", str(exc)) from exc
+    except RecoveryUnknownError as exc:
+        raise ApiError(
+            409, "recovery_unknown", str(exc), details={"reason": exc.reason}
+        ) from exc
+    except ResumeRefusedError as exc:
+        raise ApiError(
+            409, "invalid_transition", str(exc), details={"reason": exc.reason}
+        ) from exc
+    except TaskConflictError as exc:
+        raise ApiError(409, "invalid_transition", str(exc)) from exc
+    except TaskNotFoundError as exc:
+        raise ApiError(404, "not_found", str(exc)) from exc
     except TaskStoreError as exc:
         raise ApiError(409, "invalid_transition", str(exc)) from exc
     except SessionStoreError as exc:
@@ -98,3 +147,20 @@ def add_routes(app: FastAPI, console: Console) -> None:
             console, console.workers.update(task_id, level=body.level, state=body.state)
         )
         return JSONResponse(content={"task": task})
+
+    @app.post("/api/tasks/{task_id}/resume")
+    @app.post("/api/v2/tasks/{task_id}/resume", include_in_schema=False)
+    async def resume(task_id: str, body: ResumeTask) -> JSONResponse:
+        console.require_store()
+        task = await _resume_call(
+            console,
+            console.workers.resume(
+                task_id,
+                operation_id=body.operation_id,
+                confirmation_token=body.confirmation_token,
+            ),
+        )
+        return JSONResponse(
+            content={"task": task, "operation_id": body.operation_id},
+            status_code=202,
+        )
