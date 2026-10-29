@@ -93,7 +93,7 @@
             <time datetime="2026-10-28">2026-10-28</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/167">#167</a>
           </p>
-          <p>一个未签名的 arm64 开发包把网页控制台包进原生窗口和菜单栏宿主。它在 <code>127.0.0.1:8401</code> 上启动自己的网关，向网关发送每次启动的标识符，并检查 <code>GET /</code> 探测和主页面响应；在发出每个登录码之前还会再次确认端口仍由自己的子进程持有，令牌轮换后会重新登录。退出时总会先询问，再停止网关和它的任务。它是原型，不是经过公证的发行版或 Homebrew cask，实例检查也不是认证。登录码来自包内的私有片段；为这些登录码提供可写入文档的 <code>melo</code> 命令属于 A1b 的工作。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS 开发应用（英文）</a>。</p>
+          <p>一个未签名的 arm64 开发包把网页控制台包进原生窗口和菜单栏宿主。它在 <code>127.0.0.1:8401</code> 上启动自己的网关，向网关发送每次启动的标识符，并检查 <code>GET /</code> 探测和主页面响应；在发出每个登录码之前还会再次确认端口仍由自己的子进程持有，令牌轮换后会重新登录。退出时总会先询问，再停止网关和它的任务。它是原型，不是经过公证的发行版或 Homebrew cask，实例检查也不是认证。登录码来自包内的私有片段；为这些登录码提供可写入文档的 <code>melo</code> 命令属于 A1b 的工作。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>。</p>
         </article>
 
         <article class="update-entry" id="u-process-capture">
@@ -580,7 +580,7 @@
           </p>
           <ul>
             <li><code>GET /api/sessions/{id}/tools</code> 列出每个工具的来源（<code>builtin</code>、<code>provided</code> 或 <code>custom</code>）、是否先询问，以及该会话是否已授权；<code>GET /api/sessions/{id}/memory</code> 显示网关保留的对话（去掉思考，所有文字先脱敏，并截到 2,000 个字符）；<code>GET /api/sessions/{id}/runs</code> 给出每个已完成轮次的 <code>RunResult</code>（不含回答）；<code>DELETE /api/sessions/{id}/grants/{tool}</code>（或 <code>/grants</code>）会收回会话授权，下次调用该工具时重新询问。</li>
-            <li>控制台轮次的每次模型调用现在都会像工作区聊天一样，在 <code>[scheduler]</code> 下等待自己的名额：网关只创建一个门，两个界面共用同一个 <code>n_srv</code> 预算和同一份 <code>calls.jsonl</code>（控制台调用会记录会话 ID），也共用同一个 GPU 锁和电池监视器；<code>lock_gate = "wait"</code> 时，外部 GPU 锁会暂停控制台轮次。控制台的 runner 还会为每一轮请求 <code>run.progress</code> 事件。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md#the-gate-on-chats-s2">调度器（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2（英文）</a>。</li>
+            <li>控制台轮次的每次模型调用现在都会像工作区聊天一样，在 <code>[scheduler]</code> 下等待自己的名额：网关只创建一个门，两个界面共用同一个 <code>n_srv</code> 预算和同一份 <code>calls.jsonl</code>（控制台调用会记录会话 ID），也共用同一个 GPU 锁和电池监视器；<code>lock_gate = "wait"</code> 时，外部 GPU 锁会暂停控制台轮次。控制台的 runner 还会为每一轮请求 <code>run.progress</code> 事件。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/scheduler.md#the-gate-on-chats-s2">调度器</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2（英文）</a>。</li>
           </ul>
         </article>
 
