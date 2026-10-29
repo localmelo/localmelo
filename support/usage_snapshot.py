@@ -296,5 +296,7 @@ def status_segments(
             facts.append(f"phase {phase}")
         segments.append(" ".join(facts))
     if tasks is not None:
-        segments.append(f"tasks {tasks.running} running {tasks.queued} queued")
+        text = f"tasks {tasks.running} running {tasks.queued} queued"
+        # A task held on an approval waits for the user: never hide it.
+        segments.append(text + (f" {tasks.held} held" if tasks.held else ""))
     return segments

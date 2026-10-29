@@ -169,7 +169,7 @@ async def test_tasks_come_from_the_task_store(
     turn = await seed_turn(console.store, workspace)
     body = client.get(f"/api/sessions/{turn.session_id}/status").json()
     assert body["tasks"] == {"running": 1, "queued": 2, "held": 1, "top_level": 1}
-    assert body["segments"][-1] == "tasks 1 running 2 queued"
+    assert body["segments"][-1] == "tasks 1 running 2 queued 1 held"
 
 
 def test_an_unknown_session_is_not_found(client: TestClient) -> None:

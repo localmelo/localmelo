@@ -2502,3 +2502,130 @@ test('a task waiting for approval shows the chat approval card and answers it', 
   assert.equal(findNode(h.element('task-panel'), (node) => node.classList.contains('approval-card')), null, 'the answered card goes away');
   assert.doesNotMatch(flatten(h.element('task-panel')), /Waiting for your approval/);
 });
+
+// ── The live section of the task card ──
+
+const TURNS_T1 = 'GET /sessions/t1/turns?limit=50&events=true';
+const liveStarted = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Objective of t1'}};
+const liveTool = (id, extra = {}) => ({id, turn: 1, type: 'tool.started', ts: Date.now() / 1000, data: {step: 1, call_id: `c${id}`, name: 'file_read', arguments: {}, preview: 'a.txt'}, ...extra});
+const liveBox = (h) => findNode(h.element('task-panel'), (node) => node.classList.contains('task-live'));
+const taskStream = (h) => FakeEventSource.instances.filter((source) => source.url.includes('/sessions/t1/events')).at(-1);
+const taskReads = (h) => h.net.calls.filter((call) => call.path.startsWith('/sessions/t1/turns')).length;
+
+test('a running task card gains a step and a tool call as they are recorded, without a re-read or a redraw of the card', async () => {
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running'})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'running', answer: '', events: [liveStarted]})], has_earlier: false},
+    'GET /sessions/t1/status': {session_id: 't1', segments: ['cache 50%']},
+  });
+  const panel = h.element('task-panel');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=1', 'the stream starts after the last event read');
+  assert.equal(liveBox(h).hidden, true, 'a task with no step yet shows no Live heading');
+  const heading = panel.children[0];
+  const stream = taskStream(h);
+  stream.emit({id: 2, turn: 1, type: 'step.started', ts: 2, data: {step: 1, attempt: 1}});
+  stream.emit({id: 3, turn: 1, type: 'assistant.message', ts: 3, data: {step: 1, content: 'Reading the file now', tool_calls: [{id: 'c4', name: 'file_read', arguments: {}}], usage: {}}});
+  stream.emit(liveTool(4));
+  h.timers.findLast((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).handler();
+  assert.equal(liveBox(h).hidden, false);
+  assert.match(flatten(liveBox(h)), /Live/);
+  assert.match(flatten(liveBox(h)), /file_read/);
+  assert.match(flatten(liveBox(h)), /Reading the file now/);
+  assert.equal(taskReads(h), 1, 'new events are folded in without reading the task session again');
+  assert.equal(panel.children[0], heading, 'the card itself is not redrawn');
+  assert.equal(panel.children.indexOf(liveBox(h)), panel.children.findIndex((node) => node.tag === 'h2' && node.textContent === 'Recovery card') - 1, 'the Live section sits above the recovery card');
+});
+
+test('the approval card and the live tail sit side by side, and a frame redraws only the tail', async () => {
+  const request = {request_id: 'req-l', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true, workspace_label: '~/w', target: null};
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: [request]})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'running', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
+  });
+  const panel = h.element('task-panel');
+  const card = findNode(panel, (node) => node.classList.contains('approval-card'));
+  assert.ok(card);
+  assert.match(flatten(liveBox(h)), /file_read/, 'a held task keeps showing its work');
+  assert.equal(panel.children.indexOf(liveBox(h)), panel.children.indexOf(card) + 1);
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2', 'a held task is followed');
+  taskStream(h).emit(liveTool(3, {data: {step: 2, call_id: 'c3', name: 'shell_exec', arguments: {command: 'make test'}, preview: 'make test'}}));
+  h.timers.findLast((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).handler();
+  assert.match(flatten(liveBox(h)), /shell_exec/);
+  assert.equal(findNode(panel, (node) => node.classList.contains('approval-card')), card, 'the approval card keeps its place and its focus');
+  assert.equal(findNode(liveBox(h), (node) => node.textContent === 'Allow once'), null, 'the tail has no approval buttons; the card above answers');
+});
+
+test('a finished task shows its folded work once and opens no stream', async () => {
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'done'})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'completed', answer: 'All done', events: [liveStarted, liveTool(2)]})], has_earlier: false},
+  });
+  assert.match(flatten(liveBox(h)), /file_read/);
+  assert.match(flatten(liveBox(h)), /All done/);
+  assert.equal(taskStream(h), undefined);
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  await poll.handler(); await settle();
+  assert.equal(taskReads(h), 1);
+});
+
+test('a task that never started shows nothing live and reads no session', async () => {
+  const h = await openTask({'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'queued', started_at: null, card: ''})})});
+  assert.equal(liveBox(h).hidden, true);
+  assert.equal(taskReads(h), 0);
+  assert.equal(taskStream(h), undefined);
+});
+
+test('the live stream closes in a hidden tab, resumes after the last id, and ends with the task', async () => {
+  let state = 'running';
+  let events = [liveStarted];
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state})}),
+    [TURNS_T1]: () => ({turns: [turnRow({user_text: 'Objective of t1', status: state === 'running' ? 'running' : 'completed', answer: '', events})], has_earlier: false}),
+    'GET /sessions/t1/status': {session_id: 't1', segments: []},
+  });
+  const first = taskStream(h);
+  first.emit(liveTool(2));
+  const visibility = h.documentListeners.visibilitychange.at(-1);
+  h.context.document.visibilityState = 'hidden';
+  visibility();
+  assert.equal(first.closed, true);
+  h.context.document.visibilityState = 'visible';
+  visibility();
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2');
+  assert.notEqual(taskStream(h), first);
+  const second = taskStream(h);
+  state = 'done';
+  events = [liveStarted, liveTool(2), liveTool(3)];
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  await poll.handler(); await settle();
+  assert.equal(second.closed, true, 'the stream ends when the task is done');
+  assert.equal(taskReads(h), 2, 'one more read catches up with the last events');
+  assert.equal(findNode(liveBox(h), (node) => node.classList.contains('tool-card')) !== null, true);
+  assert.equal(findNode(liveBox(h), (node) => node.textContent === 'Live') !== null, true);
+});
+
+test('leaving the task card, or opening another task, closes the live stream and drops its tail', async () => {
+  const h = await openTask({
+    'GET /tasks': {tasks: [taskRow('t1', {state: 'running'})]},
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running'})}),
+    'GET /tasks/t2': () => ({task: taskRow('t2', {state: 'running'})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'running', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
+    'GET /sessions/t2/turns?limit=50&events=true': {turns: [turnRow({user_text: 'Objective of t2', status: 'running', answer: '', events: [{...liveStarted, id: 5}]})], has_earlier: false},
+    'GET /sessions/t1/status': {session_id: 't1', segments: []},
+    'GET /sessions/t2/status': {session_id: 't2', segments: []},
+  });
+  const first = taskStream(h);
+  assert.match(flatten(liveBox(h)), /file_read/);
+  h.context.location.hash = '#/tasks/t2';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(first.closed, true, 'the stream of the task that was left is closed');
+  assert.doesNotMatch(flatten(liveBox(h)), /file_read/, 'the other task shows none of its tail');
+  const second = FakeEventSource.instances.at(-1);
+  assert.equal(second.url, '/api/sessions/t2/events?after=5');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(second.closed, true, 'the task list follows nothing');
+  first.emit(liveTool(9));
+  second.emit(liveTool(9));
+  assert.equal(h.timers.filter((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).length, 0, 'frames of a closed stream draw nothing');
+});

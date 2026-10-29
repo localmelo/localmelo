@@ -1,3 +1,5 @@
+import {taskLive} from './task-live.mjs';
+
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
 const MISSING = 'Resume unavailable: recovery information is missing.';
@@ -14,7 +16,11 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * task that starts waiting for an approval shows its card. `every(fn, ms)`
  * schedules that and returns a function that stops it. `statusRow` is an
  * optional status-row controller (status-row.mjs): the card shows it under
- * its facts, and each poll bumps it.
+ * its facts, and each poll bumps it. `live` (optional) adds the Live section
+ * (task-live.mjs): `live.nodes(view, redraw)` draws the folded turns of the
+ * task's session, and `open`, `schedule` and `cancel` are passed on to follow
+ * its events. The section is redrawn on its own, never the whole card, so a
+ * reason being typed in an approval card keeps its focus.
  */
 const POLL_MS = 3000;
 
@@ -24,12 +30,16 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
-export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null}) {
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null};
   let active = false;
   let stopPolling = null;
+  const liveBox = doc.createElement('section');
+  liveBox.className = 'task-live';
+  const {nodes: liveNodes, ...follow} = liveOptions ?? {};
+  const live = liveOptions ? taskLive({api, changed: drawLive, statusRow, doc, ...follow}) : null;
 
   function node(tag, text, className) {
     const element = doc.createElement(tag);
@@ -97,6 +107,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
+    if (live) { drawLive(); nodes.push(liveBox); }
     nodes.push(node('h2', 'Recovery card'));
     nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', 'No recovery card is saved.', 'muted'));
     const actions = node('div', undefined, 'task-actions');
@@ -116,6 +127,16 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       nodes.push(box);
     }
     return nodes;
+  }
+
+  // The folded work of the task's session, in its own box beside the approval card.
+  function drawLive() {
+    const view = live.state.view;
+    const turns = view && state.mode === 'card' ? liveNodes(view, drawLive) : [];
+    const shown = turns.length ? [node('h2', 'Live'), ...turns] : [];
+    if (live.state.error && state.mode === 'card') shown.push(node('p', live.state.error, 'muted'));
+    liveBox.hidden = !shown.length;
+    liveBox.replaceChildren(...shown);
   }
 
   function dialog() {
@@ -180,6 +201,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     active = true;
     stopPolling ??= every(poll, POLL_MS);
     const epoch = ++state.epoch;
+    live?.leave();
     Object.assign(state, {mode: id ? 'card' : 'list', error: '', notice: '', busy: '', evidence: '',
       dialog: null, pending: null, again: null, task: null});
     root.hidden = false;
@@ -189,7 +211,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     try {
       const data = await api(id ? path(id) : '/tasks');
       if (epoch !== state.epoch) return;
-      if (id) state.task = data.task;
+      if (id) { state.task = data.task; live?.sync(data.task); }
       else state.tasks = data.tasks || [];
     } catch (error) {
       if (epoch !== state.epoch) return;
@@ -222,7 +244,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (!id) return;
     try {
       const data = await api(path(id));
-      if (epoch === state.epoch && state.task?.task_id === id) state.task = data.task;
+      if (epoch === state.epoch && state.task?.task_id === id) { state.task = data.task; live?.sync(data.task); }
     } catch (error) {
       if (epoch === state.epoch) state.error = errorText(error);
     }
@@ -246,7 +268,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (epoch !== state.epoch || state.busy || state.dialog) return;
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     if (id) {
-      if (state.task?.task_id !== id || same(data.task, state.task)) return;
+      if (state.task?.task_id !== id) return;
+      live?.sync(data.task);
+      if (same(data.task, state.task)) return;
       state.task = data.task;
     } else {
       const tasks = data.tasks || [];
@@ -286,6 +310,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
       Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Resume accepted. The task is ${outcome.data.task.state}.`});
+      live?.sync(outcome.data.task);
     } else {
       const error = outcome.error;
       if (error.code === 'confirmation_required' && error.details?.confirmation_token) {
@@ -307,8 +332,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const epoch = state.epoch;
     const outcome = await act('stop', (id) => api(path(id), {method: 'PATCH', body: {state: 'stop'}}));
     if (!outcome || epoch !== state.epoch) return;
-    if (outcome.data) Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Stop accepted. The task is ${outcome.data.task.state}.`});
-    else state.error = errorText(outcome.error);
+    if (outcome.data) {
+      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Stop accepted. The task is ${outcome.data.task.state}.`});
+      live?.sync(outcome.data.task);
+    } else state.error = errorText(outcome.error);
     render();
   }
 
@@ -337,6 +364,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     stopPolling = null;
     state.epoch++;
     state.dialog = null;
+    live?.leave();
     statusRow?.clear();
     root.hidden = true;
     root.replaceChildren();
