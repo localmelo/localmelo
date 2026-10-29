@@ -106,6 +106,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
+### Docs
+
+- Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#NN]).
+
 ### Added
 
 - Default mode and developer mode (#186). Every `melo` option has a tier (user,
