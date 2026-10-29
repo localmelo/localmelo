@@ -64,7 +64,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `/attach !` attaches a bounded, redacted snapshot of the last output
   (without concealed text or anything before a screen clear) to the next
   message, after showing the exact snapshot and asking `[y/N]`. `!` alone shows help and `\! text` sends a literal leading `! `.
-  melo exiting ends only the command's own process group. [#NN]
+  melo exiting ends only the command's own process group. [#180]
 
 - Controlled task Resume: `POST /api/tasks/{id}/resume` (also
   `/api/v2/tasks/{id}/resume`) queues a recovered task only through the
@@ -1105,3 +1105,4 @@ earlier milestones.
 [#169]: https://github.com/localmelo/localmelo/pull/169
 [#175]: https://github.com/localmelo/localmelo/pull/175
 [#177]: https://github.com/localmelo/localmelo/pull/177
+[#180]: https://github.com/localmelo/localmelo/pull/180
