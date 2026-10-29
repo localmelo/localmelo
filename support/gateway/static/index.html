@@ -82,6 +82,17 @@
             aria-label="Machine status"
             hidden
           ></span>
+          <div class="running-picker" id="running-root" hidden>
+            <button
+              class="running-chip"
+              id="running-btn"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="running-menu"
+            ></button>
+            <div class="running-menu" id="running-menu" aria-label="Running now" hidden></div>
+          </div>
           <div class="level-picker">
             <button
               class="level-chip"

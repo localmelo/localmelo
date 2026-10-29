@@ -18,6 +18,7 @@ import { setupDrawer } from "./drawer.mjs";
 import { workerHistory } from "./worker-history.mjs";
 import { setupTasks } from "./tasks.mjs";
 import { setupStatusRow } from "./status-row.mjs";
+import { setupRunning } from "./running.mjs";
 import {
   activity,
   applyEvent,
@@ -1782,6 +1783,12 @@ function statusRowNode() {
   return node;
 }
 const chatStatus = setupStatusRow({ api, root: $("status-row") });
+const running = setupRunning({ root: $("running-root"), button: $("running-btn"), menu: $("running-menu") });
+
+function setHealth(body) {
+  S.health = body;
+  running.update(body?.status);
+}
 
 let workerMode = false;
 let taskMode = false;
@@ -2066,7 +2073,7 @@ const showSettings = setupSettings({
     await refreshMode(saved);
     drawer.modeChanged();
     try {
-      S.health = await api("/health");
+      setHealth(await api("/health"));
       syncUI();
     } catch (error) {
       notify("Settings saved, but health could not be refreshed: " + error.message, {sticky: true});
@@ -2138,7 +2145,7 @@ async function init() {
     }
   }
   try {
-    S.health = await api("/health", {allowLocked: true});
+    setHealth(await api("/health", {allowLocked: true}));
   } catch (error) {
     lock(error.status === 401 ? "" : "Could not reach the gateway. Open a new sign-in link to try again.");
     return;
@@ -2200,7 +2207,7 @@ async function init() {
     if (S.authenticated && !document.hidden) {
       refreshList();
       chatStatus.bump();
-      api("/health").then((body) => { S.health = body; syncUI(); }).catch(() => {});
+      api("/health").then((body) => { setHealth(body); syncUI(); }).catch(() => {});
     }
   }, LIST_POLL_MS);
   // The first load is done: a screenshot harness (and a curious person) can
@@ -2267,6 +2274,7 @@ $("level-btn").addEventListener("click", () => {
 });
 document.addEventListener("click", (event) => {
   if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
+  if (running.isOpen() && !event.target.closest?.(".running-picker")) running.toggle(false);
 });
 $("search").addEventListener("input", renderSessions);
 $("sidebar-toggle").addEventListener("click", () =>
@@ -2309,6 +2317,11 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key !== "Escape") return;
   // Close what is open first; a stop is the last thing Escape does.
+  if (running.isOpen()) {
+    running.toggle(false);
+    $("running-btn").focus();
+    return;
+  }
   if (S.levelsOpen) {
     showLevelMenu(false);
     return;

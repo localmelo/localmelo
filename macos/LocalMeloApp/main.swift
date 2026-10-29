@@ -383,6 +383,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 }
                 guard status == 200, let data = data, let health = gatewayHealth(data) else { return }
                 self.healthAuthenticated = true
+                self.statusItem.button?.title = menuTitle(runningCounts(data))
                 guard health.store == "ok" else {
                     if !self.ready {
                         self.timer?.invalidate()
@@ -512,10 +513,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         request.timeoutInterval = 2
         healthSession.dataTask(with: request) { [weak self] data, response, _ in
             var running: Int?
+            var counts: RunningCounts?
             if let data = data, (response as? HTTPURLResponse)?.statusCode == 200,
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let sessions = object["sessions"] as? [String: Any] {
                 running = sessions["running"] as? Int
+                counts = runningCounts(data)
             }
             RunLoop.main.perform(inModes: [.default, .modalPanel]) {
                 guard let self = self else { sender.reply(toApplicationShouldTerminate: false); return }
@@ -529,9 +532,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 do {
                     let alert = NSAlert()
                     alert.messageText = "Quit LocalMelo?"
-                    alert.informativeText = running == nil
-                        ? "The task status is unavailable. Quitting stops the gateway and any running tasks."
-                        : "Quitting stops the gateway and any running tasks."
+                    alert.informativeText = quitMessage(counts, statusKnown: running != nil)
                     alert.addButton(withTitle: "Quit and Stop")
                     alert.addButton(withTitle: "Cancel")
                     guard alert.runModal() == .alertFirstButtonReturn else {

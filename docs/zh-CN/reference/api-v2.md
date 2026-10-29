@@ -35,7 +35,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/health
 
-就绪状态、API 和事件结构的版本、设置中的模型、缓存的模型服务器检查、各项限制以及存储的状态。存储不可用时仍提供健康检查。
+就绪状态、API 和事件结构的版本、设置中的模型、缓存的模型服务器检查、各项限制、存储的状态，以及当前正在运行的内容。存储不可用时仍提供健康检查。
 
 示例把网关的 bearer 令牌从其私有文件通过管道传给 curl，使它不出现在命令行参数和 shell 历史中。不要开启 curl 的详细输出，也不要记录该请求头；同一用户的进程仍然可以读取令牌文件。
 
@@ -55,6 +55,15 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
+  "status": {
+    "running": {"chats": 0, "tasks": 1, "runs": 1, "terminal": 1},
+    "tasks": {"running": 1, "queued": 1, "held": 0, "top_level": 2},
+    "items": [
+      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo"},
+      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog"},
+      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test"}
+    ]
+  },
   "uptime_s": 132.4
 }
 ```
@@ -66,6 +75,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `limits` 是入口文本上限、会话文本预算，以及以字节计的 API 请求体上限。
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。
 - `sessions.resume_mode` 是当前使用的恢复方式；目前为 `pairs`。
+- `status.running` 按类别统计当前正在运行的内容：`chats`（控制台中有轮次在进行的对话，与 `sessions.running` 相同）、`tasks`（状态为 `running` 的调度任务）、`runs`（直接运行和 `--brief` worker）和 `terminal`（交互式 `melo` 对话）。后两项来自命令行文件，只在租约有效时才计入一个轮次，因此进程已终止的运行不会被计入。`status.tasks` 是状态行所显示的调度队列：`running`、`queued`、`held` 和 `top_level`（其中最高的级别，没有则为 `null`）。`status.items` 列出正在运行的内容，先是对话，然后是任务、运行和终端对话，最多 20 项，每项为 `{"kind", "id", "title"}`（`kind` 为 `chat`、`task`、`run` 或 `terminal`；终端对话的标题已脱敏）。计数没有上限。无法读取的存储按没有运行任何内容计；一次调用通过索引读取任务状态，并通过索引读取命令行文件中正在运行的轮次。
 
 ## GET /api/settings
 

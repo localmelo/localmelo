@@ -68,8 +68,8 @@ message. A 503 repeats the store's reason with the home folder written as
 ## GET /api/health
 
 Readiness, the API and event schema versions, the settings' model, the
-cached model-server check, the limits and the store's state. Health is
-served while the store is unavailable.
+cached model-server check, the limits, the store's state and what runs now.
+Health is served while the store is unavailable.
 
 The examples pipe the gateway bearer token from its private file to curl, keeping
 it out of command-line arguments and shell history. Do not enable verbose curl
@@ -91,6 +91,15 @@ output or log the header; same-user processes can still read the token file.
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
+  "status": {
+    "running": {"chats": 0, "tasks": 1, "runs": 1, "terminal": 1},
+    "tasks": {"running": 1, "queued": 1, "held": 0, "top_level": 2},
+    "items": [
+      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo"},
+      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog"},
+      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test"}
+    ]
+  },
   "uptime_s": 132.4
 }
 ```
@@ -119,6 +128,19 @@ output or log the header; same-user processes can still read the token file.
   write failure. Clients should use this stable reason instead of parsing
   `store_error`; it clears when the store opens successfully.
 - `sessions.resume_mode` is the resume arm in use; it is `pairs` today.
+- `status.running` counts what runs now, by kind: `chats` (the console's chats
+  with a turn in flight, as `sessions.running`), `tasks` (scheduler tasks in
+  state `running`), `runs` (direct runs and `--brief` workers) and `terminal`
+  (interactive `melo` chats). The last two come from the CLI file and count a
+  turn only under a live lease, so a run whose process died is not counted.
+  `status.tasks` is the scheduler's queue as the status row shows it:
+  `running`, `queued`, `held` and `top_level` (the best level among them, or
+  `null`). `status.items` lists what runs, chats first, then tasks, runs and
+  terminal chats, at most 20, each `{"kind", "id", "title"}` (`kind` is `chat`,
+  `task`, `run` or `terminal`; a terminal chat's title is redacted). The counts
+  are not capped. A store that cannot be read counts as nothing running; one
+  call reads the task states by their index and the running turns of the CLI
+  file by theirs.
 
 ## GET /api/settings
 
