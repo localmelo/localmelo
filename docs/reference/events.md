@@ -217,6 +217,11 @@ asyncio.run(main())
 Before the event is built, `thinking` and `content` pass a minimal
 redaction of secrets, which replaces each with `[redacted]`:
 
+- the body of a PEM private key block, from `-----BEGIN … PRIVATE KEY-----`
+  (RSA, EC, DSA, OPENSSH, ENCRYPTED or plain; also PGP's `PRIVATE KEY BLOCK`)
+  to its END line, or to the end of
+  the text when the END line is missing: the two marker lines stay and the
+  body becomes one `[redacted]` line. Public keys and certificates stay;
 - well-known key shapes: `sk-` keys, GitHub tokens (`ghp_…`,
   `github_pat_…` and the like) and AWS access key ids (`AKIA…`, `ASIA…`);
 - the token after `Bearer`;
