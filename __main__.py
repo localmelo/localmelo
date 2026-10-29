@@ -624,8 +624,12 @@ async def _run(
     worker_brief: bool = False,
     inbox_path: str | None = None,
     inbox_fd: int | None = None,
+    record: bool = False,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
+
+    With *record* a query is recorded as a worker session, titled from its
+    first line, unless *save_session* names the title.
 
     One query is reported in *output_format* on *out* (see
     :func:`_report`), unless one of *exit_signals* arrived during the
@@ -640,6 +644,8 @@ async def _run(
         exit_signals.install()
     try:
         if query:
+            if record and save_session is None:
+                save_session = ""
             if worker_brief:
                 return await _run_worker_brief(
                     agent,
@@ -764,6 +770,7 @@ def _run_direct(
     worker_brief: bool = False,
     inbox_path: str | None = None,
     inbox_fd: int | None = None,
+    record: bool = False,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -810,6 +817,7 @@ def _run_direct(
                     routine=routine,
                     save_session=save_session,
                     parent_run=parent_run,
+                    record=record,
                     **worker_args,
                 )
             )
@@ -1111,16 +1119,19 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             )
     elif args.title is not None:
         parser.error("--title requires --import-session")
-    if args.parent_run is not None and args.save_session is None:
-        parser.error("--parent-run requires --save-session")
-    if args.save_session is not None and (
+    if args.no_save_session and args.save_session is not None:
+        parser.error("--no-save-session cannot be combined with --save-session")
+    if args.no_save_session and args.parent_run is not None:
+        parser.error("--parent-run needs the run to be recorded")
+    if (args.save_session is not None or args.parent_run is not None) and (
         not args.query
         or not " ".join(args.query).strip()
         or args.serve
         or args.daemon
         or args.reconfigure
     ):
-        parser.error("--save-session is only for a direct task")
+        flag = "--save-session" if args.save_session is not None else "--parent-run"
+        parser.error(f"{flag} is only for a direct task")
     if args.mcp_only and args.mcp_config is None:
         parser.error("--mcp-only requires --mcp-config")
     if args.mcp_only:
@@ -1322,6 +1333,16 @@ def _direct_tool_providers(
     parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {problem}\n")
 
 
+def _record_direct_runs() -> bool:
+    """Whether the saved config records direct runs; a config that does not load does."""
+    from localmelo.support import config
+
+    try:
+        return bool(config.load().sessions.record_direct)
+    except Exception:  # the run reports a bad config itself, or does not need it
+        return True
+
+
 def _config_wants_developer_help() -> bool:
     """Whether ``[ui] mode`` asks for developer help; a bad mode warns and is ignored."""
     from localmelo.support import config
@@ -1393,6 +1414,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
     def _get_option_tuples(self, option_string: str) -> Any:
         full_name_only = {
             "--save-session",
+            "--no-save-session",
             "--brief",
             "--inbox",
             "--inbox-fd",
@@ -1490,11 +1512,15 @@ def _build_parser(
         nargs="?",
         const="",
         metavar="TITLE",
-        help="Save this direct run as a worker session",
+        help="Set the title of this direct run's worker session",
     )
     direct.add_argument(
-        "--parent-run", metavar="ID", help="Launcher run ID (with --save-session)"
+        "--no-save-session",
+        action="store_true",
+        help="Do not record this direct run as a worker session "
+        "(recording is the default; [sessions] record_direct = false turns it off)",
     )
+    direct.add_argument("--parent-run", metavar="ID", help="Launcher run ID")
     direct.add_argument(
         "--workspace",
         metavar="DIR",
@@ -1996,7 +2022,11 @@ def main() -> None:
             **(
                 {"save_session": args.save_session, "parent_run": args.parent_run}
                 if args.save_session is not None
-                else {}
+                else {
+                    "record": not args.no_save_session
+                    and (args.parent_run is not None or _record_direct_runs()),
+                    **({"parent_run": args.parent_run} if args.parent_run else {}),
+                }
             ),
         )
         if code != EXIT_COMPLETED:

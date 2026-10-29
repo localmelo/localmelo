@@ -104,9 +104,14 @@ class GatewayConfig:
 
 @dataclass
 class SessionsConfig:
-    """How an interactive surface restores a saved conversation."""
+    """How an interactive surface restores a saved conversation.
+
+    ``record_direct`` says whether a direct run (``melo "<task>"``) is recorded
+    as a worker session; only ``false`` turns it off.
+    """
 
     resume_mode: str = "pairs"
+    record_direct: bool = True
 
 
 @dataclass
@@ -758,6 +763,8 @@ def load() -> Config:
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+        if data["sessions"].get("record_direct") is False:
+            cfg.sessions.record_direct = False
 
     if isinstance(data.get("cli"), dict):
         section = data["cli"]
@@ -887,6 +894,8 @@ def _migrate_legacy(data: dict) -> Config:
 
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+        if data["sessions"].get("record_direct") is False:
+            cfg.sessions.record_direct = False
 
     cfg.request_timeout_s = data.get("request_timeout_s")
 
@@ -1021,14 +1030,13 @@ def save(cfg: Config) -> None:
             lines.append("admit_on_outcome = true")
         lines.append("")
 
-    if cfg.sessions.resume_mode != "pairs":
-        lines.extend(
-            [
-                "[sessions]",
-                f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}",
-                "",
-            ]
-        )
+    if cfg.sessions != SessionsConfig():
+        lines.append("[sessions]")
+        if cfg.sessions.resume_mode != "pairs":
+            lines.append(f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}")
+        if not cfg.sessions.record_direct:
+            lines.append("record_direct = false")
+        lines.append("")
     if cfg.cli != CliConfig():
         lines.append("[cli]")
         lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")

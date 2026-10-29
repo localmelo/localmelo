@@ -315,3 +315,40 @@ async def test_worker_pagination_and_event_paging(
         )
     finally:
         await store.aclose()
+
+
+def test_a_plain_direct_run_appears_in_the_worker_list(
+    tmp_path: Path, client: TestClient, console: Console
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    from localmelo.tests.fixtures.stub_llm import StubServer
+
+    server = StubServer().start()
+    try:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALMELO_")}
+        env["HOME"] = str(tmp_path)
+        done = subprocess.run(
+            [sys.executable, "-m", "localmelo", "--base-url", server.base_url]
+            + ["--chat-model", "stub-model", "--", "say hello"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            timeout=120,
+        )
+    finally:
+        server.close()
+    assert done.returncode == 0, done.stderr
+    console.worker_history = WorkerReader(
+        str(tmp_path / ".cache/localmelo/cli/sessions.db")
+    )
+    [item] = client.get("/api/sessions?kind=worker").json()["sessions"]
+    assert (item["title"], item["status"], item["source"]) == (
+        "say hello",
+        "completed",
+        "localmelo",
+    )

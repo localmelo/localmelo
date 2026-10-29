@@ -76,17 +76,21 @@ FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 REFLECT_TOOL_GUARD_DEFAULTS = {"reflect_tool_guard": None}
-WORKER_DEFAULTS = dict.fromkeys(
-    (
-        "save_session",
-        "parent_run",
-        "import_session",
-        "title",
-        "brief",
-        "inbox",
-        "inbox_fd",
-    )
-)
+WORKER_DEFAULTS = {
+    **dict.fromkeys(
+        (
+            "save_session",
+            "parent_run",
+            "import_session",
+            "title",
+            "brief",
+            "inbox",
+            "inbox_fd",
+        )
+    ),
+    # Direct runs are recorded unless --no-save-session says otherwise.
+    "no_save_session": False,
+}
 
 
 @pytest.fixture
@@ -198,6 +202,7 @@ def test_historical_dispatch(
         [],
         progress=expected["progress"],
         routine=expected["routine"],
+        record=True,
     )
     dispatch.ui.assert_not_called()
     dispatch.gateway.assert_not_called()
