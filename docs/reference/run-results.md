@@ -146,6 +146,8 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
+| `cache_layout` | `v3` when the run used it; absent for `v2` (the default). |
+| `window_messages` | The window's message cap when it is not 20; absent otherwise. |
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |

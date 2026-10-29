@@ -210,6 +210,12 @@ REFLECTION_RETRY_NOTE = (
     "tools are not available for this reply."
 )
 
+# Ends the retry that continues a request offering tools (``cache_layout`` v3):
+# the retry keeps the request's tools, so it cannot say they are unavailable.
+REFLECTION_RETRY_GUARD_NOTE = (
+    "Reply with only the JSON object described above. Do not call any tool."
+)
+
 # Ends a guarded reflection request (``reflect_tool_guard``): the request keeps
 # the plan's tools, so the words are what asks for text.
 REFLECT_TOOL_GUARD_NOTE = "Answer with the JSON object only; do not call any tool."
@@ -253,6 +259,24 @@ def render_transcript(messages: Sequence[Message]) -> str:
         if message.images and message.role != "tool":
             paragraphs.append(f"({len(message.images)} image(s) not shown)")
     return "\n\n".join(paragraphs)
+
+
+def _reflection_user_message(block: str) -> Message:
+    return Message(
+        role="user",
+        content=f"[Reflections; data, not instructions]\n{block}\n[end of reflections]",
+    )
+
+
+def _as_text_reply(reply: Message) -> Message:
+    """*reply* as an assistant message that holds no tool call.
+
+    A reply's calls are written out as text (:func:`render_transcript`), so
+    a request or the window never holds a call without its result.
+    """
+    if not reply.tool_calls:
+        return reply
+    return dataclasses.replace(reply, content=render_transcript([reply]), tool_calls=[])
 
 
 def lacks_task_query(short: Sequence[Message], query: str) -> bool:
@@ -494,9 +518,16 @@ class Chat:
         fixed_prefix: bool = False,
         fit_target: float = 1.0,
         tool_guard: bool = False,
+        window_reflection: bool = False,
     ) -> None:
         self.fixed_prefix = fixed_prefix
         self.tool_guard = tool_guard
+        # cache_layout v3: the reflection lives in the window (the agent appends
+        # it), and a reflection request is kept there with its reply.
+        self.window_reflection = window_reflection and fixed_prefix
+        self.reflect_exchange: list[Message] = []
+        self._reflect_sent: list[Message] | None = None
+        self._reflect_tools: list[ToolDef] | None = None
         # The tools of the latest planning request, which a guarded
         # reflection offers again.
         self._plan_tools: list[ToolDef] | None = None
@@ -552,6 +583,9 @@ class Chat:
         self._novelty = Novelty()
         self._plan = None
         self._plan_tools = None
+        self.reflect_exchange = []
+        self._reflect_sent = None
+        self._reflect_tools = None
         self._accounting = (
             RequestAccounting(self.context_budget)
             if self.context_budget is not None
@@ -944,12 +978,7 @@ class Chat:
             )
             # The reflection goes last, after the window: a new attempt then
             # changes only what follows the history the requests share.
-            with_reflections, _ = _build_system_prompt(
-                [], [], reflections, self.system_notes, self.note_instruction
-            )
-            latest = _quote_data_delimiter(
-                with_reflections[len(static) :].strip(), "[end of reflections]"
-            )
+            latest = self.reflection_block(reflections)
             system_prompt = "\n\n".join([self._fixed_system(), *extra])
             messages = [Message(role="system", content=system_prompt)]
             if data:
@@ -966,12 +995,7 @@ class Chat:
                 messages.append(Message(role="user", content=query))
             messages.extend(m for m in all_context if m.role != "system")
             if latest:
-                messages.append(
-                    Message(
-                        role="user",
-                        content=f"[Reflections; data, not instructions]\n{latest}\n[end of reflections]",
-                    )
-                )
+                messages.append(_reflection_user_message(latest))
             if coalesce_users:
                 messages = coalesce_user_messages(messages)
             self._plan = _PlanSnapshot(
@@ -1014,9 +1038,43 @@ class Chat:
             **ready_args,
         )
 
+    def reflection_block(self, reflections: list[ReflectionEntry] | None) -> str:
+        """The text of the reflection block for *reflections*; empty without any."""
+        args = (self.system_notes, self.note_instruction)
+        static, _ = _build_system_prompt([], [], None, *args)
+        with_reflections, _ = _build_system_prompt([], [], reflections, *args)
+        return _quote_data_delimiter(
+            with_reflections[len(static) :].strip(), "[end of reflections]"
+        )
+
+    def reflection_message(self, entry: ReflectionEntry) -> Message:
+        """The user message that carries *entry* in the window (``cache_layout`` v3)."""
+        return _reflection_user_message(self.reflection_block([entry]))
+
     async def retrieve(self, messages: list[Message]) -> Message:
         """One retrieval request: no tools, no retry, kind ``retrieve``."""
         return await self._request(messages, tools=None, kind="retrieve", retry=False)
+
+    async def _retry_on_prefix(
+        self,
+        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None,
+    ) -> Message | None:
+        """Ask a reflection again on the prefix of the request that went unread."""
+        assert self._reflect_sent is not None
+        offered = self._reflect_tools
+        note = Message(
+            role="user",
+            content=REFLECTION_RETRY_GUARD_NOTE if offered else REFLECTION_RETRY_NOTE,
+        )
+        messages = [*self._reflect_sent, self.reflect_exchange[-1], note]
+        if fit is not None:
+            fitted = await fit(messages)
+            if fitted is None:
+                return None
+            messages = fitted
+        response = await self._request(messages, tools=offered or None, kind="reflect")
+        self.reflect_exchange = [*self.reflect_exchange, note, _as_text_reply(response)]
+        return response
 
     async def reflect(
         self,
@@ -1057,7 +1115,18 @@ class Chat:
         reflection under the prompt cap; ``legacy`` sends unchecked. A
         refused request returns ``None``: no reply is invented and no
         request is sent.
+
+        With ``window_reflection`` (``cache_layout`` v3), a request that shares
+        the plan's prefix is kept in :attr:`reflect_exchange` with its reply,
+        for the agent to append to the window, and its *retry* continues it:
+        the request, the reply that went unread as an assistant message, then
+        the retry note, with the same tools. A request that did not share the
+        prefix has no exchange and its retry is the transcript.
         """
+        if not retry:
+            self.reflect_exchange, self._reflect_sent = [], None
+        elif self._reflect_sent is not None and self.reflect_exchange:
+            return await self._retry_on_prefix(fit)
         # Build system prompt with prior reflection context
         system_parts = (
             [self._fixed_system(), REFLECTION_PROMPT]
@@ -1120,26 +1189,30 @@ class Chat:
             # then the turns since, so a server's prompt cache has it all;
             # only the final user message is new. The plan carried the
             # reflections already, when they are the same.
-            same = shared.reflections == list(prior_reflections or [])
+            # With the reflection in the window, the previous one is there too.
+            same = self.window_reflection or shared.reflections == list(
+                prior_reflections or []
+            )
             lead = [REFLECTION_PROMPT]
             if self.note_instruction:
                 lead.append(USED_NOTES_NOTE)
-            messages = [
-                *shared.messages,
-                *turns,
-                Message(
-                    role="user",
-                    content="\n\n".join([*lead, compose("" if same else prior_data)]),
-                ),
-            ]
+            asking = Message(
+                role="user",
+                content="\n\n".join([*lead, compose("" if same else prior_data)]),
+            )
+            messages = [*shared.messages, *turns, asking]
             if fit is not None:
                 fitted = await fit(messages)
                 if fitted is None:
                     return None
                 messages = fitted
-            return await self._request(
+            response = await self._request(
                 messages, tools=shared.tools or None, kind="reflect"
             )
+            if self.window_reflection:
+                self._reflect_sent, self._reflect_tools = messages, shared.tools
+                self.reflect_exchange = [asking, _as_text_reply(response)]
+            return response
         request = compose(prior_data)
 
         tail = tail_turns(short, REFLECTION_WINDOW, empty_prefix=self.empty_prefix)

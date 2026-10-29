@@ -124,6 +124,8 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
 | `--reflect-tool-guard` | experimental | #183 |
+| `--cache-layout` | experimental | #183 |
+| `--window-messages` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
 | `--replay-turns` | experimental | #183 |
@@ -179,6 +181,8 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--fixed-prefix on\|off` | `on` | 使用带版本号的固定系统前缀，本地日期在运行开始时冻结；`off` 会发送此前的请求。它会覆盖 `[agent] fixed_prefix`。 |
 | `--window-eviction slide\|chunk\|boundary` | `chunk` | 工作记忆如何丢弃旧轮次：`chunk` 每次丢弃八条消息；`slide`（此前的默认值）在窗口满后每步丢弃一个单元；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--reflect-tool-guard on\|off` | `on` | 为 `on` 时，每个反思请求都提供该步骤规划请求的工具（列表、顺序和 schema 相同，因此服务器的提示前缀保持不变），且其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变。重试请求不变。为 `off` 时，请求既不带工具，也没有那句话。它会覆盖 `[agent] reflect_tool_guard`；见[配置](configuration.md#context-accounting)。 |
+| `--cache-layout v2\|v3` | `v2` | 启用固定前缀时，`v3` 在尝试边界把反思作为一条窗口消息只追加一次，让反思请求及其回复留在窗口中，并在同一前缀上再次询问不可读的反思；`v2` 是今天的请求。没有固定前缀时它不改变任何内容。它会覆盖 `[agent] cache_layout`；见[配置](configuration.md#context-accounting)。 |
+| `--window-messages N` | `20` | 工作窗口的消息数上限，8 到 256。它会覆盖 `[agent] window_messages`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
 | `--max-steps N` | `30` | 整个运行最多可以使用的规划步数。 |

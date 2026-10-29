@@ -20,7 +20,14 @@ from localmelo.melo.memory.recall import (
     RecallPlacement,
     RetrieverMode,
 )
-from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEMPT
+from localmelo.melo.schema import (
+    MAX_AGENT_STEPS,
+    MAX_ATTEMPTS,
+    SHORT_TERM_MAX,
+    STEPS_PER_ATTEMPT,
+    WINDOW_MESSAGES_MAX,
+    WINDOW_MESSAGES_MIN,
+)
 
 AttemptPolicy = Literal["reflect", "none"]
 ReflectionGate = Literal["flags", "utility"]
@@ -28,6 +35,7 @@ ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
 NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["slide", "chunk", "boundary"]
+CacheLayout = Literal["v2", "v3"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -194,6 +202,19 @@ class AgentOptions:
       ``REFLECT_TOOL_GUARD_NOTE``, which asks for the JSON object and no tool
       call. The retry request is unchanged. The default is true; ``False`` keeps
       the reflection request as it was before the guard (#183).
+    - ``cache_layout``: ``"v2"`` (default) is today's requests. ``"v3"``,
+      with ``fixed_prefix``, appends a reflection once, at the attempt
+      boundary, as an ordinary window message (it moves with the history
+      and leaves by eviction) instead of rebuilding it as the last message
+      of every planning request, keeps a reflection request and its reply in
+      the window so the next planning request continues it, and sends an
+      unreadable reflection's retry on the same prefix (the reply as an
+      assistant message, then the retry note) instead of as a text
+      transcript. Older reflection blocks stay in the history until
+      evicted. Without ``fixed_prefix`` it changes nothing. Experimental.
+    - ``window_messages``: the working window's message cap (8 to 256,
+      default ``SHORT_TERM_MAX``). A larger cap leaves the prompt-size fit
+      (see ``window_eviction``) to drop history. Experimental.
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
@@ -260,10 +281,21 @@ class AgentOptions:
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
     reflect_tool_guard: bool = True
+    cache_layout: CacheLayout = "v2"
+    window_messages: int = SHORT_TERM_MAX
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
             raise ValueError("fixed_prefix must be a bool")
+        if (
+            isinstance(self.window_messages, bool)
+            or not isinstance(self.window_messages, int)
+            or not WINDOW_MESSAGES_MIN <= self.window_messages <= WINDOW_MESSAGES_MAX
+        ):
+            raise ValueError(
+                f"window_messages must be an int from {WINDOW_MESSAGES_MIN} "
+                f"to {WINDOW_MESSAGES_MAX}, got {self.window_messages!r}"
+            )
         if not isinstance(self.reflect_tool_guard, bool):
             raise ValueError("reflect_tool_guard must be a bool")
         if self.brief_probe is not None and not callable(self.brief_probe):
@@ -297,6 +329,7 @@ class AgentOptions:
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),
             ("window_eviction", get_args(WindowEviction)),
+            ("cache_layout", get_args(CacheLayout)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

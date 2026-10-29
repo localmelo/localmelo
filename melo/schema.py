@@ -19,6 +19,10 @@ SHORT_TERM_MAX = 20
 # retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
+# The working window's message cap (``window_messages``): SHORT_TERM_MAX by
+# default, and any value in this range.
+WINDOW_MESSAGES_MIN = 8
+WINDOW_MESSAGES_MAX = 256
 LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 

@@ -76,6 +76,28 @@ async def test_the_default_run_matches_its_golden(
     check_golden(GOLDEN / "openai_reflection_continues.json", document)
 
 
+async def test_the_named_defaults_of_the_layout_and_the_window_send_the_same_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = await _run_scenario(
+        tmp_path, monkeypatch, **DEFAULTS, cache_layout="v2", window_messages=20
+    )
+    check_golden(GOLDEN / "openai_reflection_continues.json", document)
+
+
+async def test_the_v3_run_matches_its_golden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = await _run_scenario(tmp_path, monkeypatch, **DEFAULTS, cache_layout="v3")
+    check_golden(GOLDEN / "openai_reflection_continues_v3.json", document)
+    requests: Any = document["requests"]
+    assert len(requests) == 3
+    reflect, after = requests[1], requests[2]
+    assert after["messages"][: len(reflect["messages"])] == reflect["messages"]
+    result: Any = document["result"]
+    assert result["config"]["cache_layout"] == "v3"
+
+
 async def test_the_default_reflection_request_offers_the_tools_and_asks_for_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

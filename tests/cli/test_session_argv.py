@@ -76,6 +76,7 @@ FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 REFLECT_TOOL_GUARD_DEFAULTS = {"reflect_tool_guard": None}
+CACHE_LAYOUT_DEFAULTS = {"cache_layout": None, "window_messages": None}
 WORKER_DEFAULTS = {
     **dict.fromkeys(
         (
@@ -158,6 +159,7 @@ def test_historical_dispatch(
             **CAPTURED_DEFAULTS,
             **WINDOW_EVICTION_DEFAULTS,
             **REFLECT_TOOL_GUARD_DEFAULTS,
+            **CACHE_LAYOUT_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -188,6 +190,7 @@ def test_historical_dispatch(
         **CAPTURED_DEFAULTS,
         **WINDOW_EVICTION_DEFAULTS,
         **REFLECT_TOOL_GUARD_DEFAULTS,
+        **CACHE_LAYOUT_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

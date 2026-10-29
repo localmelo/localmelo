@@ -30,7 +30,12 @@ from localmelo.melo.memory.recall import (
     parse_kinds,
     parse_triggers,
 )
-from localmelo.melo.schema import RunResult
+from localmelo.melo.schema import (
+    SHORT_TERM_MAX,
+    WINDOW_MESSAGES_MAX,
+    WINDOW_MESSAGES_MIN,
+    RunResult,
+)
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import BaseEmbeddingProvider
@@ -71,6 +76,8 @@ _DIRECT_FLAGS = {
     "fixed_prefix": "--fixed-prefix",
     "window_eviction": "--window-eviction",
     "reflect_tool_guard": "--reflect-tool-guard",
+    "cache_layout": "--cache-layout",
+    "window_messages": "--window-messages",
     "captured_history": "--captured-history",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
@@ -942,6 +949,19 @@ def _recall_k(text: str) -> int:
     return value
 
 
+def _window_messages(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if not WINDOW_MESSAGES_MIN <= value <= WINDOW_MESSAGES_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be an integer from {WINDOW_MESSAGES_MIN} to "
+            f"{WINDOW_MESSAGES_MAX}, got {value}"
+        )
+    return value
+
+
 def _unit_score(text: str) -> float:
     try:
         value = float(text)
@@ -1272,6 +1292,10 @@ def _direct_options(
         fields["window_eviction"] = args.window_eviction
     if getattr(args, "reflect_tool_guard", None) is not None:
         fields["reflect_tool_guard"] = args.reflect_tool_guard == "on"
+    if getattr(args, "cache_layout", None) is not None:
+        fields["cache_layout"] = args.cache_layout
+    if getattr(args, "window_messages", None) is not None:
+        fields["window_messages"] = args.window_messages
     if getattr(args, "captured_history", None) is not None:
         fields["captured_history"] = args.captured_history == "on"
     reasoning = getattr(args, "reasoning", None)
@@ -1429,6 +1453,8 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--fixed-prefix",
             "--window-eviction",
             "--reflect-tool-guard",
+            "--cache-layout",
+            "--window-messages",
             "--developer",
             "--captured-history",
             "--context-window",
@@ -1572,6 +1598,20 @@ def _build_parser(
         choices=["on", "off"],
         help="Reflection requests offer the plan's tools and end with a sentence "
         "that asks for the JSON object, not a tool call (default on)",
+    )
+    direct.add_argument(
+        "--cache-layout",
+        choices=["v2", "v3"],
+        help="With the fixed prefix, v3 appends a reflection once at the attempt "
+        "boundary, keeps the reflection request in the window and retries an "
+        "unreadable reflection on the same prefix (default v2: today's requests)",
+    )
+    direct.add_argument(
+        "--window-messages",
+        type=_window_messages,
+        metavar="N",
+        help=f"The working window's message cap, {WINDOW_MESSAGES_MIN}-"
+        f"{WINDOW_MESSAGES_MAX} (default {SHORT_TERM_MAX})",
     )
     direct.add_argument(
         "--tool-exposure",
@@ -2265,6 +2305,21 @@ def _build_direct_mode_agent(
         config_value_error(
             f"[agent] window_eviction {budget_cfg.agent.window_eviction!r} is not "
             f"recognised. Must be one of {config.WINDOW_EVICTIONS}."
+        )
+    if budget_cfg.agent.cache_layout not in config.CACHE_LAYOUTS:
+        config_value_error(
+            f"[agent] cache_layout {budget_cfg.agent.cache_layout!r} is not "
+            f"recognised. Must be one of {config.CACHE_LAYOUTS}."
+        )
+    window = budget_cfg.agent.window_messages
+    if (
+        isinstance(window, bool)
+        or not isinstance(window, int)
+        or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
+    ):
+        config_value_error(
+            f"[agent] window_messages must be an int from {WINDOW_MESSAGES_MIN} "
+            f"to {WINDOW_MESSAGES_MAX}, got {window!r}"
         )
     # A flag keeps its value; the others come from the config file, whose
     # absent keys are the defaults.

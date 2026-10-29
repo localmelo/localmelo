@@ -92,6 +92,8 @@
 | `tools` | 所有已注册的工具，内置的和 MCP 的，按名称排序。 |
 | `window_eviction` | 运行使用了 `chunk`（默认值）或 `boundary` 时为该值；`slide` 不出现。 |
 | `reflect_tool_guard` | 运行使用了保护（默认值）时为 `true`；使用 `--reflect-tool-guard off` 时不出现。 |
+| `cache_layout` | 运行使用了 `v3` 时为该值；`v2`（默认值）不出现。 |
+| `window_messages` | 窗口的消息数上限不是 20 时为该值；否则不出现。 |
 | `reasoning`, `replay_turns`, `note_writer` | 在 `legacy` 之外，是生效的推理模式、它的轮次上限（`null` 表示范围内的所有轮次）以及压缩模式下由谁写回复的笔记。它们不出现在 `legacy` 行中。 |
 | `retriever`, `retriever_effective`, `recall_at` | 在 `legacy` 之外，是请求的检索器（取默认值时为 `auto`）、已启用触发点的映射（`{"start": "llm", "attempt": "llm", "step": "bm25"}`，已排序）以及排序后的生效触发点列表。 |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | 在 `legacy` 之外，是任务内的命中上限、排序后的已启用类型、步骤中的放置位置，以及嵌入/长期条目的分数下限。 |

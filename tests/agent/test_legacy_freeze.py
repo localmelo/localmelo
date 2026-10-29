@@ -114,6 +114,8 @@ LATER_OPTIONS = [
     "--fixed-prefix",
     "--window-eviction",
     "--reflect-tool-guard",
+    "--cache-layout",
+    "--window-messages",
     "--captured-history",
     "--context-window",
     "--output-reserve",

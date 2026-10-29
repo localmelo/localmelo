@@ -23,7 +23,8 @@ page.
 
 ## Working-memory window
 
-The working-memory window holds at most 20 messages: the task, then each
+The working-memory window holds at most 20 messages (`--window-messages N`, 8 to 256, changes the
+cap; see below): the task, then each
 reply's turn (a tool-call message with its results, never split). By default
 (`chunk`) the window drops whole units at once, so the history starts at the
 same unit for several steps and a server's prompt cache can reuse it.
@@ -39,6 +40,13 @@ cap (100,000 characters) and, with `--context-window`, by the request fit.
 | `slide` | The oldest unit, at every step once full. |
 | `chunk` (default) | Whole units down to 12 messages (the maximum less 8) when it would pass 20, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
 | `boundary` | `chunk` within an attempt, and the finished attempt's turns when the next attempt starts after a reflection (the reflection carries them); the task and inbox messages stay. |
+
+With `--window-messages 64` (or `[agent] window_messages = 64`) the count rarely drops anything:
+the prompt-size fit is the evictor. When the planning prompt would pass the 100,000-character cap,
+it drops whole units, a tool call with its results never split, down to 70% of the cap under `chunk`
+and `boundary` (just under it under `slide`, so every step drops one unit again). A window that
+reaches the message cap first still drops by count, as the mode says. The value appears as `window_messages`
+in the JSON result's `config` when it is not 20. Experimental, for the benchmark A/B.
 
 A mode other than `slide` appears as `window_eviction` in the JSON result's
 `config`; `slide` adds nothing. The request fit (`--context-window`) also

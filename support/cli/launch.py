@@ -290,6 +290,8 @@ def run_interactive(
             "fixed_prefix",
             "window_eviction",
             "reflect_tool_guard",
+            "cache_layout",
+            "window_messages",
             "captured_history",
             "reasoning",
             "replay_turns",

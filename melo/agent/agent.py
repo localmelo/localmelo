@@ -200,6 +200,7 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    SHORT_TERM_MAX,
     WINDOW_EVICT_CHUNK,
     WINDOW_FIT_TARGET,
     CandidateItem,
@@ -1641,7 +1642,13 @@ class Agent:
         # still cleared. self._embedding stays set so close() closes it.
         # window_eviction "chunk" and "boundary": drop in chunks (see schema).
         self._evicts_in_chunks = self.options.window_eviction != "slide"
+        # cache_layout "v3" (with the fixed prefix): a reflection is a message of
+        # the window, appended at the attempt boundary, not rebuilt per request.
+        self._reflection_in_window = (
+            self.options.fixed_prefix and self.options.cache_layout == "v3"
+        )
         self.hippo = Hippo(
+            short_term_max=self.options.window_messages,
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
@@ -1720,6 +1727,7 @@ class Agent:
             fixed_prefix=self.options.fixed_prefix,
             fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
             tool_guard=self.options.reflect_tool_guard,
+            window_reflection=self._reflection_in_window,
         )
 
         names = (
@@ -3526,7 +3534,12 @@ class Agent:
             )
             run.boundary_block = block
         query_block = "" if run is None else run.boundary_block
-        reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
+        # In the window already when the layout keeps the reflection there.
+        reflection_msgs = (
+            []
+            if self._reflection_in_window
+            else _serialize_reflections(self.hippo.working.get_reflections())
+        )
         await self._fit_prompt_cap(
             long_context + reflection_msgs,
             query,
@@ -4653,7 +4666,11 @@ class Agent:
         ``failed`` with the error ``empty replies``.
         """
         fingerprints: list[tuple[str, str, str]] = []
-        reflections = self.hippo.working.get_reflections() or None
+        reflections = (
+            None
+            if self._reflection_in_window
+            else self.hippo.working.get_reflections() or None
+        )
         run.attempt_calls.clear()
         run.read_streak = 0
 
@@ -5972,6 +5989,10 @@ class Agent:
             config["window_eviction"] = opts.window_eviction
         if opts.reflect_tool_guard:
             config["reflect_tool_guard"] = True
+        if opts.cache_layout != "v2":
+            config["cache_layout"] = opts.cache_layout
+        if opts.window_messages != SHORT_TERM_MAX:
+            config["window_messages"] = opts.window_messages
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns
@@ -6146,10 +6167,17 @@ class Agent:
                 continue
             assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
+            exchange = self.chat.reflect_exchange
             if opts.window_eviction == "boundary" and continue_run:
                 # The reflection carries the finished attempt; the next one
                 # starts from the query (and what the run pinned) alone.
                 self.hippo.working.drop_since(run.task_query_msg, run.pinned)
+                exchange = []
+            if self._reflection_in_window:
+                # Once, here: the exchange (when the request shared the plan's
+                # prefix) and the block that carries the reflection.
+                for message in (*exchange, self.chat.reflection_message(entry)):
+                    self.hippo.working.append(message)
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
