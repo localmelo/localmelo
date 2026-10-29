@@ -219,7 +219,7 @@ that directory instead.
   embedding vectors. `procedures.db` holds each task's query, normalized, the folder
   it ran in, and its tool calls' labels: file names and program names,
   never their content or output. The query and the labels pass a minimal
-  redaction: the key shapes, bearer tokens and one-time codes of
+  redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of
   [Model calls](../reference/memory.md#model-calls), then a URL's password
   (`postgres://app:<redacted>@host`, the user name kept) and the value of
   `NAME=value` or `NAME: value` when NAME contains `key`, `token`,

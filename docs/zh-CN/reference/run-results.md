@@ -26,7 +26,7 @@
 
 - **`completed`。** 当反思判定任务已完成时，答案是它的尽力结果；如果那是空的，就是该次运行中模型写下的最新文本。
 - **`failed`。** 错误说明是哪项检查拒绝了运行，例如 `Plan check failed: Prompt too large: <n> chars` 或 `Response check failed: …`。既没有工具调用也没有文本的回复是空回复：localmelo 要求模型继续并重新规划，这一步照常计数。连续两次空回复会以错误 `empty replies` 结束运行。
-- **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n>`。使用 `--reflection-gate utility` 时，读不懂的反思也会结束运行；超过大小限制的反思同样如此，除非它选择了 `done`。
+- **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n> (stop reason: <code>)`。`reflection` 事件总是带有停止原因和决定的各项标志（见[事件](../../reference/events.md#reflection)）。使用 `--reflection-gate utility` 时，读不懂的反思也会结束运行；超过大小限制的反思同样如此，除非它选择了 `done`。
 - **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。使用 `--reflection-gate utility` 时，任何 JSON 对象都算可读；第二次回复若没有 JSON 对象，则以 `gate_stopped` 结束运行：回复无法读取时错误是 `Could not parse reflection response`，是有效 JSON 但不是对象时是 `Reflection response was not a JSON object`。如果没有剩余尝试，运行反而以 `budget_exhausted` 结束。
 - **`budget_exhausted`。** 错误是 `Max steps reached` 或 `Max attempts reached`。使用 `--attempt-policy reflect` 时，最后一次反思仍可选择 `done`；否则它的尽力结果成为 `result`。
 - **`stuck`。** 只出现在 `--attempt-policy none` 下；使用 `reflect` 时，由反思决定接下来做什么。错误是 `Stuck: the same tool calls or errors repeated`。返回新结果的重复调用（例如轮询一个任务）不算卡住。

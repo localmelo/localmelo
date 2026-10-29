@@ -273,6 +273,13 @@ def _echo(text: str, call_id: str = "call_1", **reply: Any) -> Message:
     return _calls(("echo", {"text": text}, call_id), **reply)
 
 
+ALL_FLAGS = {
+    "task_still_feasible": True,
+    "next_step_is_concrete": True,
+    "next_step_is_novel": True,
+}
+
+
 def _decision(action: str, **fields: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
         "summary": "Echoed once.",
@@ -556,6 +563,10 @@ class TestFields:
                 "attempt",
                 "action",
                 "continue_run",
+                "flags",
+                "gate",
+                "utility",
+                "stop_reason",
                 "rationale",
                 "summary",
                 "best_effort_result",
@@ -1483,6 +1494,10 @@ class TestReflections:
             "attempt": 1,
             "action": "continue",
             "continue_run": True,
+            "flags": ALL_FLAGS,
+            "gate": "flags",
+            "utility": None,
+            "stop_reason": None,
             "rationale": "Echo once more.",
             "summary": "Echoed a.",
             "best_effort_result": "a",
@@ -1516,6 +1531,10 @@ class TestReflections:
             "attempt": 1,
             "action": None,
             "continue_run": True,
+            "flags": None,
+            "gate": "flags",
+            "utility": None,
+            "stop_reason": None,
             "rationale": None,
             "summary": None,
             "best_effort_result": None,
