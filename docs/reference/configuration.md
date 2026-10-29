@@ -270,11 +270,14 @@ reuse it; `slide` drops the oldest unit at every step once the window is full, a
   replaces the one working memory holds), but older blocks stay in the history until they are
   evicted.
 - A reflection request and its reply stay in the window, so the next planning request continues the
-  request instead of being built again. A reply that holds no reflection stays out, and so does its
-  retry.
+  request instead of being built again. With the default `reflection_gate = "flags"`, when no
+  reflection is read, even after the retry, none of it stays in the window.
 - An unreadable reply is asked again on the same prefix: the request, the unreadable reply as an
   assistant message (a tool call written out as text, so no call is left without its result), then a
-  closing note, with the tools the request offered. The earlier text transcript is not sent.
+  closing note, with the tools the request offered, instead of the text transcript. When the first
+  request did not repeat the plan's request (the window had moved on), there is no exchange to
+  continue and the retry is the transcript as before. A read retry keeps the whole exchange in the
+  window: the request, the unreadable reply, the note and the reply.
 - With `window_eviction = "boundary"` the finished attempt's turns are dropped at the boundary, so
   only the block is appended there.
 
@@ -285,7 +288,9 @@ when it is `v3`.
 overrides it) is the most messages the working window holds before `window_eviction` drops some.
 With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
 whole units (a tool call with its results, never split) down to 70% of the cap under `chunk` and
-`boundary`, so the history holds for several steps. See [Memory](memory.md#working-memory-window).
+`boundary`, so the history holds for several steps; under `slide` it drops a unit at every step.
+A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
+messages. See [Memory](memory.md#working-memory-window).
 The JSON result's `config` has `window_messages` only when it is not 20.
 
 `melo --developer --help` lists `--cache-layout` and `--window-messages` under Experimental. They

@@ -411,4 +411,6 @@ def test_the_message_cap_drops_a_chunk_of_whole_units_at_the_cap(cap: int) -> No
     drops = [i for i in range(1, len(sizes)) if sizes[i] < sizes[i - 1]]
     assert drops
     for i in drops:
-        assert sizes[i] <= max(cap - WINDOW_EVICT_CHUNK, 0) + 2  # to within a unit
+        # To within a unit of the target; a drop never takes more than half.
+        assert sizes[i] <= cap - min(WINDOW_EVICT_CHUNK, cap // 2) + 2
+        assert sizes[i] >= cap // 2

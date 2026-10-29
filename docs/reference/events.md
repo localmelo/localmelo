@@ -239,8 +239,10 @@ asyncio.run(main())
   - `tools_changed`: `true` when the tool definitions offered differ.
   - `fresh_chars`: the characters of this request's messages that no earlier
     request of the run held, found by the hash of each serialized message
-    (role, content, thinking, calls, call id, images). No prompt cache could
-    have them: they are new tool results and replies. `request_chars`: all
+    (role, content, thinking, calls, call id, images). No earlier request of
+    this run sent them: they are new tool results, replies and reflection
+    blocks. They are serialized characters, not the content characters that
+    `chars` counts. `request_chars`: all
     the characters of the request's serialized messages and of the tools'
     schema. On a `reflection` that asked twice, both are summed over its
     requests. A log from before them lacks both.

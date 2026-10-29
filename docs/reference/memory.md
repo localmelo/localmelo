@@ -45,7 +45,8 @@ With `--window-messages 64` (or `[agent] window_messages = 64`) the count rarely
 the prompt-size fit is the evictor. When the planning prompt would pass the 100,000-character cap,
 it drops whole units, a tool call with its results never split, down to 70% of the cap under `chunk`
 and `boundary` (just under it under `slide`, so every step drops one unit again). A window that
-reaches the message cap first still drops by count, as the mode says. The value appears as `window_messages`
+reaches the message cap first still drops by count, as the mode says; a drop takes at most half the
+window, so below a cap of 16 a chunk is fewer than eight messages. The value appears as `window_messages`
 in the JSON result's `config` when it is not 20. Experimental, for the benchmark A/B.
 
 A mode other than `slide` appears as `window_eviction` in the JSON result's
