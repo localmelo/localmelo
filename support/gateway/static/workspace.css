@@ -890,7 +890,7 @@ dialog::backdrop {
 .details-drawer h2 { display: inline-block; margin: 0 12px 12px 0; font-size: 16px; }
 .drawer-tabs, .settings-tabs { display: flex; gap: 6px; margin: 12px 0; }
 .settings-tabs button, .drawer-tabs button, .details-drawer button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--soft); }
-.drawer-tabs [aria-pressed="true"], .settings-tabs [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.drawer-tabs [aria-pressed="true"], .settings-tabs [aria-pressed="true"], .worker-kinds [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .drawer-tabs { flex-wrap: wrap; }
 .drawer-event pre { margin: 2px 0; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dev-options { max-height: 220px; overflow: auto; margin: 8px 0; padding-left: 18px; font: 11px/1.6 ui-monospace, monospace; }
@@ -1502,6 +1502,12 @@ dialog::backdrop {
 }
 .worker-panel h1 {
   margin: 0 0 8px;
+}
+.worker-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
 }
 .worker-filters {
   display: flex;

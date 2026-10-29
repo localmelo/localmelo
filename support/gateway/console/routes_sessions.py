@@ -120,6 +120,10 @@ def _worker_body(
 ) -> dict[str, Any]:
     meta = info.meta
     body = {**session_json(info, running_here=False), "meta": meta}
+    # A chat of the terminal is listed under ``kind=terminal``; the console's
+    # own ``kind=chat`` list never holds one.
+    if info.kind == "chat":
+        body["kind"] = "terminal"
     for key in ("source", "parent_run", "git_branch", "git_head", "exit_code"):
         body[key] = meta.get(key)
     for key in ("status", "steps"):
@@ -155,13 +159,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         cursor: str | None = Query(None, max_length=512),
     ) -> JSONResponse:
         console.require_store()
-        if kind not in SESSION_KINDS and kind != "worker":
+        if kind not in SESSION_KINDS and kind != "terminal":
             raise ApiError(
                 400,
                 "invalid_request",
-                f"kind must be one of {', '.join(sorted(SESSION_KINDS | {'worker'}))}",
+                f"kind must be one of {', '.join(sorted(SESSION_KINDS | {'terminal'}))}",
             )
-        if kind == "worker":
+        if kind in ("worker", "terminal"):
             try:
                 after = decode_cursor(cursor)
             except ValueError as exc:
@@ -175,6 +179,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     source=source,
                     parent_run=parent_run,
                     after=after,
+                    kind="chat" if kind == "terminal" else "worker",
                 ),
             )
             has_more = len(records) > limit
@@ -192,7 +197,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         if any(value is not None for value in (status, source, parent_run, cursor)):
             raise ApiError(
-                400, "invalid_request", "Worker filters require kind=worker."
+                400,
+                "invalid_request",
+                "Worker filters require kind=worker or kind=terminal.",
             )
         # A row with no turn is a create that never got its message (a
         # shutdown in the middle of one); the list starts at one turn, a
@@ -242,7 +249,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             await _store_call(
                 console,
                 console.worker_history.workers(
-                    limit=1, query="", session_id=session_id
+                    limit=1, query="", session_id=session_id, kind=info.kind
                 ),
             )
             if worker

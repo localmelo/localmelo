@@ -213,9 +213,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `limit` 为 1 到 200（默认 50）。`query` 最多 200 个字符，与会话的标题或任一轮次的用户文本匹配。`has_more` 表示该页之外还有更早的会话。
 - 会话在拥有一个轮次之后即被列出，正在运行的轮次也算在内：创建操作一旦保存了第一个轮次的行，会话就会出现。创建操作留下的、从未开始其消息的行（例如中途关机）没有轮次，因此不会被列出；`GET /api/sessions/{id}` 仍会显示它。
-- `kind` 为 `chat`（默认）、`front`、`front_bg`、`task` 或 `worker`；其他任何值都是 400 `invalid_request`。`worker` 以 SQLite 只读模式读取 CLI 会话文件；它不包括终端对话会话。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
-- worker 列表接受精确匹配的 `status`、`source` 和 `parent_run` 筛选条件，以及来自上一个响应 `next_cursor` 的不透明 `cursor`。结果按第一轮次的开始时间降序排列，再按会话 id 降序排列。到达末尾时 `next_cursor` 为 `null`；翻到后续页时，应保持相同的筛选条件和查询。无效的游标，或在没有 `kind=worker` 的情况下使用这些参数，都返回 400。分页结果不是快照：并发的变更可能影响后续页面。
+- `kind` 为 `chat`（默认）、`front`、`front_bg`、`task`、`worker` 或 `terminal`；其他任何值都是 400 `invalid_request`。`worker` 和 `terminal` 以 SQLite 只读模式读取 CLI 会话文件：`worker` 列出直接运行，`terminal` 列出交互式 `melo` 会话的对话，`kind=chat` 从不包含它们。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
+- worker 和 terminal 列表接受精确匹配的 `status`、`source` 和 `parent_run` 筛选条件，以及来自上一个响应 `next_cursor` 的不透明 `cursor`。结果按该行所用轮次的开始时间降序排列，再按会话 id 降序排列。到达末尾时 `next_cursor` 为 `null`；翻到后续页时，应保持相同的筛选条件和查询。无效的游标，或在没有 `kind=worker` 或 `kind=terminal` 的情况下使用这些参数，都返回 400。分页结果不是快照：并发的变更可能影响后续页面。
 - worker 的列表和详情会话对象包含可为空的 `source`、`parent_run`、`git_branch`、`git_head`、`exit_code`、`status`、`steps`、`tokens`、`started_at` 和 `duration_s`。开始时间是第一轮次的时间戳；存在时，持续时间为其记录的结果持续时间。`tokens` 是整数的总 token 数，`meta.usage` 保存完整的用量映射。状态回退为第一轮次的状态；步骤数和 token 数回退为其保存的结果。缺失的值为 `null`，而不是零。详情响应顶层的 `tokens` 单独统计 completion token；对于 worker，若没有任何轮次带有整数的 `completion_tokens`，则为 `null`。
+- 终端对话和 worker 运行一样以只读方式提供，列表和详情对象中的 `kind` 为 `terminal`。该行所用的轮次是对话的最新轮次，因此 `status`、`started_at`、`steps` 和 `duration_s` 描述的是那一轮，正在进行的对话排在最前。详情、轮次（包括 `events=true`）、`/events` 和 `/status` 与 worker 运行一样可以按 id 获取；当拥有该对话的终端持有有效租约并正在运行一个轮次时，`busy` 为 true。终端以未脱敏的方式保存对话，所以对话的每一段文本在读取时都会脱敏：标题、`meta`、轮次文本、回答、结果和事件载荷（包括工具输出和 shell 输出）中的密钥都变为 `[redacted]`，读取过 `.env` 之类密钥文件的调用，其输出被替换为一条说明，运行的 `config` 被省略。worker 运行是脱敏后保存的，按保存的内容读取。脱敏基于模式，不保证不含密钥；图片不会被脱敏。对于终端对话的 id，每个写入路由都返回 404，与 worker 的 id 相同。
 - worker 会话是只读的。它们的会话详情和轮次（包括 `events=true`）、已保存的图片 blob、`/events` 和 `/status` 都可以通过 id 获取；写入路由返回 404（`POST /api/turns/{turn_id}/cancel` 返回 409 `turn_not_running`：worker 运行的轮次不在网关中运行）。对于只在 CLI 文件中找到的 worker id，`/tools`、`/memory`、`/runs` 以及限定会话的提交查询也返回 404 `not_found`。如果一个 id 同时存在于两个文件中，则网关会话优先。worker 会话对象会增加 `meta`，其中包含已保存的来源信息，它们的 `running_here` 始终为 false。`busy` 反映一个未过期的 worker 租约；网关不会恢复陈旧的轮次，也不会对 CLI 文件应用保留策略。
 - `workspace_label` 是工作区，并把主目录写作 `~`。
 - `busy` 表示有轮次正在运行。对于网关会话，`running_here` 等于 `busy`：只有本网关运行其自身会话文件中的轮次。
@@ -295,10 +296,11 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `follow=false` 发送起点之后已保存的事件，直到该请求读取到的最新事件 id，然后结束响应；它是一次性的追赶，而在它分页期间开始的轮次不会增加任何帧。
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
 - worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
+- 终端对话以同样方式流式提供，并经过脱敏。当它的某个轮次在终端的租约下运行时它处于活动状态，因此该轮次结束时流也结束；请再次读取会话对象，查看是否有另一个轮次在运行。
 
 ## GET /api/sessions/{id}/status
 
-终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。worker 运行从 CLI 的文件读取。
+终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。worker 运行或终端对话从 CLI 的文件读取。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
