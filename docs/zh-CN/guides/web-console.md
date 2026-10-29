@@ -24,6 +24,18 @@
 
 **Workers** 打开来自命令行会话文件的只读 worker 历史记录。你可以按状态、来源或精确的父运行筛选，使用服务器的游标加载更多记录，并打开一次运行以查看其记录的任务简报、元数据、工作过程和回答。尚未完成的运行显示的是快照：**Refresh** 会重新读取，而不是提供实时流。该视图不能发送消息、批准调用或更改授权；打开 Workers 时，关闭对话和级别控制均不可用。连接设置仍可单独使用。**Chats** 返回打开的对话。记录按模式进行脱敏，不能保证不含秘密信息；分享前请先检查。
 
+<a id="tasks"></a>
+
+## 任务
+
+**Tasks**（`#/tasks`）列出调度器的任务，按最近更新排在前面，显示状态、优先级和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、证据状态，以及它当前状态允许的操作。和 Workers 一样，打开这个视图时它会取代对话。
+
+- 已停放或中断的任务会显示 **Resume**。页面先询问服务器，只有服务器要求时才请你确认：对话框会写 "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once."，并提供 **Resume anyway** 和 **Cancel**。按 Escape 即取消。在你选择 **Resume anyway** 之前不会记录任何东西；确认在五分钟内有效，网关重启后失效。
+- **Stop** 使用任务自己的停止操作，而不是对话的停止。在任务结束前都可用，并且优先于正在进行的 Resume。
+- 已经开始但没有保存卡片的任务会显示 "Resume unavailable: recovery information is missing." 和 **Start again as a new task**，它会根据原始目标创建一个单独的新任务。之前那个任务的效果是未知的，也不会被撤销。
+
+请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
+
 <a id="inspect-a-chat"></a>
 
 ## 查看对话详情

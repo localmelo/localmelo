@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 
@@ -20,6 +21,8 @@ _PLATFORM_UUID = re.compile(
     r'[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})"'
 )
 _MACHINE_ID = re.compile(r"^[0-9a-f]{8,64}$")
+_MACOS_HOST: str | None = None
+_MACOS_HOST_LOCK = threading.Lock()
 
 
 def _boot_kind(value: str) -> str | None:
@@ -122,6 +125,23 @@ def _host() -> str:
         raise OSError("cannot read host identity")
     if sys.platform != "darwin":
         raise OSError("host identity unavailable on this platform")
+    return _macos_host()
+
+
+def _macos_host() -> str:
+    """The digest of the hardware UUID, read once per process.
+
+    ``ioreg`` costs a subprocess and the UUID never changes while the process
+    lives. A failure is not cached: the next capture tries again.
+    """
+    global _MACOS_HOST
+    with _MACOS_HOST_LOCK:
+        if _MACOS_HOST is None:
+            _MACOS_HOST = _read_macos_host()
+        return _MACOS_HOST
+
+
+def _read_macos_host() -> str:
     try:
         done = subprocess.run(
             ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],

@@ -11,6 +11,7 @@ import vm from 'node:vm';
 import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
+import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -364,6 +365,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
+  .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -383,6 +385,7 @@ function makeElement(tag, id = '') {
   const element = {
     tag, tagName: tag.toUpperCase(), id, value: '', textContent: '', innerHTML: '', title: '', type: '', src: '', alt: '',
     style: {}, dataset: {}, attributes: {}, children: [], listeners: {}, parentElement: null,
+    get ownerDocument() { return documentDouble; },
     hidden: false, disabled: false, open: false, inert: false, tabIndex: 0,
     scrollHeight: 50, scrollTop: 0, clientHeight: 40,
     classList: {
@@ -539,6 +542,7 @@ function harness(routes, {mobile = false} = {}) {
     ...turns,
     renderMarkdown,
     workerHistory,
+    setupTasks,
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
@@ -2104,4 +2108,217 @@ test('worker title and answer use safe rendering', async () => {
   assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'h1').textContent, hostile);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'img'), null);
   assert.doesNotMatch(findNode(h.element('worker-panel'), (node) => node.classList.contains('answer')).innerHTML, /<img/i);
+});
+
+// ── The task view: card, Resume, Stop ──
+
+function taskRow(id, extra = {}) {
+  return {
+    task_id: id, title: `Task ${id}`, state: 'parked', level: 2, level_eff: 2, wait_reason: '', card: 'Plan: step 1 done.',
+    spec: {title: `Task ${id}`, objective: `Objective of ${id}`, workspace: ''}, started_at: 5, updated_at: 100,
+    workspace_label: '~/w', ...extra,
+  };
+}
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+const labelled = (h, text) => findNode(h.element('task-panel'), (node) => node.tag === 'button' && node.textContent === text);
+const taskError = (status, code, message, details) => ({status, body: {error: {code, message, details}}});
+
+async function openTask(routes, id = 't1') {
+  const h = harness(baseRoutes(routes));
+  await h.run('init()');
+  h.context.location.hash = `#/tasks/${id}`;
+  await h.windowListeners.hashchange[0](); await settle();
+  return h;
+}
+
+test('the task list shows state, priority, title and update time, newest first, as text', async () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const h = harness(baseRoutes({'GET /tasks': {tasks: [
+    taskRow('old', {updated_at: 10}), taskRow('new', {updated_at: 90, title: hostile, state: 'queued', level_eff: 3}),
+  ]}}));
+  await h.run('init()');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  const panel = h.element('task-panel');
+  assert.equal(panel.hidden, false);
+  assert.equal(h.element('scroll').hidden, true);
+  assert.equal(h.element('tasks-link').attributes['aria-current'], 'page');
+  const rows = panel.children.filter((node) => node.className.includes('task-row'));
+  assert.deepEqual(rows.map((row) => row.href), ['#/tasks/new', '#/tasks/old']);
+  assert.match(flatten(rows[0]), /queued · P3 · updated/);
+  assert.equal(findNode(panel, (node) => node.tag === 'img'), null);
+  assert.equal(rows[0].children[0].textContent, hostile);
+  h.context.location.hash = '#/s/a'; await h.windowListeners.hashchange[0]();
+  assert.equal(panel.hidden, true);
+  assert.equal(h.element('scroll').hidden, false);
+  assert.equal(h.element('tasks-link').attributes['aria-current'], undefined);
+});
+
+test('a card that needs confirmation asks first, and Cancel sends nothing', async () => {
+  const posts = [];
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {card: '<b>not html</b>'})},
+    'POST /tasks/t1/resume': (body) => {
+      posts.push(body);
+      return taskError(409, 'confirmation_required', 'warn', {confirmation_token: 'tok-1', reason: 'unverified_processes', expires_in_s: 300, warning: 'Server warning text.'});
+    },
+  });
+  const panel = h.element('task-panel');
+  const pre = findNode(panel, (node) => node.tag === 'pre');
+  assert.equal(pre.textContent, '<b>not html</b>');
+  assert.equal(findNode(panel, (node) => node.tag === 'b'), null);
+  assert.match(flatten(panel), /Evidence Checked when you press Resume/);
+  labelled(h, 'Resume').click(); await settle();
+  const dialog = findNode(panel, (node) => node.tag === 'dialog');
+  assert.equal(dialog.open, true);
+  assert.equal(h.state().authenticated, true);
+  assert.match(flatten(dialog), /Server warning text\./);
+  assert.ok(labelled(h, 'Resume anyway') && labelled(h, 'Cancel'));
+  assert.equal(documentDouble.activeElement.textContent, 'Cancel', 'focus starts on the safe choice');
+  assert.match(flatten(panel), /confirmation is required to resume/);
+  assert.deepEqual(posts.map((body) => body.confirmation_token), [undefined]);
+  labelled(h, 'Cancel').click();
+  assert.equal(findNode(panel, (node) => node.tag === 'dialog'), null);
+  assert.equal(posts.length, 1, 'cancel sends nothing');
+});
+
+test('Resume anyway retries the same operation with the token, once, and shows the new state', async () => {
+  const posts = [];
+  let release;
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'interrupted'})},
+    'POST /tasks/t1/resume': (body) => {
+      posts.push(body);
+      if (!body.confirmation_token) return taskError(409, 'confirmation_required', 'warn', {confirmation_token: 'tok-1', warning: ''});
+      return new Promise((resolve) => { release = () => resolve({status: 202, body: {task: taskRow('t1', {state: 'queued'}), operation_id: body.operation_id}}); });
+    },
+  });
+  const panel = h.element('task-panel');
+  labelled(h, 'Resume').click(); await settle();
+  assert.match(flatten(panel), /A process from before the restart may still be running\. Resuming may repeat effects\. Confirmation does not prove the process stopped or effects happened only once\./);
+  labelled(h, 'Resume anyway').click(); await settle();
+  const inDialog = () => findNode(findNode(panel, (node) => node.tag === 'dialog'), (node) => node.tag === 'button' && node.textContent === 'Resuming…');
+  assert.equal(inDialog().disabled, true, 'disabled while in flight');
+  inDialog().click(); await settle();
+  assert.equal(posts.length, 2, 'a second click while in flight sends nothing');
+  assert.equal(posts[1].operation_id, posts[0].operation_id);
+  assert.equal(posts[1].confirmation_token, 'tok-1');
+  release(); await settle();
+  assert.equal(findNode(panel, (node) => node.tag === 'dialog'), null);
+  assert.match(flatten(panel), /Resume accepted\. The task is queued\./);
+  assert.equal(labelled(h, 'Resume'), null, 'a queued task is not resumable');
+  assert.ok(labelled(h, 'Stop'));
+});
+
+test('a stale confirmation shows the API text and the next Resume starts a new operation', async () => {
+  const posts = [];
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1')},
+    'POST /tasks/t1/resume': (body) => {
+      posts.push(body);
+      return body.confirmation_token
+        ? taskError(409, 'stale_confirmation', 'The recovery evidence changed.')
+        : taskError(409, 'confirmation_required', 'warn', {confirmation_token: `tok-${posts.length}`});
+    },
+  });
+  labelled(h, 'Resume').click(); await settle();
+  labelled(h, 'Resume anyway').click(); await settle();
+  const panel = h.element('task-panel');
+  assert.match(flatten(panel), /The recovery evidence changed\./);
+  assert.equal(findNode(panel, (node) => node.tag === 'dialog'), null);
+  labelled(h, 'Resume').click(); await settle();
+  assert.notEqual(posts[2].operation_id, posts[0].operation_id);
+  assert.equal(posts[2].confirmation_token, undefined, 'no authorization is carried over');
+});
+
+test('Escape closes the dialog without sending anything and the page does not stop a chat', async () => {
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1')},
+    'POST /tasks/t1/resume': taskError(409, 'confirmation_required', 'warn', {confirmation_token: 'tok-1'}),
+  });
+  labelled(h, 'Resume').click(); await settle();
+  const panel = h.element('task-panel');
+  const dialog = findNode(panel, (node) => node.tag === 'dialog');
+  const count = h.net.calls.length;
+  dialog.listeners.keydown[0]({key: 'Escape', preventDefault() {}});
+  assert.equal(findNode(panel, (node) => node.tag === 'dialog'), null);
+  h.documentListeners.keydown[0]({key: 'Escape', preventDefault() {}});
+  assert.equal(h.net.calls.length, count);
+});
+
+test('a missing recovery card offers a new task, and a retry reuses its request key', async () => {
+  const posts = [];
+  let fail = true;
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {card: '', state: 'interrupted'})},
+    'POST /tasks': (body) => {
+      posts.push(body);
+      if (fail) return new Error('network down');
+      return {status: 202, body: {task: taskRow('t2', {state: 'queued'})}};
+    },
+  });
+  const panel = h.element('task-panel');
+  assert.match(flatten(panel), /Resume unavailable: recovery information is missing\./);
+  assert.match(flatten(panel), /Earlier effects of this task are unknown/);
+  assert.equal(labelled(h, 'Resume'), null);
+  labelled(h, 'Start again as a new task').click(); await settle();
+  assert.equal(posts[0].objective, 'Objective of t1');
+  fail = false;
+  labelled(h, 'Start again as a new task').click(); await settle();
+  assert.equal(posts[1].request_key, posts[0].request_key, 'a retry after a network failure is the same request');
+  assert.equal(h.context.location.hash, '#/tasks/t2');
+});
+
+test('a task that never started and has no card can still be resumed', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {card: '', started_at: null})}});
+  assert.ok(labelled(h, 'Resume'));
+  assert.equal(labelled(h, 'Start again as a new task'), null);
+});
+
+test('a missing_card refusal from the server switches the card to the new-task path', async () => {
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {card: '', started_at: null})},
+    'POST /tasks/t1/resume': taskError(409, 'invalid_transition', 'Resume unavailable: recovery information is missing. Start again as a new task.', {reason: 'missing_card'}),
+  });
+  labelled(h, 'Resume').click(); await settle();
+  assert.equal(labelled(h, 'Resume'), null);
+  assert.ok(labelled(h, 'Start again as a new task'));
+});
+
+test('Stop uses the task API, disables while in flight, and shows a refusal', async () => {
+  const calls = [];
+  let release;
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'running'})},
+    'PATCH /tasks/t1': (body) => {
+      calls.push(body);
+      return calls.length === 1
+        ? new Promise((resolve) => { release = () => resolve(taskError(409, 'invalid_transition', 'The task already finished.')); })
+        : {task: taskRow('t1', {state: 'cancelled'})};
+    },
+  });
+  assert.equal(labelled(h, 'Resume'), null);
+  labelled(h, 'Stop').click(); await settle();
+  assert.equal(labelled(h, 'Stopping…').disabled, true);
+  labelled(h, 'Stopping…').click(); await settle();
+  assert.equal(calls.length, 1);
+  release(); await settle();
+  assert.match(flatten(h.element('task-panel')), /The task already finished\./);
+  labelled(h, 'Stop').click(); await settle();
+  assert.deepEqual(calls, [{state: 'stop'}, {state: 'stop'}]);
+  assert.match(flatten(h.element('task-panel')), /Stop accepted\. The task is cancelled\./);
+  assert.equal(labelled(h, 'Stop'), null, 'a stopped task has no actions');
+  assert.equal(h.net.calls.filter((call) => call.path.startsWith('/sessions') && call.method !== 'GET').length, 0, 'never the chat cancel');
+});
+
+test('a late answer for a task the user left is dropped', async () => {
+  let release;
+  const h = harness(baseRoutes({'GET /tasks/t1': () => new Promise((resolve) => { release = () => resolve({task: taskRow('t1')}); })}));
+  await h.run('init()');
+  h.context.location.hash = '#/tasks/t1';
+  const pending = h.windowListeners.hashchange[0](); await settle();
+  h.context.location.hash = '#/s/a'; await h.windowListeners.hashchange[0]();
+  release(); await pending; await settle();
+  assert.equal(h.element('task-panel').children.length, 0);
+  assert.equal(h.element('task-panel').hidden, true);
 });
