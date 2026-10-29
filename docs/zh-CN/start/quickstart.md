@@ -196,7 +196,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 
 ## 下一步
 
-- [配置](../../reference/configuration.md)（英文）：后端、云端 API 密钥、超时。
+- [配置](../reference/configuration.md)：后端、云端 API 密钥、超时。
 - [工具和 MCP](../reference/tools.md)：选择内置工具并添加 MCP 服务器。
 - [网关和 HTTP API](../guides/gateway.md)：会话、网页工作区、登录时运行。
 - [Python API](../reference/python-api.md)：从 Python 运行任务、跟踪事件、审批工具调用。

@@ -504,6 +504,9 @@ def test_local_links_and_anchors() -> None:
         "docs/reference/http-v1.md",
         "docs/reference/python-api.md",
         "docs/reference/run-results.md",
+        "docs/reference/configuration.md",
+        "docs/reference/sessions.md",
+        "docs/reference/scheduler.md",
     ],
 )
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:
