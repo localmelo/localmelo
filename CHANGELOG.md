@@ -118,7 +118,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   modes, so scripts and the benchmark are unaffected. `--window-eviction`, which
   was hidden outright, has help text and shows in developer mode. A `[ui] mode`
   that is not `"default"` or `"developer"` warns on stderr and shows the default
-  help. ([#NN])
+  help. ([#199])
 - `/status` in the interactive UI gains a usage block, built only from events the
   session already received (no request, no polling of the model server): the
   last request's cached share and the session's average over the requests whose
@@ -1219,3 +1219,4 @@ earlier milestones.
 [#195]: https://github.com/localmelo/localmelo/pull/195
 [#197]: https://github.com/localmelo/localmelo/pull/197
 [#198]: https://github.com/localmelo/localmelo/pull/198
+[#199]: https://github.com/localmelo/localmelo/pull/199
