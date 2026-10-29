@@ -267,7 +267,7 @@ class TestGateStopped:
         result = await agent.run_task("echo the answer")
         assert (result.status, result.error) == (
             "gate_stopped",
-            "Stopped after attempt 2",
+            "Stopped after attempt 2 (stop reason: action_not_continue)",
         )
         assert result.attempts == 2
 
