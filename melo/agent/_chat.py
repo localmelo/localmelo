@@ -15,7 +15,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from localmelo.melo.agent._context_fit import ContextFitError, fit_request
-from localmelo.melo.agent._prefix_diag import Fingerprint, compare, fingerprint
+from localmelo.melo.agent._prefix_diag import (
+    MAX_FINGERPRINTS,
+    Fingerprint,
+    best_match,
+    fingerprint,
+)
 from localmelo.melo.agent._request_accounting import (
     ContextBudget,
     RequestAccounting,
@@ -457,7 +462,8 @@ class Chat:
         self.on_context_budget: Callable[[dict[str, Any]], None] | None = None
         self._accounting: RequestAccounting | None = None
         self.last_call: CallTelemetry | None = None
-        self._last_plan: Fingerprint | None = None
+        self._sent: list[tuple[int, str, Fingerprint]] = []
+        self._sent_count = 0
         self.reset_stats()
 
     def begin_prefix(self) -> contextvars.Token[tuple[object, str] | None]:
@@ -488,7 +494,8 @@ class Chat:
         """
         self.stats = RequestStats()
         self.last_call = None
-        self._last_plan = None
+        self._sent = []
+        self._sent_count = 0
         self._accounting = (
             RequestAccounting(self.context_budget)
             if self.context_budget is not None
@@ -702,12 +709,13 @@ class Chat:
                 ) + reported
         self._emit_context_budget(record)
         prefix = None
-        if kind == "plan":
+        if kind in ("plan", "reflect"):
             outgoing = _merge_user_turns(messages) if self.fixed_prefix else messages
             current = fingerprint(outgoing, tools)
-            if self._last_plan is not None:
-                prefix = compare(self._last_plan, current)
-            self._last_plan = current
+            prefix = best_match(self._sent, current)
+            self._sent_count += 1
+            self._sent.append((self._sent_count, kind, current))
+            del self._sent[:-MAX_FINGERPRINTS]
         self.last_call = CallTelemetry(
             kind,
             {

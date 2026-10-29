@@ -214,22 +214,27 @@ asyncio.run(main())
   streamed reply as well when the request asks the server for usage
   (`stream_options.include_usage`). A count the server did not send is not
   in `usage`, so a missing `cached_tokens` means "not reported", never 0.
-  Only this event carries these two; the usage of `reflection` and the
-  run's `RunResult.usage` keep the three standard counts.
-- `prefix`: how much of this request the previous planning request of the
-  run already sent, so a cache miss can be traced to what changed;
-  `null` for the first planning request. The agent works it out from the
+  The `reflection` event's `usage` has them too (summed over its
+  requests); the run's `RunResult.usage` keeps the three standard counts.
+- `prefix`: how much of this request an earlier request of the run
+  (planning or reflection) already sent, so a cache miss can be traced to
+  what changed; `null` for the run's first request. The agent works it out from the
   messages and tools it sends, and the request body is the same with or
   without it. An object:
-  - `messages`: how many leading messages are identical to the previous
-    request's.
+  - `messages`: how many leading messages are identical to those of the
+    best earlier request: the one with the most identical leading messages,
+    then the most characters, then the most recent. A server's prefix cache
+    keeps more than the last request, so this is what it could reuse.
   - `chars`: the characters of content in those messages, plus the leading
     characters that the first differing message shares with its
     counterpart.
-  - `previous_messages`, `total_messages`: the message counts of the
-    previous and this request.
+  - `against`: that request, `{"kind": "plan" | "reflect", "request": n}`;
+    `n` counts the run's planning and reflection requests from 1 (a
+    reflection asked twice takes two numbers).
+  - `previous_messages`, `total_messages`: the message counts of that
+    request and this one.
   - `first_changed`: the role of the first message that differs
-    (`system`, `user`, `assistant` or `tool`), or `null` when the previous
+    (`system`, `user`, `assistant` or `tool`), or `null` when that
     request is a plain prefix of this one (the usual growth of a run).
   - `tools_changed`: `true` when the tool definitions offered differ.
 
@@ -415,8 +420,12 @@ is in `memory_stats.recall_log` and, with its item text, in
   `Could not parse reflection response`, or
   `Reflection response was not a JSON object` when it was valid JSON that
   is not an object.
-- `usage` and `duration_s`: the token counts and the time of both requests,
-  their retries included. With persistence on, `duration_s` also includes
+- `usage`, `prefix` and `duration_s`: the token counts and the time of both
+  requests, their retries included. `usage` also holds `cached_tokens` and
+  `reasoning_tokens` when the server sent them, summed over the requests.
+  `prefix` is the object described under `assistant.message`, for the
+  first request of the reflection (`null` when it is the run's first request
+  or no request was sent). With persistence on, `duration_s` also includes
   recording the replies in history, which can wait up to 5 seconds while
   another process writes to `history.db`.
 
@@ -644,7 +653,7 @@ The store guarantees:
 
 Within schema version 1 (`v` 1), types and keys are only ever added, never
 removed or renamed. Ignore types and keys you do not know. A stored
-`assistant.message` from before `prefix` existed lacks that key
+`assistant.message` or `reflection` from before `prefix` existed lacks that key
 (`OPTIONAL_EVENT_FIELDS` in `localmelo.melo.contracts.events` lists such
 keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and

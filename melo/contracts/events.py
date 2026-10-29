@@ -97,6 +97,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "requests",
                 "readable",
                 "usage",
+                "prefix",
                 "duration_s",
             }
         ),
@@ -140,7 +141,10 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 # emits now always carry every key of EVENT_FIELDS; a session store accepts
 # the older shape too.
 OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
-    {"assistant.message": frozenset({"prefix"})}
+    {
+        "assistant.message": frozenset({"prefix"}),
+        "reflection": frozenset({"prefix"}),
+    }
 )
 EVENT_TYPES: Final = frozenset(EVENT_FIELDS)
 

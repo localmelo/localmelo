@@ -60,11 +60,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
   with `stream_options.include_usage`; a missing key means not reported), and
-  a new `prefix` object says how much of the previous planning request of the
-  run this one repeats and the role of the first message that changed, so a
-  prompt-cache miss can be traced. Request bodies and the JSON result are
-  unchanged. `scripts/cache_report.py LOG` prints the cache use per request
-  from a `stream-json` log. ([#NN])
+  a new `prefix` object says how much of the best earlier request of the run
+  (planning or reflection) this one repeats, which request that is
+  (`against`) and the role of the first message that changed, so a
+  prompt-cache miss can be traced. The `reflection` event gets the same
+  `cached_tokens`/`reasoning_tokens` in its `usage` and a `prefix` for its
+  first request. Request bodies and the JSON result are unchanged.
+  `scripts/cache_report.py LOG` prints the cache use per request (plan and
+  reflect) from a `stream-json` log, with totals by kind. ([#NN])
 
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
   prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,

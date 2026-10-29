@@ -4310,6 +4310,8 @@ class Agent:
                 self.chat.stats.reasoning_chars += len(response.thinking)
         if replies is not None:
             replies.append(response)
+        if run is not None:
+            run.events.reflection_call(getattr(self.chat, "last_call", None))
         if flags:
             readable = _find_reflection(response.content) is not None
         else:
@@ -4343,6 +4345,8 @@ class Agent:
                     self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+            if run is not None:
+                run.events.reflection_call(getattr(self.chat, "last_call", None))
         reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking

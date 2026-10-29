@@ -80,6 +80,19 @@ def core_event(
             "approval": None,
             "exit_code": None,
         },
+        "reflection": {
+            "attempt": 1,
+            "action": "continue",
+            "continue_run": True,
+            "rationale": "",
+            "summary": "",
+            "best_effort_result": "",
+            "requests": 1,
+            "readable": True,
+            "usage": {},
+            "prefix": None,
+            "duration_s": 0.1,
+        },
         "run.finished": {"result": run_result()},
     }
     payload = dict(defaults[type_])

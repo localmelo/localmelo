@@ -121,6 +121,7 @@ class _Emitter:
         self._reflecting_since = 0.0
         # The replies of the reflection under way (see replies).
         self._replies: list[Message] | None = None
+        self._calls: list[CallTelemetry] = []
         self._sink_failed = False
         self._warned_awaitable = False
 
@@ -465,6 +466,7 @@ class _Emitter:
             ),
         )
         self._replies = []
+        self._calls = []
         self._reflecting_since = time.perf_counter()
 
     @property
@@ -474,6 +476,11 @@ class _Emitter:
         ``None`` without a sink: the run then keeps no replies.
         """
         return self._replies
+
+    def reflection_call(self, call: CallTelemetry | None) -> None:
+        """Keep what a request of the reflection under way reported."""
+        if call is not None and self._replies is not None:
+            self._calls.append(call)
 
     def reflection(
         self,
@@ -487,12 +494,19 @@ class _Emitter:
         reply that holds no reflection after it was asked again, whose
         decision fields are then ``None``. ``requests``, ``usage`` and
         ``duration_s`` cover the replies in :attr:`replies`, from
-        ``reflection.started`` on.
+        ``reflection.started`` on; the extra usage fields of the requests
+        (see :meth:`reflection_call`) are summed into ``usage`` and the first
+        request's prefix diagnostics are ``prefix``.
         """
         if self._sink is None:
             return
         attempt = self._attempt
         replies = list(self._replies or ())
+        usage = _usage(replies)
+        for call in self._calls:
+            for name, value in call.details.items():
+                usage[name] = usage.get(name, 0) + value
+        prefix = self._calls[0].prefix if self._calls else None
         duration_s = time.perf_counter() - self._reflecting_since
         action: str | None = None
         rationale: str | None = None
@@ -516,7 +530,8 @@ class _Emitter:
                     "best_effort_result": _redacted(best_effort),
                     "requests": len(replies),
                     "readable": reflected is not None,
-                    "usage": _usage(replies),
+                    "usage": usage,
+                    "prefix": prefix,
                     "duration_s": duration_s,
                 }
             ),
