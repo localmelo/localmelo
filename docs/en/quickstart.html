@@ -91,6 +91,12 @@ source .venv/bin/activate</code></pre>
           fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.
         </p>
         <p>
+          On a Mac with Apple silicon, the
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS development app</a>
+          builds an unsigned native window around the console. It needs the release
+          Xcode, and it is a development bundle, not a release or a Homebrew cask.
+        </p>
+        <p>
           The rest of this guide calls <code>melo</code> directly. Activation
           lasts for this terminal only: in a new terminal, run
           <code>source &lt;clone&gt;/.venv/bin/activate</code> again, where
@@ -320,6 +326,12 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         </p>
         <pre><code>melo "What is 6*7?"</code></pre>
         <p>To start the gateway again without the wizard, run <code>melo --serve</code>.</p>
+        <p>
+          The separate <code>melo-task</code> client creates, inspects, follows and
+          controls gateway tasks over authenticated loopback HTTP, and never starts
+          the gateway. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#task-command">the task command</a>.
+        </p>
       </section>
 
       <section class="section" id="interactive-conversations">
