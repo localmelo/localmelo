@@ -188,7 +188,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server's prompt prefix holds. The default, `off`, is unchanged; `on` adds
   `reflect_tool_guard` to the JSON result's `config`. The `reflection` event has a new
   `unreadable_reason` (`tool_call`, `invalid`, `no_json` or `null`) that says why the
-  first reply held no reflection, in every mode ([#NN]).
+  first reply held no reflection, in every mode ([#210]).
 
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
@@ -1305,6 +1305,7 @@ earlier milestones.
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
 [#209]: https://github.com/localmelo/localmelo/pull/209
+[#210]: https://github.com/localmelo/localmelo/pull/210
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
