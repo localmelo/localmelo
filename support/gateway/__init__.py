@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -361,20 +362,50 @@ class GatewayServer:
         )
         return _ConsoleServer(config, console=self.console)
 
-    def run(self) -> None:
-        self.uvicorn_server().run()
+    def run(self, sockets: list[socket.socket] | None = None) -> None:
+        self.uvicorn_server().run(sockets=sockets)
 
 
-def start_gateway(cfg: config.Config, *, allow_unconfigured: bool = False) -> None:
+def bind_free_port(cfg: config.Config) -> socket.socket:
+    """Bind the gateway's host to a port the system picks; set ``gateway.port``.
+
+    The socket stays open and is handed to the server, so the port cannot be
+    taken between the bind and the first request. Everything that names the
+    port (the startup line, the sign-in link, the guard's host check, the
+    cookie name) reads ``cfg.gateway.port`` afterwards.
+    """
+    host = cfg.gateway.host
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not is_loopback(host):
+        raise ValueError("The gateway must listen on a loopback address.")
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, 0))
+    except BaseException:
+        sock.close()
+        raise
+    cfg.gateway.port = int(sock.getsockname()[1])
+    return sock
+
+
+def start_gateway(
+    cfg: config.Config,
+    *,
+    allow_unconfigured: bool = False,
+    sockets: list[socket.socket] | None = None,
+) -> None:
     if not allow_unconfigured:
         cfg.validate_or_raise()
-    elif cfg.gateway.port <= 0 or cfg.gateway.port > 65535:
+    elif not cfg.gateway_port_ok:
         raise config.ConfigError(
             "Configuration errors:\n"
             f"  - [gateway] port={cfg.gateway.port} is out of range (1-65535)"
         )
     server = GatewayServer(cfg)
-    server.run()
+    server.run(sockets)
 
 
 class _ConsoleServer(uvicorn.Server):

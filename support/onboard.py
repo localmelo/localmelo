@@ -495,14 +495,16 @@ def _choose_model(url: str, models: list[str]) -> str:
     chat = [model for model in models if discovery.is_chat_model(model)]
     if len(models) == 1 and chat:
         return models[0]
+    # Only a choice between chat models needs to know which are in memory.
+    loaded = asyncio.run(discovery.loaded_models(url)) if len(chat) > 1 else set()
     print(f"Models on {url}:")
     for i, model in enumerate(models, 1):
-        print(f"  [{i}] {model}")
+        print(f"  [{i}] {model}{'  (loaded)' if model in loaded else ''}")
     if not chat:
         print(
             "  These look like embedding or reranking models; chat needs a chat model."
         )
-    default = models.index(discovery.pick_model(models) or models[0]) + 1
+    default = models.index(discovery.pick_model(models, loaded) or models[0]) + 1
     while True:
         raw = _question("Model", str(default))
         if raw.isdigit() and 1 <= int(raw) <= len(models):

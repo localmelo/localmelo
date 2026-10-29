@@ -58,7 +58,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 
 答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
 
-直接任务会不经询问就写入文件、运行 Python，并且没有 shell，除非传入 `--builtins all`。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
+直接任务会不经询问就写入文件、运行 Python，并且没有 `shell_exec` 工具，除非传入 `--builtins all`。这不是沙箱：`python_exec` 仍可启动程序（见[上面的警告](#run-your-first-task)）。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
 
 所有选项见[命令行参考](../../reference/cli.md)（英文）。
 
@@ -121,7 +121,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--base-url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器，询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器，询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型；否则 Enter 选择第一个对话模型：
 
 ```text
 $ melo
@@ -202,7 +202,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 melo "What is 6*7?"
 ```
 
-要跳过向导再次启动网关，运行 `melo --serve`。
+要跳过向导再次启动网关，运行 `melo --serve`。用 `melo --serve --port 0` 时由系统选一个空闲端口：启动信息会显示真实地址，`melo --gateway-login --port PORT` 和 `melo-task --gateway URL` 需要用它。
 
 <a id="run-a-task-through-the-gateway"></a>
 
@@ -224,7 +224,7 @@ c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
   Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
 ```
 
-默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。在终端中运行 `melo --gateway-login`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
+默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo --gateway-login`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
 
 ```bash
 melo-task show c5b2d38ceecc

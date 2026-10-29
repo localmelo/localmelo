@@ -1205,6 +1205,12 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
         )
+    if args.port == 0 and (args.daemon or auth_command):
+        parser.error(
+            "--port 0 picks a free port for --serve only; "
+            f"{'--daemon' if args.daemon else 'a gateway authentication command'} "
+            "needs the port the gateway listens on"
+        )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
     query = " ".join(args.query)
@@ -2075,12 +2081,14 @@ def main() -> None:
         cfg.gateway.host = args.host
     if args.port is not None:
         cfg.gateway.port = args.port
+        # 0 asks for a free port; the gateway binds it and writes it back.
+        cfg._ephemeral_port = args.port == 0
 
     # validate before anything else — fail fast with actionable errors
     from localmelo.support.config import ConfigError
 
     if allow_unconfigured:
-        if cfg.gateway.port <= 0 or cfg.gateway.port > 65535:
+        if not cfg.gateway_port_ok:
             print(
                 "\n  Configuration errors:\n"
                 f"  - [gateway] port={cfg.gateway.port} is out of range (1-65535)\n",
@@ -2489,8 +2497,10 @@ def _set_retrieval_extra_body(
 
 def _start_gateway(cfg: Config) -> None:
     """Thin seam for gateway startup — keeps the lazy import local."""
-    from localmelo.support.gateway import start_gateway
+    from localmelo.support.gateway import bind_free_port, start_gateway
 
+    # --port 0: bind first, so every line below names the port in use.
+    sockets = [bind_free_port(cfg)] if cfg.gateway.port == 0 else None
     host = cfg.gateway.host
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
@@ -2505,12 +2515,15 @@ def _start_gateway(cfg: Config) -> None:
         "  Sign in: run melo --gateway-login "
         f"--port {cfg.gateway.port} in another terminal"
     )
+    if sockets is not None:
+        print(f"  melo-task: pass --gateway http://{host}:{cfg.gateway.port}")
     print()
 
+    extra: dict[str, Any] = {} if sockets is None else {"sockets": sockets}
     if getattr(cfg, "_allow_unconfigured", False):
-        start_gateway(cfg, allow_unconfigured=True)
+        start_gateway(cfg, allow_unconfigured=True, **extra)
     else:
-        start_gateway(cfg)
+        start_gateway(cfg, **extra)
 
 
 if __name__ == "__main__":
