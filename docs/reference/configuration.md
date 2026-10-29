@@ -219,9 +219,14 @@ pruning counts without storing prompt text. The output reserve is not a provider
 the independent character guard still applies.
 
 `[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
-`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+`fixed-prefix-v2`; `--fixed-prefix on|off` overrides it for a direct or interactive
 run. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
+Recall goes before the task; the latest reflection goes last, in a final user message
+after the window, so a new attempt changes only what follows the shared history.
+A reflection request repeats the latest planning request (same system text, same
+`tools`, same turns, then the turns since) and adds one final user message with the
+reflection prompt; it offers the tools, and a reply that calls one is asked again as text.
 An explicit end delimiter leaves the task and reflection request outside that data;
 data lines starting with that delimiter are deterministically quoted.
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools

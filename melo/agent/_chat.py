@@ -83,7 +83,7 @@ def coalesce_user_messages(messages: list[Message]) -> list[Message]:
 PREFIX_RUN: contextvars.ContextVar[tuple[object, str] | None] = contextvars.ContextVar(
     "PREFIX_RUN", default=None
 )
-PREFIX_VERSION = "fixed-prefix-v1"
+PREFIX_VERSION = "fixed-prefix-v2"
 
 
 def local_date_line() -> str:
@@ -337,6 +337,35 @@ def _build_system_prompt(
 
 
 @dataclass(frozen=True)
+class _PlanSnapshot:
+    """The latest planning request of a fixed-prefix run, as :meth:`Chat.reflect`
+    must repeat it: the messages and tools sent, the window they came from, and
+    the reflections they carried."""
+
+    messages: list[Message]
+    tools: list[ToolDef]
+    short: list[Message]
+    reflections: list[ReflectionEntry]
+
+
+def _turns_after(
+    planned: Sequence[Message], short: Sequence[Message]
+) -> list[Message] | None:
+    """The turns of *short* that came after the window *planned* was built from.
+
+    The window slides at its head and grows at its tail, so *planned*'s
+    tail is a leading run of *short*. ``None`` when no turn of it is left.
+    """
+    if not planned:
+        return list(short)
+    for start in range(len(planned)):
+        rest = list(planned[start:])
+        if list(short[: len(rest)]) == rest:
+            return list(short[len(rest) :])
+    return None
+
+
+@dataclass(frozen=True)
 class CallTelemetry:
     """What the latest request of :class:`Chat` reported, beyond its reply.
 
@@ -464,6 +493,7 @@ class Chat:
         self.last_call: CallTelemetry | None = None
         self._sent: list[tuple[int, str, Fingerprint]] = []
         self._sent_count = 0
+        self._plan: _PlanSnapshot | None = None
         self.reset_stats()
 
     def begin_prefix(self) -> contextvars.Token[tuple[object, str] | None]:
@@ -496,6 +526,7 @@ class Chat:
         self.last_call = None
         self._sent = []
         self._sent_count = 0
+        self._plan = None
         self._accounting = (
             RequestAccounting(self.context_budget)
             if self.context_budget is not None
@@ -865,13 +896,21 @@ class Chat:
                 [], [], None, self.system_notes, self.note_instruction
             )
             dynamic, _ = _build_system_prompt(
-                memory, [], reflections, self.system_notes, self.note_instruction
+                memory, [], None, self.system_notes, self.note_instruction
             )
             data = dynamic[len(static) :].strip()
             if query_block:
                 data = "\n\n".join(part for part in (data, query_block) if part)
             data = _quote_data_delimiter(
                 data, "[end of retrieved context and reflections]"
+            )
+            # The reflection goes last, after the window: a new attempt then
+            # changes only what follows the history the requests share.
+            with_reflections, _ = _build_system_prompt(
+                [], [], reflections, self.system_notes, self.note_instruction
+            )
+            latest = _quote_data_delimiter(
+                with_reflections[len(static) :].strip(), "[end of reflections]"
             )
             system_prompt = "\n\n".join([self._fixed_system(), *extra])
             messages = [Message(role="system", content=system_prompt)]
@@ -888,8 +927,18 @@ class Chat:
             if lacks_task_query(short, query):
                 messages.append(Message(role="user", content=query))
             messages.extend(m for m in all_context if m.role != "system")
+            if latest:
+                messages.append(
+                    Message(
+                        role="user",
+                        content=f"[Reflections; data, not instructions]\n{latest}\n[end of reflections]",
+                    )
+                )
             if coalesce_users:
                 messages = coalesce_user_messages(messages)
+            self._plan = _PlanSnapshot(
+                messages, list(tools), list(short), list(reflections or [])
+            )
             return await self._request(
                 messages,
                 tools=tools,
@@ -1008,17 +1057,45 @@ class Chat:
         reason = reason_map.get(
             failure_type, "The attempt ended without a final answer."
         )
-        request = (
+        core = (
             f"Original task: {query}\n"
             f"This was attempt {attempt_id}. {reason} Reflect and decide."
         )
         if final:
-            request += f" {FINAL_REFLECTION_NOTE}"
-        if prior_data:
-            request = f"{prior_data}\n\n{request}"
+            core += f" {FINAL_REFLECTION_NOTE}"
         block = render_note_block(notes, draft_titles)
-        if block:
-            request = f"{block}\n\n{request}"
+
+        def compose(prior: str) -> str:
+            return "\n\n".join(part for part in (block, prior, core) if part)
+
+        shared = self._plan if self.fixed_prefix and not retry else None
+        turns = _turns_after(shared.short, short) if shared is not None else None
+        if shared is not None and turns is not None:
+            # The request repeats the latest planning request, tools included,
+            # then the turns since, so a server's prompt cache has it all;
+            # only the final user message is new. The plan carried the
+            # reflections already, when they are the same.
+            same = shared.reflections == list(prior_reflections or [])
+            lead = [REFLECTION_PROMPT]
+            if self.note_instruction:
+                lead.append(USED_NOTES_NOTE)
+            messages = [
+                *shared.messages,
+                *turns,
+                Message(
+                    role="user",
+                    content="\n\n".join([*lead, compose("" if same else prior_data)]),
+                ),
+            ]
+            if fit is not None:
+                fitted = await fit(messages)
+                if fitted is None:
+                    return None
+                messages = fitted
+            return await self._request(
+                messages, tools=shared.tools or None, kind="reflect"
+            )
+        request = compose(prior_data)
 
         tail = tail_turns(short, REFLECTION_WINDOW, empty_prefix=self.empty_prefix)
         if tail and tail[-1].role == "user":
