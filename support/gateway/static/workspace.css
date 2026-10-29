@@ -1351,6 +1351,11 @@ dialog::backdrop {
 .notice-item[data-kind="retry"] {
   color: var(--muted);
 }
+.fact-item {
+  padding: 3px 13px;
+  font-size: 11px;
+  color: var(--muted);
+}
 .live-row {
   padding: 8px 13px;
   display: grid;
@@ -1390,7 +1395,8 @@ dialog::backdrop {
   content: "·";
   margin-right: 8px;
 }
-.task-panel .status-row {
+.task-panel .status-row,
+.worker-panel .status-row {
   padding: 0;
   margin: 8px 0;
 }

@@ -1979,7 +1979,7 @@ test('worker detail is read-only and isolates the chat draft and stream', async 
   assert.equal(h.element('details-trigger').hidden, true);
   assert.match(h.text('worker-panel'), /Worker brief/);
   assert.match(h.text('worker-panel'), /Not recorded/);
-  assert.match(h.text('worker-panel'), /updates every few seconds/);
+  assert.match(h.text('worker-panel'), /New steps appear as they are recorded/);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('approval-card')), null);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('live-row')), null);
   await h.run('send()');
@@ -2051,36 +2051,41 @@ test('worker back returns to the list header and Chats resumes the open chat', a
   assert.equal(h.stream().closed, false);
 });
 
-test('an open unfinished worker run updates without Refresh, redraws only on a change, and stops when finished', async () => {
+test('an open unfinished worker run follows its stream, appends without a re-read, and stops when finished', async () => {
   let status = 'running';
-  let answer = '';
-  const turns = () => ({turns: [turnRow({user_text: 'Live brief', answer, status, events: [
+  const row = () => ({turns: [turnRow({user_text: 'Live brief', status, events: [
     {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Live brief'}},
   ]})], has_earlier: false});
   const h = harness(baseRoutes({
-    'GET /sessions/w': () => ({session: session('w', {kind: 'worker', title: 'Live', source: 'localmelo', status, steps: 0, tokens: null})}),
-    'GET /sessions/w/turns?limit=50&events=true': turns,
+    'GET /sessions/w': () => ({session: session('w', {kind: 'worker', title: 'Live', source: 'localmelo', status, steps: 0, tokens: null, busy: status === 'running'})}),
+    'GET /sessions/w/turns?limit=50&events=true': row,
+    'GET /sessions/w/status': {session_id: 'w', segments: ['cache 40% idle 5s', 'step 1']},
   }));
   await h.run('init()');
   h.run('showWorkers("w")'); await settle();
   const panel = h.element('worker-panel');
-  const poll = h.timers.findLast((timer) => timer.interval && timer.ms === 3000 && !timer.cleared);
-  assert.ok(poll, 'the Workers view polls every 3 seconds');
+  const stream = FakeEventSource.instances.at(-1);
+  assert.equal(stream.url, '/api/sessions/w/events?after=1', 'the stream starts after the last event read');
   assert.match(flatten(panel), /Run not finished/);
-  const reads = () => h.net.calls.filter((call) => call.path.startsWith('/sessions/w')).length;
-  const before = panel.children[0];
-  await poll.handler(); await settle();
-  assert.equal(panel.children[0], before, 'an unchanged run is not redrawn');
-  answer = 'All done'; status = 'completed';
-  await poll.handler(); await settle();
-  assert.notEqual(panel.children[0], before);
-  assert.match(flatten(panel), /All done/);
+  assert.match(flatten(panel), /cache 40% idle 5s/, 'the status row shows on a worker run');
+  const reads = () => h.net.calls.filter((call) => call.path.startsWith('/sessions/w') && !call.path.endsWith('/status')).length;
+  const before = reads();
+  stream.emit({id: 2, turn: 1, type: 'tool.started', ts: 1, data: {step: 1, call_id: 'c1', name: 'file_read', arguments: {}, preview: 'a.txt'}});
+  stream.emit({id: 3, turn: 1, type: 'note', ts: 2, data: {step: 1, kind: 'plan', text: 'Read the file first'}});
+  stream.emit({id: 3, turn: 1, type: 'note', ts: 2, data: {step: 1, kind: 'plan', text: 'Read the file first'}});
+  const draw = h.timers.findLast((timer) => !timer.interval && timer.ms === 150 && !timer.cleared);
+  assert.ok(draw, 'frames are drawn together on one timer');
+  draw.handler();
+  assert.match(flatten(panel), /file_read/);
+  assert.match(flatten(panel), /Note \(plan\): Read the file first/);
+  assert.equal(reads(), before, 'new events are folded in without reading the run again');
+  status = 'completed';
+  stream.fail();
+  await settle();
+  assert.equal(stream.closed, true);
   assert.doesNotMatch(flatten(panel), /Run not finished/);
-  const settled = reads();
-  await poll.handler(); await settle();
-  assert.equal(reads(), settled, 'a finished run is not read again');
+  assert.equal(FakeEventSource.instances.filter((source) => source.url.includes('/w/events')).length, 1, 'a finished run is not followed again');
   h.run('leaveWorkers()');
-  assert.equal(poll.cleared, true, 'leaving the view stops the polling');
 });
 
 test('the open worker list shows a run that starts later', async () => {

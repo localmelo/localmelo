@@ -96,7 +96,9 @@ async def test_missing_file_then_live_worker(
             await console.worker_history.rename_session(turn.session_id, "no")
         stored_session = await store.get_session(turn.session_id)
         assert stored_session is not None and stored_session.title != "no"
-        assert client.get(f"/api/sessions/{turn.session_id}/events").status_code == 404
+        # The events of a worker run are read, never written.
+        events = client.get(f"/api/sessions/{turn.session_id}/events?follow=false")
+        assert events.status_code == 200 and "assistant.message" in events.text
         assert (
             client.patch(
                 f"/api/sessions/{turn.session_id}", json={"title": "no"}
