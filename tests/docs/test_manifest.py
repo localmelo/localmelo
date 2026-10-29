@@ -499,6 +499,11 @@ def test_local_links_and_anchors() -> None:
         "docs/concepts/memory.md",
         "docs/concepts/procedures.md",
         "docs/concepts/retrieval.md",
+        "docs/reference/tools.md",
+        "docs/reference/procedures.md",
+        "docs/reference/http-v1.md",
+        "docs/reference/python-api.md",
+        "docs/reference/run-results.md",
     ],
 )
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:

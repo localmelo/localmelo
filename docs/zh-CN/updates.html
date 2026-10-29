@@ -477,7 +477,7 @@
           </p>
           <ul>
             <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。旧版 <code>/v1</code> 没有审批策略；控制台会话调用 <code>file_write</code> 和 <code>python_exec</code> 前会请求审批。控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
-            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问）。直接模式和 Python API 的默认行为见上面的工具默认值更新。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md#agentoptions">Python API（英文）</a>。</li>
+            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问）。直接模式和 Python API 的默认行为见上面的工具默认值更新。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md#agentoptions">Python API</a>。</li>
           </ul>
         </article>
 
@@ -605,7 +605,7 @@
           </p>
           <ul>
             <li><code>session_id</code> 不是字符串（数字、列表）时，现在会得到该路由自己的 400 <code>{"error": "Invalid session_id format: …"}</code>，与其他无效 ID 相同，而不是 FastAPI 的纯文本 500。</li>
-            <li>100,000 字符的上限改为在去掉首尾空白之后计算——也就是智能体实际运行的文本——所以去掉空白后不超长的带空白查询会被接受；空查询仍然是 400。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/http-v1.md#post-v1agentrun">网关和 HTTP API（英文）</a>。</li>
+            <li>100,000 字符的上限改为在去掉首尾空白之后计算——也就是智能体实际运行的文本——所以去掉空白后不超长的带空白查询会被接受；空查询仍然是 400。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/http-v1.md#post-v1agentrun">网关和 HTTP API</a>。</li>
           </ul>
         </article>
 
@@ -655,7 +655,7 @@
           </p>
           <ul>
             <li><code>shell_exec</code> 和 <code>python_exec</code> 启动子进程时只带 <code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、所有 <code>LC_*</code> 变量和 <code>TMPDIR</code>，再加上新增的 <code>AgentOptions(tool_env={...})</code>，别的都不带。除 <code>tool_env</code> 点名之外，melo 环境里的 API 密钥不会到达任何工具；<code>VIRTUAL_ENV</code>、<code>PYTHONPATH</code>、<code>SSH_AUTH_SOCK</code> 和代理变量只能通过 <code>tool_env</code> 传入。</li>
-            <li>MCP 服务器也拿到同样的基础环境（现在包括所有 <code>LC_*</code> 变量），再加上它自己条目里的 <code>env</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md#built-in-tools">工具（英文）</a>。</li>
+            <li>MCP 服务器也拿到同样的基础环境（现在包括所有 <code>LC_*</code> 变量），再加上它自己条目里的 <code>env</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md#built-in-tools">工具</a>。</li>
           </ul>
         </article>
 

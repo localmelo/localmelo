@@ -240,7 +240,7 @@ asyncio.run(main())
 - **模型会得到提示。** 每次规划请求都包含：`Working directory: <root>. Relative paths and shell and Python commands run there; file_read and file_write refuse paths outside it.`
 - `RunResult.config` 不包含根目录：可从 `agent.workspace_root` 和 `run.started` 事件获取。
 
-未设置根目录时，内置工具的行为与直接模式相同，见[工具和 MCP（英文）](../../reference/tools.md#built-in-tools)。
+未设置根目录时，内置工具的行为与直接模式相同，见[工具和 MCP](../reference/tools.md#built-in-tools)。
 
 <a id="keep-answers-between-runs"></a>
 

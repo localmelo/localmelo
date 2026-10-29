@@ -91,7 +91,7 @@ source .venv/bin/activate</code></pre>
             <strong>运行任务</strong>
             <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以运行 <code>melo</code> 在终端里对话：模型的思考、每个工具调用和运行进度都会实时显示；批准写文件之前，还会显示这次写入将做出的改动；运行命令或写文件之前会先询问；还可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复该文件夹里已保存的对话；<code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 可以命名、撤销、查看和复制对话；整段对话还可以运行在推理和召回模式下（<code>--reasoning</code>、<code>--retriever</code> 和各个召回选项）。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">
             <strong>工具和 MCP</strong>
             <span>使用四个内置工具和本地 MCP 服务器提供的工具（网关和控制台会话只有三个，没有 <code>shell_exec</code>）；每一步提供内置工具、模型已经调用过的工具和与任务最接近的匹配，并且只运行这些工具；子进程只拿到最小环境加上 <code>tool_env</code>，Python 调用在子进程中运行，时间限制可以终止它。</span>
           </a>
@@ -119,7 +119,7 @@ source .venv/bin/activate</code></pre>
             <strong>嵌入模型设置</strong>
             <span>为长期记忆添加嵌入模型：第一次运行或配置向导会提供聊天服务器已经列出的模型，并给出 Ollama、oMLX、vLLM、SGLang 和 MLC 的步骤。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">
             <strong>Python API <span class="tag experimental">实验性</span></strong>
             <span>在 Python 代码中运行任务：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
           </a>
