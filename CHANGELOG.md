@@ -146,7 +146,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `fresh_chars` and `request_chars` (the characters that no earlier request of the run
   held, and all of them), and `scripts/cache_report.py` reports the reusable share
   `cached / (prompt - fresh)` per run and pooled beside the share of all prompt tokens;
-  `fresh` is an estimate. ([#NN])
+  `fresh` is an estimate. ([#228])
 
 - What runs now, in the web console header and the macOS app (#213).
   `GET /api/health` gains `status`: `running` counts the console's chats with a
@@ -1441,6 +1441,7 @@ earlier milestones.
 [#224]: https://github.com/localmelo/localmelo/pull/224
 [#226]: https://github.com/localmelo/localmelo/pull/226
 [#227]: https://github.com/localmelo/localmelo/pull/227
+[#228]: https://github.com/localmelo/localmelo/pull/228
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
