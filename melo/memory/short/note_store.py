@@ -235,7 +235,7 @@ class NoteStore:
 
         Returns how many entries changed. A chunk is the attempt's earlier
         thinking as a note is its earlier plan, so it leaves with the notes
-        at the same boundary (T59).
+        at the same boundary.
         """
         changed = 0
         for entry in self._entries:

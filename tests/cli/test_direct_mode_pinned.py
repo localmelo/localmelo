@@ -18,7 +18,7 @@ config inheritance changes only ``_build_direct_mode_agent``; URL sessions and
 default options stay unchanged. P13b's loop notice (``shell_exec`` is off;
 ``--builtins all`` turns it on) moved ``_run`` again, and ``_parse_builtins``
 is pinned for the first time: it returns every built-in explicitly for
-``--builtins all``. T65b's review fixes name ``melo "" --builtins all`` in
+``--builtins all``. Review fixes name ``melo "" --builtins all`` in
 the notice, so ``_run`` has a new hash again. Worker history adds opt-in
 ``--save-session`` and import dispatch to ``_run_direct`` and ``_run``.
 Context accounting resolves its opt-in budget before Agent construction, so
@@ -30,15 +30,16 @@ adds an opt-in flag and config fallback to ``_direct_options`` and
 ``_build_direct_mode_agent``; the default output and provider wire remain
 covered by the legacy golden. Captured history also adds an opt-in flag and
 config fallback to those two functions. Digest recall adds config-backed gate
-settings only for explicit reasoning modes, and T95bR's review fixes make a
+settings only for explicit reasoning modes, and review fixes make a
 refused config value a worker ``startup_error`` after a valid brief, so
 ``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
 the golden and without ``--brief`` it keeps the old usage error. ``--window-eviction``
 adds an opt-in flag and config fallback to the same two functions (default ``slide``
-changes nothing). ``_check_args`` is not pinned. T161 changed the no-backend message text in
-``_build_direct_mode_agent`` (both the plain and the ``--brief`` branch), so it has a new hash.
 changes nothing). ``--reflect-tool-guard`` adds an opt-in flag (no config
-fallback) to ``_direct_options`` (default off changes nothing). ``_check_args`` is not pinned.
+fallback) to ``_direct_options`` (default off changes nothing). The no-backend
+message now points at the first-run flow, in both the plain and the ``--brief``
+branch of ``_build_direct_mode_agent``, so it has a new hash. ``_check_args`` is
+not pinned.
 """
 
 from __future__ import annotations

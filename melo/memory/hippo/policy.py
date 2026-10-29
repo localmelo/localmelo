@@ -301,7 +301,7 @@ def classify_kind(
     if source == "user":
         if first_person is None:
             # "call me" is a profile predicate even though "me" is not in
-            # _first_person (T53R finding 7).
+            # _first_person (review finding 7).
             first_person = (
                 _first_person(folded)
                 or _has_phrase(folded, "call me")
@@ -360,7 +360,7 @@ def subjects(
     """The comparison subject of one text of *kind*.
 
     An episodic item's subject is item-local: its candidate id and index
-    (T53R finding 4). Two different items of one note therefore both stay,
+    (review finding 4). Two different items of one note therefore both stay,
     while a restatement re-proposes the same candidate with the same item
     order, so its item keeps the subject and is an ``UPDATE``.
     """

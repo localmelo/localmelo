@@ -234,7 +234,7 @@ def test_a_missing_file_is_one_line_and_exit_2(
 def test_a_directory_without_a_store_exports_zero_and_exit_0(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # T59: a directory with no long_term.db is an empty store, not a usage
+    # A directory with no long_term.db is an empty store, not a usage
     # error; the normal output shape is zero lines plus the count on stderr.
     directory = tmp_path / "no-store"
     directory.mkdir()
@@ -297,7 +297,7 @@ def test_the_three_modes_are_mutually_exclusive(
 def test_the_new_modes_accept_and_ignore_model_flags(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # T53R finding 9 / Requirement 12: no model flag is needed or refused.
+    # Review finding 9 / Requirement 12: no model flag is needed or refused.
     directory = tmp_path / "m"
     candidates = _candidates(tmp_path / "c.jsonl", CANDIDATES[:1])
     model_flags = [

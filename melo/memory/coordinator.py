@@ -54,7 +54,7 @@ def _redacted_text(text: str) -> str:
 
 
 # Provenance is stored beside the entry, so every text it carries is bounded
-# and redacted like the entry text (P4, T53R finding 2).
+# and redacted like the entry text (P4, review finding 2).
 PROVENANCE_TEXT_CHARS = 300
 PROVENANCE_LIST_MAX = 20
 
@@ -186,7 +186,7 @@ class Hippo:
         self.keep_decision_text = keep_decision_text
         self.typed_assertions = typed_assertions
         # User statements have no source timestamp; sentence/message order is
-        # their trusted observation order (T112R finding 2).
+        # their trusted observation order (review finding 2).
         self._user_order = 0
         # R6-lite's typed write path exists only for a real long store: an
         # injected backend, never the in-memory fallback of a legacy run.
@@ -650,7 +650,7 @@ class Hippo:
             if await self.long.count_entries() == 0:
                 return []
             # Each row is tagged with the retriever that scored it, so the
-            # cosine floor never drops a BM25 row (T53R finding 3).
+            # cosine floor never drops a BM25 row (review finding 3).
             if self.embedding is not None:
                 vectors = await self.embedding.embed([query])
                 raw_rows = await self.long.search_embedding(
@@ -817,7 +817,7 @@ class Hippo:
             )
         except LongTermSchemaError as exc:
             # A newer localmelo wrote this file: one WARNING, then the run
-            # continues without long-term memory (Requirement 4, T53R
+            # continues without long-term memory (Requirement 4, review
             # finding 5). The legacy path had no catch at all.
             self._disable_store(exc)
             return []

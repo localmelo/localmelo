@@ -510,7 +510,7 @@ async def test_default_auto_start_selects_a_long_entry_by_its_text(
 async def test_an_embedding_agent_recalls_a_text_only_entry_at_start(
     tmp_path: Path,
 ) -> None:
-    # T53R finding 3: recall_long tags a text-only row as BM25, so the
+    # Review finding 3: recall_long tags a text-only row as BM25, so the
     # cosine floor must not drop it in Agent._long_docs/_run_recall either.
     class FakeEmbedding:
         async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -547,7 +547,7 @@ async def test_an_embedding_agent_recalls_a_text_only_entry_at_start(
 async def test_a_legacy_run_continues_without_a_newer_long_store(
     tmp_path: Path, caplog: Any
 ) -> None:
-    # T53R finding 5: a newer localmelo wrote the file. The Agent logs one
+    # Review finding 5: a newer localmelo wrote the file. The Agent logs one
     # WARNING and runs without long-term memory instead of crashing.
     import logging
     import sqlite3

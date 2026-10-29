@@ -2,7 +2,7 @@
 
 The cache holds the user's config, memory, sessions, CLI history and the
 gateway's call logs. The suite once wrote ~140 call-log run directories per
-full run there (T52): two defaults were expanded at import time, before a
+full run there: two defaults were expanded at import time, before a
 test's temporary HOME applied.
 
 The guards act on the cause, inside the test process, so another process

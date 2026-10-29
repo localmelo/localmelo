@@ -357,7 +357,7 @@ async def test_update_supersedes_and_a_missing_target_becomes_new(
 
 
 async def test_the_in_memory_store_clears_the_target_of_a_downgraded_update() -> None:
-    # T53R finding 12: the SQLite twin clears target_id when UPDATE becomes
+    # Review finding 12: the SQLite twin clears target_id when UPDATE becomes
     # NEW, so the in-memory twin must do the same.
     store = LongTerm()
     await _apply(store, "I live in Berlin", kind="profile")

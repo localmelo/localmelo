@@ -176,7 +176,7 @@ def test_supersede_attempt_leaves_digests_and_later_attempts_alone() -> None:
 
 
 def test_supersede_attempt_marks_its_thought_chunks_with_its_notes() -> None:
-    # T59: a chunk of the attempt is that attempt's earlier thinking too,
+    # A chunk of the attempt is that attempt's earlier thinking too,
     # so it leaves with its notes.
     store = NoteStore(clock=Clock())
     note = _add(store, "note", "old", note=_note("old"), attempt=1)

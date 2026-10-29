@@ -428,7 +428,7 @@ def test_a_superseded_note_names_its_attempt_and_says_so() -> None:
 
 
 def test_a_superseded_thought_names_its_attempt_and_says_so() -> None:
-    # #94's T47d rule now covers a thought chunk too: a later attempt's
+    # #94's rule now covers a thought chunk too: a later attempt's
     # boundary supersedes the chunk, so a recalled one is marked.
     old = docs_from_notes(
         [

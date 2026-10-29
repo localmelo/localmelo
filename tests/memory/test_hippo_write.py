@@ -206,7 +206,7 @@ async def test_a_secret_is_stored_redacted_and_counted() -> None:
     entry = (await store.active_entries())[0]
     assert key not in entry.text
     assert "[redacted]" in entry.text
-    # T53R finding 2: the provenance is stored in the same row, so its
+    # Review finding 2: the provenance is stored in the same row, so its
     # texts are redacted too (and bounded).
     assert key not in json.dumps(entry.provenance)
     assert entry.provenance["task_text"] == "deploy with [redacted]"
@@ -235,7 +235,7 @@ async def test_a_provenance_text_is_bounded_before_it_is_stored() -> None:
 
 
 async def test_two_ordinary_items_of_one_note_both_stay() -> None:
-    # T53R finding 4: both are episodic and share the note, but they are
+    # Review finding 4: both are episodic and share the note, but they are
     # two traces; the second must not supersede the first.
     store = LongTerm()
     hippo = Hippo(long=store)

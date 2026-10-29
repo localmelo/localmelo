@@ -114,7 +114,7 @@ async def test_a_request_that_states_no_fact_admits_notes_but_not_the_digest(
 async def test_a_remember_request_admits_the_fact_but_not_an_evidence_less_digest(
     tmp_path: Path,
 ) -> None:
-    # T59: "Remember that X" is an encoding instruction for X. The digest
+    # "Remember that X" is an encoding instruction for X. The digest
     # stays task-local unless the attempt wrote a file or ran a check.
     server = FakeLLM(_answer("noted"))
     agent = _agent(
@@ -255,7 +255,7 @@ async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
 
 @pytest.mark.asyncio
 async def test_an_aider_final_digest_is_admitted_on_outcome(tmp_path: Path) -> None:
-    # T68b: the digest has a task: line, a file name and a function name
+    # The digest has a task: line, a file name and a function name
     # but no dates or amounts; the meta filter must not drop it.
     server = FakeLLM(
         _write_note_reply(
@@ -331,7 +331,7 @@ async def test_the_memory_event_has_its_five_fields(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_keep_decision_text_stores_the_checked_text(tmp_path: Path) -> None:
-    # T53R finding 10: no end-to-end test covered --keep-decision-text.
+    # Review finding 10: no end-to-end test covered --keep-decision-text.
     (tmp_path / "list_ops.py").write_text("def append(a, b):\n    return a + b\n")
     server = FakeLLM(
         _note_reply("list_ops.py returns the wrong list from its append helper"),
@@ -359,7 +359,7 @@ async def test_keep_decision_text_stores_the_checked_text(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_a_meta_sentence_makes_no_profile_entry(tmp_path: Path) -> None:
-    # T53R finding 6, end to end: a task-shaped prompt is not a fact.
+    # Review finding 6, end to end: a task-shaped prompt is not a fact.
     server = FakeLLM(_answer("done"))
     agent = _agent(
         server,
@@ -502,7 +502,7 @@ async def test_memory_false_still_writes_and_recalls_nothing(tmp_path: Path) -> 
 async def test_twenty_runs_through_the_agent_keep_the_growth_bound(
     tmp_path: Path,
 ) -> None:
-    # T53R finding 10: the stability slice opened the store directly, never
+    # Review finding 10: the stability slice opened the store directly, never
     # through 20 Agent sessions. The spec's D11 bound: at most 3 entries per
     # run on average, and no run more than 8.
     memory = tmp_path / "memory"
@@ -543,7 +543,7 @@ def _write_note_reply(content: str, path: str, text: str) -> Message:
 async def test_an_aider_style_run_names_files_checks_and_decisions(
     tmp_path: Path,
 ) -> None:
-    # T76: the digest is built from the attempt's own calls and results, not
+    # The digest is built from the attempt's own calls and results, not
     # only from its notes' keyed facts.
     (tmp_path / "transpose_test.py").write_text(
         "from transpose import transpose\n\n\n"
