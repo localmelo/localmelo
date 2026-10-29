@@ -600,6 +600,22 @@ async def _rows(
     return list(await conn.execute_fetchall(sql, args))
 
 
+async def _file_snapshot(conn: aiosqlite.Connection) -> tuple[int, list[Any]]:
+    """``user_version`` and the ``sqlite_master`` rows, read by one statement.
+
+    Two statements could see a file before and after another process creates
+    its schema (version 0 with tables) and call a new file foreign; one
+    statement reads one snapshot.
+    """
+    rows = await _rows(
+        conn,
+        "SELECT v.user_version, m.type, m.name FROM pragma_user_version AS v "
+        "LEFT JOIN sqlite_master AS m",
+    )
+    objects = [(row[1], row[2]) for row in rows if row[1] is not None]
+    return int(rows[0][0]), objects
+
+
 def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
@@ -1019,8 +1035,7 @@ class SessionStore:
 
     async def _check_file(self, conn: aiosqlite.Connection) -> bool:
         """Refuse a file this store must not write; return whether it is new."""
-        version = await self._user_version(conn)
-        objects = await _rows(conn, "SELECT type, name FROM sqlite_master")
+        version, objects = await _file_snapshot(conn)
         if version == 0:
             if objects:
                 raise SessionStoreError(
