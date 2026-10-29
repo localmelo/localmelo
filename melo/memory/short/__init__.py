@@ -143,6 +143,10 @@ class WorkingMemory:
 
     # ── Conversation buffer ──
 
+    def holds(self, msg: Message) -> bool:
+        """Whether the window still holds this very message (not an equal one)."""
+        return any(held is msg for held in self._buf)
+
     def append(self, msg: Message, *, aliases: Iterable[str] = ()) -> None:
         """Append *msg*; *aliases* are the recall aliases its block shows."""
         self._buf.append(msg)

@@ -1094,6 +1094,9 @@ class _RunState:
     task_query_msg: Message | None = None
     # User messages the run inserted mid-run (inbox): kept at a boundary drop.
     pinned: list[Message] = dataclasses.field(default_factory=list)
+    # cache_layout v3: the message that carries the latest reflection in the
+    # window, put back once if an eviction takes it.
+    reflection_msg: Message | None = None
     # An opt-in source of parent instructions at planning boundaries.
     inbox: InboxSource | None = None
     # Replay counters (see memory_stats on RunResult).
@@ -4677,6 +4680,11 @@ class Agent:
         for step in range(budget):
             if budget - step == 2:
                 await self._deadline_check(run)
+            reflection = run.reflection_msg
+            if reflection is not None and not self.hippo.working.holds(reflection):
+                # An eviction took the latest reflection: it goes back once, at
+                # the end, where the eviction has already changed the prefix.
+                self.hippo.working.append(reflection)
             pending = run.inbox.poll() if run.inbox is not None else []
             inserted = None
             if pending:
@@ -6176,7 +6184,8 @@ class Agent:
             if self._reflection_in_window:
                 # Once, here: the exchange (when the request shared the plan's
                 # prefix) and the block that carries the reflection.
-                for message in (*exchange, self.chat.reflection_message(entry)):
+                run.reflection_msg = self.chat.reflection_message(entry)
+                for message in (*exchange, run.reflection_msg):
                     self.hippo.working.append(message)
 
             best_effort = decision.best_effort_result

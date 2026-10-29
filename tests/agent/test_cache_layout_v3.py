@@ -143,6 +143,32 @@ async def test_a_second_reflection_keeps_the_first_block_until_eviction() -> Non
     assert _extends(second_reflect, last)
 
 
+async def test_an_evicted_reflection_goes_back_into_the_window() -> None:
+    # A small window evicts the reflection's block a few steps into attempt 2;
+    # every later planning request must still carry the latest reflection.
+    def echo(n: int) -> dict[str, Any]:
+        # Distinct calls, so no stuck check ends the attempt early.
+        reply = _call_reply(_cached(0))
+        call = reply["choices"][0]["message"]["tool_calls"][0]
+        call["id"] = f"call_{n}"
+        call["function"]["arguments"] = json.dumps({"text": f"hi {n}"})
+        return reply
+
+    stub = Stub(
+        [
+            *(echo(n) for n in range(6)),
+            _reflection_reply(_cached(0)),
+            *(echo(n) for n in range(6, 11)),
+            _final_reply(_cached(0)),
+        ]
+    )
+    await _run(stub, **{**V3, "steps_per_attempt": 6, "window_messages": 8})
+    later_plans = stub.bodies[7:]
+    assert len(later_plans) == 6
+    # Exactly once: put back after an eviction, never duplicated.
+    assert all(len(_blocks(body)) == 1 for body in later_plans)
+
+
 async def test_an_unreadable_reply_is_retried_on_the_same_prefix() -> None:
     stub = Stub(
         _replies(
