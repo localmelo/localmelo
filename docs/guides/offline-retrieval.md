@@ -1,5 +1,7 @@
 # Guide: Offline retrieval
 
+This guide shows how to evaluate memory retrievers offline: run a first evaluation, compare retrievers on a model server, and export runs and history for analysis. Read it before you compare retrieval settings; the options and output fields are in the [offline retrieval reference](../reference/retrieval.md).
+
 ## Run a first evaluation
 
 `bm25` needs no server. Write a corpus of three documents and two labelled

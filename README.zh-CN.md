@@ -50,7 +50,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 - [路线图和更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)：v0.1.0 的计划和按日期排列的变更。
 - [记忆设计](https://localmelo.github.io/localmelo/zh-CN/memory-design.html)：记忆的设计，其中一部分尚未实现。
 - [开发者说明](https://localmelo.github.io/localmelo/zh-CN/developers.html)：开发环境、测试、检查，以及如何提交改动。
-- [参考文档（英文）](docs/README.md)：所有指南和参考页面，从命令行到记忆和网关。
+- [文档索引](docs/zh-CN/README.md)：所有指南和参考页面，从命令行到记忆和网关。
 
 ## 安全
 

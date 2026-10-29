@@ -4,6 +4,8 @@ The documentation for localmelo, a local personal agent that runs tasks with
 tools and memory on your own model server or a cloud API. The website is at
 <https://localmelo.github.io/localmelo/>.
 
+The Chinese index is [zh-CN/README.md](zh-CN/README.md).
+
 ## Start here
 
 - [Quickstart](start/quickstart.md): install localmelo, run a first task, save a

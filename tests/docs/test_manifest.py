@@ -513,6 +513,9 @@ def test_local_links_and_anchors() -> None:
         "docs/reference/events.md",
         "docs/reference/retrieval.md",
         "docs/reference/memory.md",
+        "docs/README.md",
+        "docs/project/evaluations.md",
+        "docs/project/documentation.md",
     ],
 )
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:

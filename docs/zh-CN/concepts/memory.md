@@ -2,6 +2,8 @@
 
 # 概念：记忆
 
+本页说明 localmelo 会记住什么，以及一次运行如何召回这些记忆。修改记忆设置之前请先阅读本页；确切的文件和选项见[记忆参考](../reference/memory.md)。
+
 <a id="what-localmelo-remembers"></a>
 
 ## localmelo 记住什么

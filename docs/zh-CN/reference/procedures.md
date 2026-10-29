@@ -2,6 +2,8 @@
 
 # 参考：程序记忆
 
+本页是 `melo-procedures` 的参考：回放已记录的运行、把运行转为片段，并导出或遗忘程序记忆。需要从命令行管理程序记忆时请阅读本页；概念见[程序记忆](../concepts/procedures.md)。
+
 <a id="melo-procedures"></a>
 
 ## 命令 melo-procedures

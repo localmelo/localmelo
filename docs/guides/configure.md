@@ -1,5 +1,7 @@
 # Guide: Configure
 
+This guide covers the first run, the setup wizard, and how to update or uninstall localmelo. Read it when you set localmelo up on a machine or change its configuration; the settings are in the [configuration reference](../reference/configuration.md).
+
 ## First run
 
 In a terminal with no config file, `melo` asks for a model server's URL and

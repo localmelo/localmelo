@@ -1,5 +1,7 @@
 # Guide: Scheduler
 
+This guide explains how the scheduler decides when chat requests may reach a shared model server, and how to run a simulation. Read it before you change scheduling; the policy, the store and the simulator are described in the [scheduler reference](../reference/scheduler.md).
+
 ## The gate on chats (S2)
 
 Every model call a web workspace chat makes passes through one in-process
