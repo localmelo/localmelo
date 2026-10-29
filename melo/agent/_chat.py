@@ -80,6 +80,14 @@ def coalesce_user_messages(messages: list[Message]) -> list[Message]:
     return result
 
 
+def _with_tail(messages: list[Message], tail: str, coalesce: bool) -> list[Message]:
+    """*messages* with *tail* as a final user line (joined to a user message)."""
+    if not tail:
+        return messages
+    messages = [*messages, Message(role="user", content=tail)]
+    return coalesce_user_messages(messages) if coalesce else messages
+
+
 PREFIX_RUN: contextvars.ContextVar[tuple[object, str] | None] = contextvars.ContextVar(
     "PREFIX_RUN", default=None
 )
@@ -881,6 +889,7 @@ class Chat:
         recalls: Sequence[Any] = (),
         coalesce_users: bool = False,
         on_ready: Callable[[list[Message]], None] | None = None,
+        tail_note: str = "",
     ) -> Message:
         ready_args: dict[str, Any] = (
             {"on_ready": on_ready} if on_ready is not None else {}
@@ -945,7 +954,7 @@ class Chat:
                 messages, list(tools), list(short), list(reflections or [])
             )
             return await self._request(
-                messages,
+                _with_tail(messages, tail_note, coalesce_users),
                 tools=tools,
                 kind="plan",
                 recall=recalls,
@@ -970,6 +979,7 @@ class Chat:
             else other_msgs
         )
 
+        messages = _with_tail(messages, tail_note, False)
         if coalesce_users:
             messages = coalesce_user_messages(messages)
         return await self._request(
@@ -997,6 +1007,7 @@ class Chat:
         fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
         notes: Sequence[str] = (),
         draft_titles: Sequence[str] = (),
+        addendum: str = "",
     ) -> Message | None:
         """Ask the LLM to reflect on the current attempt.
 
@@ -1068,6 +1079,8 @@ class Chat:
         )
         if final:
             core += f" {FINAL_REFLECTION_NOTE}"
+        if addendum:
+            core += f" {addendum}"
         block = render_note_block(notes, draft_titles)
 
         def compose(prior: str) -> str:

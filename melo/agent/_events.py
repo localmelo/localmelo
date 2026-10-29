@@ -457,11 +457,13 @@ class _Emitter:
             return
         self._notice("empty_reply", NOTICE_MESSAGES["empty_reply"], {"count": count})
 
-    def no_change(self) -> None:
-        """A brief run's boundary found the workspace as it was at the start."""
+    def no_change(self, scope: str | None = None) -> None:
+        """A brief run found the workspace unchanged: at a boundary, or with
+        *scope* ``"step"`` after steps of reading."""
         if self._sink is None:
             return
-        self._notice("no_change", NOTICE_MESSAGES["no_change"], {})
+        detail = {} if scope is None else {"scope": scope}
+        self._notice("no_change", NOTICE_MESSAGES["no_change"], detail)
 
     def brief_check(self, result: BriefCheckResult, round_: int) -> None:
         """A brief run's gate ran one check; *round_* counts the gate's runs."""

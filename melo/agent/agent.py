@@ -25,6 +25,15 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
+from localmelo.melo.agent._brief_aids import (
+    DROPPED_KEPT,
+    REFLECTION_ADDENDUM,
+    STEP_PUSH,
+    STEP_PUSH_STEPS,
+    dropped_notes,
+    render_dropped,
+    start_with,
+)
 from localmelo.melo.agent._brief_gate import (
     MAX_CHECK_RETRIES,
     check_commands,
@@ -1153,6 +1162,12 @@ class _RunState:
     # run's start, None outside a git tree.
     brief: bool = False
     workspace_digest: str | None = None
+    # Its step-level push: the digest at the last change seen, and the steps
+    # since the last probe. And the notes of the tool output the window lost
+    # (newest DROPPED_KEPT).
+    step_digest: str | None = None
+    read_streak: int = 0
+    dropped: list[str] = dataclasses.field(default_factory=list)
     # Its check gate (AgentOptions.brief_check): the brief's check commands,
     # the gate's runs so far and the retries it has used.
     check_commands: list[str] = dataclasses.field(default_factory=list)
@@ -3619,6 +3634,9 @@ class Agent:
             plan_args["coalesce_users"] = True
         if on_ready is not None:
             plan_args["on_ready"] = on_ready
+        elif run is not None and run.brief and run.dropped:
+            # Not at a step that carries inbox lines: they must end the request.
+            plan_args["tail_note"] = render_dropped(run.dropped)
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,
@@ -4374,6 +4392,10 @@ class Agent:
         draft_titles: list[str] = []
         if self._notes_mode and run is not None:
             note_lines, draft_titles = self._reflection_note_inputs(run)
+        # A brief run asks for pointers (REFLECTION_PROMPT stays frozen).
+        addendum: dict[str, Any] = (
+            {"addendum": REFLECTION_ADDENDUM} if run is not None and run.brief else {}
+        )
         response = await self.chat.reflect(
             short=sent,
             query=task.query,
@@ -4384,6 +4406,7 @@ class Agent:
             fit=fit,
             notes=note_lines,
             draft_titles=draft_titles,
+            **addendum,
         )
         if response is None:
             # The fit refused the request before it was sent; read it as an
@@ -4419,6 +4442,7 @@ class Agent:
                 fit=fit,
                 notes=note_lines,
                 draft_titles=draft_titles,
+                **addendum,
             )
             if response is None:
                 return (
@@ -4603,6 +4627,7 @@ class Agent:
         fingerprints: list[tuple[str, str, str]] = []
         reflections = self.hippo.working.get_reflections() or None
         run.attempt_calls.clear()
+        run.read_streak = 0
 
         for step in range(budget):
             pending = run.inbox.poll() if run.inbox is not None else []
@@ -4794,6 +4819,8 @@ class Agent:
                 run.events.stuck()
                 run.note(Trace.stuck)
                 return step + 1, stuck
+            if run.brief and step + 1 < budget:
+                await self._push_after_reads(run)
 
         run.events.budget_used()
         return budget, "budget"
@@ -5067,6 +5094,10 @@ class Agent:
                     run.workspace_digest = await asyncio.to_thread(
                         self.options.brief_probe, self._workspace_for_brief()
                     )
+                    run.step_digest = run.workspace_digest
+                    self.hippo.working.on_drop = lambda gone: self._note_dropped(
+                        run, gone
+                    )
                 if self.options.brief_check is not None:
                     run.check_commands = check_commands(query)
                 async with deadline:
@@ -5209,6 +5240,8 @@ class Agent:
             await self._learn(run, query, outcome)
             return outcome
         finally:
+            if run.brief:
+                self.hippo.working.on_drop = None
             PREFIX_RUN.reset(prefix_run)
             BUDGET_HOOK.reset(budget_hook)
             BUDGET_ACCOUNTING.reset(budget_accounting)
@@ -6072,7 +6105,7 @@ class Agent:
                     run.attempts,
                     run.attempts + 1,
                 )
-                await self._push_if_unchanged(run)
+                await self._push_if_unchanged(run, None)
                 continue
             assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
@@ -6125,15 +6158,19 @@ class Agent:
                 run.end("gate_stopped", result=best_effort, error=error)
                 return
             run.events.reflection(reflection, continue_run=True, verdict=verdict)
-            await self._push_if_unchanged(run)
+            await self._push_if_unchanged(run, entry)
 
-    async def _push_if_unchanged(self, run: _RunState) -> None:
+    async def _push_if_unchanged(
+        self, run: _RunState, entry: ReflectionEntry | None
+    ) -> None:
         """At a brief run's boundary: ask the next attempt to start writing.
 
         When the workspace digest is the one from the run's start, a
         ``no_change`` notice is emitted and a user line is added to the
         window, so the next attempt's first planning request carries it.
-        Nothing happens outside a brief run or a git tree.
+        The line ends with the first direction of the boundary's reflection
+        *entry*, when it has one. Nothing happens outside a brief run or a
+        git tree.
         """
         probe = self.options.brief_probe
         if probe is None or run.workspace_digest is None:
@@ -6142,7 +6179,35 @@ class Agent:
         if digest != run.workspace_digest:
             return
         run.events.no_change()
-        self.hippo.working.append(Message(role="user", content=NO_CHANGE_PUSH))
+        line = " ".join(part for part in (NO_CHANGE_PUSH, start_with(entry)) if part)
+        self.hippo.working.append(Message(role="user", content=line))
+
+    async def _push_after_reads(self, run: _RunState) -> None:
+        """In a brief run, after ``STEP_PUSH_STEPS`` steps in a row, ask to write.
+
+        Every ``STEP_PUSH_STEPS``-th step of an attempt probes the workspace.
+        A digest that is the one at the last change seen (or at the start)
+        adds a ``no_change`` notice (detail ``scope: "step"``) and one user
+        line to the window; a changed digest becomes the new baseline.
+        """
+        probe = self.options.brief_probe
+        if probe is None or run.step_digest is None:
+            return
+        run.read_streak += 1
+        if run.read_streak < STEP_PUSH_STEPS:
+            return
+        run.read_streak = 0
+        digest = await asyncio.to_thread(probe, self._workspace_for_brief())
+        if digest != run.step_digest:
+            run.step_digest = digest
+            return
+        run.events.no_change(scope="step")
+        self.hippo.working.append(Message(role="user", content=STEP_PUSH))
+
+    @staticmethod
+    def _note_dropped(run: _RunState, gone: list[Message]) -> None:
+        """Keep a line for each tool result that left the window of a brief run."""
+        run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
     async def _brief_gate(self, run: _RunState, *, can_retry: bool) -> str | None:
         """Run a brief's checks before the run ends ``completed``.

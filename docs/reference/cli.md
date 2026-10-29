@@ -490,6 +490,24 @@ yet. Start this attempt by writing the part of the task you can already write,
 then continue." and a `no_change` notice is emitted; a workspace that is not a
 git tree gets neither. Runs without `--brief` are unchanged.
 
+Three more aids keep a brief run writing. After 6 steps in a row in which the
+workspace digest has not changed since the last change seen (or the start), one
+user line, "You have read for 6 steps without changing anything. Write the part
+of the task you can already write now (the smallest item first), then
+continue.", is added and a `no_change` notice with detail `{"scope": "step"}`
+is emitted; the count restarts at each attempt and after each probe, so the line
+comes at most once every 6 steps (the boundary line stays). When the window or a
+fit drops tool output, the run remembers one line per dropped result (tool, its
+key argument shortened to 80 characters, output length, newest 8) and each
+planning request ends with "Earlier tool output no longer in your context:
+file_read support/sessions/runner.py (49,999 chars); shell_exec `grep -n ...`
+(2,310 chars). Read again what you need before you edit." (not on a step that
+carries an inbox line). The reflection request ends with a sentence that asks
+for exact file paths with line numbers in `useful_evidence` and for the first
+command or edit to run next as the first `next_promising_directions`; when the
+boundary line above is added, it ends with "Start with: <that direction>"
+(redacted, at most 300 characters).
+
 The fourth difference is that the run checks itself. A brief names its checks on
 lines that start with `Check:` (no leading space); the rest of each line is one
 shell command, for example `Check: uv run pytest tests/cli -q`. Before the run

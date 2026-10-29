@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 from collections import deque
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from localmelo.melo.memory.notes import RECALL_START
@@ -132,6 +132,9 @@ class WorkingMemory:
         # message's id(); eviction, dropping and replacement keep it in step
         # with the buffer.
         self._aliases: dict[int, frozenset[str]] = {}
+        # Told the messages that leave the window by eviction or dropping
+        # (a brief run notes the tool output it loses).
+        self.on_drop: Callable[[list[Message]], None] | None = None
 
     @property
     def empty_prefix(self) -> bool:
@@ -200,8 +203,7 @@ class WorkingMemory:
             size = self._leading_unit_size()
             if size >= len(self._buf):
                 break  # only the newest unit is left
-            for _ in range(size):
-                self._forget_aliases(self._buf.popleft())
+            self._drop_leading(size)
             dropped += size
         return dropped
 
@@ -258,8 +260,14 @@ class WorkingMemory:
             size = self._leading_unit_size()
             if size >= len(self._buf):
                 return  # only the newest unit is left
-            for _ in range(size):
-                self._forget_aliases(self._buf.popleft())
+            self._drop_leading(size)
+
+    def _drop_leading(self, size: int) -> None:
+        gone = [self._buf.popleft() for _ in range(size)]
+        for msg in gone:
+            self._forget_aliases(msg)
+        if self.on_drop is not None:
+            self.on_drop(gone)
 
     def drop_since(self, anchor: Message | None, keep: Collection[Message] = ()) -> int:
         """Drop the units after the unit that holds *anchor*, except pinned ones.
@@ -275,12 +283,16 @@ class WorkingMemory:
             0,
         )
         kept = [msg for unit in units[:start] for msg in unit]
+        gone: list[Message] = []
         for unit in units[start:]:
             if id(unit[0]) in pinned:
                 kept.extend(unit)
             else:
                 for msg in unit:
                     self._forget_aliases(msg)
+                gone.extend(unit)
+        if gone and self.on_drop is not None:
+            self.on_drop(gone)
         dropped = len(self._buf) - len(kept)
         self._buf = deque(kept)
         return dropped
