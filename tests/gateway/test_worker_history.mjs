@@ -338,3 +338,28 @@ test('opening a run keeps the list on worker runs, and a console chat is still r
   await chat.detail('c');
   assert.equal(chat.state.error, 'Worker run not found.');
 });
+
+test('an idle terminal chat is watched by its record and followed when a turn starts', async () => {
+  const f = followFixture();
+  const polls = [];
+  const state = {running: false, updated: 1, calls: []};
+  const history = workerHistory(async (path) => {
+    state.calls.push(path);
+    const event = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'hi'}};
+    if (path.includes('/turns')) return {turns: [{turn: 1, status: state.running ? 'running' : 'completed', events: [event]}], has_earlier: false};
+    return {session: {id: 't', kind: 'terminal', status: state.running ? 'running' : 'completed', busy: state.running, updated_at: state.updated}};
+  }, () => f.draws++, (fn) => { polls.push(fn); return () => {}; }, {
+    open: (url) => { const source = new FakeSource(url); f.sources.push(source); return source; },
+    schedule: (fn, ms) => ({fn, ms}), cancel: () => {}, doc: f.doc,
+  });
+  await history.detail('t');
+  assert.equal(f.sources.length, 0, 'a finished chat opens no stream');
+  const reads = state.calls.length;
+  await polls[0]();
+  assert.deepEqual(state.calls.slice(reads), ['/sessions/t'], 'an unchanged chat costs one record read');
+  state.running = true; state.updated = 2;
+  await polls[0]();
+  assert.equal(f.sources.length, 1, 'the next turn is followed');
+  assert.equal(f.sources[0].url, '/api/sessions/t/events?after=1');
+  history.leave();
+});

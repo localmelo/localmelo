@@ -236,11 +236,20 @@ export function workerHistory(api, changed, every = defaultEvery, {
         // Frames arrive on the stream; the row's idle time moves on its own.
         statusRow?.bump();
         return;
-      } else if (state.mode === 'detail' && live(state.session)) {
+      } else if (state.mode === 'detail' && (live(state.session) || state.session?.kind === 'terminal')) {
+        // An idle chat of the terminal can start another turn: its record is
+        // read first, and the whole chat only once it has changed.
+        const wasLive = live(state.session);
+        if (!wasLive) {
+          const {session} = await api(`/sessions/${encodeURIComponent(state.selectedId)}`);
+          if (epoch !== state.epoch || state.loading || !readable(session)) return;
+          if (!live(session) && session.updated_at === state.session.updated_at) return;
+        }
         const run = await readRun(state.selectedId);
         if (epoch !== state.epoch || state.loading || !readable(run.session)) return;
         if (same(run, state.raw)) return;
         showRun(state.selectedId, run);
+        if (!wasLive) startFollow(state.selectedId);
       } else return;
     } catch {
       return;

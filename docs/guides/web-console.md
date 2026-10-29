@@ -72,6 +72,18 @@ close and level controls are disabled while Workers is open. Connection
 settings remain available separately. **Chats** returns to the open chat.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
 
+The **Terminal chats** chip beside **Worker runs** lists the chats of
+interactive `melo` sessions from the same file, newest activity first. The
+status filter stays; source and parent run are left out because a chat has
+neither. A chat opens read-only, one section per turn, and is followed on its event
+stream while a turn runs in its terminal; when that turn ends the page keeps
+checking the chat and follows the next one. These chats never appear in the
+sidebar's chat list, and the console cannot send to them. The terminal saves a
+chat unredacted, so the console redacts each text of it as it reads: keys,
+bearer tokens and private key blocks show as `[redacted]`, and the output of a
+read of a secret file such as `.env` is replaced by a note. Images are not
+redacted.
+
 ## Tasks
 
 **Tasks** (`#/tasks`) lists the scheduler's tasks, newest update first, with
