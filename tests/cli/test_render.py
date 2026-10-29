@@ -1675,3 +1675,15 @@ def test_verbose_hunks_cannot_act_on_the_terminal() -> None:
         approval={"request_id": "r1", "allowed": True, "origin": "user"},
     ).text()
     assert "\x1b" not in text and "\x07" not in text
+
+
+def test_events_feed_the_usage_snapshot_until_the_session_is_cleared() -> None:
+    turn = Turn()
+    turn.event("run.started", query="q", max_steps=30, workspace_root="", approval=True)
+    turn.event("assistant.message", usage={"prompt_tokens": 200, "cached_tokens": 50})
+    turn.event("run.progress", level=0, step=1, attempt=1)
+    usage = turn.renderer.usage
+    assert (usage.last_prompt, usage.last_cached, usage.run_active) == (200, 50, True)
+    assert usage.progress is not None
+    turn.renderer.clear_session()
+    assert turn.renderer.usage.requests == 0

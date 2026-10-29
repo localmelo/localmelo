@@ -58,6 +58,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     UnknownSessionError,
 )
+from localmelo.support.usage_snapshot import UsageSnapshot
 
 # Output lines a tool block shows under its header (20 with /verbose).
 BLOCK_LINES: Final = 3
@@ -341,6 +342,8 @@ class TurnRenderer:
         self.live: LiveState | None = None
         # The latest run.progress of this session, for /progress.
         self.progress: Mapping[str, Any] | None = None
+        # What the session's events say about cache, context and steps, for /status.
+        self.usage = UsageSnapshot()
         # A cancelled run.finished whose turn.finished has not come yet.
         self._cancelled_pending = False
         # The latest request's prompt tokens, for the status bar.
@@ -530,6 +533,7 @@ class TurnRenderer:
     def on_event(self, stored: StoredEvent) -> None:
         """One stored event of the turn (the runner's ``on_event``)."""
         event = stored.event
+        self.usage.observe(event)
         if stored.turn is not None:
             self._turn = stored.turn
         kind = event.get("type")
@@ -900,6 +904,7 @@ class TurnRenderer:
         """Forget calls, progress and numbering, retaining display preferences on resume."""
         self.tool_outputs = []
         self.progress = None
+        self.usage = UsageSnapshot()
         self._turn = 0
         self._call_number = 0
         self._held = ""

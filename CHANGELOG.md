@@ -80,6 +80,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `/status` in the interactive UI gains a usage block, built only from events the
+  session already received (no request, no polling of the model server): the
+  last request's cached share and the session's average over the requests whose
+  server reported `cached_tokens` (`--` when it sent none, never 0%), for a local
+  backend the idle time since the last request (no countdown; a cloud backend's
+  cache lifetime is not tracked yet), the last measured prompt tokens over the
+  input limit when a `context_budget` event exists, the current or last run's
+  `run.progress` facts (no percent), and `no task store in this session` where
+  the session cannot reach one. Each row says in a few words why it has no value.
+  #176 SL1. ([#194])
 - `--window-eviction slide|chunk|boundary` (and `[agent] window_eviction`), an
   experimental option for the prompt-cache A/B: `chunk` drops the working-memory
   window in chunks of eight messages and the prompt-cap fit down to 70% of the
@@ -1166,3 +1176,4 @@ earlier milestones.
 [#191]: https://github.com/localmelo/localmelo/pull/191
 [#192]: https://github.com/localmelo/localmelo/pull/192
 [#193]: https://github.com/localmelo/localmelo/pull/193
+[#194]: https://github.com/localmelo/localmelo/pull/194
