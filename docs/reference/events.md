@@ -168,7 +168,7 @@ asyncio.run(main())
 | `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
-| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
+| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | Last. | `result` |
@@ -373,6 +373,24 @@ is in `memory_stats.recall_log` and, with its item text, in
 - `continue_run`: `true` only when another attempt starts. It is `false`
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
+- `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
+  `next_step_is_novel`, as booleans; `null` when the reply was not readable.
+- `gate`: the `reflection_gate` in force, `flags` or `utility`.
+- `utility`: with `"utility"`, the decision's utility (see the option); else
+  `null`.
+- `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
+  first of these that applies, in this order:
+  `unreadable_reply` (no decision, and no attempt could start),
+  `action_not_continue` (the action is `done`),
+  `no_attempt_left` (`max_attempts` used; the run ends with `Max attempts
+  reached`), `step_budget_used` (`max_steps` used; `Max steps reached`),
+  then the gate's checks: `action_not_continue` (the action is `stop` or
+  `decompose`), `not_feasible`, `not_concrete`, `not_novel`, and with
+  `"utility"` only `utility_below_threshold`. It is derived by the
+  code that decides, so it never disagrees with `continue_run`. A
+  `gate_stopped` run whose rationale is blank reports it in `error`:
+  `Stopped after attempt <n> (stop reason: <code>)`; with a rationale, the
+  error is the rationale alone.
 - `rationale`, `summary` and `best_effort_result`: the reflection's
   reasons, its summary of the attempt, and its best answer so far. They
   pass the same redaction of secrets as `assistant.message`'s `thinking`

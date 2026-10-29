@@ -34,8 +34,10 @@ Details:
 - **`gate_stopped`.** The reflection chose `stop` or `decompose`, or its
   decision to continue did not pass the continuation gate (see
   [Reflection](../concepts/how-it-works.md#reflection)). `result` holds the reflection's
-  best effort, if any, and `error` its reason, or `Stopped after attempt <n>`
-  when it gave none. With `--reflection-gate utility`, an unreadable
+  best effort, if any, and `error` its reason, or
+  `Stopped after attempt <n> (stop reason: <code>)` when it gave none. The
+  `reflection` event always carries the stop reason and the decision's flags
+  (see [Events](events.md#reflection)). With `--reflection-gate utility`, an unreadable
   reflection stops the run too, and so does one over the size limit unless
   it chose `done`.
 - **Unreadable reflections.** A reflection reply is readable when it holds a
