@@ -106,6 +106,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
+### Docs
+
+- Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
+
 ### Added
 
 - The interactive status bar shows usage at a glance (#176 SL2): after the model
@@ -1229,3 +1233,4 @@ earlier milestones.
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
 [#201]: https://github.com/localmelo/localmelo/pull/201
+[#202]: https://github.com/localmelo/localmelo/pull/202
