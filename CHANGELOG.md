@@ -80,7 +80,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `cached_tokens`/`reasoning_tokens` in its `usage` and a `prefix` for its
   first request. Request bodies and the JSON result are unchanged.
   `scripts/cache_report.py LOG` prints the cache use per request (plan and
-  reflect) from a `stream-json` log, with totals by kind. ([#NN])
+  reflect) from a `stream-json` log, with totals by kind. ([#190])
 
 - The console has a **Tasks** view (`#/tasks`, `#/tasks/<id>`): the task list, and a card with the state, the saved recovery card, the evidence status, Resume (with a confirmation dialog only when the server asks for one), Stop and "Start again as a new task" for a started task without a recovery card. ([#189])
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
@@ -1135,3 +1135,4 @@ earlier milestones.
 [#187]: https://github.com/localmelo/localmelo/pull/187
 [#188]: https://github.com/localmelo/localmelo/pull/188
 [#189]: https://github.com/localmelo/localmelo/pull/189
+[#190]: https://github.com/localmelo/localmelo/pull/190
