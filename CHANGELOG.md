@@ -57,6 +57,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The console has a **Tasks** view (`#/tasks`, `#/tasks/<id>`): the task list, and a card with the state, the saved recovery card, the evidence status, Resume (with a confirmation dialog only when the server asks for one), Stop and "Start again as a new task" for a started task without a recovery card. ([#NN])
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
   prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
   never the agent) and restored once afterwards. It is not a sandbox. Its output

@@ -285,6 +285,22 @@ before it registers a worker or starts a provider or tool. Neither a free
 Resume nor a confirmation proves an older process stopped, cleans it up, or
 makes effects happen only once.
 
+### Console task card
+
+The console's **Tasks** view (`#/tasks`, `#/tasks/<id>`) is a client of the
+routes above: `GET /api/tasks`, `GET /api/tasks/{id}`,
+`POST /api/tasks/{id}/resume` and `PATCH /api/tasks/{id}` with
+`{"state": "stop"}`. It sends Resume without a token first and opens the
+confirmation dialog only on a `confirmation_required` answer, then retries the
+same `operation_id` with `details.confirmation_token`. After any other answer
+that carries a status the operation id is dropped, so a stale or refused
+attempt never reuses authorization; after a network failure it is kept, so a
+retry cannot start a second turn. A started task with no card, or a
+`missing_card` refusal, replaces Resume with **Start again as a new task**
+(`POST /api/tasks` with the objective, title, workspace and a request key kept
+across retries). The recovery card is rendered with `textContent`, never as
+HTML. Stop is the task API, never `POST /api/turns/{id}/cancel`.
+
 ## S3b.1a foundations
 
 Pause saves the prior level, source, reason and rank in `park_priority` in the

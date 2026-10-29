@@ -56,6 +56,30 @@ close and level controls are disabled while Workers is open. Connection
 settings remain available separately. **Chats** returns to the open chat.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
 
+## Tasks
+
+**Tasks** (`#/tasks`) lists the scheduler's tasks, newest update first, with
+state, priority and title. Open one (`#/tasks/<id>`) to see its state, the saved
+recovery card (shown as plain text), the evidence status and the actions its
+state allows. Like Workers, the view replaces the chat while it is open.
+
+- **Resume** appears for a parked or interrupted task. The page asks the
+  server and confirms only when the server requires it: then a dialog says "A
+  process from before the restart may still be running. Resuming may repeat
+  effects. Confirmation does not prove the process stopped or effects happened
+  only once." with **Resume anyway** and **Cancel**. Escape cancels. Nothing is
+  recorded until you choose **Resume anyway**, and the confirmation lasts five
+  minutes and does not survive a gateway restart.
+- **Stop** uses the task's own stop, not the chat's. It is available until the
+  task is finished and wins over a Resume in flight.
+- A started task without a saved card shows "Resume unavailable: recovery
+  information is missing." and **Start again as a new task**, which creates a
+  separate task from the original objective. The effects of the earlier task are
+  unknown and are not undone.
+
+A button is disabled while its request is in flight. A refusal (a stale
+confirmation, a finished task, Stop winning the race) shows the server's text.
+
 ## Inspect a chat
 
 **Details** opens a session drawer with its tools and session grants, working

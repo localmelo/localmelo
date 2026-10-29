@@ -434,8 +434,7 @@ def test_macos_host_identity_is_read_once_across_threads(
     monkeypatch.setattr(identity.subprocess, "run", slow)
     seen: list[str] = []
     threads = [
-        threading.Thread(target=lambda: seen.append(identity._host()))
-        for _ in range(6)
+        threading.Thread(target=lambda: seen.append(identity._host())) for _ in range(6)
     ]
     for thread in threads:
         thread.start()
