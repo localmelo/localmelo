@@ -70,6 +70,10 @@ The answer is printed on stdout, and the command exits with code 0
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
 
+Direct tasks write files and run Python without asking, and have no shell
+unless you pass `--builtins all`. A brief's check (see
+[Run a worker task](#run-a-worker-task)) runs anyway.
+
 For every option, see the [command-line reference](../reference/cli.md).
 
 ## Get the result as JSON
@@ -93,6 +97,43 @@ is `completed`.
 or `provider_error`. The counters say how many steps, model requests and tool
 calls the run took, and `config` records the options it ran with. See
 [Run results](../reference/run-results.md) for every status and field.
+
+## Run a worker task
+
+A worker task is a brief in a file. A line that starts with `Check:` (no
+leading space) holds one shell command that tells whether the task is done:
+
+```bash
+cat > brief.md <<'EOF'
+Write hello.py so that it prints the word hello.
+Check: python3 hello.py
+EOF
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
+echo "exit code: $?"
+python3 -c 'import json; r = json.load(open("result.json")); print(r["status"], r["tests"]["state"])'
+```
+
+When the model has finished, `melo` runs the check in the workspace (the
+current folder, or `--workspace`), whatever tools the run offers the model.
+If it fails, the model is sent back to fix it, twice at most. Example output
+of the last two commands (the model's work varies):
+
+```text
+exit code: 0
+completed passed
+```
+
+`tests.state` is `passed` when every check of the last round exited with 0,
+and `failed` when one did not, or could not run. A run that ends `completed`
+with a failed check exits with code 4, so a script can stop on it:
+
+```bash
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
+```
+
+The result is one JSON line with `status`, `exit_code`, `tests` and the run
+record. For every field and exit code, see the
+[command-line reference](../reference/cli.md#output).
 
 ## Save a configuration
 

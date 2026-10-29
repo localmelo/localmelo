@@ -31,6 +31,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A brief's `Check:` command now runs in a default `melo --brief` run. A direct
+  run offers no `shell_exec` to the model, so the harness's own check call was
+  refused, the run ended `completed` with exit 0 and `tests` `failed`, and only
+  the developer flag `--builtins all` made it run. The check now runs in every
+  `--builtins` setting (`none` included); the model's tool list and its own
+  `shell_exec` calls are unchanged, and `pre_execute`, the workspace root, the
+  shell timeout and redaction still apply ([#NN]).
+
 - `scripts/cache_report.py` runs under Python 3.9 again: the `zip(..., strict=True)`
   call that needed 3.10 is replaced by an explicit length check. `-h` and `--help`
   print its usage and exit 0, and no arguments print the usage to stderr and exit 2,
@@ -791,6 +799,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A uv development environment with a committed `uv.lock` ([#25]).
 
 ### Changed
+
+- A `melo --brief` run that ends `completed` while its brief's check failed for
+  good (`tests` is `failed`, a refused check included) exits with the new code
+  4, so `melo --brief f && next-step` stops. `status` stays `completed`, the
+  record's `exit_code` is 4, and stderr gets
+  `melo: the brief's check failed: <command> (exit N)`. Every other exit code is
+  unchanged, and a brief without a `Check:` line never exits 4 ([#NN]).
+
+- Docs: the quickstart has a "Run a worker task" section (a brief with a
+  `Check:` line, `tests.state` and the exit code), and says that direct tasks
+  have no shell unless `--builtins all` ([#NN]).
 
 - Organize Markdown documentation into start, guides, reference, concepts and
   project sections. Old paths retain readable links for each historical
