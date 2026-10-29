@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import localmelo.support.gateway.workers as gateway_workers
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
@@ -23,14 +24,18 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.gateway.task_store import TaskStoreError
+from localmelo.support.gateway.task_store import TaskConflictError, TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.gateway.workers import (
+    collect_evidence as collect_resume_evidence,
+)
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
 
 OLD_BOOT = "11111111-1111-1111-1111-111111111111"
 NEW_BOOT = "22222222-2222-2222-2222-222222222222"
+HOST = "host-a"
 
 
 @pytest.fixture
@@ -106,6 +111,7 @@ async def _started(
             leader_pid=leader,
             boot_id=boot,
             start_token=token,
+            host_id=HOST,
         )
     if card:
         await _set_card(workers.store, task.task_id, card)
@@ -148,7 +154,7 @@ async def test_trusted_complete_capture_with_group_gone_resumes_free(
         workers, workspace, capture=True, processes=((4321, 4321, "boot", "1:1"),)
     )
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: True
+    workers._process_verifier = lambda record, host: True
     task = await _resume(workers, task_id, "resume-1")
     assert task["state"] == "queued"
     assert not await _events(store, task_id, "sched.resume_confirmed")
@@ -189,7 +195,7 @@ async def test_unverifiable_process_requires_single_use_confirmation(
         workers, workspace, capture=True, processes=((4321, 4321, "boot", "1:1"),)
     )
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: False
+    workers._process_verifier = lambda record, host: False
     with pytest.raises(ConfirmationRequiredError) as preview:
         await _resume(workers, task_id, "resume-1")
     token = preview.value.token
@@ -215,7 +221,7 @@ async def test_every_recorded_group_must_be_gone(
         processes=((4321, 4321, "boot", "1:1"), (8765, 8765, "boot", "2:2")),
     )
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: record[0] == 4321
+    workers._process_verifier = lambda record, host: record[0] == 4321
     with pytest.raises(ConfirmationRequiredError):
         await _resume(workers, task_id, "resume-1")
     assert (await workers.tasks.get_task(task_id)).state == "interrupted"
@@ -244,7 +250,7 @@ async def test_verifier_exception_is_never_evidence(
     )
     await _open_and_freeze(workers, monkeypatch)
 
-    def denied(record: tuple[int, int, str, str]) -> bool:
+    def denied(record: tuple[int, int, str, str], host: str) -> bool:
         raise PermissionError("cannot inspect process group")
 
     workers._process_verifier = denied
@@ -263,7 +269,7 @@ async def test_token_is_bound_to_the_cas_generation(
         workers, workspace, capture=True, processes=((4321, 4321, "boot", "1:1"),)
     )
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: False
+    workers._process_verifier = lambda record, host: False
     token = await _preview(workers, task_id, "resume-1")
     async with workers.store.component_transaction("seed_generation") as conn:
         await conn.execute(
@@ -287,7 +293,7 @@ async def test_incomplete_capture_is_unknown_not_death(
         processes=((4321, 4321, "boot", "1:1"),),
     )
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: True
+    workers._process_verifier = lambda record, host: True
     with pytest.raises(ConfirmationRequiredError):
         await _resume(workers, task_id, "resume-1")
     assert (await workers.tasks.get_task(task_id)).state == "interrupted"
@@ -306,9 +312,31 @@ async def test_verified_boot_change_counts_as_gone(
     )
     await _open_and_freeze(workers, monkeypatch)
     monkeypatch.setattr(process_identity, "_boot", lambda: NEW_BOOT)
+    monkeypatch.setattr(process_identity, "_host", lambda: HOST)
     resumed = await _resume(workers, task_id, "resume-1")
     assert resumed["state"] == "queued"
     assert not await _events(store, task_id, "sched.resume_confirmed")
+
+
+async def test_boot_change_on_another_host_requires_confirmation(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(
+        workers,
+        workspace,
+        capture=True,
+        processes=((4321, 4321, OLD_BOOT, "1:1"),),
+    )
+    await _open_and_freeze(workers, monkeypatch)
+    monkeypatch.setattr(process_identity, "_boot", lambda: NEW_BOOT)
+    # A boot id read on another host proves nothing about the host that
+    # recorded the group: its processes may still be running there.
+    monkeypatch.setattr(process_identity, "_host", lambda: "host-b")
+    with pytest.raises(ConfirmationRequiredError):
+        await _resume(workers, task_id, "resume-1")
+    assert (await workers.tasks.get_task(task_id)).state == "interrupted"
 
 
 async def test_unreadable_boot_requires_confirmation(
@@ -354,6 +382,34 @@ async def test_proven_never_started_parked_first_starts_without_card_or_token(
         "never_started"
     )
     assert not await _events(store, task.task_id, "sched.resume_confirmed")
+
+
+async def test_real_create_records_the_never_started_proof(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production create path, restarted, takes the first-start row."""
+    workers, _, store = worker_setup
+    _freeze(workers, monkeypatch)
+    await workers.open()
+    created, repeated = await workers.create({"objective": "do work", "level": "p5"})
+    assert not repeated
+    assert created["state"] == "parked"
+    task_id = created["task_id"]
+    assert (await RecoveryStore(store).provenance(task_id)).first_start == (
+        "never_started"
+    )
+    gate = ChatGate(policy="off")
+    restarted = TaskWorkers(store, gate, workers.settings, SessionHub(store))
+    try:
+        await restarted.open()
+        _freeze(restarted, monkeypatch)
+        resumed = await _resume(restarted, task_id, "resume-1")
+        assert resumed["state"] == "queued"
+        assert not await _events(store, task_id, "sched.resume_confirmed")
+    finally:
+        await restarted.aclose()
+        await gate.close()
 
 
 async def test_queued_never_started_create_is_not_resumed_by_the_route(
@@ -692,7 +748,7 @@ async def test_stale_generation_or_evidence_refuses_the_token(
     workers, workspace, _ = worker_setup
     task_id = await _started(workers, workspace, processes=((4321, 4321, "b", "t"),))
     await _open_and_freeze(workers, monkeypatch)
-    workers._process_verifier = lambda record: False
+    workers._process_verifier = lambda record, host: False
     with pytest.raises(ConfirmationRequiredError) as preview:
         await _resume(workers, task_id, "resume-1")
     token = preview.value.token
@@ -801,3 +857,136 @@ async def test_patch_stays_fenced_before_resume(
         await workers.update(task_id, level="p1")
     with pytest.raises(TaskStoreError, match="safety review"):
         await workers.update(task_id, state="resume")
+
+
+async def test_committed_resume_is_readmitted_after_a_restart(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace, capture=True)
+    await _open_and_freeze(workers, monkeypatch)
+    workers._process_verifier = lambda record, host: True
+    assert (await _resume(workers, task_id, "resume-1"))["state"] == "queued"
+    gate = ChatGate(policy="off")
+    restarted = TaskWorkers(store, gate, workers.settings, SessionHub(store))
+    try:
+        await restarted.open()
+        _freeze(restarted, monkeypatch)
+        # Re-admitted on its own: the committed queue survives the restart
+        # without waiting for the client to retry.
+        assert task_id in restarted._eligible
+        assert (await restarted.tasks.get_task(task_id)).state == "queued"
+        retried = await _resume(restarted, task_id, "resume-1")
+        assert retried["state"] == "queued"
+        assert task_id in restarted._eligible
+        assert task_id not in restarted._restart_fenced
+    finally:
+        await restarted.aclose()
+        await gate.close()
+
+
+async def test_committed_resume_with_a_started_turn_conflicts_after_restart(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace, capture=True)
+    await _open_and_freeze(workers, monkeypatch)
+    workers._process_verifier = lambda record, host: True
+    assert (await _resume(workers, task_id, "resume-1"))["state"] == "queued"
+    # The resumed work began before the restart: its turn exists.
+    await store.begin_turn(task_id, "do work", holder="gateway")
+    gate = ChatGate(policy="off")
+    restarted = TaskWorkers(store, gate, workers.settings, SessionHub(store))
+    try:
+        await restarted.open()
+        _freeze(restarted, monkeypatch)
+        with pytest.raises(TaskConflictError):
+            await _resume(restarted, task_id, "resume-1")
+        assert task_id not in restarted._eligible
+        assert (await restarted.tasks.get_task(task_id)).state == "interrupted"
+    finally:
+        await restarted.aclose()
+        await gate.close()
+
+
+async def test_stop_after_registration_admits_no_turn(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace)
+    await workers.open()
+
+    async def build(**kwargs: Any) -> Agent:
+        agent = Agent(
+            llm=kwargs["wrap_llm"](_DoneLLM()),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        return agent
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    token = await _preview(workers, task_id, "resume-1")
+    original = workers.tasks.change
+    ready, go = asyncio.Event(), asyncio.Event()
+
+    async def delayed(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("state") == "running":
+            ready.set()
+            await go.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(workers.tasks, "change", delayed)
+    resumed = asyncio.create_task(_resume(workers, task_id, "resume-1", token))
+    await asyncio.wait_for(ready.wait(), 3)
+    # Stop is requested after the runner was registered but while the worker
+    # waits inside its state change, holding the lock.
+    stopped = asyncio.create_task(workers.update(task_id, state="stop"))
+    await asyncio.sleep(0)
+    go.set()
+    await asyncio.wait_for(stopped, 3)
+    await asyncio.wait_for(resumed, 3)
+    for _ in range(300):
+        if (await workers.tasks.get_task(task_id)).state == "cancelled":
+            break
+        await asyncio.sleep(0.01)
+    assert (await workers.tasks.get_task(task_id)).state == "cancelled"
+    assert not await _events(store, task_id, "turn.started")
+
+
+async def test_evidence_is_read_outside_the_worker_lock(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, _ = worker_setup
+    task_id = await _started(workers, workspace)
+    await _open_and_freeze(workers, monkeypatch)
+    held: list[bool] = []
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        held.append(workers._lock.locked())
+        return await collect_resume_evidence(*args, **kwargs)
+
+    monkeypatch.setattr(gateway_workers, "collect_evidence", spy)
+    with pytest.raises(ConfirmationRequiredError):
+        await _resume(workers, task_id, "resume-1")
+    assert held == [False]
+
+
+async def test_retry_with_another_payload_returns_the_committed_operation(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace, capture=True)
+    await _open_and_freeze(workers, monkeypatch)
+    workers._process_verifier = lambda record, host: True
+    first = await _resume(workers, task_id, "resume-1")
+    # An operation ID names one operation: the retry never re-authorises a
+    # transition, whatever payload it carries.
+    again = await _resume(workers, task_id, "resume-1", "tok_whatever")
+    assert again["task_id"] == first["task_id"]
+    assert again["state"] == "queued"
+    assert len(await _events(store, task_id, "sched.resumed")) == 1

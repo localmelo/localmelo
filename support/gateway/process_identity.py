@@ -13,6 +13,7 @@ _BOOT_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 _BOOT_TIME = re.compile(r"^[0-9]+:[0-9]{1,6}$")
+_MACHINE_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 
 def _boot_kind(value: str) -> str | None:
@@ -94,6 +95,44 @@ def _boot() -> str:
     return f"{value.seconds}:{value.microseconds}"
 
 
+def _host() -> str:
+    """A durable identity for this machine, or raise OSError.
+
+    A boot id changes on reboot and says nothing about which machine read it:
+    a database copied to a second host would otherwise read its own boot id
+    against the first host's and call a live group gone. ``/etc/machine-id``
+    and macOS's ``kern.uuid`` stay the same across reboots of one machine.
+    """
+    if sys.platform.startswith("linux"):
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                text = Path(path).read_text().strip().lower()
+            except OSError:
+                continue
+            if _MACHINE_ID.fullmatch(text):
+                return text
+        raise OSError("cannot read host identity")
+    if sys.platform != "darwin":
+        raise OSError("host identity unavailable on this platform")
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.sysctlbyname.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_size_t),
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+    ]
+    libc.sysctlbyname.restype = ctypes.c_int
+    buffer = ctypes.create_string_buffer(64)
+    size = ctypes.c_size_t(ctypes.sizeof(buffer))
+    if libc.sysctlbyname(b"kern.uuid", buffer, ctypes.byref(size), None, 0) != 0:
+        raise OSError(ctypes.get_errno(), "cannot read host identity")
+    text = buffer.value.decode("ascii", "replace").strip().lower()
+    if not _BOOT_UUID.fullmatch(text):
+        raise OSError("invalid host identity")
+    return text
+
+
 def _birth(pid: int) -> tuple[int, str]:
     if sys.platform.startswith("linux"):
         try:
@@ -136,22 +175,24 @@ def _birth(pid: int) -> tuple[int, str]:
     return int(info.pgid), f"{info.start_sec}:{info.start_usec}"
 
 
-def identity(pid: int) -> tuple[int, int, str, str]:
+def identity(pid: int) -> tuple[int, int, str, str, str]:
     """Identify a live group leader before releasing its start gate."""
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
         raise ValueError("invalid process ID")
     group, token = _birth(pid)
     if group != pid:
         raise OSError("child is not its process-group leader")
-    return group, pid, _boot(), token
+    return group, pid, _host(), _boot(), token
 
 
-def gone(record: tuple[int, int, str, str]) -> bool:
+def gone(record: tuple[int, int, str, str], host_id: str = "") -> bool:
     """Return true only when a recorded group is verifiably absent now.
 
     A verified boot change (both ids read, both well formed and different)
-    proves the group is gone: no process survives a reboot. An unreadable or
-    malformed boot id stays unknown.
+    proves the group is gone only on the host that recorded it: no process
+    survives a reboot *of that machine*. A boot id read on another host, or a
+    record whose host is unknown, proves nothing. An unreadable boot id stays
+    unknown as well.
     """
     pgid, leader, boot, token = record
     if pgid <= 0 or leader <= 0 or pgid != leader or not boot or not token:
@@ -162,7 +203,13 @@ def gone(record: tuple[int, int, str, str]) -> bool:
         return False
     if current_boot != boot:
         kind = _boot_kind(current_boot)
-        return kind is not None and kind == _boot_kind(boot)
+        if kind is None or kind != _boot_kind(boot):
+            return False
+        try:
+            current_host = _host()
+        except (OSError, OverflowError, ValueError):
+            return False
+        return bool(host_id) and host_id == current_host
     try:
         try:
             os.killpg(pgid, 0)

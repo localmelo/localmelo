@@ -213,7 +213,9 @@ async def test_child_is_released_only_after_record_or_durable_fallback(
     )
     path = tmp_path / "child-ran"
     monkeypatch.setattr(
-        worker_module, "process_identity", lambda pid: (pid, pid, "boot", "birth")
+        worker_module,
+        "process_identity",
+        lambda pid: (pid, pid, "host", "boot", "birth"),
     )
     if record_fails:
 
@@ -329,14 +331,13 @@ async def test_worker_context_hooks_bind_execution(
                 ).fetchone()
             assert row is not None
             execution = row[0]
-            assert observations[0] == (execution if proof else None)
+            assert observations[0] == execution
             entry = TOOL_ENTRY.get()
             process = PROCESS_RECORD.get()
             assert entry is not None and process is not None
             recovery = RecoveryStore(store)
-            assert (
-                await recovery.capture_complete(self.session_id, execution_id=execution)
-                is proof
+            assert await recovery.capture_complete(
+                self.session_id, execution_id=execution
             )
             await process(123)
             assert await recovery.processes(
@@ -358,7 +359,9 @@ async def test_worker_context_hooks_bind_execution(
     monkeypatch.setattr(worker_module, "SessionRunner", Runner)
     monkeypatch.setattr(worker_module, "build_session_agent", build)
     monkeypatch.setattr(
-        worker_module, "process_identity", lambda pid: (pid, pid, "boot", "birth")
+        worker_module,
+        "process_identity",
+        lambda pid: (pid, pid, "host", "boot", "birth"),
     )
     try:
         if proof:

@@ -313,9 +313,10 @@ becomes invalid before a run or resume fails the task with
 
 At most four workers are resident at once, including quarantined workers.
 Task rows persist across gateway restarts. Startup interrupts uncertain tasks,
-retains valid parked cards and preserves pending pause, without replay. Runnable
-queued tasks durably proved never-started may run once after a start fence;
-ordinary creation does not yet establish that proof. Recovered tasks with
+retains valid parked cards and preserves pending pause, without replay. Every
+create records a durable never-started proof inside the create transaction,
+before any launch; a runnable queued task with that proof may run once after a
+start fence. Recovered tasks with
 uncertain history reject `PATCH` resume and priority changes until controlled
 Resume is used; Stop remains available. A failure to persist
 startup recovery keeps the store unavailable. Retrying the same `request_key`
@@ -337,8 +338,10 @@ The route consumes evidence, never absence of evidence:
   not by this route, so calling the route for one returns `invalid_transition`.
 - A started task needs a card and a valid workspace. It resumes without
   confirmation only when its trusted, complete capture covers the whole
-  execution and every recorded process group is verifiably gone; a verified
-  boot change also counts as gone.
+  execution and every recorded process group is verifiably gone. A verified
+  boot change (both ids read, well formed and different) counts as gone only on
+  the host that recorded the group; a change read on another host, a record
+  without a host, and an unreadable host are all unknown.
 - Anything else, including missing, untrusted or incomplete capture or a group
   whose liveness cannot be checked, returns 409 `confirmation_required` with
   `details.confirmation_token`, `details.expires_in_s` (300), a
@@ -354,8 +357,13 @@ The route consumes evidence, never absence of evidence:
   recovery operation or an unsettled worker cleanup returns 409
   `recovery_unknown`.
 
-A matching retry with the same `operation_id` returns 202 with the current task
-and never starts a second turn; a token is consumed at most once. Stop always
+An operation ID names one operation. A retry with the same `operation_id`
+returns 202 with the current task, whatever payload it carries, and never
+starts a second turn or re-authorizes a transition; a token is consumed at most
+once. A restart drops tokens. A Resume committed before a restart is re-admitted
+on startup when its turn never started; once that turn has started, a retry of
+the operation returns 409 `invalid_transition` instead of pretending the queued
+work still waits. Stop always
 wins: it invalidates pending tokens and cancels a queued resumed turn before a
 worker starts a provider or tool. Neither a free Resume nor a confirmation
 proves that an older process stopped or that its effects happened only once.

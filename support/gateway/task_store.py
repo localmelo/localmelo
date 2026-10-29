@@ -38,7 +38,7 @@ from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
-SCHEDULER_VERSION: Final = 4
+SCHEDULER_VERSION: Final = 5
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -119,7 +119,7 @@ _RECOVERY_SCHEMA: Final = (
     """CREATE TABLE IF NOT EXISTS recovery_processes (
   task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
   execution_id TEXT NOT NULL, pgid INTEGER NOT NULL, leader_pid INTEGER NOT NULL,
-  boot_id TEXT NOT NULL, start_token TEXT NOT NULL,
+  host_id TEXT NOT NULL DEFAULT '', boot_id TEXT NOT NULL, start_token TEXT NOT NULL,
   PRIMARY KEY (task_id, execution_id, pgid, leader_pid, boot_id, start_token))""",
     """CREATE TABLE IF NOT EXISTS recovery_capture (
   task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
@@ -236,17 +236,41 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _resume_request(generation: int | None, previous: str | None, actor: str) -> str:
+def _resume_request(
+    generation: int | None, previous: str | None, actor: str, next_turn: int
+) -> str:
     return json.dumps(
         {
             "kind": "resume_recovered",
             "generation": generation,
             "previous": previous,
             "actor": actor,
+            "next_turn": next_turn,
         },
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _reserved_turn(request: str) -> int | None:
+    """The ``next_turn`` a stored Resume request names, when it parses."""
+    try:
+        data = json.loads(request)
+    except ValueError:
+        return None
+    value = data.get("next_turn") if isinstance(data, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+async def _next_turn_number(conn: Any, task_id: str) -> int:
+    row = await _first(
+        conn,
+        "SELECT COALESCE(MAX(turn), 0) FROM turns WHERE session_id = ?",
+        (task_id,),
+    )
+    return int(row[0]) + 1 if row is not None else 1
 
 
 async def compare_park_identity(
@@ -361,12 +385,20 @@ class TaskStore:
                     "INSERT INTO schema_components (name, version) VALUES (?, ?)",
                     (COMPONENT, SCHEDULER_VERSION),
                 )
-            elif current in (1, 2, 3):
+            elif current in (1, 2, 3, 4):
                 if current == 1:
                     await conn.execute(_SNAPSHOT_SCHEMA)
                     await self._migrate_snapshots(conn)
-                for statement in _RECOVERY_SCHEMA:
-                    await conn.execute(statement)
+                if current == 4:
+                    # v5 records the host beside each captured group, so a boot
+                    # change only reads as gone on the host that recorded it.
+                    await conn.execute(
+                        "ALTER TABLE recovery_processes ADD COLUMN host_id "
+                        "TEXT NOT NULL DEFAULT ''"
+                    )
+                else:
+                    for statement in _RECOVERY_SCHEMA:
+                        await conn.execute(statement)
                 await conn.execute(
                     "UPDATE schema_components SET version = ? WHERE name = ?",
                     (SCHEDULER_VERSION, COMPONENT),
@@ -570,6 +602,45 @@ class TaskStore:
             )
             return row is not None
 
+    async def resume_turn(
+        self, task_id: str, operation_id: str | None = None
+    ) -> int | None:
+        """The turn number a committed Resume reserved, or None when unknown.
+
+        Without *operation_id* the newest committed Resume is read. A receipt
+        written before the store recorded ``next_turn`` is unknown, never a
+        proof that its turn has not started.
+        """
+        sql = (
+            "SELECT request FROM recovery_operations WHERE task_id = ? "
+            "AND kind = 'resume' AND phase = 'committed'"
+        )
+        args: tuple[Any, ...] = (task_id,)
+        if operation_id is not None:
+            sql += " AND operation_id = ?"
+            args = (task_id, operation_id)
+        sql += " ORDER BY rowid DESC LIMIT 1"
+        async with self._store.component_transaction("task_resume_turn") as conn:
+            row = await _first(conn, sql, args)
+        return _reserved_turn(row[0]) if row is not None else None
+
+    async def turn_started(self, task_id: str, *, turn: int) -> bool:
+        """Whether any turn at or above *turn* exists: the resumed work began."""
+        if isinstance(turn, bool) or not isinstance(turn, int) or turn < 1:
+            raise ValueError("turn must be a positive integer")
+        async with self._store.component_transaction("task_turn_started") as conn:
+            row = await _first(
+                conn,
+                "SELECT 1 FROM turns WHERE session_id = ? AND turn >= ?",
+                (task_id, turn),
+            )
+            return row is not None
+
+    async def resume_waiting_turn(self, task_id: str) -> bool:
+        """Whether the newest committed Resume still waits for its first turn."""
+        turn = await self.resume_turn(task_id)
+        return turn is not None and not await self.turn_started(task_id, turn=turn)
+
     async def _is_retry(
         self, conn: Any, current: TaskRecord, op: str, request: Mapping[str, Any]
     ) -> bool:
@@ -651,8 +722,10 @@ class TaskStore:
         row with ``repeated=True``; a different payload raises
         :class:`TaskConflictError`. The session shares the task's id and stores
         *workspace*, the real path already validated by trusted code; the
-        original workspace request remains in ``tasks.spec``. The private
-        recovery proof is dormant until all worker launches use its fence.
+        original workspace request remains in ``tasks.spec``. With
+        ``_recovery_proof`` the same transaction records that the task has
+        never started: workers pass it on every create, before any launch, so
+        a task that dies queued is provably never-started rather than unknown.
         """
         if not isinstance(_recovery_proof, bool):
             raise ValueError("recovery proof must be boolean")
@@ -1642,7 +1715,12 @@ class TaskStore:
                 "hold_site = '', updated_at = ? WHERE task_id = ?",
                 (now, task_id),
             )
-            request = _resume_request(expected_generation, expected_operation_id, actor)
+            request = _resume_request(
+                expected_generation,
+                expected_operation_id,
+                actor,
+                await _next_turn_number(conn, task_id),
+            )
             await conn.execute(
                 "INSERT INTO recovery_operations VALUES "
                 "(?, ?, 'resume', ?, 'committed', ?, NULL, 'queued')",

@@ -128,7 +128,7 @@ async def collect_evidence(
     recovery: RecoveryStore,
     record: TaskRecord,
     *,
-    verifier: Callable[[Process], bool] = gone,
+    verifier: Callable[[Process, str], bool] = gone,
 ) -> ResumeEvidence:
     """Read the evidence once; every read is conservative on failure."""
     task_id = record.task_id
@@ -149,8 +149,13 @@ async def collect_evidence(
         if execution_id
         else ()
     )
+    host_id = (
+        await recovery.process_host(task_id, execution_id=execution_id)
+        if execution_id
+        else ""
+    )
     try:
-        groups_gone = all(verifier(group) for group in groups)
+        groups_gone = all(verifier(group, host_id) for group in groups)
     except Exception:
         # A verifier that cannot answer is unknown, never "gone".
         groups_gone = False

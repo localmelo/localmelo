@@ -15,7 +15,9 @@ def test_process_group_absence_checks_boot_pid_and_start(
 ) -> None:
     boot = "11111111-1111-1111-1111-111111111111"
     other_boot = "22222222-2222-2222-2222-222222222222"
+    host = "host-a"
     monkeypatch.setattr(identity, "_boot", lambda: boot)
+    monkeypatch.setattr(identity, "_host", lambda: host)
 
     def absent(pgid: int, sig: int) -> None:
         assert pgid == 123 and sig == 0
@@ -32,11 +34,16 @@ def test_process_group_absence_checks_boot_pid_and_start(
     assert identity.gone((123, 123, boot, "old"))
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "old"))
     assert not identity.gone((123, 123, boot, "old"))
-    # A verified boot change counts as gone; a malformed stored id is unknown.
-    assert identity.gone((123, 123, other_boot, "old"))
-    assert not identity.gone((123, 123, "other-boot", "old"))
+    # A verified boot change counts as gone on the host that recorded it; a
+    # malformed stored id, another host or an unknown host is unknown.
+    assert identity.gone((123, 123, other_boot, "old"), host)
+    monkeypatch.setattr(identity, "_host", lambda: "host-b")
+    assert not identity.gone((123, 123, other_boot, "old"), host)
+    assert not identity.gone((123, 123, other_boot, "old"))
+    monkeypatch.setattr(identity, "_host", lambda: host)
+    assert not identity.gone((123, 123, "other-boot", "old"), host)
     # A stored id with the other platform's shape is malformed too.
-    assert not identity.gone((123, 123, "1:2", "old"))
+    assert not identity.gone((123, 123, "1:2", "old"), host)
 
 
 def test_unreadable_boot_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,6 +84,39 @@ def test_linux_boot_identity_is_normalized_and_invalid_is_unknown(
     monkeypatch.setattr(Path, "read_text", lambda path: "not-a-uuid")
     with pytest.raises(OSError, match="invalid Linux boot"):
         identity._boot()
+
+
+def test_unreadable_host_is_not_evidence_of_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other_boot = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr(
+        identity, "_boot", lambda: "11111111-1111-1111-1111-111111111111"
+    )
+
+    def unreadable() -> str:
+        raise OSError("cannot read host identity")
+
+    monkeypatch.setattr(identity, "_host", unreadable)
+    assert not identity.gone((123, 123, other_boot, "old"), "host-a")
+
+
+def test_linux_host_identity_is_normalized_and_invalid_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(identity.sys, "platform", "linux")
+    machine_id = Path("/etc/machine-id")
+
+    def read_id(path: Path) -> str:
+        if path == machine_id:
+            return " ABCDEF0123456789ABCDEF0123456789\n"
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(Path, "read_text", read_id)
+    assert identity._host() == "abcdef0123456789abcdef0123456789"
+    monkeypatch.setattr(Path, "read_text", lambda path: "not a machine id")
+    with pytest.raises(OSError, match="cannot read host identity"):
+        identity._host()
 
 
 def test_linux_birth_parses_command_with_spaces_and_parentheses(
@@ -247,7 +287,8 @@ def test_identity_requires_group_leader(monkeypatch: pytest.MonkeyPatch) -> None
         identity.identity(123)
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "start"))
     monkeypatch.setattr(identity, "_boot", lambda: "boot")
-    assert identity.identity(123) == (123, 123, "boot", "start")
+    monkeypatch.setattr(identity, "_host", lambda: "host")
+    assert identity.identity(123) == (123, 123, "host", "boot", "start")
 
 
 @pytest.mark.parametrize(

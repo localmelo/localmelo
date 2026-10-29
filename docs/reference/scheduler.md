@@ -203,7 +203,10 @@ and its priority snapshot survive interruption. Recovered tasks are fenced from
 `PATCH` resume and priority changes until an explicit
 [controlled Resume](#controlled-resume-s3b2-pr3b-1); Stop remains available.
 Proved-never-started runnable queued tasks can start after a durable launch fence
-and workspace validation; ordinary creation does not yet enable this proof.
+and workspace validation; every create writes that proof inside its own
+transaction, before any launch, so the proof covers ordinary tasks too. A
+committed Resume whose turn never started stays queued across a restart and is
+re-admitted without another review.
 A missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
@@ -225,8 +228,17 @@ to S6b.
 `POST /api/tasks/{task_id}/resume` (also `/api/v2/tasks/{task_id}/resume`)
 takes `{"operation_id": str, "confirmation_token"?: str}`. It is the only route
 that resumes a task recovered by startup; the PATCH route stays fenced for that
-work. An accepted transition is 202 `{"task", "operation_id"}`; a matching
-`operation_id` retry returns the current row without a second turn.
+work. An accepted transition is 202 `{"task", "operation_id"}`. An
+`operation_id` names one operation: a retry with it returns the current row,
+whatever payload it carries, and never starts a second turn or re-authorizes a
+transition.
+
+Every create records the never-started proof inside its create transaction,
+before any launch, so a task that dies before its first launch is proved
+never-started rather than unknown. A Resume committed before a restart reserves
+the turn number it will use; on startup the task stays queued and is re-admitted
+when no such turn exists yet, and a retry after that turn started returns 409
+`invalid_transition` instead of replaying the operation.
 
 Before acting, the route reads the persisted task, card, provenance, active
 capture and recorded process groups, and validates the workspace. It never
@@ -241,8 +253,12 @@ unsupported check is unknown, not proof that a process stopped.
 | Anything else, including missing, untrusted, partial or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
 
 A verified boot change (both boot ids read, well formed and different) counts as
-gone. An unreadable boot id, a permission error, an unsupported platform or a
-malformed record is unknown, so that path needs confirmation. An empty group set
+gone only on the host that recorded the group: no process survives a reboot of
+that machine. The capture stores a durable host id beside the boot id, so a
+boot change read on another host, a record written before the host was kept, or
+an unreadable host id is unknown, and that path needs confirmation. An
+unreadable boot id, a permission error, an unsupported platform or a
+malformed record is unknown too. An empty group set
 qualifies only when the capture is trusted and complete; missing rows alone
 prove nothing.
 

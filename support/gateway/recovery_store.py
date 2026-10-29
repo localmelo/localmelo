@@ -1,7 +1,8 @@
 """Dormant, durable primitives for scheduler restart recovery.
 
-No worker uses these primitives until creation and every launch path are wired
-through the same fence. Missing provenance is unknown, not never started.
+Creation writes the never-started proof in its own transaction, and every
+launch path fences its execution. Missing provenance is unknown, not never
+started.
 """
 
 from __future__ import annotations
@@ -718,6 +719,7 @@ class RecoveryStore:
         start_token: str,
         expected_generation: int | None,
         expected_operation_id: str | None,
+        host_id: str = "",
     ) -> None:
         """CAS-record the gated process identity before releasing its child."""
         for value, name in (
@@ -726,6 +728,10 @@ class RecoveryStore:
             (start_token, "start_token"),
         ):
             _text(value, name)
+        if host_id:
+            # Empty means unknown: a record written before the store kept the
+            # host stays readable, and reads as unknown rather than as this host.
+            _text(host_id, "host_id")
         _guard(expected_generation, expected_operation_id)
         if any(
             isinstance(n, bool) or not isinstance(n, int) or n <= 0
@@ -758,8 +764,18 @@ class RecoveryStore:
                 new_generation,
             )
             await conn.execute(
-                "INSERT OR IGNORE INTO recovery_processes VALUES (?, ?, ?, ?, ?, ?)",
-                (task_id, execution_id, pgid, leader_pid, boot_id, start_token),
+                "INSERT OR IGNORE INTO recovery_processes "
+                "(task_id, execution_id, pgid, leader_pid, host_id, boot_id, start_token) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    execution_id,
+                    pgid,
+                    leader_pid,
+                    host_id,
+                    boot_id,
+                    start_token,
+                ),
             )
 
     async def processes(
@@ -777,6 +793,27 @@ class RecoveryStore:
             ).fetchall()
             return [(int(row[0]), int(row[1]), row[2], row[3]) for row in rows]
 
+    async def process_host(self, task_id: str, *, execution_id: str) -> str:
+        """The one host every captured group was recorded on, or "" if unknown.
+
+        Groups recorded on different hosts, or with no host, prove nothing
+        about the current host, so they read as unknown.
+        """
+        _text(execution_id, "execution_id")
+        async with self.store.component_transaction("recovery_process_host") as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT DISTINCT host_id FROM recovery_processes "
+                    "WHERE task_id = ? AND execution_id = ?",
+                    (task_id, execution_id),
+                )
+            ).fetchall()
+        hosts = {str(row[0]) for row in rows}
+        if len(hosts) == 1:
+            (host,) = hosts
+            return host
+        return ""
+
     async def record_process(
         self,
         task_id: str,
@@ -786,11 +823,19 @@ class RecoveryStore:
         leader_pid: int,
         boot_id: str,
         start_token: str,
+        host_id: str = "",
     ) -> None:
         """Store captured identity, not a claim the group has exited."""
-        _text(execution_id, "execution_id")
-        _text(boot_id, "boot_id")
-        _text(start_token, "start_token")
+        for value, name in (
+            (execution_id, "execution_id"),
+            (boot_id, "boot_id"),
+            (start_token, "start_token"),
+        ):
+            _text(value, name)
+        if host_id:
+            # Empty means unknown: a record written before the store kept the
+            # host stays readable, and reads as unknown rather than as this host.
+            _text(host_id, "host_id")
         if any(
             isinstance(n, bool) or not isinstance(n, int) or n <= 0
             for n in (pgid, leader_pid)
@@ -805,6 +850,16 @@ class RecoveryStore:
             if row is None or row[0] != execution_id:
                 raise TaskConflictError("stale process execution")
             await conn.execute(
-                "INSERT OR IGNORE INTO recovery_processes VALUES (?, ?, ?, ?, ?, ?)",
-                (task_id, execution_id, pgid, leader_pid, boot_id, start_token),
+                "INSERT OR IGNORE INTO recovery_processes "
+                "(task_id, execution_id, pgid, leader_pid, host_id, boot_id, start_token) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    execution_id,
+                    pgid,
+                    leader_pid,
+                    host_id,
+                    boot_id,
+                    start_token,
+                ),
             )
