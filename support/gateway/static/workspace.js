@@ -17,6 +17,7 @@ import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
 import { workerHistory } from "./worker-history.mjs";
 import { setupTasks } from "./tasks.mjs";
+import { setupStatusRow } from "./status-row.mjs";
 import {
   activity,
   applyEvent,
@@ -615,6 +616,7 @@ function startStream(id) {
   // one bound to this id would ignore every frame of the chat now open.
   if (!S.authenticated || S.activeId !== id || workerMode) return;
   closeStream();
+  chatStatus.follow(id);
   if (typeof EventSource !== "function") return;
   S.stream.sessionId = id;
   const source = new EventSource(eventsUrl(id));
@@ -632,6 +634,7 @@ function startStream(id) {
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
     if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
+    chatStatus.bump();
     renderMessages(false);
     syncUI();
   };
@@ -668,6 +671,7 @@ async function refreshApproval(id, requestId) {
 }
 
 function closeStream() {
+  chatStatus.clear();
   if (S.stream.source) {
     try {
       S.stream.source.close();
@@ -1770,11 +1774,19 @@ function presence(force = false) {
 // ── Routing and the sidebar ──
 
 // `workerMode` is true in every read-only side view; `taskMode` marks the task view.
+function statusRowNode() {
+  const node = el("div", "status-row");
+  node.hidden = true;
+  return node;
+}
+const chatStatus = setupStatusRow({ api, root: $("status-row") });
+
 let workerMode = false;
 let taskMode = false;
 const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); });
 const tasks = setupTasks({
   api,
+  statusRow: setupStatusRow({ api, root: statusRowNode() }),
   approvalCard,
   root: $("task-panel"),
   newId: newClientRequestId,
@@ -2141,6 +2153,7 @@ async function init() {
   setInterval(() => {
     if (S.authenticated && !document.hidden) {
       refreshList();
+      chatStatus.bump();
       api("/health").then((body) => { S.health = body; syncUI(); }).catch(() => {});
     }
   }, LIST_POLL_MS);

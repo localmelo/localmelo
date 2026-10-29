@@ -12,6 +12,7 @@ import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
+import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -366,6 +367,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
+  .replace(/^import \{ setupStatusRow \} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -543,6 +545,7 @@ function harness(routes, {mobile = false} = {}) {
     renderMarkdown,
     workerHistory,
     setupTasks,
+    setupStatusRow,
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
@@ -1219,6 +1222,7 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   assert.deepEqual(h.net.calls.map((call) => `${call.method} ${call.path}`), [
     'GET /health', 'GET /sessions',
     'POST /presence', 'GET /sessions/a', 'GET /sessions/a/turns?limit=10',
+    'GET /sessions/a/status',
   ]);
   assert.equal(h.state().activeId, 'a');
   const transcript = h.text('messages');
@@ -1230,6 +1234,22 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   assert.equal(h.element('header-title').textContent, 'New chat');
   assert.equal(h.stream().url, '/api/sessions/a/events?after=7');
   assert.equal(h.root.dataset.ready, '1', 'The first load marks the page ready');
+});
+
+test('the chat shows the server\'s status segments and refreshes them on a frame', async () => {
+  let segments = ['cache 40%', 'ctx 1.0k/8.0k'];
+  const h = harness(baseRoutes({'GET /sessions/a/status': () => ({session_id: 'a', segments})}));
+  await h.run('init()');
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = h.element('status-row');
+  assert.equal(row.hidden, false);
+  assert.deepEqual(row.children.map((child) => child.textContent), ['cache 40%', 'ctx 1.0k/8.0k']);
+  assert.equal(h.net.callsTo('/sessions/a/status').length, 1);
+  segments = ['cache --', 'step 2'];
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Run'}});
+  await new Promise((resolve) => setImmediate(resolve));
+  // A frame within a second of the last fetch waits for its slot.
+  assert.equal(h.net.callsTo('/sessions/a/status').length, 1);
 });
 
 test('the #/new route opens a new chat even when chats are saved', async () => {
@@ -2381,6 +2401,24 @@ test('an open task card picks up an approval that arrives later, and redraws onl
   assert.equal(findNode(panel, (node) => node.classList.contains('approval-card'))?.id, 'approval-card-req-late');
   assert.match(flatten(panel), /Waiting for your approval/);
   assert.equal(findNode(panel, (node) => node.textContent === 'Refresh'), null, 'the card needs no Refresh button');
+});
+
+test('a task card shows its status row under the facts and bumps it on each poll', async () => {
+  let segments = ['cache 50%', 'tasks 1 running 0 queued'];
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running'})}),
+    'GET /sessions/t1/status': () => ({session_id: 't1', segments}),
+  });
+  await settle();
+  const panel = h.element('task-panel');
+  const row = findNode(panel, (node) => node.classList.contains('status-row'));
+  assert.deepEqual(row.children.map((child) => child.textContent), segments);
+  assert.equal(panel.children.indexOf(row), panel.children.findIndex((node) => node.tagName === 'DL') + 1);
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  segments = ['cache --'];
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await poll.handler(); await settle();
+  assert.deepEqual(row.children.map((child) => child.textContent), ['cache --']);
 });
 
 test('a task waiting for approval shows the chat approval card and answers it', async () => {

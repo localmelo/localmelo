@@ -12,7 +12,9 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * never draws over a newer view or a task the user left. While the view is
  * open it is read again every POLL_MS and drawn only when it changed, so a
  * task that starts waiting for an approval shows its card. `every(fn, ms)`
- * schedules that and returns a function that stops it.
+ * schedules that and returns a function that stops it. `statusRow` is an
+ * optional status-row controller (status-row.mjs): the card shows it under
+ * its facts, and each poll bumps it.
  */
 const POLL_MS = 3000;
 
@@ -22,7 +24,7 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
-export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery}) {
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null};
@@ -92,6 +94,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (task.workspace_label) row('Workspace', task.workspace_label);
     row('Evidence', evidenceText(task));
     const nodes = [back, meta];
+    if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     nodes.push(node('h2', 'Recovery card'));
@@ -181,6 +184,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       dialog: null, pending: null, again: null, task: null});
     root.hidden = false;
     render();
+    if (id) statusRow?.follow(id);
+    else statusRow?.clear();
     try {
       const data = await api(id ? path(id) : '/tasks');
       if (epoch !== state.epoch) return;
@@ -232,6 +237,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (state.mode === 'card' && (!id || FINISHED.has(state.task.state))) return;
     const epoch = state.epoch;
     let data;
+    if (id) statusRow?.bump();
     try {
       data = await api(id ? path(id) : '/tasks');
     } catch {
@@ -331,6 +337,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     stopPolling = null;
     state.epoch++;
     state.dialog = null;
+    statusRow?.clear();
     root.hidden = true;
     root.replaceChildren();
   }
