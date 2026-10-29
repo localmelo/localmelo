@@ -57,6 +57,7 @@ RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
 REASONING_TAGS = ("explicit", "closing_only", "none")
+UI_MODES = ("default", "developer")
 
 
 @dataclass
@@ -118,6 +119,13 @@ class CliConfig:
 
     stream: bool = False
     reasoning_tags: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class UiConfig:
+    """The ``[ui]`` table: ``mode`` decides which options ``melo --help`` shows."""
+
+    mode: str = "default"  # default | developer
 
 
 @dataclass
@@ -214,6 +222,7 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     sessions: SessionsConfig = field(default_factory=SessionsConfig)
     cli: CliConfig = field(default_factory=CliConfig)
+    ui: UiConfig = field(default_factory=UiConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -366,6 +375,12 @@ class Config:
                     f"Must be one of {REASONING_TAGS}."
                 )
         return errors
+
+    def _validate_ui(self) -> list[str]:
+        """``[ui] mode`` is one of the two modes."""
+        if self.ui.mode in UI_MODES:
+            return []
+        return [f"[ui] mode={self.ui.mode!r} is not one of {UI_MODES}"]
 
     def _validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
@@ -581,6 +596,10 @@ class Config:
         """The ``[cli]`` errors alone, for a path that does not read the rest."""
         return self._validate_cli()
 
+    def ui_errors(self) -> list[str]:
+        """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
+        return self._validate_ui()
+
 
 def has_control_or_surrogate(text: str) -> bool:
     """Whether *text* holds a control character, newline or lone surrogate."""
@@ -740,6 +759,10 @@ def load() -> Config:
             tags = section["reasoning_tags"]
             # Keep a malformed value so Config.validate can report it.
             cfg.cli.reasoning_tags = dict(tags) if isinstance(tags, dict) else tags
+
+    # A bad mode is kept so Config.ui_errors can report it.
+    if isinstance(data.get("ui"), dict):
+        cfg.ui.mode = data["ui"].get("mode", cfg.ui.mode)
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -1001,6 +1024,8 @@ def save(cfg: Config) -> None:
         if cfg.cli.reasoning_tags:
             lines.append(f"reasoning_tags = {_toml_value(cfg.cli.reasoning_tags)}")
         lines.append("")
+    if cfg.ui != UiConfig():
+        lines.extend(["[ui]", f"mode = {_toml_value(cfg.ui.mode)}", ""])
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

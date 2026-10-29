@@ -54,6 +54,10 @@ never allowed; a test that genuinely needs the real home is marked
       `docs/llms.txt` when agent-facing behaviour changes.
 - [ ] A `CHANGELOG.md` entry under Unreleased, with the pull request number.
 - [ ] Screenshots for a change to the terminal UI or the website.
+- [ ] A new `melo` option has a tier in `support/option_tiers.py` and in the
+      [CLI reference](docs/reference/cli.md#default-and-developer-mode). An option that
+      compares designs is `experimental`, with the issue that will remove it; only a
+      deliberate change adds a `user` option.
 - [ ] Code, comments, tests and documentation in English.
 
 The [developer guide](https://localmelo.github.io/localmelo/en/developers.html)

@@ -1311,8 +1311,35 @@ def _direct_tool_providers(
     parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {problem}\n")
 
 
+def _config_wants_developer_help() -> bool:
+    """Whether ``[ui] mode`` asks for developer help; a bad mode warns and is ignored."""
+    from localmelo.support import config
+
+    try:
+        cfg = config.load()
+    except Exception:  # --help works even when the config file does not
+        return False
+    if errors := cfg.ui_errors():
+        print(f"{errors[0]}; showing the default help", file=sys.stderr)
+    return not errors and cfg.ui.mode == "developer"
+
+
 class _WorkerFlagParser(argparse.ArgumentParser):
-    """Keep old abbreviations unambiguous; new options require full names."""
+    """Keep old abbreviations unambiguous; new options require full names.
+
+    ``developer`` picks the help (#186): True for every option grouped by tier,
+    False for the user options, None to read ``[ui] mode`` when help is printed.
+    """
+
+    developer: bool | None = None
+
+    def format_help(self) -> str:
+        from localmelo.support.option_tiers import format_help
+
+        developer = self.developer
+        if developer is None:
+            developer = _config_wants_developer_help()
+        return format_help(self, developer=developer)
 
     def _check_value(self, action: argparse.Action, value: str) -> None:
         if action.dest == "output_format" and value == "stream-json":
@@ -1330,6 +1357,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--title",
             "--fixed-prefix",
             "--window-eviction",
+            "--developer",
             "--captured-history",
             "--context-window",
             "--output-reserve",
@@ -1363,17 +1391,31 @@ class _InteractiveParser(_WorkerFlagParser):
 
     validation_error: str | None = None
 
+    def parse_known_args(self, args: Any = None, namespace: Any = None) -> Any:
+        # --help may come before --developer, so look at the whole command line.
+        argv = sys.argv[1:] if args is None else list(args)
+        if "--developer" in argv[: argv.index("--") if "--" in argv else len(argv)]:
+            self.developer = True
+        return super().parse_known_args(args, namespace)
+
     def error(self, message: str) -> NoReturn:
         super().error(self.validation_error or message)
 
 
-def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
+def _build_parser(
+    *, direct_only: bool = False, developer: bool | None = None
+) -> argparse.ArgumentParser:
     parser_type = _DirectParser if direct_only else _InteractiveParser
     parser = parser_type(
         prog="melo", description="localmelo agent", add_help=not direct_only
     )
+    parser.developer = developer
     parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
-    parser.add_argument("--base-url", default=None, help="LLM API base URL")
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Your model server, e.g. http://127.0.0.1:8000/v1",
+    )
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 
     direct = parser.add_argument_group(
@@ -1441,9 +1483,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--window-eviction",
         choices=["slide", "chunk", "boundary"],
-        # Experimental, for the bench's A/B (#183): hidden from --help so users
-        # are not asked to choose; the winner becomes the default (#186).
-        help=argparse.SUPPRESS,
+        help="How working memory drops old turns: slide one unit per step once "
+        "full (default), chunk eight messages at a time, or boundary also at "
+        "the end of an attempt",
     )
     direct.add_argument(
         "--tool-exposure",
@@ -1659,6 +1701,12 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             action="store_true",
             default=argparse.SUPPRESS,
             help="Enable authenticated development playground routes",
+        )
+        parser.add_argument(
+            "--developer",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help='Show every option in --help, grouped by tier (like [ui] mode = "developer")',
         )
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
