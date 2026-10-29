@@ -79,6 +79,7 @@ KEYS: Final = (
     "enter send (queues during a turn) · alt+enter, ctrl+j or \\ enter: new line",
     "↑↓ history · ctrl+r search · tab complete",
     "esc stop the turn · ctrl+c clear, stop or quit · ctrl+d quit",
+    "! command runs it in your shell, not through the model (! alone: details)",
 )
 
 _COMMAND: Final = re.compile(r"/([a-z][a-z-]*)(?:\s+(.*))?\Z", re.DOTALL)
