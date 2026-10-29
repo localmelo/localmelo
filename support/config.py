@@ -55,6 +55,7 @@ RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
+REASONING_TAGS = ("explicit", "closing_only", "none")
 
 
 @dataclass
@@ -103,6 +104,19 @@ class SessionsConfig:
     """How an interactive surface restores a saved conversation."""
 
     resume_mode: str = "pairs"
+
+
+@dataclass
+class CliConfig:
+    """The terminal UI's opt-in live streaming, per model.
+
+    ``reasoning_tags`` maps a model id to its trusted framing declaration
+    (``explicit``, ``closing_only`` or ``none``). An undeclared model keeps the
+    conservative rule: streamed content is held until the reply ends.
+    """
+
+    stream: bool = False
+    reasoning_tags: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -197,6 +211,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     sessions: SessionsConfig = field(default_factory=SessionsConfig)
+    cli: CliConfig = field(default_factory=CliConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -226,6 +241,9 @@ class Config:
         errors.extend(self._validate_retrieval())
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
+        # [cli] is a display preference: like [sessions] resume_mode, a bad
+        # value warns and falls back in the interactive UI (cli_errors()), so
+        # direct mode and the gateway never fail on it.
         errors.extend(self._validate_gateway_workspace())
 
         # -- chat_backend validation --
@@ -322,6 +340,29 @@ class Config:
                 errors.append(f"[scheduler] {name} must be a string, got {value!r}")
             elif "\x00" in value:
                 errors.append(f"[scheduler] {name} must not contain a NUL byte")
+        return errors
+
+    def _validate_cli(self) -> list[str]:
+        """``[cli]`` holds a bool and a model-to-hint table of known values."""
+        errors: list[str] = []
+        cli = self.cli
+        if not isinstance(cli.stream, bool):
+            errors.append(f"[cli] stream must be a boolean, got {cli.stream!r}")
+        tags = cli.reasoning_tags
+        if not isinstance(tags, dict):
+            return [*errors, f"[cli] reasoning_tags must be a table, got {tags!r}"]
+        for model, hint in tags.items():
+            if (
+                not isinstance(model, str)
+                or not model.strip()
+                or has_control_or_surrogate(model)
+            ):
+                errors.append(f"[cli] reasoning_tags has an invalid model id {model!r}")
+            if not isinstance(hint, str) or hint not in REASONING_TAGS:
+                errors.append(
+                    f"[cli] reasoning_tags[{model!r}] {hint!r} is not recognised. "
+                    f"Must be one of {REASONING_TAGS}."
+                )
         return errors
 
     def _validate_request_timeout(self) -> list[str]:
@@ -529,6 +570,10 @@ class Config:
             msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
             raise ConfigError(msg)
 
+    def cli_errors(self) -> list[str]:
+        """The ``[cli]`` errors alone, for a path that does not read the rest."""
+        return self._validate_cli()
+
 
 def has_control_or_surrogate(text: str) -> bool:
     """Whether *text* holds a control character, newline or lone surrogate."""
@@ -679,6 +724,15 @@ def load() -> Config:
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
+    if isinstance(data.get("cli"), dict):
+        section = data["cli"]
+        if "stream" in section:
+            cfg.cli.stream = section["stream"]
+        if "reasoning_tags" in section:
+            tags = section["reasoning_tags"]
+            # Keep a malformed value so Config.validate can report it.
+            cfg.cli.reasoning_tags = dict(tags) if isinstance(tags, dict) else tags
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -931,6 +985,12 @@ def save(cfg: Config) -> None:
                 "",
             ]
         )
+    if cfg.cli != CliConfig():
+        lines.append("[cli]")
+        lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
+        if cfg.cli.reasoning_tags:
+            lines.append(f"reasoning_tags = {_toml_value(cfg.cli.reasoning_tags)}")
+        lines.append("")
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

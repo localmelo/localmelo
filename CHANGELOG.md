@@ -88,6 +88,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   instance before sending any login code, binds the code to the launch instance
   and checks page responses, re-signs in after a token rotation, and offers
   "Sign In Again"; the check is not authentication ([#167]).
+- Interactive terminal live streaming is opt-in with `[cli] stream = true` and a
+  per-model `[cli.reasoning_tags]` hint (`explicit`, `closing_only` or `none`),
+  with `/stream on|off` for later turns. Released, redacted text shows in the
+  live area; provisional text that becomes a tool call, retry, failed run or
+  stop is labelled, and the final answer prints once. A provider without
+  streaming falls back to the complete reply; direct mode is unchanged, and an
+  invalid `[cli]` value warns and falls back instead of failing a run. `/new`
+  resets `/stream` to `[cli] stream`. ([#175])
 - Direct workers can read an explicit append-only inbox at planning boundaries,
   with per-line acceptance events and redacted saved history. An inbox inside the
   workspace is refused as `setup_error` before any model call; a slow event
@@ -1086,3 +1094,4 @@ earlier milestones.
 [#167]: https://github.com/localmelo/localmelo/pull/167
 [#168]: https://github.com/localmelo/localmelo/pull/168
 [#169]: https://github.com/localmelo/localmelo/pull/169
+[#175]: https://github.com/localmelo/localmelo/pull/175

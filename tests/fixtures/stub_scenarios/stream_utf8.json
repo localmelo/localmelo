@@ -1,0 +1,19 @@
+{
+  "models": [
+    "stub-model"
+  ],
+  "replies": [
+    {
+      "stream": {
+        "chunks": [
+          "<thi",
+          "nk>secret plan</thi",
+          "nk>你好，世界\n",
+          "Still streaming Still streaming Still streaming Still streaming Still streaming Still streaming Still streaming Still streaming \n"
+        ],
+        "slice": 5,
+        "delay_s": 0.02
+      }
+    }
+  ]
+}

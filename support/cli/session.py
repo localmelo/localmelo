@@ -19,7 +19,7 @@ import logging
 import os
 import shlex
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, Final, Literal, cast
 
 from prompt_toolkit.document import Document
@@ -29,6 +29,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import RunResult
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
@@ -191,6 +192,8 @@ class CliSession:
         mode: Mode,
         out: Out,
         resume_mode: ResumeMode = "pairs",
+        stream: bool = False,
+        reasoning_tags: Mapping[str, str] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.store = store
@@ -199,6 +202,12 @@ class CliSession:
         self.renderer = renderer
         self.approver = approver
         self.out = out
+        # [cli] stream, flipped by /stream for later turns. The per-model
+        # framing hints belong to the renderer, which applies the same rule
+        # to the stream and to the whole reply.
+        self.stream = stream
+        self._default_stream = stream
+        self.renderer.reasoning_tags = dict(reasoning_tags or {})
         self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
@@ -437,12 +446,19 @@ class CliSession:
                 if attachments
                 else {}
             )
-            result = await runner.run_turn(
-                text,
-                approval=self.approvals.policy(),
-                title=text if typed_text is None else typed_text,
-                **kwargs,
+            token = (
+                STREAM_DISPLAY.set(self.renderer.stream_feed()) if self.stream else None
             )
+            try:
+                result = await runner.run_turn(
+                    text,
+                    approval=self.approvals.policy(),
+                    title=text if typed_text is None else typed_text,
+                    **kwargs,
+                )
+            finally:
+                if token is not None:
+                    STREAM_DISPLAY.reset(token)
         except UnknownSessionError:
             error = UnknownSessionError(DELETED)
         except SessionBusyError:
@@ -592,6 +608,8 @@ class CliSession:
             self.toggle_verbose(arguments)
         elif name == "thinking":
             self.toggle_thinking(arguments)
+        elif name == "stream":
+            self.toggle_stream(arguments)
         elif name == "expand":
             await self.expand(arguments)
         elif name == "sessions":
@@ -696,6 +714,24 @@ class CliSession:
         self.renderer.thinking = state
         self.out.print(
             self._text(f"Thinking excerpts {'on' if state else 'off'}.", "muted")
+        )
+
+    def toggle_stream(self, arguments: str) -> None:
+        """``/stream [on|off]``: live streamed replies, for the next turn."""
+        state = _toggle(arguments, self.stream)
+        if state is None:
+            self.out.print(
+                self._text("✗ Use /stream on or /stream off.", style="error")
+            )
+            return
+        self.stream = state
+        hint = self.renderer.stream_hint()
+        footer = f" · {hint} framing" if hint else " · conservative until declared"
+        self.out.print(
+            self._text(
+                f"Live streaming {'on' if state else 'off'}{footer if state else ''}.",
+                "muted",
+            )
         )
 
     async def expand(self, arguments: str) -> None:
@@ -1006,7 +1042,7 @@ class CliSession:
             self.out.print(self._text(line))
 
     async def new(self) -> None:
-        """``/new``: the next message starts a new session, with no grants."""
+        """``/new``: start over, grants and display preferences included."""
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
@@ -1017,6 +1053,7 @@ class CliSession:
         self.title = ""
         self.renderer.context_tokens = 0
         self.renderer.new_session()
+        self.stream = self._default_stream
         label = " New session "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule

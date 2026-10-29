@@ -75,6 +75,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import (
@@ -4551,6 +4552,8 @@ class Agent:
             # once the planning call is made, even if it then raises.
             run.steps += 1
             run.events.step_started(run.steps, run.attempts)
+            if (stream_display := STREAM_DISPLAY.get()) is not None:
+                stream_display.step(run.steps)
             run.note(lambda trace: trace.step(run.steps, run.attempts))
             response, fail = await self._do_plan(
                 long_context,

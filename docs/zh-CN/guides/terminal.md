@@ -98,6 +98,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/copy [turn]` | 复制已存储回答的 Markdown，而不是终端中换行后的显示内容。不带编号时使用最近已完成且未撤销的轮次。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用参数、20 行输出、反思摘要及完整理由；不带参数时切换开关。 |
 | `/thinking [on\|off]` | 开启（默认）或关闭思考摘录；关闭时只保留 `Thought for 1.2s`；不带参数时切换开关。 |
+| `/stream [on\|off]` | 开启或关闭后续轮次的实时流式回复；不带参数时切换开关。见[流式回复](#streamed-replies)。 |
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
@@ -155,11 +156,29 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 ### 一轮的输出
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
-- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示运行信息：步骤（`step 4`，不与 `--max-steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期、已见到的测试和时间；后面是输出 token 数和 `esc to stop`。行宽不足时先省略提示，再省略 token 数，信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
+- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示运行信息：步骤（`step 4`，不与 `--max-steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期、已见到的测试和时间；后面是输出 token 数和 `esc to stop`。行宽不足时先省略提示，再省略 token 数，信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
 - **思考。**显示 `✻ Thought for 1.2s`，然后显示思考的前 3 行（使用 `/verbose` 时为 40 行，使用 `/thinking off` 时不显示），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及最多 3 行输出（使用 `/verbose` 时为 20 行），之后显示 `… +N lines (/expand T.C)`（若只剩一行则直接显示该行）。`/verbose` 还显示调用参数，图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会输出尽力生成的结果、[状态行](../../reference/cli.md#output)（英文）和提示，例如服务器无响应时显示 `Is the model server running at URL?`。
+
+<a id="streamed-replies"></a>
+
+### 流式回复
+
+流式默认关闭。在 `config.toml` 中开启：
+
+```toml
+[cli]
+stream = true
+
+[cli.reasoning_tags]
+"Qwen3-8B" = "closing_only"
+```
+
+开启后，交互式界面会向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。按模型的提示说明该模型如何标记推理：`explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。服务器单独返回的推理字段始终按推理处理，绝不会作为正文绘制；`/thinking off` 仍像以前一样只隐藏思考摘录。
+
+流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。提供方一次性发送完整回复（或不支持流式）时会静默回退到普通完整回复。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
 
 <a id="approvals"></a>
 
@@ -217,7 +236,7 @@ melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文�
 
 直接运行 `melo` 会开始新会话；只有第一条消息才会创建会话记录。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新会话；在启动选择器中按 Esc 也会开始新会话，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：选中的聊天标为 `"TITLE" (resumed)`；按 Esc 或列表为空时显示新会话横幅。`-c` 和 `-r` 不能同时使用，也不能与任务、`--serve` 或 `--daemon` 同用。
 
-选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose` 和 `/thinking` 偏好保持不变。`/new` 会重置这些显示偏好。如果会话之前在另一个文件夹中工作过，会显示提示。
+选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果会话之前在另一个文件夹中工作过，会显示提示。
 
 横幅之后的回顾显示存储的脱敏副本中最近三个符合条件的轮次。标题下方的一行说明进入模型记忆的内容：`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息／回答配对，不包含工具步骤；`"window"` 恢复已保存的工作记忆检查点及之后的配对，没有可用检查点时退回配对模式。在 `config.toml` 中设置此项；无效值会在界面中产生警告并使用配对模式，但不会在直接模式输出中增加警告。回顾中的计数反映淘汰后的恢复窗口，而不是存储的轮次总数。
 

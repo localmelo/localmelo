@@ -492,6 +492,44 @@ def test_a_crashed_run_prints_its_traceback(tmp_path: Path, output_format: str) 
         )
 
 
+# ── [cli] is a display preference ───────────────────────────────────────────
+
+
+def _run_melo_with_a_saved_config(
+    chat_server: FakeChatServer, tmp_path: Path, cli_section: str
+) -> subprocess.CompletedProcess[str]:
+    """Direct mode from config.toml (no --base-url) with a ``[cli]`` *cli_section*."""
+    folder = tmp_path / ".cache" / "localmelo"
+    folder.mkdir(parents=True)
+    (folder / "config.toml").write_text(
+        'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+        f'[vllm]\nchat_url = "{chat_server.base_url}"\nchat_model = "fake-model"\n\n'
+        f"[cli]\n{cli_section}\n",
+        encoding="utf-8",
+    )
+    return subprocess.run(
+        [sys.executable, "-I", "-m", "localmelo", "say hello"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_env(tmp_path),
+        cwd=tmp_path,
+        check=False,
+    )
+
+
+def test_a_bad_cli_table_does_not_fail_a_direct_run(
+    chat_server: FakeChatServer, tmp_path: Path
+) -> None:
+    """A bad [cli] value is for the interactive UI to warn and fall back on."""
+    done = _run_melo_with_a_saved_config(chat_server, tmp_path, 'stream = "yes"')
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "done\n"
+    assert "Configuration errors" not in done.stderr
+    assert chat_server.requests == 1
+
+
 # ── python_exec ─────────────────────────────────────────────────────────────
 
 

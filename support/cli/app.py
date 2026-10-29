@@ -71,7 +71,7 @@ from localmelo.support.cli.approvals import (
 )
 from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
 from localmelo.support.cli.picker import SessionPicker
-from localmelo.support.cli.render import TurnRenderer, live_rows
+from localmelo.support.cli.render import STREAM_LIVE_LINES, TurnRenderer, live_rows
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
@@ -666,7 +666,17 @@ class InteractiveApp:
         if live is not None:
             if self.controller.state == "stopping" and not live.finished:
                 live.activity = "Stopping"
-            rows = live_rows(live, now, width, self.symbols, frame=self._frame)
+            rows = live_rows(
+                live,
+                now,
+                width,
+                self.symbols,
+                frame=self._frame,
+                # Leave a short terminal its draft, rules and status bar.
+                stream_lines=min(
+                    STREAM_LIVE_LINES, max(0, self.app.output.get_size().rows - 14)
+                ),
+            )
         else:
             activity = self.controller.activity or ""
             index = self._frame if self._frame is not None else int(now / TICK_S)
@@ -816,7 +826,7 @@ class InteractiveApp:
         rows = size.rows - 1
         rows -= sum(
             (
-                self._live_visible(),
+                self._live_rows(),
                 self.controller.queued is not None,
                 bool(getattr(self.controller, "attachment_line", "")),
                 self._hint_visible(),
