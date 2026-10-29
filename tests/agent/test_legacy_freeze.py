@@ -343,7 +343,12 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
     assert sorted(cli._build_parser()._option_string_actions) == sorted(
         BASE_OPTIONS
         + LATER_OPTIONS
-        + ["--gateway-login", "--gateway-rotate-token", "--enable-playground"]
+        + [
+            "--gateway-login",
+            "--gateway-rotate-token",
+            "--enable-playground",
+            "--developer",
+        ]
     )
     ui_or_help = {
         "--yolo",

@@ -506,7 +506,7 @@ def test_the_legacy_json_line_has_none_of_the_new_keys(
 
 
 def test_the_interactive_help_lists_the_flags() -> None:
-    text = cli._build_parser().format_help()
+    text = cli._build_parser(developer=True).format_help()
     assert "--reasoning {legacy,drop,replay,compress,compress+replay}" in text
     assert "--reasoning-field {auto,reasoning_content,reasoning}" in text
     assert "--replay-turns N" in text
