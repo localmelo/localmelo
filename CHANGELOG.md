@@ -76,7 +76,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   cap, so the retained history stays the same for several steps; `boundary` does
   the same and also drops a finished attempt's turns when the next attempt starts
   after a reflection. The default, `slide`, is unchanged, and non-default modes
-  add `window_eviction` to the JSON result's `config` ([#NN]).
+  add `window_eviction` to the JSON result's `config` ([#191]).
 
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
@@ -1144,3 +1144,4 @@ earlier milestones.
 [#188]: https://github.com/localmelo/localmelo/pull/188
 [#189]: https://github.com/localmelo/localmelo/pull/189
 [#190]: https://github.com/localmelo/localmelo/pull/190
+[#191]: https://github.com/localmelo/localmelo/pull/191
