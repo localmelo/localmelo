@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import queue
@@ -20,6 +21,17 @@ from localmelo.support.sessions.worker import redact_worker, sensitive_read
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_EVENT_BYTES = 1024 * 1024
+
+# Appended to every brief-mode query (the same text on every call, so the
+# task query still matches when the window drops it).
+WORKER_PROTOCOL = (
+    "Make the smallest change that satisfies the task as soon as you know where it "
+    "goes; do not read more first. After each change, run the task's check commands. "
+    "If a check fails, fix what you broke, including tests that assert the old "
+    "behaviour. Before you edit a file, read the lines you will change: earlier tool "
+    "output leaves your context after about ten steps. In your final answer, say "
+    "which checks you ran and their result."
+)
 _SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b((?=[A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL))[A-Za-z_][A-Za-z0-9_]*[ \t]*[:=][ \t]*)[^\r\n]*"
 )
@@ -62,32 +74,62 @@ def read_brief(path: str | Path) -> str:
     return text
 
 
-def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
-    """Return the workspace HEAD and dirty flag, or unknown on failure."""
+def _git(workspace: str, *args: str) -> str:
+    """Run one read-only git command in *workspace*, raising when it fails."""
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("GIT_")
     }
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    return subprocess.run(
+        ["git", "-C", workspace, *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=3,
+        check=True,
+    ).stdout.strip()
 
-    def git(*args: str) -> str:
-        return subprocess.run(
-            ["git", "-C", workspace, *args],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=True,
-        ).stdout.strip()
 
+def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
+    """Return the workspace HEAD and dirty flag, or unknown on failure."""
     try:
-        head = git("rev-parse", "--verify", "HEAD") or None
+        head = _git(workspace, "rev-parse", "--verify", "HEAD") or None
     except (OSError, subprocess.SubprocessError):
         head = None
     try:
-        dirty: bool | None = bool(git("status", "--porcelain"))
+        dirty: bool | None = bool(_git(workspace, "status", "--porcelain"))
     except (OSError, subprocess.SubprocessError):
         dirty = None
     return head, dirty
+
+
+# At most this many untracked files are looked at by workspace_fingerprint.
+_FINGERPRINT_UNTRACKED = 200
+
+
+def workspace_fingerprint(workspace: str) -> str | None:
+    """A digest of the workspace's changes, ``None`` outside a git tree.
+
+    It covers the status, the diff of tracked files against HEAD and the
+    size and mtime of untracked files, so two equal digests mean that
+    nothing was edited in between, also in a tree that was dirty already.
+    """
+    try:
+        parts = [_git(workspace, "status", "--porcelain")]
+        try:
+            parts.append(_git(workspace, "diff", "HEAD"))
+        except subprocess.CalledProcessError:  # no commit yet
+            parts.append(_git(workspace, "diff"))
+        names = _git(workspace, "ls-files", "-o", "--exclude-standard").splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for name in names[:_FINGERPRINT_UNTRACKED]:
+        try:
+            info = os.stat(os.path.join(workspace, name))
+        except OSError:
+            continue
+        parts.append(f"{name} {info.st_size} {info.st_mtime_ns}")
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
 
 
 def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:

@@ -31,6 +31,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo --brief` runs follow a worker protocol (#185): a fixed paragraph appended
+  to the brief asks for the smallest change as soon as the target is known, the
+  task's check commands after each change, a read of the lines before editing and
+  a final answer that says which checks ran; a reflection that says `continue`
+  starts the next attempt while steps and attempts remain, whatever its three
+  flags say; and an attempt boundary that finds the git workspace unchanged since
+  the run started adds a `no_change` notice and one line asking the next attempt
+  to start by writing. Runs without `--brief` and request bodies outside brief
+  runs are unchanged ([#193]).
+
 - The `reflection` event now records the decision's three flags (`flags`), the
   gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
   when the run does not continue, so a `gate_stopped` run shows which check
@@ -1155,3 +1165,4 @@ earlier milestones.
 [#190]: https://github.com/localmelo/localmelo/pull/190
 [#191]: https://github.com/localmelo/localmelo/pull/191
 [#192]: https://github.com/localmelo/localmelo/pull/192
+[#193]: https://github.com/localmelo/localmelo/pull/193

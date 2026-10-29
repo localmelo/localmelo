@@ -511,12 +511,14 @@ async def _run_worker_brief(
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
     from localmelo.support.cli.worker_contract import (
+        WORKER_PROTOCOL,
         WorkerObserver,
         failure_record,
         result_record,
     )
     from localmelo.support.cli.worker_inbox import FdInbox, Inbox
 
+    query = f"{query.rstrip()}\n\n{WORKER_PROTOCOL}"
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     assert task is not None
@@ -1828,6 +1830,14 @@ def main() -> None:
             # The surface is known here: direct mode has no approver, so its
             # default set leaves shell_exec out (--builtins all names it).
             options = dataclasses.replace(options, mode="direct")
+            if args.brief is not None:
+                from localmelo.support.cli.worker_contract import (
+                    workspace_fingerprint,
+                )
+
+                options = dataclasses.replace(
+                    options, brief_probe=workspace_fingerprint
+                )
             if not query:
                 # The loop keeps its answers, so each turn sees the earlier ones; a
                 # single task's options stay as they were.

@@ -470,6 +470,21 @@ user's home directory is shown as `~`. Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
 before sharing. `--save-session` can record the same run.
 
+A `--brief` run also differs from a plain task in three ways. The query is the
+brief followed by one fixed paragraph, the same on every request: make the
+smallest change that satisfies the task as soon as you know where it goes, run
+the task's check commands after each change, fix what you broke (tests that
+assert the old behaviour included), read the lines you will edit first because
+earlier tool output leaves the context after about ten steps, and say in the
+final answer which checks ran and their result. A reflection whose action is
+`continue` starts the next attempt while steps and attempts remain, whatever
+its three flags say (the `reflection` event still records them). When an
+attempt boundary finds the workspace unchanged since the run started, the next
+attempt's first request carries the line "Nothing has changed in the workspace
+yet. Start this attempt by writing the part of the task you can already write,
+then continue." and a `no_change` notice is emitted; a workspace that is not a
+git tree gets neither. Runs without `--brief` are unchanged.
+
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last
 line waits for its newline. The file may initially be absent, but must otherwise
