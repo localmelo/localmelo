@@ -1,5 +1,7 @@
 # Guide: Memory
 
+This guide shows how to keep memory between runs, inspect and reset it, turn it off, and what it keeps about you. Read it before you enable memory for a project; the files and options are in the [memory reference](../reference/memory.md).
+
 ## Keep memory between runs
 
 ```bash

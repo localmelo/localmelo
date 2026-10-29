@@ -1,5 +1,7 @@
 # Guide: Sessions
 
+This guide shows how to run a conversation that is kept between turns, and how to resume it later. Read it when a conversation must continue across runs; the session files and limits are in the [sessions reference](../reference/sessions.md).
+
 ## Run a conversation
 
 ```python

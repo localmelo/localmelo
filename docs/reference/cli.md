@@ -568,8 +568,9 @@ recorded item contains the raw command or Python code, redacted and capped at
 With a `Check:` line, `tests` is the harness's own result instead (see below):
 `passed` or `failed`, with one item per command of the gate's last run, each
 with `command`, `command_truncated`, `exit_code`, `duration_s` and the source
-`brief_check`, plus `refused` (the reason) when the policy did not let the
-command run.
+`brief_check`, and `output_tail` (the last 20 lines of the check's output,
+redacted, at most 4,000 characters; absent from records of older versions),
+plus `refused` (the reason) when the policy did not let the command run.
 
 With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
@@ -645,8 +646,13 @@ says so, and the exit code is 4 (see [Exit codes](#exit-codes); stderr gets one
 line, `melo: the brief's check failed: <command> (exit N)`, with `not run` for
 a refused check and `no exit status` for a timeout); when every check of the last round
 passes, `tests` is `passed`. Each run of a check emits a `brief_check` notice
-with its command, exit code and duration. A brief with no `Check:` line behaves
-as before, and the model's own account of its checks is still only that.
+with its command, exit code and duration. When the run is in its last attempt with exactly two steps of its budget left,
+the workspace has changed since the checks last ran (or since the run started),
+and the gate has not run in that attempt, the harness runs the checks once
+before the next planning request, so the model can still fix what they show. A
+pass changes nothing; a failure sends the same message as the gate and uses one
+of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
+line behaves as before, and the model's own account of its checks is still only that.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last

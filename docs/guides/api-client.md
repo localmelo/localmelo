@@ -1,5 +1,7 @@
 # Guide: API client
 
+This guide shows how a script drives localmelo through its HTTP API: it creates a console session, starts a run, approves a tool call and reads the result. Read it if you are writing your own client; the endpoints are described in the [API v2 reference](../reference/api-v2.md).
+
 ## A script: create, run, approve, read
 
 One Python file, standard library only. It creates a session with a first
