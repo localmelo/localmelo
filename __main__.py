@@ -1439,10 +1439,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--window-eviction",
         choices=["slide", "chunk", "boundary"],
-        help="How working memory drops old turns: slide (default, one unit per "
-        "step once full), chunk (8 messages at a time, for prompt-cache reuse) "
-        "or boundary (chunk, and a finished attempt's turns leave at the next "
-        "attempt). Experimental",
+        # Experimental, for the bench's A/B (#183): hidden from --help so users
+        # are not asked to choose; the winner becomes the default (#186).
+        help=argparse.SUPPRESS,
     )
     direct.add_argument(
         "--tool-exposure",
