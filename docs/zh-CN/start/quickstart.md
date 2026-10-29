@@ -93,7 +93,7 @@ worker 任务是写在文件里的任务简报（brief）。以 `Check:` 开头�
 ```bash
 cat > brief.md <<'EOF'
 Write hello.py so that it prints the word hello.
-Check: python3 hello.py
+Check: python3 hello.py | grep -x hello
 EOF
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
 echo "exit code: $?"
