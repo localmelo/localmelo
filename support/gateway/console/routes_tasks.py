@@ -113,7 +113,7 @@ async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
 
 def _approvals(console: Console, task: dict[str, Any]) -> dict[str, Any]:
     """*task* with the approvals it waits for; the broker keys them by task id."""
-    pending = console.broker.pending(task["task_id"])
+    pending = console.broker.pending(str(task.get("task_id")))
     return {**task, "pending_approvals": [approval_json(r) for r in pending]}
 
 

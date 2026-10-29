@@ -74,7 +74,7 @@ def test_resume_accepted_returns_202_task_and_operation(
     )
     assert response.status_code == 202
     assert response.json() == {
-        "task": {"task_id": "task1", "state": "queued"},
+        "task": {"task_id": "task1", "state": "queued", "pending_approvals": []},
         "operation_id": "op-1",
     }
     assert workers.calls[-1] == ("task1", "op-1", "tok")
