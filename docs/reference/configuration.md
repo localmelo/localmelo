@@ -238,6 +238,15 @@ offered planning schemas within the run, not actual cache misses; an optional
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 The legacy `/v1` API and the default-off request bytes remain unchanged.
 
+`--reflect-tool-guard on` (experimental, hidden from default help; no config key) keeps a
+reflection request from inviting a tool call. The request offers the tools of the step's
+planning request (same list, order and schema, with `fixed_prefix` already the case) and its
+last user message ends with `Answer with the JSON object only; do not call any tool.`;
+`tool_choice` is untouched, so a server's prompt prefix holds. The retry request is unchanged.
+`on` adds `reflect_tool_guard` to the JSON result's `config`; `off` (default) changes no request
+byte. Whatever the option, the `reflection` event's `unreadable_reason` says why a first reply
+was unreadable (see [Events](events.md)).
+
 `[agent] window_eviction = "chunk"` or `"boundary"` (default `"slide"`; `--window-eviction`
 overrides it) changes when working memory drops old turns so the retained history stays the same
 for several steps and a server's prompt cache can reuse it. Experimental; `slide` leaves request
