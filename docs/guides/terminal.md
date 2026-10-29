@@ -368,7 +368,7 @@ when it has data:
   `ctx 12k` when no limit is known.
 - `step 4 attempt 2 phase fix` are the run's progress facts while a run is
   active, never a percent or `n/max`.
-- `tasks 1 running 2 queued` appears only when a task store is reachable.
+- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
 the last redraw. On a narrow terminal the title goes first, then the segments
