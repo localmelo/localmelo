@@ -27,7 +27,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and a block cut before its END line is redacted to the end of the text. Public
   keys and certificates are unchanged. Streamed display text holds an open block
   until its END line, or drops its body past 16 KiB, so a key never streams out
-  ([#NN]).
+  ([#188]).
 
 ### Fixed
 
@@ -1120,3 +1120,4 @@ earlier milestones.
 [#177]: https://github.com/localmelo/localmelo/pull/177
 [#180]: https://github.com/localmelo/localmelo/pull/180
 [#187]: https://github.com/localmelo/localmelo/pull/187
+[#188]: https://github.com/localmelo/localmelo/pull/188
