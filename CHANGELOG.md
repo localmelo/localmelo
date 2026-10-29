@@ -896,7 +896,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (hidden from default help, listed by `melo --developer --help`) send the requests of
   the earlier defaults byte for byte. A default run's JSON result now carries
   `prefix_cache` and the `config` keys `window_eviction` and `reflect_tool_guard`.
-  ([#NN])
+  ([#223])
 
 - First-run setup prefers a model that is already in memory: when the server
   reports which models are loaded (oMLX `GET /v1/models/status`, Ollama
@@ -1392,6 +1392,7 @@ earlier milestones.
 [#219]: https://github.com/localmelo/localmelo/pull/219
 [#221]: https://github.com/localmelo/localmelo/pull/221
 [#222]: https://github.com/localmelo/localmelo/pull/222
+[#223]: https://github.com/localmelo/localmelo/pull/223
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
