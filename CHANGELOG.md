@@ -31,6 +31,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `scripts/cache_report.py` runs under Python 3.9 again: the `zip(..., strict=True)`
+  call that needed 3.10 is replaced by an explicit length check. `-h` and `--help`
+  print its usage and exit 0, and no arguments print the usage to stderr and exit 2,
+  instead of reading `--help` as a log path ([#NN]).
+
 - `melo --brief` runs follow a worker protocol (#185): a fixed paragraph appended
   to the brief asks for the smallest change as soon as the target is known, the
   task's check commands after each change, a read of the lines before editing and

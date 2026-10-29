@@ -104,9 +104,9 @@ def report(events: list[dict[str, Any]]) -> str:
         widths = [max(len(r[i]) for r in table) for i in range(len(HEADER))]
         out.append(f"run {run_id}")
         for r in table:
-            out.append(
-                "  " + "  ".join(c.rjust(w) for c, w in zip(r, widths, strict=True))
-            )
+            if len(r) != len(widths):
+                raise ValueError(f"row has {len(r)} cells, the header {len(widths)}")
+            out.append("  " + "  ".join(map(str.rjust, r, widths)))
         stats = [(kind, p, c) for _, kind, p, c in rows]
         out.extend(_totals(stats, "  "))
         overall.extend(stats)
@@ -141,6 +141,9 @@ def _total(stats: list[tuple[str, int, int | None]]) -> str:
 
 
 def main(argv: list[str]) -> int:
+    if any(arg in ("-h", "--help") for arg in argv):
+        print(__doc__)
+        return 0
     if not argv:
         print(__doc__, file=sys.stderr)
         return 2
