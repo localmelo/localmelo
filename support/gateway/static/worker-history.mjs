@@ -51,6 +51,8 @@ function defaultOpen(url) {
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // A run is still being written while its status says so and its lease is live.
 const live = (session) => session?.status === 'running' && session?.busy !== false;
+// The two kinds this view reads: one-shot runs and chats of the terminal.
+const readable = (session) => session?.kind === 'worker' || session?.kind === 'terminal';
 
 /**
  * Worker requests have their own epoch and never modify the active chat. While
@@ -69,7 +71,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
   doc = globalThis.document,
 } = {}) {
   const state = {
-    mode: 'list', filters: {status: '', source: '', parent: ''}, rows: [],
+    mode: 'list', kind: 'worker', filters: {status: '', source: '', parent: ''}, rows: [],
     nextCursor: null, selectedId: null, view: null, session: null,
     loading: false, error: '', epoch: 0, loaded: false, eventCounts: {}, unsupported: false,
   };
@@ -79,11 +81,13 @@ export function workerHistory(api, changed, every = defaultEvery, {
   const fail = (error, detail) => {
     if (error.status === 503) return 'Worker history is unavailable.';
     if (detail && error.status === 404) return 'Worker run not found.';
-    if (!detail && ([404, 405].includes(error.status) || (error.status === 400 && /kind/i.test(error.message || '')))) return 'This server does not support worker history yet.';
+    if (!detail && ([404, 405].includes(error.status) || (error.status === 400 && /kind/i.test(error.message || '')))) {
+      return `This server does not support ${state.kind === 'terminal' ? 'terminal chats' : 'worker history'} yet.`;
+    }
     return detail ? 'Could not load this worker run. Try again.' : 'Could not load workers. Try again.';
   };
   function listPath(cursor) {
-    const params = new URLSearchParams({kind: 'worker', limit: String(PAGE)});
+    const params = new URLSearchParams({kind: state.kind, limit: String(PAGE)});
     for (const [key, value] of Object.entries(state.filters)) {
       if (value) params.set(key === 'parent' ? 'parent_run' : key, value);
     }
@@ -121,6 +125,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
   }
   function showRun(id, {session, rows}) {
     state.session = session;
+    state.kind = session?.kind === 'terminal' ? 'terminal' : 'worker';
     state.eventCounts = Object.fromEntries(rows.map((row) => [row.turn, (row.events ?? []).length]));
     state.unsupported = rows.some((row) => (row.events ?? []).some((event) => !SUPPORTED_EVENTS.has(event?.type)));
     state.view = foldWorkerTurns(id, rows);
@@ -136,7 +141,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
     try {
       const run = await readRun(id);
       if (epoch !== state.epoch) return;
-      if (run.session?.kind !== 'worker') { state.error = 'Worker run not found.'; return; }
+      if (!readable(run.session)) { state.error = 'Worker run not found.'; return; }
       showRun(id, run);
       startFollow(id);
     } catch (error) {
@@ -182,7 +187,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
     let gone = false;
     try {
       const {session} = await api(`/sessions/${encodeURIComponent(id)}`);
-      if (epoch === state.epoch && session?.kind === 'worker') state.session = session;
+      if (epoch === state.epoch && readable(session)) state.session = session;
     } catch (error) { gone = error?.status === 404; }
     if (epoch !== state.epoch || follow.id !== id) return;
     if (!gone && live(state.session)) follow.retry = schedule(() => { follow.retry = null; connect(); }, RETRY_MS);
@@ -233,7 +238,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
         return;
       } else if (state.mode === 'detail' && live(state.session)) {
         const run = await readRun(state.selectedId);
-        if (epoch !== state.epoch || state.loading || run.session?.kind !== 'worker') return;
+        if (epoch !== state.epoch || state.loading || !readable(run.session)) return;
         if (same(run, state.raw)) return;
         showRun(state.selectedId, run);
       } else return;

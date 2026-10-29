@@ -65,7 +65,9 @@ async def test_missing_file_then_live_worker(
         assert items[0]["duration_s"] is None
         assert items[0]["busy"] is True
         assert client.get("/api/sessions").json()["sessions"] == []
-        assert client.get(f"/api/sessions/{chat.session_id}").status_code == 404
+        # A chat of the CLI file is a terminal chat: read-only, under its own kind.
+        shown = client.get(f"/api/sessions/{chat.session_id}").json()["session"]
+        assert shown["kind"] == "terminal"
         detail = client.get(f"/api/sessions/{turn.session_id}").json()
         assert detail["agent"] == "not_loaded"
         assert detail["grants"] == []

@@ -306,3 +306,35 @@ test('the fold shows a muted line for notes, accepted messages, memory and recal
   assert.ok(items.every((item) => item.kind === 'fact'));
   assert.equal(items[0].step, 2);
 });
+
+test('a terminal chat is listed under its own kind, opens, and follows while its turn runs', async () => {
+  const calls = [];
+  const f = followFixture();
+  const history = workerHistory(async (path) => {
+    calls.push(path);
+    if (path.startsWith('/sessions?')) return {sessions: [{id: 't', kind: 'terminal'}], next_cursor: null};
+    if (path.includes('/turns')) return {turns: [{turn: 1, status: 'running', events: [{id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'hi'}}]}], has_earlier: false};
+    return {session: {id: 't', kind: 'terminal', status: 'running', busy: true}};
+  }, () => {}, () => () => {}, {
+    open: (url) => { const source = new FakeSource(url); f.sources.push(source); return source; },
+    schedule: (fn, ms) => ({fn, ms}), cancel: () => {}, doc: f.doc,
+  });
+  history.state.kind = 'terminal';
+  await history.list();
+  assert.deepEqual(new URLSearchParams(calls[0].split('?')[1]).get('kind'), 'terminal');
+  await history.detail('t');
+  assert.equal(history.state.error, '');
+  assert.equal(history.state.kind, 'terminal');
+  assert.equal(f.sources.at(-1).url, '/api/sessions/t/events?after=1');
+  history.leave();
+});
+
+test('opening a run keeps the list on worker runs, and a console chat is still refused', async () => {
+  const history = workerHistory(async () => ({session: {id: 'w', kind: 'worker', status: 'completed'}, turns: [], has_earlier: false}), () => {}, () => () => {});
+  history.state.kind = 'terminal';
+  await history.detail('w');
+  assert.equal(history.state.kind, 'worker');
+  const chat = workerHistory(async () => ({session: {id: 'c', kind: 'chat'}}), () => {}, () => () => {});
+  await chat.detail('c');
+  assert.equal(chat.state.error, 'Worker run not found.');
+});
