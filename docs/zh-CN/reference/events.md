@@ -143,7 +143,7 @@ asyncio.run(main())
 | `notice` | 一次尝试结束时、模型给出空回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | 召回块进入请求时：在 `start`、`attempt`、`step`，或由 `recall` 工具触发。 | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | 在一次尝试之后的反思开始之前。 | `attempt`, `failure_type` |
-| `reflection` | 反思的效果确定之后。 | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
+| `reflection` | 反思的效果确定之后。 | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `usage`, `duration_s` |
 | `run.progress` | 仅当设置 `progress=True` 时：紧接在 `run.started` 之后；每次 `step.started`、`tool.finished`、`reflection.started` 和 `stuck` 通知之后；以及紧接在 `run.finished` 之前。 | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | 启用上下文记账时，每次规划或反思尝试一次，包括失败的尝试。 | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | 最后一个。 | `result` |
@@ -314,6 +314,7 @@ CLI 在其计划行出现之前会忽略此事件；会话运行器会保存它�
 - `rationale`、`summary` 和 `best_effort_result`：反思的理由、它对该次尝试的总结，以及它迄今为止最佳的答案。它们与 `assistant.message` 的 `thinking` 和 `content` 一样经过敏感信息脱敏；`RunResult` 保留模型写出的最佳答案原文。
 - `requests`：反思请求的数量，为 1 或 2。若回复中不含反思，则不带工具再请求一次；第二次请求没有自己的事件。在压缩模式中，提示拟合可能在请求发出之前就拒绝它，这会被视为无法读取的回复：此时 `requests` 为 0；若只有重试被拒绝，则为 1。
 - `readable`：在默认的 `reflection_gate="flags"` 下，第二次回复仍不含反思时为 `false`。此时 `requests` 为 2；`action`、`rationale`、`summary` 和 `best_effort_result` 为 `null`；`continue_run` 为 `true`，除非无法开始任何尝试，那时运行以 `budget_exhausted` 结束。使用 `"utility"` 时，它始终为 `true`：这样的回复计为 `stop`，理由为 `Could not parse reflection response`；若它是有效的 JSON 但不是对象，则理由为 `Reflection response was not a JSON object`。
+- `unreadable_reason`：第一次回复为何不含反思：`tool_call`（它带有工具调用，其文本中没有反思；窗口以工具轮次结尾时的常见情况）、`invalid`（其文本含有 `"flags"` 不接受的 JSON 对象）或 `no_json`；可读时为 `null`。无论哪种，之后都会重试，因此 `readable` 可以为 `true` 同时带有原因。
 - `usage`、`prefix` 和 `duration_s`：两次请求的 token 计数和耗时，包括它们的重试。若服务器发送了 `cached_tokens` 和 `reasoning_tokens`，`usage` 中也会包含它们，并对各次请求求和。`prefix` 是 `assistant.message` 下所描述的对象，针对反思的第一次请求（当它是运行的第一个请求，或未发送任何请求时为 `null`）。启用持久化时，`duration_s` 还包括把回复记录到历史中的时间；在另一个进程写入 `history.db` 时，这一步最多可能等待 5 秒。
 
 另见[反思](../concepts/how-it-works.md#reflection)和[运行结果](run-results.md#statuses)。

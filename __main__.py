@@ -71,6 +71,7 @@ _DIRECT_FLAGS = {
     "workspace": "--workspace",
     "fixed_prefix": "--fixed-prefix",
     "window_eviction": "--window-eviction",
+    "reflect_tool_guard": "--reflect-tool-guard",
     "captured_history": "--captured-history",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
@@ -1253,6 +1254,8 @@ def _direct_options(
         fields["fixed_prefix"] = args.fixed_prefix == "on"
     if getattr(args, "window_eviction", None) is not None:
         fields["window_eviction"] = args.window_eviction
+    if getattr(args, "reflect_tool_guard", None) is not None:
+        fields["reflect_tool_guard"] = args.reflect_tool_guard == "on"
     if getattr(args, "captured_history", None) is not None:
         fields["captured_history"] = args.captured_history == "on"
     reasoning = getattr(args, "reasoning", None)
@@ -1398,6 +1401,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--title",
             "--fixed-prefix",
             "--window-eviction",
+            "--reflect-tool-guard",
             "--developer",
             "--captured-history",
             "--context-window",
@@ -1527,6 +1531,12 @@ def _build_parser(
         help="How working memory drops old turns: slide one unit per step once "
         "full (default), chunk eight messages at a time, or boundary also at "
         "the end of an attempt",
+    )
+    direct.add_argument(
+        "--reflect-tool-guard",
+        choices=["on", "off"],
+        help="Reflection requests offer the plan's tools and end with a sentence "
+        "that asks for the JSON object, not a tool call (default off)",
     )
     direct.add_argument(
         "--tool-exposure",

@@ -168,7 +168,7 @@ asyncio.run(main())
 | `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
-| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
+| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | Last. | `result` |
@@ -448,6 +448,11 @@ is in `memory_stats.recall_log` and, with its item text, in
   `Could not parse reflection response`, or
   `Reflection response was not a JSON object` when it was valid JSON that
   is not an object.
+- `unreadable_reason`: why the first reply held no reflection: `tool_call` (it has
+  tool calls and no reflection in its text; the usual case when the window
+  ends in tool turns), `invalid` (its text has a JSON object that
+  `"flags"` does not accept) or `no_json`; `null` when it read. The retry
+  follows either way, so `readable` can be `true` with a reason.
 - `usage`, `prefix` and `duration_s`: the token counts and the time of both
   requests, their retries included. `usage` also holds `cached_tokens` and
   `reasoning_tokens` when the server sent them, summed over the requests.
