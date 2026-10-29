@@ -42,6 +42,18 @@
 
 **Details** 打开会话抽屉，显示工具和会话授权、工作记忆及长期记忆状态，以及已完成的运行；当页面提供轮次游标时，还可分页查看运行记录。你可以在那里撤销已授权的工具；工具视图可能会打开一个暂停的会话。在窄屏上，抽屉会排列在消息输入框下方。
 
+<a id="developer-mode"></a>
+
+## 开发者模式
+
+**Connection settings → Developer** 里有一个开关，“Developer mode: show advanced settings and debug views”。它保存为 `config.toml` 中的 `[ui] mode`，也就是 `melo --help` 读取的设置，并与其他设置一样做修订版本检查；手工写进文件的模式会在页面下次读取时生效。它只改变显示的内容，不改变任何运行行为。开启后：
+
+- Developer 标签页以只读方式列出高级和实验性的 `melo` 选项，标明各自的层级；实验性选项还标明决定它的 issue（用命令行参数或在 `config.toml` 中设置）；
+- **Details** 增加 **Events** 标签页，显示最近一轮保存的原始事件；**Memory** 标签页增加智能体状态和长期记忆后端；
+- **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字。
+
+关闭时这些内容只是隐藏，不会被删除。对话、Workers、任务和连接设置在两种模式下相同。
+
 <a id="recover-a-send"></a>
 
 ## 恢复发送

@@ -34,6 +34,7 @@ from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
+from localmelo.support.option_tiers import ADVANCED, EXPERIMENTAL_ISSUES, OPTION_TIERS
 from localmelo.support.sessions import display
 from localmelo.support.sessions.runner import DEFAULT_RESUME_MODE
 
@@ -85,6 +86,8 @@ class SettingsPutBody(_SettingsBaseBody):
 
     workspace: StrictStr
     revision: StrictStr
+    # ``[ui] mode``; absent leaves the saved mode as it is.
+    mode: StrictStr | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -170,6 +173,24 @@ def health_json(console: Console) -> dict[str, Any]:
     }
 
 
+def _ui_mode(cfg: config.Config) -> str:
+    """The saved ``[ui] mode``; a value the CLI warns about reads as default."""
+    return cfg.ui.mode if cfg.ui.mode in config.UI_MODES else "default"
+
+
+def _advanced_options() -> list[dict[str, str]]:
+    """The advanced and experimental ``melo`` options for the developer view.
+
+    Read-only: the tier label, and for an experimental option the issue that
+    decides it. The user tier is what the console already shows.
+    """
+    return [
+        {"option": name, "tier": tier, "issue": EXPERIMENTAL_ISSUES.get(name, "")}
+        for name, tier in OPTION_TIERS.items()
+        if tier == ADVANCED or name in EXPERIMENTAL_ISSUES
+    ]
+
+
 def settings_json() -> dict[str, Any]:
     """The whole ``GET /api/settings`` body."""
     revision = _file_revision()
@@ -219,6 +240,8 @@ def settings_json() -> dict[str, Any]:
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
         },
+        "mode": _ui_mode(cfg),
+        "advanced_options": _advanced_options(),
         "file_label": display.home_label(config.config_path()),
         "revision": revision,
     }
@@ -282,6 +305,11 @@ def _build_candidate(
     if check_revision is not None:
         _check_single_line("revision", check_revision)
     _validate_sections(body.sections)
+    mode = getattr(body, "mode", None)
+    if mode is not None and mode not in config.UI_MODES:
+        raise ApiError(
+            400, "invalid_request", f"mode: Must be one of {config.UI_MODES}."
+        )
 
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
@@ -295,6 +323,7 @@ def _build_candidate(
     candidate.chat_backend = body.chat_backend
     candidate.embedding_backend = body.embedding_backend
     candidate.gateway.workspace = body.workspace
+    candidate.ui.mode = mode or _ui_mode(candidate)
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -342,6 +371,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         after.gateway.workspace or DEFAULT_WORKSPACE
     ):
         changed.append("workspace")
+    if _ui_mode(before) != _ui_mode(after):
+        changed.append("mode")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

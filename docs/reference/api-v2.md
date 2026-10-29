@@ -148,6 +148,11 @@ file's revision.
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
     "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
   },
+  "mode": "default",
+  "advanced_options": [
+    {"option": "--host", "tier": "advanced", "issue": ""},
+    {"option": "--retriever", "tier": "experimental", "issue": "#4"}
+  ],
   "file_label": "~/.cache/localmelo/config.toml",
   "revision": "5d41402abc4b2a76"
 }
@@ -162,6 +167,11 @@ file's revision.
   is unset.
 - `revision` is the first 16 hex characters of the file's SHA-256, or `""`
   when the file does not exist yet.
+- `mode` is `[ui] mode` (`default` or `developer`; any other saved value
+  reads as `default`). `advanced_options` lists the advanced and experimental
+  `melo` options from the tier table (`issue` is the deciding issue of an
+  experimental one, `""` otherwise); the console shows them read-only in
+  developer mode.
 
 ## PUT /api/settings
 
@@ -179,6 +189,9 @@ sessions.
   must not resolve to `/` or the home folder (including through a symlink);
   otherwise 400 `invalid_request`. `api_key_set` is not accepted in
   `sections`.
+- `mode` is optional: `default` or `developer` sets `[ui] mode` (other values
+  are 400 `invalid_request`); omitted, the saved mode is kept. The mode changes
+  only what the console and `melo --help` show.
 - A `revision` that does not match the file on disk returns 409
   `settings_changed`. Two concurrent `PUT` requests that read the same
   `revision` can both pass the check; the last writer wins, and `os.replace`

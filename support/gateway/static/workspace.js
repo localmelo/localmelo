@@ -1979,10 +1979,18 @@ function sidebar(open) {
   }
 }
 
-const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger") });
+// Developer mode is the saved [ui] mode; it only adds panels (the drawer's Events
+// tab and its run and memory internals) and never changes what a panel does.
+let developerMode = false;
+async function refreshMode(saved) {
+  try { developerMode = (saved ?? await api("/settings")).mode === "developer"; } catch { /* Keep the last known mode. */ }
+}
+const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 const showSettings = setupSettings({
   api,
-  onSaved: async () => {
+  onSaved: async (saved) => {
+    await refreshMode(saved);
+    drawer.modeChanged();
     try {
       S.health = await api("/health");
       syncUI();
@@ -2152,9 +2160,12 @@ for (const id of ["close-settings", "cancel-settings"]) $(id).addEventListener("
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
 });
-$("details-trigger").addEventListener("click", () => {
+$("details-trigger").addEventListener("click", async () => {
   if (workerMode) return;
-  if (!drawer.close()) drawer.open();
+  if (drawer.close()) return;
+  // A config written by hand wins: read the mode again as the drawer opens.
+  await refreshMode();
+  drawer.open();
 });
 $("stop-btn").addEventListener("click", stop);
 $("reconnect-btn").addEventListener("click", async () => {

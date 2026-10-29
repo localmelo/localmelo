@@ -891,7 +891,10 @@ dialog::backdrop {
 .drawer-tabs, .settings-tabs { display: flex; gap: 6px; margin: 12px 0; }
 .settings-tabs button, .drawer-tabs button, .details-drawer button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--soft); }
 .drawer-tabs [aria-pressed="true"], .settings-tabs [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-.drawer-tool, .drawer-memory, .drawer-run { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.drawer-tabs { flex-wrap: wrap; }
+.drawer-event pre { margin: 2px 0; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dev-options { max-height: 220px; overflow: auto; margin: 8px 0; padding-left: 18px; font: 11px/1.6 ui-monospace, monospace; }
+.drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
 .theme-options { display: flex; gap: 16px; border: 1px solid var(--line); border-radius: 8px; margin: 16px 0; }
 #settings-test-status[data-state="success"] { color: var(--ok); }
