@@ -18,6 +18,7 @@ from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_reque
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
     Fingerprint,
+    Novelty,
     best_match,
     fingerprint,
 )
@@ -548,6 +549,7 @@ class Chat:
         self.last_call = None
         self._sent = []
         self._sent_count = 0
+        self._novelty = Novelty()
         self._plan = None
         self._plan_tools = None
         self._accounting = (
@@ -775,6 +777,9 @@ class Chat:
             outgoing = _merge_user_turns(messages) if self.fixed_prefix else messages
             current = fingerprint(outgoing, tools)
             prefix = best_match(self._sent, current)
+            fresh, total = self._novelty.add(current)
+            if prefix is not None:
+                prefix = {**prefix, "fresh_chars": fresh, "request_chars": total}
             self._sent_count += 1
             self._sent.append((self._sent_count, kind, current))
             del self._sent[:-MAX_FINGERPRINTS]

@@ -14,9 +14,14 @@ requests (``reused``), that request (``against``: kind and number ``#n``) and
 the role of the first message that changed. Numbers count the run's
 requests; a reflection that had to be asked twice takes two (its row shows
 the first request's prefix and the usage of both). Then the totals by kind
-and overall, with the cached share. ``-`` marks a value the log does not
-hold: a server that sends no ``cached_tokens``, the run's first request, or a
-log from before the ``prefix`` object existed.
+and overall, with the cached share (of all prompt tokens), and a ``reusable``
+line: the requests after the run's first, with ``fresh`` tokens (content no
+earlier request of the run held, which no prompt cache could have) estimated
+from each request's own tokens-per-character ratio, and the reusable share
+``cached / (prompt - fresh)`` beside the all-token share of the same
+requests. The fresh tokens are an estimate. ``-`` marks a value the log does
+not hold: a server that sends no ``cached_tokens``, the run's first request, or
+a log from before the ``prefix`` object (or its ``fresh_chars``) existed.
 Standard library only; it changes nothing.
 """
 
@@ -59,7 +64,20 @@ def read_events(lines: Iterable[str]) -> list[dict[str, Any]]:
     return events
 
 
-def _row(event: dict[str, Any], number: int) -> tuple[list[str], str, int, int | None]:
+Stat = tuple[str, int, "int | None", "float | None"]
+
+
+def _fresh_tokens(prefix: dict[str, Any] | None, prompt: int | None) -> float | None:
+    """The tokens of a request's first-seen content, from its characters."""
+    if prefix is None or prompt is None:
+        return None
+    fresh, size = prefix.get("fresh_chars"), prefix.get("request_chars")
+    if not isinstance(fresh, int) or not isinstance(size, int) or size <= 0:
+        return None
+    return fresh * prompt / size
+
+
+def _row(event: dict[str, Any], number: int) -> tuple[list[str], Stat]:
     data = event.get("data") or {}
     kind = KINDS[event["type"]]
     usage = data.get("usage") or {}
@@ -80,9 +98,7 @@ def _row(event: dict[str, Any], number: int) -> tuple[list[str], str, int, int |
     cells = [number, kind, at, prompt, cached, new, reused, against, changed]
     return (
         ["-" if c is None else str(c) for c in cells],
-        kind,
-        prompt or 0,
-        cached,
+        (kind, prompt or 0, cached, _fresh_tokens(prefix, prompt)),
     )
 
 
@@ -92,7 +108,7 @@ def report(events: list[dict[str, Any]]) -> str:
     for event in events:
         runs.setdefault(str(event.get("run_id", "?")), []).append(event)
     out: list[str] = []
-    overall: list[tuple[str, int, int | None]] = []
+    overall: list[Stat] = []
     for run_id, run_events in runs.items():
         rows = []
         number = 1
@@ -107,7 +123,7 @@ def report(events: list[dict[str, Any]]) -> str:
             if len(r) != len(widths):
                 raise ValueError(f"row has {len(r)} cells, the header {len(widths)}")
             out.append("  " + "  ".join(map(str.rjust, r, widths)))
-        stats = [(kind, p, c) for _, kind, p, c in rows]
+        stats = [stat for _, stat in rows]
         out.extend(_totals(stats, "  "))
         overall.extend(stats)
     if len(runs) > 1:
@@ -116,20 +132,40 @@ def report(events: list[dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
-def _totals(stats: list[tuple[str, int, int | None]], indent: str) -> list[str]:
-    """The total line of each kind present (when more than one) and overall."""
-    kinds = sorted({kind for kind, _, _ in stats})
+def _totals(stats: list[Stat], indent: str) -> list[str]:
+    """The total line of each kind present (when more than one), overall, and the
+    reusable share."""
+    kinds = sorted({stat[0] for stat in stats})
     groups = [(k, [s for s in stats if s[0] == k]) for k in kinds if len(kinds) > 1]
-    return [
+    lines = [
         f"{indent}{label}: {_total(group)}"
         for label, group in [*groups, ("total", stats)]
     ]
+    return [*lines, f"{indent}reusable: {_reusable(stats)}"]
 
 
-def _total(stats: list[tuple[str, int, int | None]]) -> str:
-    prompt = sum(p for _, p, _ in stats)
-    cached = sum(c for _, _, c in stats if c is not None)
-    reported = sum(p for _, p, c in stats if c is not None)
+def _reusable(stats: list[Stat]) -> str:
+    """The share of the reusable prompt tokens (prompt minus fresh) that hit."""
+    rows = [
+        (p, c, f) for _, p, c, f in stats if c is not None and f is not None and p > 0
+    ]
+    prompt = sum(p for p, _, _ in rows)
+    fresh = sum(f for _, _, f in rows)
+    cached = sum(c for _, c, _ in rows)
+    if not rows or prompt - fresh <= 0:
+        return "n/a (needs cached_tokens and fresh_chars, after a run's first request)"
+    return (
+        f"{len(rows)} requests after the first, {prompt} prompt tokens, "
+        f"~{round(fresh)} fresh (estimated), {cached} cached, "
+        f"reusable share {100 * cached / (prompt - fresh):.1f}% "
+        f"(all-token share of these requests {100 * cached / prompt:.1f}%)"
+    )
+
+
+def _total(stats: list[Stat]) -> str:
+    prompt = sum(p for _, p, _, _ in stats)
+    cached = sum(c for _, _, c, _ in stats if c is not None)
+    reported = sum(p for _, p, c, _ in stats if c is not None)
     line = f"{len(stats)} requests, {prompt} prompt tokens"
     if not reported:
         return line + ", no cached_tokens reported, cached share n/a"

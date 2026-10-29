@@ -19,10 +19,12 @@ from localmelo.melo.schema import Message, ToolDef
 # Fingerprints kept per run; the oldest are dropped first.
 MAX_FINGERPRINTS = 64
 
-# The offered tools, then each message as (digest of its serialized form, role,
-# content): the digest decides equality, the content (the message's own string,
-# not a copy) gives the characters.
-Fingerprint = tuple[str, list[tuple[str, str, str]]]
+# One message as (digest of its serialized form, role, content, characters of
+# the serialized form): the digest decides equality, the content (the message's
+# own string, not a copy) gives the characters it shows.
+Entry = tuple[str, str, str, int]
+# The offered tools, then each message.
+Fingerprint = tuple[str, list[Entry]]
 
 
 def fingerprint(
@@ -35,32 +37,50 @@ def fingerprint(
         sort_keys=True,
         default=str,
     )
-    return schema, [
-        (
-            hashlib.blake2b(
-                json.dumps(
-                    [
-                        message.role,
-                        message.content,
-                        message.thinking,
-                        [(c.id, c.tool_name, c.arguments) for c in message.tool_calls],
-                        message.tool_call_id,
-                        [image.sha256 for image in message.images],
-                    ],
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    default=str,
-                ).encode(),
-                digest_size=16,
-            ).hexdigest(),
+    return schema, [_entry(message) for message in messages]
+
+
+def _entry(message: Message) -> Entry:
+    text = json.dumps(
+        [
             message.role,
             message.content,
-        )
-        for message in messages
-    ]
+            message.thinking,
+            [(c.id, c.tool_name, c.arguments) for c in message.tool_calls],
+            message.tool_call_id,
+            [image.sha256 for image in message.images],
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    digest = hashlib.blake2b(text.encode(), digest_size=16).hexdigest()
+    return digest, message.role, message.content, len(text)
 
 
-def _shared(old: list[tuple[str, str, str]], new: list[tuple[str, str, str]]) -> int:
+class Novelty:
+    """The messages a run's requests have sent, by hash.
+
+    What is new in a request is what no earlier request of the run held, so
+    no prompt cache could have it.
+    """
+
+    def __init__(self) -> None:
+        self._seen: set[str] = set()
+
+    def add(self, request: Fingerprint) -> tuple[int, int]:
+        """``(fresh, total)`` characters of *request*, which is then known.
+
+        *fresh* counts the serialized messages no earlier request held;
+        *total* all of them and the tools' schema.
+        """
+        entries = request[1]
+        fresh = sum(entry[3] for entry in entries if entry[0] not in self._seen)
+        self._seen.update(entry[0] for entry in entries)
+        return fresh, sum(entry[3] for entry in entries) + len(request[0])
+
+
+def _shared(old: list[Entry], new: list[Entry]) -> int:
     """The number of leading messages that *old* and *new* have in common."""
     same = 0
     while same < min(len(old), len(new)) and old[same][0] == new[same][0]:
@@ -68,9 +88,7 @@ def _shared(old: list[tuple[str, str, str]], new: list[tuple[str, str, str]]) ->
     return same
 
 
-def _shared_chars(
-    old: list[tuple[str, str, str]], new: list[tuple[str, str, str]], same: int
-) -> int:
+def _shared_chars(old: list[Entry], new: list[Entry], same: int) -> int:
     """Characters of content in the *same* leading messages, plus the common
     start of the next message's content."""
     chars = sum(len(message[2]) for message in new[:same])

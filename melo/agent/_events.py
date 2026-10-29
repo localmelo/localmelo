@@ -574,6 +574,16 @@ class _Emitter:
             for name, value in call.details.items():
                 usage[name] = usage.get(name, 0) + value
         prefix = self._calls[0].prefix if self._calls else None
+        later = [call.prefix for call in self._calls[1:] if call.prefix is not None]
+        if prefix is not None and later:
+            # Like usage, the novelty covers every request of the reflection.
+            prefix = {
+                **prefix,
+                **{
+                    key: sum(p[key] for p in [prefix, *later])
+                    for key in ("fresh_chars", "request_chars")
+                },
+            }
         duration_s = time.perf_counter() - self._reflecting_since
         action: str | None = None
         rationale: str | None = None

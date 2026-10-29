@@ -188,8 +188,9 @@ asyncio.run(main())
   - `previous_messages`、`total_messages`：该请求和本次请求的消息数。
   - `first_changed`：第一条不同消息的角色（`system`、`user`、`assistant` 或 `tool`）；如果该请求正好是本次请求的前缀（运行中常见的增长），则为 `null`。
   - `tools_changed`：提供的工具定义不同时为 `true`。
+  - `fresh_chars`：本次请求的消息中，该运行较早的任何请求都没有包含过的字符数，按每条序列化消息（角色、内容、thinking、调用、调用 id、图片）的哈希判断。任何提示缓存都不可能有它们：它们是新的工具结果和回复。`request_chars`：该请求的序列化消息和工具 schema 的全部字符数。对询问了两次的 `reflection`，两者都对其各个请求求和。早于它们的日志没有这两项。
 
-  服务器按 token 前缀进行缓存，因此 `messages` 很高而 `cached_tokens` 很低，说明问题出在服务器；`first_changed: "system"` 则指向提示词。`scripts/cache_report.py LOG` 会根据 `stream-json` 日志逐个请求打印这两项。
+  服务器按 token 前缀进行缓存，因此 `messages` 很高而 `cached_tokens` 很低，说明问题出在服务器；`first_changed: "system"` 则指向提示词。`scripts/cache_report.py LOG` 会根据 `stream-json` 日志逐个请求打印这两项，然后给出可复用份额：`cached / (prompt - fresh)`，其中 `fresh` 是把 `fresh_chars` 换算成的 token，按该请求自己的每字符提示 token 数估算（`fresh_chars / request_chars * prompt_tokens`；这是估算值，因此份额可能超过 100%）。它统计每个运行第一个请求之后、报告了 `cached_tokens` 的请求，分别按运行和合并给出，与所有提示 token 的份额并列。
 - `duration_s`：规划请求的耗时，包括其重试及重试前的等待。启用持久化时，它还包括把回复记录到历史中的时间；在另一个进程写入 `history.db` 时，这一步最多可能等待 5 秒。
 
 在构建事件之前，`thinking` 和 `content` 会经过最小化的敏感信息脱敏，把每一处替换为 `[redacted]`：

@@ -237,11 +237,23 @@ asyncio.run(main())
     (`system`, `user`, `assistant` or `tool`), or `null` when that
     request is a plain prefix of this one (the usual growth of a run).
   - `tools_changed`: `true` when the tool definitions offered differ.
+  - `fresh_chars`: the characters of this request's messages that no earlier
+    request of the run held, found by the hash of each serialized message
+    (role, content, thinking, calls, call id, images). No prompt cache could
+    have them: they are new tool results and replies. `request_chars`: all
+    the characters of the request's serialized messages and of the tools'
+    schema. On a `reflection` that asked twice, both are summed over its
+    requests. A log from before them lacks both.
 
   A server caches by token prefix, so a high `messages` with a low
   `cached_tokens` points at the server, and `first_changed: "system"` at
   the prompt. `scripts/cache_report.py LOG` prints both per request from a
-  `stream-json` log.
+  `stream-json` log, then the reusable share: `cached / (prompt - fresh)`,
+  where `fresh` is `fresh_chars` as tokens, estimated with the request's own
+  prompt tokens per character (`fresh_chars / request_chars * prompt_tokens`;
+  an estimate, so the share can pass 100%). It counts the requests after a
+  run's first that reported `cached_tokens`, per run and pooled, beside the
+  share of all prompt tokens.
 - `duration_s`: how long the planning request took, its retries and the
   waits before them included. With persistence on, it also includes
   recording the reply in history, which can wait up to 5 seconds while
