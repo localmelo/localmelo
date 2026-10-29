@@ -163,7 +163,6 @@ async def test_an_empty_body_is_named() -> None:
 @pytest.mark.parametrize(
     ("error", "text"),
     [
-        (httpx.ConnectError("All connection attempts failed"), "ConnectError: All"),
         (httpx.ConnectTimeout(""), "ConnectTimeout"),
         (httpx.ReadTimeout("timed out"), "ReadTimeout: timed out"),
         (httpx.RemoteProtocolError("peer closed"), "RemoteProtocolError: peer"),
@@ -175,6 +174,28 @@ async def test_timeouts_and_transport_errors_are_retryable(
     exc = await _error(kind, _raise(error))
     assert (exc.status_code, exc.retryable) == (None, True)
     assert str(exc).startswith(f"POST {PATHS[kind]} failed: {text}")
+    assert exc.__cause__ is error
+
+
+# The base URL each provider is built with in _request.
+BASE_URLS = {
+    "openai": "http://llm.test/v1",
+    "ollama": "http://ollama.test",
+    "embedding": "http://emb.test/v1",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS)
+async def test_a_refused_connection_names_the_server_and_the_fix(kind: str) -> None:
+    error = httpx.ConnectError("All connection attempts failed")
+    exc = await _error(kind, _raise(error))
+    assert (exc.status_code, exc.retryable) == (None, True)
+    assert str(exc) == (
+        f"cannot reach the model server at {BASE_URLS[kind]}. "
+        "Start it, or run melo to set one up. "
+        "(ConnectError: All connection attempts failed)"
+    )
     assert exc.__cause__ is error
 
 

@@ -75,6 +75,26 @@ def _exception_text(exc: Exception) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+# The start of every "cannot reach" message; the status hint matches it.
+UNREACHABLE_PREFIX = "cannot reach the model server at "
+
+
+def unreachable(
+    client: httpx.AsyncClient, exc: httpx.ConnectError, *, retryable: bool
+) -> ProviderError:
+    """The error for a request that could not connect to the model server.
+
+    It names the server's URL and the fix; the raw cause follows, for the
+    record's error detail. A timeout is not this: it keeps its own message.
+    """
+    url = str(client.base_url).rstrip("/")
+    return ProviderError(
+        f"{UNREACHABLE_PREFIX}{url}. Start it, or run melo to set one up. "
+        f"({_exception_text(exc)})",
+        retryable=retryable,
+    )
+
+
 def malformed_body(response: httpx.Response, path: str, problem: str) -> ProviderError:
     """The error for a response to ``POST <path>`` that lacks what it needs.
 
@@ -116,6 +136,8 @@ async def post_json(
             retryable=status in RETRYABLE_STATUS_CODES,
             context_overflow=_context_overflow(exc.response),
         ) from exc
+    except httpx.ConnectError as exc:
+        raise unreachable(client, exc, retryable=True) from exc
     except httpx.TransportError as exc:  # timeouts included
         raise ProviderError(
             f"POST {path} failed: {_exception_text(exc)}", retryable=True

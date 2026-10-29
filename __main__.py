@@ -2413,6 +2413,12 @@ def _start_gateway(cfg: Config) -> None:
     print(f"  Embedding: {cfg.embedding_backend}")
     print(f"  Gateway: http://{host}:{cfg.gateway.port}")
     print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
+    # The gateway always checks a bearer token or a browser cookie, so the
+    # console needs a sign-in link from --gateway-login (on the same port).
+    print(
+        "  Sign in: run melo --gateway-login "
+        f"--port {cfg.gateway.port} in another terminal"
+    )
     print()
 
     if getattr(cfg, "_allow_unconfigured", False):

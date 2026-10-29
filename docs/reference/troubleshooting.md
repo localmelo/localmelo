@@ -116,7 +116,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-[r]etry, [s]tart anyway, [q]uit [r]:
+[r]etry, [s]tart without saving, [q]uit [r]:
 ```
 
 - **Cause:** `GET /v1/models` on that URL failed. `connection refused`:
@@ -230,7 +230,7 @@ rotation invalidates existing browser sessions. See [gateway security](../guides
 ### ConnectError
 
 ```text
-melo: run ended with status provider_error: POST /chat/completions failed: ConnectError: All connection attempts failed
+melo: run ended with status provider_error: cannot reach the model server at http://127.0.0.1:11434/v1. Start it, or run melo to set one up. (ConnectError: All connection attempts failed)
 ```
 
 - **Cause:** nothing listens at the URL: the server is not running, or the

@@ -792,6 +792,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The "no model server" screens now say what to do. A chat request that cannot
+  connect ends the run with `cannot reach the model server at URL. Start it, or
+  run melo to set one up.` and the raw cause after it, in the status line and
+  the JSON `error`; timeouts and HTTP errors keep their text. The first run with
+  no server found prints `No model server found on this computer (looked at
+  ports …)` before the URL question, and the retry prompt reads `[s]tart without
+  saving`. `melo --serve` prints `Sign in: run melo --gateway-login --port N in
+  another terminal` after `Web UI:`. Text only: exit codes and choices are
+  unchanged ([#NN]).
+
 - Organize Markdown documentation into start, guides, reference, concepts and
   project sections. Old paths retain readable links for each historical
   fragment; the agent entry points and printed CLI paths remain stable ([#129]).

@@ -44,6 +44,7 @@ from localmelo.support.cli.text import (
 from localmelo.support.cli.theme import Symbols
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.progress_line import format_line, format_past, tool_elapsed
+from localmelo.support.providers._http import UNREACHABLE_PREFIX
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.display import (
     clean_output,
@@ -203,7 +204,9 @@ def status_hint(
         code = int(http.group(1)) if http else 0
         failed = _FAILED_WITH.search(error)
         name = failed.group(1) if failed and not http else ""
-        if name in ("ConnectError", "ConnectTimeout"):
+        # ConnectError is the pre-"cannot reach" text of older saved runs.
+        unreachable = error.startswith(UNREACHABLE_PREFIX)
+        if unreachable or name in ("ConnectError", "ConnectTimeout"):
             return f"Is the model server running at {url}? /status checks again."
         if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
             return (

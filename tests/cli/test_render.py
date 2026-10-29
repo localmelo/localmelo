@@ -360,6 +360,13 @@ def test_a_blank_answer_says_so() -> None:
         ),
         (
             "provider_error",
+            f"cannot reach the model server at {URL}. Start it, or run melo to set "
+            "one up. (ConnectError: All connection attempts failed)",
+            "✗",
+            f"Is the model server running at {URL}?",
+        ),
+        (
+            "provider_error",
             "POST /chat/completions failed: ReadTimeout: x",
             "✗",
             "may still be loading the model.",

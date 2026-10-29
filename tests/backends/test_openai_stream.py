@@ -269,6 +269,30 @@ async def test_incomplete_tools_are_never_returned(arguments: str, finish: str) 
 
 
 @pytest.mark.asyncio
+async def test_a_refused_stream_names_the_server() -> None:
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(_refuse),
+    )
+    try:
+        with pytest.raises(ProviderError) as failure:
+            _ = [event async for event in provider.stream_chat([])]
+        assert failure.value.retryable
+        assert str(failure.value) == (
+            "cannot reach the model server at http://example.test/v1. "
+            "Start it, or run melo to set one up. "
+            "(ConnectError: All connection attempts failed)"
+        )
+    finally:
+        await provider.close()
+
+
+def _refuse(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("All connection attempts failed")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error", [httpx.ReadTimeout("timeout"), httpx.ReadError("disconnect")]
 )
