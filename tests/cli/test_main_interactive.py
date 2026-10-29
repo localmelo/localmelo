@@ -186,7 +186,7 @@ def test_reconfigure_off_a_terminal_runs_the_wizard_then_exits() -> None:
         mock.patch.object(cli, "_build_direct_mode_agent") as build,
     ):
         cli.main()
-    setup.assert_called_once_with()
+    setup.assert_called_once_with(guided=True)
     gateway.assert_not_called()
     build.assert_not_called()
 
