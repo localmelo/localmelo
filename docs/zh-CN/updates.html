@@ -94,7 +94,7 @@
             <time datetime="2026-10-28">2026-10-28</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/177">#177</a>
           </p>
-          <p><code>POST /api/tasks/{task_id}/resume</code>（也可用 <code>/api/v2/tasks/{task_id}/resume</code>）接受 <code>{operation_id, confirmation_token?}</code>，返回 202，以及任务和操作 ID。存储能证明从未启动的停放或中断任务，会通过现有的启动围栏排队为首次启动，无需确认卡。已启动的任务只有在可信的完整捕获记录覆盖整个执行、且每个已记录的进程组都能确认已经不存在时，才无需确认即可恢复；其他情况下，用户须通过确认令牌接受记录的风险，无法判定的检查会阻止恢复。控制台的 Resume 卡片随后；现有的 <code>PATCH</code> 对已恢复的任务仍然受围栏限制。</p>
+          <p><code>POST /api/tasks/{task_id}/resume</code>（也可用 <code>/api/v2/tasks/{task_id}/resume</code>）接受 <code>{operation_id, confirmation_token?}</code>，返回 202，以及任务和操作 ID。存储能证明从未启动的停放或中断任务，会通过现有的启动围栏排队为首次启动，无需确认卡。已启动的任务只有在可信的完整捕获记录覆盖整个执行、且每个已记录的进程组都能确认已经不存在时，才无需确认即可恢复；其他情况下，用户须通过确认令牌接受记录的风险；无法读取或不支持的检查按未知处理，绝不当作已停止；缺少任务卡片则会阻止恢复。控制台的 Resume 卡片随后；现有的 <code>PATCH</code> 对已恢复的任务仍然受围栏限制。</p>
         </article>
 
         <article class="update-entry" id="u-live-reply">

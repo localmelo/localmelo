@@ -106,7 +106,7 @@
             <time datetime="2026-10-28">2026-10-28</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/177">#177</a>
           </p>
-          <p><code>POST /api/tasks/{task_id}/resume</code> (also <code>/api/v2/tasks/{task_id}/resume</code>) takes <code>{operation_id, confirmation_token?}</code> and returns 202 with the task and the operation ID. A parked or interrupted task that the store proves never started is queued as its first start through the existing launch fence, with no card. A started task resumes without a confirmation only with a trusted complete capture covering its whole execution and every recorded process group verifiably gone; otherwise the user must accept the recorded risk with a confirmation token, and an unknown check blocks. The console's Resume card is next; the existing <code>PATCH</code> stays fenced for recovered work.</p>
+          <p><code>POST /api/tasks/{task_id}/resume</code> (also <code>/api/v2/tasks/{task_id}/resume</code>) takes <code>{operation_id, confirmation_token?}</code> and returns 202 with the task and the operation ID. A parked or interrupted task that the store proves never started is queued as its first start through the existing launch fence, with no card. A started task resumes without a confirmation only with a trusted complete capture covering its whole execution and every recorded process group verifiably gone; otherwise the user must accept the recorded risk with a confirmation token; an unreadable or unsupported check counts as unknown, never as stopped, and a missing card blocks. The console's Resume card is next; the existing <code>PATCH</code> stays fenced for recovered work.</p>
         </article>
 
         <article class="update-entry" id="u-live-reply">
