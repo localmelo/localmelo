@@ -11,10 +11,18 @@ import re
 import stat
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, TextIO, cast
 
+from localmelo.melo.agent._brief_gate import CHECK_TAIL_LINES, BriefCheckResult
 from localmelo.melo.contracts.events import AgentEvent
+from localmelo.melo.executor import TOOL_EXIT_CODE, Executor
+from localmelo.melo.executor.models import (
+    ErrorCategory,
+    ExecutionRequest,
+    ExecutionStatus,
+)
 from localmelo.melo.memory.notes import _call_text, _digest_verified, _is_check
 from localmelo.melo.schema import ToolCall, ToolResult
 from localmelo.support.sessions.worker import redact_worker, sensitive_read
@@ -132,6 +140,63 @@ def workspace_fingerprint(workspace: str) -> str | None:
     return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
 
 
+# Printed after a check that ran without a workspace root, whose shell_exec
+# records no exit status, so the gate can read the status from the output.
+_EXIT_MARK = "__melo_check_exit__"
+_EXIT_LINE = re.compile(rf"\n?{_EXIT_MARK}(\d+)\n?\Z")
+_REFUSED = (
+    ErrorCategory.TOOL_NOT_FOUND,
+    ErrorCategory.TOOL_NOT_OFFERED,
+    ErrorCategory.INVALID_ARGUMENTS,
+)
+
+
+async def run_brief_check(executor: Executor, command: str) -> BriefCheckResult:
+    """Run a brief's check as a ``shell_exec`` call of the run's executor.
+
+    The call takes the executor's whole path, so the mode's policy, the
+    workspace root and the shell timeout apply as they do to the model's
+    own calls. A call that the path refuses does not run and is reported
+    in ``refused``. The check passes on exit status 0.
+    """
+    wrapped = command
+    if executor.workspace_root is None:
+        wrapped = (
+            f"(\n{command}\n)\n__melo_rc=$?\n"
+            f"printf '\\n{_EXIT_MARK}%s\\n' \"$__melo_rc\"\nexit $__melo_rc"
+        )
+    codes: list[int] = []
+    slot = TOOL_EXIT_CODE.set(codes)
+    started = time.perf_counter()
+    try:
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="shell_exec", arguments={"command": wrapped})
+        )
+    finally:
+        TOOL_EXIT_CODE.reset(slot)
+    duration = time.perf_counter() - started
+    ran = outcome.status is ExecutionStatus.SUCCESS
+    text = outcome.output if ran else outcome.error
+    exit_code = codes[-1] if codes else None
+    if ran and exit_code is None:
+        found = _EXIT_LINE.search(text)
+        if found is not None:
+            exit_code, text = int(found.group(1)), text[: found.start()]
+    refused = ""
+    if outcome.status is ExecutionStatus.BLOCKED or outcome.error_category in _REFUSED:
+        refused = outcome.error
+    # The shell_exec line that repeats the status the result already holds.
+    text = re.sub(r"\A\[exit code -?\d+\]\n?", "", text)
+    tail = "\n".join(text.splitlines()[-CHECK_TAIL_LINES:])
+    return BriefCheckResult(
+        command=redact_output(command),
+        exit_code=exit_code,
+        duration_s=duration,
+        output=redact_output(tail),
+        refused=redact_output(refused),
+    )
+
+
 def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:
     """Build a redacted report when there is no completed run result."""
     head, dirty = workspace_head(workspace)
@@ -167,6 +232,8 @@ class WorkerObserver:
         self.pending: dict[str, tuple[ToolCall, str | None]] = {}
         self.checks: list[tuple[ToolCall, ToolResult]] = []
         self.check_exit: int | None = None
+        # The detail of each brief_check notice (see run_brief_check).
+        self.gate: list[dict[str, Any]] = []
         self.attempt = 0
         self.lines: queue.Queue[str | None] = queue.Queue(maxsize=64)
         self.thread: threading.Thread | None = None
@@ -225,6 +292,8 @@ class WorkerObserver:
                 self.attempt = attempt
                 self.checks.clear()
                 self.check_exit = None
+        if event.type == "notice" and data.get("kind") == "brief_check":
+            self.gate.append(dict(data.get("detail") or {}))
         if event.type == "tool.started":
             call = ToolCall(
                 str(data.get("name", "")),
@@ -270,7 +339,32 @@ class WorkerObserver:
                 safe["images"] = []
         self._enqueue({"v": 1, "type": "event", "event": payload})
 
+    def _gate_tests(self) -> dict[str, Any]:
+        """The checks of the brief gate's last round: ``passed`` or ``failed``."""
+        last = max(detail.get("round", 0) for detail in self.gate)
+        latest = [detail for detail in self.gate if detail.get("round", 0) == last]
+        items = []
+        for detail in latest:
+            command = redact_output(str(detail.get("command", "")))
+            item = {
+                "command": command[:2000],
+                "command_truncated": len(command) > 2000,
+                "exit_code": detail.get("exit_code"),
+                "duration_s": detail.get("duration_s"),
+                "source": "brief_check",
+            }
+            if detail.get("refused"):
+                item["refused"] = detail["refused"]
+            items.append(item)
+        passed = all(
+            detail.get("exit_code") == 0 and not detail.get("refused")
+            for detail in latest
+        )
+        return {"state": "passed" if passed else "failed", "items": items}
+
     def tests(self) -> dict[str, Any]:
+        if self.gate:
+            return self._gate_tests()
         evidence = _digest_verified(self.checks, self.workspace)
         if not evidence:
             return {"state": "not_recorded", "items": []}
