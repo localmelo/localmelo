@@ -1373,8 +1373,10 @@ class TestCliStreamConfig:
         cfg = _timeout_cfg()
         cfg.cli = CliConfig(reasoning_tags=tags)
         cfg.cli.stream = stream
-        assert any(error.startswith("[cli]") for error in cfg.validate())
         assert cfg.cli_errors()
+        # A display preference: the UI warns and falls back, everything else
+        # (direct mode, the gateway) never fails on it.
+        assert not any(error.startswith("[cli]") for error in cfg.validate())
 
     @pytest.mark.parametrize(
         "section",
@@ -1396,4 +1398,5 @@ class TestCliStreamConfig:
         )
         loaded = load()
         assert loaded.cli_errors()
-        assert any(error.startswith("[cli]") for error in loaded.validate())
+        assert not any(error.startswith("[cli]") for error in loaded.validate())
+        loaded.validate_or_raise()  # a bad [cli] is not a configuration error

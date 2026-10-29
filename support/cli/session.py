@@ -206,6 +206,7 @@ class CliSession:
         # framing hints belong to the renderer, which applies the same rule
         # to the stream and to the whole reply.
         self.stream = stream
+        self._default_stream = stream
         self.renderer.reasoning_tags = dict(reasoning_tags or {})
         self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
         self.runner: SessionRunner | None = None
@@ -1041,7 +1042,7 @@ class CliSession:
             self.out.print(self._text(line))
 
     async def new(self) -> None:
-        """``/new``: the next message starts a new session, with no grants."""
+        """``/new``: start over, grants and display preferences included."""
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
@@ -1052,6 +1053,7 @@ class CliSession:
         self.title = ""
         self.renderer.context_tokens = 0
         self.renderer.new_session()
+        self.stream = self._default_stream
         label = " New session "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule

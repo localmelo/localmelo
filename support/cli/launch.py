@@ -493,9 +493,10 @@ async def main_async(
 
         approver = TerminalApprover()
         session_config = config.load()
-        # A --base-url session does not validate the saved backend, but it
-        # still reads [cli]: a bad value falls back with a warning rather than
-        # turning streaming on or keeping an unknown hint.
+        # Config validation never fails on [cli] (a display preference), and a
+        # --base-url session validates nothing at all, so both paths land here:
+        # a bad value falls back with a warning rather than turning streaming
+        # on or keeping an unknown hint.
         if errors := session_config.cli_errors():
             logging.getLogger(__name__).warning(
                 "Invalid [cli] settings; using defaults: %s", "; ".join(errors)

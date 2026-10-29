@@ -241,7 +241,9 @@ class Config:
         errors.extend(self._validate_retrieval())
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
-        errors.extend(self._validate_cli())
+        # [cli] is a display preference: like [sessions] resume_mode, a bad
+        # value warns and falls back in the interactive UI (cli_errors()), so
+        # direct mode and the gateway never fail on it.
         errors.extend(self._validate_gateway_workspace())
 
         # -- chat_backend validation --

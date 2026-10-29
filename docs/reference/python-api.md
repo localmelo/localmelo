@@ -216,8 +216,10 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   stream. At commit, apply `redact_for_storage()` separately to each concatenated
   display channel: it applies the snapshot and then the current rules, so newer
   rules can add masking. Redaction is pattern-based and does not guarantee secret
-  removal. This contract
-  has no agent or UI consumer yet; existing `chat()` behavior is unchanged.
+  removal. The interactive terminal UI is the only consumer (`[cli] stream =
+  true`): it streams planning requests only, draws released text in its live
+  area and stores the completed reply, never the deltas; existing `chat()`
+  behavior is unchanged.
   Callers must not silently retry a stream after showing provisional output.
   Call `finish()` only after a completed reply; call `abort()` on error or
   cancellation to discard buffered text (already released text cannot be recalled).

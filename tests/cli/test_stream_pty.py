@@ -52,9 +52,18 @@ def screen(term: Melo, columns: int = 100) -> str:
 
 
 @pytest.fixture
-def streamed(tmp_path: Path) -> Iterator[Callable[..., Melo]]:
+def servers() -> Iterator[list[StubServer]]:
+    items: list[StubServer] = []
+    yield items
+    for server in items:
+        server.close()
+
+
+@pytest.fixture
+def streamed(
+    tmp_path: Path, servers: list[StubServer]
+) -> Iterator[Callable[..., Melo]]:
     terms: list[Melo] = []
-    servers: list[StubServer] = []
 
     def start(scenario: str, *, hint: str | None = "none", stream: bool = True) -> Melo:
         server = StubServer(load_scenarios([SCENARIOS]), default=scenario).start()
@@ -67,8 +76,6 @@ def streamed(tmp_path: Path) -> Iterator[Callable[..., Melo]]:
     yield start
     for term in terms:
         term.close()
-    for server in servers:
-        server.close()
 
 
 def test_a_streamed_reply_shows_live_then_prints_the_final_answer_once(
@@ -167,4 +174,35 @@ def test_a_stream_that_breaks_before_the_end_is_labelled(
     term.type("drop please\r")
     term.see("partial reply (not the final answer)")
     term.see("provider_error")
+    assert term.quit() == 0
+
+
+def test_opted_out_turns_send_no_stream_and_print_the_answer_once(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    """``[cli] stream = false``: the ordinary complete-reply turn, untouched."""
+    term = streamed("answer", stream=False)
+    term.see("Ask melo")
+    term.type("stream please\r")
+    term.see("Worked for")
+    text = screen(term)
+    assert text.count("● Hello! I am melo, running on a stub model.") == 1
+    assert "partial reply" not in text
+    assert not servers[0].requests[-1].get("stream")
+    assert term.quit() == 0
+
+
+def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
+    streamed: Callable[..., Melo],
+) -> None:
+    """The conservative rule: no ``[cli.reasoning_tags]`` entry, no live text."""
+    term = streamed("stream_slow", hint=None)
+    term.see("Ask melo")
+    term.type("stream please\r")
+    term.see("✻ thinking…")
+    assert "Streaming line one." not in term.text()  # held, not drawn
+    term.see("Worked for")
+    text = screen(term)
+    assert text.count("● Streaming line one.") == 1
+    assert "partial reply" not in text
     assert term.quit() == 0

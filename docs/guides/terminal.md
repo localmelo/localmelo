@@ -260,8 +260,9 @@ happens without the explicit `/copy` command.
   lines in red, added in green, with the counts), and a write too large or not text says why;
   `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
-  `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
-  `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
+  `Thinking`, `Replying`, `Running`, `Waiting for your approval`,
+  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the run's
+  facts: the step
   (`step 4`, never against `--max-steps`), the attempt from the second
   one, the phase with its cycle, the tests seen, and the time; the output
   tokens and `esc to stop` follow. When the line is narrow the hint goes
@@ -326,8 +327,12 @@ as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
 `(stopped)`; the completed final answer prints once after `●`. A reply a
 provider sends in one piece (or a provider without streaming) silently
 falls back to the ordinary complete reply. `/stream on|off` flips the
-setting for later turns without saving it. Direct mode and stdin-closed
-runs never stream, so their output and request bodies are unchanged.
+setting for later turns without saving it, and `/new` puts it back to
+`[cli] stream`. Runs without the interactive UI (direct mode, workers,
+the gateway) never stream, so their output and request bodies are unchanged.
+An invalid `[cli]` value never
+fails a run: the interactive UI warns and uses the defaults, and direct
+mode and the gateway do not read it.
 
 ### Approvals
 
@@ -422,8 +427,8 @@ Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
 Web and scheduler sessions are never offered. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
-`/verbose` and `/thinking` preferences stay as they were. `/new` resets those
-display preferences. A note says when the session previously worked in another folder.
+`/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
+resets those display preferences (`/stream` back to `[cli] stream`). A note says when the session previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
 redacted copies. The line below its title says what reached model memory:

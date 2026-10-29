@@ -1224,11 +1224,14 @@ async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None
     assert session.renderer.progress is not None
     session.renderer.verbose = True
     session.renderer.thinking = False
+    session.enter("/stream on")
+    await _until(lambda: session.stream)
     session.enter("/new")
     await _until(lambda: session.runner is None)
     assert session.renderer.tool_outputs == []
     assert session.renderer.progress is None
     assert not session.renderer.verbose and session.renderer.thinking
+    assert not session.stream  # back to [cli] stream, the session's default
     session.enter("/expand")
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
     session.enter("/progress")
