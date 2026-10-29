@@ -367,6 +367,20 @@ def _find_reflection(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _unreadable_reason(reply: Message, *, flags: bool) -> str:
+    """Why *reply* holds no reflection: ``tool_call``, ``invalid`` or ``no_json``.
+
+    ``tool_call``: the reply has tool calls (and no reflection in its text);
+    ``invalid``: its text has a JSON object that ``"flags"`` does not accept;
+    ``no_json``: its text has no JSON object.
+    """
+    if reply.tool_calls:
+        return "tool_call"
+    if flags and _holds_reflection_object(reply.content):
+        return "invalid"
+    return "no_json"
+
+
 def _as_planned(
     window: list[Message], query: str, query_block: str = ""
 ) -> list[Message]:
@@ -1700,6 +1714,7 @@ class Agent:
             context_budget=budget,
             fixed_prefix=self.options.fixed_prefix,
             fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
+            tool_guard=self.options.reflect_tool_guard,
         )
 
         names = (
@@ -4432,6 +4447,10 @@ class Agent:
         else:
             readable = _holds_reflection_object(response.content)
         if not readable:
+            if run is not None:
+                run.events.reflection_unreadable(
+                    _unreadable_reason(response, flags=flags)
+                )
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
@@ -5943,6 +5962,8 @@ class Agent:
         }
         if opts.window_eviction != "slide":
             config["window_eviction"] = opts.window_eviction
+        if opts.reflect_tool_guard:
+            config["reflect_tool_guard"] = True
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns

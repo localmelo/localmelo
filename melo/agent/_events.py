@@ -141,6 +141,7 @@ class _Emitter:
         self._reflecting_since = 0.0
         # The replies of the reflection under way (see replies).
         self._replies: list[Message] | None = None
+        self._unreadable_reason: str | None = None
         self._calls: list[CallTelemetry] = []
         self._sink_failed = False
         self._warned_awaitable = False
@@ -522,6 +523,7 @@ class _Emitter:
         )
         self._replies = []
         self._calls = []
+        self._unreadable_reason = None
         self._reflecting_since = time.perf_counter()
 
     @property
@@ -536,6 +538,10 @@ class _Emitter:
         """Keep what a request of the reflection under way reported."""
         if call is not None and self._replies is not None:
             self._calls.append(call)
+
+    def reflection_unreadable(self, reason: str) -> None:
+        """Keep why the first reply of the reflection under way held no reflection."""
+        self._unreadable_reason = reason
 
     def reflection(
         self,
@@ -553,7 +559,10 @@ class _Emitter:
         ``reflection.started`` on; the extra usage fields of the requests
         (see :meth:`reflection_call`) are summed into ``usage`` and the first
         request's prefix diagnostics are ``prefix``. *verdict* is the gate in
-        force and why the run stopped, if it did.
+        force and why the run stopped, if it did. ``unreadable_reason`` is why
+        the first reply held no reflection: ``tool_call`` (it has tool calls
+        and no reflection), ``no_json`` or ``invalid``; ``None`` when it
+        read. The retry that follows can still make ``readable`` true.
         """
         if self._sink is None:
             return
@@ -597,6 +606,7 @@ class _Emitter:
                     "best_effort_result": _redacted(best_effort),
                     "requests": len(replies),
                     "readable": reflected is not None,
+                    "unreadable_reason": self._unreadable_reason,
                     "usage": usage,
                     "prefix": prefix,
                     "duration_s": duration_s,

@@ -181,6 +181,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   after a reflection. The default, `slide`, is unchanged, and non-default modes
   add `window_eviction` to the JSON result's `config` ([#191]).
 
+- `--reflect-tool-guard on|off`, an experimental option hidden from default help
+  (no config key): with `on`, a reflection request offers the tools of that step's
+  planning request and ends with `Answer with the JSON object only; do not call any
+  tool.`, so a model that continues the window's tool turns answers in text and the
+  server's prompt prefix holds. The default, `off`, is unchanged; `on` adds
+  `reflect_tool_guard` to the JSON result's `config`. The `reflection` event has a new
+  `unreadable_reason` (`tool_call`, `invalid`, `no_json` or `null`) that says why the
+  first reply held no reflection, in every mode ([#210]).
+
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
   with `stream_options.include_usage`; a missing key means not reported), and
@@ -1296,6 +1305,7 @@ earlier milestones.
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
 [#209]: https://github.com/localmelo/localmelo/pull/209
+[#210]: https://github.com/localmelo/localmelo/pull/210
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -75,6 +75,7 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--reflection-gate": "#185",
     "--fixed-prefix": "#183",
     "--window-eviction": "#183",
+    "--reflect-tool-guard": "#183",
     "--reasoning": "#183",
     "--reasoning-field": "#183",
     "--replay-turns": "#183",

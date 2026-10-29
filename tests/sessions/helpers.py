@@ -97,6 +97,7 @@ def core_event(
             "best_effort_result": "",
             "requests": 1,
             "readable": True,
+            "unreadable_reason": None,
             "usage": {},
             "prefix": None,
             "duration_s": 0.1,

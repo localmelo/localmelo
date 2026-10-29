@@ -209,6 +209,10 @@ REFLECTION_RETRY_NOTE = (
     "tools are not available for this reply."
 )
 
+# Ends a guarded reflection request (``reflect_tool_guard``): the request keeps
+# the plan's tools, so the words are what asks for text.
+REFLECT_TOOL_GUARD_NOTE = "Answer with the JSON object only; do not call any tool."
+
 # Opens the retry's transcript: the window's turns written out as text, so
 # the retry has no tool turns for the model to continue.
 REFLECTION_TRANSCRIPT_INTRO = "The end of this attempt, written out as text:"
@@ -488,8 +492,13 @@ class Chat:
         context_budget: ContextBudget | None = None,
         fixed_prefix: bool = False,
         fit_target: float = 1.0,
+        tool_guard: bool = False,
     ) -> None:
         self.fixed_prefix = fixed_prefix
+        self.tool_guard = tool_guard
+        # The tools of the latest planning request, which a guarded
+        # reflection offers again.
+        self._plan_tools: list[ToolDef] | None = None
         self.fit_target = fit_target
         # One held cut per request kind: a target below 1 (window_eviction
         # chunk and boundary) keeps the context fit's cut across requests.
@@ -540,6 +549,7 @@ class Chat:
         self._sent = []
         self._sent_count = 0
         self._plan = None
+        self._plan_tools = None
         self._accounting = (
             RequestAccounting(self.context_budget)
             if self.context_budget is not None
@@ -902,6 +912,7 @@ class Chat:
         ready_args: dict[str, Any] = (
             {"on_ready": on_ready} if on_ready is not None else {}
         )
+        self._plan_tools = list(tools)
         if self.fixed_prefix:
             all_context = [*context, *short]
             memory = [
@@ -1089,6 +1100,9 @@ class Chat:
             core += f" {FINAL_REFLECTION_NOTE}"
         if addendum:
             core += f" {addendum}"
+        guarded = self.tool_guard and not retry and self._plan_tools is not None
+        if guarded:
+            core += f" {REFLECT_TOOL_GUARD_NOTE}"
         block = render_note_block(notes, draft_titles)
 
         def compose(prior: str) -> str:
@@ -1146,4 +1160,8 @@ class Chat:
                 # Refused before it is sent: no request and no reply.
                 return None
             messages = fitted
-        return await self._request(messages, tools=None, kind="reflect")
+        # A guarded request offers the plan's tools exactly (so the prefix
+        # holds) and asks for text in words; ``tool_choice`` stays the
+        # provider's.
+        tools = self._plan_tools if guarded else None
+        return await self._request(messages, tools=tools or None, kind="reflect")

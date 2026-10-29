@@ -35,7 +35,8 @@ refused config value a worker ``startup_error`` after a valid brief, so
 ``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
 the golden and without ``--brief`` it keeps the old usage error. ``--window-eviction``
 adds an opt-in flag and config fallback to the same two functions (default ``slide``
-changes nothing). ``_check_args`` is not pinned.
+changes nothing). ``--reflect-tool-guard`` adds an opt-in flag (no config
+fallback) to ``_direct_options`` (default off changes nothing). ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ PINNED = {
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "7e9a393bcb7475bc6a2880d128abcacdaca21171877b4abc0411444dbe5e2cf6",
+    "_direct_options": "b5e75a9f080a4b99efff29d5379c2d935ca295503758da015abb2879044e2a03",
     "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

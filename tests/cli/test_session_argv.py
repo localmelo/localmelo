@@ -75,6 +75,7 @@ U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
+REFLECT_TOOL_GUARD_DEFAULTS = {"reflect_tool_guard": None}
 WORKER_DEFAULTS = dict.fromkeys(
     (
         "save_session",
@@ -152,6 +153,7 @@ def test_historical_dispatch(
             **FIXED_PREFIX_DEFAULTS,
             **CAPTURED_DEFAULTS,
             **WINDOW_EVICTION_DEFAULTS,
+            **REFLECT_TOOL_GUARD_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -181,6 +183,7 @@ def test_historical_dispatch(
         **FIXED_PREFIX_DEFAULTS,
         **CAPTURED_DEFAULTS,
         **WINDOW_EVICTION_DEFAULTS,
+        **REFLECT_TOOL_GUARD_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

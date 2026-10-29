@@ -183,6 +183,12 @@ class AgentOptions:
       drops a finished attempt's turns when the next attempt starts after a
       reflection. Both keep the retained history stable for several steps,
       which a server's prompt cache can reuse. Experimental.
+    - ``reflect_tool_guard``: when true, a reflection request offers the tools
+      the step's planning request sent (the same list, order and schema, so a
+      server's prompt prefix holds) and its last user message ends with
+      ``REFLECT_TOOL_GUARD_NOTE``, which asks for the JSON object and no tool
+      call. The retry request is unchanged. The default is false: the request
+      bytes are unchanged. Experimental (#183).
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
@@ -248,10 +254,13 @@ class AgentOptions:
     window_eviction: WindowEviction = "slide"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
+    reflect_tool_guard: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
             raise ValueError("fixed_prefix must be a bool")
+        if not isinstance(self.reflect_tool_guard, bool):
+            raise ValueError("reflect_tool_guard must be a bool")
         if self.brief_probe is not None and not callable(self.brief_probe):
             raise ValueError("brief_probe must be callable or None")
         if self.brief_check is not None and not callable(self.brief_check):
