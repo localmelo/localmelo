@@ -55,12 +55,23 @@ again.
 
 ## Worker histories
 
-`--save-session [TITLE]` records a direct task as a `worker` session in the
-CLI sessions file. Put the task after `--`; without a title, the first task
-line supplies one. `--parent-run ID` requires `--save-session` and links a
-launcher. Without the flag, direct runs do not open the session store. Workers
-are not offered by `-c`, `-r`, or the chat picker. Workspace and git metadata
-use `--workspace` when supplied, otherwise the current working directory.
+Every direct run (`melo "<task>"` and `melo --brief FILE`) is recorded as a
+`worker` session in the CLI sessions file, `~/.cache/localmelo/cli/sessions.db`,
+so the web console's Workers view and the macOS app show it, a running one
+included. Recording changes nothing the run sends or prints: the model's
+requests, stdout, the JSON result and the exit code are the same, and a run
+costs about 20 ms more before its first request. Put the task after `--`; the
+first task line is the title, and `--save-session TITLE` sets another.
+`--parent-run ID` links a launcher and needs no other flag. Opt out for one run
+with `--no-save-session`, or for the whole home with `record_direct = false`
+under `[sessions]` in the config (see the
+[configuration reference](configuration.md)); an explicit `--save-session` or
+`--parent-run` records regardless of the config. A store that cannot be opened
+or written never fails the run: one line,
+`melo: could not record this run (<reason>); the run is unchanged`, goes to
+stderr and the run goes on unrecorded. Workers are not offered by `-c`, `-r`,
+or the chat picker. Workspace and git metadata use `--workspace` when supplied,
+otherwise the current working directory.
 
 `--import-session dsh-jsonl FILE [--title TITLE]` imports a dsh JSONL log
 without a task. Reimporting identical file contents is a no-op; unknown or
@@ -132,6 +143,7 @@ two equal.
 | `--import-session` | advanced |  |
 | `--title` | advanced |  |
 | `--save-session` | advanced |  |
+| `--no-save-session` | advanced |  |
 | `--parent-run` | advanced |  |
 | `--inbox` | advanced |  |
 | `--inbox-fd` | advanced |  |
@@ -575,7 +587,7 @@ redaction and omits some recognizable sensitive-file reads, including simple
 shell and Python reads. A startup error's text is redacted too, and the
 user's home directory is shown as `~`. Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
-before sharing. `--save-session` can record the same run.
+before sharing. Direct runs, this one included, are recorded by default (see above).
 
 A `--brief` run also differs from a plain task in four ways. The query is the
 brief followed by one fixed paragraph, the same on every request: make the
