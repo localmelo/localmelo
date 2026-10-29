@@ -33,6 +33,7 @@ from localmelo.support.backends.registry import get_backend
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
+from localmelo.support.gateway.console.running import running_status
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
 from localmelo.support.option_tiers import ADVANCED, EXPERIMENTAL_ISSUES, OPTION_TIERS
 from localmelo.support.sessions import display
@@ -141,7 +142,7 @@ def model_json(cfg: Any) -> dict[str, Any]:
     }
 
 
-def health_json(console: Console) -> dict[str, Any]:
+async def health_json(console: Console) -> dict[str, Any]:
     """The whole ``GET /api/health`` body."""
     entries = console.sessions.entries()
     return {
@@ -169,6 +170,7 @@ def health_json(console: Console) -> dict[str, Any]:
             "store_error": console.store_error(),
             "resume_mode": DEFAULT_RESUME_MODE,
         },
+        "status": await running_status(console),
         "uptime_s": round(console.uptime_s(), 1),
     }
 
@@ -403,7 +405,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/health")
     async def api_health() -> JSONResponse:
-        return JSONResponse(content=health_json(console))
+        return JSONResponse(content=await health_json(console))
 
     @app.get("/api/settings")
     async def api_get_settings() -> JSONResponse:

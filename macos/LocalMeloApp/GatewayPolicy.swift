@@ -17,6 +17,57 @@ func gatewayHealth(_ data: Data) -> GatewayHealth? {
     return GatewayHealth(store: store, error: error, reason: sessions["store_reason"] as? String ?? "", running: running)
 }
 
+/// What runs now, from `status.running` of `GET /api/health`.
+struct RunningCounts {
+    let chats: Int
+    let tasks: Int
+    let runs: Int
+    let terminal: Int
+    var total: Int { chats + tasks + runs + terminal }
+}
+
+func runningCounts(_ data: Data) -> RunningCounts? {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let status = body["status"] as? [String: Any],
+          let running = status["running"] as? [String: Any],
+          let chats = running["chats"] as? Int, chats >= 0,
+          let tasks = running["tasks"] as? Int, tasks >= 0,
+          let runs = running["runs"] as? Int, runs >= 0,
+          let terminal = running["terminal"] as? Int, terminal >= 0 else { return nil }
+    return RunningCounts(chats: chats, tasks: tasks, runs: runs, terminal: terminal)
+}
+
+/// The menu-bar title: the plain name at 0 or when the count is unknown.
+func menuTitle(_ counts: RunningCounts?) -> String {
+    guard let counts = counts, counts.total > 0 else { return "Melo" }
+    return "Melo · \(counts.total)"
+}
+
+private func counted(_ n: Int, _ noun: String) -> String {
+    "\(n) \(noun)\(n == 1 ? "" : "s")"
+}
+
+/// The quit dialog's text. Quitting stops the gateway and so its chats and
+/// tasks; runs and terminal chats belong to other processes and go on.
+func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
+    let generic = "Quitting stops the gateway and any running tasks."
+    guard let counts = counts else {
+        return statusKnown ? generic : "The task status is unavailable. " + generic
+    }
+    let stops = [(counts.tasks, "task"), (counts.chats, "chat")]
+        .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
+    let goes = [(counts.runs, "run"), (counts.terminal, "terminal chat")]
+        .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
+    var text = generic
+    if !stops.isEmpty {
+        let verb = counts.tasks + counts.chats == 1 ? "is" : "are"
+        text = "\(stops.joined(separator: " and ")) \(verb) running. "
+            + "Quitting stops the gateway and everything running in it."
+    }
+    if !goes.isEmpty { text += " Not affected: \(goes.joined(separator: " and "))." }
+    return text
+}
+
 func ownsListener(_ pids: [Int32]?, child: Int32) -> Bool {
     guard let pids = pids else { return false }
     return !pids.isEmpty && pids.allSatisfy { $0 == child }

@@ -13,6 +13,7 @@ import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
+import {setupRunning} from '../../support/gateway/static/running.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -368,6 +369,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
   .replace(/^import \{ setupStatusRow \} from "\.\/status-row\.mjs";\n/m, '')
+  .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -546,6 +548,7 @@ function harness(routes, {mobile = false} = {}) {
     workerHistory,
     setupTasks,
     setupStatusRow,
+    setupRunning,
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
@@ -1239,6 +1242,25 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   assert.equal(h.root.dataset.ready, '1', 'The first load marks the page ready');
 });
 
+test('the header chip shows what runs now and follows the health poll', async () => {
+  let answer = {running: {chats: 0, tasks: 2, runs: 0, terminal: 1}, items: [
+    {kind: 'task', id: 't1', title: 'Index the repo'}, {kind: 'task', id: 't2', title: 'Summarize'},
+    {kind: 'terminal', id: 'k1', title: 'Terminal work'},
+  ]};
+  const h = harness(baseRoutes({'GET /health': () => ({body: {...health, status: answer}})}));
+  await h.run('init()');
+  assert.equal(h.element('running-root').hidden, false);
+  assert.equal(h.element('running-btn').textContent, '3 running');
+  h.element('running-btn').click();
+  const links = h.element('running-menu').children.map((row) => row.href);
+  assert.deepEqual(links, ['#/tasks/t1', '#/tasks/t2', '#/workers/k1']);
+  answer = {running: {chats: 0, tasks: 0, runs: 0, terminal: 0}, items: []};
+  const poll = h.timers.findLast((timer) => timer.interval && !timer.cleared && timer.handler.toString().includes('refreshList'));
+  await poll.handler();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.element('running-root').hidden, true);
+});
+
 test('the chat shows the server\'s status segments and refreshes them on a frame', async () => {
   let segments = ['cache 40%', 'ctx 1.0k/8.0k'];
   const h = harness(baseRoutes({'GET /sessions/a/status': () => ({session_id: 'a', segments})}));
@@ -1896,6 +1918,32 @@ test('Escape closes the level menu before it stops the turn', async () => {
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'A second Escape stops the turn');
+});
+
+test('Escape and a click outside close the running list before Escape stops the turn', async () => {
+  const status = {running: {chats: 1, tasks: 0, runs: 0, terminal: 0}, items: [{kind: 'chat', id: 'a', title: 'Chat'}]};
+  const h = harness(baseRoutes({
+    'GET /health': {body: {...health, status}},
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
+  }));
+  await h.run('init()');
+  h.stream().emit({
+    id: 20, turn: 2, ts: 50, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'},
+  });
+  h.element('running-btn').click();
+  assert.equal(h.element('running-menu').hidden, false);
+  const [escape] = h.documentListeners.keydown;
+  escape({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.equal(h.element('running-menu').hidden, true, 'The open list closes first');
+  assert.equal(h.context.document.activeElement, h.element('running-btn'));
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('running-btn').click();
+  h.documentListeners.click.forEach((handler) => handler({target: {closest: () => null}}));
+  assert.equal(h.element('running-menu').hidden, true, 'A click outside closes it');
+  h.element('running-btn').click();
+  h.documentListeners.click.forEach((handler) => handler({target: {closest: (selector) => (selector === '.running-picker' ? {} : null)}}));
+  assert.equal(h.element('running-menu').hidden, false, 'A click inside leaves it open');
 });
 
 test('a closed stream reopens from the last event id', async () => {

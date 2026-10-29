@@ -54,6 +54,56 @@ precondition(gatewayExitMessage(status: 2, signalled: false).contains("status 2"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_running_count_title_and_quit_text(tmp_path: Path) -> None:
+    main = tmp_path / "main.swift"
+    main.write_text("""import Foundation
+func health(_ running: String) -> Data {
+    Data((#"{"api":2,"status":{"running":"# + running + #","tasks":{}}}"#).utf8)
+}
+let none = runningCounts(health(#"{"chats":0,"tasks":0,"runs":0,"terminal":0}"#))
+let busy = runningCounts(health(#"{"chats":1,"tasks":2,"runs":1,"terminal":3}"#))
+let chat = runningCounts(health(#"{"chats":1,"tasks":0,"runs":0,"terminal":0}"#))
+let runsOnly = runningCounts(health(#"{"chats":0,"tasks":0,"runs":1,"terminal":0}"#))
+precondition(none?.total == 0 && busy?.total == 7)
+precondition(runningCounts(Data(#"{"api":2}"#.utf8)) == nil)
+precondition(runningCounts(health(#"{"chats":-1,"tasks":0,"runs":0,"terminal":0}"#)) == nil)
+precondition(runningCounts(health(#"{"chats":"1","tasks":0,"runs":0,"terminal":0}"#)) == nil)
+precondition(runningCounts(Data("not json".utf8)) == nil)
+precondition(menuTitle(none) == "Melo")
+precondition(menuTitle(nil) == "Melo")
+precondition(menuTitle(busy) == "Melo · 7")
+precondition(quitMessage(busy, statusKnown: true)
+    == "2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it. "
+    + "Not affected: 1 run and 3 terminal chats.")
+precondition(quitMessage(chat, statusKnown: true)
+    == "1 chat is running. Quitting stops the gateway and everything running in it.")
+precondition(quitMessage(runsOnly, statusKnown: true)
+    == "Quitting stops the gateway and any running tasks. Not affected: 1 run.")
+precondition(quitMessage(none, statusKnown: true) == "Quitting stops the gateway and any running tasks.")
+precondition(quitMessage(nil, statusKnown: true) == "Quitting stops the gateway and any running tasks.")
+precondition(quitMessage(nil, statusKnown: false).hasPrefix("The task status is unavailable."))
+""")
+    binary = tmp_path / "test-running"
+    subprocess.run(
+        [
+            "/usr/bin/xcrun",
+            "swiftc",
+            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(main),
+            "-o",
+            str(binary),
+        ],
+        env={
+            **os.environ,
+            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+        },
+        check=True,
+        timeout=60,
+    )
+    subprocess.run([str(binary)], check=True, timeout=5)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
     subprocess.run(
         [

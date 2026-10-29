@@ -984,10 +984,16 @@ class TaskStore:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             return record
 
-    async def list_tasks(self) -> list[TaskRecord]:
+    async def list_tasks(self, states: Sequence[str] | None = None) -> list[TaskRecord]:
+        """Every task, newest first, or only those in *states* (by the state index)."""
+        where = ""
+        if states is not None:
+            where = f" WHERE state IN ({', '.join('?' * len(states))})"
         async with self._store.component_transaction("task_list") as conn:
             rows = await _rows(
-                conn, f"{_SELECT_TASK} ORDER BY created_at DESC, task_id"
+                conn,
+                f"{_SELECT_TASK}{where} ORDER BY created_at DESC, task_id",
+                tuple(states or ()),
             )
             return [TaskRecord.from_row(row) for row in rows]
 

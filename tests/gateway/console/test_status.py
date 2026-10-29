@@ -156,7 +156,7 @@ async def test_tasks_come_from_the_task_store(
         def __init__(self, state: str, level_eff: int) -> None:
             self.state, self.level_eff = state, level_eff
 
-    async def listed() -> list[Record]:
+    async def listed(states: Any = None) -> list[Record]:
         return [
             Record("running", 2),
             Record("queued", 3),
