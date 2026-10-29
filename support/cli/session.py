@@ -208,7 +208,9 @@ class CliSession:
         stream: bool = False,
         reasoning_tags: Mapping[str, str] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        developer: bool = False,
     ) -> None:
+        self.developer = developer
         self.store = store
         self.factory = factory
         self.agent = agent
@@ -928,7 +930,7 @@ class CliSession:
         """``/status``: the model, workspace, session, approvals, tools, memory, limits, usage, files."""
         from localmelo.support.cli.render import LOG_PATH
         from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
-        from localmelo.support.sessions.display import localmelo_version
+        from localmelo.support.sessions.display import display_version
 
         backend = self.factory.backend
         state = "not checked"
@@ -1012,6 +1014,7 @@ class CliSession:
             local=backend.local,
             now=time.time(),
             steps=lambda payload: _progress_lines(payload, self.renderer.symbols),
+            hide_empty=not self.developer,
         ):
             self.out.print(self._text(row))
         files = [getattr(self.store, "path", ""), LOG_PATH]
@@ -1027,7 +1030,7 @@ class CliSession:
             ]
         files = [home_label(str(path)) for path in files if path]
         self.out.print(self._text("files      " + " · ".join(files)))
-        self.out.print(self._text(f"version    melo {localmelo_version()}"))
+        self.out.print(self._text(f"version    melo {display_version()}"))
 
     async def retry(self) -> None:
         """``/retry``: re-run the newest turn, undoing it only when still live."""

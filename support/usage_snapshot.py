@@ -122,14 +122,17 @@ def _cache_text(snap: UsageSnapshot, *, local: bool, now: float) -> str:
     return " · ".join(parts)
 
 
+def _measured(snap: UsageSnapshot) -> int | None:
+    data = snap.context
+    return None if data is None else _count(data.get("measured_prompt_tokens"))
+
+
 def _context_text(snap: UsageSnapshot) -> str:
     data = snap.context
-    if data is None:
+    measured = _measured(snap)
+    if data is None or measured is None:
         return "no context budget measured yet"
-    measured = _count(data.get("measured_prompt_tokens"))
     limit = _count(data.get("input_limit"))
-    if measured is None:
-        return "no context budget measured yet"
     if not limit or limit <= 0:
         return f"{format_tokens(measured)} prompt tokens · no input limit known"
     return (
@@ -146,8 +149,11 @@ def usage_lines(
     steps: Callable[[Mapping[str, Any]], list[str]],
     tasks: TaskCounts | None = None,
     dot: str = "·",
+    hide_empty: bool = False,
 ) -> list[str]:
     """The ``/status`` rows of *snap*: cache, context, steps, tasks.
+
+    With *hide_empty*, a row with nothing to say yet ("no ... yet") is left out.
 
     *steps* formats a ``run.progress`` payload as one fact per line (the
     caller's ``/progress`` formatter); *now* is ``time.time()``.
@@ -168,11 +174,21 @@ def usage_lines(
         )
         if tasks.top_level is not None:
             task_text += f" {dot} top priority P{tasks.top_level}"
-    lines = [
-        "cache      " + _cache_text(snap, local=local, now=now),
-        "context    " + _context_text(snap),
-        "steps      " + step_rows[0],
+    rows = [
+        (
+            "cache",
+            _cache_text(snap, local=local, now=now),
+            not snap.requests or snap.last_prompt is None,
+        ),
+        ("context", _context_text(snap), _measured(snap) is None),
+        ("steps", step_rows[0], snap.progress is None),
+        ("tasks", task_text, tasks is None),
     ]
-    lines += ["           " + row for row in step_rows[1:]]
-    lines.append("tasks      " + task_text)
+    lines: list[str] = []
+    for name, text, empty in rows:
+        if hide_empty and empty:
+            continue
+        lines.append(f"{name:<11}{text}")
+        if name == "steps":
+            lines += ["           " + row for row in step_rows[1:]]
     return lines

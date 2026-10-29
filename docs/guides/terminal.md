@@ -49,8 +49,11 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 The first of these that applies:
 
-1. `--reconfigure`: the setup wizard, then the backend it saved. Without a
-   task it cannot be combined with `--base-url`.
+1. `--reconfigure`: the setup wizard, then the backend it saved. In default
+   mode it first offers the model server it finds on this computer (`Found a
+   model server at …`, `Use it? [Y/n]:`) with the first run's questions; the
+   full backend menu follows only after `n`, when none is found, or with
+   `--developer`. Without a task it cannot be combined with `--base-url`.
 2. `--base-url URL`: that server, without the config file. The model is
    `--chat-model`, else the first model that `GET URL/models` lists,
    skipping models whose id contains `embed` or `rerank` while another is
@@ -67,7 +70,8 @@ The first of these that applies:
    `⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. No saved backend: the [first-run](#first-run) questions, then the UI.
 
-The banner names the model and the server; when they are not the saved
+The banner's title shows the package version, and on a git checkout the short
+commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
 backend, a second line says where they come from (`from --base-url (not
 saved)`, `saved as the default`) and, when melo took the first of several
 models, `first of N; /model lists them`.
@@ -105,7 +109,8 @@ models, `first of N; /model lists them`.
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one.
+type more letters to narrow them, Tab or Enter to take one. The list starts
+with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 
 | Command | What it does |
 |---|---|
@@ -127,7 +132,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
-| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks), files and version. |
+| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks: a row appears once it has data; `--developer` shows every row), files and version. |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |

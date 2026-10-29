@@ -148,13 +148,23 @@ def _with_url(args: argparse.Namespace) -> Choice:
     )
 
 
+def _developer(args: argparse.Namespace) -> bool:
+    """Whether ``--developer`` or ``[ui] mode = "developer"`` is on."""
+    if getattr(args, "developer", False):
+        return True
+    try:
+        return bool(config.load().ui.mode == "developer")
+    except Exception:  # a broken config file must not stop the wizard
+        return False
+
+
 def choose_backend(args: argparse.Namespace) -> Choice | int:
     """The backend for the session, or an exit code (see the module docstring).
 
     EOFError and KeyboardInterrupt from a question reach the caller.
     """
     if args.reconfigure:
-        cfg = onboard.run_backend_setup()
+        cfg = onboard.run_backend_setup(guided=not _developer(args))
         if cfg is None:
             return 0
         return _configured(cfg, args.chat_model, args)
@@ -246,7 +256,7 @@ def run_interactive(
         if args.reconfigure:
             # A script can pipe the wizard's answers in; nothing opens after.
             try:
-                onboard.run_backend_setup()
+                onboard.run_backend_setup(guided=not _developer(args))
             except EOFError:
                 print("\nSetup cancelled.")
             except KeyboardInterrupt:
@@ -433,7 +443,7 @@ async def main_async(
     from localmelo.support.cli.signals import ExitSignals, save_terminal
     from localmelo.support.cli.theme import in_symbols, symbols_for, wants_no_color
     from localmelo.support.cli.views import banner
-    from localmelo.support.sessions.display import home_label, localmelo_version
+    from localmelo.support.sessions.display import display_version, home_label
     from localmelo.support.sessions.runner import ResumeMode
     from localmelo.support.sessions.store import (
         SessionInfo,
@@ -535,12 +545,13 @@ async def main_async(
             stream=session_config.cli.stream,
             reasoning_tags=session_config.cli.reasoning_tags,
             out=out,
+            developer=_developer(args),
         )
 
         def show_banner(selected: SessionInfo | None = None) -> None:
             out.print(
                 banner(
-                    version=localmelo_version(),
+                    version=display_version(),
                     backend=factory.backend,
                     workspace=agent.workspace_root or workspace,
                     tools=agent.list_tools(),

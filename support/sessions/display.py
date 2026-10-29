@@ -4,7 +4,7 @@ The terminal UI and the web console format these the same way, so a turn
 reads alike on both: :func:`format_duration` and :func:`format_tokens`,
 :func:`home_label` and :func:`display_path`, :func:`status_line` (the
 direct mode's line for a run that did not complete), :func:`clean_output`
-for text a tool or a model printed, :func:`localmelo_version`,
+for text a tool or a model printed, :func:`localmelo_version`, :func:`display_version`,
 :func:`split_thinking` (re-exported from the core), and the words of a run's
 end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
@@ -391,3 +391,18 @@ def localmelo_version() -> str:
         return importlib.metadata.version("localmelo")
     except importlib.metadata.PackageNotFoundError:
         return "unknown"
+
+
+def display_version() -> str:
+    """The version a person reads: ``0.1.0 (baab21e)`` on a git checkout.
+
+    The package version, then the checkout's :func:`localmelo_version`; plain
+    package version elsewhere. ``localmelo_version`` itself stays what JSON
+    records and the gateway report.
+    """
+    described = localmelo_version()
+    try:
+        package = importlib.metadata.version("localmelo")
+    except importlib.metadata.PackageNotFoundError:
+        return described
+    return package if described == package else f"{package} ({described})"

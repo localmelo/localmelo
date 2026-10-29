@@ -94,6 +94,11 @@ prompts. It sends a short test request to each server, saves the config
 file, and then opens the interactive UI or, with `--serve`, starts the
 gateway. Press Ctrl+C to stop the gateway.
 
+Without `--serve` and in default mode, `melo --reconfigure` starts as the first
+run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
+full menu follows only after `n`, when no server is found, or with
+`--developer`.
+
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers the saved backend; with
   none saved, the first candidate the chat server lists, else `None`.

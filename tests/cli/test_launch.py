@@ -201,10 +201,16 @@ def test_an_invalid_config_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
 def test_reconfigure_runs_the_wizard_and_cancelling_it_starts_nothing() -> None:
     faked = Faked(cfg=_configured(), wizard=None)
     assert faked.choose(reconfigure=True) == 0
-    faked.wizard.assert_called_once_with()
+    faked.wizard.assert_called_once_with(guided=True)
     faked = Faked(cfg=_configured(), wizard=_configured("new"))
     choice = _choice(faked.choose(reconfigure=True, chat_model="M"))
     assert choice.backend.model == "M"
+
+
+def test_reconfigure_in_developer_mode_runs_the_full_wizard() -> None:
+    faked = Faked(cfg=_configured(), wizard=None)
+    assert faked.choose(reconfigure=True, developer=True) == 0
+    faked.wizard.assert_called_once_with(guided=False)
 
 
 def test_with_no_config_the_first_run_saves_and_the_session_uses_the_config() -> None:
@@ -266,7 +272,7 @@ def test_reconfigure_without_a_terminal_runs_the_wizard_then_exits_0(
 ) -> None:
     with mock.patch("localmelo.support.onboard.run_backend_setup") as wizard:
         assert _run(monkeypatch, terminal=False, reconfigure=True) == 0
-    wizard.assert_called_once_with()
+    wizard.assert_called_once_with(guided=True)
 
 
 @pytest.mark.parametrize(("raised", "code"), [(EOFError, 0), (KeyboardInterrupt, 130)])

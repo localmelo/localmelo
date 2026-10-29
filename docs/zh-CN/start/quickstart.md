@@ -108,6 +108,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   / commands · esc stop · ctrl+d quit
 ```
 
+标题显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。
+
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
 
 <a id="with-the-setup-wizard"></a>
@@ -127,7 +129,7 @@ melo --serve --reconfigure
 | `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于其他 OpenAI 兼容服务器，选择 vLLM（`3`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
-| `Start?` | 按 Enter（是）继续。 |
+| `Save and continue?` | 按 Enter（是）保存并继续。 |
 | `Embedding backend` | 输入 `5` 选择 `None (no long-term memory)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，第一个为默认值；选择一个即可。 |
 | `Embedding endpoint URL`, `Embedding model name` | 仅当选择固定嵌入后端 `1`–`4` 之一，而不是检测到的模型时询问。 |
 
@@ -135,7 +137,7 @@ melo --serve --reconfigure
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。不带 `--serve` 时，`melo --reconfigure` 会改为打开交互式界面。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。不带 `--serve` 时，`melo --reconfigure` 会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才会出现上面的完整菜单。
 
 <a id="start-the-gateway"></a>
 

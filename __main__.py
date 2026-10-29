@@ -1324,6 +1324,27 @@ def _config_wants_developer_help() -> bool:
     return not errors and cfg.ui.mode == "developer"
 
 
+class _VersionAction(argparse.Action):
+    """``--version``: print the banner's version and exit 0 (looked up on use)."""
+
+    def __init__(self, option_strings: Any, dest: str, **kwargs: Any) -> None:
+        super().__init__(
+            option_strings,
+            dest=dest,
+            default=argparse.SUPPRESS,
+            nargs=0,
+            help="Show the version and exit",
+        )
+
+    def __call__(
+        self, parser: Any, namespace: Any, values: Any, option: Any = None
+    ) -> None:
+        from localmelo.support.sessions.display import display_version
+
+        print(f"melo {display_version()}")
+        parser.exit()
+
+
 class _WorkerFlagParser(argparse.ArgumentParser):
     """Keep old abbreviations unambiguous; new options require full names.
 
@@ -1340,6 +1361,18 @@ class _WorkerFlagParser(argparse.ArgumentParser):
         if developer is None:
             developer = _config_wants_developer_help()
         return format_help(self, developer=developer)
+
+    def format_usage(self) -> str:
+        """A usage error shows every flag in developer mode, else two short lines."""
+        developer = self.developer
+        if developer is None:
+            developer = _config_wants_developer_help()
+        if developer:
+            return super().format_usage()
+        return (
+            f"usage: {self.prog} [options] [--] [task ...]\n"
+            f"Run {self.prog} --help for options.\n"
+        )
 
     def _check_value(self, action: argparse.Action, value: str) -> None:
         if action.dest == "output_format" and value == "stream-json":
@@ -1684,6 +1717,7 @@ def _build_parser(
         )
 
     if not direct_only:
+        parser.add_argument("--version", action=_VersionAction)
         parser.add_argument(
             "--gateway-login",
             action="store_true",

@@ -136,3 +136,15 @@ def test_malformed_events_are_ignored() -> None:
     ):
         snap.observe(event)
     assert snap.requests == 0 and snap.progress is None
+
+
+def test_hide_empty_leaves_out_the_rows_with_nothing_to_say() -> None:
+    snap = UsageSnapshot()
+    assert usage_lines(snap, local=True, now=T0, steps=steps, hide_empty=True) == []
+    snap.observe(message(1000, 500))
+    assert usage_lines(snap, local=True, now=T0, steps=steps, hide_empty=True) == [
+        "cache      last request 50% cached (500 of 1.0k prompt tokens) · "
+        "session 50% over 1 request · idle 0s"
+    ]
+    assert usage_lines(snap, local=True, now=T0, steps=steps)[0].startswith("cache ")
+    assert len(usage_lines(snap, local=True, now=T0, steps=steps)) == 4

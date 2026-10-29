@@ -35,7 +35,10 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   order, as a table whose header row names the ID, level, state and title columns; every column but the title is padded so the rows line up.
   `show ID` inspects one. `pause ID`, `resume ID [--level Pn]`,
   `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
-  not supported. Pause does not interrupt a running tool.
+  not supported. Pause does not interrupt a running tool. `stop ID` prints
+  the task's state; when the task is not yet `cancelled` it adds `stop
+  requested; the task stops when its worker ends`, because the gateway
+  accepts a stop for a task with a live worker before the worker has ended.
 - `follow ID [--after EVENT_ID] [--wait]` streams stored session events and
   rechecks task state. By default each event prints one readable line: local
   time, event type and a short summary, never raw JSON. It reconnects using
