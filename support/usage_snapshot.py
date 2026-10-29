@@ -116,9 +116,9 @@ def _cache_text(snap: UsageSnapshot, *, local: bool, now: float) -> str:
     if local:
         if snap.last_request_ts is not None:
             idle = run_elapsed(now - snap.last_request_ts)
-            parts.append(f"idle {idle} (no countdown)")
+            parts.append(f"idle {idle}")
     else:
-        parts.append("no countdown: cloud cache lifetime is not tracked yet (#176 SL3)")
+        parts.append("cache lifetime not tracked yet")
     return " · ".join(parts)
 
 

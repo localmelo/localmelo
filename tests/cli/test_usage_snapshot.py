@@ -60,7 +60,7 @@ def test_local_backend_shows_shares_and_idle_time_without_a_countdown() -> None:
     assert lines[0] == (
         "cache      last request 75% cached (1.5k of 2.0k prompt tokens)"
         " · session 50% over 2 requests"
-        " · idle 1m05s (no countdown)"
+        " · idle 1m05s"
     )
 
 
@@ -85,7 +85,7 @@ def test_cloud_backend_shows_cache_and_no_countdown_or_idle_time() -> None:
     line = render([message(1000, 800)], local=False)[0]
     assert "last request 80% cached" in line
     assert "idle" not in line
-    assert "no countdown: cloud cache lifetime is not tracked yet (#176 SL3)" in line
+    assert "cache lifetime not tracked yet" in line
 
 
 def test_cached_tokens_never_exceed_the_prompt() -> None:
