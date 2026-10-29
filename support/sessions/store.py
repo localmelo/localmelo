@@ -59,6 +59,7 @@ from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.events import (
     EVENT_FIELDS,
     EVENT_SCHEMA_VERSION,
+    OPTIONAL_EVENT_FIELDS,
     json_safe_payload,
 )
 from localmelo.melo.memory._sqlite import (
@@ -2000,7 +2001,8 @@ class SessionStore:
         if pinned is None and type_ in APPROVAL_EVENT_TYPES:
             pinned = SESSION_EVENT_FIELDS[type_]
         if pinned is not None:
-            if set(data) != pinned:
+            optional = OPTIONAL_EVENT_FIELDS.get(type_, frozenset())
+            if not pinned - optional <= set(data) <= pinned:
                 raise ValueError(f"a {type_} event has the keys {sorted(pinned)}")
         elif type_.startswith(
             RESERVED_EVENT_PREFIXES

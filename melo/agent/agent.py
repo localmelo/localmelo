@@ -38,6 +38,7 @@ from localmelo.melo.agent._chat import (
     PREFIX_RUN,
     PREFIX_VERSION,
     RETRY_HOOK,
+    CallTelemetry,
     Chat,
     RequestStats,
     coalesce_user_messages,
@@ -1127,6 +1128,7 @@ class _RunState:
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
+    plan_call: CallTelemetry | None = None
     pending_shown: set[str] = dataclasses.field(default_factory=set)
     # R6-lite: the run's user request, its last digest and final reflection,
     # and the admission counters (see memory_stats on RunResult).
@@ -3579,6 +3581,8 @@ class Agent:
             recalls=recalls,
             **plan_args,
         )
+        if run is not None:
+            run.plan_call = getattr(self.chat, "last_call", None)
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
         if self.options.reasoning != "legacy":
@@ -4346,6 +4350,8 @@ class Agent:
                 self.chat.stats.reasoning_chars += len(response.thinking)
         if replies is not None:
             replies.append(response)
+        if run is not None:
+            run.events.reflection_call(getattr(self.chat, "last_call", None))
         if flags:
             readable = _find_reflection(response.content) is not None
         else:
@@ -4379,6 +4385,8 @@ class Agent:
                     self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+            if run is not None:
+                run.events.reflection_call(getattr(self.chat, "last_call", None))
         reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
@@ -4606,7 +4614,7 @@ class Agent:
                 **({"on_ready": on_ready} if on_ready is not None else {}),
             )
             # Also a reply the post-plan check refuses.
-            run.events.assistant_message(response)
+            run.events.assistant_message(response, run.plan_call)
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""

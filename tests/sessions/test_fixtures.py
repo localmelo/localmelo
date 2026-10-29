@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.contracts.events import EVENT_FIELDS
+from localmelo.melo.contracts.events import EVENT_FIELDS, OPTIONAL_EVENT_FIELDS
 from localmelo.support.sessions.store import SESSION_EVENT_FIELDS
 
 EVENTS = Path(__file__).resolve().parents[1] / "fixtures" / "events"
@@ -102,7 +102,9 @@ def test_each_line_is_one_envelope_with_the_pinned_keys(name: str) -> None:
         pinned = EVENT_FIELDS.get(type_)
         if pinned is None:
             pinned = SESSION_EVENT_FIELDS[type_]
-        assert set(event["data"]) == pinned, (name, type_)
+        # Recorded before an optional key existed, an event may lack it.
+        optional = OPTIONAL_EVENT_FIELDS.get(type_, frozenset())
+        assert pinned - optional <= set(event["data"]) <= pinned, (name, type_)
 
 
 @pytest.mark.parametrize("name", SCENARIOS)

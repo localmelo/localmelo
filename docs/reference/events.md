@@ -161,7 +161,7 @@ asyncio.run(main())
 | `run.started` | First, once the arguments of `run_task` are checked. | `query`, `max_steps`, `workspace_root`, `approval` |
 | `inbox.accepted` | After request fitting and before sending the planning request. | `offset`, `text`, `step`, `attempt` |
 | `step.started` | At the start of each planning step. | `step`, `attempt` |
-| `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `duration_s` |
+| `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
 | `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
@@ -208,7 +208,40 @@ asyncio.run(main())
 - `tool_calls`: the calls of the reply, each as
   `{id, name, arguments, preview}`. `preview` is as on `tool.started`.
 - `usage`: the integer token counts of the reply, such as `prompt_tokens`,
-  or `{}` when the server sent none.
+  or `{}` when the server sent none. When an OpenAI-compatible server sends
+  them, `cached_tokens` (from `prompt_tokens_details`) and
+  `reasoning_tokens` (from `completion_tokens_details`) are in it too, on a
+  streamed reply as well when the request asks the server for usage
+  (`stream_options.include_usage`). A count the server did not send is not
+  in `usage`, so a missing `cached_tokens` means "not reported", never 0.
+  The `reflection` event's `usage` has them too (summed over its
+  requests); the run's `RunResult.usage` keeps the three standard counts.
+- `prefix`: how much of this request an earlier request of the run
+  (planning or reflection) already sent, so a cache miss can be traced to
+  what changed; `null` for the run's first request. The agent works it out from the
+  messages and tools it sends, and the request body is the same with or
+  without it. An object:
+  - `messages`: how many leading messages are identical to those of the
+    best earlier request: the one with the most identical leading messages,
+    then the most characters, then the most recent. A server's prefix cache
+    keeps more than the last request, so this is what it could reuse.
+  - `chars`: the characters of content in those messages, plus the leading
+    characters that the first differing message shares with its
+    counterpart.
+  - `against`: that request, `{"kind": "plan" | "reflect", "request": n}`;
+    `n` counts the run's planning and reflection requests from 1 (a
+    reflection asked twice takes two numbers).
+  - `previous_messages`, `total_messages`: the message counts of that
+    request and this one.
+  - `first_changed`: the role of the first message that differs
+    (`system`, `user`, `assistant` or `tool`), or `null` when that
+    request is a plain prefix of this one (the usual growth of a run).
+  - `tools_changed`: `true` when the tool definitions offered differ.
+
+  A server caches by token prefix, so a high `messages` with a low
+  `cached_tokens` points at the server, and `first_changed: "system"` at
+  the prompt. `scripts/cache_report.py LOG` prints both per request from a
+  `stream-json` log.
 - `duration_s`: how long the planning request took, its retries and the
   waits before them included. With persistence on, it also includes
   recording the reply in history, which can wait up to 5 seconds while
@@ -410,8 +443,12 @@ is in `memory_stats.recall_log` and, with its item text, in
   `Could not parse reflection response`, or
   `Reflection response was not a JSON object` when it was valid JSON that
   is not an object.
-- `usage` and `duration_s`: the token counts and the time of both requests,
-  their retries included. With persistence on, `duration_s` also includes
+- `usage`, `prefix` and `duration_s`: the token counts and the time of both
+  requests, their retries included. `usage` also holds `cached_tokens` and
+  `reasoning_tokens` when the server sent them, summed over the requests.
+  `prefix` is the object described under `assistant.message`, for the
+  first request of the reflection (`null` when it is the run's first request
+  or no request was sent). With persistence on, `duration_s` also includes
   recording the replies in history, which can wait up to 5 seconds while
   another process writes to `history.db`.
 
@@ -638,7 +675,10 @@ The store guarantees:
 ## Stability
 
 Within schema version 1 (`v` 1), types and keys are only ever added, never
-removed or renamed. Ignore types and keys you do not know.
+removed or renamed. Ignore types and keys you do not know. A stored
+`assistant.message` or `reflection` from before `prefix` existed lacks that key
+(`OPTIONAL_EVENT_FIELDS` in `localmelo.melo.contracts.events` lists such
+keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and
 `SESSION_EVENT_FIELDS` in `localmelo.support.sessions.store` each session
 type.

@@ -509,6 +509,7 @@ class TestFields:
                 "thinking",
                 "tool_calls",
                 "usage",
+                "prefix",
                 "duration_s",
             },
             "tool.started": {"step", "call_id", "name", "arguments", "preview"},
@@ -573,6 +574,7 @@ class TestFields:
                 "requests",
                 "readable",
                 "usage",
+                "prefix",
                 "duration_s",
             },
             "run.progress": {
@@ -1490,6 +1492,7 @@ class TestReflections:
         [reflection] = recorder.of("reflection")
         data = dict(reflection.data)
         assert data.pop("duration_s") >= 0
+        assert data.pop("prefix")["against"] == {"kind": "plan", "request": 1}
         assert data == {
             "attempt": 1,
             "action": "continue",
@@ -1527,6 +1530,7 @@ class TestReflections:
         [reflection] = recorder.of("reflection")
         data = dict(reflection.data)
         assert data.pop("duration_s") >= 0
+        assert data.pop("prefix")["against"] == {"kind": "plan", "request": 1}
         assert data == {
             "attempt": 1,
             "action": None,

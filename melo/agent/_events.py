@@ -32,6 +32,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
+    from localmelo.melo.agent._chat import CallTelemetry
     from localmelo.melo.memory.procedures.tracker import ProgressState
     from localmelo.melo.memory.recall import RecallRecord
 
@@ -128,6 +129,7 @@ class _Emitter:
         self._reflecting_since = 0.0
         # The replies of the reflection under way (see replies).
         self._replies: list[Message] | None = None
+        self._calls: list[CallTelemetry] = []
         self._sink_failed = False
         self._warned_awaitable = False
 
@@ -198,8 +200,14 @@ class _Emitter:
         )
         self._planning_since = time.perf_counter()
 
-    def assistant_message(self, response: Message) -> None:
+    def assistant_message(
+        self, response: Message, call: CallTelemetry | None = None
+    ) -> None:
         """The planning reply of the current step.
+
+        *call* is what the request reported beyond the reply: its extra
+        usage fields join ``usage`` and its prefix diagnostics are the
+        ``prefix`` object (``None`` for the run's first planning request).
 
         Its ``thinking`` and ``content`` pass :func:`redact_secrets`, on the
         whole text and before the payload clips them; *response* itself
@@ -219,7 +227,8 @@ class _Emitter:
                     "content": redact_secrets(response.content)[0],
                     "thinking": redact_secrets(response.thinking)[0],
                     "tool_calls": [_call_entry(call) for call in response.tool_calls],
-                    "usage": _usage([response]),
+                    "usage": {**_usage([response]), **(call.details if call else {})},
+                    "prefix": call.prefix if call else None,
                     "duration_s": duration_s,
                 }
             )
@@ -465,6 +474,7 @@ class _Emitter:
             ),
         )
         self._replies = []
+        self._calls = []
         self._reflecting_since = time.perf_counter()
 
     @property
@@ -474,6 +484,11 @@ class _Emitter:
         ``None`` without a sink: the run then keeps no replies.
         """
         return self._replies
+
+    def reflection_call(self, call: CallTelemetry | None) -> None:
+        """Keep what a request of the reflection under way reported."""
+        if call is not None and self._replies is not None:
+            self._calls.append(call)
 
     def reflection(
         self,
@@ -488,13 +503,20 @@ class _Emitter:
         reply that holds no reflection after it was asked again, whose
         decision fields are then ``None``. ``requests``, ``usage`` and
         ``duration_s`` cover the replies in :attr:`replies`, from
-        ``reflection.started`` on. *verdict* is the gate in force and why
-        the run stopped, if it did.
+        ``reflection.started`` on; the extra usage fields of the requests
+        (see :meth:`reflection_call`) are summed into ``usage`` and the first
+        request's prefix diagnostics are ``prefix``. *verdict* is the gate in
+        force and why the run stopped, if it did.
         """
         if self._sink is None:
             return
         attempt = self._attempt
         replies = list(self._replies or ())
+        usage = _usage(replies)
+        for call in self._calls:
+            for name, value in call.details.items():
+                usage[name] = usage.get(name, 0) + value
+        prefix = self._calls[0].prefix if self._calls else None
         duration_s = time.perf_counter() - self._reflecting_since
         action: str | None = None
         rationale: str | None = None
@@ -528,7 +550,8 @@ class _Emitter:
                     "best_effort_result": _redacted(best_effort),
                     "requests": len(replies),
                     "readable": reflected is not None,
-                    "usage": _usage(replies),
+                    "usage": usage,
+                    "prefix": prefix,
                     "duration_s": duration_s,
                 }
             ),
