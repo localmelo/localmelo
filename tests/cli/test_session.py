@@ -29,7 +29,11 @@ from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import UNICODE
 from localmelo.support.sessions.runner import SessionRunner
-from localmelo.support.sessions.store import SessionBusyError, SessionStore
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStore,
+    StoredEvent,
+)
 from localmelo.tests.sessions.helpers import (
     ScriptedLLM,
     answer,
@@ -99,12 +103,13 @@ class FakeApp:
         self.answers = list(answers or [])
         self.exited = False
         self.bells = 0
+        self.invalidated = 0
 
     def hint(self, text: str, seconds: float = 2.0) -> None:
         self.hints.append(text)
 
     def invalidate(self) -> None:
-        pass
+        self.invalidated += 1
 
     def bell(self) -> None:
         self.bells += 1
@@ -1559,3 +1564,41 @@ async def test_attach_bang_always_shows_the_exact_output_and_asks(
     assert turn.attachments is not None
     [attached] = turn.attachments
     assert attached.text == "ok\n\nend\n" and "HIDDEN_MARK" not in attached.text
+
+
+def _request_event(prompt: int, cached: int | None) -> StoredEvent:
+    usage = {"prompt_tokens": prompt, "completion_tokens": 5}
+    if cached is not None:
+        usage["cached_tokens"] = cached
+    event = {"type": "assistant.message", "ts": time.time(), "data": {"usage": usage}}
+    return StoredEvent(None, "s1", 1, event)
+
+
+async def test_status_bar_redraws_after_an_assistant_message(setup: Setup) -> None:
+    session = setup.session
+    assert session.status_bar().segments == ()
+    before = setup.app.invalidated
+    session.on_event(_request_event(1000, 830))
+    assert setup.app.invalidated == before + 1
+    assert session.status_bar().segments == ("cache 83%",)
+    # Without a context_budget event the bar keeps its own ctx, as before.
+    assert session.status_bar().context == "ctx 1.0k"
+
+
+async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
+    session = setup.session
+    session.on_event(_request_event(1000, 830))
+    auto = session.status_bar()
+    session.status_line = "off"
+    before = setup.app.invalidated
+    session.on_event(_request_event(1000, 830))
+    assert setup.app.invalidated == before
+    off = session.status_bar()
+    assert off.segments == ()
+    assert (off.model, off.workspace, off.context, off.title, off.mode) == (
+        auto.model,
+        auto.workspace,
+        "ctx 1.0k",
+        auto.title,
+        auto.mode,
+    )
