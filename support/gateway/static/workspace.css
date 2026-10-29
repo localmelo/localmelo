@@ -1366,6 +1366,34 @@ dialog::backdrop {
 .live-line .status-dot {
   animation: pulse 1.4s infinite;
 }
+/* One clipped line: a segment that does not fit wraps below and is hidden, so a
+   narrow width drops the rightmost segments first, as the terminal's bar does. */
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  height: 16px;
+  overflow: hidden;
+  /* Aligned with the composer's text below it. */
+  max-width: 800px;
+  margin: 0 auto 6px;
+  padding: 0 17px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.status-row[hidden] {
+  display: none;
+}
+.status-seg + .status-seg::before {
+  content: "·";
+  margin-right: 8px;
+}
+.task-panel .status-row {
+  padding: 0;
+  margin: 8px 0;
+}
 .live-past {
   padding-left: 18px;
   overflow-wrap: anywhere;

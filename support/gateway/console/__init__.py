@@ -48,6 +48,7 @@ from . import (
     routes_page,
     routes_sessions,
     routes_settings,
+    routes_status,
     routes_tasks,
     routes_turns,
 )
@@ -197,6 +198,7 @@ class Console:
         errors.install(app)
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
+        routes_status.add_routes(app, self)
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
         routes_page.add_routes(app, self)

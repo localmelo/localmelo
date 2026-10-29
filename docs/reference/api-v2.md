@@ -561,6 +561,42 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   browser reconnects with `Last-Event-ID` and receives every event it
   missed, once.
 
+## GET /api/sessions/{id}/status
+
+The numbers the terminal's `/status` and status bar show for one chat or task
+session, folded on the server from its stored events with the terminal's own
+code, so both agree. A worker session (one made by `--save-session`, in the
+CLI's store) is 404 `not_found` until the console reads those events.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
+```
+
+```json
+{
+  "session_id": "3f9c2a7b1d4e",
+  "local": true,
+  "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
+  "context": {"measured": 1000, "limit": 8000},
+  "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
+  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1}
+}
+```
+
+- `segments` is what the terminal's status bar draws, left to right: cache,
+  context, step, tasks. A segment with no data is left out.
+- `cache.last_percent` and `cache.session_percent` are `null`, and the
+  segment reads `cache --`, when the server reported no cached tokens: never
+  0%. `idle_s` is set for a local backend only (a local server's cache is
+  evicted by memory, not by time, so there is no countdown).
+- `context` and `steps` are `null` before a measurement or a run's first
+  progress fact. `steps.active` is true while a run is going. `tasks` is the
+  task store's running, queued and held counts and the highest priority
+  among them (`top_level`, `null` with none).
+- The fold is cached per session at its last event id: a read with no new
+  event reads no events.
+
 ## GET /api/sessions/{id}/blobs/{sha256}
 
 An image a turn's tool returned, by its SHA-256 digest.

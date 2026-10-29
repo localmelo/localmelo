@@ -127,6 +127,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Status row in the web console (#176, #213). A chat shows one line above its
+  composer, and a task's card shows it under its facts: the same segments as the
+  terminal's status bar (`cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`,
+  `tasks 1 running 2 queued`), from the new `GET /api/sessions/{id}/status`, which
+  folds the session's stored events with the terminal's own code. A server that
+  reports no cached tokens shows `cache --`, never 0%. The row refetches at most
+  once a second while events arrive and on the page's existing polls; a narrow
+  width drops segments right to left. A worker (CLI-store) session id is 404 until
+  the console can read those events. ([#218])
 - Every direct run (`melo "<task>"`, `melo --brief FILE`) is now recorded as a
   worker session in `~/.cache/localmelo/cli/sessions.db` by default, so the web
   console's Workers view and the macOS app show localmelo's own runs without a
@@ -1338,6 +1347,7 @@ earlier milestones.
 [#214]: https://github.com/localmelo/localmelo/pull/214
 [#216]: https://github.com/localmelo/localmelo/pull/216
 [#217]: https://github.com/localmelo/localmelo/pull/217
+[#218]: https://github.com/localmelo/localmelo/pull/218
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
