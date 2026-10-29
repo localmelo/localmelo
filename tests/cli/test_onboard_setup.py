@@ -457,7 +457,7 @@ def test_enter_at_every_wizard_question_keeps_the_config(config_path: Path) -> N
         "  Chat backend [3]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
-        "  Start? [Y]: ",
+        "  Save and continue? [Y]: ",
         "  Embedding backend [5]: ",
     ]
     assert not any("key" in prompt.lower() for prompt in answers.prompts)
@@ -482,7 +482,7 @@ def test_the_wizard_offers_the_chat_servers_embedding_model(
         "  Chat backend [3]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
-        "  Start? [Y]: ",
+        "  Save and continue? [Y]: ",
         "  Embedding backend [6]: ",
     ]
     listing.assert_awaited_once_with("vllm", URL)
@@ -553,7 +553,7 @@ def test_the_wizard_falls_back_when_the_listing_fails(
         "  Chat backend [3]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
-        "  Start? [Y]: ",
+        "  Save and continue? [Y]: ",
         "  Embedding backend [5]: ",
     ]
     assert "Traceback" not in capsys.readouterr().out
@@ -664,10 +664,15 @@ def test_retry_asks_again_with_what_was_typed(config_path: Path) -> None:
     config.save(Config())
     chat = mock.AsyncMock(side_effect=[_probe_failure(), None])
     answers = _Answers(
-        *("3", "http://127.0.0.1:9000/v1", "typo", ""),  # backend, URL, model, Start?
+        *(
+            "3",
+            "http://127.0.0.1:9000/v1",
+            "typo",
+            "",
+        ),  # backend, URL, model, Save and continue?
         "",  # embedding: none
         "r",  # the check fails: retry
-        *("", "fixed", ""),  # URL kept, model fixed, Start?
+        *("", "fixed", ""),  # URL kept, model fixed, Save and continue?
     )
     with (
         mock.patch("builtins.input", answers),
@@ -993,3 +998,57 @@ def test_the_embedding_guides_toml_examples_load(
         cfg = config.load()
         if "chat_backend" in tomllib.loads(block):
             assert cfg.validate() == []
+
+
+# ── --reconfigure in default mode (guided) ──
+
+
+def _guided(
+    answers: _Answers, *, found: FoundServer | None, lists: dict | None = None
+) -> Config | None:
+    detect, list_models = _servers(found, lists)
+    with (
+        mock.patch.object(discovery, "detect_urls", return_value=(URL,)),
+        mock.patch.object(discovery, "detect_local_server", detect),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch("builtins.input", answers),
+    ):
+        return run_backend_setup(guided=True)
+
+
+def test_a_guided_reconfigure_keeps_a_found_server_with_one_question(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config.save(_configured())
+    answers = _Answers("", "", "n")  # keep it, model, no embedding
+    cfg = _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
+    assert cfg is not None and (cfg.vllm.chat_url, cfg.vllm.chat_model) == (
+        URL,
+        "Qwen3-8B",
+    )
+    assert answers.prompts[0] == "Use it? [Y/n]: "
+    assert not any("backend" in p.lower() or "URL" in p for p in answers.prompts)
+    out = capsys.readouterr().out
+    assert out.startswith(f"Found a model server at {URL} (1 model).\n")
+    assert "Welcome" not in out
+
+
+def test_a_guided_reconfigure_shows_the_full_menu_after_no(
+    config_path: Path,
+) -> None:
+    config.save(_configured())
+    answers = _Answers("n", *[""] * 10)
+    cfg = _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
+    assert cfg is not None
+    assert answers.prompts[0] == "Use it? [Y/n]: "
+    assert answers.prompts[1] == "  Chat backend [3]: "
+    assert "  Save and continue? [Y]: " in answers.prompts
+
+
+def test_a_guided_reconfigure_with_no_server_goes_straight_to_the_menu(
+    config_path: Path,
+) -> None:
+    config.save(_configured())
+    answers = _Answers(*[""] * 10)
+    assert _guided(answers, found=None) is not None
+    assert answers.prompts[0] == "  Chat backend [3]: "

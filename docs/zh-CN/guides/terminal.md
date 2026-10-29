@@ -48,12 +48,12 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 按以下顺序使用第一项适用的配置：
 
-1. `--reconfigure`：运行配置向导，然后使用它保存的后端。不带任务时，不能与 `--base-url` 同用。
+1. `--reconfigure`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整的后端菜单。不带任务时，不能与 `--base-url` 同用。
 2. `--base-url URL`：使用该服务器，不使用配置文件。模型使用 `--chat-model` 指定的模型，否则使用 `GET URL/models` 列出的第一个模型；若列表中还有其他模型，则跳过 ID 包含 `embed` 或 `rerank` 的模型。没有 `/v1` 的 URL 会通过 `URL/v1/models` 获取列表，如果该地址有响应，界面也会使用 `URL/v1`。服务器没有响应模型列表请求或没有列出模型时，模型为 `default`，横幅下方的警告会说明原因。没有配置文件时会询问一次 `Save URL · MODEL as the default backend? [Y/n]`；按 Enter 保存，与首次运行相同。
 3. 已保存的后端；若指定 `--chat-model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. 没有已保存的后端：先回答[首次运行](#first-run)的问题，然后打开界面。
 
-横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了第一个，还会显示 `first of N; /model lists them`。
+横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了第一个，还会显示 `first of N; /model lists them`。
 
 <a id="keys"></a>
 
@@ -80,7 +80,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。列表以 `/model`、`/backend`、`/new`、`/status`、`/help` 和 `/exit` 开头。
 
 | 命令 | 作用 |
 |---|---|
@@ -102,7 +102,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
-| `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、文件和版本。 |
+| `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；`--developer` 显示所有行）、文件和版本。 |
 | `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp-config` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
 | `/retry` | 重新运行最近一个已完成轮次，即使恢复会话后也保留存储的原始输入文本。只有尚未撤销该轮时才先撤销；之前的轮次和文件仍保持原有更改。 |
 | `/model [name\|number]` | 单独使用时显示当前模型和服务器列出的模型。指定列表中的 ID 或编号时（尚未列出则 melo 先列出），从下一条消息起切换到该模型，并将其保存为默认值。 |

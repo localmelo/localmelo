@@ -303,6 +303,15 @@ def execute(
             file=out,
             flush=True,
         )
+        if cmd == "stop" and task.get("state") != "cancelled":
+            # The gateway accepts a stop for a task with a live worker before
+            # that worker has ended; the record turns cancelled once it has.
+            print(
+                f"  stop requested; the task stops when its worker ends. "
+                f"Check with: melo-task show {_safe(task.get('task_id', ''))}",
+                file=out,
+                flush=True,
+            )
         if cmd == "show":
             print(f"  Title: {_safe(task.get('title') or 'not recorded')}", file=out)
             print(f"  Level: {_level_label(task)}", file=out)

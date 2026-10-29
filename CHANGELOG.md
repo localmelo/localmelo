@@ -818,6 +818,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- First-look fixes for the default mode: `melo --version` prints the banner's
+  version and exits 0, and a usage error prints a short usage instead of every
+  developer flag (`--developer` keeps the long one). The banner and
+  `--version` show `melo 0.1.0 (baab21e)` on a git checkout (the JSON record's
+  and gateway's version fields are unchanged). `/status` hides the cache,
+  context, steps and tasks rows until they have data. The `/` list starts with
+  `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`. `melo-task
+  stop` says `stop requested; …` while the task has not stopped. In default
+  mode `melo --reconfigure` offers the server it finds before the full
+  backend menu, and the wizard's `Start?` is `Save and continue?` ([#207]).
 - The "no model server" screens now say what to do. A chat request that cannot
   connect ends the run with `cannot reach the model server at URL. Start it, or
   run melo to set one up.` (for a server beyond this computer and the local
@@ -1273,3 +1283,4 @@ earlier milestones.
 [#204]: https://github.com/localmelo/localmelo/pull/204
 [#205]: https://github.com/localmelo/localmelo/pull/205
 [#206]: https://github.com/localmelo/localmelo/pull/206
+[#207]: https://github.com/localmelo/localmelo/pull/207

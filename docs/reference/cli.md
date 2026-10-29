@@ -32,7 +32,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 | `melo -- "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
-| `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
+| `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use it? [Y/n]:`) and shows the full backend menu only after `n`, with none found, or with `--developer`. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
@@ -107,6 +107,7 @@ two equal.
 | Option | Tier | Decided in |
 |---|---|---|
 | `-h`, `--help` | user |  |
+| `--version` | user |  |
 | `--base-url` | user |  |
 | `--chat-model` | user |  |
 | `--workspace` | user |  |
@@ -178,6 +179,7 @@ deliberate change: a test pins the number of options default-mode help shows.
 |---|---|---|
 | `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the plain loop; none opens the interactive UI. |
 | `-h`, `--help` | | Show the help and exit: the user options in default mode, every option in [developer mode](#default-and-developer-mode). |
+| `--version` | | Print `melo <version>` (the package version, then the short commit on a git checkout, e.g. `melo 0.1.0 (baab21e)`) and exit 0. |
 | `--developer` | off | Show every option in `--help`, grouped by tier, for this run; the same as `[ui] mode = "developer"`. It changes only the help. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
 | `--chat-model NAME` | with `--base-url`, `default` for a task and the server's first listed model without one; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
@@ -424,7 +426,7 @@ These options apply to `melo` without a task.
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
 | `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
-| `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
+| `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use it? [Y/n]:`; the full menu after `n`, with none found, or with `--developer`), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of

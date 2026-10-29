@@ -1304,6 +1304,33 @@ async def test_status_shows_the_facts(
     assert "version    melo " in text
 
 
+async def test_status_hides_the_rows_with_nothing_to_say_until_they_have_data(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    session.enter("/status")
+    await _until(lambda: "version    melo " in out.text())
+    text = out.text()
+    assert not any(
+        row in text for row in ("cache  ", "context  ", "steps  ", "tasks  ")
+    )
+    assert " yet" not in text
+    session.renderer.usage.observe(
+        {
+            "type": "assistant.message",
+            "ts": time.time(),
+            "data": {"usage": {"prompt_tokens": 400, "cached_tokens": 300}},
+        }
+    )
+    session.enter("/status")
+    await _until(lambda: out.text().count("version    melo ") == 2)
+    assert "cache      last request 75% cached" in out.text()
+
+
 async def test_status_prints_the_usage_rows(
     setup: Setup, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1312,6 +1339,7 @@ async def test_status_prints_the_usage_rows(
 
     monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
     session, out = setup.session, setup.out
+    session.developer = True  # developer mode shows every row
     session.enter("/status")
     await _until(lambda: "version    melo " in out.text())
     text = out.text()

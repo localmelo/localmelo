@@ -36,7 +36,7 @@ def _ask_choice(prompt: str, options: list[str], default: int = 1) -> int:
     return _ask_int(prompt, default, lo=1, hi=len(options))
 
 
-def _confirm(prompt: str = "Start?") -> bool:
+def _confirm(prompt: str = "Save and continue?") -> bool:
     val = _ask(prompt, "Y").lower()
     return val in ("y", "yes", "")
 
@@ -246,8 +246,16 @@ def _embedding_choices(cfg: config.Config, models: list[str]) -> list[EmbeddingC
     ]
 
 
-def run_backend_setup() -> config.Config | None:
+class _FullMenuError(Exception):
+    """The guided reconfigure found no server to keep: show the full menu."""
+
+
+def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     """Run the split backend setup flow.
+
+    With *guided* (default mode's ``--reconfigure``), a model server found on
+    this machine is offered first, as the first run does; the full menu below
+    follows only when none is found or the user declines it.
 
     1. Choose and configure the chat backend.
     2. Choose and configure the embedding backend.
@@ -257,6 +265,14 @@ def run_backend_setup() -> config.Config | None:
     backend defaults to none when the config has none. Returns Config if
     successful, None if cancelled.
     """
+
+    if guided:
+        try:
+            setup = run_first_setup(ask_keep=True)
+        except _FullMenuError:
+            pass
+        else:
+            return config.load() if setup is not None and setup.saved else None
 
     print("\n  Welcome to localmelo.\n")
     cfg = config.load()
@@ -589,7 +605,7 @@ def _offer_embedding(
     return candidate, ollama
 
 
-def run_first_setup() -> FirstSetup | None:
+def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     A server found on this machine prefills the URL; the model is chosen
@@ -597,9 +613,16 @@ def run_first_setup() -> FirstSetup | None:
     ``GET /api/version`` once when saving, to tell Ollama apart. When the
     check fails the user may retry, start without saving, or quit
     (None). EOFError and KeyboardInterrupt reach the caller.
+
+    With *ask_keep* (``--reconfigure``), the found server is offered with one
+    question instead of the URL question; no server found, or a ``n``,
+    raises :class:`_FullMenuError` before anything is saved.
     """
     urls = discovery.detect_urls()
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
+    if ask_keep and (found is None or not found.models):
+        raise _FullMenuError
+    keep = False
     if found is not None and found.models:
         count = len(found.models)
         print(
@@ -607,6 +630,10 @@ def run_first_setup() -> FirstSetup | None:
             f"({count} model{'' if count == 1 else 's'})."
         )
         default_url = found.url
+        if ask_keep:
+            if _choose("Use it? [Y/n]: ", "yn", "y") == "n":
+                raise _FullMenuError
+            keep = True
     elif found is not None:
         print(f"A model server at {found.url} answered, but {found.problem}.")
         default_url = found.url
@@ -622,7 +649,8 @@ def run_first_setup() -> FirstSetup | None:
         default_url = urls[0] if overridden and urls else _FIRST_RUN_URL
 
     while True:
-        url = _question("Model server URL", default_url)
+        url = default_url if keep else _question("Model server URL", default_url)
+        keep = False
         try:
             if found is not None and found.models and url == found.url:
                 models = found.models

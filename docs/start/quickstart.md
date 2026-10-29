@@ -163,6 +163,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   / commands · esc stop · ctrl+d quit
 ```
 
+The title shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0.
+
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
 embeddings probe. Type a message and press Enter, or `/exit` to leave. From
@@ -190,7 +192,7 @@ The wizard asks:
 | `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
-| `Start?` | Press Enter (yes) to continue. |
+| `Save and continue?` | Press Enter (yes) to save and continue. |
 | `Embedding backend` | `5` for `None (no long-term memory)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first as the default; choosing one is enough. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
@@ -210,7 +212,10 @@ embedding server fails, the wizard saves with embedding off and says so. On
 success it prints `Config saved to …`, the path of
 `~/.cache/localmelo/config.toml`, and then **starts the gateway** on
 `http://127.0.0.1:8401`. The gateway keeps running in this terminal.
-Without `--serve`, `melo --reconfigure` opens the interactive UI instead.
+Without `--serve`, `melo --reconfigure` opens the interactive UI instead, and in
+default mode it starts with the first run's question: it prints
+`Found a model server at …` and asks `Use it? [Y/n]:`. The full menu above
+follows only after `n`, when no server is found, or with `--developer`.
 
 ## Start the gateway
 

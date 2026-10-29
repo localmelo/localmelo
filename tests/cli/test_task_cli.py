@@ -406,3 +406,31 @@ def test_main_sends_bearer_without_proxy_or_redirects(
     assert options["follow_redirects"] is False and options["trust_env"] is False
     assert requests[0].headers["Authorization"] == "Bearer " + "a" * 64
     assert "a" * 64 not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "state,says_requested", [("held", True), ("running", True), ("cancelled", False)]
+)
+def test_stop_says_when_the_task_has_not_stopped_yet(
+    state: str, says_requested: bool
+) -> None:
+    def reply(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"task": {"task_id": "abc", "state": state}})
+
+    out = io.StringIO()
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901", transport=httpx.MockTransport(reply)
+    ) as client:
+        code = execute(
+            parser().parse_args(["stop", "abc"]), client, out=out, stdin=io.StringIO()
+        )
+    assert code == 0
+    lines = out.getvalue().splitlines()
+    assert lines[0] == f"abc  {state}"
+    if says_requested:
+        assert lines[1].startswith(
+            "  stop requested; the task stops when its worker ends"
+        )
+        assert lines[1].endswith("melo-task show abc")
+    else:
+        assert len(lines) == 1
