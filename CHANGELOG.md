@@ -31,6 +31,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Concurrent first runs on a new home no longer lose a recording. A process
+  that read a new sessions file just as another finished its schema saw version
+  0 with tables and called the file foreign (`melo: could not record this run
+  (... is not a localmelo sessions file)`); the version and the tables are now
+  read as one snapshot. A foreign file is still refused at once ([#NN]).
+
 - A brief's `Check:` command now runs in a default `melo --brief` run. A direct
   run offers no `shell_exec` to the model, so the harness's own check call was
   refused, the run ended `completed` with exit 0 and `tests` `failed`, and only

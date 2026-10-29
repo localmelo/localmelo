@@ -15,6 +15,8 @@ import stat
 import subprocess
 import sys
 import textwrap
+import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -414,6 +416,111 @@ async def test_two_terminals_create_one_new_file_at_the_same_moment(
     assert (await second.get_session(one.id)) == one
     await first.aclose()
     await second.aclose()
+
+
+async def test_a_schema_created_while_the_file_is_checked_is_not_foreign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.db"
+    other = cli(path)
+    first = cli(path)
+    created = False
+    original = store_mod._rows
+
+    async def create_after_the_first_read(
+        conn: Any, sql: str, args: Any = ()
+    ) -> list[Any]:
+        nonlocal created
+        result = await original(conn, sql, args)
+        if not created:
+            # Another process finishes the schema right after the file was
+            # read as new: version 0 and no tables, by the first read.
+            created = True
+            await other.open()
+        return result
+
+    monkeypatch.setattr(store_mod, "_rows", create_after_the_first_read)
+    await first.open()
+    assert created
+    assert rows(path, "SELECT key, value FROM store_info WHERE key = 'writer'") == [
+        ("writer", "cli")
+    ]
+    await first.aclose()
+    await other.aclose()
+
+
+async def test_an_existing_store_opens_on_its_first_check(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sessions.db"
+    store = cli(path)
+    await store.open()
+    await store.aclose()
+    checks: list[str] = []
+    original = SessionStore._check_read_only
+
+    async def traced(self: SessionStore) -> bool:
+        started = time.monotonic()
+        result = await original(self)
+        checks.append(f"{time.monotonic() - started:.3f}")
+        return result
+
+    reopened = cli(path)
+    reopened._check_read_only = types.MethodType(traced, reopened)  # type: ignore[method-assign]
+    started = time.monotonic()
+    await reopened.open()
+    # An existing store opens on its first check, without a retry delay.
+    assert len(checks) == 1
+    assert time.monotonic() - started < 2.0
+    await reopened.aclose()
+
+
+_OPEN_CHILD = """
+import asyncio, sys, time
+from localmelo.support.sessions.store import SessionStore
+
+async def main(path, start):
+    store = SessionStore(path, writer="cli")
+    while time.time() < float(start):
+        await asyncio.sleep(0)
+    try:
+        await store.open()
+    finally:
+        await store.aclose()
+
+asyncio.run(main(sys.argv[1], sys.argv[2]))
+"""
+
+
+def test_processes_opening_one_new_file_at_once_all_open_it(tmp_path: Path) -> None:
+    for number in range(3):
+        path = tmp_path / f"round{number}" / "sessions.db"
+        start = str(time.time() + 1.5)
+        children = [
+            subprocess.Popen(
+                [sys.executable, "-I", "-c", _OPEN_CHILD, str(path), start],
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(8)
+        ]
+        failures = [
+            err for child in children for err in [child.communicate()[1]] if err
+        ]
+        assert not failures, failures[0]
+        assert [child.returncode for child in children] == [0] * 8
+
+
+async def test_tasks_opening_one_new_file_at_once_all_open_it(tmp_path: Path) -> None:
+    for number in range(10):
+        path = tmp_path / f"round{number}.db"
+        stores = [cli(path) for _ in range(12)]
+        results = await asyncio.gather(
+            *(store.open() for store in stores), return_exceptions=True
+        )
+        for store in stores:
+            await store.aclose()
+        assert [r for r in results if r is not None] == []
 
 
 async def test_aclose_is_final_and_leaves_a_running_turn_running(
