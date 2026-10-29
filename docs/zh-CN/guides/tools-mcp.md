@@ -13,7 +13,7 @@ melo --builtins file_read,shell_exec "How many lines does notes.txt have?"
 
 - `--builtins` 接受 `all`（所有内置工具，包括 `shell_exec`）、`none` 或以逗号分隔的工具名称列表。未知名称属于用法错误。未指定该选项时由模式决定：直接运行、网关和 Python API 使用 `file_read`、`file_write` 和 `python_exec`；交互式界面使用全部四个工具。`--builtins all` 可以保留旧版直接运行的工具集合，而 `--builtins shell_exec` 只指定 Shell 工具。
 - JSON 行中的 `config.builtins` 和 `config.tools` 显示已注册的工具。
-- 在 Python 中使用 `AgentOptions(builtins=...)`；见 [AgentOptions（英文）](../../reference/python-api.md#agentoptions)。
+- 在 Python 中使用 `AgentOptions(builtins=...)`；见 [AgentOptions](../reference/python-api.md#agentoptions)。
 
 <a id="add-tools-from-mcp-servers"></a>
 
@@ -85,7 +85,7 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 - 工具命名为 `mcp__<server>__<tool>`。字母、数字、`_` 和 `-` 以外的字符会变为 `_`。超过 64 个字符的名称会缩短至 64 个字符，并以短哈希结尾；JSON 行中的 `config.tools` 显示实际使用的名称。
 - 工具的 `annotations` 对象按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。
 - 服务器在运行开始时启动。无法启动的服务器会使运行以 `setup_error` 状态结束，例如 `MCP server 'notes' exited (code 1)`。
-- MCP 服务器适用于直接模式和 [Python API（英文）](../../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。
+- MCP 服务器适用于直接模式和 [Python API](../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。
 
 <a id="what-the-checks-do"></a>
 

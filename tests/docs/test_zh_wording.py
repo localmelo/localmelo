@@ -46,6 +46,7 @@ def test_web_console_twin_follows_the_playground_move() -> None:
     zh = (ROOT / "docs/zh-CN/guides/web-console.md").read_text()
     assert "disabled-by-default [legacy playground routes]" in en
     assert "旧版 playground 路由" in zh
-    assert "../../reference/http-v1.md#legacy-playground" in zh
+    # The reference page has a Chinese twin since the reference batch.
+    assert "../reference/http-v1.md#legacy-playground" in zh
     assert "security-1b" not in zh
     assert "_test_webapp" not in zh

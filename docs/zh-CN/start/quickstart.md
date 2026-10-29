@@ -80,7 +80,7 @@ stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码�
 
 ### 运行结果
 
-`status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../../reference/run-results.md)（英文）。
+`status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../reference/run-results.md)。
 
 <a id="save-a-configuration"></a>
 
@@ -196,10 +196,10 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 
 ## 下一步
 
-- [配置](../../reference/configuration.md)（英文）：后端、云端 API 密钥、超时。
-- [工具和 MCP](../../reference/tools.md)（英文）：选择内置工具并添加 MCP 服务器。
+- [配置](../reference/configuration.md)：后端、云端 API 密钥、超时。
+- [工具和 MCP](../reference/tools.md)：选择内置工具并添加 MCP 服务器。
 - [网关和 HTTP API](../guides/gateway.md)：会话、网页工作区、登录时运行。
-- [Python API](../../reference/python-api.md)（英文）：从 Python 运行任务、跟踪事件、审批工具调用。
+- [Python API](../reference/python-api.md)：从 Python 运行任务、跟踪事件、审批工具调用。
 - [记忆](../../reference/memory.md)（英文）：跨运行保留记忆、检查和重置记忆。
 - [命令行参考](../../reference/cli.md)（英文）：所有选项、退出码和脚本编写。
 - [故障排查](../../reference/troubleshooting.md)（英文）：错误消息和解决办法。

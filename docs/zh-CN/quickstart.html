@@ -72,7 +72,7 @@ uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         <p>uv 会创建虚拟环境 <code>.venv/</code>（如果你没有 Python 3.13，它会自动安装），并安装 localmelo 及网关所需的依赖。</p>
         <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（<code>localmelo-main</code>）会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</p>
-        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS 开发应用（英文）</a>会在控制台外面构建一个未签名的原生窗口。它需要 release Xcode，而且是开发包，不是发行版或 Homebrew cask。</p>
+        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>会在控制台外面构建一个未签名的原生窗口。它需要 release Xcode，而且是开发包，不是发行版或 Homebrew cask。</p>
         <p>本教程后面的命令直接调用 <code>melo</code>。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 <code>source &lt;clone&gt;/.venv/bin/activate</code>，其中 <code>&lt;clone&gt;</code> 是你的 <code>localmelo</code> 目录。使用 uv 时，也可以在克隆目录中运行 <code>uv run melo …</code>，或在其他任何位置运行 <code>uv run --project &lt;clone&gt; melo …</code>。</p>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
@@ -102,7 +102,7 @@ pip install -e ".[gateway]"</code></pre>
         <p>stdout 上只有这一行。只有当 <code>status</code> 为 <code>completed</code> 时，退出码才是 0。</p>
 
         <h3 id="run-results">运行结果</h3>
-        <p><code>status</code> 表示运行是如何结束的，例如 <code>completed</code>、<code>budget_exhausted</code> 或 <code>provider_error</code>。各个计数字段记录这次运行用了多少步、多少次模型请求和多少次工具调用，<code>config</code> 记录运行时使用的选项。所有状态和字段的说明见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/run-results.md">运行结果（英文）</a>。</p>
+        <p><code>status</code> 表示运行是如何结束的，例如 <code>completed</code>、<code>budget_exhausted</code> 或 <code>provider_error</code>。各个计数字段记录这次运行用了多少步、多少次模型请求和多少次工具调用，<code>config</code> 记录运行时使用的选项。所有状态和字段的说明见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/run-results.md">运行结果</a>。</p>
       </section>
 
       <section class="section" id="save-a-configuration">
@@ -183,7 +183,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <p>在第一个终端中按 Ctrl+C 停止网关。运行任务会使用保存的配置：</p>
         <pre><code>melo "What is 6*7?"</code></pre>
         <p>以后想跳过向导、直接启动网关时，运行 <code>melo --serve</code>。</p>
-        <p>独立的 <code>melo-task</code> 客户端通过认证的回环 HTTP 创建、查看、跟随和控制网关任务，从不启动网关。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#task-command">任务命令（英文）</a>。</p>
+        <p>独立的 <code>melo-task</code> 客户端通过认证的回环 HTTP 创建、查看、跟随和控制网关任务，从不启动网关。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/scheduler.md#task-command">任务命令</a>。</p>
       </section>
 
       <section class="section" id="interactive-conversations">
@@ -239,10 +239,10 @@ brew install jundot/omlx/omlx</code></pre>
       <section class="section" id="next-steps">
         <h2>下一步</h2>
         <ul>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">配置（英文）</a>：后端、云端 API 密钥、超时。</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">工具和 MCP（英文）</a>：选择内置工具，添加 MCP 服务器。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/configuration.md">配置</a>：后端、云端 API 密钥、超时。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具和 MCP</a>：选择内置工具，添加 MCP 服务器。</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">网关和 HTTP API（英文）</a>：会话、网页工作区、登录时自动运行。</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API（英文）</a>：在 Python 中运行任务、跟踪事件、审批工具调用。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a>：在 Python 中运行任务、跟踪事件、审批工具调用。</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">记忆（英文）</a>：在多次运行之间保留记忆，查看和重置记忆。</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a>：所有选项、退出码、在脚本中使用。</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/troubleshooting.md">故障排查（英文）</a>：错误信息及解决方法。</li>

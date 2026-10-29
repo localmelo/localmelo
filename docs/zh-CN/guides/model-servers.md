@@ -85,7 +85,7 @@ enable_thinking = false
 
 - `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。
 - [首次运行](configure.md#first-run)会写入 `chat_backend`、`chat_url` 和 `chat_model` 行：在没有配置文件的终端中运行 `melo`，同时让 oMLX 运行。当它提供嵌入模型时，还会写入 `embedding_backend = "vllm"`，以及该表的 `embedding_url` 和 `embedding_model`。其他行请手动添加。
-- `request_timeout_s = 600` 为 oMLX 留出时间，以便在请求遇到未加载的模型时加载它；见[对话请求超时](../../reference/configuration.md#chat-request-timeout)（英文）。
+- `request_timeout_s = 600` 为 oMLX 留出时间，以便在请求遇到未加载的模型时加载它；见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
 - `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快。省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用上述表中的设置。
 - 要使用长期记忆，oMLX 也可以从同一目录提供嵌入模型：设置 `embedding_backend = "vllm"`，并在 `[vllm]` 中添加 `embedding_url = "http://127.0.0.1:8000/v1"` 和 `embedding_model = "<its id>"`。oMLX 的 `GET /v1/models` 返回 ID 但不返回类型，因此无法区分嵌入模型和对话模型：需要使用 ID 发送一次 `POST /v1/embeddings` 进行检查。见[配置嵌入模型](embedding.md#omlx)。
 
