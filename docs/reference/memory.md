@@ -340,8 +340,10 @@ planning and reflection requests alike. The history in RAM keeps none.
   that its clean-up writes.
 - **Redaction.** Every text that memory stores passes a minimal redaction
   of secrets, the same as the Python API's events: well-known key shapes
-  (`sk-` keys, GitHub tokens, AWS access key ids), the token after `Bearer`,
-  and a code of 4 to 8 digits within 20 characters of `verification code`,
+  (`sk-` keys, GitHub tokens, AWS access key ids), the body of a PEM
+  private key block (`-----BEGIN … PRIVATE KEY-----`, the BEGIN and END lines
+  kept, a block with no END line redacted to the end of the text), the token
+  after `Bearer`, and a code of 4 to 8 digits within 20 characters of `verification code`,
   `passcode`, `OTP` or `验证码`, on the same line, each become `[redacted]`.
   It covers `tasks.query`, `tasks.result`, `steps.thought`, every string
   in `steps.tool_call_json`'s arguments, `steps.tool_result_json`'s output
