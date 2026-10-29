@@ -87,6 +87,7 @@ def configured_session_options(
             "replay_turns",
             "note_writer",
             "fixed_prefix",
+            "window_eviction",
             "captured_history",
         )
         if name not in explicit

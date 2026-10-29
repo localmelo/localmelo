@@ -186,6 +186,8 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    WINDOW_EVICT_CHUNK,
+    WINDOW_FIT_TARGET,
     CandidateItem,
     ImagePart,
     MemoryCandidate,
@@ -760,6 +762,14 @@ def _utility(decision: ReflectionDecision) -> float:
     )
 
 
+# The line a brief run adds to the window when an attempt boundary finds the
+# workspace unchanged since the run started.
+NO_CHANGE_PUSH = (
+    "Nothing has changed in the workspace yet. Start this attempt by writing the "
+    "part of the task you can already write, then continue."
+)
+
+
 def _gate_stop_reason(
     decision: ReflectionDecision, gate: ReflectionGate = "flags"
 ) -> str | None:
@@ -807,14 +817,19 @@ _OUT_OF_REASONS = {
 
 
 def _stop_reason(
-    decision: ReflectionDecision | None, gate: ReflectionGate, out_of: str
+    decision: ReflectionDecision | None,
+    gate: ReflectionGate,
+    out_of: str,
+    *,
+    brief: bool = False,
 ) -> str | None:
     """Why the run does not go on after a reflection, ``None`` if it does.
 
     *decision* is ``None`` for a reply that holds no reflection, and
     *out_of* is the boundary's error (``""`` when another attempt can
     start). The one place that decides: ``continue_run`` is whether this
-    is ``None``.
+    is ``None``. In a *brief* run (``AgentOptions.brief_probe``) a
+    ``continue`` goes on whatever the gate's flags say.
     """
     if decision is None:
         return "unreadable_reply" if out_of else None
@@ -822,6 +837,8 @@ def _stop_reason(
         return "action_not_continue"
     if out_of:
         return _OUT_OF_REASONS[out_of]
+    if brief and decision.recommended_action == "continue":
+        return None
     return _gate_stop_reason(decision, gate)
 
 
@@ -1046,6 +1063,8 @@ class _RunState:
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
     task_query_msg: Message | None = None
+    # User messages the run inserted mid-run (inbox): kept at a boundary drop.
+    pinned: list[Message] = dataclasses.field(default_factory=list)
     # An opt-in source of parent instructions at planning boundaries.
     inbox: InboxSource | None = None
     # Replay counters (see memory_stats on RunResult).
@@ -1125,6 +1144,10 @@ class _RunState:
     # run, the recall records not yet sent, and the aliases shown but not yet
     # in the window.
     boundary_block: str = ""
+    # A brief run (AgentOptions.brief_probe): the workspace digest at the
+    # run's start, None outside a git tree.
+    brief: bool = False
+    workspace_digest: str | None = None
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -1572,12 +1595,17 @@ class Agent:
         # the documented behavior of that option: no long-term recall, no
         # long-term writes, no reflection promotion, and reflections are
         # still cleared. self._embedding stays set so close() closes it.
+        # window_eviction "chunk" and "boundary": drop in chunks (see schema).
+        self._evicts_in_chunks = self.options.window_eviction != "slide"
         self.hippo = Hippo(
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
             procedures=procedures_backend,
             short_term_empty_prefix=self.options.reasoning != "legacy",
+            short_term_evict_chunk=(
+                WINDOW_EVICT_CHUNK if self._evicts_in_chunks else 0
+            ),
             memory=self.options.memory,
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
@@ -1646,6 +1674,7 @@ class Agent:
             empty_prefix=self.options.reasoning != "legacy",
             context_budget=budget,
             fixed_prefix=self.options.fixed_prefix,
+            fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
         )
 
         names = (
@@ -3325,7 +3354,7 @@ class Agent:
             empty_prefix=self.hippo.working.empty_prefix,
         )
 
-        async def fits(kept: list[Message]) -> bool:
+        async def fits(kept: list[Message], target: float = 1.0) -> bool:
             sent = _as_sent(
                 kept,
                 self.options,
@@ -3333,11 +3362,12 @@ class Agent:
                 requires_replay=self._requires_replay,
             )
             planned = _as_planned(sent, query, query_block)
-            if run is not None and run.inbox is not None:
+            if run is not None and (run.inbox is not None or run.brief):
                 planned = coalesce_user_messages(planned)
             check = await self.checker.pre_plan(
                 others + planned,
                 count_thinking=self._counts_thinking,
+                cap_ratio=target,
             )
             return check.allowed
 
@@ -3386,6 +3416,14 @@ class Agent:
                     break
             else:
                 return  # not even the newest unit fits: keep the window
+            if first and self._evicts_in_chunks:
+                # Drop to WINDOW_FIT_TARGET of the cap, so the next steps fit
+                # without dropping again (when no such cut fits, keep *first*).
+                for deeper in range(first + 1, len(units)):
+                    kept = [msg for unit in units[deeper:] for msg in unit]
+                    if await fits(kept, WINDOW_FIT_TARGET):
+                        first = deeper
+                        break
             if first:
                 dropped = self.hippo.working.drop_oldest_units(first)
                 logger.info(
@@ -3507,7 +3545,7 @@ class Agent:
             requires_replay=self._requires_replay,
         )
         planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
-        if run is not None and run.inbox is not None:
+        if run is not None and (run.inbox is not None or run.brief):
             planned = coalesce_user_messages(planned)
         all_msgs = long_context + planned + reflection_msgs
         check = await self.checker.pre_plan(
@@ -3567,7 +3605,7 @@ class Agent:
             run.pending_recalls = []
             run.pending_recall_records = []
         plan_args: dict[str, Any] = {}
-        if run is not None and run.inbox is not None:
+        if run is not None and (run.inbox is not None or run.brief):
             plan_args["coalesce_users"] = True
         if on_ready is not None:
             plan_args["on_ready"] = on_ready
@@ -4564,6 +4602,7 @@ class Agent:
                     role="user", content="\n\n".join(text for _, text in pending)
                 )
                 self.hippo.working.append(inserted)
+                run.pinned.append(inserted)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -4964,6 +5003,7 @@ class Agent:
             approval=approval,
             routine=routine,
             inbox=inbox,
+            brief=self.options.brief_probe is not None,
             place=place,
             limits=self._limits() if progress else None,
         )
@@ -5001,6 +5041,11 @@ class Agent:
             try:
                 if run.inbox is not None:
                     run.inbox.validate(self.executor.workspace_root or os.getcwd())
+                if run.brief:
+                    assert self.options.brief_probe is not None
+                    run.workspace_digest = await asyncio.to_thread(
+                        self.options.brief_probe, self._workspace_for_brief()
+                    )
                 async with deadline:
                     try:
                         await self._look_up(run, query)
@@ -5836,6 +5881,8 @@ class Agent:
             "timeout_s": opts.timeout_s,
             "tools": sorted(tool.name for tool in self.hippo.list_tools()),
         }
+        if opts.window_eviction != "slide":
+            config["window_eviction"] = opts.window_eviction
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns
@@ -5950,7 +5997,9 @@ class Agent:
             if reflection is not None:
                 entry, decision = reflection
             # None for a reply with no reflection, only with "flags".
-            stop_reason = _stop_reason(decision, opts.reflection_gate, out_of)
+            stop_reason = _stop_reason(
+                decision, opts.reflection_gate, out_of, brief=run.brief
+            )
             continue_run = stop_reason is None
             verdict = GateVerdict(
                 opts.reflection_gate,
@@ -6000,9 +6049,14 @@ class Agent:
                     run.attempts,
                     run.attempts + 1,
                 )
+                await self._push_if_unchanged(run)
                 continue
             assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
+            if opts.window_eviction == "boundary" and continue_run:
+                # The reflection carries the finished attempt; the next one
+                # starts from the query (and what the run pinned) alone.
+                self.hippo.working.drop_since(run.task_query_msg, run.pinned)
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
@@ -6037,6 +6091,27 @@ class Agent:
                 run.end("gate_stopped", result=best_effort, error=error)
                 return
             run.events.reflection(reflection, continue_run=True, verdict=verdict)
+            await self._push_if_unchanged(run)
+
+    async def _push_if_unchanged(self, run: _RunState) -> None:
+        """At a brief run's boundary: ask the next attempt to start writing.
+
+        When the workspace digest is the one from the run's start, a
+        ``no_change`` notice is emitted and a user line is added to the
+        window, so the next attempt's first planning request carries it.
+        Nothing happens outside a brief run or a git tree.
+        """
+        probe = self.options.brief_probe
+        if probe is None or run.workspace_digest is None:
+            return
+        digest = await asyncio.to_thread(probe, self._workspace_for_brief())
+        if digest != run.workspace_digest:
+            return
+        run.events.no_change()
+        self.hippo.working.append(Message(role="user", content=NO_CHANGE_PUSH))
+
+    def _workspace_for_brief(self) -> str:
+        return self.executor.workspace_root or os.getcwd()
 
     async def _run_single_attempt(
         self, task: TaskRecord, query: str, run: _RunState

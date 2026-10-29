@@ -368,6 +368,7 @@ ignores it.
 | `stuck` | An attempt ends because the same tool calls or errors repeated. | `The same tool calls or errors repeated; the attempt ends.` | `{}` |
 | `budget` | An attempt ends because it used its steps. | `The attempt used its step budget.` | `{}` |
 | `empty_reply` | The model gave an empty reply, and localmelo asks it to continue. A second empty reply in a row ends the run as `failed` instead, with no notice. | `The model returned an empty reply; asking it to continue.` | `{"count": <empty replies in a row>}` |
+| `no_change` | Only in a `--brief` run: an attempt boundary where another attempt starts finds the workspace unchanged since the run started (the digest of `git status`, `git diff HEAD` and untracked files is equal; never outside a git tree). A user line, "Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.", is added for the next attempt. | `Nothing has changed in the workspace yet.` | `{}` |
 | `retry` | A model request failed and is sent again after a delay; see [Provider errors and retries](run-results.md#provider-errors-and-retries). | `Model request failed; retrying in <delay> s: <the first 200 characters of the error>` | `{"request_attempt", "delay_s", "status_code"}` |
 
 `step` and `attempt` are those of the latest `step.started`.
@@ -423,7 +424,9 @@ is in `memory_stats.recall_log` and, with its item text, in
   code that decides, so it never disagrees with `continue_run`. A
   `gate_stopped` run whose rationale is blank reports it in `error`:
   `Stopped after attempt <n> (stop reason: <code>)`; with a rationale, the
-  error is the rationale alone.
+  error is the rationale alone. In a `--brief` run a `continue` goes on while
+  steps and attempts remain, so `flags` can hold a `false` while `stop_reason`
+  is `null`; the other checks above are unchanged.
 - `rationale`, `summary` and `best_effort_result`: the reflection's
   reasons, its summary of the attempt, and its best answer so far. They
   pass the same redaction of secrets as `assistant.message`'s `thinking`
@@ -551,7 +554,8 @@ returned.
   attempt is followed by `reflection.started`, the `retry` notices of the
   reflection's requests, and `reflection`, unless one of its requests
   failed or the run was cancelled. With `"none"`, it is followed by
-  `run.finished`.
+  `run.finished`. A `no_change` notice comes after that `reflection`, when the
+  next attempt starts.
 - **Progress follows what it reports.** With `progress=True`, a
   `run.progress` comes right after `run.started`, right after each
   `step.started`, `tool.finished` (of a call that returned),

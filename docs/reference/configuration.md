@@ -219,9 +219,14 @@ pruning counts without storing prompt text. The output reserve is not a provider
 the independent character guard still applies.
 
 `[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
-`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+`fixed-prefix-v2`; `--fixed-prefix on|off` overrides it for a direct or interactive
 run. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
+Recall goes before the task; the latest reflection goes last, in a final user message
+after the window, so a new attempt changes only what follows the shared history.
+A reflection request repeats the latest planning request (same system text, same
+`tools`, same turns, then the turns since) and adds one final user message with the
+reflection prompt; it offers the tools, and a reply that calls one is asked again as text.
 An explicit end delimiter leaves the task and reflection request outside that data;
 data lines starting with that delimiter are deterministically quoted.
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
@@ -230,6 +235,11 @@ offered planning schemas within the run, not actual cache misses; an optional
 `reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 The legacy `/v1` API and the default-off request bytes remain unchanged.
+
+`[agent] window_eviction = "chunk"` or `"boundary"` (default `"slide"`; `--window-eviction`
+overrides it) changes when working memory drops old turns so the retained history stays the same
+for several steps and a server's prompt cache can reuse it. Experimental; `slide` leaves request
+bodies and the JSON result as before. See [Memory](memory.md#working-memory-window).
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character

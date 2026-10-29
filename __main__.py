@@ -21,6 +21,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.options import (
     NoteWriter,
     ReasoningMode,
+    WindowEviction,
     reasoning_refusal,
 )
 from localmelo.melo.checker import builtin_set_for
@@ -66,6 +67,7 @@ STATUS_LINE_ERROR_CHARS = 500
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
     "fixed_prefix": "--fixed-prefix",
+    "window_eviction": "--window-eviction",
     "captured_history": "--captured-history",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
@@ -509,12 +511,14 @@ async def _run_worker_brief(
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
     from localmelo.support.cli.worker_contract import (
+        WORKER_PROTOCOL,
         WorkerObserver,
         failure_record,
         result_record,
     )
     from localmelo.support.cli.worker_inbox import FdInbox, Inbox
 
+    query = f"{query.rstrip()}\n\n{WORKER_PROTOCOL}"
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     assert task is not None
@@ -1239,6 +1243,8 @@ def _direct_options(
         fields["timeout_s"] = args.timeout
     if getattr(args, "fixed_prefix", None) is not None:
         fields["fixed_prefix"] = args.fixed_prefix == "on"
+    if getattr(args, "window_eviction", None) is not None:
+        fields["window_eviction"] = args.window_eviction
     if getattr(args, "captured_history", None) is not None:
         fields["captured_history"] = args.captured_history == "on"
     reasoning = getattr(args, "reasoning", None)
@@ -1323,6 +1329,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--import-session",
             "--title",
             "--fixed-prefix",
+            "--window-eviction",
             "--captured-history",
             "--context-window",
             "--output-reserve",
@@ -1430,6 +1437,13 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         "--fixed-prefix",
         choices=["on", "off"],
         help="Use a versioned run-frozen system prefix and local date (default off)",
+    )
+    direct.add_argument(
+        "--window-eviction",
+        choices=["slide", "chunk", "boundary"],
+        # Experimental, for the bench's A/B (#183): hidden from --help so users
+        # are not asked to choose; the winner becomes the default (#186).
+        help=argparse.SUPPRESS,
     )
     direct.add_argument(
         "--tool-exposure",
@@ -1816,6 +1830,14 @@ def main() -> None:
             # The surface is known here: direct mode has no approver, so its
             # default set leaves shell_exec out (--builtins all names it).
             options = dataclasses.replace(options, mode="direct")
+            if args.brief is not None:
+                from localmelo.support.cli.worker_contract import (
+                    workspace_fingerprint,
+                )
+
+                options = dataclasses.replace(
+                    options, brief_probe=workspace_fingerprint
+                )
             if not query:
                 # The loop keeps its answers, so each turn sees the earlier ones; a
                 # single task's options stay as they were.
@@ -2090,6 +2112,19 @@ def _build_direct_mode_agent(
         config_value_error("[agent] fixed_prefix must be a boolean")
     if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
         options = dataclasses.replace(options, fixed_prefix=True)
+    if budget_cfg.agent.window_eviction not in config.WINDOW_EVICTIONS:
+        config_value_error(
+            f"[agent] window_eviction {budget_cfg.agent.window_eviction!r} is not "
+            f"recognised. Must be one of {config.WINDOW_EVICTIONS}."
+        )
+    if (
+        getattr(args, "window_eviction", None) is None
+        and budget_cfg.agent.window_eviction != "slide"
+    ):
+        options = dataclasses.replace(
+            options,
+            window_eviction=cast(WindowEviction, budget_cfg.agent.window_eviction),
+        )
 
     if not isinstance(budget_cfg.agent.captured_history, bool):
         config_value_error("[agent] captured_history must be a boolean")

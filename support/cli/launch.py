@@ -23,10 +23,10 @@ import time
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from localmelo.melo.agent import AgentOptions
-from localmelo.melo.agent.options import reasoning_refusal
+from localmelo.melo.agent.options import WindowEviction, reasoning_refusal
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
@@ -277,6 +277,7 @@ def run_interactive(
         name
         for name in (
             "fixed_prefix",
+            "window_eviction",
             "captured_history",
             "reasoning",
             "replay_turns",
@@ -295,6 +296,14 @@ def run_interactive(
             loaded = config.load()
             if "fixed_prefix" not in explicit and loaded.agent.fixed_prefix:
                 options = replace(options, fixed_prefix=True)
+            if (
+                "window_eviction" not in explicit
+                and loaded.agent.window_eviction != "slide"
+            ):
+                options = replace(
+                    options,
+                    window_eviction=cast(WindowEviction, loaded.agent.window_eviction),
+                )
             if "captured_history" not in explicit and loaded.agent.captured_history:
                 options = replace(options, captured_history=True)
             options = configured_context_options(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -26,6 +26,7 @@ ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
 NoteWriter = Literal["auto", "heuristic"]
+WindowEviction = Literal["slide", "chunk", "boundary"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -172,9 +173,26 @@ class AgentOptions:
       back to the heuristic, ``"heuristic"`` always writes it from the
       reply's text and thinking. It is accepted and inert in the other
       modes.
+    - ``window_eviction``: how working memory drops old turns. ``"slide"``
+      (default) drops the oldest unit at every step once the window is full.
+      ``"chunk"`` drops whole units down to ``SHORT_TERM_MAX -
+      WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
+      context fit then drop down to ``WINDOW_FIT_TARGET`` (70%) of their
+      limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
+      drops a finished attempt's turns when the next attempt starts after a
+      reflection. Both keep the retained history stable for several steps,
+      which a server's prompt cache can reuse. Experimental.
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
+    - ``brief_probe``: set only by the ``--brief`` worker path. A function of
+      the workspace root that returns a digest of the workspace's changes
+      (``None`` outside a git tree). Setting it marks the run as a brief run:
+      a reflection that says ``continue`` starts the next attempt while steps
+      and attempts remain, whatever its flags say, and an attempt boundary
+      that finds the digest unchanged since the run started adds a
+      ``notice`` event (kind ``no_change``) and one user line that asks the
+      next attempt to start by writing. ``None`` (the default) changes nothing.
     """
 
     context_window: int | None = None
@@ -219,10 +237,14 @@ class AgentOptions:
     fixed_prefix: bool = False
     captured_history: bool = False
     typed_assertions: bool = False
+    window_eviction: WindowEviction = "slide"
+    brief_probe: Callable[[str], str | None] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
             raise ValueError("fixed_prefix must be a bool")
+        if self.brief_probe is not None and not callable(self.brief_probe):
+            raise ValueError("brief_probe must be callable or None")
         budget = (self.context_window, self.output_reserve, self.safety_margin)
         if any(value is not None for value in budget):
             if not all(_is_positive_int(value) for value in budget):
@@ -249,6 +271,7 @@ class AgentOptions:
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),
+            ("window_eviction", get_args(WindowEviction)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

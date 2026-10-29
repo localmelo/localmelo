@@ -33,7 +33,9 @@ config fallback to those two functions. Digest recall adds config-backed gate
 settings only for explicit reasoning modes, and T95bR's review fixes make a
 refused config value a worker ``startup_error`` after a valid brief, so
 ``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
-the golden and without ``--brief`` it keeps the old usage error. ``_check_args`` is not pinned.
+the golden and without ``--brief`` it keeps the old usage error. ``--window-eviction``
+adds an opt-in flag and config fallback to the same two functions (default ``slide``
+changes nothing). ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -55,12 +57,12 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "8f29945472bcba2277cfcbb5bc4a45f329088fac484183065aa9af907a46ce89",
+    "_build_direct_mode_agent": "793fcad639f07b692ae8c2d88738803aca776c111246863d1a9085afb4562b37",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "3a228a27542384b8bc78f57fb33b3c7b0dc109e66850c40247218c9373ace26c",
+    "_direct_options": "7e9a393bcb7475bc6a2880d128abcacdaca21171877b4abc0411444dbe5e2cf6",
     "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

@@ -106,6 +106,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--inbox-fd N` | not set | With `--brief`, accept the same lines from an inherited, readable pipe fd `N`. Requires the parent to keep the write end; the read end is close-on-exec before tools start. Cannot be combined with `--inbox`. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--fixed-prefix on\|off` | `off` | Opt in to a versioned fixed system prefix with the local date frozen at run start; overrides `[agent] fixed_prefix`. |
+| `--window-eviction slide\|chunk\|boundary` | `slide` | Experimental. How working memory drops old turns: `slide` one unit per step once full; `chunk` eight messages at a time; `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
@@ -468,6 +469,21 @@ shell and Python reads. A startup error's text is redacted too, and the
 user's home directory is shown as `~`. Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
 before sharing. `--save-session` can record the same run.
+
+A `--brief` run also differs from a plain task in three ways. The query is the
+brief followed by one fixed paragraph, the same on every request: make the
+smallest change that satisfies the task as soon as you know where it goes, run
+the task's check commands after each change, fix what you broke (tests that
+assert the old behaviour included), read the lines you will edit first because
+earlier tool output leaves the context after about ten steps, and say in the
+final answer which checks ran and their result. A reflection whose action is
+`continue` starts the next attempt while steps and attempts remain, whatever
+its three flags say (the `reflection` event still records them). When an
+attempt boundary finds the workspace unchanged since the run started, the next
+attempt's first request carries the line "Nothing has changed in the workspace
+yet. Start this attempt by writing the part of the task you can already write,
+then continue." and a `no_change` notice is emitted; a workspace that is not a
+git tree gets neither. Runs without `--brief` are unchanged.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last
