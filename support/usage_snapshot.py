@@ -15,7 +15,7 @@ time since the last request and no countdown.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from localmelo.support.progress_line import run_elapsed
@@ -90,6 +90,57 @@ class UsageSnapshot:
             self.reported_prompt += prompt
             self.reported_cached += self.last_cached
             self.reported_requests += 1
+
+    def to_dict(
+        self, *, local: bool, now: float, tasks: TaskCounts | None = None
+    ) -> dict[str, Any]:
+        """The snapshot as the console's status route serves it.
+
+        ``segments`` is exactly :func:`status_segments`, so a surface that only
+        draws them agrees with the terminal. The numbers beside it are for a
+        surface that styles them: a share is ``None`` when the server reported
+        no cached tokens (drawn ``--``, never 0%), and ``idle_s`` is set for a
+        local server only.
+        """
+        context = self.context or {}
+        measured = _count(context.get("measured_prompt_tokens"))
+        progress = self.progress or {}
+        phase = progress.get("phase")
+        idle = None
+        if local and self.last_request_ts is not None:
+            idle = max(0.0, now - self.last_request_ts)
+        return {
+            "local": local,
+            "segments": status_segments(self, local=local, now=now, tasks=tasks),
+            "cache": {
+                "requests": self.requests,
+                "last_percent": _share(self.last_cached, self.last_prompt),
+                "session_percent": _share(self.reported_cached, self.reported_prompt),
+                "idle_s": idle,
+            },
+            "context": (
+                {"measured": measured, "limit": _count(context.get("input_limit"))}
+                if measured
+                else None
+            ),
+            "steps": (
+                None
+                if self.progress is None
+                else {
+                    "active": self.run_active,
+                    "step": _count(progress.get("step")) or 0,
+                    "attempt": _count(progress.get("attempt")) or 1,
+                    "phase": phase if isinstance(phase, str) else "",
+                }
+            ),
+            "tasks": None if tasks is None else asdict(tasks),
+        }
+
+
+def _share(part: int | None, whole: int | None) -> int | None:
+    if part is None or not whole:
+        return None
+    return int(_percent(part, whole)[:-1])
 
 
 def _percent(part: int, whole: int) -> str:
