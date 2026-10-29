@@ -411,6 +411,11 @@ class TaskWorkers:
                 if not pending_resume:
                     raise TaskNotPausedError("task is not paused")
             if state == "stop" and task_id in self._runs:
+                # Set the stop flag under the same lock Resume holds, so a
+                # worker admitted by a Resume that finished committing just
+                # before this Stop cannot start its turn.
+                self._stopping.add(task_id)
+                self._ready[task_id].clear()
                 runner = self._runners.get(task_id)
                 if runner is not None:
                     runner.cancel(cause="user_stop")
@@ -625,6 +630,10 @@ class TaskWorkers:
                     and task_id not in self._quarantined
                     and task_id not in self._stopping
                 ):
+                    self._restart_fenced.discard(task_id)
+                    self._restart_first.discard(task_id)
+                    self._invalid_workspace.discard(task_id)
+                    self._pause_requested.discard(task_id)
                     self._register(current)
                     self._eligible.add(task_id)
                     self._ready[task_id].set()
@@ -636,6 +645,10 @@ class TaskWorkers:
                     "Resume unavailable: the previous worker's cleanup has not "
                     "settled; Stop stays available.",
                     reason="cleanup_unresolved",
+                )
+            if task_id in self._stopping:
+                raise ResumeRefusedError(
+                    "Resume unavailable: Stop is in progress.", reason="stopping"
                 )
             if confirmation_token is not None:
                 grant = self._resume_tokens.binding_for(confirmation_token)
@@ -695,14 +708,11 @@ class TaskWorkers:
                 confirmed=decision.kind == "confirm",
                 first_start=decision.kind == "first_start",
             )
-            if (
-                decision.kind == "confirm"
-                and confirmation_token is not None
-                and not self._resume_tokens.consume(confirmation_token, binding)
-            ):
-                raise StaleConfirmationError(
-                    "The confirmation was already used for another transition."
-                )
+            if decision.kind == "confirm" and confirmation_token is not None:
+                # The token was validated under this lock, just before the
+                # commit. Consume it as a formality: an accepted transition
+                # must never fail after its durable commit.
+                self._resume_tokens.consume(confirmation_token, binding)
             # An accepted transition retires every preview issued for it.
             self._resume_tokens.invalidate(task_id)
             self._restart_fenced.discard(task_id)

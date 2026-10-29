@@ -1098,6 +1098,17 @@ class TaskStore:
                             "INSERT INTO recovery_capture VALUES (?, ?, 0, 0, 1)",
                             (task_id, _capture_execution),
                         )
+                        # The ordinary (resumed or legacy) start becomes the
+                        # current execution; startup recovery and Resume must
+                        # see the same identity as the active capture.
+                        await conn.execute(
+                            "INSERT INTO recovery_provenance "
+                            "(task_id, first_start, execution_id, unsafe_resume, reason) "
+                            "VALUES (?, 'started', ?, 1, '') "
+                            "ON CONFLICT(task_id) DO UPDATE SET "
+                            "execution_id = excluded.execution_id",
+                            (task_id, _capture_execution),
+                        )
             if state == "parked" and await _first(
                 conn,
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",

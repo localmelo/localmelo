@@ -207,7 +207,8 @@ and workspace validation; ordinary creation does not yet enable this proof.
 A missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
-becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
+becomes invalid fails a run with `invalid_workspace`, while Resume returns 409
+`invalid_transition` and leaves the task interrupted. Deadlines are rejected
 and service, wait and tool accounting is deferred. Pause requests P5 and
 waits for a safe point while running providers and tools finish. A held plan,
 reflection or undelivered approval can park and release its resident worker;
@@ -235,7 +236,7 @@ unsupported check is unknown, not proof that a process stopped.
 | Evidence | Action |
 |---|---|
 | Terminal task, invalid workspace, missing card on a started task, stale execution identity, unresolved recovery operation or unsettled worker cleanup | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
-| Proven never-started queued or parked task | Queue through the durable launch fence, first start, no card or confirmation |
+| Proven never-started parked or interrupted task | Queue through the durable launch fence, first start, no card or confirmation. A queued never-started create is admitted by startup, not this route |
 | Started task with a valid card, trusted complete capture for the whole execution, and every recorded group verifiably gone | Queue without confirmation |
 | Anything else, including missing, untrusted, partial or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
 
@@ -249,7 +250,7 @@ An unconfirmed `confirmation_required` (`409`, `details.reason` and
 `details.warning`) carries a single-use token in `details.confirmation_token`
 with `details.expires_in_s` 300. The token lives in memory only and is bound to
 the task, source execution, evidence identity and CAS generation that the
-preview read. Present it with the same `operation_id` to accept the risk; the
+preview read. Present it to accept the risk; the
 accepted transaction restores the saved priority (computed P2 when a paused P5
 task has no snapshot), clears the pause snapshot, queues the task, writes the
 resume receipt and one `sched.resume_confirmed` event. A preview writes

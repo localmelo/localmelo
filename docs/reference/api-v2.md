@@ -331,8 +331,10 @@ is committed.
 
 The route consumes evidence, never absence of evidence:
 
-- A task the store proves never started is queued for its first launch through
-  the durable launch fence, with no card and no confirmation.
+- A parked or interrupted task the store proves never started is queued for its
+  first launch through the durable launch fence, with no card and no
+  confirmation. A queued never-started create is admitted by startup recovery,
+  not by this route, so calling the route for one returns `invalid_transition`.
 - A started task needs a card and a valid workspace. It resumes without
   confirmation only when its trusted, complete capture covers the whole
   execution and every recorded process group is verifiably gone; a verified
@@ -340,9 +342,9 @@ The route consumes evidence, never absence of evidence:
 - Anything else, including missing, untrusted or incomplete capture or a group
   whose liveness cannot be checked, returns 409 `confirmation_required` with
   `details.confirmation_token`, `details.expires_in_s` (300), a
-  `details.warning`, and `details.reason`. Present the token with the same
-  `operation_id` to accept the recorded risk and resume. That accepted
-  transition writes one `sched.resume_confirmed` event; a preview writes
+  `details.warning`, and `details.reason`. Present the token to accept the
+  recorded risk and resume. That accepted transition writes one
+  `sched.resume_confirmed` event; a preview writes
   nothing. The token is single use, held in memory only, and bound to the task,
   source execution, evidence identity and CAS generation. A restart drops it,
   and Stop invalidates it.
