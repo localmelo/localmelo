@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 MAX_CHECK_RETRIES = 2
 # Lines of a failing check's output that the model is shown.
 CHECK_TAIL_LINES = 60
+# Lines and characters of a check's output that the notice and the result
+# record keep.
+RECORD_TAIL_LINES = 20
+RECORD_TAIL_CHARS = 4000
 CHECK_FAILED_LINE = (
     "The task's check failed. Fix what it shows, run it again, then finish."
 )
@@ -46,6 +50,12 @@ class BriefCheckResult:
     @property
     def passed(self) -> bool:
         return self.exit_code == 0 and not self.refused
+
+    @property
+    def output_tail(self) -> str:
+        """The record's share of *output*: its last lines, bounded in size."""
+        lines = self.output.splitlines()[-RECORD_TAIL_LINES:]
+        return "\n".join(lines)[-RECORD_TAIL_CHARS:]
 
 
 # Runs one check command with the run's executor, as a ``shell_exec`` call.

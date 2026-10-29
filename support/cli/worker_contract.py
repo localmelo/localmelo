@@ -15,7 +15,11 @@ import time
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from localmelo.melo.agent._brief_gate import CHECK_TAIL_LINES, BriefCheckResult
+from localmelo.melo.agent._brief_gate import (
+    CHECK_TAIL_LINES,
+    RECORD_TAIL_CHARS,
+    BriefCheckResult,
+)
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.executor import TOOL_EXIT_CODE, Executor
 from localmelo.melo.executor.models import (
@@ -354,6 +358,10 @@ class WorkerObserver:
                 "duration_s": detail.get("duration_s"),
                 "source": "brief_check",
             }
+            if "output_tail" in detail:
+                item["output_tail"] = redact_output(str(detail["output_tail"]))[
+                    -RECORD_TAIL_CHARS:
+                ]
             if detail.get("refused"):
                 item["refused"] = detail["refused"]
             items.append(item)

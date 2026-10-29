@@ -233,3 +233,186 @@ class TestAtTheBoundary:
         assert len(_notices(events, "brief_check_failed")) == 1
         [reflection] = [e.data for e in events if e.type == "reflection"]
         assert reflection["continue_run"] is False
+
+
+def _moving(llm: FakeLLM) -> Any:
+    """A probe whose digest changes with every planning request."""
+    return lambda workspace: f"after {len(llm.calls)} requests"
+
+
+async def _deadline_run(
+    replies: list[Any], check: Any, *, moving: bool = True, **options: Any
+) -> tuple[Any, FakeLLM, list[AgentEvent]]:
+    events: list[AgentEvent] = []
+    llm = FakeLLM(replies)
+    probe = _moving(llm) if moving else (lambda workspace: "same")
+    agent = _agent(llm, brief_check=check, brief_probe=probe, **options)
+    result = await agent.run_task(QUERY, on_event=events.append)
+    return result, llm, events
+
+
+class TestTheDeadlineCheck:
+    @pytest.mark.asyncio
+    async def test_a_failing_check_two_steps_from_the_end_can_be_fixed(self) -> None:
+        check = Checks(1, 0)
+        result, llm, events = await _deadline_run(
+            [_echo_call("a"), _echo_call("b"), _answer("fixed"), _answer("unused")],
+            check,
+            attempt_policy="none",
+            max_steps=4,
+        )
+        assert (result.status, result.result) == ("completed", "fixed")
+        assert len(llm.calls) == 3
+        # The failure message is the user message of the planning request
+        # that has two steps left, not the answer's.
+        assert _last_user(llm, 2).endswith(CHECK_FAILED_LINE)
+        assert "Exit code: 1" in _last_user(llm, 2)
+        assert not any(CHECK_FAILED_LINE in c for c in _flat(llm, 1))
+        assert check.commands == ["pytest -q", "pytest -q"]  # the gate runs again
+        assert [n["detail"]["exit_code"] for n in _notices(events, "brief_check")] == [
+            1,
+            0,
+        ]
+        assert not _notices(events, "brief_check_failed")
+
+    @pytest.mark.asyncio
+    async def test_a_pass_changes_nothing(self) -> None:
+        check = Checks(0)
+        result, llm, _events = await _deadline_run(
+            [_echo_call("a"), _echo_call("b"), _answer("done")],
+            check,
+            attempt_policy="none",
+            max_steps=4,
+        )
+        assert (result.status, len(llm.calls)) == ("completed", 3)
+        assert not any(
+            CHECK_FAILED_LINE in c for call in range(3) for c in _flat(llm, call)
+        )
+        assert len(check.commands) == 2  # the deadline check, then the gate
+
+    @pytest.mark.asyncio
+    async def test_a_failure_uses_one_retry(self) -> None:
+        check = Checks(1)
+        result, llm, events = await _deadline_run(
+            [
+                _echo_call("a"),
+                _echo_call("b"),
+                _echo_call("c"),
+                _answer("x"),
+                _answer("y"),
+            ],
+            check,
+            attempt_policy="none",
+            max_steps=5,
+        )
+        # Deadline failure (retry 1), the gate's failure (retry 2), then it gives up.
+        assert (result.status, len(llm.calls)) == ("completed", 5)
+        [failed] = _notices(events, "brief_check_failed")
+        assert failed["detail"] == {"retries": MAX_CHECK_RETRIES}
+
+    @pytest.mark.asyncio
+    async def test_nothing_changed_since_the_last_check_means_no_check(self) -> None:
+        check = Checks(0)
+        result, llm, _events = await _deadline_run(
+            [_echo_call("a"), _echo_call("b"), _answer("done")],
+            check,
+            moving=False,
+            attempt_policy="none",
+            max_steps=4,
+        )
+        assert (result.status, len(llm.calls)) == ("completed", 3)
+        assert check.commands == ["pytest -q"]  # the gate alone
+
+    @pytest.mark.asyncio
+    async def test_it_runs_once_per_attempt(self) -> None:
+        check = Checks(0)
+        await _deadline_run(
+            [_echo_call("a"), _echo_call("b"), _echo_call("c"), _answer("done")],
+            check,
+            attempt_policy="none",
+            max_steps=5,
+        )
+        assert len(check.commands) == 2
+
+    @pytest.mark.asyncio
+    async def test_an_attempt_that_is_not_the_last_has_none(self) -> None:
+        check = Checks(0)
+        replies = [_echo_call("a"), _echo_call("b"), _answer("done")]
+        await _deadline_run(replies, check, steps_per_attempt=3, max_attempts=2)
+        assert check.commands == ["pytest -q"]
+
+    @pytest.mark.asyncio
+    async def test_the_last_attempt_of_several_has_one(self) -> None:
+        check = Checks(1, 0)
+        replies = [
+            _echo_call("a"),
+            _echo_call("b"),
+            _echo_call("c"),
+            _reflection("continue"),
+            _echo_call("d"),
+            _echo_call("e"),
+            _answer("fixed"),
+        ]
+        result, llm, _events = await _deadline_run(
+            replies, check, steps_per_attempt=3, max_attempts=2
+        )
+        assert result.status == "completed"
+        assert check.commands[:1] == ["pytest -q"]
+        assert any(CHECK_FAILED_LINE in c for c in _flat(llm, len(llm.calls) - 1))
+
+    @pytest.mark.asyncio
+    async def test_a_brief_without_check_lines_runs_none(self) -> None:
+        check = Checks(1)
+        events: list[AgentEvent] = []
+        llm = FakeLLM([_echo_call("a"), _echo_call("b"), _answer("done")])
+        agent = _agent(
+            llm,
+            brief_check=check,
+            brief_probe=_moving(llm),
+            attempt_policy="none",
+            max_steps=4,
+        )
+        result = await agent.run_task("echo it", on_event=events.append)
+        assert (result.status, check.commands) == ("completed", [])
+
+    @pytest.mark.asyncio
+    async def test_a_run_without_brief_probe_runs_none(self) -> None:
+        check = Checks(1, 0)
+        result, llm, _events = await _run(
+            [_echo_call("a"), _echo_call("b"), _answer("done"), _answer("fixed")],
+            check,
+            attempt_policy="none",
+            max_steps=4,
+        )
+        assert result.status == "completed"
+        assert len(check.commands) == 2 and len(llm.calls) == 4
+
+
+def _flat(llm: FakeLLM, request: int) -> list[str]:
+    return [m.content for m in llm.calls[request]["messages"]]
+
+
+class TestTheOutputTail:
+    @pytest.mark.asyncio
+    async def test_the_notice_carries_the_last_twenty_lines(self) -> None:
+        long = "\n".join(f"row {n}" for n in range(100))
+        check = _Output(long)
+        _result_, _llm, events = await _run([_answer("done"), _answer("ok")], check)
+        [notice, _] = _notices(events, "brief_check")
+        tail = notice["detail"]["output_tail"]
+        assert tail.splitlines() == [f"row {n}" for n in range(80, 100)]
+
+    def test_the_tail_is_bounded_in_characters(self) -> None:
+        wide = BriefCheckResult("c", 1, 0.1, "\n".join("x" * 1000 for _ in range(10)))
+        assert len(wide.output_tail) == 4000
+        assert BriefCheckResult("c", 1, 0.1).output_tail == ""
+
+
+class _Output:
+    def __init__(self, output: str) -> None:
+        self.output = output
+        self.calls = 0
+
+    async def __call__(self, executor: Executor, command: str) -> BriefCheckResult:
+        self.calls += 1
+        return BriefCheckResult(command, 1 if self.calls == 1 else 0, 0.1, self.output)
