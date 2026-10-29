@@ -108,6 +108,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Default mode and developer mode (#186). Every `melo` option has a tier (user,
+  advanced or experimental) in one table, `support/option_tiers.py`, copied in the
+  CLI reference. `melo --help` now shows the 15 user options and one line pointing
+  at developer mode; `melo --developer --help`, or `[ui] mode = "developer"` in
+  the config file, shows every option under Options, Advanced and Experimental
+  headings, each experimental one naming the issue that decides it. The mode
+  changes only what help prints: every option still parses and works in both
+  modes, so scripts and the benchmark are unaffected. `--window-eviction`, which
+  was hidden outright, has help text and shows in developer mode. A `[ui] mode`
+  that is not `"default"` or `"developer"` warns on stderr and shows the default
+  help. ([#NN])
 - `/status` in the interactive UI gains a usage block, built only from events the
   session already received (no request, no polling of the model server): the
   last request's cached share and the session's average over the requests whose

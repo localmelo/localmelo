@@ -18,6 +18,7 @@ melo --serve --enable-playground             # opt in to legacy playground (in p
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
 melo --daemon install|uninstall|status       # macOS background service
+melo --developer --help                      # every option, grouped by tier
 ```
 
 Quote the task and put it after `--` so option-like text is unambiguous.
@@ -73,6 +74,102 @@ arbitrary secrets printed by a command, echoed by the model, or loaded through
 an unrecognized tool can still be retained. Review the data before sharing it.
 Thinking is subject to the session retention policy.
 
+## Default and developer mode
+
+`melo` has two modes. They change what `melo --help` shows, never what any
+option does.
+
+| Mode | How to choose it | What `--help` shows |
+|---|---|---|
+| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The user options, then the line `More options: melo --developer --help (or set [ui] mode = "developer").` |
+| Developer | `[ui] mode = "developer"`, or `--developer` for one run | Every option, under the headings Options, Advanced and Experimental; each experimental line names the issue that decides it. |
+
+Every option parses and works in both modes, from the command line and from
+the config file, so scripts and the benchmark keep running: the mode hides an
+option from help, it does not remove it. `--developer` takes effect for help
+wherever it stands on the command line (`melo --help --developer` works), and
+needs its full name. A `[ui] mode` that is neither `"default"` nor
+`"developer"` prints one line on stderr and shows the default help; it never
+stops a run or the gateway.
+
+### Option tiers
+
+| Tier | Meaning |
+|---|---|
+| user | What a new user needs; no setup beyond these. Default-mode help shows exactly these. |
+| advanced | Stable options for scripts, the gateway, workers and tuning. |
+| experimental | Compares designs on the benchmark, may change or go away. Each names the issue whose result decides it; the winner becomes the default and the flag goes one release later. |
+
+The table below is the whole classification, in the order developer help lists
+it. It is the same table as `support/option_tiers.py`, and a test keeps the
+two equal.
+
+| Option | Tier | Decided in |
+|---|---|---|
+| `-h`, `--help` | user |  |
+| `--base-url` | user |  |
+| `--chat-model` | user |  |
+| `--workspace` | user |  |
+| `--max-steps` | user |  |
+| `--timeout` | user |  |
+| `--output-format` | user |  |
+| `--memory` | user |  |
+| `--brief` | user |  |
+| `-c`, `--continue` | user |  |
+| `-r`, `--resume` | user |  |
+| `--yolo` | user |  |
+| `--serve` | user |  |
+| `--gateway-login` | user |  |
+| `--reconfigure` | user |  |
+| `--developer` | advanced |  |
+| `--gateway-rotate-token` | advanced |  |
+| `--enable-playground` | advanced |  |
+| `--host` | advanced |  |
+| `--port` | advanced |  |
+| `--allow-unconfigured` | advanced |  |
+| `--daemon` | advanced |  |
+| `--import-session` | advanced |  |
+| `--title` | advanced |  |
+| `--save-session` | advanced |  |
+| `--parent-run` | advanced |  |
+| `--inbox` | advanced |  |
+| `--inbox-fd` | advanced |  |
+| `--context-window` | advanced |  |
+| `--output-reserve` | advanced |  |
+| `--safety-margin` | advanced |  |
+| `--builtins` | advanced |  |
+| `--mcp-config` | advanced |  |
+| `--mcp-only` | advanced |  |
+| `--memory-dir` | advanced |  |
+| `--request-timeout` | advanced |  |
+| `--embedding-base-url` | advanced |  |
+| `--embedding-model` | advanced |  |
+| `--progress` | advanced |  |
+| `--routine` | advanced |  |
+| `--attempt-policy` | experimental | #185 |
+| `--reflection-gate` | experimental | #185 |
+| `--fixed-prefix` | experimental | #183 |
+| `--window-eviction` | experimental | #183 |
+| `--reasoning` | experimental | #183 |
+| `--reasoning-field` | experimental | #183 |
+| `--replay-turns` | experimental | #183 |
+| `--note-writer` | experimental | #183 |
+| `--tool-exposure` | experimental | #3 |
+| `--captured-history` | experimental | #4 |
+| `--retriever` | experimental | #4 |
+| `--recall-at` | experimental | #4 |
+| `--recall-k` | experimental | #4 |
+| `--recall-kinds` | experimental | #4 |
+| `--recall-placement` | experimental | #4 |
+| `--recall-min-score` | experimental | #4 |
+| `--admit-on-outcome` | experimental | #4 |
+| `--keep-decision-text` | experimental | #4 |
+| `--retrieval-extra-body` | experimental | #4 |
+
+A new option that compares designs starts as experimental, with an issue that
+will remove it, in the same pull request that adds it. A new user option is a
+deliberate change: a test pins the number of options default-mode help shows.
+
 ## Options
 
 ### General
@@ -80,7 +177,8 @@ Thinking is subject to the session retention policy.
 | Option | Default | Description |
 |---|---|---|
 | `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the plain loop; none opens the interactive UI. |
-| `-h`, `--help` | | Show the help and exit. |
+| `-h`, `--help` | | Show the help and exit: the user options in default mode, every option in [developer mode](#default-and-developer-mode). |
+| `--developer` | off | Show every option in `--help`, grouped by tier, for this run; the same as `[ui] mode = "developer"`. It changes only the help. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
 | `--chat-model NAME` | with `--base-url`, `default` for a task and the server's first listed model without one; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
 

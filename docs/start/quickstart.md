@@ -56,9 +56,9 @@ linked to this checkout, so source changes apply without reinstalling.
 
 > [!WARNING]
 > The model can run shell commands and Python code, and read or write any
-> file you can: there is no sandbox. To run a task without tools, add
-> `--builtins none`. See the
-> [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
+> file you can: there is no sandbox. To run a task without tools, see
+> [Choose the built-in tools](../guides/tools-mcp.md#choose-the-built-in-tools).
+> See also the [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
 > and [What the checks do](../guides/tools-mcp.md#what-the-checks-do).
 
 ```bash
@@ -233,11 +233,6 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 - melo works in the current folder (`--workspace DIR` picks another): file
   tools stay in it; commands and Python can reach other files, so melo asks
   first.
-- A chat can run in a reasoning and recall mode: `--reasoning`,
-  `--reasoning-field`, `--replay-turns`, `--note-writer`, `--retriever`,
-  `--recall-*` and `--retrieval-extra-body`, or the saved `[agent]` and
-  `[retrieval]` tables. Explicit flags win, and retrieval flags stay inert
-  in `legacy`.
 
 [The interactive UI](../guides/terminal.md#the-interactive-ui) has the keys and the rest.
 `melo ""` opens the plain conversation loop of earlier releases. Without a

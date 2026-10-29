@@ -50,7 +50,7 @@ pip install -e ".[gateway]"
 ## 运行第一个任务
 
 > [!WARNING]
-> 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，添加 `--builtins none`。请参阅[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../guides/tools-mcp.md#what-the-checks-do)。
+> 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，见[选择内置工具](../guides/tools-mcp.md#choose-the-built-in-tools)。另见[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../guides/tools-mcp.md#what-the-checks-do)。
 
 ```bash
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
@@ -186,7 +186,6 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 - 输入 `/` 查看命令：`/model` 列出服务器的模型并切换模型，`/backend` 切换到另一个服务器（两者都会保存为默认值，`melo --base-url` 会话除外），`/new` 重新开始，`/exit` 或 Ctrl+D 退出。
 - melo 运行 shell 命令、Python 代码或写入文件前会询问：按 `1` 允许，按 `2` 在本会话中允许该工具，按 `3` 拒绝并告诉 melo 原因。Esc 停止当前轮次。
 - melo 在当前文件夹中工作（`--workspace DIR` 可选择其他文件夹）：文件工具限制在该文件夹内；命令和 Python 可以访问其他文件，因此 melo 会先询问。
-- 对话可以使用推理和召回模式：`--reasoning`、`--reasoning-field`、`--replay-turns`、`--note-writer`、`--retriever`、`--recall-*` 和 `--retrieval-extra-body`，或已保存的 `[agent]` 和 `[retrieval]` 表。显式选项优先，检索选项在 `legacy` 中不起作用。
 
 [交互式界面](../guides/terminal.md#the-interactive-ui)介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo --serve` 启动网关。
 

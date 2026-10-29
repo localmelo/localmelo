@@ -79,6 +79,16 @@ def test_the_user_tier_has_the_pinned_count() -> None:
     assert len(users) == USER_OPTION_COUNT
 
 
+def test_the_cli_reference_table_matches_the_code() -> None:
+    text = (Path(cli.__file__).parent / "docs/reference/cli.md").read_text("utf-8")
+    table = text[text.index("| Option | Tier | Decided in |") :]
+    rows = re.findall(
+        r"^\| (?:`-\w`, )?`(--[a-z-]+)` \| (\w+) \| (#\d+)? ?\|$", table, re.M
+    )
+    assert {name: tier for name, tier, _ in rows} == OPTION_TIERS
+    assert {name: issue for name, _, issue in rows if issue} == EXPERIMENTAL_ISSUES
+
+
 # -- default mode --------------------------------------------------------------
 
 
