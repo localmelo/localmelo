@@ -237,6 +237,15 @@ class Config:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     _enable_playground: bool = field(default=False, repr=False, compare=False)
+    # ``melo --serve --port 0``: the gateway binds a free port and writes it
+    # to ``gateway.port``. A saved ``[gateway] port = 0`` is still invalid.
+    _ephemeral_port: bool = field(default=False, repr=False, compare=False)
+
+    @property
+    def gateway_port_ok(self) -> bool:
+        """Whether ``gateway.port`` can be listened on: 1-65535, or 0 when asked."""
+        port = self.gateway.port
+        return 0 < port <= 65535 or (port == 0 and self._ephemeral_port)
 
     @property
     def is_configured(self) -> bool:
@@ -305,7 +314,7 @@ class Config:
         errors.extend(self._validate_request_timeout())
 
         # -- Gateway validation --
-        if self.gateway.port <= 0 or self.gateway.port > 65535:
+        if not self.gateway_port_ok:
             errors.append(
                 f"[gateway] port={self.gateway.port} is out of range (1-65535)"
             )
