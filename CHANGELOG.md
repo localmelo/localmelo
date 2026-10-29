@@ -80,6 +80,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `--window-eviction slide|chunk|boundary` (and `[agent] window_eviction`), an
+  experimental option for the prompt-cache A/B: `chunk` drops the working-memory
+  window in chunks of eight messages and the prompt-cap fit down to 70% of the
+  cap, so the retained history stays the same for several steps; `boundary` does
+  the same and also drops a finished attempt's turns when the next attempt starts
+  after a reflection. The default, `slide`, is unchanged, and non-default modes
+  add `window_eviction` to the JSON result's `config` ([#191]).
+
 - Each `assistant.message` event's `usage` now carries `cached_tokens` and
   `reasoning_tokens` when the server sent them (also on a streamed reply
   with `stream_options.include_usage`; a missing key means not reported), and
@@ -93,6 +101,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   reflect) from a `stream-json` log, with totals by kind. ([#190])
 
 - The console has a **Tasks** view (`#/tasks`, `#/tasks/<id>`): the task list, and a card with the state, the saved recovery card, the evidence status, Resume (with a confirmation dialog only when the server asks for one), Stop and "Start again as a new task" for a started task without a recovery card. ([#189])
+
+- `--fixed-prefix` is now `fixed-prefix-v2`: the latest reflection moves to the end of the
+  planning request, in a final user message after the window, so a new attempt changes only
+  what follows the history the requests share; and a reflection request starts with the bytes
+  of the latest planning request (the same system text, the same `tools` array, the same
+  turns, then the turns since) and adds one final user message with the reflection prompt.
+  A reply that calls a tool instead of answering is asked again as before. The default path
+  is unchanged. ([#192])
+
 - Interactive `! COMMAND` runs a command in the user's own shell from an idle
   prompt, with the terminal handed over to it (Ctrl+C and Esc go to the command,
   never the agent) and restored once afterwards. It is not a sandbox. Its output
@@ -1146,3 +1163,5 @@ earlier milestones.
 [#188]: https://github.com/localmelo/localmelo/pull/188
 [#189]: https://github.com/localmelo/localmelo/pull/189
 [#190]: https://github.com/localmelo/localmelo/pull/190
+[#191]: https://github.com/localmelo/localmelo/pull/191
+[#192]: https://github.com/localmelo/localmelo/pull/192

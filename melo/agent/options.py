@@ -26,6 +26,7 @@ ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
 NoteWriter = Literal["auto", "heuristic"]
+WindowEviction = Literal["slide", "chunk", "boundary"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -172,6 +173,15 @@ class AgentOptions:
       back to the heuristic, ``"heuristic"`` always writes it from the
       reply's text and thinking. It is accepted and inert in the other
       modes.
+    - ``window_eviction``: how working memory drops old turns. ``"slide"``
+      (default) drops the oldest unit at every step once the window is full.
+      ``"chunk"`` drops whole units down to ``SHORT_TERM_MAX -
+      WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
+      context fit then drop down to ``WINDOW_FIT_TARGET`` (70%) of their
+      limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
+      drops a finished attempt's turns when the next attempt starts after a
+      reflection. Both keep the retained history stable for several steps,
+      which a server's prompt cache can reuse. Experimental.
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
@@ -227,6 +237,7 @@ class AgentOptions:
     fixed_prefix: bool = False
     captured_history: bool = False
     typed_assertions: bool = False
+    window_eviction: WindowEviction = "slide"
     brief_probe: Callable[[str], str | None] | None = None
 
     def __post_init__(self) -> None:
@@ -260,6 +271,7 @@ class AgentOptions:
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),
+            ("window_eviction", get_args(WindowEviction)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

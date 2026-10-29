@@ -71,8 +71,8 @@
 | `steps` | 做出的规划步骤数，最多 `max_steps`。 |
 | `attempts` | 开始的尝试次数：第一次尝试就给出答案时为 1。 |
 | `n_llm` | 返回了回复的模型请求数。 |
-| `n_main` | 其中提供了工具的请求数。 |
-| `n_aux` | 其中不带工具的请求数：反思、召回发出的检索请求，以及步骤中没有提供任何工具时的规划请求。 |
+| `n_main` | 其中提供了工具的请求数，反思除外。 |
+| `n_aux` | 其余的请求数：反思（使用 `--fixed-prefix` 时，反思为共享前缀也会提供规划请求的工具，但仍计在这里）、召回发出的检索请求，以及步骤中没有提供任何工具时的规划请求。 |
 | `n_tool` | 交给执行器的工具调用数，包括被拒绝的调用。 |
 | `llm_errors` | 失败的模型请求数，重试请求的每次失败尝试都计一次。`n_llm + llm_errors` 是发出的请求总数。 |
 | `usage` | 所有回复的 token 计数，按名称求和，例如 `prompt_tokens`、`completion_tokens` 和 `total_tokens`。在 `legacy` 之外，它还有 `reasoning_chars`（收到的推理，已拆出内联的 `<think>` 块）以及服务器报告时的 `cached_tokens` 或 `reasoning_tokens`。 |
@@ -90,6 +90,7 @@
 | `builtins` | 已注册的内置工具，按名称排序。 |
 | `memory_dir` | SQLite 文件所在的目录；记忆留在 RAM 中时为 `null`。 |
 | `tools` | 所有已注册的工具，内置的和 MCP 的，按名称排序。 |
+| `window_eviction` | 运行使用了 `chunk` 或 `boundary` 时为该值；默认的 `slide` 不出现。 |
 | `reasoning`, `replay_turns`, `note_writer` | 在 `legacy` 之外，是生效的推理模式、它的轮次上限（`null` 表示范围内的所有轮次）以及压缩模式下由谁写回复的笔记。它们不出现在 `legacy` 行中。 |
 | `retriever`, `retriever_effective`, `recall_at` | 在 `legacy` 之外，是请求的检索器（取默认值时为 `auto`）、已启用触发点的映射（`{"start": "llm", "attempt": "llm", "step": "bm25"}`，已排序）以及排序后的生效触发点列表。 |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | 在 `legacy` 之外，是任务内的命中上限、排序后的已启用类型、步骤中的放置位置，以及嵌入/长期条目的分数下限。 |

@@ -21,6 +21,33 @@ page.
 | See past runs | `sqlite3` queries; see [Inspect memory](../guides/memory.md#inspect-memory) |
 | Delete memory | In Python, `await hippo.forget_all()` (one task: `forget(task_id)`); no command yet. See [Reset memory](../guides/memory.md#reset-memory) |
 
+## Working-memory window
+
+The working-memory window holds at most 20 messages: the task, then each
+reply's turn (a tool-call message with its results, never split). By default
+(`slide`) the oldest unit leaves at every step once the window is full, so
+from about the eleventh step each request starts its history one unit later
+than the one before, and a server's prompt cache can reuse only the system
+prompt, the tools and the task. The window is also cut by the prompt cap
+(100,000 characters) and, with `--context-window`, by the request fit, in the
+same one-unit-per-step way.
+
+`--window-eviction chunk|boundary` (or `[agent] window_eviction`) is
+experimental, for measuring prompt-cache reuse; the default is unchanged.
+
+| Mode | The window drops |
+|---|---|
+| `slide` (default) | The oldest unit, at every step once full. |
+| `chunk` | Whole units down to 12 messages (the maximum less 8) when it would pass 20, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
+| `boundary` | `chunk` within an attempt, and the finished attempt's turns when the next attempt starts after a reflection (the reflection carries them); the task and inbox messages stay. |
+
+A mode other than `slide` appears as `window_eviction` in the JSON result's
+`config`; `slide` adds nothing. The request fit (`--context-window`) also
+drops to 70% of the input limit under `chunk` and `boundary`, but it works on
+a copy of the whole window at each request, so it does not hold the cut
+between steps the way the window and the prompt-cap fit do. With a context
+budget small enough to drop at every step, requests still slide.
+
 ## Digest recall
 
 A digest is eligible for long-term admission only when its checked text has a

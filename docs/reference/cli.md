@@ -106,6 +106,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--inbox-fd N` | not set | With `--brief`, accept the same lines from an inherited, readable pipe fd `N`. Requires the parent to keep the write end; the read end is close-on-exec before tools start. Cannot be combined with `--inbox`. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--fixed-prefix on\|off` | `off` | Opt in to a versioned fixed system prefix with the local date frozen at run start; overrides `[agent] fixed_prefix`. |
+| `--window-eviction slide\|chunk\|boundary` | `slide` | Experimental. How working memory drops old turns: `slide` one unit per step once full; `chunk` eight messages at a time; `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |

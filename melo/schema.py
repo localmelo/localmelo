@@ -13,6 +13,12 @@ from typing import Any, Literal
 # ── Config ──
 
 SHORT_TERM_MAX = 20
+# window_eviction="chunk"/"boundary": a full window drops whole units down to
+# SHORT_TERM_MAX - WINDOW_EVICT_CHUNK messages at once, and the prompt-cap fit
+# and the context fit drop down to WINDOW_FIT_TARGET of their limit, so the
+# retained history stays the same for several steps (prompt-cache reuse).
+WINDOW_EVICT_CHUNK = 8
+WINDOW_FIT_TARGET = 0.7
 LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 
@@ -462,9 +468,10 @@ class RunResult:
     - ``steps``: planning calls made, counted when each is sent;
     - ``attempts``: attempts started (1 for an answer on the first try);
     - ``n_llm``: LLM requests that returned a response, split into
-      ``n_main`` (requests that offered tools) and ``n_aux`` (requests
-      without tools, such as a reflection, or a planning call in a step
-      that offered no tool);
+      ``n_main`` (requests that offered tools, other than reflections) and
+      ``n_aux`` (the rest: reflections, also under ``fixed-prefix-v2``
+      where they offer the plan's tools, and requests without tools, such
+      as a planning call in a step that offered no tool);
     - ``n_tool``: tool calls handed to the executor, including calls it
       refused (an unknown tool, or one that step did not offer);
     - ``llm_errors``: LLM requests that raised instead of responding,

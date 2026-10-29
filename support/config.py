@@ -50,6 +50,7 @@ VALID_CHAT_BACKENDS = (
 VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
+WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -128,6 +129,7 @@ class AgentConfig:
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
     fixed_prefix: bool = False  # opt-in stable prompt prefix
+    window_eviction: str = "slide"  # slide | chunk | boundary
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -400,6 +402,11 @@ class Config:
             errors.append(
                 f"[agent] note_writer {self.agent.note_writer!r} is not "
                 f"recognised. Must be one of {NOTE_WRITERS}."
+            )
+        if self.agent.window_eviction not in WINDOW_EVICTIONS:
+            errors.append(
+                f"[agent] window_eviction {self.agent.window_eviction!r} is not "
+                f"recognised. Must be one of {WINDOW_EVICTIONS}."
             )
         turns: object = self.agent.replay_turns
         if turns is not None and (
@@ -948,6 +955,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.note_writer != "auto"
         or cfg.agent.tool_env
         or cfg.agent.fixed_prefix
+        or cfg.agent.window_eviction != "slide"
         or cfg.agent.captured_history
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
@@ -961,6 +969,8 @@ def save(cfg: Config) -> None:
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
         if cfg.agent.fixed_prefix:
             lines.append("fixed_prefix = true")
+        if cfg.agent.window_eviction != "slide":
+            lines.append(f"window_eviction = {_toml_string(cfg.agent.window_eviction)}")
         if cfg.agent.captured_history:
             lines.append("captured_history = true")
         if cfg.agent.tool_env:

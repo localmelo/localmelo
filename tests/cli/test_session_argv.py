@@ -74,6 +74,7 @@ U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 # Fixed prefix is opt-in; historical invocations leave it unset.
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None}
+WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 WORKER_DEFAULTS = dict.fromkeys(
     (
         "save_session",
@@ -150,6 +151,7 @@ def test_historical_dispatch(
             **WORKER_DEFAULTS,
             **FIXED_PREFIX_DEFAULTS,
             **CAPTURED_DEFAULTS,
+            **WINDOW_EVICTION_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -178,6 +180,7 @@ def test_historical_dispatch(
         **WORKER_DEFAULTS,
         **FIXED_PREFIX_DEFAULTS,
         **CAPTURED_DEFAULTS,
+        **WINDOW_EVICTION_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

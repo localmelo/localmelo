@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 from collections import deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from localmelo.melo.memory.notes import RECALL_START
@@ -114,10 +114,15 @@ class WorkingMemory:
     rather than a log keeps the planning prompt bounded across attempts.
     """
 
-    def __init__(self, max_len: int, *, empty_prefix: bool = False) -> None:
+    def __init__(
+        self, max_len: int, *, empty_prefix: bool = False, evict_chunk: int = 0
+    ) -> None:
         if max_len < 0:
             raise ValueError("max_len must be non-negative")
+        if evict_chunk < 0:
+            raise ValueError("evict_chunk must be non-negative")
         self._max_len = max_len
+        self._evict_chunk = evict_chunk
         self._empty_prefix = empty_prefix
         self._buf: deque[Message] = deque()
         self._reflection: ReflectionEntry | None = None
@@ -244,12 +249,41 @@ class WorkingMemory:
         return len(unit)
 
     def _evict(self) -> None:
-        while len(self._buf) > self._max_len:
+        if len(self._buf) <= self._max_len:
+            return
+        # With an eviction chunk, a full window drops down to max_len - chunk
+        # in one go, so the oldest retained turn stays put until it fills again.
+        target = max(self._max_len - self._evict_chunk, 0)
+        while len(self._buf) > target:
             size = self._leading_unit_size()
             if size >= len(self._buf):
                 return  # only the newest unit is left
             for _ in range(size):
                 self._forget_aliases(self._buf.popleft())
+
+    def drop_since(self, anchor: Message | None, keep: Collection[Message] = ()) -> int:
+        """Drop the units after the unit that holds *anchor*, except pinned ones.
+
+        *anchor* is matched by identity; when it is no longer in the window, or
+        is ``None``, every unit goes. A unit whose first message is in *keep*
+        stays. Returns the number of messages dropped.
+        """
+        pinned = {id(msg) for msg in keep}
+        units = group_turns(self._buf, empty_prefix=self._empty_prefix)
+        start = next(
+            (i + 1 for i, unit in enumerate(units) if any(m is anchor for m in unit)),
+            0,
+        )
+        kept = [msg for unit in units[:start] for msg in unit]
+        for unit in units[start:]:
+            if id(unit[0]) in pinned:
+                kept.extend(unit)
+            else:
+                for msg in unit:
+                    self._forget_aliases(msg)
+        dropped = len(self._buf) - len(kept)
+        self._buf = deque(kept)
+        return dropped
 
     def _leading_unit_size(self) -> int:
         """Messages in the oldest unit of the buffer (see :func:`group_turns`)."""
