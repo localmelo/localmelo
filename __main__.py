@@ -1411,7 +1411,11 @@ def _build_parser(
     )
     parser.developer = developer
     parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
-    parser.add_argument("--base-url", default=None, help="LLM API base URL")
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Your model server, e.g. http://127.0.0.1:8000/v1",
+    )
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 
     direct = parser.add_argument_group(
