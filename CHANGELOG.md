@@ -850,7 +850,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the checks last ran, the harness runs them once so the model can still fix a
   failure (it uses one of the two retries). The `brief_check` notice and each
   `tests.items` entry of a brief check gain `output_tail`, the last 20 lines of
-  the check's output, redacted, at most 4,000 characters. Part of #185 ([#NN]).
+  the check's output, redacted, at most 4,000 characters. Part of #185 ([#214]).
 
 - Second-walkthrough polish (part of #200): the no-backend message says
   `Run melo in a terminal to set up`; the quickstart has a section on running a
@@ -1324,6 +1324,7 @@ earlier milestones.
 [#209]: https://github.com/localmelo/localmelo/pull/209
 [#210]: https://github.com/localmelo/localmelo/pull/210
 [#211]: https://github.com/localmelo/localmelo/pull/211
+[#214]: https://github.com/localmelo/localmelo/pull/214
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
