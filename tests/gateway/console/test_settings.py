@@ -764,3 +764,112 @@ def test_unconfigured_gateway_server_boots_and_onboards_over_api(
         assert h2["configured"] is True
         assert h2["config_errors"] == []
         assert h2["model"]["name"] == "stub-model"
+
+
+# ── Developer mode (#186) ──
+
+
+def _put_body(revision: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "chat_backend": "mlc",
+        "embedding_backend": "none",
+        "workspace": "~/ws",
+        "sections": {},
+        "revision": revision,
+        **extra,
+    }
+
+
+def _saved_cfg() -> None:
+    config.save(
+        Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(chat_url="http://127.0.0.1:9/v1", chat_model="m"),
+        )
+    )
+
+
+def test_fresh_config_reads_default_mode_with_the_tiered_options(
+    client: TestClient,
+) -> None:
+    body = client.get("/api/settings").json()
+    assert body["mode"] == "default"
+    tiers = {row["option"]: row for row in body["advanced_options"]}
+    assert tiers["--host"] == {"option": "--host", "tier": "advanced", "issue": ""}
+    assert tiers["--retriever"]["tier"] == "experimental"
+    assert tiers["--retriever"]["issue"] == "#4"
+    assert "--base-url" not in tiers  # the user tier is not an advanced option
+
+
+def test_mode_round_trips_through_put_and_the_cli_config(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    first = client.get("/api/settings").json()
+    resp = client.put(
+        "/api/settings", json=_put_body(first["revision"], mode="developer")
+    )
+    assert resp.status_code == 200
+    assert resp.json()["mode"] == "developer"
+    assert resp.json()["revision"] != first["revision"]
+    assert config.load().ui.mode == "developer"  # what the CLI reads
+    assert 'mode = "developer"' in isolated_config.read_text()
+    # An absent mode keeps the saved one; "default" removes the table again.
+    kept = client.put("/api/settings", json=_put_body(resp.json()["revision"]))
+    assert kept.json()["mode"] == "developer"
+    off = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], mode="default")
+    )
+    assert off.json()["mode"] == "default"
+    assert "[ui]" not in isolated_config.read_text()
+
+
+def test_saving_without_a_mode_does_not_write_a_ui_table(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    revision = client.get("/api/settings").json()["revision"]
+    assert client.put("/api/settings", json=_put_body(revision)).status_code == 200
+    assert "[ui]" not in isolated_config.read_text()
+
+
+def test_mode_put_on_a_stale_revision_conflicts_and_writes_nothing(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    before = isolated_config.read_text()
+    resp = client.put(
+        "/api/settings", json=_put_body("0000000000000000", mode="developer")
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "settings_changed"
+    assert isolated_config.read_text() == before
+
+
+def test_an_unknown_mode_is_rejected(client: TestClient) -> None:
+    _saved_cfg()
+    revision = client.get("/api/settings").json()["revision"]
+    resp = client.put("/api/settings", json=_put_body(revision, mode="expert"))
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_request"
+
+
+def test_a_hand_written_mode_wins_and_a_bad_one_reads_default(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    isolated_config.write_text(
+        isolated_config.read_text() + '\n[ui]\nmode = "developer"\n'
+    )
+    body = client.get("/api/settings").json()
+    assert body["mode"] == "developer"
+    isolated_config.write_text(
+        isolated_config.read_text().replace("developer", "expert")
+    )
+    stale = client.get("/api/settings").json()
+    assert stale["mode"] == "default"
+    # Saving from the console repairs it instead of failing validation.
+    resp = client.put("/api/settings", json=_put_body(stale["revision"]))
+    assert resp.status_code == 200
+    assert "expert" not in isolated_config.read_text()

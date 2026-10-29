@@ -4,9 +4,11 @@ import {formatDuration, statusText} from './turns.mjs';
  * Mount a session details region. `api` takes paths relative to /api and
  * `currentId` returns the active session id (or null). The host calls
  * sessionChanged() whenever that id changes, and close() from its Escape
- * handler before considering turn cancellation.
+ * handler before considering turn cancellation. `developer()` says whether
+ * developer mode is on: it adds panels (the Events tab, memory internals, the
+ * request and cache counts of a run) and never changes what a panel does.
  */
-export function setupDrawer({api, currentId, root, trigger}) {
+export function setupDrawer({api, currentId, root, trigger, developer = () => false}) {
   const doc = root.ownerDocument;
   let open = false;
   let id = null;
@@ -41,13 +43,16 @@ export function setupDrawer({api, currentId, root, trigger}) {
   root.hidden = true;
   root.replaceChildren(heading, closeButton, tabs, message, content);
   const tabButtons = {};
-  for (const name of ['tools', 'memory', 'runs']) {
+  const TABS = ['tools', 'memory', 'runs', 'events'];
+  const available = (name) => name !== 'events' || developer();
+  for (const name of TABS) {
     const item = button(name[0].toUpperCase() + name.slice(1), () => selectTab(name));
     tabButtons[name] = item;
     tabs.append(item);
   }
   function updateControls() {
     for (const [name, item] of Object.entries(tabButtons)) {
+      item.hidden = !available(name);
       item.setAttribute('aria-pressed', String(name === tab));
     }
     if (trigger) trigger.setAttribute('aria-expanded', String(open));
@@ -86,8 +91,8 @@ export function setupDrawer({api, currentId, root, trigger}) {
   function memoryView(data) {
     line(content, 'Working memory', `${(data.working || []).length} / ${data.working_max}`);
     const longTerm = data.long_term || {};
-    line(content, 'Long-term memory', `${longTerm.enabled ? 'Enabled' : 'Disabled'} (${longTerm.backend || 'none'})`);
-    if (data.agent) line(content, 'Agent', typeof data.agent === 'string' ? data.agent : JSON.stringify(data.agent));
+    line(content, 'Long-term memory', `${longTerm.enabled ? 'Enabled' : 'Disabled'}${developer() ? ` (${longTerm.backend || 'none'})` : ''}`);
+    if (developer() && data.agent) line(content, 'Agent', typeof data.agent === 'string' ? data.agent : JSON.stringify(data.agent));
     if (!data.working?.length) content.append(node('p', 'No working memory.'));
     for (const entry of data.working || []) {
       const row = node('div', undefined, 'drawer-memory');
@@ -114,7 +119,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
       if (typeof run.started_at === 'number' && typeof run.finished_at === 'number') {
         line(row, 'Duration', formatDuration(run.finished_at - run.started_at));
       }
-      if (run.result && typeof run.result === 'object') {
+      if (developer() && run.result && typeof run.result === 'object') {
         for (const [key, value] of Object.entries(run.result)) {
           if (key !== 'result') line(row, key, typeof value === 'object' ? JSON.stringify(value) : String(value));
         }
@@ -124,6 +129,17 @@ export function setupDrawer({api, currentId, root, trigger}) {
     if (earlier && runs.length) content.append(button('Earlier runs', () => load(true)));
     else if (earlier) content.append(node('p', 'Earlier runs cannot be loaded because this page has no finished runs.'));
   }
+  function eventsView(data) {
+    const turn = (data.turns || []).at(-1);
+    const events = turn?.events || [];
+    if (!events.length) content.append(node('p', 'No stored events.'));
+    else line(content, 'Raw events of turn', turn.turn);
+    for (const event of events) {
+      const row = node('div', undefined, 'drawer-event');
+      row.append(node('strong', `#${event.id} ${event.type}`), node('pre', JSON.stringify(event, null, 1)));
+      content.append(row);
+    }
+  }
   function clearContent(...children) {
     if (open && content.contains(doc.activeElement)) closeButton.focus();
     content.replaceChildren(...children);
@@ -132,6 +148,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
     clearContent();
     if (tab === 'tools') toolView(data);
     else if (tab === 'memory') memoryView(data);
+    else if (tab === 'events') eventsView(data);
     else runsView();
   }
   async function load(append = false, notice = '') {
@@ -144,7 +161,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
     if (!append) clearContent();
     try {
       const cursor = append ? `?before=${encodeURIComponent(Math.min(...runs.map((run) => run.turn)))}` : '';
-      const data = await api(path(session, selected + cursor));
+      const data = await api(path(session, selected === 'events' ? 'turns?limit=1&events=true' : selected + cursor));
       if (!valid(token, session, selected)) return;
       if (selected === 'runs') {
         runs = append ? [...data.runs, ...runs] : data.runs;
@@ -190,7 +207,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
     }
   }
   function selectTab(next) {
-    if (!['tools', 'memory', 'runs'].includes(next) || !open) return;
+    if (!TABS.includes(next) || !available(next) || !open) return;
     generation++;
     busy = false;
     tab = next;
@@ -217,8 +234,9 @@ export function setupDrawer({api, currentId, root, trigger}) {
   }
   function show(initialTab) {
     const session = currentId();
-    if (!session || (initialTab !== undefined && !['tools', 'memory', 'runs'].includes(initialTab))) return false;
+    if (!session || (initialTab !== undefined && !(TABS.includes(initialTab) && available(initialTab)))) return false;
     if (initialTab !== undefined) tab = initialTab;
+    if (!available(tab)) tab = 'tools';
     generation++;
     busy = false;
     id = session;
@@ -232,6 +250,12 @@ export function setupDrawer({api, currentId, root, trigger}) {
     root.hidden = false;
     updateControls();
     closeButton.focus();
+    return load();
+  }
+  function modeChanged() {
+    if (!open) return;
+    if (!available(tab)) tab = 'tools';
+    updateControls();
     return load();
   }
   function sessionChanged() {
@@ -263,5 +287,5 @@ export function setupDrawer({api, currentId, root, trigger}) {
     }
   });
   updateControls();
-  return {open: show, close, selectTab, sessionChanged, isOpen: () => open};
+  return {open: show, close, selectTab, sessionChanged, modeChanged, isOpen: () => open};
 }

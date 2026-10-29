@@ -7,7 +7,7 @@ function deferred() {
   const promise = new Promise((a, b) => { resolve = a; reject = b; });
   return {promise, resolve, reject};
 }
-function harness(routes) {
+function harness(routes, mode = {on: false}) {
   const doc = {activeElement: null, handlers: {},
     addEventListener(type, handler) { this.handlers[type] = handler; },
     removeEventListener(type, handler) { if (this.handlers[type] === handler) delete this.handlers[type]; }};
@@ -34,7 +34,7 @@ function harness(routes) {
     if (route === undefined) throw new Error(`Unexpected request ${path}`);
     return typeof route === 'function' ? route() : route;
   };
-  const drawer = setupDrawer({api, currentId: () => id, root, trigger});
+  const drawer = setupDrawer({api, currentId: () => id, root, trigger, developer: () => mode.on});
   function text(element = root) { return [element.textContent, ...element.children.map(text)].join(' '); }
   function find(label) { return root.querySelectorAll('button').find((item) => item.textContent === label); }
   return {drawer, root, trigger, calls, text, find, setId(value) { id = value; }, doc};
@@ -211,4 +211,37 @@ test('empty filtered page with earlier turns explains unavailable cursor', async
   const h = harness({'GET /sessions/s%2F1/tools': emptyTools, 'GET /sessions/s%2F1/runs': {runs: [], has_earlier: true}});
   await h.drawer.open(); await h.drawer.selectTab('runs');
   assert.match(h.text(), /no finished runs/);
+});
+
+const richRun = {turn: 1, turn_id: 't1', status: 'completed', started_at: 10, finished_at: 12,
+  result: {n_llm: 3, usage: {prompt_tokens: 9}, prefix_cache: {hits: 2}}};
+
+test('developer mode adds the Events tab, memory internals and run counters; off hides them', async () => {
+  const mode = {on: false};
+  const h = harness({'GET /sessions/s%2F1/tools': emptyTools, 'GET /sessions/s%2F1/memory': memory,
+    'GET /sessions/s%2F1/runs': {runs: [richRun], has_earlier: false},
+    'GET /sessions/s%2F1/turns?limit=1&events=true': {turns: [{turn: 7, events: [{id: 5, type: 'run.finished', usage: {prompt_tokens: 9}}]}]}}, mode);
+  await h.drawer.open();
+  assert.equal(h.find('Events').hidden, true);
+  assert.equal(await h.drawer.selectTab('events'), undefined);
+  await h.drawer.selectTab('memory');
+  assert.doesNotMatch(h.text(), /Agent: open|\(mlx\)/);
+  await h.drawer.selectTab('runs');
+  assert.match(h.text(), /Duration: 2.0s/);
+  assert.doesNotMatch(h.text(), /n_llm|prefix_cache/);
+  mode.on = true;
+  await h.drawer.modeChanged();
+  assert.equal(h.find('Events').hidden, false);
+  assert.match(h.text(), /n_llm: 3/);
+  assert.match(h.text(), /prefix_cache: {"hits":2}/);
+  await h.drawer.selectTab('memory');
+  assert.match(h.text(), /Agent: open/);
+  assert.match(h.text(), /\(mlx\)/);
+  await h.drawer.selectTab('events');
+  assert.match(h.text(), /Raw events of turn: 7/);
+  assert.match(h.text(), /#5 run.finished/);
+  mode.on = false;
+  await h.drawer.modeChanged();
+  assert.equal(h.find('Events').hidden, true);
+  assert.match(h.text(), /No tools available/);
 });

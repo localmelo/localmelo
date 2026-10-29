@@ -97,7 +97,7 @@ test('load, discover, save and notify with revision and only writable selected f
   await change(h, 's-workspace', '/new/workspace');
   await h.element('create-btn').emit('click');
   assert.deepEqual(h.calls.at(-1), {path: '/settings', options: {method: 'PUT', body: {
-    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '/new/workspace', revision: 'rev1',
+    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '/new/workspace', revision: 'rev1', mode: 'default',
     sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'manual-model'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'manual-embedding'}},
   }}});
   assert.equal(h.saved[0].revision, 'rev2');
@@ -302,4 +302,23 @@ test('cloud candidate includes key environment name but never key status or revi
   assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', base_url: '', chat_model: 'cloud'}});
   assert.equal('revision' in body, false);
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
+});
+
+test('the developer toggle loads the saved mode, lists options read-only and saves the mode', async () => {
+  const advanced = [{option: '--host', tier: 'advanced', issue: ''}, {option: '--retriever', tier: 'experimental', issue: '#4'}];
+  const value = fixture({mode: 'default', advanced_options: advanced});
+  const h = harness({'GET /settings': value, 'PUT /settings': {...value, mode: 'developer'}});
+  await h.open();
+  assert.equal(h.element('s-developer').checked, false);
+  assert.equal(h.element('s-developer-options').hidden, true);
+  assert.deepEqual(h.element('s-developer-list').children.map((row) => row.textContent),
+    ['--host: advanced', '--retriever: experimental, decided in #4']);
+  h.element('s-developer').checked = true;
+  await h.element('s-developer').emit('change');
+  assert.equal(h.element('s-developer-options').hidden, false);
+  await h.element('settings-tab-developer').emit('click');
+  assert.equal(h.element('settings-panel-developer').hidden, false);
+  await h.element('create-btn').emit('click');
+  assert.equal(h.calls.at(-1).options.body.mode, 'developer');
+  assert.equal(h.saved[0].mode, 'developer');
 });

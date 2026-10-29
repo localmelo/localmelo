@@ -93,6 +93,11 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
     "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
   },
+  "mode": "default",
+  "advanced_options": [
+    {"option": "--host", "tier": "advanced", "issue": ""},
+    {"option": "--retriever", "tier": "experimental", "issue": "#4"}
+  ],
   "file_label": "~/.cache/localmelo/config.toml",
   "revision": "5d41402abc4b2a76"
 }
@@ -101,6 +106,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `sections` 包含全部四个本地节（`mlc`、`ollama`、`vllm`、`sglang`）和全部四个云端节（`openai`、`gemini`、`anthropic`、`nvidia`）。云端节报告 `api_key_env`（变量名）和 `api_key_set`（该变量在网关的环境中是否非空），从不包含密钥或其遮罩。
 - `workspace` 是 `[gateway] workspace`；未设置时为 `~/localmelo-workspace`。
 - `revision` 是文件 SHA-256 的前 16 个十六进制字符；文件尚不存在时为 `""`。
+- `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）；控制台在开发者模式下以只读方式显示它们。
 
 ## PUT /api/settings
 
@@ -113,6 +119,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - 每个字符串都必须是不含控制字符的单行，`workspace` 为必填项，必须是绝对路径或以 `~/` 开头，并且不能解析为 `/` 或主目录（包括经由符号链接）；否则返回 400 `invalid_request`。`sections` 中不接受 `api_key_set`。
+- `mode` 可选：`default` 或 `developer` 会设置 `[ui] mode`（其他值返回 400 `invalid_request`）；省略时保留已保存的模式。模式只改变控制台和 `melo --help` 显示的内容。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
 

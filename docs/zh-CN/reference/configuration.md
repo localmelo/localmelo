@@ -59,7 +59,7 @@ chat_model = "qwen3:8b"
 | `stream` | `[cli]` | `false` | 仅在交互式界面启用的实时流式；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件加入 `cache`、`ctx`、`step` 和 `tasks` 段，没有数据的段隐藏。`"off"`：状态栏保持原样（模型、工作区、上一次请求的 `ctx`、标题）。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
 | `reasoning_tags` | `[cli]` | 未设置 | 一张 `MODEL = "explicit" \| "closing_only" \| "none"` 表：某模型回复的可信分帧声明；`stream = false` 时也会用它切分完整回复。没有条目的模型使用保守规则（内容一直保留到回复结束）。目前需要手工设置，引导流程还不会询问它。 |
-| `mode` | `[ui]` | `"default"` | `"default"`：`melo --help` 只显示用户选项。`"developer"`：显示全部选项，按用户、高级、实验分组；`melo --developer --help` 对单次运行有同样效果。模式只改变帮助文字，不改变任何选项的行为。其他取值会在 stderr 警告并显示默认帮助；运行和网关不会因此失败。见[默认模式与开发者模式](../../reference/cli.md#default-and-developer-mode)（英文）。 |
+| `mode` | `[ui]` | `"default"` | `"default"`：`melo --help` 只显示用户选项。`"developer"`：显示全部选项，按用户、高级、实验分组；`melo --developer --help` 对单次运行有同样效果。模式只改变显示的内容（帮助文字，以及 Web 控制台的开发者视图，其设置中的开关会保存到这里），不改变任何选项的行为。其他取值会在 stderr 警告并显示默认帮助；运行和网关不会因此失败。见[默认模式与开发者模式](../../reference/cli.md#default-and-developer-mode)（英文）。 |
 | `resume_mode` | `[sessions]` | `"pairs"` | 终端对话恢复：`pairs` 加载最近的用户/答案对；`window` 加载保存的工作窗口加上之后的问答对，没有可用的检查点时回退。无效值只在界面中警告或回退；直接运行不读取此设置。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |

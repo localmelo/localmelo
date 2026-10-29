@@ -126,6 +126,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer mode in the web console (#186). **Connection settings** has a
+  Developer tab with one toggle, "Developer mode: show advanced settings and
+  debug views", saved as the same `[ui] mode` the CLI reads (revision-checked
+  like the other settings; a config written by hand wins on reload). When on, the
+  details drawer gains an Events tab (the stored raw events of the latest turn),
+  the Memory tab shows the agent state and the long-term backend, the Runs tab
+  shows each run's counters (requests, usage and cache numbers), and the Developer
+  tab lists the advanced and experimental options read-only with their tier and
+  deciding issue. When off they are hidden, not removed. `GET /api/settings` adds
+  `mode` and `advanced_options`; `PUT /api/settings` takes an optional `mode`.
+  The default mode's drawer no longer shows the Runs tab's raw result fields.
+  Nothing changes what runs. ([#209])
 - A task that waits for a tool approval can be answered ([#208]). The task JSON
   carries `pending_approvals` (the shape a chat session uses), the console's
   Tasks view shows the same approval card and says "Waiting for your approval",
@@ -1283,6 +1295,7 @@ earlier milestones.
 [#197]: https://github.com/localmelo/localmelo/pull/197
 [#198]: https://github.com/localmelo/localmelo/pull/198
 [#199]: https://github.com/localmelo/localmelo/pull/199
+[#209]: https://github.com/localmelo/localmelo/pull/209
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

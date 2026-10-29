@@ -80,6 +80,26 @@ def test_v1_health_is_byte_identical(
     )
 
 
+def test_developer_mode_leaves_v1_and_the_page_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("localmelo.support.gateway.time.time", lambda: 1000.0)
+    server = build(tmp_path)
+    server.cfg.ui.mode = "developer"
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
+    assert client.get("/v1/health").content == (
+        b'{"status":"ok","uptime":0.0,"sessions":{"active":0,"busy":0,"max":50},'
+        b'"chat_backend":"mlc","embedding_backend":"none"}'
+    )
+    assert client.get("/v1/sessions").content == b'{"sessions":[]}'
+    static = Path(__file__).parents[3] / "support" / "gateway" / "static" / "index.html"
+    assert client.get("/").content == static.read_bytes()
+
+
 def test_v1_sessions_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
     client = TestClient(

@@ -32,16 +32,17 @@ export function setupSettings({ api, onSaved }) {
       try { localStorage.setItem("localmelo-console.theme", name); } catch { /* Keep the current theme. */ }
     });
   }
-  for (const name of ["model", "test", "theme"]) {
+  const tabNames = ["model", "test", "theme", "developer"];
+  for (const name of tabNames) {
     $(`settings-tab-${name}`).addEventListener("click", () => {
-      for (const item of ["model", "test", "theme"]) {
+      for (const item of tabNames) {
         $(`settings-panel-${item}`).hidden = item !== name;
         $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
       }
     });
   }
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model",
-    "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace"];
+    "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace", "s-developer"];
   let settings = null;
   let sections = {};
   let generation = 0;
@@ -72,6 +73,10 @@ export function setupSettings({ api, onSaved }) {
 
   function isCloud() {
     return settings?.choices.chat_backends.find((choice) => choice.key === chat.value)?.kind === "cloud";
+  }
+
+  function renderDeveloper() {
+    $("s-developer-options").hidden = !$("s-developer").checked;
   }
 
   function options(node, choices, selected) {
@@ -167,6 +172,15 @@ export function setupSettings({ api, onSaved }) {
       options(chat, loaded.choices.chat_backends, loaded.chat_backend);
       options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
       $("s-workspace").value = loaded.workspace;
+      $("s-developer").checked = loaded.mode === "developer";
+      const list = $("s-developer-list");
+      list.replaceChildren();
+      for (const item of loaded.advanced_options || []) {
+        const row = document.createElement("li");
+        row.textContent = `${item.option}: ${item.tier}${item.issue ? `, decided in ${item.issue}` : ""}`;
+        list.append(row);
+      }
+      renderDeveloper();
       busy = false;
       renderChat();
       renderEmbedding();
@@ -191,6 +205,7 @@ export function setupSettings({ api, onSaved }) {
   chat.addEventListener("change", () => { invalidateTest(); renderChat(); });
   embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); });
   $("s-workspace").addEventListener("input", invalidateTest);
+  $("s-developer").addEventListener("change", renderDeveloper);
   for (const [id, field] of [["s-chat-url", "chat_url"], ["s-chat-model", "chat_model"],
     ["s-key-env", "api_key_env"], ["s-base-url", "base_url"]]) {
     $(id).addEventListener("input", () => {
@@ -255,6 +270,10 @@ export function setupSettings({ api, onSaved }) {
       workspace: $("s-workspace").value, sections: selectedSections };
   }
 
+  function saveBody() {
+    return { ...candidate(), revision: settings.revision, mode: $("s-developer").checked ? "developer" : "default" };
+  }
+
   testButton.addEventListener("click", async () => {
     if (busy || !settings || testButton.disabled) return;
     const version = ++testVersion;
@@ -286,7 +305,7 @@ export function setupSettings({ api, onSaved }) {
   save.addEventListener("click", async () => {
     if (busy || !settings) return;
     const currentGeneration = generation;
-    const body = { ...candidate(), revision: settings.revision };
+    const body = saveBody();
     busy = true;
     invalidateTest();
     enable(false);

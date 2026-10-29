@@ -222,6 +222,7 @@
         <button type="button" id="settings-tab-model" aria-pressed="true">Model</button>
         <button type="button" id="settings-tab-test" aria-pressed="false">Test</button>
         <button type="button" id="settings-tab-theme" aria-pressed="false">Theme</button>
+        <button type="button" id="settings-tab-developer" aria-pressed="false">Developer</button>
       </nav>
       <section id="settings-panel-model" aria-label="Model settings">
       <div class="field">
@@ -288,6 +289,14 @@
         <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /> Light</label>
         <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" /> Dark</label>
       </fieldset>
+      </section>
+      <section id="settings-panel-developer" aria-label="Developer settings" hidden>
+      <label><input type="checkbox" id="s-developer" disabled /> Developer mode: show advanced settings and debug views</label>
+      <p class="field-hint">Saved as <code>[ui] mode</code>, the setting <code>melo --help</code> reads. It changes what is shown, never what runs.</p>
+      <div id="s-developer-options" hidden>
+        <p class="field-hint">Advanced and experimental options of <code>melo</code>, read-only: set them with the flag or in config.toml.</p>
+        <ul id="s-developer-list" class="dev-options"></ul>
+      </div>
       </section>
       <p id="create-error" class="error" role="alert" hidden></p>
       <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>

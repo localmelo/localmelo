@@ -96,6 +96,25 @@ a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. On narrow screens the
 drawer stacks below the composer.
 
+## Developer mode
+
+**Connection settings → Developer** has one toggle, "Developer mode: show
+advanced settings and debug views". It is saved as `[ui] mode` in
+`config.toml`, the setting `melo --help` reads, with the same revision check as
+the other settings; a mode written in the file by hand wins the next time the
+page reads it. It changes what is shown, never what runs. When it is on:
+
+- the Developer tab lists the advanced and experimental `melo` options
+  read-only, each with its tier and, for an experimental one, the issue that
+  decides it (set them with the flag or in `config.toml`);
+- **Details** gains an **Events** tab with the stored raw events of the latest
+  turn, and its **Memory** tab adds the agent state and the long-term backend;
+- the **Runs** tab adds each run's recorded counters: requests, tool calls,
+  token usage and cache numbers.
+
+When it is off these are hidden, not removed: turn it on again to see them.
+Chats, workers, tasks and connection settings look the same in both modes.
+
 ## Recover a send
 
 A send is named by a `client_request_id`. If its answer is lost the page asks
