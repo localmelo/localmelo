@@ -227,9 +227,9 @@ class AgentOptions:
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
     fixed_prefix: bool = False
-    window_eviction: WindowEviction = "slide"
     captured_history: bool = False
     typed_assertions: bool = False
+    window_eviction: WindowEviction = "slide"
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
