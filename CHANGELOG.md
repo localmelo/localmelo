@@ -142,7 +142,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   titles, turn text, answers and event payloads, the output of a call that read a
   secret file replaced, the run `config` left out. An open chat is followed while
   a turn runs under its terminal's lease, and again when the next turn starts.
-  Every write route still returns 404 for a chat id. ([#NN])
+  Every write route still returns 404 for a chat id. ([#226])
 - Live section on the task card (#213). A started task's card in the web console
   shows the task's steps, tool calls and model text beside its approval card,
   folded like a chat. The card reads the task's session once and, while the task
@@ -1412,6 +1412,7 @@ earlier milestones.
 [#222]: https://github.com/localmelo/localmelo/pull/222
 [#223]: https://github.com/localmelo/localmelo/pull/223
 [#224]: https://github.com/localmelo/localmelo/pull/224
+[#226]: https://github.com/localmelo/localmelo/pull/226
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
