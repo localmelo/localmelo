@@ -83,11 +83,9 @@ def test_slash_lists_every_command_with_its_line() -> None:
         "/model",
         "/backend",
         "/new",
-        "/clear",
         "/status",
         "/help",
         "/exit",
-        "/quit",
         "/attach",
         "/attachments",
         "/detach",
@@ -147,6 +145,13 @@ def test_help_lists_the_commands_and_one_commands_details() -> None:
         in out.text()
     )
     assert find("quit") is find("exit")
+
+
+def test_the_bare_slash_lists_each_command_once() -> None:
+    names = [text for text, _, _ in _complete("/")]
+    assert len(names) == len(COMMANDS)
+    assert "/clear" not in names and "/quit" not in names
+    assert find("clear") is find("new") and find("quit") is find("exit")
 
 
 def test_an_alias_row_names_the_other_spelling() -> None:

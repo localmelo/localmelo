@@ -321,11 +321,14 @@ def execute(
             approval = _waiting_approval(task)
             wait = task.get("wait_reason")
             reason = task.get("reason") or ("approval" if approval else None)
-            print(f"  Reason: {_safe(reason or 'not recorded')}", file=out)
+            # Reason and Waiting appear only when the task has one. The task
+            # record has no outcome field, so a finished task adds nothing.
+            if reason:
+                print(f"  Reason: {_safe(reason)}", file=out)
             if approval:
                 print(f"  {_safe(approval)}", file=out)
-            else:
-                print(f"  Waiting: {_safe(wait or 'not recorded')}", file=out)
+            elif wait:
+                print(f"  Waiting: {_safe(wait)}", file=out)
         out.flush()
     return 0
 

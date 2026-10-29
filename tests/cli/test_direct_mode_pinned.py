@@ -35,6 +35,8 @@ refused config value a worker ``startup_error`` after a valid brief, so
 ``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
 the golden and without ``--brief`` it keeps the old usage error. ``--window-eviction``
 adds an opt-in flag and config fallback to the same two functions (default ``slide``
+changes nothing). ``_check_args`` is not pinned. T161 changed the no-backend message text in
+``_build_direct_mode_agent`` (both the plain and the ``--brief`` branch), so it has a new hash.
 changes nothing). ``--reflect-tool-guard`` adds an opt-in flag (no config
 fallback) to ``_direct_options`` (default off changes nothing). ``_check_args`` is not pinned.
 """
@@ -58,7 +60,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "793fcad639f07b692ae8c2d88738803aca776c111246863d1a9085afb4562b37",
+    "_build_direct_mode_agent": "4896cff690ad45bfecfb59d1f67e60579c193f1a6ceec1ed27b97a343a8bc7b8",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

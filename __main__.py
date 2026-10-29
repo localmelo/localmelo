@@ -1480,7 +1480,10 @@ def _build_parser(
         help="Read appended worker instructions from inherited pipe fd N",
     )
     direct.add_argument(
-        "--brief", metavar="FILE", help="Read a direct worker task from a UTF-8 file"
+        "--brief",
+        metavar="FILE",
+        help="Read a direct worker task from a UTF-8 file; its Check: lines run "
+        "when the model is done, and a failed check exits 4",
     )
     direct.add_argument(
         "--save-session",
@@ -2285,11 +2288,11 @@ def _build_direct_mode_agent(
     if not cfg.is_configured:
         if getattr(args, "brief", None) is not None:
             raise _StartupConfigError(
-                "No backend configured. Run 'melo --serve --reconfigure' to set up, "
+                "No backend configured. Run melo in a terminal to set up, "
                 "or use --base-url to connect to an OpenAI-compatible endpoint."
             )
         print(
-            "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"
+            "No backend configured. Run melo in a terminal to set up,\n"
             "or use --base-url to connect to an OpenAI-compatible endpoint.",
             file=sys.stderr,
         )

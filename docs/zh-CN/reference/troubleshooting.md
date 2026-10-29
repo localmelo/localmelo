@@ -67,7 +67,7 @@ FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smo
 ### No backend configured
 
 ```text
-No backend configured. Run 'melo --serve --reconfigure' to set up,
+No backend configured. Run melo in a terminal to set up,
 or use --base-url to connect to an OpenAI-compatible endpoint.
 ```
 

@@ -405,6 +405,29 @@ class TestBuildDirectModeAgent:
 
         assert exc_info.value.code == 1
 
+    def test_no_backend_message_says_to_set_up_in_a_terminal(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Both no-backend messages point at a terminal run, not the wizard flag."""
+        from localmelo.__main__ import _build_direct_mode_agent, _StartupConfigError
+
+        ns = argparse.Namespace(base_url=None, chat_model=None)
+        with (
+            mock.patch("localmelo.support.config.load", return_value=Config()),
+            pytest.raises(SystemExit),
+        ):
+            _build_direct_mode_agent(ns)
+        assert capsys.readouterr().err == (
+            "No backend configured. Run melo in a terminal to set up,\n"
+            "or use --base-url to connect to an OpenAI-compatible endpoint.\n"
+        )
+        ns.brief = "task.md"
+        with (
+            mock.patch("localmelo.support.config.load", return_value=Config()),
+            pytest.raises(_StartupConfigError, match="Run melo in a terminal"),
+        ):
+            _build_direct_mode_agent(ns)
+
     def test_no_base_url_invalid_config_exits(self) -> None:
         """No --base-url and an invalid config -> error on stderr, exit 1."""
         cfg = _valid_cfg()

@@ -320,3 +320,12 @@ def test_a_usage_error_in_developer_mode_keeps_the_long_usage(
     err = capsys.readouterr().err
     assert err.startswith("usage: melo [-h]") and "--reflection-gate" in err
     assert "Run melo --help" not in err
+
+
+def test_the_brief_help_says_a_failed_check_exits_4() -> None:
+    """The --brief help tells a worker author when Check: lines run and what a failure does."""
+    text = " ".join(cli._build_parser(developer=True).format_help().split())
+    assert (
+        "--brief FILE Read a direct worker task from a UTF-8 file; its Check: lines "
+        "run when the model is done, and a failed check exits 4"
+    ) in text
