@@ -20,12 +20,16 @@ def test_fixed_prefix_config_roundtrip(
     monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
     save(Config())
     assert "fixed_prefix" not in path.read_text()
-    save(Config(agent=AgentConfig(fixed_prefix=True)))
-    assert "fixed_prefix = true" in path.read_text()
     assert load().agent.fixed_prefix is True
-    assert configured_session_options(load()).fixed_prefix is True
-    assert not configured_session_options(
-        load(), AgentOptions(fixed_prefix=False), explicit={"fixed_prefix"}
+    # A value that equals the default is not written; one that differs is.
+    save(Config(agent=AgentConfig(fixed_prefix=True)))
+    assert "fixed_prefix" not in path.read_text()
+    save(Config(agent=AgentConfig(fixed_prefix=False)))
+    assert "fixed_prefix = false" in path.read_text()
+    assert load().agent.fixed_prefix is False
+    assert configured_session_options(load()).fixed_prefix is False
+    assert configured_session_options(
+        load(), AgentOptions(fixed_prefix=True), explicit={"fixed_prefix"}
     ).fixed_prefix
 
 
@@ -44,14 +48,14 @@ async def test_direct_cli_uses_config_when_flag_is_absent(
     monkeypatch.setattr(
         "localmelo.support.config.CONFIG_PATH", str(tmp_path / "config.toml")
     )
-    save(Config(agent=AgentConfig(fixed_prefix=True)))
+    save(Config(agent=AgentConfig(fixed_prefix=False)))
     parser = cli._build_parser()
     args = parser.parse_args(["--base-url", "http://127.0.0.1:1/v1", "task"])
     agent = cli._build_direct_mode_agent(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
     try:
-        assert agent.options.fixed_prefix is True
+        assert agent.options.fixed_prefix is False
     finally:
         await agent.close()
 
@@ -64,7 +68,7 @@ async def test_direct_cli_overrides_config(
     monkeypatch.setattr(
         "localmelo.support.config.CONFIG_PATH", str(tmp_path / "config.toml")
     )
-    save(Config(agent=AgentConfig(fixed_prefix=True)))
+    save(Config(agent=AgentConfig(fixed_prefix=choice == "off")))
     parser = cli._build_parser()
     args = parser.parse_args(
         ["--base-url", "http://127.0.0.1:1/v1", "--fixed-prefix", choice, "task"]

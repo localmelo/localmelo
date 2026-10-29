@@ -18,6 +18,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@ class TestReflectionInPrompt:
 
     @pytest.mark.asyncio
     async def test_reflection_section_in_prompt(self) -> None:
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call → budget
@@ -628,7 +629,7 @@ class TestReflectionReceivesPriorReflections:
 
     @pytest.mark.asyncio
     async def test_prior_reflections_in_reflect_call(self) -> None:
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call
@@ -789,7 +790,7 @@ class TestPrePlanIncludesReflections:
         reflection keeps the model's ``continue``: its summary is cut to
         fit :data:`MAX_REFLECTION_CHARS`, and the next attempt starts and
         plans with it."""
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         llm.enqueue(

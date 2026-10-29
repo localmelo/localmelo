@@ -174,21 +174,26 @@ class AgentOptions:
       back to the heuristic, ``"heuristic"`` always writes it from the
       reply's text and thinking. It is accepted and inert in the other
       modes.
-    - ``window_eviction``: how working memory drops old turns. ``"slide"``
-      (default) drops the oldest unit at every step once the window is full.
-      ``"chunk"`` drops whole units down to ``SHORT_TERM_MAX -
+    - ``fixed_prefix``: when true (the default), the run freezes its system
+      prefix and local date and keeps each request an extension of the
+      previous one, so a server's prompt cache can reuse it. ``False`` is the
+      behavior before this default changed.
+    - ``window_eviction``: how working memory drops old turns. ``"chunk"``
+      (default) drops whole units down to ``SHORT_TERM_MAX -
       WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
       context fit then drop down to ``WINDOW_FIT_TARGET`` (70%) of their
       limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
       drops a finished attempt's turns when the next attempt starts after a
       reflection. Both keep the retained history stable for several steps,
-      which a server's prompt cache can reuse. Experimental.
+      which a server's prompt cache can reuse. ``"slide"`` drops the oldest
+      unit at every step once the window is full, as before ``"chunk"`` became
+      the default.
     - ``reflect_tool_guard``: when true, a reflection request offers the tools
       the step's planning request sent (the same list, order and schema, so a
       server's prompt prefix holds) and its last user message ends with
       ``REFLECT_TOOL_GUARD_NOTE``, which asks for the JSON object and no tool
-      call. The retry request is unchanged. The default is false: the request
-      bytes are unchanged. Experimental (#183).
+      call. The retry request is unchanged. The default is true; ``False`` keeps
+      the reflection request as it was before the guard (#183).
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
@@ -248,13 +253,13 @@ class AgentOptions:
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
-    fixed_prefix: bool = False
+    fixed_prefix: bool = True
     captured_history: bool = False
     typed_assertions: bool = False
-    window_eviction: WindowEviction = "slide"
+    window_eviction: WindowEviction = "chunk"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
-    reflect_tool_guard: bool = False
+    reflect_tool_guard: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):

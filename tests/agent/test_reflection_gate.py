@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import Agent
 from localmelo.melo.agent._chat import (
     FINAL_REFLECTION_NOTE,
     REFLECTION_PROMPT,
@@ -41,6 +41,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.legacy_options import legacy_options
 
 GATES: list[ReflectionGate] = ["flags", "utility"]
 
@@ -101,7 +102,7 @@ def _agent(
     agent = Agent(
         llm=llm,
         embedding=embedding,
-        options=AgentOptions(builtins=frozenset(), **options),
+        options=legacy_options(builtins=frozenset(), **options),
     )
     agent.hippo.register_tool(
         ToolDef(

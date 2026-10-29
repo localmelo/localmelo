@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import Message, ReasoningTags, ToolCall, ToolDef
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 ECHO = ToolDef(
     name="echo",
@@ -114,6 +115,7 @@ async def _run(
     extra_body: dict[str, Any] | None = None,
     on_echo: Callable[[Agent], None] | None = None,
     stream: bool = False,
+    base: Mapping[str, Any] = LEGACY_CACHE_OPTIONS,
     **options: Any,
 ) -> list[AgentEvent]:
     llm = OpenAICompatLLM(
@@ -124,7 +126,9 @@ async def _run(
     )
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all", **options),
+        options=AgentOptions(
+            builtins=frozenset(), tool_exposure="all", **{**base, **options}
+        ),
     )
     agent.hippo.register_tool(ECHO)
 

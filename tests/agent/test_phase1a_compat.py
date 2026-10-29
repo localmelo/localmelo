@@ -58,6 +58,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import ToolOutput
 from localmelo.melo.schema import ImagePart, Message, RunResult, ToolCall, ToolDef
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 GOLDEN_DIR = Path(__file__).parent / "goldens" / "phase1a_compat"
 
@@ -772,7 +773,9 @@ async def record_run(
     agent = Agent(
         llm=llm,
         embedding=SameVectorEmbedding() if scenario.embedding else None,
-        options=AgentOptions(memory_dir=memory_dir, **scenario.options),
+        options=AgentOptions(
+            memory_dir=memory_dir, **{**LEGACY_CACHE_OPTIONS, **scenario.options}
+        ),
         tool_providers=scenario.providers,
     )
     try:

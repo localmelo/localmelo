@@ -561,7 +561,7 @@ class TestLoadConversation:
         ]
 
     def test_the_oldest_messages_are_evicted(self) -> None:
-        agent = _agent(ScriptedLLM())
+        agent = _agent(ScriptedLLM(), window_eviction="slide")
         messages = [
             Message(role="user" if n % 2 == 0 else "assistant", content=str(n))
             for n in range(SHORT_TERM_MAX + 5)

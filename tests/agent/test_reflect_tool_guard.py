@@ -44,7 +44,7 @@ def _reflection_event(events: list[AgentEvent]) -> Mapping[str, Any]:
 
 def test_the_sentence_is_the_documented_one() -> None:
     assert REFLECT_TOOL_GUARD_NOTE == SENTENCE
-    assert AgentOptions().reflect_tool_guard is False
+    assert AgentOptions().reflect_tool_guard is True
     with pytest.raises(ValueError, match="reflect_tool_guard"):
         AgentOptions(reflect_tool_guard="on")  # type: ignore[arg-type]
 

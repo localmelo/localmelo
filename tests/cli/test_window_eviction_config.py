@@ -23,6 +23,11 @@ def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_the_config_roundtrip_writes_only_a_non_default_mode(config_home: Path) -> None:
     save(Config())
     assert "window_eviction" not in (config_home / "config.toml").read_text()
+    save(Config(agent=AgentConfig(window_eviction="chunk")))
+    assert "window_eviction" not in (config_home / "config.toml").read_text()
+    save(Config(agent=AgentConfig(window_eviction="slide")))
+    assert 'window_eviction = "slide"' in (config_home / "config.toml").read_text()
+    assert load().agent.window_eviction == "slide"
     save(Config(agent=AgentConfig(window_eviction="boundary")))
     assert 'window_eviction = "boundary"' in (config_home / "config.toml").read_text()
     assert load().agent.window_eviction == "boundary"
@@ -61,29 +66,29 @@ def test_the_flag_reaches_the_options(mode: str) -> None:
     assert cli._direct_options(parser, args).window_eviction == mode
 
 
-def test_the_default_is_slide() -> None:
+def test_the_default_is_chunk() -> None:
     parser = cli._build_parser()
     args = parser.parse_args(["--base-url", "http://127.0.0.1:1/v1", "t"])
-    assert cli._direct_options(parser, args).window_eviction == "slide"
+    assert cli._direct_options(parser, args).window_eviction == "chunk"
 
 
 async def test_direct_cli_uses_the_config_when_the_flag_is_absent(
     config_home: Path,
 ) -> None:
-    save(Config(agent=AgentConfig(window_eviction="chunk")))
+    save(Config(agent=AgentConfig(window_eviction="slide")))
     parser = cli._build_parser()
     args = parser.parse_args(["--base-url", "http://127.0.0.1:1/v1", "task"])
     agent = cli._build_direct_mode_agent(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
     try:
-        assert agent.options.window_eviction == "chunk"
+        assert agent.options.window_eviction == "slide"
     finally:
         await agent.close()
 
 
 async def test_direct_cli_flag_overrides_the_config(config_home: Path) -> None:
-    save(Config(agent=AgentConfig(window_eviction="chunk")))
+    save(Config(agent=AgentConfig(window_eviction="slide")))
     parser = cli._build_parser()
     args = parser.parse_args(
         [

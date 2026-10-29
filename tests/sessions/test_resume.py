@@ -56,10 +56,14 @@ async def stored_session(store: SessionStore, turns: list[tuple[str, str, str]])
 
 
 async def runner_for(
-    tmp_path: Path, store: SessionStore, session_id: str, mode: str = "pairs"
+    tmp_path: Path,
+    store: SessionStore,
+    session_id: str,
+    mode: str = "pairs",
+    **options: Any,
 ) -> tuple[SessionRunner, Agent, ScriptedLLM]:
     llm = ScriptedLLM([answer("next answer")])
-    agent = await started_agent(tmp_path / "ws", llm)
+    agent = await started_agent(tmp_path / "ws", llm, **options)
     runner = SessionRunner(agent, store, session_id, resume_mode=mode)  # type: ignore[arg-type]
     return runner, agent, llm
 
@@ -437,7 +441,9 @@ async def test_an_evicted_checkpoint_counts_only_what_stayed(tmp_path: Path) -> 
             result=None,
             answer=f"answer {index}",
         )
-    runner, agent, _ = await runner_for(tmp_path, store, sid, "window")
+    runner, agent, _ = await runner_for(
+        tmp_path, store, sid, "window", window_eviction="slide"
+    )
     assert await runner.resume() == 10  # 24 loaded, the 4 oldest evicted
     info = runner.last_resume
     assert info is not None
@@ -459,5 +465,35 @@ async def test_resume_without_a_session_loads_nothing(tmp_path: Path) -> None:
     assert runner.last_resume is not None and runner.last_resume.messages == 0
     with pytest.raises(ValueError):
         await runner.resume(max_turns=-1)
+    await agent.close()
+    await store.aclose()
+
+
+async def test_an_evicted_checkpoint_counts_only_what_stayed_under_chunk(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="cli")
+    sid, _, live = await window_session(tmp_path, store, 10)  # 20 messages
+    for index in (10, 11):
+        turn = await store.begin_turn(sid, f"question {index}", holder=HOLDER)
+        await store.finish_turn(
+            sid,
+            turn.turn,
+            holder=HOLDER,
+            status="completed",
+            cause="run",
+            result=None,
+            answer=f"answer {index}",
+        )
+    # The default window eviction drops whole units at once, so fewer stay than
+    # under slide; the count is still the questions that stayed.
+    runner, agent, _ = await runner_for(tmp_path, store, sid, "window")
+    stayed = await runner.resume()
+    assert 0 < stayed < 10
+    questions = [m.content for m in agent.conversation() if m.role == "user"]
+    assert len(questions) == stayed and questions[-1] == "question 11"
+    info = runner.last_resume
+    assert info is not None and info.turns == stayed
+    await live.close()
     await agent.close()
     await store.aclose()

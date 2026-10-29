@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.support.sessions.agents import configured_cache_options
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -82,7 +83,9 @@ class SessionManager:
         # A session keeps its answers, so a follow-up sees them (#37's option).
         return Agent(
             config=self._config,
-            options=AgentOptions(record_answers=True, mode="gateway"),
+            options=configured_cache_options(
+                self._config, AgentOptions(record_answers=True, mode="gateway")
+            ),
         )
 
     def get(self, session_id: str) -> Session | None:

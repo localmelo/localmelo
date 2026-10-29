@@ -24,6 +24,7 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 CALL_ID = "call_1"
 
@@ -356,7 +357,7 @@ async def test_replay_required_evicts_whole_units_and_never_cuts() -> None:
     )
     agent = _agent(
         llm,
-        _options(reasoning="replay", replay_scope="window"),
+        _options(reasoning="replay", replay_scope="window", **LEGACY_CACHE_OPTIONS),
     )
     agent.load_conversation(
         [
@@ -666,7 +667,10 @@ def _unit(call_id: str, output: str, *, thinking: str = "") -> list[Message]:
 @pytest.mark.asyncio
 async def test_do_reflect_fits_the_request_it_sends() -> None:
     server = Scripted(_reflection("stop"))
-    agent = _agent(server.llm(reasoning_field="auto"), _options(reasoning="replay"))
+    agent = _agent(
+        server.llm(reasoning_field="auto"),
+        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+    )
     agent.load_conversation(
         [
             *_unit("a", "x" * 60_000),
@@ -693,7 +697,10 @@ async def test_do_reflect_fits_the_request_it_sends() -> None:
 @pytest.mark.asyncio
 async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
     server = Scripted(_reflection("stop"))
-    agent = _agent(server.llm(reasoning_field="auto"), _options(reasoning="replay"))
+    agent = _agent(
+        server.llm(reasoning_field="auto"),
+        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+    )
     agent.load_conversation(
         [
             *_unit("a", "small", thinking="t" * 50_000),
@@ -714,7 +721,10 @@ async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
 @pytest.mark.asyncio
 async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
     server = Scripted(_reflection("stop"))
-    agent = _agent(server.llm(reasoning_field="auto"), _options(reasoning="replay"))
+    agent = _agent(
+        server.llm(reasoning_field="auto"),
+        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+    )
     agent.load_conversation([*_unit("a", "x" * 120_000, thinking="t" * 50_000)])
     task = TaskRecord(query="q")
     run = _RunState(task_id=task.task_id)
@@ -730,7 +740,7 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
 async def test_a_reflection_too_large_to_fit_is_not_sent() -> None:
     server = Scripted(_reply("done"))
     llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay"))
+    agent = _agent(llm, _options(reasoning="replay", **LEGACY_CACHE_OPTIONS))
     huge = Message(
         role="assistant",
         content="a",
@@ -804,7 +814,7 @@ async def test_recall_is_read_only_in_legacy(mode: str, recall: bool) -> None:
     llm = RecordingLLM()
     agent = _agent(
         llm,
-        _options(reasoning=mode),
+        _options(reasoning=mode, **LEGACY_CACHE_OPTIONS),
         embedding=embedding,
     )
     await agent.hippo.long.add("a fact", [1.0, 0.0, 0.0, 0.0])

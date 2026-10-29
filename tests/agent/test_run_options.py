@@ -21,6 +21,7 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -447,7 +448,7 @@ class TestReflectPolicyBudgets:
                 _echo_call("e"),
             ]
         )
-        options = AgentOptions(max_steps=3, steps_per_attempt=2, max_attempts=5)
+        options = legacy_options(max_steps=3, steps_per_attempt=2, max_attempts=5)
         agent = _echo_agent(llm, options)
         assert await agent.run("echo q") == "[budget_exhausted] Max steps reached"
         # Attempt 0 uses 2 steps, attempt 1 the 1 step left; no attempt 2.

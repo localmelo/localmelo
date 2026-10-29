@@ -20,6 +20,7 @@ from localmelo.melo.schema import (
     ToolDef,
     ToolResult,
 )
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 CALL_ID = "call_1"
 
@@ -451,6 +452,7 @@ async def test_the_reflection_request_carries_notes_and_used_notes() -> None:
             attempt_policy="reflect",
             steps_per_attempt=1,
             max_attempts=2,
+            **LEGACY_CACHE_OPTIONS,
         ),
     )
     result = await agent.run_task("q")
