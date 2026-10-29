@@ -70,7 +70,7 @@
           <li>任务调度器-3：暂停、停放和重启恢复（S3b）——<a href="https://github.com/localmelo/localmelo/pull/125">#125</a>、<a href="https://github.com/localmelo/localmelo/pull/135">#135</a>、<a href="https://github.com/localmelo/localmelo/pull/147">#147</a>、<a href="https://github.com/localmelo/localmelo/pull/152">#152</a>、<a href="https://github.com/localmelo/localmelo/pull/158">#158</a> 和 <a href="https://github.com/localmelo/localmelo/pull/166">#166</a> 已落地；受控 Resume（先 API，再控制台）进行中；</li>
           <li>任务调度器-4：<code>melo-task</code> 命令（S3c）——S3c.1 已落地（<a href="https://github.com/localmelo/localmelo/pull/159">#159</a>）；更多调度器阶段随后；</li>
           <li>无头工作进程支持-4：worker 契约（#107 W2）——<a href="https://github.com/localmelo/localmelo/pull/143">#143</a>、启动结果（<a href="https://github.com/localmelo/localmelo/pull/157">#157</a>）和收件箱（<a href="https://github.com/localmelo/localmelo/pull/164">#164</a>）已落地；基于管道的收件箱（<a href="https://github.com/localmelo/localmelo/issues/163">#163</a>）随后；</li>
-          <li>终端界面-2：附件、shell 命令和流式输出（U2c、U4）——<code>/attach</code>（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）和流式输出（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>、<a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）已落地；终端中的实时回复随后，然后是 shell 命令；</li>
+          <li>终端界面-2：附件、shell 命令和流式输出（U2c、U4）——<code>/attach</code>（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）、流式输出（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>、<a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）和终端中的实时回复（<a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>）已落地；接下来是 shell 命令；</li>
           <li>记忆事实-2：中文和否定事实——第一、二切片已落地（<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>、<a href="https://github.com/localmelo/localmelo/pull/162">#162</a>，类型化事实为可选）；</li>
           <li>文档-1：在网站上提供有条理、可读、双语的文档（<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>）——起始指南、概念页、记忆、检索、终端、会话、网关和网页控制台指南的中文版本已落地（<a href="https://github.com/localmelo/localmelo/pull/140">#140</a>、<a href="https://github.com/localmelo/localmelo/pull/146">#146</a>、<a href="https://github.com/localmelo/localmelo/pull/161">#161</a>）；下一批进行中。</li>
         </ul>
@@ -86,6 +86,15 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-live-reply">
+          <h3>答案随模型书写而到达</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>
+          </p>
+          <p>通过 <code>[cli] stream = true</code> 和按模型的 <code>[cli.reasoning_tags]</code> 提示按需开启后，终端界面会请求流式的规划回复，并且只在实时区域绘制发布过滤器已经脱敏的文本；<code>/stream on|off</code> 切换后续轮次，<code>/new</code> 把它恢复为配置值。流式文本是临时的：变成工具调用、重试、失败的运行或停止时会只打印一次并加上标注，最终回答在 <code>●</code> 后只打印一次。不支持流式的提供方会回退到完整回复；直接模式、worker 和网关从不流式。无效的 <code>[cli]</code> 值现在会在界面中警告并回退，而不再让运行失败。见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#streamed-replies">流式回复</a>。</p>
+        </article>
 
         <article class="update-entry" id="u-macos-app">
           <h3>围绕控制台的 macOS 开发应用</h3>

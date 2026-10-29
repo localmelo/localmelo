@@ -76,7 +76,7 @@
           <li>Task scheduler-3: pause, park and restart recovery (S3b) — <a href="https://github.com/localmelo/localmelo/pull/125">#125</a>, <a href="https://github.com/localmelo/localmelo/pull/135">#135</a>, <a href="https://github.com/localmelo/localmelo/pull/147">#147</a>, <a href="https://github.com/localmelo/localmelo/pull/152">#152</a>, <a href="https://github.com/localmelo/localmelo/pull/158">#158</a> and <a href="https://github.com/localmelo/localmelo/pull/166">#166</a> landed; controlled Resume (API, then console) in progress;</li>
           <li>Task scheduler-4: <code>melo-task</code> command (S3c) — S3c.1 landed (<a href="https://github.com/localmelo/localmelo/pull/159">#159</a>); more scheduler phases later;</li>
           <li>Headless worker support-4: worker contract (#107 W2) — <a href="https://github.com/localmelo/localmelo/pull/143">#143</a>, startup results (<a href="https://github.com/localmelo/localmelo/pull/157">#157</a>) and the inbox (<a href="https://github.com/localmelo/localmelo/pull/164">#164</a>) landed; an inbox over a pipe (<a href="https://github.com/localmelo/localmelo/issues/163">#163</a>) next;</li>
-          <li>Terminal UI-2: attachments, shell commands, streaming (U2c, U4) — <code>/attach</code> (<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>) and streaming (<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>, <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>) landed; the live reply in the terminal next, then shell commands;</li>
+          <li>Terminal UI-2: attachments, shell commands, streaming (U2c, U4) — <code>/attach</code> (<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>), streaming (<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>, <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>) and the live reply in the terminal (<a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>) landed; shell commands next;</li>
           <li>Memory facts-2: Chinese and negative facts — slices 1 and 2 landed (<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>, <a href="https://github.com/localmelo/localmelo/pull/162">#162</a>, typed facts opt-in);</li>
           <li>Docs-1: organized, readable, bilingual docs (<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>) — Chinese twins of the start guides, concept pages, memory, retrieval, terminal, sessions, gateway and web console guides landed (<a href="https://github.com/localmelo/localmelo/pull/140">#140</a>, <a href="https://github.com/localmelo/localmelo/pull/146">#146</a>, <a href="https://github.com/localmelo/localmelo/pull/161">#161</a>); the next batch in progress.</li>
         </ul>
@@ -98,6 +98,15 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-live-reply">
+          <h3>The answer arrives as the model writes it</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>
+          </p>
+          <p>Opt-in with <code>[cli] stream = true</code> and a per-model <code>[cli.reasoning_tags]</code> hint, the terminal UI asks for a streamed planning reply and draws only text the release filter has already redacted, in the live area; <code>/stream on|off</code> flips it for later turns and <code>/new</code> puts it back. Streamed text is provisional: one that becomes a tool call, a retry, a failed run or a stop prints once, labelled, and the final answer prints once after <code>●</code>. A provider without streaming falls back to the complete reply; direct mode, workers and the gateway never stream. An invalid <code>[cli]</code> value now warns and falls back in the UI instead of failing the run. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#streamed-replies">streamed replies</a>.</p>
+        </article>
 
         <article class="update-entry" id="u-macos-app">
           <h3>A macOS development app around the console</h3>
