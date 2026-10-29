@@ -139,7 +139,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   read-only: no write route accepts a worker id. `context_budget`, `note`,
   `inbox.accepted`, `memory` and `recall` events no longer show "Some recorded
   event types cannot be shown": notes, accepted messages, memory decisions and
-  recalls draw as one muted line each. ([#NN])
+  recalls draw as one muted line each. ([#221])
 - Status row in the web console (#176, #213). A chat shows one line above its
   composer, and a task's card shows it under its facts: the same segments as the
   terminal's status bar (`cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`,
@@ -1370,6 +1370,7 @@ earlier milestones.
 [#217]: https://github.com/localmelo/localmelo/pull/217
 [#218]: https://github.com/localmelo/localmelo/pull/218
 [#219]: https://github.com/localmelo/localmelo/pull/219
+[#221]: https://github.com/localmelo/localmelo/pull/221
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
