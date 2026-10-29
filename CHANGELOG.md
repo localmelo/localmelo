@@ -126,6 +126,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task that waits for a tool approval can be answered ([#208]). The task JSON
+  carries `pending_approvals` (the shape a chat session uses), the console's
+  Tasks view shows the same approval card and says "Waiting for your approval",
+  and `melo-task show` and `list` print `Waiting for your approval: <tool>
+  <target> (answer it in the web console, Tasks)`; `Reason:` reads `approval`
+  instead of `not recorded`. Answers use the existing `POST /api/approvals/{id}`.
 - The interactive status bar shows usage at a glance (#176 SL2): after the model
   and workspace, `cache 83%` (the last request's cached share, `--` when the
   server reports none, plus `idle 3m` for a local server), `ctx 12k/32k`, the
@@ -1284,3 +1290,4 @@ earlier milestones.
 [#205]: https://github.com/localmelo/localmelo/pull/205
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
+[#208]: https://github.com/localmelo/localmelo/pull/208

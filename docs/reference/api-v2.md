@@ -302,7 +302,9 @@ A failed resource close quarantines the worker and keeps its slot counted; after
 retries, the interrupted task reports `cleanup failed; slot held until restart`.
 
 Task objects include the task id, normalized `spec`, `state`, priority and
-source, `wait_reason`, timestamps, workspace and `priority_events`, along
+source, `wait_reason`, `pending_approvals` (the approvals the task waits for, in
+the shape of a session's; empty when none; answer one with `POST
+/api/approvals/{request_id}`, as for a chat), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet. Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default

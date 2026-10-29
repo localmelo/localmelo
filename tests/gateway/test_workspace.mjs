@@ -2359,3 +2359,50 @@ test('Tasks hands the header to Workers and back without the chat', async () => 
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(h.element('header-title').textContent, 'Tasks');
 });
+
+test('an open task card picks up an approval that arrives later, and redraws only on a change', async () => {
+  const request = {
+    request_id: 'req-late', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true,
+    workspace_label: '~/w', target: null,
+  };
+  let pending = [];
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: pending})}),
+  });
+  const panel = h.element('task-panel');
+  assert.equal(findNode(panel, (node) => node.classList.contains('approval-card')), null);
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  assert.ok(poll, 'the Tasks view polls every 3 seconds');
+  const before = panel.children[0];
+  await poll.handler(); await settle();
+  assert.equal(panel.children[0], before, 'an unchanged task is not redrawn');
+  pending = [request];
+  await poll.handler(); await settle();
+  assert.equal(findNode(panel, (node) => node.classList.contains('approval-card'))?.id, 'approval-card-req-late');
+  assert.match(flatten(panel), /Waiting for your approval/);
+  assert.equal(findNode(panel, (node) => node.textContent === 'Refresh'), null, 'the card needs no Refresh button');
+});
+
+test('a task waiting for approval shows the chat approval card and answers it', async () => {
+  const request = {
+    request_id: 'req-t', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true,
+    workspace_label: '~/w', target: null,
+  };
+  let reads = 0;
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: reads++ ? [] : [request]})}),
+    'POST /approvals/req-t': {outcome: 'allowed'},
+  });
+  const panel = h.element('task-panel');
+  const card = findNode(panel, (node) => node.classList.contains('approval-card'));
+  assert.equal(card.id, 'approval-card-req-t');
+  assert.match(flatten(panel), /Waiting for your approval/);
+  assert.match(flatten(panel), /shell_exec wants to run a command in ~\/w/);
+  const once = findNode(card, (node) => node.textContent === 'Allow once');
+  h.run('approvalStates.get("req-t").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  await once.click(); await settle();
+  assert.deepEqual(h.net.callsTo('/approvals/req-t')[0].body, {choice: 'once'});
+  assert.equal(findNode(h.element('task-panel'), (node) => node.classList.contains('approval-card')), null, 'the answered card goes away');
+  assert.doesNotMatch(flatten(h.element('task-panel')), /Waiting for your approval/);
+});

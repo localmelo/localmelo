@@ -61,7 +61,9 @@ def test_create_task_and_idempotent_response(
 ) -> None:
     response = client.post("/api/tasks", json={"prompt": "summarize", "level": "P1"})
     assert response.status_code == 202
-    assert response.json() == {"task": {"task_id": "task1", "state": "queued"}}
+    assert response.json() == {
+        "task": {"task_id": "task1", "state": "queued", "pending_approvals": []}
+    }
     assert workers.payloads[-1] == {"prompt": "summarize", "level": "P1"}
     repeated = client.post(
         "/api/tasks", json={"prompt": "summarize", "request_key": "repeat"}
@@ -71,9 +73,11 @@ def test_create_task_and_idempotent_response(
 
 def test_get_and_filter_tasks(client: TestClient, workers: FakeWorkers) -> None:
     assert client.get("/api/tasks?state=running&level=1").json() == {
-        "tasks": [{"state": "running", "level": 1}]
+        "tasks": [{"state": "running", "level": 1, "pending_approvals": []}]
     }
-    assert client.get("/api/tasks/task1").json() == {"task": {"task_id": "task1"}}
+    assert client.get("/api/tasks/task1").json() == {
+        "task": {"task_id": "task1", "pending_approvals": []}
+    }
     missing = client.get("/api/tasks/missing")
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
 
