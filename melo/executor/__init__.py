@@ -37,6 +37,7 @@ def register_builtins(
     workspace_root: str | None = None,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
+    harness_only: Collection[str] = (),
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -75,6 +76,11 @@ def register_builtins(
     user, the shell, the terminal, ``LANG``, every ``LC_*`` and
     ``TMPDIR``) with *tool_env* on top, so a secret in the agent's
     environment reaches no tool unless *tool_env* names it.
+
+    *harness_only* names built-ins that are built the same way but kept from
+    the model: they go to the executor only (see
+    :meth:`Executor.register_harness_tool`) and not to the hippo, and a name
+    that is selected anyway is registered as usual.
     """
     selected = builtin_set_for(mode, names)
     known = builtin_names()
@@ -95,12 +101,15 @@ def register_builtins(
     )
     with_env = builtins_with_env(tool_env) if tool_env else {}
     for tool_def, phase1a_fn in BUILTINS:
-        if tool_def.name not in selected:
+        if tool_def.name not in selected and tool_def.name not in harness_only:
             continue
         if tool_def.name in rooted:
             fn, timeout_ms = rooted[tool_def.name]
         else:
             fn, timeout_ms = with_env.get(tool_def.name, phase1a_fn), None
+        if tool_def.name not in selected:
+            executor.register_harness_tool(tool_def, fn, timeout_ms=timeout_ms)
+            continue
         tier = tier_of(tool_def)
         hippo.register_tool(tool_def)  # type: ignore[attr-defined]
         executor.register(

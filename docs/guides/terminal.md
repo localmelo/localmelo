@@ -162,7 +162,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
   on the config as saved. In a `melo --base-url URL` session they switch for
   this session only, unless melo asked `Save URL · MODEL as the default
   backend?` (only when there is no config file yet) and you answered yes.
-  After `s` (start anyway) at the first run's questions, `/model` and
+  After `s` (start without saving) at the first run's questions, `/model` and
   `/backend` save the server, as the first run would have.
 - A model that does not start leaves the current one in place
   (`✗ Could not start NAME: …`). `/backend` keeps the current server when
@@ -345,6 +345,35 @@ happens without the explicit `/copy` command.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
+
+### The status bar
+
+The bar under the input box carries the usage figures of the session, taken
+from events melo has already received: no request, no polling, no timer.
+Left to right, after the model and the workspace, each segment appears only
+when it has data:
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%` is the share of the last request's prompt tokens the server
+  reported as cached (`cache --` when the server reports none, never 0%). For
+  a local server, `idle 3m` follows once a minute has passed since the last
+  request; a local server evicts its prefix cache by memory, not by time, so
+  there is no countdown.
+- `ctx 12k/32k` is the last measured prompt over the input limit, or just
+  `ctx 12k` when no limit is known.
+- `step 4 attempt 2 phase fix` are the run's progress facts while a run is
+  active, never a percent or `n/max`.
+- `tasks 1 running 2 queued` appears only when a task store is reachable.
+
+The bar redraws when an event arrives or you press a key, so `idle` is as of
+the last redraw. On a narrow terminal the title goes first, then the segments
+right to left, then the workspace is cut, and the bar never wraps. `/status`
+prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
+it was before these segments: the model, workspace, `ctx` of the last request
+and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
@@ -535,7 +564,7 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none
   answers, it prints
-  `No model server answered on this machine (ports 8000, 8400, 11434, 30000).`
+  `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.`
   and offers `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
@@ -561,7 +590,7 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
-  `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
+  `[r]etry, [s]tart without saving, [q]uit [r]:`. `r` asks for the URL again, with
   the one you typed as the default; `s` asks `Model name [default]:` and
   opens the UI without saving (`Not saved: melo asks again next time.`);
   `q` exits with code 0. The reasons are `connection refused`,
@@ -571,6 +600,6 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   follow), `the reply is not a model list`, `the reply could not be read`,
   `not a URL` and `it lists no models`.
 - An option is chosen by its first letter, so `s`, `start` and
-  `start anyway` are the same answer; another answer asks again.
+  `start without saving` are the same answer; another answer asks again.
 - Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;
   Ctrl+C prints the same and exits with 130.

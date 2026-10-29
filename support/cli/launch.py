@@ -544,6 +544,7 @@ async def main_async(
             resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
             stream=session_config.cli.stream,
             reasoning_tags=session_config.cli.reasoning_tags,
+            status_line=session_config.cli.status_line,
             out=out,
             developer=_developer(args),
         )

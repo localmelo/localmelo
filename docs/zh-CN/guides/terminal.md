@@ -188,6 +188,26 @@ from-the-child
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会输出尽力生成的结果、[状态行](../../reference/cli.md#output)（英文）和提示，例如服务器无响应时显示 `Is the model server running at URL?`。
 
+<a id="the-status-bar"></a>
+
+### 状态栏
+
+输入框下方的状态栏显示本会话的用量，数据来自 melo 已收到的事件：不发请求、不轮询、没有定时器。
+在模型和工作区之后从左到右，每一段只在有数据时出现：
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
+  本地服务器在距上次请求超过一分钟后还会显示 `idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
+- `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
+- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。
+- `tasks 1 running 2 queued`：仅在能访问任务存储时出现。
+
+状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
+`/status` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
+
 <a id="streamed-replies"></a>
 
 ### 流式回复
@@ -291,10 +311,10 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 Use nomic-embed-text for long-term memory? [Y/n]:
 ```
 
-- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器。按 Enter 接受 URL，或输入另一个 URL。探测时只请求模型列表；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出 `No model server answered on this machine (ports 8000, 8400, 11434, 30000).`，并提供 `http://127.0.0.1:8000/v1`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，此时提供列表中的第一个 URL；空值会关闭搜索。
+- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器。按 Enter 接受 URL，或输入另一个 URL。探测时只请求模型列表；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出 `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.`，并提供 `http://127.0.0.1:8000/v1`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，此时提供列表中的第一个 URL；空值会关闭搜索。
 - 列出多个模型的服务器会以编号列表显示模型并询问 `Model [N]:`；输入编号或 ID。默认选择跳过嵌入和重排模型。只列出这类模型的服务器也会以相同方式显示，并提示对话需要对话模型。
 - 对 `GET /api/version` 返回 `{"version": "…"}` 的 Ollama 服务器会保存为 `chat_backend = "ollama"`，并在其 `[ollama]` 表中保存 `chat_url` 和 `chat_model`；横幅随后显示 Ollama，对话请求使用 Ollama 原生 API 及其 300 秒超时。其他任何兼容 OpenAI 的服务器都保存为 `chat_backend = "vllm"`（适用于所有兼容 OpenAI 服务器的键），并在其 `[vllm]` 表中保存 `chat_url` 和 `chat_model`。文件中的其他设置保持不变。
 - 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Use <model> for long-term memory? [Y/n]:`，优先推荐 Qwen3-Embedding。`y` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `n`、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明原因；没有候选模型的提示会针对 Ollama 服务器给出 `ollama pull qwen3-embedding:0.6b`，否则给出 `Serve Qwen3-Embedding-0.6B on it`。参见[设置嵌入模型](embedding.md)。
-- 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `[r]etry, [s]tart anyway, [q]uit [r]:`。`r` 再次询问 URL，默认值为你输入的地址；`s` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`q` 以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
-- 选项按首字母选择，因此 `s`、`start` 和 `start anyway` 是同一回答；其他回答会重新询问。
+- 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `[r]etry, [s]tart without saving, [q]uit [r]:`。`r` 再次询问 URL，默认值为你输入的地址；`s` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`q` 以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
+- 选项按首字母选择，因此 `s`、`start` 和 `start without saving` 是同一回答；其他回答会重新询问。
 - 在问题处按 Ctrl-D 会输出 `Setup cancelled.` 并以退出码 0 退出；Ctrl+C 输出相同内容并以 130 退出。

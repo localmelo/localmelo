@@ -301,7 +301,8 @@ def test_without_a_found_server_the_typed_url_is_listed(
     list_models.assert_awaited_once_with("openai-compatible", URL)
     out = capsys.readouterr().out
     assert out.startswith(
-        "No model server answered on this machine (ports 8000, 11434).\n"
+        "No model server found on this computer (looked at ports 8000, 11434). "
+        "Start one (for example ollama serve), or enter its URL.\n"
         f"✓ {URL} lists 1 model; using only.\n"
     )
 
@@ -331,7 +332,7 @@ def test_a_failed_check_retries_with_the_typed_url_as_the_default(
     assert result == FirstSetup(url=other, model="m", saved=True)
     assert answers.prompts == [
         "Model server URL [http://127.0.0.1:8000/v1]: ",
-        "[r]etry, [s]tart anyway, [q]uit [r]: ",
+        "[r]etry, [s]tart without saving, [q]uit [r]: ",
         f"Model server URL [{URL}]: ",
     ]
     assert f"✗ {URL}: connection refused.\n" in capsys.readouterr().out
@@ -383,7 +384,7 @@ def test_detection_turned_off_sends_nothing(
     result, detect, _ = _first_setup(_Answers(URL), lists={URL: ["m"]}, urls=())
     assert result is not None
     detect.assert_not_called()
-    assert "No model server answered" not in capsys.readouterr().out
+    assert "No model server found" not in capsys.readouterr().out
 
 
 def test_a_save_that_fails_keeps_the_choice_for_this_run(
@@ -807,7 +808,7 @@ def test_urls_from_the_environment_prefill_the_question(
 @pytest.mark.parametrize(
     ("answer", "tail", "expected"),
     [
-        ("start anyway", ("m",), FirstSetup(url=URL, model="m", saved=False)),
+        ("start without saving", ("m",), FirstSetup(url=URL, model="m", saved=False)),
         ("Quit", (), None),
         ("", ("", "q"), None),  # Enter retries: the URL question comes again
     ],
@@ -825,7 +826,7 @@ def test_an_option_counts_by_its_first_letter(
     answers = _Answers(URL, "x", answer, *tail)
     result, _, _ = _first_setup(answers, lists=lists)
     assert result == expected
-    assert answers.prompts[1:3] == ["[r]etry, [s]tart anyway, [q]uit [r]: "] * 2
+    assert answers.prompts[1:3] == ["[r]etry, [s]tart without saving, [q]uit [r]: "] * 2
     assert "  Type r, s or q.\n" in capsys.readouterr().out
     if answer == "":
         assert answers.prompts[3] == f"Model server URL [{URL}]: "

@@ -192,3 +192,58 @@ def usage_lines(
         if name == "steps":
             lines += ["           " + row for row in step_rows[1:]]
     return lines
+
+
+def _idle_text(seconds: float) -> str:
+    """``3m`` or ``1h02m``: a minute-grained idle time, cut."""
+    minutes = int(seconds) // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def status_segments(
+    snap: UsageSnapshot,
+    *,
+    local: bool,
+    now: float,
+    tasks: TaskCounts | None = None,
+) -> list[str]:
+    """The status row's segments, left to right: cache, ctx, steps, tasks.
+
+    A segment with no data is left out. Steps are the progress spec's level-0
+    facts (never a percent or ``n/max``) and show only while a run is active.
+    The idle time is as of the last redraw (the row redraws on events only),
+    so it shows from one minute on.
+    """
+    segments: list[str] = []
+    if snap.requests:
+        if snap.last_cached is None or not snap.last_prompt:
+            cache = "cache --"
+        else:
+            cache = f"cache {_percent(snap.last_cached, snap.last_prompt)}"
+        if local and snap.last_request_ts is not None:
+            idle = now - snap.last_request_ts
+            if idle >= 60:
+                cache += f" idle {_idle_text(idle)}"
+        segments.append(cache)
+    context = snap.context or {}
+    measured = _count(context.get("measured_prompt_tokens"))
+    if measured:
+        limit = _count(context.get("input_limit"))
+        segments.append(
+            f"ctx {format_tokens(measured)}"
+            + (f"/{format_tokens(limit)}" if limit else "")
+        )
+    if snap.run_active and snap.progress is not None:
+        facts = [f"step {_count(snap.progress.get('step')) or 0}"]
+        attempt = _count(snap.progress.get("attempt")) or 1
+        if attempt >= 2:
+            facts.append(f"attempt {attempt}")
+        phase = snap.progress.get("phase")
+        if isinstance(phase, str) and phase:
+            facts.append(f"phase {phase}")
+        segments.append(" ".join(facts))
+    if tasks is not None:
+        segments.append(f"tasks {tasks.running} running {tasks.queued} queued")
+    return segments

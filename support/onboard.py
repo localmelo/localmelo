@@ -611,7 +611,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     A server found on this machine prefills the URL; the model is chosen
     from the server's list. Only ``GET <url>/models`` is sent, and
     ``GET /api/version`` once when saving, to tell Ollama apart. When the
-    check fails the user may retry, start anyway without saving, or quit
+    check fails the user may retry, start without saving, or quit
     (None). EOFError and KeyboardInterrupt reach the caller.
 
     With *ask_keep* (``--reconfigure``), the found server is offered with one
@@ -640,7 +640,10 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     else:
         if urls:
             ports = ", ".join(_port(url) for url in urls)
-            print(f"No model server answered on this machine (ports {ports}).")
+            print(
+                f"No model server found on this computer (looked at ports {ports}). "
+                "Start one (for example ollama serve), or enter its URL."
+            )
         # URLs named in the environment are the ones to try first.
         overridden = discovery.DETECT_URLS_ENV in os.environ
         default_url = urls[0] if overridden and urls else _FIRST_RUN_URL
@@ -661,7 +664,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         if not reason:
             break
         print(f"✗ {url}: {reason}.")
-        choice = _choose("[r]etry, [s]tart anyway, [q]uit [r]: ", "rsq", "r")
+        choice = _choose("[r]etry, [s]tart without saving, [q]uit [r]: ", "rsq", "r")
         if choice == "q":
             return None
         if choice == "s":
