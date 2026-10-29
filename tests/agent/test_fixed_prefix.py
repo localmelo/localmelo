@@ -161,7 +161,7 @@ async def test_provider_wire_preserves_common_prefix(
     assert server.bodies[0]["messages"][0] == server.bodies[1]["messages"][0]
     assert server.bodies[0]["tools"] == server.bodies[1]["tools"]
     assert "Date: 2026-10-28 (UTC-04:00)" in server.bodies[0]["messages"][0]["content"]
-    expected = {"version": "fixed-prefix-v1", "schema_changes": 0}
+    expected = {"version": "fixed-prefix-v2", "schema_changes": 0}
     if kind == "openai":
         expected["reported_cached_tokens"] = 96
     assert result.to_dict()["prefix_cache"] == expected
@@ -201,7 +201,11 @@ async def test_dynamic_recall_reflection_and_schema_changes(
     assert "source record 123" not in prefix and "earlier reflection" not in prefix
     assert any(m.role == "user" and "source record 123" in m.content for m in one)
     assert any(m.role == "user" and "earlier reflection" in m.content for m in one)
-    assert any(m.role == "user" and m.content.endswith(task.content) for m in one)
+    # The reflections follow the task query, at the tail of the request.
+    assert one[-1].role == "user" and one[-1].content.endswith("[end of reflections]")
+    assert one[-1].content.index(task.content) < one[-1].content.index(
+        "earlier reflection"
+    )
     data_message = next(m.content for m in one if "source record 123" in m.content)
     assert data_message.index(
         "[end of retrieved context and reflections]"

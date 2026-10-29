@@ -71,8 +71,8 @@
 | `steps` | 做出的规划步骤数，最多 `max_steps`。 |
 | `attempts` | 开始的尝试次数：第一次尝试就给出答案时为 1。 |
 | `n_llm` | 返回了回复的模型请求数。 |
-| `n_main` | 其中提供了工具的请求数。 |
-| `n_aux` | 其中不带工具的请求数：反思、召回发出的检索请求，以及步骤中没有提供任何工具时的规划请求。 |
+| `n_main` | 其中提供了工具的请求数，反思除外。 |
+| `n_aux` | 其余的请求数：反思（使用 `--fixed-prefix` 时，反思为共享前缀也会提供规划请求的工具，但仍计在这里）、召回发出的检索请求，以及步骤中没有提供任何工具时的规划请求。 |
 | `n_tool` | 交给执行器的工具调用数，包括被拒绝的调用。 |
 | `llm_errors` | 失败的模型请求数，重试请求的每次失败尝试都计一次。`n_llm + llm_errors` 是发出的请求总数。 |
 | `usage` | 所有回复的 token 计数，按名称求和，例如 `prompt_tokens`、`completion_tokens` 和 `total_tokens`。在 `legacy` 之外，它还有 `reasoning_chars`（收到的推理，已拆出内联的 `<think>` 块）以及服务器报告时的 `cached_tokens` 或 `reasoning_tokens`。 |
