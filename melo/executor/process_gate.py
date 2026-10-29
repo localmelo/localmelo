@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import os
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+
+PROCESS_RECORD: contextvars.ContextVar[Callable[[int], Awaitable[None]] | None] = (
+    contextvars.ContextVar("PROCESS_RECORD", default=None)
+)
+
+
+class UnsupportedProcessGateError(RuntimeError):
+    """The platform cannot spawn the gated bootstrap."""
+
+
+def gate_supported() -> bool:
+    """Whether this platform can run a gated launch and record its identity."""
+    return sys.platform.startswith("linux") or sys.platform == "darwin"
+
 
 # This trusted bootstrap performs no task action before the parent releases it.
 _BOOTSTRAP = """import json,os,sys
@@ -102,6 +117,10 @@ async def gated_exec(
     try:
         try:
             proc = await asyncio.shield(spawn)
+        except NotImplementedError as exc:
+            raise UnsupportedProcessGateError(
+                "gated subprocess spawn is unsupported"
+            ) from exc
         except asyncio.CancelledError:
             os.close(write_fd)
             write_fd = -1

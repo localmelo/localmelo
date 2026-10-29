@@ -103,6 +103,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 |---|---|---|
 | `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task, defaults to worker JSON output and rejects text output. |
 | `--inbox FILE` | not set | With `--brief`, accept complete appended instruction lines at planning boundaries. The path is explicit, relative to the invocation directory, and must resolve outside the workspace. |
+| `--inbox-fd N` | not set | With `--brief`, accept the same lines from an inherited, readable pipe fd `N`. Requires the parent to keep the write end; the read end is close-on-exec before tools start. Cannot be combined with `--inbox`. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--fixed-prefix on\|off` | `off` | Opt in to a versioned fixed system prefix with the local date frozen at run start; overrides `[agent] fixed_prefix`. |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
@@ -467,22 +468,38 @@ per line. Serialize writers, append each full line in one write and use a fresh
 inbox per run. There is no default inbox: `--brief` alone reads no file, and the
 inbox path is never put in the model's context.
 
-The inbox path must resolve outside the run's workspace, after symlinks. A path
-inside it is refused before any model call, because the default `file_write` and
-`python_exec` tools could rewrite it; so are a symlink, FIFO, directory,
-oversized file and unreadable path, which are checked at the same point. An
-empty, non-UTF-8 or oversize message, or a file replaced or truncated after a
-line was accepted, ends the run at the boundary that reads it. All of these are
-`setup_error` runs (exit 2) with the plain message and no traceback, not
-`crashed`. The reader requires the bytes already read to stay a prefix of the
-file: a same-inode rewrite that preserves them is accepted as appended content,
-while a shorter file or an earlier changed byte fails. It cannot detect a truncate-and-rewrite that keeps every previously read
-byte.
+With `--inbox-fd N`, the same lines, total and per-line limits and
+acknowledgements come from an inherited, readable pipe file descriptor instead.
+The parent opens the pipe, passes the read end (for example with
+`pass_fds=(read_fd,)` in `subprocess.Popen`) and keeps the write end open; it
+appends one complete line at a time. The worker checks that `N` is a pipe before
+the first model call and makes the read end close-on-exec there, so
+`python_exec`, `shell_exec` and MCP server subprocesses get no copy and cannot
+write the channel. This is the recommended inbox for untrusted tasks. A closed
+fd or one that is not a pipe is refused at the same point as a bad file, as a
+clean `setup_error` (exit 2) with no model call. An fd has no path, so the
+workspace check below applies only to a file inbox. `--inbox` and `--inbox-fd`
+cannot be combined.
 
-The inbox is a steering channel, not a trust boundary: same-user processes, and
-`python_exec`/`shell_exec` code with the user's permissions, can still write it
-or any other file. Keeping it outside the workspace only stops the confined
-file tools from rewriting it.
+For a file inbox, the path must resolve outside the run's workspace, after
+symlinks. A path inside it is refused before any model call, because the default
+`file_write` and `python_exec` tools could rewrite it; so are a symlink, FIFO,
+directory, oversized file and unreadable path, which are checked at the same
+point. An empty, non-UTF-8 or oversize message, or a file replaced or truncated
+after a line was accepted, ends the run at the boundary that reads it. All of
+these are `setup_error` runs (exit 2) with the plain message and no traceback,
+not `crashed`. The reader requires the bytes already read to stay a prefix of
+the file: a same-inode rewrite that preserves them is accepted as appended
+content, while a shorter file or an earlier changed byte fails. It cannot detect
+a truncate-and-rewrite that keeps every previously read byte.
+
+A file inbox is a steering channel, not a trust boundary: same-user processes,
+and `python_exec`/`shell_exec` code with the user's permissions, can still write
+it or any other file. Keeping it outside the workspace only stops the confined
+file tools from rewriting it. The fd channel closes that tool-write path, but it
+is not authentication: a process that already holds the write end can steer the
+run, so the parent must not pass that end to the worker's tools or to another
+untrusted process.
 
 In `stream-json`, `inbox.accepted` reports each inserted line's ending byte
 `offset`, step and attempt, without its text. An acknowledgement means the
@@ -491,10 +508,10 @@ followed it. Acknowledgements are never dropped: a slow or stalled reader makes
 the worker wait for the writer instead of skipping records. Messages appended
 after the final planning boundary may never be accepted. Offsets are committed
 once per live run, not across crashes or restarts; reconcile acknowledgements
-and use a fresh file for a new run. A saved worker records the redacted text in
-its event history. Redaction can change that text, and session resume does not
-reconstruct inbox events as conversation messages; do not treat saved history as
-an exact replay.
+and use a fresh file or pipe for a new run. A saved worker records the redacted
+text in its event history. Redaction can change that text, and session resume
+does not reconstruct inbox events as conversation messages; do not treat saved
+history as an exact replay.
 
 **In both formats:**
 

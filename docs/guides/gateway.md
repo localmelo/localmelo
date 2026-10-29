@@ -68,7 +68,7 @@ refuses requests that are not addressed to it:
 
 | HTTP status | `code` | When |
 |---|---|---|
-| 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). |
+| 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). A gateway started by the macOS app also refuses `/api/auth/login` without the app's matching `X-LocalMelo-Instance`, and a login code is bound to that instance. |
 | 403 | `foreign_origin` | A supplied `Origin` does not match the request Host exactly, or a request under `/v1/` or `/api/` has disallowed `Sec-Fetch-Site`. The login exchange requires an Origin. |
 | 413 | `too_large` | The request body exceeds 1 MiB (1,048,576 bytes). |
 | 415 | `unsupported_media_type` | A request under `/api/` has a non-empty body without `Content-Type: application/json`. |

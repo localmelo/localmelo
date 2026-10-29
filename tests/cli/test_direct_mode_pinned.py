@@ -25,14 +25,15 @@ Context accounting resolves its opt-in budget before Agent construction, so
 ``_build_direct_mode_agent`` has a new hash. The opt-in worker brief routes
 through ``_run_direct`` and ``_run``; review fixes handle broken worker pipes
 in ``_run_direct``. Inbox routing changes both hashes again without changing
-the ordinary direct path. Fixed prefix
+the ordinary direct path; ``--inbox-fd`` changes them once more. Fixed prefix
 adds an opt-in flag and config fallback to ``_direct_options`` and
 ``_build_direct_mode_agent``; the default output and provider wire remain
 covered by the legacy golden. Captured history also adds an opt-in flag and
-config fallback to those two functions. ``_check_args`` is not pinned. T95bR's
-review fixes make a refused config value a worker ``startup_error`` after a
-valid brief, so ``_build_direct_mode_agent`` has a new hash; without
-``--brief`` it keeps the old usage error.
+config fallback to those two functions. Digest recall adds config-backed gate
+settings only for explicit reasoning modes, and T95bR's review fixes make a
+refused config value a worker ``startup_error`` after a valid brief, so
+``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
+the golden and without ``--brief`` it keeps the old usage error. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -46,15 +47,15 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "98eeb31649dc6f2d84ed21187d680a08e7ceb96929e386e34aaae67b64659eaa",
-    "_run": "8a99388d143f68b8db3d16c3b4f5c50b6bde05c0519a3f9e2768ab136b376725",
+    "_run_direct": "97e9281d6ac524b259bdde8ec6b2aa2cff6ea3874e665c6d0fc46c48c3a3bcff",
+    "_run": "03c29e4466d8bfe09f0edd6a47cd435d9eda3ceb05fe8c99783c96fb9781f519",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "b8ca5200e85c5580b2de570627e38df0fbedce52c3ded145a2716c59fc9b317d",
+    "_build_direct_mode_agent": "8f29945472bcba2277cfcbb5bc4a45f329088fac484183065aa9af907a46ce89",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

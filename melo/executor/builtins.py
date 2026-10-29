@@ -16,7 +16,14 @@ from typing import Any
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
+from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED
 from localmelo.melo.executor.env import child_env
+from localmelo.melo.executor.process_gate import (
+    PROCESS_RECORD,
+    UnsupportedProcessGateError,
+    gate_supported,
+    gated_exec,
+)
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -119,6 +126,27 @@ async def _shell_exec(command: str) -> str:
     return text
 
 
+def _require_incomplete_entry() -> None:
+    """Refuse a launch whose entry marker may not have committed."""
+    if not _ENTRY_MARKED.get():
+        raise RuntimeError(
+            "execution evidence could not be recorded; the call was not run"
+        )
+
+
+async def _gated_or_fallback(
+    argv: list[str], *, record: Any, **kwargs: Any
+) -> asyncio.subprocess.Process:
+    try:
+        return await gated_exec(argv, record=record, **kwargs)
+    except UnsupportedProcessGateError:
+        # Only Executor can establish that the incomplete marker committed.
+        _require_incomplete_entry()
+        return await asyncio.create_subprocess_exec(
+            *argv, start_new_session=True, **kwargs
+        )
+
+
 async def _run_shell(
     command: str,
     *,
@@ -142,15 +170,29 @@ async def _run_shell(
     # A new session puts the shell and everything it starts in one process
     # group, which is killed as a whole when the command times out or the
     # call is cancelled (the executor's timeout, the run's timeout_s).
-    proc = await asyncio.create_subprocess_shell(
-        command,
-        stdin=stdin,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=cwd,
-        env=child_env(tool_env),
-        start_new_session=True,
-    )
+    record = PROCESS_RECORD.get()
+    if record is None or not gate_supported():
+        if record is not None:
+            _require_incomplete_entry()
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=child_env(tool_env),
+            start_new_session=True,
+        )
+    else:
+        proc = await _gated_or_fallback(
+            ["/bin/sh", "-c", command],
+            record=record,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=child_env(tool_env),
+        )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=limit)
     except TimeoutError:
@@ -387,17 +429,31 @@ async def _run_python(
     """
     if not sys.executable:
         raise RuntimeError("No Python interpreter is available for python_exec")
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        _python_wrapper(),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=cwd,
-        env=child_env(tool_env),
-        start_new_session=True,
-    )
+    record = PROCESS_RECORD.get()
+    if record is None or not gate_supported():
+        if record is not None:
+            _require_incomplete_entry()
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            _python_wrapper(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=child_env(tool_env),
+            start_new_session=True,
+        )
+    else:
+        proc = await _gated_or_fallback(
+            [sys.executable, "-c", _python_wrapper()],
+            record=record,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=child_env(tool_env),
+        )
     try:
         stdout, stderr = await proc.communicate(code.encode("utf-8", "surrogatepass"))
     except BaseException:

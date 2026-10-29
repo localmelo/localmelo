@@ -848,7 +848,9 @@ async def test_a_finalizer_that_outlives_the_wait_leaves_the_runner_finishing(
         s.runner.replace_agent(other)
     turn = await last_turn(s)
     assert (turn.status, turn.cause) == ("cancelled", "user_stop")
-    assert turn.result is None  # it ended without run.finished
+    # It ended without run.finished: the saved result still carries the reason.
+    assert turn.result is not None
+    assert turn.result["error"] == "Cancelled by the user"
     gate.set()
     for _ in range(100):
         if not s.runner.busy:
@@ -859,6 +861,31 @@ async def test_a_finalizer_that_outlives_the_wait_leaves_the_runner_finishing(
     assert (await s.runner.run_turn("next")).status == "completed"
     check_invariants(s.path, "gateway")
     await other.close()
+    await s.aclose()
+
+
+async def test_a_turn_closed_before_run_started_keeps_its_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SIGHUP before the first event: the saved turn still says why it ended."""
+    s = await setup(tmp_path)
+    gate = asyncio.Event()
+    original = Agent.run_task
+
+    async def held_run(self: Agent, *args: Any, **kwargs: Any) -> RunResult:
+        await gate.wait()  # holds the turn before run.started, as a slow setup does
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", held_run)
+    await s.runner.start_turn("wait")
+    assert s.runner.cancel("Cancelled by SIGHUP", cause="shutdown")
+    result = await s.runner.wait()
+    assert result is not None and result.error == "Cancelled by SIGHUP"
+    turn = await last_turn(s)
+    assert (turn.status, turn.cause) == ("cancelled", "shutdown")
+    assert turn.result is not None
+    assert turn.result["error"] == "Cancelled by SIGHUP"
+    gate.set()
     await s.aclose()
 
 
@@ -886,7 +913,8 @@ async def test_a_turn_cancelled_before_its_task_ran_still_ends(
     assert (waited.status, waited.error) == ("cancelled", "Session closed")
     stored = (await s.store.list_turns(turn.session_id))[-1]
     assert (stored.status, stored.cause) == ("cancelled", "closed")
-    assert stored.answer == INTERRUPT_LABEL and stored.result is None
+    assert stored.answer == INTERRUPT_LABEL
+    assert stored.result is not None and stored.result["error"] == "Session closed"
     assert await s.store.get_window(turn.session_id) is None  # no run.finished
     assert s.llm.requests == []
     check_invariants(s.path, "gateway")
@@ -1286,7 +1314,11 @@ async def test_a_turn_without_run_finished_writes_no_checkpoint(
     with pytest.raises(RuntimeError):
         await s.runner.run_turn("second")
     turn = await last_turn(s)
-    assert (turn.status, turn.cause, turn.result) == ("crashed", "run", None)
+    assert (turn.status, turn.cause) == ("crashed", "run")
+    assert turn.result is not None
+    assert (
+        turn.result["error"] == "RuntimeError: run_task failed before its first event"
+    )
     window = await s.store.get_window(turn.session_id)
     assert window is not None and window.turn == 1
     check_invariants(s.path, "gateway")

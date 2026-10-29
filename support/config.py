@@ -144,6 +144,9 @@ class RetrievalConfig:
     kinds: list[str] = field(default_factory=list)  # empty: all but thought
     placement: str = "tool"  # tool | message
     min_score: float = 0.35
+    cross_task_ratio: float = 1.1
+    cross_task_cap: int = 1
+    cross_task_cold: int = 0
 
 
 @dataclass
@@ -483,6 +486,21 @@ class Config:
             errors.append(
                 f"[retrieval] min_score must be a number from 0 to 1, got {score!r}"
             )
+        ratio: object = retrieval.cross_task_ratio
+        if (
+            isinstance(ratio, bool)
+            or not isinstance(ratio, int | float)
+            or not 1 <= ratio <= 10
+        ):
+            errors.append("[retrieval] cross_task_ratio must be a number from 1 to 10")
+        for name, maximum in (("cross_task_cap", 2), ("cross_task_cold", 1)):
+            value = getattr(retrieval, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= maximum
+            ):
+                errors.append(f"[retrieval] {name} must be an int from 0 to {maximum}")
         for name, allowed in (
             ("recall_at", RECALL_TRIGGERS),
             ("kinds", RECALL_KINDS),
@@ -982,6 +1000,9 @@ def save(cfg: Config) -> None:
             lines.append(f"kinds = {_toml_value(retrieval.kinds)}")
         lines.append(f"placement = {_toml_string(retrieval.placement)}")
         lines.append(f"min_score = {_toml_value(retrieval.min_score)}")
+        lines.append(f"cross_task_ratio = {_toml_value(retrieval.cross_task_ratio)}")
+        lines.append(f"cross_task_cap = {retrieval.cross_task_cap}")
+        lines.append(f"cross_task_cold = {retrieval.cross_task_cold}")
         lines.append("")
 
     # Only a settings section that differs from the defaults is written, so

@@ -24,6 +24,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A turn cancelled before its run reported `run.finished`, such as a SIGHUP
+  during setup, now saves the cancel reason in the stored result, so saved
+  history shows why the turn ended instead of an empty error ([#168]).
+
+- Prefer same-task episodic digests during recall; gate and cap cross-task
+  digests, with an optional cold-start allowance. A digest key includes the
+  run's workspace realpath, and a final evidence-less attempt keeps the last
+  evidence-bearing attempt's digest. General memories are not gated. Do not
+  admit digests lacking file or verification evidence ([#165]).
+
 - Label Python checks in attempt digests with a recognizable runner and safe
   target basename when available, rather than the first line of code. Unknown
   checks use a neutral label. Results show counts, an exit code or `completed`
@@ -47,6 +57,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Direct workers can read steering instructions from an inherited pipe with
+  `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
+  inbox, but the read end is close-on-exec before tools start. Python, shell
+  and MCP subprocesses get no copy, so a tool cannot write the channel; use it
+  for untrusted tasks ([#169]).
+- An unsigned arm64 macOS development bundle wraps the local web console in a
+  native window and menu-bar host. It owns its gateway child, checks the
+  instance before sending any login code, binds the code to the launch instance
+  and checks page responses, re-signs in after a token rotation, and offers
+  "Sign In Again"; the check is not authentication ([#167]).
 - Interactive terminal live streaming is opt-in with `[cli] stream = true` and a
   per-model `[cli.reasoning_tags]` hint (`explicit`, `closing_only` or `none`),
   with `/stream on|off` for later turns. Released, redacted text shows in the
@@ -65,6 +85,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - `melo-task` creates, inspects and controls gateway tasks, with authenticated
   loopback requests and an optional event follow stream that prints one readable
   line per event and a terminal snapshot. ([#159])
+- Wire process capture into task launches: the gated launcher records the
+  process group and start time before releasing a child, tool-provider starts
+  and arbitrary-code tool entries mark capture incomplete, and a task-store
+  outage retries for up to 10 seconds before refusing that one call. Resume
+  stays fenced and nothing reads the evidence yet. [#166]
 - Scheduler component v4 adds dormant process capture state, identity checks
   and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 
@@ -78,7 +103,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and reconciles execution-linked terminal results. Recovered tasks with
   uncertain history remain fenced until controlled recovery is wired; Stop is
   available. Ordinary task creation does not yet establish first-start proof. [#152]
-
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
@@ -1042,3 +1066,8 @@ earlier milestones.
 [#159]: https://github.com/localmelo/localmelo/pull/159
 [#162]: https://github.com/localmelo/localmelo/pull/162
 [#164]: https://github.com/localmelo/localmelo/pull/164
+[#165]: https://github.com/localmelo/localmelo/pull/165
+[#166]: https://github.com/localmelo/localmelo/pull/166
+[#167]: https://github.com/localmelo/localmelo/pull/167
+[#168]: https://github.com/localmelo/localmelo/pull/168
+[#169]: https://github.com/localmelo/localmelo/pull/169

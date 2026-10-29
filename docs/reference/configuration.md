@@ -48,6 +48,9 @@ tables of the chosen backends.
 | `kinds` | `[retrieval]` | not set | A list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. Omit for all but `thought`. |
 | `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused in `replay` and `compress+replay`. |
 | `min_score` | `[retrieval]` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. Inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
+| `cross_task_ratio` | `[retrieval]` | `1.1` | Cross-task episodic digests need this multiple of the best same-task digest's score from the same long-store backend; 1–10. |
+| `cross_task_cap` | `[retrieval]` | `1` | Maximum cross-task digests per recall, 0–2; the existing total long-hit limit remains two. |
+| `cross_task_cold` | `[retrieval]` | `0` | Without a matching same-task digest, permit 0 or 1 cross-task digest; still subject to the cap and backend floor. General memories bypass this gate. |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
@@ -121,6 +124,9 @@ k = 3                     # 1-10
 kinds = ["note", "draft"] # omit for all but thought
 placement = "tool"        # tool or message
 min_score = 0.35          # 0-1
+cross_task_ratio = 1.1    # 1-10
+cross_task_cap = 1        # 0-2
+cross_task_cold = 0       # 0 or 1
 ```
 
 `save` writes the table only when a value differs from its default, so an
