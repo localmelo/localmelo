@@ -871,7 +871,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   loaded chat model, so Enter does not load a large model. `melo --serve --port 0`
   now binds a free port and prints the real address. The quickstart says a worker
   task waits once per tool the model asks to use, and that `python_exec` can start
-  programs. ([#NN])
+  programs. ([#219])
 
 - A `--brief` run checks its work before the budget runs out: with `Check:` lines,
   exactly two steps left in the last attempt, and a workspace that changed since
@@ -1356,6 +1356,7 @@ earlier milestones.
 [#216]: https://github.com/localmelo/localmelo/pull/216
 [#217]: https://github.com/localmelo/localmelo/pull/217
 [#218]: https://github.com/localmelo/localmelo/pull/218
+[#219]: https://github.com/localmelo/localmelo/pull/219
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
