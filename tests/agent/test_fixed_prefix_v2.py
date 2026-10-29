@@ -54,6 +54,10 @@ async def test_a_reflection_request_starts_with_the_last_plan_request() -> None:
     assert prefix["tools_changed"] is False
     assert prefix["total_messages"] == len(reflect["messages"])
     assert (reflection.data["readable"], reflection.data["requests"]) == (True, 1)
+    [finished] = _of(events, "run.finished")
+    result = finished.data["result"]
+    # The reflection offers tools only to share the prefix: still auxiliary.
+    assert (result["n_main"], result["n_aux"]) == (4, 1)
 
 
 async def test_the_plan_after_a_reflection_shares_the_whole_history() -> None:

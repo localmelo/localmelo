@@ -125,8 +125,8 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `steps` | Planning steps made, at most `max_steps`. |
 | `attempts` | Attempts started: 1 when the first attempt answered. |
 | `n_llm` | Model requests that returned a response. |
-| `n_main` | Of those, requests that offered tools. |
-| `n_aux` | Of those, requests without tools: reflections, recall's retrieve requests, and planning requests in a step that offered no tool. |
+| `n_main` | Of those, requests that offered tools, other than reflections. |
+| `n_aux` | Of those, the rest: reflections (also under `--fixed-prefix`, where they offer the plan's tools to share its prefix), recall's retrieve requests, and planning requests in a step that offered no tool. |
 | `n_tool` | Tool calls handed to the executor, including refused calls. |
 | `llm_errors` | Model requests that failed, counting each failed attempt of a retried request. `n_llm + llm_errors` is the number of requests sent. |
 | `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |

@@ -719,7 +719,9 @@ class Chat:
                 record, proxy, full_usage if full_usage is not None else response.usage
             )
         self.stats.n_llm += 1
-        if tools:
+        # A fixed-prefix-v2 reflection offers the plan's tools only to share
+        # its prefix; it still counts as an auxiliary request.
+        if tools and kind != "reflect":
             self.stats.n_main += 1
         else:
             self.stats.n_aux += 1

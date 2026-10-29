@@ -462,9 +462,10 @@ class RunResult:
     - ``steps``: planning calls made, counted when each is sent;
     - ``attempts``: attempts started (1 for an answer on the first try);
     - ``n_llm``: LLM requests that returned a response, split into
-      ``n_main`` (requests that offered tools) and ``n_aux`` (requests
-      without tools, such as a reflection, or a planning call in a step
-      that offered no tool);
+      ``n_main`` (requests that offered tools, other than reflections) and
+      ``n_aux`` (the rest: reflections, also under ``fixed-prefix-v2``
+      where they offer the plan's tools, and requests without tools, such
+      as a planning call in a step that offered no tool);
     - ``n_tool``: tool calls handed to the executor, including calls it
       refused (an unknown tool, or one that step did not offer);
     - ``llm_errors``: LLM requests that raised instead of responding,
