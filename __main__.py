@@ -1832,11 +1832,14 @@ def main() -> None:
             options = dataclasses.replace(options, mode="direct")
             if args.brief is not None:
                 from localmelo.support.cli.worker_contract import (
+                    run_brief_check,
                     workspace_fingerprint,
                 )
 
                 options = dataclasses.replace(
-                    options, brief_probe=workspace_fingerprint
+                    options,
+                    brief_probe=workspace_fingerprint,
+                    brief_check=run_brief_check,
                 )
             if not query:
                 # The loop keeps its answers, so each turn sees the earlier ones; a

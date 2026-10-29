@@ -445,12 +445,17 @@ These are usage errors:
 **With `--brief`:** JSON is a versioned worker result: `v`, `status`, `run_id`,
 `exit_code`, `head_sha`, `git_dirty`, `tests`, `run` and `error`. HEAD and dirty
 state come from the workspace, and are null when unavailable. `run` is the
-run record without `config`, or null for startup or transport errors; `tests` is
-`recorded` only for the last passing
+run record without `config`, or null for startup or transport errors. Without a
+`Check:` line in the brief, `tests` is `recorded` only for the last passing
 recognized test check of the final attempt, otherwise `not_recorded`. A
 recorded item contains the raw command or Python code, redacted and capped at
 2,000 characters with `command_truncated`, its nullable exit code and
 `tool_event` source. It is evidence from tool output, not a guarantee that a task is correct.
+With a `Check:` line, `tests` is the harness's own result instead (see below):
+`passed` or `failed`, with one item per command of the gate's last run, each
+with `command`, `command_truncated`, `exit_code`, `duration_s` and the source
+`brief_check`, plus `refused` (the reason) when the policy did not let the
+command run.
 
 With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
@@ -470,7 +475,7 @@ user's home directory is shown as `~`. Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
 before sharing. `--save-session` can record the same run.
 
-A `--brief` run also differs from a plain task in three ways. The query is the
+A `--brief` run also differs from a plain task in four ways. The query is the
 brief followed by one fixed paragraph, the same on every request: make the
 smallest change that satisfies the task as soon as you know where it goes, run
 the task's check commands after each change, fix what you broke (tests that
@@ -484,6 +489,27 @@ attempt's first request carries the line "Nothing has changed in the workspace
 yet. Start this attempt by writing the part of the task you can already write,
 then continue." and a `no_change` notice is emitted; a workspace that is not a
 git tree gets neither. Runs without `--brief` are unchanged.
+
+The fourth difference is that the run checks itself. A brief names its checks on
+lines that start with `Check:` (no leading space); the rest of each line is one
+shell command, for example `Check: uv run pytest tests/cli -q`. Before the run
+would end `completed`, the harness runs the commands in order, each as a
+`shell_exec` call of the run's executor: the same mode policy (a run that does
+not offer `shell_exec`, that is one without `--builtins all` or `--builtins
+shell_exec`, has every check refused),
+workspace root (`--workspace`) and shell timeout as the model's own calls. A
+check passes on exit status 0. When one fails, and the attempt has a step left
+(or a `done` reflection can start another attempt), the run does not end: the
+next planning request carries one user message with the command, its exit code
+and the last 60 lines of its output, redacted, then "The task's check failed. Fix
+what it shows, run it again, then finish." Each failing check costs one retry,
+and a run has two. The first failure of a round stops the round. A check that is
+refused is not retried. When a check still fails at the end, the run ends
+`completed` as before, with no change to the exit code, but `tests` is `failed`
+and a `brief_check_failed` notice says so; when every check of the last round
+passes, `tests` is `passed`. Each run of a check emits a `brief_check` notice
+with its command, exit code and duration. A brief with no `Check:` line behaves
+as before, and the model's own account of its checks is still only that.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last

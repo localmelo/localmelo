@@ -25,6 +25,11 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
+from localmelo.melo.agent._brief_gate import (
+    MAX_CHECK_RETRIES,
+    check_commands,
+    failure_message,
+)
 from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._captured_history import (
     capture_result,
@@ -1148,6 +1153,11 @@ class _RunState:
     # run's start, None outside a git tree.
     brief: bool = False
     workspace_digest: str | None = None
+    # Its check gate (AgentOptions.brief_check): the brief's check commands,
+    # the gate's runs so far and the retries it has used.
+    check_commands: list[str] = dataclasses.field(default_factory=list)
+    check_rounds: int = 0
+    check_retries: int = 0
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -4690,8 +4700,19 @@ class Agent:
                         if entry is not None:
                             await self._restate(note, run)
                     run.answer_thinking = response.thinking
-                    run.end("completed", result=rest)
-                    return step + 1, ""
+                    retry = await self._brief_gate(run, can_retry=step + 1 < budget)
+                    if retry is None:
+                        run.end("completed", result=rest)
+                        return step + 1, ""
+                    # The answer was no end: the model reads what its check
+                    # showed and plans again.
+                    answer = Message(role="assistant", content=rest)
+                    if self.options.reasoning not in ("legacy", "compress"):
+                        answer = dataclasses.replace(answer, thinking=response.thinking)
+                    self.hippo.working.append_turn(
+                        answer, [Message(role="user", content=retry)]
+                    )
+                    continue
                 # An empty reply is no answer: ask for one and plan again.
                 label_content = EMPTY_REPLY_LABEL
                 entry = None
@@ -5046,6 +5067,8 @@ class Agent:
                     run.workspace_digest = await asyncio.to_thread(
                         self.options.brief_probe, self._workspace_for_brief()
                     )
+                if self.options.brief_check is not None:
+                    run.check_commands = check_commands(query)
                 async with deadline:
                     try:
                         await self._look_up(run, query)
@@ -6060,6 +6083,17 @@ class Agent:
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
+                retry = await self._brief_gate(run, can_retry=not out_of)
+                if retry is not None:
+                    # A failing brief check overrules the done: the next
+                    # attempt starts with what the check showed.
+                    run.events.reflection(
+                        reflection,
+                        continue_run=True,
+                        verdict=verdict._replace(stop_reason=None),
+                    )
+                    self.hippo.working.append(Message(role="user", content=retry))
+                    continue
                 run.events.reflection(reflection, continue_run=False, verdict=verdict)
                 if best_effort.strip():
                     answer = best_effort
@@ -6109,6 +6143,36 @@ class Agent:
             return
         run.events.no_change()
         self.hippo.working.append(Message(role="user", content=NO_CHANGE_PUSH))
+
+    async def _brief_gate(self, run: _RunState, *, can_retry: bool) -> str | None:
+        """Run a brief's checks before the run ends ``completed``.
+
+        Returns ``None`` when the run may end: the brief names no check,
+        every check passed, or one failed for good (a refused check, no
+        retry left or *can_retry* false), which adds a ``brief_check_failed``
+        notice. Otherwise it returns the user message for the model's next
+        planning request, and the caller keeps the run going. The checks
+        run in order and the first failure stops the gate.
+        """
+        check = self.options.brief_check
+        if check is None or not run.check_commands:
+            return None
+        run.check_rounds += 1
+        for command in run.check_commands:
+            result = await check(self.executor, command)
+            run.events.brief_check(result, run.check_rounds)
+            if result.passed:
+                continue
+            if (
+                can_retry
+                and not result.refused
+                and run.check_retries < MAX_CHECK_RETRIES
+            ):
+                run.check_retries += 1
+                return failure_message(result)
+            run.events.brief_check_failed(run.check_retries)
+            return None
+        return None
 
     def _workspace_for_brief(self) -> str:
         return self.executor.workspace_root or os.getcwd()
