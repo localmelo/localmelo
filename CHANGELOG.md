@@ -127,6 +127,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Live section on the task card (#213). A started task's card in the web console
+  shows the task's steps, tool calls and model text beside its approval card,
+  folded like a chat. The card reads the task's session once and, while the task
+  runs or waits for approval, follows its events from the last one read, drawing
+  at most every 150 ms and only the Live section; a hidden tab closes the stream
+  and a shown one resumes. The stream closes after one last read when the task is
+  done, failed, cancelled, expired, interrupted or parked. A task that never
+  started shows nothing live. No server change. ([#NN])
 - Follow worker runs live in the web console (#213). `GET /api/sessions/{id}/events`
   and `GET /api/sessions/{id}/status` now also serve a worker run of the CLI
   file, with the same frames, `after`, `follow=false` and `Last-Event-ID`. A

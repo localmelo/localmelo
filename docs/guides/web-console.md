@@ -95,6 +95,20 @@ run). Like Workers, the view replaces the chat while it is open.
   (Deny); pausing or stopping the task withdraws the card. While it is open,
   the view reads the task (or the list) again every 3 seconds and redraws only
   what changed, so a request that arrives later appears by itself.
+- A started task shows a **Live** section below its approval card: its steps,
+  tool calls and model text, drawn as the Workers view draws a run. The card
+  reads the task's session once (`GET /api/sessions/<task id>/turns?events=true`)
+  and, while the task runs or waits for approval, follows
+  `GET /api/sessions/<task id>/events?after=<last id>`. New events are folded in
+  and drawn together at most every 150 ms, without reading the earlier work
+  again, and only the Live section is redrawn, so a reason being typed in the
+  approval card keeps its focus. A hidden tab closes the stream and a shown one
+  resumes after the last event. When the task is done, failed, cancelled,
+  expired, interrupted or parked, the stream closes after one last read; a
+  resumed task is followed again. A task that never started shows no Live
+  section, and a finished task shows its work once. The console shows task
+  events as it shows a chat's: the same authenticated loopback, no extra
+  redaction.
 - **Stop** uses the task's own stop, not the chat's. It is available until the
   task is finished and wins over a Resume in flight.
 - A started task without a saved card shows "Resume unavailable: recovery

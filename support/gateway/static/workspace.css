@@ -1442,6 +1442,12 @@ dialog::backdrop {
   margin: 24px 0 8px;
   font-size: 16px;
 }
+/* The Live section keeps the chat's link buttons, not the card's bordered ones. */
+.task-live .link-button {
+  padding: 4px 8px 4px 0;
+  border: 0;
+  background: none;
+}
 .task-actions {
   display: flex;
   flex-wrap: wrap;
