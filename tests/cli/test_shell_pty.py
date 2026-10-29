@@ -75,6 +75,17 @@ def _settle(term: Melo, seconds: float = 0.5) -> None:
     term.read_until(lambda out: False, seconds)
 
 
+def _ready(term: Melo, after: str) -> None:
+    """Wait for the prompt to be drawn again below the last ``after`` on screen."""
+
+    def drawn(out: bytes) -> bool:
+        at = out.rfind(after.encode())
+        return at >= 0 and b"Ask melo" in out[at:]
+
+    assert term.read_until(drawn), term.text()
+    _settle(term, 0.2)
+
+
 def _modes(term: Melo) -> list[int]:
     """The terminal's input, output and local mode flags, as the app sees them."""
     attrs = termios.tcgetattr(term._master)
@@ -87,6 +98,7 @@ def test_a_command_shows_its_block_exit_code_and_output(
     term = melo()
     term.type("! echo from-the-child; exit 3\r")
     term.see("└ exit 3")
+    _ready(term, "/attach ! attaches")
     text = term.text()
     assert "! user shell" in text and "demo-project" in text
     assert "$ echo from-the-child; exit 3" in text
@@ -127,10 +139,10 @@ def test_a_program_reading_input_gets_what_is_typed(
     term.type("Ada\r")
     term.see("hello Ada")
     term.see("└ exit 0")
+    _ready(term, "└ exit 0")
     # Esc is the child's: it arrives as a byte, and stops nothing of melo's.
-    term.type("! read -r x; printf '%s' \"$x\" | od -An -c\r")
-    term.see("$ read -r x")
-    _settle(term)  # keys typed before the child has the terminal are the prompt's
+    term.type("! printf 'r%s' eady; read -r x; printf '%s' \"$x\" | od -An -c\r")
+    term.see("ready")  # the child is running: the keys are its now
     term.type("\x1b\r")
     term.see("033")
     term.see("└ exit 0")
@@ -164,6 +176,7 @@ def test_the_terminal_is_given_back_exactly_as_it_was(
     before = _modes(term)
     term.type("! stty -a >/dev/null; printf '\\033[?25l\\033[31m'; exit 1\r")
     term.see("└ exit 1")
+    _ready(term, "└ exit 1")
     assert _until(lambda: _modes(term) == before)
     text = term.output.decode(errors="replace")
     # What the child left on is turned off, once, before the prompt comes back.
@@ -179,6 +192,7 @@ def test_output_stays_out_of_the_next_model_request_unless_attached(
     term = melo()
     term.type("! echo KEEP_OUT_MARK\r")
     term.see("└ exit 0")
+    _ready(term, "└ exit 0")
     term.type("hello\r")
     term.see("Worked for")
     _settle(term)
@@ -188,11 +202,14 @@ def test_output_stays_out_of_the_next_model_request_unless_attached(
     term.type("! echo ATTACH_ME_MARK\r")
     term.see("ATTACH_ME_MARK\r\n")
     term.see("/attach ! attaches")
+    _ready(term, "/attach ! attaches")
     term.type("/attach !\r")
     term.see("✓ Attached shell output: echo ATTACH_ME_MARK")
+    _ready(term, "Attached: shell output")
     sent = len(stub.requests)
     term.type("hello\r")
-    assert _until(lambda: len(stub.requests) > sent)
+    term.read_until(lambda out: len(stub.requests) > sent, 15)  # reads the screen too
+    assert len(stub.requests) > sent, term.text()
     assert "ATTACH_ME_MARK" in json.dumps(stub.requests[sent:])
     assert "KEEP_OUT_MARK" not in json.dumps(stub.requests)
     assert term.quit() == 0
