@@ -122,14 +122,17 @@ def _cache_text(snap: UsageSnapshot, *, local: bool, now: float) -> str:
     return " · ".join(parts)
 
 
+def _measured(snap: UsageSnapshot) -> int | None:
+    data = snap.context
+    return None if data is None else _count(data.get("measured_prompt_tokens"))
+
+
 def _context_text(snap: UsageSnapshot) -> str:
     data = snap.context
-    if data is None:
+    measured = _measured(snap)
+    if data is None or measured is None:
         return "no context budget measured yet"
-    measured = _count(data.get("measured_prompt_tokens"))
     limit = _count(data.get("input_limit"))
-    if measured is None:
-        return "no context budget measured yet"
     if not limit or limit <= 0:
         return f"{format_tokens(measured)} prompt tokens · no input limit known"
     return (
@@ -146,8 +149,11 @@ def usage_lines(
     steps: Callable[[Mapping[str, Any]], list[str]],
     tasks: TaskCounts | None = None,
     dot: str = "·",
+    hide_empty: bool = False,
 ) -> list[str]:
     """The ``/status`` rows of *snap*: cache, context, steps, tasks.
+
+    With *hide_empty*, a row with nothing to say yet ("no ... yet") is left out.
 
     *steps* formats a ``run.progress`` payload as one fact per line (the
     caller's ``/progress`` formatter); *now* is ``time.time()``.
@@ -168,11 +174,76 @@ def usage_lines(
         )
         if tasks.top_level is not None:
             task_text += f" {dot} top priority P{tasks.top_level}"
-    lines = [
-        "cache      " + _cache_text(snap, local=local, now=now),
-        "context    " + _context_text(snap),
-        "steps      " + step_rows[0],
+    rows = [
+        (
+            "cache",
+            _cache_text(snap, local=local, now=now),
+            not snap.requests or snap.last_prompt is None,
+        ),
+        ("context", _context_text(snap), _measured(snap) is None),
+        ("steps", step_rows[0], snap.progress is None),
+        ("tasks", task_text, tasks is None),
     ]
-    lines += ["           " + row for row in step_rows[1:]]
-    lines.append("tasks      " + task_text)
+    lines: list[str] = []
+    for name, text, empty in rows:
+        if hide_empty and empty:
+            continue
+        lines.append(f"{name:<11}{text}")
+        if name == "steps":
+            lines += ["           " + row for row in step_rows[1:]]
     return lines
+
+
+def _idle_text(seconds: float) -> str:
+    """``3m`` or ``1h02m``: a minute-grained idle time, cut."""
+    minutes = int(seconds) // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def status_segments(
+    snap: UsageSnapshot,
+    *,
+    local: bool,
+    now: float,
+    tasks: TaskCounts | None = None,
+) -> list[str]:
+    """The status row's segments, left to right: cache, ctx, steps, tasks.
+
+    A segment with no data is left out. Steps are the progress spec's level-0
+    facts (never a percent or ``n/max``) and show only while a run is active.
+    The idle time is as of the last redraw (the row redraws on events only),
+    so it shows from one minute on.
+    """
+    segments: list[str] = []
+    if snap.requests:
+        if snap.last_cached is None or not snap.last_prompt:
+            cache = "cache --"
+        else:
+            cache = f"cache {_percent(snap.last_cached, snap.last_prompt)}"
+        if local and snap.last_request_ts is not None:
+            idle = now - snap.last_request_ts
+            if idle >= 60:
+                cache += f" idle {_idle_text(idle)}"
+        segments.append(cache)
+    context = snap.context or {}
+    measured = _count(context.get("measured_prompt_tokens"))
+    if measured:
+        limit = _count(context.get("input_limit"))
+        segments.append(
+            f"ctx {format_tokens(measured)}"
+            + (f"/{format_tokens(limit)}" if limit else "")
+        )
+    if snap.run_active and snap.progress is not None:
+        facts = [f"step {_count(snap.progress.get('step')) or 0}"]
+        attempt = _count(snap.progress.get("attempt")) or 1
+        if attempt >= 2:
+            facts.append(f"attempt {attempt}")
+        phase = snap.progress.get("phase")
+        if isinstance(phase, str) and phase:
+            facts.append(f"phase {phase}")
+        segments.append(" ".join(facts))
+    if tasks is not None:
+        segments.append(f"tasks {tasks.running} running {tasks.queued} queued")
+    return segments

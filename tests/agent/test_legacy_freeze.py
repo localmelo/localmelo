@@ -348,6 +348,7 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
             "--gateway-rotate-token",
             "--enable-playground",
             "--developer",
+            "--version",
         ]
     )
     ui_or_help = {

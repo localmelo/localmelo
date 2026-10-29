@@ -456,7 +456,7 @@ LISTED = ["stub-model", "qwen3-8b", "llama-3.1"]
         ("/he", "\t", "/help"),
         ("/model q", "\t", "/model qwen3-8b"),
         ("/model ll", "\x1b[B", "/model llama-3.1"),
-        ("/", "\x1b[B\x1b[B", "/attach"),
+        ("/", "\x1b[B\x1b[B", "/backend"),
     ],
 )
 async def test_enter_takes_the_picked_completion(
@@ -568,8 +568,8 @@ async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
         ("/model q\t", "/model qwen3-8b"),
         ("/he\t", "/help"),
         ("/mo\t", "/model"),
-        ("/\t", "/help"),
-        ("/\t\t", "/attach"),
+        ("/\t", "/model"),
+        ("/\t\t", "/backend"),
     ],
 )
 async def test_tab_completes_at_once_before_the_menu_shows(
@@ -611,3 +611,49 @@ async def test_printing_above_the_app_keeps_the_terminal_raw(
         assert screen.index("printed above") < screen.index(
             "› Ask melo · / for commands"
         )
+
+
+ROW = ("cache 83% idle 3m", "ctx 12k/32k", "step 4")
+
+
+def _row_line(width: int, segments: tuple[str, ...] = ROW) -> str:
+    bar = StatusBar(
+        "stub-model", "~/demo-project", "", "fail please", "ask", segments=segments
+    )
+    line = "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
+    assert len(line) == width  # nothing wraps, and the mode stays at the edge
+    return line
+
+
+def test_the_status_row_shows_every_segment_at_120_columns() -> None:
+    line = _row_line(120)
+    assert line.index("cache 83% idle 3m") < line.index("ctx 12k/32k")
+    assert line.index("ctx 12k/32k") < line.index("step 4") < line.index("fail please")
+    assert line.endswith(" ask")
+
+
+def test_the_status_row_drops_the_title_then_segments_right_to_left() -> None:
+    shown_at = {
+        width: [part for part in (*ROW, "fail please") if part in _row_line(width)]
+        for width in (120, 80, 70, 60, 50)
+    }
+    assert shown_at[120] == [*ROW, "fail please"]
+    assert shown_at[80] == list(ROW)
+    assert shown_at[70] == list(ROW[:2])
+    assert shown_at[60] == list(ROW[:1])
+    assert shown_at[50] == []
+    assert "stub-model · ~/demo-project" in _row_line(50)
+
+
+@pytest.mark.parametrize("width", [8, 10, 16, 20, 25, 30, 40, 60])
+def test_the_status_row_never_wraps_at_any_width(width: int) -> None:
+    line = _row_line(width)
+    if "cache" in line:
+        assert "stub-model" in line and "~/demo" in line
+
+
+def test_without_segments_the_bar_is_the_old_one() -> None:
+    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", "ask")
+    left = "  stub-model · ~/demo-project · ctx 120 · fail please"
+    expected = left + " " * (120 - len(left) - len("ask")) + "ask"
+    assert "".join(f[1] for f in status_fragments(bar, 120, "…")) == expected

@@ -529,6 +529,25 @@ class TestGatewayMode:
         assert f"  Web UI:  http://{shown}:5000/\n" in out
         mock_start.assert_called_once_with(cfg)
 
+    def test_start_gateway_says_how_to_sign_in_after_the_web_ui(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The console needs a sign-in link, so the banner says how to get one."""
+        cfg = _valid_cfg(host="127.0.0.1", port=5000)
+        gateway = mock.MagicMock(start_gateway=mock.MagicMock())
+
+        with mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}):
+            from localmelo.__main__ import _start_gateway
+
+            _start_gateway(cfg)
+
+        out = capsys.readouterr().out
+        sign_in = (
+            "  Sign in: run melo --gateway-login --port 5000 in another terminal\n"
+        )
+        assert sign_in in out
+        assert out.index("  Web UI:") < out.index(sign_in)
+
     def test_serve_allow_unconfigured_skips_setup_and_validation(self) -> None:
         """melo --serve --allow-unconfigured starts without config or TTY."""
         empty_cfg = Config(chat_backend="", embedding_backend="")

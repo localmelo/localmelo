@@ -1715,6 +1715,10 @@ class Agent:
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
             tool_env=self.options.tool_env,
+            # A brief's check runs whatever the run offers the model.
+            harness_only=(
+                {"shell_exec"} if self.options.brief_check is not None else ()
+            ),
         )
         # The names of the built-ins registered above (see list_tools), and
         # R5's recall tool when its trigger is on. It is not a builtin_names()

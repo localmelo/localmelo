@@ -43,11 +43,15 @@ class Command:
 
 
 COMMANDS: Final[tuple[Command, ...]] = (
+    Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
+    Command("backend", (), "[url]", "Switch to another model server (saved)", False),
+    Command("new", ("clear",), "", "Start a new session", False),
+    Command("status", (), "", "Show the model, session, tools and limits", True),
     Command("help", (), "[command]", "Show commands and keys", True),
+    Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
     Command("attach", (), "PATH", "Stage a text file from the workspace", False),
     Command("attachments", (), "", "List staged text files", False),
     Command("detach", (), "N|all", "Remove a staged text file", False),
-    Command("new", ("clear",), "", "Start a new session", False),
     Command("sessions", (), "[filter]", "Pick a session to resume", False),
     Command("resume", (), "[id|title]", "Resume a session", False),
     Command("title", (), "[text]", "Show or set the session title", True),
@@ -67,12 +71,8 @@ COMMANDS: Final[tuple[Command, ...]] = (
         "show",
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
-    Command("status", (), "", "Show the model, session, tools and limits", True),
     Command("mcp", (), "", "Show the MCP servers", True),
     Command("retry", (), "", "Run the last turn again", False),
-    Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
-    Command("backend", (), "[url]", "Switch to another model server (saved)", False),
-    Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
 )
 
 KEYS: Final = (

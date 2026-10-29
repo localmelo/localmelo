@@ -22,6 +22,7 @@ EXPERIMENTAL = "experimental"
 # The user tier is the only one default-mode help shows.
 _USER = (
     "--help",
+    "--version",
     "--base-url",
     "--chat-model",
     "--workspace",

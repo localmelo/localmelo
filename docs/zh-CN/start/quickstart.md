@@ -58,6 +58,8 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 
 答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
 
+直接任务会不经询问就写入文件、运行 Python，并且没有 shell，除非传入 `--builtins all`。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
+
 所有选项见[命令行参考](../../reference/cli.md)（英文）。
 
 <a id="get-the-result-as-json"></a>
@@ -81,6 +83,37 @@ stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码�
 ### 运行结果
 
 `status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../reference/run-results.md)。
+
+<a id="run-a-worker-task"></a>
+
+## 运行 worker 任务
+
+worker 任务是写在文件里的任务简报（brief）。以 `Check:` 开头（前面没有空格）的一行写一条 shell 命令，用来判断任务是否完成：
+
+```bash
+cat > brief.md <<'EOF'
+Write hello.py so that it prints the word hello.
+Check: python3 hello.py | grep -x hello
+EOF
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
+echo "exit code: $?"
+python3 -c 'import json; r = json.load(open("result.json")); print(r["status"], r["tests"]["state"])'
+```
+
+模型完成后，`melo` 在工作区（当前文件夹，或 `--workspace`）中运行该检查，无论这次运行向模型提供了哪些工具。检查失败时，模型会被送回去修复，最多两次。最后两条命令的输出示例（模型的工作结果会有所不同）：
+
+```text
+exit code: 0
+completed passed
+```
+
+最后一轮的所有检查都以 0 退出时，`tests.state` 为 `passed`；有检查失败或无法运行时为 `failed`。运行以 `completed` 结束但检查失败时，退出码为 4，脚本可以据此停下：
+
+```bash
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
+```
+
+结果是一行 JSON，含 `status`、`exit_code`、`tests` 和运行记录。所有字段和退出码见[命令行参考](../../reference/cli.md#output)（英文）。
 
 <a id="save-a-configuration"></a>
 
@@ -108,6 +141,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   / commands · esc stop · ctrl+d quit
 ```
 
+标题显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。
+
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
 
 <a id="with-the-setup-wizard"></a>
@@ -127,7 +162,7 @@ melo --serve --reconfigure
 | `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于其他 OpenAI 兼容服务器，选择 vLLM（`3`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
-| `Start?` | 按 Enter（是）继续。 |
+| `Save and continue?` | 按 Enter（是）保存并继续。 |
 | `Embedding backend` | 输入 `5` 选择 `None (no long-term memory)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，第一个为默认值；选择一个即可。 |
 | `Embedding endpoint URL`, `Embedding model name` | 仅当选择固定嵌入后端 `1`–`4` 之一，而不是检测到的模型时询问。 |
 
@@ -135,7 +170,7 @@ melo --serve --reconfigure
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。不带 `--serve` 时，`melo --reconfigure` 会改为打开交互式界面。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。不带 `--serve` 时，`melo --reconfigure` 会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才会出现上面的完整菜单。
 
 <a id="start-the-gateway"></a>
 

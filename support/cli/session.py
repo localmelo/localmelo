@@ -70,12 +70,13 @@ from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStore,
     SessionStoreError,
+    StoredEvent,
     TurnInfo,
     UnknownSessionError,
     title_from_text,
 )
 from localmelo.support.sessions.sync import SessionMark
-from localmelo.support.usage_snapshot import usage_lines
+from localmelo.support.usage_snapshot import status_segments, usage_lines
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +208,11 @@ class CliSession:
         resume_mode: ResumeMode = "pairs",
         stream: bool = False,
         reasoning_tags: Mapping[str, str] | None = None,
+        status_line: str = "auto",
         clock: Callable[[], float] = time.monotonic,
+        developer: bool = False,
     ) -> None:
+        self.developer = developer
         self.store = store
         self.factory = factory
         self.agent = agent
@@ -219,6 +223,8 @@ class CliSession:
         # framing hints belong to the renderer, which applies the same rule
         # to the stream and to the whole reply.
         self.stream = stream
+        # [cli] status_line: "auto" adds the usage segments to the status bar.
+        self.status_line = status_line
         self._default_stream = stream
         self.renderer.reasoning_tags = dict(reasoning_tags or {})
         self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
@@ -260,14 +266,32 @@ class CliSession:
         context = self.renderer.context_tokens
         mode = self.approvals.mode
         yolo = mode == "yolo"
+        segments: tuple[str, ...] = ()
+        if self.status_line == "auto":
+            segments = tuple(
+                status_segments(
+                    self.renderer.usage, local=backend.local, now=time.time()
+                )
+            )
+            # The ctx segment shows the measured tokens and the limit; without
+            # a measurement the bar keeps its last-request ctx.
+            if any(segment.startswith("ctx ") for segment in segments):
+                context = 0
         return StatusBar(
             model=backend.model,
             workspace=home_label(self.agent.workspace_root or ""),
             context=f"ctx {format_tokens(context)}" if context else "",
+            segments=segments,
             title=self.title or "New session",
             mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else mode,
             mode_style="class:yolo" if yolo else "class:muted",
         )
+
+    def on_event(self, stored: StoredEvent) -> None:
+        """Render one event of a turn, and redraw the bar its usage may change."""
+        self.renderer.on_event(stored)
+        if self.status_line == "auto" and self.app is not None:
+            self.app.invalidate()
 
     @property
     def attachment_line(self) -> str:
@@ -466,7 +490,7 @@ class CliSession:
                     model=self.factory.backend.model,
                     workspace=self.agent.workspace_root,
                 ),
-                on_event=self.renderer.on_event,
+                on_event=self.on_event,
                 progress=True,
                 resume_mode=self.navigation.mode,
                 before_turn=self._prepare_turn,
@@ -928,7 +952,7 @@ class CliSession:
         """``/status``: the model, workspace, session, approvals, tools, memory, limits, usage, files."""
         from localmelo.support.cli.render import LOG_PATH
         from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
-        from localmelo.support.sessions.display import localmelo_version
+        from localmelo.support.sessions.display import display_version
 
         backend = self.factory.backend
         state = "not checked"
@@ -1012,6 +1036,7 @@ class CliSession:
             local=backend.local,
             now=time.time(),
             steps=lambda payload: _progress_lines(payload, self.renderer.symbols),
+            hide_empty=not self.developer,
         ):
             self.out.print(self._text(row))
         files = [getattr(self.store, "path", ""), LOG_PATH]
@@ -1027,7 +1052,7 @@ class CliSession:
             ]
         files = [home_label(str(path)) for path in files if path]
         self.out.print(self._text("files      " + " · ".join(files)))
-        self.out.print(self._text(f"version    melo {localmelo_version()}"))
+        self.out.print(self._text(f"version    melo {display_version()}"))
 
     async def retry(self) -> None:
         """``/retry``: re-run the newest turn, undoing it only when still live."""

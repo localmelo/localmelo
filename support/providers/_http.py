@@ -7,6 +7,7 @@ retry it or report it without knowing about httpx.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -75,6 +76,43 @@ def _exception_text(exc: Exception) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+# The start of every "cannot reach" message; the status hint matches it.
+UNREACHABLE_PREFIX = "cannot reach the model server at "
+
+
+def unreachable(
+    client: httpx.AsyncClient, exc: httpx.ConnectError, *, retryable: bool
+) -> ProviderError:
+    """The error for a request that could not connect to the model server.
+
+    It names the server's URL and the fix: start a server on this computer
+    or the local network, check the URL and the network for any other host.
+    The raw cause follows, for the record's error detail. A timeout is not
+    this: it keeps its own message.
+    """
+    url = str(client.base_url).rstrip("/")
+    fix = (
+        "Start it, or run melo to set one up."
+        if _is_local(client.base_url.host)
+        else "Check the URL and the network."
+    )
+    return ProviderError(
+        f"{UNREACHABLE_PREFIX}{url}. {fix} ({_exception_text(exc)})",
+        retryable=retryable,
+    )
+
+
+def _is_local(host: str) -> bool:
+    """Whether *host* is this computer or a private-network address."""
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
 def malformed_body(response: httpx.Response, path: str, problem: str) -> ProviderError:
     """The error for a response to ``POST <path>`` that lacks what it needs.
 
@@ -116,6 +154,8 @@ async def post_json(
             retryable=status in RETRYABLE_STATUS_CODES,
             context_overflow=_context_overflow(exc.response),
         ) from exc
+    except httpx.ConnectError as exc:
+        raise unreachable(client, exc, retryable=True) from exc
     except httpx.TransportError as exc:  # timeouts included
         raise ProviderError(
             f"POST {path} failed: {_exception_text(exc)}", retryable=True
