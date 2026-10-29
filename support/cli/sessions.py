@@ -148,7 +148,7 @@ class SessionNavigation:
             s.agent,
             s.store,
             info.id,
-            on_event=s.renderer.on_event,
+            on_event=s.on_event,
             progress=True,
             resume_mode=self.mode,
             before_turn=s._prepare_turn,

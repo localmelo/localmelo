@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from localmelo.support.usage_snapshot import TaskCounts, UsageSnapshot, usage_lines
+from localmelo.support.usage_snapshot import (
+    TaskCounts,
+    UsageSnapshot,
+    status_segments,
+    usage_lines,
+)
 
 T0 = 1_000.0
 
@@ -136,3 +141,63 @@ def test_malformed_events_are_ignored() -> None:
     ):
         snap.observe(event)
     assert snap.requests == 0 and snap.progress is None
+
+
+# ── The status row (#176 SL2) ──
+
+
+def row(
+    events: list[dict[str, Any]], *, local: bool = True, now: float = T0 + 30
+) -> list[str]:
+    snap = UsageSnapshot()
+    for event in events:
+        snap.observe(event)
+    return status_segments(snap, local=local, now=now)
+
+
+def progress(**data: Any) -> dict[str, Any]:
+    return {"type": "run.progress", "ts": T0, "data": {"level": 0, **data}}
+
+
+def test_row_has_no_segment_without_data() -> None:
+    assert row([]) == []
+
+
+def test_cache_segment_shows_the_last_requests_share_and_idle_for_a_local_server() -> (
+    None
+):
+    events = [message(1000, 100), message(2000, 1660)]
+    assert row(events) == ["cache 83%"]
+    assert row(events, now=T0 + 190) == ["cache 83% idle 3m"]
+    assert row(events, now=T0 + 3 * 3600 + 120) == ["cache 83% idle 3h02m"]
+    assert row(events, local=False, now=T0 + 190) == ["cache 83%"]
+
+
+def test_cache_segment_is_dashes_when_the_server_reports_no_cached_tokens() -> None:
+    assert row([message(1000, None)]) == ["cache --"]
+
+
+def test_ctx_segment_needs_a_measurement_and_shows_the_limit_when_known() -> None:
+    assert row([budget(None, 32768)]) == []
+    assert row([budget(12345, 32768)]) == ["ctx 12k/32k"]
+    assert row([budget(900, None)]) == ["ctx 900"]
+
+
+def test_steps_segment_is_level_zero_facts_only_while_a_run_is_active() -> None:
+    started = {"type": "run.started", "ts": T0, "data": {}}
+    finished = {"type": "run.finished", "ts": T0, "data": {}}
+    events = [started, progress(step=4, attempt=2, phase="fix", past={"runs": 3})]
+    assert row(events) == ["step 4 attempt 2 phase fix"]
+    assert row([started, progress(step=1)]) == ["step 1"]
+    assert row([*events, finished]) == []
+    for text in row(events):
+        assert "%" not in text and "/" not in text
+
+
+def test_tasks_segment_only_with_a_task_store() -> None:
+    snap = UsageSnapshot()
+    assert status_segments(snap, local=True, now=T0) == []
+    counts = TaskCounts(running=1, queued=2, held=0)
+    assert status_segments(snap, local=True, now=T0, tasks=counts) == [
+        "tasks 1 running 2 queued"
+    ]

@@ -43,10 +43,13 @@ experimental, for measuring prompt-cache reuse; the default is unchanged.
 
 A mode other than `slide` appears as `window_eviction` in the JSON result's
 `config`; `slide` adds nothing. The request fit (`--context-window`) also
-drops to 70% of the input limit under `chunk` and `boundary`, but it works on
-a copy of the whole window at each request, so it does not hold the cut
-between steps the way the window and the prompt-cap fit do. With a context
-budget small enough to drop at every step, requests still slide.
+holds its cut under `chunk` and `boundary`: when a request would pass the
+input limit it drops whole units down to 70% of the limit and remembers the
+oldest unit it kept, and the next requests start from that unit and drop again
+only when they would pass the limit. A window chunk drop or a boundary drop
+that removes the remembered unit resets the cut. Reasoning replay and the
+units the fit never drops (an unfinished tool call, the latest failing result,
+images) are unchanged.
 
 ## Digest recall
 
@@ -208,14 +211,14 @@ one action:
 | Action | Rule | Write |
 |---|---|---|
 | `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, a completion or self-work claim with no fact beyond its frame, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
-
-An episodic item's subject is its candidate plus its item index, so two
-different items of one note are two entries; a restatement re-proposes the
-same candidate and item order, so it stays an `UPDATE`.
 | `UPDATE` | Same subject and a compatible value, or a change marker (`moved`, `now`, `搬到` and so on). | A new entry that supersedes the old one; the old one becomes `superseded`. |
 | `CONFLICT` | Same subject, values that contradict, and no change marker. | A new active entry linked to the old one; both stay recallable. |
 | `RELATED` | A different subject with text overlap >= 0.35 or cosine >= 0.75. | A new active entry linked to the old one. |
 | `NEW` | Anything else. | A new active entry. |
+
+An episodic item's subject is its candidate plus its item index, so two
+different items of one note are two entries; a restatement re-proposes the
+same candidate and item order, so it stays an `UPDATE`.
 
 **The decision log.** `long_term.db` also has a `decisions` table: one row per
 action, with the candidate id, the action, the kind, the signal, the entry and
