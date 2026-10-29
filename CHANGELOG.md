@@ -24,6 +24,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The `reflection` event now records the decision's three flags (`flags`), the
+  gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
+  when the run does not continue, so a `gate_stopped` run shows which check
+  stopped it. A blank rationale's `gate_stopped` error names it too. Decisions
+  and request bodies are unchanged ([#NN]).
+
 - A turn cancelled before its run reported `run.finished`, such as a SIGHUP
   during setup, now saves the cancel reason in the stored result, so saved
   history shows why the turn ended instead of an empty error ([#168]).
