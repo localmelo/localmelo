@@ -140,7 +140,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   at most every 150 ms and only the Live section; a hidden tab closes the stream
   and a shown one resumes. The stream closes after one last read when the task is
   done, failed, cancelled, expired, interrupted or parked. A task that never
-  started shows nothing live. No server change. ([#NN])
+  started shows nothing live. No server change. ([#224])
 - Follow worker runs live in the web console (#213). `GET /api/sessions/{id}/events`
   and `GET /api/sessions/{id}/status` now also serve a worker run of the CLI
   file, with the same frames, `after`, `follow=false` and `Last-Event-ID`. A
@@ -1401,6 +1401,7 @@ earlier milestones.
 [#221]: https://github.com/localmelo/localmelo/pull/221
 [#222]: https://github.com/localmelo/localmelo/pull/222
 [#223]: https://github.com/localmelo/localmelo/pull/223
+[#224]: https://github.com/localmelo/localmelo/pull/224
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
