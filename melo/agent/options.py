@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
+from localmelo.melo.agent._brief_gate import BriefCheck
 from localmelo.melo.checker.policy import ToolMode
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.memory.recall import (
@@ -193,6 +194,13 @@ class AgentOptions:
       that finds the digest unchanged since the run started adds a
       ``notice`` event (kind ``no_change``) and one user line that asks the
       next attempt to start by writing. ``None`` (the default) changes nothing.
+    - ``brief_check``: set only by the ``--brief`` worker path. A coroutine
+      function of the run's executor and one command that runs the command
+      as a ``shell_exec`` call and returns a ``BriefCheckResult``. It gates
+      a brief run: the commands on the query's ``Check:`` lines run before
+      the run ends ``completed``, and a failing one sends the model back to
+      work, at most twice (see ``melo/agent/_brief_gate.py``). ``None`` (the
+      default) changes nothing.
     """
 
     context_window: int | None = None
@@ -239,12 +247,15 @@ class AgentOptions:
     typed_assertions: bool = False
     window_eviction: WindowEviction = "slide"
     brief_probe: Callable[[str], str | None] | None = None
+    brief_check: BriefCheck | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
             raise ValueError("fixed_prefix must be a bool")
         if self.brief_probe is not None and not callable(self.brief_probe):
             raise ValueError("brief_probe must be callable or None")
+        if self.brief_check is not None and not callable(self.brief_check):
+            raise ValueError("brief_check must be callable or None")
         budget = (self.context_window, self.output_reserve, self.safety_margin)
         if any(value is not None for value in budget):
             if not all(_is_positive_int(value) for value in budget):

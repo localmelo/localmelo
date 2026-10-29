@@ -32,6 +32,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
+    from localmelo.melo.agent._brief_gate import BriefCheckResult
     from localmelo.melo.agent._chat import CallTelemetry
     from localmelo.melo.memory.procedures.tracker import ProgressState
     from localmelo.melo.memory.recall import RecallRecord
@@ -45,6 +46,16 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "budget": "The attempt used its step budget.",
     "empty_reply": "The model returned an empty reply; asking it to continue.",
     "no_change": "Nothing has changed in the workspace yet.",
+    "brief_check_failed": (
+        "The task's check still fails; the run ends completed with failing tests."
+    ),
+}
+
+# The message of a brief_check notice, by how the check went.
+BRIEF_CHECK_MESSAGES = {
+    "passed": "The task's check passed.",
+    "failed": "The task's check failed.",
+    "refused": "The task's check was refused and did not run.",
 }
 
 # Characters of a failed request's error that a retry notice quotes.
@@ -451,6 +462,33 @@ class _Emitter:
         if self._sink is None:
             return
         self._notice("no_change", NOTICE_MESSAGES["no_change"], {})
+
+    def brief_check(self, result: BriefCheckResult, round_: int) -> None:
+        """A brief run's gate ran one check; *round_* counts the gate's runs."""
+        if self._sink is None:
+            return
+        state = "refused" if result.refused else "passed" if result.passed else "failed"
+        self._notice(
+            "brief_check",
+            BRIEF_CHECK_MESSAGES[state],
+            {
+                "round": round_,
+                "command": result.command,
+                "exit_code": result.exit_code,
+                "duration_s": result.duration_s,
+                "refused": result.refused,
+            },
+        )
+
+    def brief_check_failed(self, retries: int) -> None:
+        """The gate gives up: the run ends ``completed`` with a failing check."""
+        if self._sink is None:
+            return
+        self._notice(
+            "brief_check_failed",
+            NOTICE_MESSAGES["brief_check_failed"],
+            {"retries": retries},
+        )
 
     def retry(self, request_attempt: int, delay: float, error: ProviderError) -> None:
         """A model request failed and is sent again after *delay* seconds.
