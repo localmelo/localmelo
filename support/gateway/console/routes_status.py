@@ -1,6 +1,7 @@
 """``GET /api/sessions/{id}/status``: the terminal's status numbers for one session.
 
-The route folds the session's stored events with the same
+The session is a chat or task of the gateway's file or a worker run of the CLI
+file. The route folds the session's stored events with the same
 :class:`UsageSnapshot` the terminal feeds, so the console row and the
 terminal's ``/status`` and status bar agree. The fold is cached per session
 at the last event id it has read: a poll with no new event reads one id, and
@@ -17,11 +18,11 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from localmelo.support.sessions.store import SessionStoreError
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.usage_snapshot import TaskCounts, UsageSnapshot
 
 from .probe import LOCAL_BACKENDS
-from .routes_sessions import _require_session, _store_call
+from .routes_sessions import _read_session, _store_call
 
 if TYPE_CHECKING:
     from . import Console
@@ -48,10 +49,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
     folds: OrderedDict[str, tuple[int, UsageSnapshot]] = OrderedDict()
     lock = asyncio.Lock()
 
-    async def fold(session_id: str) -> UsageSnapshot:
+    async def fold(session_id: str, store: SessionStore) -> UsageSnapshot:
+        scope = None if store is console.worker_history else session_id
         async with lock:
             latest = await _store_call(
-                console, console.store.latest_event_id(session_id), session_id
+                console, store.latest_event_id(session_id), scope
             )
             last, snap = folds.pop(session_id, (0, UsageSnapshot()))
             if latest < last:
@@ -59,8 +61,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
             while last < latest:
                 page = await _store_call(
                     console,
-                    console.store.list_events(session_id, after_id=last, limit=_PAGE),
-                    session_id,
+                    store.list_events(session_id, after_id=last, limit=_PAGE),
+                    scope,
                 )
                 for stored in page:
                     snap.observe(stored.event)
@@ -75,10 +77,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/status")
     async def session_status(session_id: str) -> JSONResponse:
         console.require_store()
-        # A worker session lives in another store: not found until the console
-        # reads those events.
-        await _require_session(console, session_id)
-        snap = await fold(session_id)
+        # A chat or task of the gateway's file, or a worker run of the CLI file.
+        _, store = await _read_session(console, session_id)
+        snap = await fold(session_id, store)
         tasks = await _task_counts(console)
         local = console.cfg.chat_backend in LOCAL_BACKENDS
         return JSONResponse(

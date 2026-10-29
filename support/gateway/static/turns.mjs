@@ -521,6 +521,20 @@ function flushUnstarted(turn) {
   turn.unstartedCalls.clear();
 }
 
+function clipped(text, max = 160) {
+  const line = String(text ?? "").replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** The one muted line a `note`, `inbox.accepted`, `memory` or `recall` event shows. */
+function factLine(type, data) {
+  if (type === "note") return `Note${data.kind ? ` (${data.kind})` : ""}: ${clipped(data.text)}`;
+  if (type === "inbox.accepted") return `Message accepted: ${clipped(data.text)}`;
+  if (type === "memory") return `Memory ${data.action ?? "decision"}${data.kind ? `: ${data.kind}` : ""}`;
+  const hits = Array.isArray(data.hits) ? data.hits.length : 0;
+  return `Recalled ${hits} ${hits === 1 ? "item" : "items"}${data.trigger ? ` (${data.trigger})` : ""}`;
+}
+
 /** The newest tool card of *callId*, made when no `tool.started` came first. */
 function newestTool(turn, callId, name = "") {
   for (let index = turn.items.length - 1; index >= 0; index -= 1) {
@@ -794,6 +808,21 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       item.durationS = num(data.duration_s);
       const completion = int(objectOf(data.usage).completion_tokens);
       if (completion !== null) turn.outputTokens += Math.max(0, completion);
+      break;
+    }
+    case "context_budget":
+      // The status row shows the numbers; a line per request would bury the work.
+      break;
+    case "note":
+    case "inbox.accepted":
+    case "memory":
+    case "recall": {
+      turn.items.push({
+        kind: "fact",
+        factKind: type,
+        step: int(data.step) ?? turn.step,
+        message: factLine(type, data),
+      });
       break;
     }
     case "run.progress": {

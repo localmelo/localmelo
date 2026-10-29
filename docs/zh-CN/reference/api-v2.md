@@ -216,7 +216,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `kind` 为 `chat`（默认）、`front`、`front_bg`、`task` 或 `worker`；其他任何值都是 400 `invalid_request`。`worker` 以 SQLite 只读模式读取 CLI 会话文件；它不包括终端对话会话。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
 - worker 列表接受精确匹配的 `status`、`source` 和 `parent_run` 筛选条件，以及来自上一个响应 `next_cursor` 的不透明 `cursor`。结果按第一轮次的开始时间降序排列，再按会话 id 降序排列。到达末尾时 `next_cursor` 为 `null`；翻到后续页时，应保持相同的筛选条件和查询。无效的游标，或在没有 `kind=worker` 的情况下使用这些参数，都返回 400。分页结果不是快照：并发的变更可能影响后续页面。
 - worker 的列表和详情会话对象包含可为空的 `source`、`parent_run`、`git_branch`、`git_head`、`exit_code`、`status`、`steps`、`tokens`、`started_at` 和 `duration_s`。开始时间是第一轮次的时间戳；存在时，持续时间为其记录的结果持续时间。`tokens` 是整数的总 token 数，`meta.usage` 保存完整的用量映射。状态回退为第一轮次的状态；步骤数和 token 数回退为其保存的结果。缺失的值为 `null`，而不是零。详情响应顶层的 `tokens` 单独统计 completion token；对于 worker，若没有任何轮次带有整数的 `completion_tokens`，则为 `null`。
-- worker 会话是只读的。它们的会话详情和轮次（包括 `events=true`）以及已保存的图片 blob 都可以通过 id 获取；写入路由和 `/events` SSE 路由返回 404。对于只在 CLI 文件中找到的 worker id，`/tools`、`/memory`、`/runs` 以及限定会话的提交查询也返回 404 `not_found`。如果一个 id 同时存在于两个文件中，则网关会话优先。worker 会话对象会增加 `meta`，其中包含已保存的来源信息，它们的 `running_here` 始终为 false。`busy` 反映一个未过期的 worker 租约；网关不会恢复陈旧的轮次，也不会对 CLI 文件应用保留策略。
+- worker 会话是只读的。它们的会话详情和轮次（包括 `events=true`）、已保存的图片 blob、`/events` 和 `/status` 都可以通过 id 获取；写入路由返回 404（`POST /api/turns/{turn_id}/cancel` 返回 409 `turn_not_running`：worker 运行的轮次不在网关中运行）。对于只在 CLI 文件中找到的 worker id，`/tools`、`/memory`、`/runs` 以及限定会话的提交查询也返回 404 `not_found`。如果一个 id 同时存在于两个文件中，则网关会话优先。worker 会话对象会增加 `meta`，其中包含已保存的来源信息，它们的 `running_here` 始终为 false。`busy` 反映一个未过期的 worker 租约；网关不会恢复陈旧的轮次，也不会对 CLI 文件应用保留策略。
 - `workspace_label` 是工作区，并把主目录写作 `~`。
 - `busy` 表示有轮次正在运行。对于网关会话，`running_here` 等于 `busy`：只有本网关运行其自身会话文件中的轮次。
 - `pending_approvals` 统计该会话中仍在等待答复的审批卡片数。
@@ -262,7 +262,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"turns": [{"id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "turn": 3, "run_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "user_text": "Summarize these notes", "status": "completed", "cause": "run", "answer": "The notes say ...", "result": {"task_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "status": "completed", "result": "...", "error": "", "steps": 3, "attempts": 1, "n_llm": 3, "n_main": 3, "n_aux": 0, "n_tool": 4, "llm_errors": 0, "usage": {"prompt_tokens": 1180, "completion_tokens": 24, "total_tokens": 1204}, "duration_s": 12.2, "config": {}}, "undone": false, "started_at": 1761141600.2, "finished_at": 1761141612.4, "client_request_id": null, "running_here": false, "events": [{"id": 790, "session_id": "3f9c2a7b1d4e", "turn": 3, "v": 1, "type": "turn.started", "run_id": "", "seq": null, "ts": 1761141600.2, "data": {"turn": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "user_text": "Summarize these notes", "client_request_id": null}}]}], "has_earlier": false, "replay_from": 789}
 ```
 
-- `limit` 为 1 到 50（默认 10）。不带 `before` 时，该页是最新的轮次，`replay_from` 是最旧返回轮次的 `turn.started` 之前的那个事件 id；会话没有轮次时为 0。对于网关会话，把它作为事件流的 `after` 传入，即可回放该页的事件。worker 会话只能通过 `events=true` 暴露事件，而不通过 SSE。
+- `limit` 为 1 到 50（默认 10）。不带 `before` 时，该页是最新的轮次，`replay_from` 是最旧返回轮次的 `turn.started` 之前的那个事件 id；会话没有轮次时为 0。对于网关会话，把它作为事件流的 `after` 传入，即可回放该页的事件。对于 worker 会话，`events=true` 是一次读取；`/events` 则会跟随它。
 - 使用 `before=N`（1 到 SQLite 的最大整数）时，该页是编号低于 `N` 的最新轮次，并且没有 `replay_from`。
 - `has_earlier` 表示该页之外还有更早的轮次。
 - `events=true` 会把每个轮次已保存的事件作为 `events` 添加进来，按 id 排序，与事件流的 `data` 帧完全一致。
@@ -294,10 +294,11 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `after` 默认为 0。当两者同时存在时，`Last-Event-ID` 请求头优先；这正是浏览器的 `EventSource` 在重连时发送的内容；此时无效的 `after` 不会被读取。否则它必须是有符号 64 位整数范围内的十进制数字：负数、`+1`、`1_0`、非数字以及过大的值，都是 400 `invalid_request`。
 - `follow=false` 发送起点之后已保存的事件，直到该请求读取到的最新事件 id，然后结束响应；它是一次性的追赶，而在它分页期间开始的轮次不会增加任何帧。
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
+- worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
 
 ## GET /api/sessions/{id}/status
 
-终端的 `/status` 和状态栏为一个会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。Worker 会话（由 `--save-session` 产生、位于 CLI 存储中）在控制台能读取这些事件之前返回 404 `not_found`。
+终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。worker 运行从 CLI 的文件读取。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
