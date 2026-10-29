@@ -618,6 +618,12 @@ class TaskWorkers:
             if await self.tasks.has_resume_receipt(task_id, operation_id):
                 # A matching retry returns the current row without a second turn.
                 return await self._body(current)
+            if task_id in self._quarantined:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: the previous worker's cleanup has not "
+                    "settled; Stop stays available.",
+                    reason="cleanup_unresolved",
+                )
             if confirmation_token is not None:
                 grant = self._resume_tokens.binding_for(confirmation_token)
                 if grant is None or grant.task_id != task_id:

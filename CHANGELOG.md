@@ -53,6 +53,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Controlled task Resume: `POST /api/tasks/{id}/resume` (also
+  `/api/v2/tasks/{id}/resume`) queues a recovered task only through the
+  evidence decision table. A proved never-started task first-starts without a
+  card or confirmation; a started task resumes without confirmation only with a
+  trusted complete capture whose recorded groups are verifiably gone (a verified
+  boot change counts as gone), else 409 `confirmation_required` carries a
+  five-minute, single-use, in-memory token bound to the task, execution,
+  evidence and CAS generation. Missing card, invalid workspace, stale identity,
+  terminal state and unresolved recovery operations block Resume; Stop always
+  wins and a matching operation ID retries without a second turn. PATCH stays
+  fenced for recovered work. ([#NN])
+
 - An unsigned arm64 macOS development bundle wraps the local web console in a
   native window and menu-bar host. It owns its gateway child, checks the
   instance before sending any login code, binds the code to the launch instance

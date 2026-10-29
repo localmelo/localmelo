@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.agent import Agent
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
+from localmelo.support.gateway import process_identity
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.resume_evidence import (
@@ -20,8 +24,12 @@ from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
+
+OLD_BOOT = "11111111-1111-1111-1111-111111111111"
+NEW_BOOT = "22222222-2222-2222-2222-222222222222"
 
 
 @pytest.fixture
@@ -119,7 +127,7 @@ async def _resume(
 
 
 async def _events(store: SessionStore, task_id: str, kind: str) -> list[Any]:
-    found = []
+    found: list[Any] = []
     after = 0
     while True:
         page = await store.list_events(task_id, after_id=after)
@@ -177,6 +185,46 @@ async def test_incomplete_capture_is_unknown_not_death(
     task_id = await _started(workers, workspace, capture=False)
     await _open_and_freeze(workers, monkeypatch)
     workers._process_verifier = lambda record: True
+    with pytest.raises(ConfirmationRequiredError):
+        await _resume(workers, task_id, "resume-1")
+    assert (await workers.tasks.get_task(task_id)).state == "interrupted"
+
+
+async def test_verified_boot_change_counts_as_gone(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(
+        workers,
+        workspace,
+        capture=True,
+        processes=((4321, 4321, OLD_BOOT, "1:1"),),
+    )
+    await _open_and_freeze(workers, monkeypatch)
+    monkeypatch.setattr(process_identity, "_boot", lambda: NEW_BOOT)
+    resumed = await _resume(workers, task_id, "resume-1")
+    assert resumed["state"] == "queued"
+    assert not await _events(store, task_id, "sched.resume_confirmed")
+
+
+async def test_unreadable_boot_requires_confirmation(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, _ = worker_setup
+    task_id = await _started(
+        workers,
+        workspace,
+        capture=True,
+        processes=((4321, 4321, OLD_BOOT, "1:1"),),
+    )
+    await _open_and_freeze(workers, monkeypatch)
+
+    def unreadable() -> str:
+        raise OSError("cannot read boot identity")
+
+    monkeypatch.setattr(process_identity, "_boot", unreadable)
     with pytest.raises(ConfirmationRequiredError):
         await _resume(workers, task_id, "resume-1")
     assert (await workers.tasks.get_task(task_id)).state == "interrupted"
@@ -291,6 +339,21 @@ async def test_unresolved_operation_blocks_only_resume(
     assert (await workers.update(task_id, state="stop"))["state"] == "cancelled"
 
 
+async def test_unresolved_cleanup_blocks_resume_but_not_stop(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, _ = worker_setup
+    task_id = await _started(workers, workspace)
+    await _open_and_freeze(workers, monkeypatch)
+    workers._register(await workers.tasks.get_task(task_id))
+    workers._quarantined.add(task_id)
+    with pytest.raises(RecoveryUnknownError) as blocked:
+        await _resume(workers, task_id, "resume-1")
+    assert blocked.value.reason == "cleanup_unresolved"
+    assert (await workers.update(task_id, state="stop"))["state"] == "cancelled"
+
+
 async def test_matching_retry_is_idempotent(
     worker_setup: tuple[TaskWorkers, Path, SessionStore],
     monkeypatch: pytest.MonkeyPatch,
@@ -362,6 +425,51 @@ async def test_race_stop_and_resume_ends_cancelled_without_a_turn(
         isinstance(result, dict) and result.get("state") == "cancelled"
         for result in results
     )
+
+
+class _DoneLLM(BaseLLMProvider):
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        return Message(role="assistant", content="done")
+
+    async def close(self) -> None:
+        pass
+
+
+async def test_stop_before_worker_registration_cancels_the_resumed_turn(
+    worker_setup: tuple[TaskWorkers, Path, SessionStore],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, workspace, store = worker_setup
+    task_id = await _started(workers, workspace)
+    await workers.open()
+    built, release = asyncio.Event(), asyncio.Event()
+
+    async def build(**kwargs: Any) -> Agent:
+        built.set()
+        await release.wait()
+        agent = Agent(
+            llm=kwargs["wrap_llm"](_DoneLLM()),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        return agent
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    token = await _preview(workers, task_id, "resume-1")
+    resumed = asyncio.create_task(_resume(workers, task_id, "resume-1", token))
+    await asyncio.wait_for(built.wait(), 3)
+    stopped = asyncio.create_task(workers.update(task_id, state="stop"))
+    await asyncio.wait_for(stopped, 3)
+    release.set()
+    await asyncio.wait_for(resumed, 3)
+    for _ in range(300):
+        if (await workers.tasks.get_task(task_id)).state == "cancelled":
+            break
+        await asyncio.sleep(0.01)
+    assert (await workers.tasks.get_task(task_id)).state == "cancelled"
+    assert not await _events(store, task_id, "turn.started")
 
 
 async def test_double_confirmation_commits_once(

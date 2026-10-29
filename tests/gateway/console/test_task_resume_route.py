@@ -52,7 +52,9 @@ class FakeResumeWorkers:
 
 
 @pytest.fixture
-def workers(console: Console, monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeResumeWorkers]:
+def workers(
+    console: Console, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[FakeResumeWorkers]:
     fake = FakeResumeWorkers()
     original = console.workers
     monkeypatch.setattr(console, "workers", fake)
@@ -78,9 +80,7 @@ def test_resume_accepted_returns_202_task_and_operation(
 def test_versioned_alias_reaches_the_same_handler(
     client: TestClient, workers: FakeResumeWorkers
 ) -> None:
-    response = client.post(
-        "/api/v2/tasks/task1/resume", json={"operation_id": "op-1"}
-    )
+    response = client.post("/api/v2/tasks/task1/resume", json={"operation_id": "op-1"})
     assert response.status_code == 202
     assert workers.calls[-1] == ("task1", "op-1", None)
 

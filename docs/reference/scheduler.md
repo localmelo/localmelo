@@ -122,8 +122,8 @@ mark capture incomplete before the first tool provider starts (an MCP provider
 can spawn a server itself) and at each arbitrary-code tool entry; a store outage
 retries the marker for up to 10 seconds, then refuses that one call. An unsupported
 platform, or an identity/record failure, releases the child only after the marker
-commits. Nothing reads this evidence yet, so Resume stays fenced; process verification, controlled restart
-scheduling and user-facing confirmation remain later work.
+commits. Explicit Resume reads this evidence without launching a worker; see
+[Controlled Resume](#controlled-resume-s3b2-pr3b-1).
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in
@@ -199,12 +199,12 @@ never-started queued or parked tasks, and interrupts uncertain tasks without
 replaying them. An already-started parked task retains its recorded card; an
 uncertain task without usable evidence stays without a card. An execution-linked
 committed run outcome can be reconciled without rerunning it. Pending pause intent
-and its priority snapshot survive interruption. Recovered tasks with uncertain
-history are fenced from resume and priority changes; Stop remains available.
+and its priority snapshot survive interruption. Recovered tasks are fenced from
+`PATCH` resume and priority changes until an explicit
+[controlled Resume](#controlled-resume-s3b2-pr3b-1); Stop remains available.
 Proved-never-started runnable queued tasks can start after a durable launch fence
 and workspace validation; ordinary creation does not yet enable this proof.
-Orphan verification and informed Resume are later
-work; a missing process record is not proof that a process has stopped.
+A missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
 becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
@@ -218,6 +218,51 @@ level is supplied; without a saved pause snapshot (such as a task created or
 set at P5), resume falls back to computed P2. Resuming an unpaused task returns
 409 `not_paused`. The task PATCH route rejects `first` with 400; it is deferred
 to S6b.
+
+## Controlled Resume (S3b.2 PR3b-1)
+
+`POST /api/tasks/{task_id}/resume` (also `/api/v2/tasks/{task_id}/resume`)
+takes `{"operation_id": str, "confirmation_token"?: str}`. It is the only route
+that resumes a task recovered by startup; the PATCH route stays fenced for that
+work. An accepted transition is 202 `{"task", "operation_id"}`; a matching
+`operation_id` retry returns the current row without a second turn.
+
+Before acting, the route reads the persisted task, card, provenance, active
+capture and recorded process groups, and validates the workspace. It never
+launches a provider, tool or worker during classification. An unreadable or
+unsupported check is unknown, not proof that a process stopped.
+
+| Evidence | Action |
+|---|---|
+| Terminal task, invalid workspace, missing card on a started task, stale execution identity, or an unresolved recovery operation | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
+| Proven never-started queued or parked task | Queue through the durable launch fence, first start, no card or confirmation |
+| Started task with a valid card, trusted complete capture for the whole execution, and every recorded group verifiably gone | Queue without confirmation |
+| Anything else, including missing, untrusted, partial or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
+
+A verified boot change (both boot ids read, well formed and different) counts as
+gone. An unreadable boot id, a permission error, an unsupported platform or a
+malformed record is unknown, so that path needs confirmation. An empty group set
+qualifies only when the capture is trusted and complete; missing rows alone
+prove nothing.
+
+The first unconfirmed `confirmation_required` (`409`, `details.reason` and
+`details.warning`) carries a single-use token in `details.confirmation_token`
+with `details.expires_in_s` 300. The token lives in memory only and is bound to
+the task, source execution, evidence identity and CAS generation that the
+preview read. Present it with the same `operation_id` to accept the risk; the
+accepted transaction restores the saved priority (computed P2 when a paused P5
+task has no snapshot), clears the pause snapshot, queues the task, writes the
+resume receipt and one `sched.resume_confirmed` event. A preview writes
+nothing, and the token is invalidated by Stop or by a restart. A changed
+evidence identity, a used token or an expired token returns 409
+`stale_confirmation`. An unknown receipt for the operation returns 409
+`recovery_unknown` and blocks only Resume.
+
+Stop wins and is always allowed. It serializes with Resume on the shared park
+identity, invalidates pending tokens, and a queued resumed turn is cancelled
+before it registers a worker or starts a provider or tool. Neither a free
+Resume nor a confirmation proves an older process stopped, cleans it up, or
+makes effects happen only once.
 
 ## S3b.1a foundations
 

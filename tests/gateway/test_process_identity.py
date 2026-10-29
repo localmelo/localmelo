@@ -13,7 +13,9 @@ from localmelo.support.gateway import process_identity as identity
 def test_process_group_absence_checks_boot_pid_and_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(identity, "_boot", lambda: "boot")
+    boot = "11111111-1111-1111-1111-111111111111"
+    other_boot = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr(identity, "_boot", lambda: boot)
 
     def absent(pgid: int, sig: int) -> None:
         assert pgid == 123 and sig == 0
@@ -25,12 +27,23 @@ def test_process_group_absence_checks_boot_pid_and_start(
         raise ProcessLookupError()
 
     monkeypatch.setattr(identity, "_birth", missing)
-    assert identity.gone((123, 123, "boot", "old"))
+    assert identity.gone((123, 123, boot, "old"))
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "new"))
-    assert identity.gone((123, 123, "boot", "old"))
+    assert identity.gone((123, 123, boot, "old"))
     monkeypatch.setattr(identity, "_birth", lambda pid: (pid, "old"))
-    assert not identity.gone((123, 123, "boot", "old"))
+    assert not identity.gone((123, 123, boot, "old"))
+    # A verified boot change counts as gone; a malformed stored id is unknown.
+    assert identity.gone((123, 123, other_boot, "old"))
     assert not identity.gone((123, 123, "other-boot", "old"))
+
+
+def test_unreadable_boot_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable() -> str:
+        raise OSError("cannot read boot identity")
+
+    monkeypatch.setattr(identity, "_boot", unreadable)
+    monkeypatch.setattr(identity.os, "killpg", lambda pgid, sig: None)
+    assert not identity.gone((123, 123, "11111111-1111-1111-1111-111111111111", "old"))
 
 
 def test_group_alive_or_permission_denied_is_not_gone(

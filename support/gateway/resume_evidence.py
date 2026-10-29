@@ -53,10 +53,15 @@ class ResumeRefusedError(TaskStoreError):
 
 
 class RecoveryUnknownError(ResumeRefusedError):
-    """An unresolved or foreign operation receipt blocks only Resume."""
+    """An unresolved receipt or cleanup blocks Resume only."""
 
-    def __init__(self, message: str = UNRESOLVED_MESSAGE) -> None:
-        super().__init__(message, reason="unresolved_operation")
+    def __init__(
+        self,
+        message: str = UNRESOLVED_MESSAGE,
+        *,
+        reason: str = "unresolved_operation",
+    ) -> None:
+        super().__init__(message, reason=reason)
 
 
 class ConfirmationRequiredError(Exception):

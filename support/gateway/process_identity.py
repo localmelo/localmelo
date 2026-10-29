@@ -4,9 +4,27 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
+
+_BOOT_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+_BOOT_TIME = re.compile(r"^[0-9]+:[0-9]{1,6}$")
+
+
+def _known_boot(value: str) -> bool:
+    """Whether *value* has a boot-id shape this platform writes.
+
+    A stored id that does not parse is malformed evidence, not a boot this
+    machine could have rebooted away from.
+    """
+    if _BOOT_UUID.fullmatch(value):
+        return True
+    match = _BOOT_TIME.fullmatch(value)
+    return bool(match) and int(value.rsplit(":", 1)[1]) < 1_000_000
 
 
 class _BSDInfo(ctypes.Structure):
@@ -127,13 +145,22 @@ def identity(pid: int) -> tuple[int, int, str, str]:
 
 
 def gone(record: tuple[int, int, str, str]) -> bool:
-    """Return true only when a recorded group is verifiably absent now."""
+    """Return true only when a recorded group is verifiably absent now.
+
+    A verified boot change (both ids read, both well formed and different)
+    proves the group is gone: no process survives a reboot. An unreadable or
+    malformed boot id stays unknown.
+    """
     pgid, leader, boot, token = record
     if pgid <= 0 or leader <= 0 or pgid != leader or not boot or not token:
         return False
     try:
-        if _boot() != boot:
-            return False
+        current_boot = _boot()
+    except (OSError, OverflowError, ValueError):
+        return False
+    if current_boot != boot:
+        return _known_boot(current_boot) and _known_boot(boot)
+    try:
         try:
             os.killpg(pgid, 0)
         except ProcessLookupError:
