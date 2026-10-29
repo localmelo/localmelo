@@ -123,7 +123,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
 - Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
-- Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#NN]).
+- Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
 
@@ -1326,6 +1326,7 @@ earlier milestones.
 [#210]: https://github.com/localmelo/localmelo/pull/210
 [#211]: https://github.com/localmelo/localmelo/pull/211
 [#214]: https://github.com/localmelo/localmelo/pull/214
+[#216]: https://github.com/localmelo/localmelo/pull/216
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
