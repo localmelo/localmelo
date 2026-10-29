@@ -22,8 +22,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   close/delete refuses running or queued starts with 409 rather than cancelling
   them ([#141]).
 
-- Redaction now covers PEM private key blocks (RSA, EC, DSA, OPENSSH, ENCRYPTED
-  and plain PKCS#8): the BEGIN and END lines stay, the body becomes `[redacted]`,
+- Redaction now covers PEM private key blocks (RSA, EC, DSA, OPENSSH, ENCRYPTED,
+  plain PKCS#8 and PGP `PRIVATE KEY BLOCK`): the BEGIN and END lines stay, the body becomes `[redacted]`,
   and a block cut before its END line is redacted to the end of the text. Public
   keys and certificates are unchanged. Streamed display text holds an open block
   until its END line, or drops its body past 16 KiB, so a key never streams out

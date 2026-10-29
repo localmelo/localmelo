@@ -14,7 +14,7 @@ from localmelo.melo.checker import redaction
 Redact = Callable[[str], tuple[str, int]]
 
 # Any unreviewed change to the rules disables incremental release.
-_RULES_SHA256 = "136eaa8013f7ce472d1cd8e1f45d8011746f78aaca98ecd227aa69a68c6fe8eb"
+_RULES_SHA256 = "3500b204c8b2c598d748b5e241adc6c2eeac9275348c90315b2c73fa2f28ddca"
 
 # Each active regex is reviewed with its start and end conditions. A newline
 # closes every current match except a bearer prefix, held by _OPEN_BEARER, and
@@ -94,9 +94,9 @@ def _known_rules(bindings: dict[str, object]) -> bool:
                 return False
         return bool(
             rules._PEM.pattern
-            == r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----)"
+            == r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----)"
             r"(.*?)"
-            r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----|\Z)"
+            r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----|\Z)"
             and rules._PEM.flags == re.UNICODE | re.DOTALL
             and rules._KEY.pattern == r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"
             r"|(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"
@@ -142,9 +142,11 @@ def snapshot_rules() -> tuple[Redact, bool]:
 _OPEN_BEARER = re.compile(r"\bbearer\s*\Z", re.IGNORECASE)
 
 # The same markers as redaction._PEM, split so an open block can be found.
-_PEM_BEGIN = re.compile(r"-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----")
-_PEM_END = re.compile(r"-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----")
-# The longest END marker: 9 + 3 * 17 + 11 + 5 characters, with room to spare.
+_PEM_BEGIN = re.compile(
+    r"-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----"
+)
+_PEM_END = re.compile(r"-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----")
+# The longest END marker: 9 + 3 * 17 + 11 + 6 + 5 characters, with room to spare.
 _PEM_END_MAX = 96
 
 # The most characters held for one open PEM block, counted from its BEGIN

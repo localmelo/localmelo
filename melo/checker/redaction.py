@@ -2,8 +2,8 @@
 
 :func:`redact_secrets` replaces three kinds of secret with
 :data:`REDACTED`: PEM private key blocks, well-known key shapes, and
-one-time codes next to a code keyword. It is a pure function, for text that leaves the run's own memory,
-such as the ``thinking`` and ``content`` of an ``assistant.message`` event.
+one-time codes next to a code keyword. It is a pure function, for text that
+leaves the run's own memory, such as the ``thinking`` and ``content`` of an ``assistant.message`` event.
 History's ``llm_calls`` table keeps the ``thinking`` and ``content`` of
 every model response redacted by it too.
 """
@@ -19,12 +19,13 @@ REDACTED: Final = "[redacted]"
 # Pass 1, PEM private key blocks: the BEGIN and END lines stay, the body
 # between them goes. A block with no END line runs to the end of the text.
 # Only labels that end in PRIVATE KEY match (RSA, EC, DSA, OPENSSH, ENCRYPTED,
-# plain PKCS#8); a label has at most 3 words of at most 16 characters before
-# PRIVATE KEY, so a scan for the END line stays linear.
+# plain PKCS#8), and the PGP armor's PRIVATE KEY BLOCK; a label has at most 3
+# words of at most 16 characters before PRIVATE KEY, so a scan for the END line
+# stays linear.
 _PEM = re.compile(
-    r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----)"
+    r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----)"
     r"(.*?)"
-    r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----|\Z)",
+    r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----|\Z)",
     re.DOTALL,
 )
 
@@ -59,7 +60,8 @@ def redact_secrets(text: str) -> tuple[str, int]:
 
     1. PEM private key blocks: from ``-----BEGIN <label>PRIVATE KEY-----``
        (the label is up to 3 upper-case words, so RSA, EC, DSA, OPENSSH,
-       ENCRYPTED and plain PKCS#8 all match) to the next
+       ENCRYPTED and plain PKCS#8 all match; ``PRIVATE KEY BLOCK``, the PGP
+       armor, too) to the next
        ``-----END <label>PRIVATE KEY-----``, or to the end of the text when
        there is none. The BEGIN and END lines stay and the body becomes one
        line, :data:`REDACTED`: ``BEGIN``, newline, ``[redacted]``, newline,

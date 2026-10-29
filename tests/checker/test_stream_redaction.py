@@ -109,12 +109,12 @@ def test_rule_inventory_requires_deliberate_update() -> None:
     # Any change, including a new pass, forces a review of line locality.
     assert redaction.__file__ is not None
     assert hashlib.sha256(Path(redaction.__file__).read_bytes()).hexdigest() == (
-        "136eaa8013f7ce472d1cd8e1f45d8011746f78aaca98ecd227aa69a68c6fe8eb"
+        "3500b204c8b2c598d748b5e241adc6c2eeac9275348c90315b2c73fa2f28ddca"
     )
     assert redaction._PEM.pattern == (
-        r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----)"
+        r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----)"
         r"(.*?)"
-        r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY-----|\Z)"
+        r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----|\Z)"
     )
     assert redaction._KEY.pattern == (
         r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"
