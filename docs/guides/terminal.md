@@ -506,7 +506,9 @@ The picker lists at most 50 chats with finished, non-undone turns, newest
 first. The filter updates after 150 ms; Tab toggles this folder/all folders.
 Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
-Web and scheduler sessions are never offered. A resume keeps the current
+Web and scheduler sessions are never offered. The web console's Workers view
+shows your chats here read-only under **Terminal chats**, redacted as it reads
+them (the stored copy is not redacted); it cannot change or send to them. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
 `/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
 resets those display preferences (`/stream` back to `[cli] stream`). A note says when the session previously worked in another folder.

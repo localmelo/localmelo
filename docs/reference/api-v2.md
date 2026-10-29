@@ -406,18 +406,20 @@ The newest sessions first. Only `chat` sessions are listed by default.
   A row a create made without ever starting its message (a shutdown in the
   middle, say) has no turn and is left out; `GET /api/sessions/{id}` still
   shows it.
-- `kind` is `chat` (default), `front`, `front_bg`, `task` or `worker`; any
-  other value is 400 `invalid_request`. `worker` reads the CLI sessions file
-  in SQLite read-only mode; it does not include terminal chat sessions. A
+- `kind` is `chat` (default), `front`, `front_bg`, `task`, `worker` or
+  `terminal`; any other value is 400 `invalid_request`. `worker` and `terminal`
+  read the CLI sessions file in SQLite read-only mode: `worker` lists direct
+  runs and `terminal` lists the chats of interactive `melo` sessions, which
+  `kind=chat` never includes. A
   missing CLI file gives an empty list and is not created by the gateway.
   SQLite may create `-wal` and `-shm` bookkeeping sidecars during a read;
   the reader does not open the main database for writing or use immutable mode.
-- Worker lists accept exact-match `status`, `source`, and `parent_run`
-  filters, and an opaque `cursor` from the previous response's `next_cursor`.
-  Results are ordered by the first turn's start time descending, then session
-  id descending. `next_cursor` is `null` at the end; keep the same filters
-  and query on later pages. Invalid cursors or using these parameters without
-  `kind=worker` return 400. Pages are not a snapshot: concurrent changes may
+- Worker and terminal lists accept exact-match `status`, `source`, and
+  `parent_run` filters, and an opaque `cursor` from the previous response's
+  `next_cursor`. Results are ordered by the start time of the row's turn
+  descending, then session id descending. `next_cursor` is `null` at the end;
+  keep the same filters and query on later pages. Invalid cursors or using
+  these parameters without `kind=worker` or `kind=terminal` return 400. Pages are not a snapshot: concurrent changes may
   affect subsequent pages.
 - Worker list and detail session objects include nullable `source`,
   `parent_run`, `git_branch`, `git_head`, `exit_code`, `status`, `steps`, and
@@ -428,6 +430,20 @@ The newest sessions first. Only `chat` sessions are listed by default.
   tokens fall back to its stored result. Missing values are `null`, not zero.
   The detail response's top-level `tokens` separately counts completion tokens;
   for a worker it is `null` if no turn has an integer `completion_tokens`.
+- Terminal chats are served read-only, like worker runs, with `kind` set to
+  `terminal` in list and detail objects. The row's turn is the chat's latest
+  turn, so `status`, `started_at`, `steps` and `duration_s` describe that turn
+  and an active chat comes first. Detail, turns (including `events=true`),
+  `/events` and `/status` work by id as for a worker run, and `busy` is true
+  while a turn runs under a live lease of the terminal that owns the chat.
+  The terminal stores a chat unredacted, so every text of one is redacted as
+  it is read: secrets in titles, `meta`, turn text, answers, results and event
+  payloads (tool output and shell output included) become `[redacted]`, the
+  output of a call that read a secret file such as `.env` is replaced by a
+  note, and a run's `config` is left out. A worker run is stored redacted and
+  is read as stored. Redaction is by patterns, not guaranteed secret-free;
+  images are not redacted. Every write route returns 404 for a terminal chat
+  id, as for a worker id.
 - Worker sessions are read-only. Their session detail and turns (including
   `events=true`), stored image blobs, `/events` and `/status` are available by
   id; write routes return 404 (`POST /api/turns/{turn_id}/cancel` returns 409
@@ -570,12 +586,16 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   with no live lease, as one that crashed leaves, is replayed and ends at
   once. Keepalives are as for a chat; each open stream is one reader of the
   file, closed when the client goes away.
+- A terminal chat is streamed the same way, redacted. It is live while one
+  of its turns runs under the terminal's lease, so the stream ends when that
+  turn ends; read the session object again to see whether another turn runs.
 
 ## GET /api/sessions/{id}/status
 
 The numbers the terminal's `/status` and status bar show for one chat, task or
 worker session, folded on the server from its stored events with the
-terminal's own code, so both agree. A worker run is read from the CLI's file.
+terminal's own code, so both agree. A worker run or terminal chat is read from
+the CLI's file.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status

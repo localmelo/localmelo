@@ -2029,6 +2029,35 @@ test('worker list uses server filters without opening worker streams', async () 
   assert.equal(FakeEventSource.instances.length, 1);
 });
 
+test('the Workers view filters to terminal chats and opens one read-only', async () => {
+  const chat = (extra = {}) => session('t', {kind: 'terminal', title: 'fix the build', status: 'completed', model: 'stub', ...extra});
+  const h = harness(baseRoutes({
+    'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker', source: 'dsh', status: 'completed'})], next_cursor: null},
+    'GET /sessions?kind=terminal&limit=50': {sessions: [chat()], next_cursor: null},
+    'GET /sessions/t': () => ({session: chat()}),
+    'GET /sessions/t/turns?limit=50&events=true': {turns: [turnRow({user_text: 'why does the build fail', status: 'completed', events: []})], has_earlier: false},
+  }));
+  await h.run('init()');
+  h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  const chips = findNode(h.element('worker-panel'), (node) => node.className === 'worker-kinds').children;
+  assert.deepEqual(chips.map((node) => [node.textContent, node.attributes['aria-pressed']]), [['Worker runs', 'true'], ['Terminal chats', 'false']]);
+  assert.match(flatten(h.element('worker-panel')), /Parent run/);
+  chips[1].listeners.click[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  const list = flatten(h.element('worker-panel'));
+  assert.match(list, /fix the build/);
+  assert.match(list, /terminal · stub · completed/);
+  assert.doesNotMatch(list, /Parent run|All sources/, 'a chat has no source or parent run');
+  assert.equal(h.net.callsTo('/sessions?kind=terminal&limit=50').length, 1);
+  h.run('showWorkers("t")');
+  await new Promise((resolve) => setImmediate(resolve));
+  const detail = flatten(h.element('worker-panel'));
+  assert.match(detail, /Read-only terminal chat, secrets redacted/);
+  assert.match(detail, /You[\s\S]*why does the build fail/);
+  assert.doesNotMatch(detail, /Brief|Source|Git head/);
+});
+
 test('worker back returns to the list header and Chats resumes the open chat', async () => {
   const h = harness(baseRoutes({
     'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker'})], next_cursor: null},

@@ -148,6 +148,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `cached / (prompt - fresh)` per run and pooled beside the share of all prompt tokens;
   `fresh` is an estimate. ([#NN])
 
+- Terminal chats in the web console, read-only and redacted (#213). The Workers
+  view has a Worker runs / Terminal chats chip pair; `GET /api/sessions?kind=terminal`
+  lists the chats of interactive `melo` sessions from the CLI file (never in the
+  console's own `kind=chat` list), and detail, turns, `/events` and `/status`
+  serve them by id, read-only. A chat is stored unredacted, so every text of one
+  is redacted as it is read, as a worker run is when it is written: secrets in
+  titles, turn text, answers and event payloads, the output of a call that read a
+  secret file replaced, the run `config` left out. An open chat is followed while
+  a turn runs under its terminal's lease, and again when the next turn starts.
+  Every write route still returns 404 for a chat id. ([#226])
 - Live section on the task card (#213). A started task's card in the web console
   shows the task's steps, tool calls and model text beside its approval card,
   folded like a chat. The card reads the task's session once and, while the task
@@ -1417,6 +1427,7 @@ earlier milestones.
 [#222]: https://github.com/localmelo/localmelo/pull/222
 [#223]: https://github.com/localmelo/localmelo/pull/223
 [#224]: https://github.com/localmelo/localmelo/pull/224
+[#226]: https://github.com/localmelo/localmelo/pull/226
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

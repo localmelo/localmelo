@@ -1938,13 +1938,24 @@ function renderWorkers() {
   const state = workers.state;
   const root = $("worker-panel");
   const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.tagName === "H1";
-  const title = el("h1", "", state.mode === "list" ? "Workers" : state.session?.title || "Worker run");
+  const terminal = state.mode === "detail" ? state.session?.kind === "terminal" : state.kind === "terminal";
+  const title = el("h1", "", state.mode === "list" ? "Workers" : state.session?.title || (terminal ? "Terminal chat" : "Worker run"));
   title.tabIndex = -1;
-  const nodes = [title, el("p", "muted", state.mode === "list" ? "Read-only history" : "Read-only worker run")];
+  const nodes = [title, el("p", "muted", state.mode === "list" ? "Read-only history" : terminal ? "Read-only terminal chat, secrets redacted" : "Read-only worker run")];
   if (state.mode === "detail") {
     const back = document.createElement("a"); back.href = "#/workers"; back.textContent = "Back to workers"; nodes.push(back);
   }
   if (state.mode === "list") {
+    const kinds = el("div", "worker-kinds");
+    for (const [value, text] of [["worker", "Worker runs"], ["terminal", "Terminal chats"]]) {
+      const chip = button("secondary-button", text, () => {
+        if (state.kind === value) return;
+        state.kind = value; state.filters = {status: "", source: "", parent: ""}; workers.list();
+      });
+      chip.setAttribute("aria-pressed", String(state.kind === value));
+      kinds.append(chip);
+    }
+    nodes.push(kinds);
     const filters = el("form", "worker-filters");
     const select = (label, name, choices, selected) => {
       const wrapper = el("label", "", label);
@@ -1958,23 +1969,24 @@ function renderWorkers() {
     };
     const statuses = [...new Set(["running", "completed", "crashed", "budget_exhausted", "stuck", "cancelled", ...state.rows.map((row) => row.status).filter(Boolean), state.filters.status].filter(Boolean))];
     const status = select("Status", "status", [["", "All statuses"], ...statuses.map((s) => [s, s])], state.filters.status);
-    const source = select("Source", "source", [["", "All sources"], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
-    const label = el("label", "", "Parent run");
-    const parent = document.createElement("input"); parent.value = state.filters.parent; label.append(parent); filters.append(label);
+    // Source and parent run describe a run; a terminal chat has neither.
+    const source = terminal ? null : select("Source", "source", [["", "All sources"], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
+    const parent = document.createElement("input"); parent.value = state.filters.parent;
+    if (!terminal) { const label = el("label", "", "Parent run"); label.append(parent); filters.append(label); }
     const apply = document.createElement("button"); apply.type = "submit"; apply.className = "primary-button"; apply.textContent = "Apply"; filters.append(apply);
     filters.append(button("secondary-button", "Clear filters", () => { state.filters = {status: "", source: "", parent: ""}; workers.list(); }));
-    filters.addEventListener("submit", (event) => { event.preventDefault(); state.filters = {status: status.value, source: source.value, parent: parent.value.trim()}; workers.list(); });
+    filters.addEventListener("submit", (event) => { event.preventDefault(); state.filters = {status: status.value, source: source?.value ?? "", parent: parent.value.trim()}; workers.list(); });
     nodes.push(filters);
     for (const row of state.rows) {
       const link = document.createElement("a");
       link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
-      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
+      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [terminal ? "terminal" : row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
       const started = row.started_at == null ? "Not recorded" : new Date(row.started_at * 1000).toLocaleString();
       const duration = row.duration_s == null ? "Not recorded" : formatDuration(row.duration_s);
-      link.append(el("span", "muted", `Started: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
+      link.append(el("span", "muted", `${terminal ? "Last turn" : "Started"}: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
       nodes.push(link);
     }
-    if (!state.loading && !state.error && !state.rows.length) nodes.push(el("p", "", Object.values(state.filters).some(Boolean) ? "No runs match these filters." : "No worker runs yet."));
+    if (!state.loading && !state.error && !state.rows.length) nodes.push(el("p", "", Object.values(state.filters).some(Boolean) ? "No runs match these filters." : terminal ? "No terminal chats yet." : "No worker runs yet."));
     if (state.nextCursor) nodes.push(button("secondary-button", "Load more", () => workers.list({more: true})));
   }
   const announcement = el("p", "worker-announcement", state.loading ? (state.mode === "list" ? "Loading workers…" : "Loading worker run…") : state.error);
@@ -1989,17 +2001,20 @@ function renderWorkers() {
     const firstTurn = state.view.turns[0];
     const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
     const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
-    for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : formatDuration(duration)], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
+    const fields = terminal
+      ? [["Model", session.model], ["Workspace", session.workspace], ["Created", new Date(session.created_at * 1000).toLocaleString()], ["Tokens", session.tokens], ["Status", session.status]]
+      : [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : formatDuration(duration)], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]];
+    for (const [label, value] of fields) {
       meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
     }
     nodes.push(meta, workerStatus.element);
     if (state.unsupported) nodes.push(el("p", "muted", "Some recorded event types cannot be shown."));
-    if (state.view.turns.length > 1) nodes.push(el("p", "", "This run has multiple recorded turns."));
+    if (state.view.turns.length > 1 && !terminal) nodes.push(el("p", "", "This run has multiple recorded turns."));
     if (!state.view.turns.length) nodes.push(el("p", "", "No recorded turn."));
-    if (session.status === "running") nodes.push(el("p", "", "Run not finished. New steps appear as they are recorded."));
+    if (session.status === "running") nodes.push(el("p", "", terminal ? "A turn is running. New steps appear as they are recorded." : "Run not finished. New steps appear as they are recorded."));
     nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
     for (const turn of state.view.turns) {
-      nodes.push(el("h2", "", "Brief"), el("p", "worker-brief", turn.userText || "No brief recorded."), el("h2", "", "Work"));
+      nodes.push(el("h2", "", terminal ? "You" : "Brief"), el("p", "worker-brief", turn.userText || (terminal ? "No message recorded." : "No brief recorded.")), el("h2", "", "Work"));
       nodes.push(...turnWork(turn, session.id, renderWorkers, state.eventCounts[turn.turn] ? "" : "No recorded events."));
     }
   }
