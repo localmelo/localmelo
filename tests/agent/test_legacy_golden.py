@@ -53,6 +53,7 @@ from localmelo.tests.agent.test_phase1a_compat import (
     result_json,
     window_json,
 )
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 GOLDEN_DIR = Path(__file__).parent / "goldens" / "legacy"
 
@@ -398,7 +399,9 @@ async def record_run(
     server = ScriptedServer(_bodies(provider, scenario.replies))
     agent = Agent(
         llm=_llm(provider, httpx.MockTransport(server.handler)),
-        options=AgentOptions(memory_dir=memory_dir, **scenario.options),
+        options=AgentOptions(
+            memory_dir=memory_dir, **{**LEGACY_CACHE_OPTIONS, **scenario.options}
+        ),
     )
     try:
         result = await agent.run_task(scenario.query)

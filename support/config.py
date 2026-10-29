@@ -145,8 +145,9 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
-    fixed_prefix: bool = False  # opt-in stable prompt prefix
-    window_eviction: str = "slide"  # slide | chunk | boundary
+    fixed_prefix: bool = True  # stable prompt prefix; false is the old request
+    window_eviction: str = "chunk"  # slide | chunk | boundary
+    reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -428,6 +429,8 @@ class Config:
         errors: list[str] = []
         if not isinstance(self.agent.fixed_prefix, bool):
             errors.append("[agent] fixed_prefix must be a boolean")
+        if not isinstance(self.agent.reflect_tool_guard, bool):
+            errors.append("[agent] reflect_tool_guard must be a boolean")
         if not isinstance(self.agent.captured_history, bool):
             errors.append("[agent] captured_history must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
@@ -1001,13 +1004,15 @@ def save(cfg: Config) -> None:
         lines.append(f"workspace = {_toml_string(cfg.gateway.workspace)}")
     lines.append("")
 
+    defaults = AgentConfig()
     if (
         cfg.agent.reasoning != "legacy"
         or cfg.agent.replay_turns is not None
         or cfg.agent.note_writer != "auto"
         or cfg.agent.tool_env
-        or cfg.agent.fixed_prefix
-        or cfg.agent.window_eviction != "slide"
+        or cfg.agent.fixed_prefix != defaults.fixed_prefix
+        or cfg.agent.window_eviction != defaults.window_eviction
+        or cfg.agent.reflect_tool_guard != defaults.reflect_tool_guard
         or cfg.agent.captured_history
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
@@ -1019,10 +1024,14 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
-        if cfg.agent.fixed_prefix:
-            lines.append("fixed_prefix = true")
-        if cfg.agent.window_eviction != "slide":
+        if cfg.agent.fixed_prefix != defaults.fixed_prefix:
+            lines.append(f"fixed_prefix = {_toml_value(cfg.agent.fixed_prefix)}")
+        if cfg.agent.window_eviction != defaults.window_eviction:
             lines.append(f"window_eviction = {_toml_string(cfg.agent.window_eviction)}")
+        if cfg.agent.reflect_tool_guard != defaults.reflect_tool_guard:
+            lines.append(
+                f"reflect_tool_guard = {_toml_value(cfg.agent.reflect_tool_guard)}"
+            )
         if cfg.agent.captured_history:
             lines.append("captured_history = true")
         if cfg.agent.tool_env:

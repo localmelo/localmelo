@@ -50,6 +50,7 @@ from localmelo.support.providers.llm.openai_compat import (
 from localmelo.support.providers.llm.openai_compat import (
     _tool_def_to_openai as _openai_tool_def,
 )
+from localmelo.tests.legacy_options import legacy_options
 
 # ── Schema: tool call ids ──────────────────────────────────────────────────
 
@@ -1253,7 +1254,7 @@ class TestAgentWindowTruncation:
 
     @pytest.mark.asyncio
     async def test_reflection_window_is_protocol_valid(self) -> None:
-        options = AgentOptions(steps_per_attempt=3, max_attempts=1)
+        options = legacy_options(steps_per_attempt=3, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(
@@ -1527,7 +1528,7 @@ class TestStuckDetectionMultiCall:
 
     @pytest.mark.asyncio
     async def test_loop_stops_on_repeated_batches(self) -> None:
-        options = AgentOptions(steps_per_attempt=6, max_attempts=1)
+        options = legacy_options(steps_per_attempt=6, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(

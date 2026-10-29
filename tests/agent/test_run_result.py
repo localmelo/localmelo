@@ -31,6 +31,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS, legacy_options
 
 # The fields in the order of the Phase 1a spec (B4). The CLI's JSON output
 # prints RunResult.to_dict() and relies on this order.
@@ -233,7 +234,7 @@ async def _echo(text: str) -> str:
 
 def _options(**kwargs: Any) -> AgentOptions:
     """Options without built-ins, so the test's echo tool is the only tool."""
-    return AgentOptions(builtins=frozenset(), **kwargs)
+    return AgentOptions(builtins=frozenset(), **{**LEGACY_CACHE_OPTIONS, **kwargs})
 
 
 def _agent(
@@ -736,7 +737,7 @@ CONFIG_KEYS = [
 class TestConfig:
     @pytest.mark.asyncio
     async def test_default_configuration(self) -> None:
-        agent = Agent(llm=FakeLLM([_answer("ok")]))
+        agent = Agent(llm=FakeLLM([_answer("ok")]), options=legacy_options())
         result = await agent.run_task("q")
         assert list(result.config) == CONFIG_KEYS
         assert result.config == {
@@ -759,7 +760,7 @@ class TestConfig:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
-        options = AgentOptions(
+        options = legacy_options(
             max_steps=4,
             attempt_policy="none",
             steps_per_attempt=2,

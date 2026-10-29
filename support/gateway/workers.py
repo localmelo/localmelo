@@ -66,7 +66,10 @@ from localmelo.support.gateway.worker_evidence import (
 )
 from localmelo.support.scheduler.model import TERMINAL_PHASES, LevelSource, Phase, Task
 from localmelo.support.sessions import display
-from localmelo.support.sessions.agents import build_session_agent
+from localmelo.support.sessions.agents import (
+    build_session_agent,
+    configured_cache_options,
+)
 from localmelo.support.sessions.approvals import ApprovalBroker, RememberingPolicy
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
@@ -1406,11 +1409,14 @@ class TaskWorkers:
                 base_url=None,
                 model=None,
                 workspace=workspace,
-                options=AgentOptions(
-                    mode="gateway",
-                    memory=False,
-                    timeout_s=None,
-                    builtins=worker_tool_allowlist("user").builtins,
+                options=configured_cache_options(
+                    self.settings(),
+                    AgentOptions(
+                        mode="gateway",
+                        memory=False,
+                        timeout_s=None,
+                        builtins=worker_tool_allowlist("user").builtins,
+                    ),
                 ),
                 wrap_llm=lambda inner: _WorkerLLM(
                     inner,

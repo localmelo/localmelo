@@ -25,20 +25,19 @@ page.
 
 The working-memory window holds at most 20 messages: the task, then each
 reply's turn (a tool-call message with its results, never split). By default
-(`slide`) the oldest unit leaves at every step once the window is full, so
-from about the eleventh step each request starts its history one unit later
-than the one before, and a server's prompt cache can reuse only the system
-prompt, the tools and the task. The window is also cut by the prompt cap
-(100,000 characters) and, with `--context-window`, by the request fit, in the
-same one-unit-per-step way.
-
-`--window-eviction chunk|boundary` (or `[agent] window_eviction`) is
-experimental, for measuring prompt-cache reuse; the default is unchanged.
+(`chunk`) the window drops whole units at once, so the history starts at the
+same unit for several steps and a server's prompt cache can reuse it.
+`--window-eviction slide` (or `[agent] window_eviction = "slide"`) is the
+earlier behavior: the oldest unit leaves at every step once the window is
+full, so from about the eleventh step each request starts its history one unit
+later than the one before, and a server's prompt cache can reuse only the
+system prompt, the tools and the task. The window is also cut by the prompt
+cap (100,000 characters) and, with `--context-window`, by the request fit.
 
 | Mode | The window drops |
 |---|---|
-| `slide` (default) | The oldest unit, at every step once full. |
-| `chunk` | Whole units down to 12 messages (the maximum less 8) when it would pass 20, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
+| `slide` | The oldest unit, at every step once full. |
+| `chunk` (default) | Whole units down to 12 messages (the maximum less 8) when it would pass 20, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
 | `boundary` | `chunk` within an attempt, and the finished attempt's turns when the next attempt starts after a reflection (the reflection carries them); the task and inbox messages stay. |
 
 A mode other than `slide` appears as `window_eviction` in the JSON result's

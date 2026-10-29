@@ -35,6 +35,24 @@ SESSION_TOOL_TIMEOUT_S: Final = 600.0
 LLMWrapper = Callable[[BaseLLMProvider], BaseLLMProvider]
 EmbeddingWrapper = Callable[[BaseEmbeddingProvider], BaseEmbeddingProvider]
 
+# The settings that keep each request an extension of the previous one. A config
+# file that lacks a key has its default; one that sets a key keeps it.
+CACHE_SETTINGS: Final = ("fixed_prefix", "window_eviction", "reflect_tool_guard")
+
+
+def configured_cache_options(
+    cfg: Config | None, options: AgentOptions, keep: Collection[str] = ()
+) -> AgentOptions:
+    """*options* with the config's cache settings, except the names in *keep*."""
+    if cfg is None:
+        return options
+    changes = {
+        name: getattr(cfg.agent, name)
+        for name in CACHE_SETTINGS
+        if name not in keep and getattr(options, name) != getattr(cfg.agent, name)
+    }
+    return dataclasses.replace(options, **changes) if changes else options
+
 
 def configured_context_options(
     cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
@@ -86,8 +104,7 @@ def configured_session_options(
             "reasoning",
             "replay_turns",
             "note_writer",
-            "fixed_prefix",
-            "window_eviction",
+            *CACHE_SETTINGS,
             "captured_history",
         )
         if name not in explicit

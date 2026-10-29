@@ -153,8 +153,8 @@ def test_drop_since_forgets_the_aliases_of_what_it_drops() -> None:
 # ── The options ──
 
 
-def test_the_option_is_validated_and_defaults_to_slide() -> None:
-    assert AgentOptions().window_eviction == "slide"
+def test_the_option_is_validated_and_defaults_to_chunk() -> None:
+    assert AgentOptions().window_eviction == "chunk"
     with pytest.raises(ValueError, match="window_eviction"):
         AgentOptions(window_eviction="sliding")  # type: ignore[arg-type]
 
@@ -489,7 +489,7 @@ async def _stub_run(
             window_eviction=mode,  # type: ignore[arg-type]
             max_steps=max_steps,
             steps_per_attempt=steps_per_attempt,
-            **options,
+            **{"fixed_prefix": False, "reflect_tool_guard": False, **options},
         ),
     )
     agent.hippo.register_tool(ECHO)

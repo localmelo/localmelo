@@ -21,7 +21,6 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.options import (
     NoteWriter,
     ReasoningMode,
-    WindowEviction,
     reasoning_refusal,
 )
 from localmelo.melo.checker import builtin_set_for
@@ -1558,20 +1557,21 @@ def _build_parser(
     direct.add_argument(
         "--fixed-prefix",
         choices=["on", "off"],
-        help="Use a versioned run-frozen system prefix and local date (default off)",
+        help="Use a versioned run-frozen system prefix and local date (default on); "
+        "off sends the earlier requests",
     )
     direct.add_argument(
         "--window-eviction",
         choices=["slide", "chunk", "boundary"],
-        help="How working memory drops old turns: slide one unit per step once "
-        "full (default), chunk eight messages at a time, or boundary also at "
-        "the end of an attempt",
+        help="How working memory drops old turns: chunk eight messages at a "
+        "time (default), slide one unit per step once full, or boundary, which "
+        "also drops at the end of an attempt",
     )
     direct.add_argument(
         "--reflect-tool-guard",
         choices=["on", "off"],
         help="Reflection requests offer the plan's tools and end with a sentence "
-        "that asks for the JSON object, not a tool call (default off)",
+        "that asks for the JSON object, not a tool call (default on)",
     )
     direct.add_argument(
         "--tool-exposure",
@@ -2223,7 +2223,11 @@ def _build_direct_mode_agent(
     base_url = args.base_url
     request_timeout = getattr(args, "request_timeout", None)
     from localmelo.support import config
-    from localmelo.support.sessions.agents import configured_context_options
+    from localmelo.support.sessions.agents import (
+        CACHE_SETTINGS,
+        configured_cache_options,
+        configured_context_options,
+    )
 
     def config_value_error(message: str) -> NoReturn:
         """Refuse a bad config value as a usage error, or a worker result.
@@ -2255,21 +2259,17 @@ def _build_direct_mode_agent(
         config_value_error(str(exc))
     if not isinstance(budget_cfg.agent.fixed_prefix, bool):
         config_value_error("[agent] fixed_prefix must be a boolean")
-    if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
-        options = dataclasses.replace(options, fixed_prefix=True)
+    if not isinstance(budget_cfg.agent.reflect_tool_guard, bool):
+        config_value_error("[agent] reflect_tool_guard must be a boolean")
     if budget_cfg.agent.window_eviction not in config.WINDOW_EVICTIONS:
         config_value_error(
             f"[agent] window_eviction {budget_cfg.agent.window_eviction!r} is not "
             f"recognised. Must be one of {config.WINDOW_EVICTIONS}."
         )
-    if (
-        getattr(args, "window_eviction", None) is None
-        and budget_cfg.agent.window_eviction != "slide"
-    ):
-        options = dataclasses.replace(
-            options,
-            window_eviction=cast(WindowEviction, budget_cfg.agent.window_eviction),
-        )
+    # A flag keeps its value; the others come from the config file, whose
+    # absent keys are the defaults.
+    flagged = {name for name in CACHE_SETTINGS if getattr(args, name, None) is not None}
+    options = configured_cache_options(budget_cfg, options, keep=flagged)
 
     if not isinstance(budget_cfg.agent.captured_history, bool):
         config_value_error("[agent] captured_history must be a boolean")
