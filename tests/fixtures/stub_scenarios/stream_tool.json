@@ -1,0 +1,10 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {
+      "stream": {"chunks": ["Let me read it.\n"]},
+      "tool_calls": [{"name": "file_read", "arguments": {"path": "app.py"}}]
+    },
+    {"stream": {"chunks": ["The file prints hello.\n"]}}
+  ]
+}

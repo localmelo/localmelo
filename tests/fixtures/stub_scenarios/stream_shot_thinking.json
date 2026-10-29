@@ -1,0 +1,18 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {
+      "stream": {
+        "reasoning": [
+          "Comparing the options ",
+          "before answering, ",
+          "checking the workspace, ",
+          "weighing the cost, ",
+          "and choosing one."
+        ],
+        "chunks": ["The answer comes after the thinking.\n"],
+        "delay_s": 2.0
+      }
+    }
+  ]
+}

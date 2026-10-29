@@ -25,6 +25,15 @@ A reply has ``content``, ``reasoning`` (sent as ``reasoning_content``),
 or ``status`` and ``body``, an HTTP error; or ``{"hold": true, "then":
 {...}}``, which sends its headers at once, then a space every 20 s until
 ``POST /__release`` (at most 600 s), then the ``then`` reply.
+
+A reply with ``stream`` is sent as incremental SSE instead of one JSON
+body: ``{"chunks": [...], "reasoning": [...], "delay_s": 0.02, "slice": 0,
+"drop": false}``. ``chunks`` are content deltas (the reply's ``content``
+when absent), ``reasoning`` deltas go to ``reasoning_content``, and
+``tool_calls`` are sent as complete fragments before the finish reason.
+``slice`` writes the encoded body in pieces of that many bytes, so a test
+can split UTF-8 or a tag across transport chunks. ``drop`` closes the
+connection after the deltas, before the finish frame and ``[DONE]``.
 """
 
 from __future__ import annotations
@@ -179,6 +188,9 @@ class StubServer:
                     self._hold(reply.get("then") or {})
                     return
                 time.sleep(float(reply.get("delay_s") or 0))
+                if "stream" in reply:
+                    self._stream(reply)
+                    return
                 if "status" in reply:
                     data = str(reply.get("body", "")).encode()
                     self.send_response(int(reply["status"]))
@@ -187,6 +199,30 @@ class StubServer:
                     self.wfile.write(data)
                     return
                 self._json(200, _completion(reply, body))
+
+            def _stream(self, reply: dict[str, Any]) -> None:
+                stream = reply["stream"]
+                body = _stream_body(reply)
+                delay = float(stream.get("delay_s") or 0)
+                size = int(stream.get("slice") or 0)
+                # Without a byte slice, one SSE frame is one write, so the
+                # delay paces the deltas a screen test sees.
+                pieces = (
+                    [frame + b"\n\n" for frame in body.split(b"\n\n") if frame]
+                    if size <= 0
+                    else [body[i : i + size] for i in range(0, len(body), size)]
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                try:
+                    for piece in pieces:
+                        self.wfile.write(piece)
+                        self.wfile.flush()
+                        if delay:
+                            time.sleep(delay)
+                except OSError:
+                    pass  # the client went away, as after a stop
 
             def _hold(self, then: dict[str, Any]) -> None:
                 self.send_response(200)
@@ -204,6 +240,66 @@ class StubServer:
                     pass  # the client went away, as after a stop
 
         return Handler
+
+
+def _sse(payload: dict[str, Any]) -> bytes:
+    return b"data: " + json.dumps(payload, ensure_ascii=False).encode() + b"\n\n"
+
+
+def _stream_body(reply: dict[str, Any]) -> bytes:
+    """The SSE body of a streamed reply, without the finish when it drops."""
+    stream = reply["stream"]
+    chunks: list[bytes] = []
+
+    def delta(value: dict[str, Any]) -> None:
+        chunks.append(
+            _sse({"choices": [{"index": 0, "delta": value, "finish_reason": None}]})
+        )
+
+    for text in stream.get("reasoning") or []:
+        delta({"reasoning_content": text})
+    for text in stream.get("chunks", [reply.get("content", "")]):
+        delta({"content": text})
+    calls = reply.get("tool_calls") or []
+    for index, call in enumerate(calls):
+        delta(
+            {
+                "tool_calls": [
+                    {
+                        "index": index,
+                        "id": f"call_{index + 1}",
+                        "type": "function",
+                        "function": {
+                            "name": call["name"],
+                            "arguments": json.dumps(call.get("arguments", {})),
+                        },
+                    }
+                ]
+            }
+        )
+    if stream.get("drop"):
+        return b"".join(chunks)
+    usage = dict(reply.get("usage") or DEFAULT_USAGE)
+    usage.setdefault(
+        "total_tokens",
+        usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
+    )
+    chunks.append(_sse({"choices": [], "usage": usage}))
+    chunks.append(
+        _sse(
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "tool_calls" if calls else "stop",
+                    }
+                ]
+            }
+        )
+    )
+    chunks.append(b"data: [DONE]\n\n")
+    return b"".join(chunks)
 
 
 def _completion(reply: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:

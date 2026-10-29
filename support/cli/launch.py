@@ -492,13 +492,24 @@ async def main_async(
             return 1, None
 
         approver = TerminalApprover()
+        session_config = config.load()
+        # Config validation never fails on [cli] (a display preference), and a
+        # --base-url session validates nothing at all, so both paths land here:
+        # a bad value falls back with a warning rather than turning streaming
+        # on or keeping an unknown hint.
+        if errors := session_config.cli_errors():
+            logging.getLogger(__name__).warning(
+                "Invalid [cli] settings; using defaults: %s", "; ".join(errors)
+            )
+            session_config.cli = config.CliConfig()
         renderer = TurnRenderer(
             out,
             symbols=symbols,
             backend=lambda: factory.backend,
+            reasoning_tags=session_config.cli.reasoning_tags,
             snapshots=approver.snapshots,
         )
-        raw_mode = config.load().sessions.resume_mode
+        raw_mode = session_config.sessions.resume_mode
         invalid_mode = raw_mode not in ("pairs", "window")
         if invalid_mode:
             logging.getLogger(__name__).warning(
@@ -512,6 +523,8 @@ async def main_async(
             approver=approver,
             mode="yolo" if args.yolo else "ask",
             resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
+            stream=session_config.cli.stream,
+            reasoning_tags=session_config.cli.reasoning_tags,
             out=out,
         )
 

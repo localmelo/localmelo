@@ -1,0 +1,18 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {
+      "stream": {
+        "chunks": [
+          "Here is the value: Bearer\n",
+          "  ",
+          "abcdefghijklmnopqrstuvwxyz0123456789",
+          "\nDone.\n",
+          "Still streaming here.\n",
+          "And still here.\n"
+        ],
+        "delay_s": 0.3
+      }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import dataclasses
 import json
@@ -19,12 +20,14 @@ from localmelo.melo.agent._request_accounting import (
     RequestAccounting,
     request_proxy,
 )
+from localmelo.melo.checker.stream_filter import StreamFilter
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import Message, ToolDef
@@ -703,10 +706,71 @@ class Chat:
                     else:
                         merged.append(message)
                 messages = merged
+            display = STREAM_DISPLAY.get() if kind == "plan" else None
+            if display is not None:
+                return await self._send_streaming(messages, tools, display)
             return await self.llm.chat(messages, tools=tools or None)
         finally:
             LLM_REQUEST_KIND.reset(kind_token)
             LLM_REQUEST_ATTEMPT.reset(token)
+
+    async def _send_streaming(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None,
+        display: StreamDisplay,
+    ) -> Message:
+        """Send one planning request through the provider's stream.
+
+        Only the display sees deltas: the completed reply is returned as
+        ``chat`` would return it, so the agent, its checker and its stored
+        events are unchanged. Without a release declaration the filter holds
+        the text and only the ``thinking`` indicator shows.
+        """
+        display.opened()
+        hint = display.reasoning_tags
+        separate = False
+        filter: StreamFilter | None = None
+        reply: Message | None = None
+        saw_text = False
+        try:
+            async with contextlib.aclosing(
+                self.llm.stream_chat(messages, tools=tools or None)
+            ) as stream:
+                async for fragment in stream:
+                    if fragment.kind == "reply":
+                        reply = fragment.reply
+                        break
+                    if fragment.kind == "reasoning":
+                        saw_text = True
+                        if filter is None:
+                            filter, separate = (
+                                StreamFilter(separate_reasoning=True),
+                                True,
+                            )
+                        if separate:
+                            filter.feed_reasoning(fragment.text)
+                        display.held()
+                    elif fragment.kind == "content":
+                        saw_text = True
+                        if filter is None:
+                            filter = StreamFilter(hint)
+                        _, delta = filter.feed(fragment.text)
+                        if delta:
+                            display.content(delta)
+                        else:
+                            display.held()
+                    elif fragment.kind == "tool":
+                        display.held()
+            if reply is None:
+                raise ProviderError("Streaming response ended without a reply")
+            if filter is not None:
+                _, tail = filter.finish()
+                if saw_text and tail:
+                    display.content(tail)
+        finally:
+            display.closed()
+        return reply
 
     async def estimate_steps(self, query: str) -> int:
         """Ask the LLM to estimate how many tool-call steps *query* needs."""

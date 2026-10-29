@@ -123,6 +123,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/stream [on\|off]` | Live streamed replies for later turns on or off; without an argument, flips it. See [Streamed replies](#streamed-replies). |
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
@@ -259,8 +260,9 @@ happens without the explicit `/copy` command.
   lines in red, added in green, with the counts), and a write too large or not text says why;
   `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
-  `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
-  `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
+  `Thinking`, `Replying`, `Running`, `Waiting for your approval`,
+  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the run's
+  facts: the step
   (`step 4`, never against `--max-steps`), the attempt from the second
   one, the phase with its cycle, the tests seen, and the time; the output
   tokens and `esc to stop` follow. When the line is narrow the hint goes
@@ -293,6 +295,44 @@ happens without the explicit `/copy` command.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
+
+### Streamed replies
+
+Streaming is off by default. Turn it on in `config.toml`:
+
+```toml
+[cli]
+stream = true
+
+[cli.reasoning_tags]
+"Qwen3-8B" = "closing_only"
+```
+
+With it on, the interactive UI asks the provider for a streamed planning
+reply and draws only text the release filter has already redacted, in the
+live area, at the app's redraw rate; it never writes raw deltas to the
+terminal. The per-model hint says how that model frames reasoning:
+`explicit` (a leading `<think>` starts it), `closing_only` (everything
+before `</think>` is reasoning) or `none` (tags are literal text). A model
+with no hint keeps the conservative rule: content is held until the reply
+ends, so the live area shows `✻ thinking…` rather than text. The same hint
+splits the completed reply, so the stream and the stored answer do not
+disagree. A model field the server sends separately is always treated as
+reasoning and is never drawn as content; `/thinking off` hides its excerpt
+as before.
+
+Streamed text is provisional. If the reply becomes a tool call, a retry,
+a run that fails, or a stop, melo closes the live text and prints it once
+as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
+`(stopped)`; the completed final answer prints once after `●`. A reply a
+provider sends in one piece (or a provider without streaming) silently
+falls back to the ordinary complete reply. `/stream on|off` flips the
+setting for later turns without saving it, and `/new` puts it back to
+`[cli] stream`. Runs without the interactive UI (direct mode, workers,
+the gateway) never stream, so their output and request bodies are unchanged.
+An invalid `[cli]` value never
+fails a run: the interactive UI warns and uses the defaults, and direct
+mode and the gateway do not read it.
 
 ### Approvals
 
@@ -387,8 +427,8 @@ Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
 Web and scheduler sessions are never offered. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
-`/verbose` and `/thinking` preferences stay as they were. `/new` resets those
-display preferences. A note says when the session previously worked in another folder.
+`/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
+resets those display preferences (`/stream` back to `[cli] stream`). A note says when the session previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
 redacted copies. The line below its title says what reached model memory:

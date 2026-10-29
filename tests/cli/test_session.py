@@ -1087,6 +1087,15 @@ async def test_verbose_and_thinking_toggle(setup: Setup) -> None:
     session.enter("/thinking yes")
     await _until(lambda: "✗ Use /thinking on or /thinking off." in out.text())
     assert session.renderer.thinking
+    session.enter("/stream on")
+    await _until(lambda: "Live streaming on" in out.text())
+    assert session.stream
+    session.enter("/stream off")
+    await _until(lambda: "Live streaming off." in out.text())
+    assert not session.stream
+    session.enter("/stream maybe")
+    await _until(lambda: "✗ Use /stream on or /stream off." in out.text())
+    assert not session.stream
 
 
 async def test_expand_prints_a_call_in_full(setup: Setup) -> None:
@@ -1215,11 +1224,14 @@ async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None
     assert session.renderer.progress is not None
     session.renderer.verbose = True
     session.renderer.thinking = False
+    session.enter("/stream on")
+    await _until(lambda: session.stream)
     session.enter("/new")
     await _until(lambda: session.runner is None)
     assert session.renderer.tool_outputs == []
     assert session.renderer.progress is None
     assert not session.renderer.verbose and session.renderer.thinking
+    assert not session.stream  # back to [cli] stream, the session's default
     session.enter("/expand")
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
     session.enter("/progress")

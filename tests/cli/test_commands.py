@@ -95,6 +95,7 @@ def test_slash_lists_every_command_with_its_line() -> None:
         "/copy",
         "/verbose",
         "/thinking",
+        "/stream",
         "/expand",
         "/approvals",
         "/progress",
