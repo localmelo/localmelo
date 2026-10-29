@@ -4,7 +4,9 @@ One frame per event: ``id: <event id>`` and ``data: <the event JSON>``, on
 one line, then a blank line. The stream announces ``retry: 2000`` once,
 sends ``: keepalive`` every :data:`SSE_KEEPALIVE_S` seconds, and ends when
 the client goes away, the gateway shuts down, or (with ``follow=false``)
-the stored events run out.
+the stored events run out. A worker session lives in a file another process
+writes, which the hub cannot see: its stream reads the store about every
+:data:`SSE_POLL_S` seconds instead, and ends when the run is no longer live.
 
 The generator keeps one pending ``__anext__`` task across keepalive ticks
 and never cancels it on a timeout: cancelling it would finalize the hub's
@@ -19,7 +21,8 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Final
 
 import anyio
@@ -30,6 +33,8 @@ from localmelo.support.sessions.store import SessionStore, StoredEvent
 
 # Seconds between ``: keepalive`` comments.
 SSE_KEEPALIVE_S: Final = 15.0
+# Seconds between reads of a store the hub cannot see.
+SSE_POLL_S: Final = 1.0
 # The reconnect delay a client is told once, in milliseconds.
 SSE_RETRY_MS: Final = 2000
 # Events per replay page.
@@ -66,8 +71,10 @@ class EventStream:
 
     *follow* ``False`` reads the stored events after *after_id* and ends;
     ``True`` subscribes to the hub and waits, sending keepalives and ending
-    when *shutdown* is set. :meth:`aclose` is safe to call twice and is
-    what :class:`EventStreamResponse` calls on the way out.
+    when *shutdown* is set. With *live*, a following stream reads the store
+    every *poll_s* seconds instead and ends once ``await live()`` is false
+    and no event is left. :meth:`aclose` is safe to call twice and is what
+    :class:`EventStreamResponse` calls on the way out.
     """
 
     def __init__(
@@ -81,6 +88,8 @@ class EventStream:
         follow: bool = True,
         high_water: int | None = None,
         on_close: Callable[[], None] | None = None,
+        live: Callable[[], Awaitable[bool]] | None = None,
+        poll_s: float | None = None,
     ) -> None:
         self._store = store
         self._hub = hub
@@ -90,8 +99,13 @@ class EventStream:
         self._follow = follow
         self._high_water = high_water
         self._on_close = on_close
+        self._live = live
+        self._poll_s = SSE_POLL_S if poll_s is None else poll_s
+        self._quiet_since = time.monotonic()
         self._iterator: AsyncIterator[StoredEvent] | None = (
-            hub.subscribe(session_id, after_id=after_id) if follow else None
+            hub.subscribe(session_id, after_id=after_id)
+            if follow and live is None
+            else None
         )
         self._pending: asyncio.Task[StoredEvent] | None = None
         self._shutdown_wait: asyncio.Task[bool] | None = None
@@ -109,6 +123,8 @@ class EventStream:
         if not self._started:
             self._started = True
             return _RETRY_FRAME
+        if self._follow and self._live is not None:
+            return await self._poll_next(self._live)
         if self._follow:
             return await self._follow_next()
         return await self._replay_next()
@@ -156,6 +172,38 @@ class EventStream:
         if not exists:
             raise StopAsyncIteration
         return _KEEPALIVE_FRAME
+
+    async def _poll_next(self, live: Callable[[], Awaitable[bool]]) -> str:
+        while not self._buffer:
+            if self._shutdown.is_set():
+                raise StopAsyncIteration
+            try:
+                # Liveness first: an event written before the run ended is
+                # then still read below, and one written after is not missed.
+                running = await live()
+                page = await self._store.list_events(
+                    self._session_id, after_id=self._last, limit=SSE_PAGE
+                )
+            except Exception:
+                # A store error is not the end of the run: try again.
+                logger.warning(
+                    "Could not poll session %s", self._session_id, exc_info=True
+                )
+                running, page = True, []
+            if page:
+                self._buffer = list(page)
+                break
+            if not running:
+                raise StopAsyncIteration
+            if time.monotonic() - self._quiet_since >= SSE_KEEPALIVE_S:
+                self._quiet_since = time.monotonic()
+                return _KEEPALIVE_FRAME
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._shutdown.wait(), self._poll_s)
+        event = self._buffer.pop(0)
+        self._last = event.id if event.id is not None else self._last
+        self._quiet_since = time.monotonic()
+        return frame(event)
 
     async def _replay_next(self) -> str:
         while not self._buffer:
