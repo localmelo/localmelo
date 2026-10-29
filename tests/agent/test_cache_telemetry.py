@@ -495,3 +495,178 @@ def test_cache_report_prints_its_usage_for_help_and_for_no_arguments() -> None:
     assert bare.returncode == 2
     assert bare.stdout == ""
     assert "usage: python scripts/cache_report.py LOG [LOG ...]" in bare.stderr
+
+
+# ── fresh_chars: what no earlier request of the run held ──
+
+
+def test_novelty_counts_the_messages_no_earlier_request_sent() -> None:
+    from localmelo.melo.agent._prefix_diag import Novelty
+
+    a, b, c = (Message(role="user", content=text * 50) for text in "abc")
+    tool = ToolDef(name="t", description="d", parameters={"type": "object"})
+    novelty = Novelty()
+    first = fingerprint([a, b], None)
+    sizes = [entry[3] for entry in first[1]]
+    assert novelty.add(first) == (sum(sizes), sum(sizes) + len(first[0]))
+    second = fingerprint([a, b, c], None)
+    assert novelty.add(second)[0] == fingerprint([c], None)[1][0][3]
+    # Reordered, with new tools: every message was sent before.
+    third = fingerprint([c, a], [tool])
+    fresh, total = novelty.add(third)
+    assert fresh == 0 and total > len(third[0])
+    # Within one request a repeat is no earlier request's: both are fresh.
+    fourth = fingerprint(
+        [Message(role="user", content="z"), Message("user", "z")], None
+    )
+    assert novelty.add(fourth)[0] == sum(entry[3] for entry in fourth[1])
+
+
+async def test_fresh_chars_on_a_scripted_run() -> None:
+    stub = Stub([_call_reply(PLAIN), _final_reply(PLAIN)])
+    first, second = await _plans(stub)
+    assert first.data["prefix"] is None
+    prefix = second.data["prefix"]
+    # The second request is the first plus the tool turn: only that is new.
+    turn = fingerprint(
+        [
+            Message(
+                "assistant",
+                tool_calls=[ToolCall("echo", {"text": "hi"}, id="call_1")],
+            ),
+            Message("tool", "hi", tool_call_id="call_1"),
+        ],
+        None,
+    )
+    assert prefix["fresh_chars"] == sum(entry[3] for entry in turn[1])
+    assert prefix["request_chars"] > prefix["fresh_chars"] > 0
+    assert set(stub.bodies[1]) == {"model", "messages", "tools", "tool_choice"}
+
+
+async def test_a_chat_request_after_the_retry_counts_its_own_new_messages() -> None:
+    from localmelo.melo.agent._chat import Chat
+
+    class Echoing:
+        model = "stub"
+
+        async def chat(self, messages: Any, tools: Any = None, **_: Any) -> Message:
+            return Message(role="assistant", content="ok")
+
+    chat = Chat(Echoing())  # type: ignore[arg-type]
+    base = [Message(role="user", content="q" * 40)]
+    await chat._request(base, None, kind="plan")
+    assert chat.last_call is not None and chat.last_call.prefix is None
+    extra = [Message(role="assistant", content="a" * 10), Message("user", "b" * 20)]
+    await chat._request([*base, *extra], None, kind="reflect")
+    prefix = chat.last_call.prefix
+    assert prefix is not None
+    assert prefix["fresh_chars"] == sum(e[3] for e in fingerprint(extra, None)[1])
+    chat.reset_stats()  # a new run knows nothing of the earlier one
+    await chat._request(base, None, kind="plan")
+    await chat._request(base, None, kind="plan")
+    prefix = chat.last_call.prefix
+    assert prefix is not None and prefix["fresh_chars"] == 0
+
+
+def _reusable_events() -> list[dict[str, Any]]:
+    def event(run: str, type_: str, **data: Any) -> dict[str, Any]:
+        return {"v": 1, "type": type_, "run_id": run, "data": data}
+
+    def usage(prompt: int, cached: int) -> dict[str, Any]:
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": 1,
+            "total_tokens": prompt + 1,
+            "cached_tokens": cached,
+        }
+
+    def prefix(fresh: int, size: int) -> dict[str, Any]:
+        return {
+            "messages": 1,
+            "chars": 5,
+            "first_changed": None,
+            "tools_changed": False,
+            "against": {"kind": "plan", "request": 1},
+            "fresh_chars": fresh,
+            "request_chars": size,
+        }
+
+    return [
+        event("r1", "assistant.message", step=1, usage=usage(100, 0)),
+        event(
+            "r1",
+            "assistant.message",
+            step=2,
+            usage=usage(100, 60),
+            prefix=prefix(20, 100),
+        ),
+        event("r2", "assistant.message", step=1, usage=usage(100, 0)),
+        event(
+            "r2",
+            "assistant.message",
+            step=2,
+            usage=usage(200, 150),
+            prefix=prefix(50, 400),
+        ),
+    ]
+
+
+def test_cache_report_gives_the_reusable_share_per_run_and_pooled(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "run.jsonl"
+    log.write_text("\n".join(json.dumps(e) for e in _reusable_events()) + "\n")
+    done = _report(log)
+    assert done.returncode == 0, done.stderr
+    reusable = [
+        line.strip() for line in done.stdout.splitlines() if "reusable:" in line
+    ]
+    assert reusable == [
+        "reusable: 1 requests after the first, 100 prompt tokens, ~20 fresh "
+        "(estimated), 60 cached, reusable share 75.0% "
+        "(all-token share of these requests 60.0%)",
+        "reusable: 1 requests after the first, 200 prompt tokens, ~25 fresh "
+        "(estimated), 150 cached, reusable share 85.7% "
+        "(all-token share of these requests 75.0%)",
+        "reusable: 2 requests after the first, 300 prompt tokens, ~45 fresh "
+        "(estimated), 210 cached, reusable share 82.4% "
+        "(all-token share of these requests 70.0%)",
+    ]
+    # Today's all-token share stays, over every request.
+    assert "total: 4 requests, 500 prompt tokens, 210 cached" in done.stdout
+    assert "cached share 42.0%" in done.stdout
+
+
+def test_cache_report_says_when_a_log_has_no_fresh_chars(tmp_path: Path) -> None:
+    events = _reusable_events()
+    for event in events:
+        (event["data"].get("prefix") or {}).pop("fresh_chars", None)
+    log = tmp_path / "old.jsonl"
+    log.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    done = _report(log)
+    assert done.returncode == 0, done.stderr
+    assert "reusable: n/a (needs cached_tokens and fresh_chars" in done.stdout
+    assert "cached share 42.0%" in done.stdout
+
+
+async def test_cache_report_reads_the_fresh_chars_of_a_recorded_run(
+    tmp_path: Path,
+) -> None:
+    stub = Stub([_call_reply(_cached(0)), _final_reply(_cached(64))])
+    events = await _plans(stub)
+    log = tmp_path / "run.jsonl"
+    log.write_text(
+        "\n".join(
+            json.dumps({"v": 1, "type": "event", "event": e.to_dict()}) for e in events
+        )
+        + "\n"
+    )
+    done = _report(log)
+    assert done.returncode == 0, done.stderr
+    [line] = [x for x in done.stdout.splitlines() if "reusable:" in x]
+    assert "1 requests after the first, 100 prompt tokens" in line
+    prefix = events[1].data["prefix"]
+    fresh = 100 * prefix["fresh_chars"] / prefix["request_chars"]
+    assert f"~{round(fresh)} fresh (estimated), 64 cached" in line
+    assert f"reusable share {100 * 64 / (100 - fresh):.1f}%" in line
+    assert "n/a" not in line

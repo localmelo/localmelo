@@ -133,6 +133,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental `cache_layout` and `window_messages` options for prompt-cache reuse
+  (#183), off by default. `--cache-layout v3` (`[agent] cache_layout`), with the fixed
+  prefix, appends a reflection once at the attempt boundary as an ordinary window
+  message instead of rebuilding it as the last message of every planning request,
+  keeps the reflection request and its reply in the window so the next planning
+  request continues it, and asks an unreadable reflection again on the same prefix
+  instead of as a text transcript; older reflection blocks stay in the history until
+  evicted. `--window-messages N` (`[agent] window_messages`, 8 to 256, default 20) sets
+  the working window's message cap, so the prompt-size fit can be the only evictor.
+  The default requests are unchanged. Each request's `prefix` now also has
+  `fresh_chars` and `request_chars` (the characters that no earlier request of the run
+  held, and all of them), and `scripts/cache_report.py` reports the reusable share
+  `cached / (prompt - fresh)` per run and pooled beside the share of all prompt tokens;
+  `fresh` is an estimate. ([#228])
+
 - What runs now, in the web console header and the macOS app (#213).
   `GET /api/health` gains `status`: `running` counts the console's chats with a
   turn in flight, scheduler tasks in `running`, and, from the CLI file under a
@@ -1426,6 +1441,7 @@ earlier milestones.
 [#224]: https://github.com/localmelo/localmelo/pull/224
 [#226]: https://github.com/localmelo/localmelo/pull/226
 [#227]: https://github.com/localmelo/localmelo/pull/227
+[#228]: https://github.com/localmelo/localmelo/pull/228
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

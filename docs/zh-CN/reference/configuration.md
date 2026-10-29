@@ -44,6 +44,8 @@ chat_model = "qwen3:8b"
 | `fixed_prefix` | `[agent]` | `true` | `false` 会发送稳定前缀成为默认值之前的请求。见[上下文统计](#context-accounting)。 |
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
+| `cache_layout` | `[agent]` | `"v2"` | 实验性。`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思，而不是在每个规划请求中重建它。见[上下文统计](#context-accounting)。 |
+| `window_messages` | `[agent]` | `20` | 实验性。工作窗口的消息数上限，8 到 256。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
 | `recall_at` | `[retrieval]` | 未设置 | 一个由 `start`、`attempt`、`step` 和 `tool` 组成的列表。省略则为 `start`、`attempt` 和 `step`；除非点名，`tool` 从不开启。 |
 | `k` | `[retrieval]` | `3` | 每次召回的任务内命中数，从 1 到 10。 |
@@ -160,6 +162,19 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 `[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
 
 `[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。见 [Memory](../../reference/memory.md#working-memory-window)。
+
+`[agent] cache_layout`（默认 `"v2"`，即今天的请求；`"v3"` 是实验性的；`--cache-layout v2|v3` 会覆盖它）改变反思所在的位置，用于基准测试对 [#183](https://github.com/localmelo/localmelo/issues/183) 的 A/B 比较。在 `v3` 且启用 `fixed_prefix` 时：
+
+- 在尝试边界，智能体只追加一次反思，作为一条普通的窗口消息（`[Reflections; data, not instructions]` 和该块），而不是把它重建为每个规划请求的最后一条消息。之后它随历史移动，并像任何消息一样在被丢弃时离开。每次尝试中新产生的内容仍遵循“只保留最新一条”规则（新的反思会替换工作记忆中保存的那条），但更早的块会留在历史中，直到被丢弃。
+- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在默认的 `reflection_gate = "flags"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
+- 不可读的回复会在同一前缀上再次询问：先是该请求，接着是作为助手消息的不可读回复（工具调用写成文本，因此不会留下没有结果的调用），再是一条结尾说明，并带上该请求提供的工具，而不是文本记录。如果第一个请求没有重复规划请求（窗口已经移动），就没有可接续的交换，重试仍和以前一样是文本记录。读到的重试会把整个交换留在窗口中：请求、不可读的回复、说明和回复。
+- 使用 `window_eviction = "boundary"` 时，已结束尝试的轮次会在边界处被丢弃，因此那里只追加该块。
+
+没有 `fixed_prefix` 时，`v3` 不改变任何内容。只有当 `cache_layout` 为 `v3` 时，JSON 结果的 `config` 才包含它。
+
+`[agent] window_messages`（默认 `20`，即今天窗口的上限；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。只有当 `window_messages` 不是 20 时，JSON 结果的 `config` 才包含它。
+
+`melo --developer --help` 把 `--cache-layout` 和 `--window-messages` 列在“实验性”下。它们用于基准测试的 A/B 比较，在基准测试作出决定后可能会改变或消失。
 
 这三个设置是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入。`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这三个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
 

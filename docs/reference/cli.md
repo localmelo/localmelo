@@ -164,6 +164,8 @@ two equal.
 | `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
 | `--reflect-tool-guard` | experimental | #183 |
+| `--cache-layout` | experimental | #183 |
+| `--window-messages` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
 | `--replay-turns` | experimental | #183 |
@@ -220,7 +222,9 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--fixed-prefix on\|off` | `on` | Use a versioned fixed system prefix with the local date frozen at run start; `off` sends the earlier requests. Overrides `[agent] fixed_prefix`. |
 | `--window-eviction slide\|chunk\|boundary` | `chunk` | How working memory drops old turns: `chunk` eight messages at a time; `slide` one unit per step once full (the earlier default); `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
-| `--reflect-tool-guard on\|off` | `on` | With `on`, every reflection request offers the tools of that step's planning request (same list, order and schema, so a server's prompt prefix holds) and its last user message ends with `Answer with the JSON object only; do not call any tool.`; `tool_choice` is untouched. The retry request is unchanged. With `off`, the request has neither. Overrides `[agent] reflect_tool_guard`; see [Configuration](configuration.md#context-accounting). |
+| `--reflect-tool-guard on\|off` | `on` | With `on`, every reflection request offers the tools of that step's planning request (same list, order and schema, so a server's prompt prefix holds) and its last user message ends with `Answer with the JSON object only; do not call any tool.`; `tool_choice` is untouched. The retry request is unchanged (except with `--cache-layout v3`, which continues the request). With `off`, the request has neither. Overrides `[agent] reflect_tool_guard`; see [Configuration](configuration.md#context-accounting). |
+| `--cache-layout v2\|v3` | `v2` | With the fixed prefix, `v3` appends a reflection once at the attempt boundary as a window message, keeps the reflection request and its reply in the window, and asks an unreadable reflection again on the same prefix; `v2` is today's requests. Without the fixed prefix it changes nothing. Overrides `[agent] cache_layout`; see [Configuration](configuration.md#context-accounting). |
+| `--window-messages N` | `20` | The working window's message cap, 8 to 256. Overrides `[agent] window_messages`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |

@@ -14,6 +14,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from localmelo.melo.schema import (
+    SHORT_TERM_MAX,
+    WINDOW_MESSAGES_MAX,
+    WINDOW_MESSAGES_MIN,
+)
+
 
 class ConfigError(Exception):
     """Raised when configuration is invalid or incomplete."""
@@ -51,6 +57,7 @@ VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
+CACHE_LAYOUTS = ("v2", "v3")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -148,6 +155,8 @@ class AgentConfig:
     fixed_prefix: bool = True  # stable prompt prefix; false is the old request
     window_eviction: str = "chunk"  # slide | chunk | boundary
     reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
+    cache_layout: str = "v2"  # v2 | v3 (experimental; needs fixed_prefix)
+    window_messages: int = SHORT_TERM_MAX  # working window cap (8-256, experimental)
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -447,6 +456,21 @@ class Config:
             errors.append(
                 f"[agent] window_eviction {self.agent.window_eviction!r} is not "
                 f"recognised. Must be one of {WINDOW_EVICTIONS}."
+            )
+        if self.agent.cache_layout not in CACHE_LAYOUTS:
+            errors.append(
+                f"[agent] cache_layout {self.agent.cache_layout!r} is not "
+                f"recognised. Must be one of {CACHE_LAYOUTS}."
+            )
+        window: object = self.agent.window_messages
+        if (
+            isinstance(window, bool)
+            or not isinstance(window, int)
+            or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
+        ):
+            errors.append(
+                f"[agent] window_messages must be an int from "
+                f"{WINDOW_MESSAGES_MIN} to {WINDOW_MESSAGES_MAX}, got {window!r}"
             )
         turns: object = self.agent.replay_turns
         if turns is not None and (
@@ -1013,6 +1037,8 @@ def save(cfg: Config) -> None:
         or cfg.agent.fixed_prefix != defaults.fixed_prefix
         or cfg.agent.window_eviction != defaults.window_eviction
         or cfg.agent.reflect_tool_guard != defaults.reflect_tool_guard
+        or cfg.agent.cache_layout != defaults.cache_layout
+        or cfg.agent.window_messages != defaults.window_messages
         or cfg.agent.captured_history
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
@@ -1032,6 +1058,10 @@ def save(cfg: Config) -> None:
             lines.append(
                 f"reflect_tool_guard = {_toml_value(cfg.agent.reflect_tool_guard)}"
             )
+        if cfg.agent.cache_layout != defaults.cache_layout:
+            lines.append(f"cache_layout = {_toml_string(cfg.agent.cache_layout)}")
+        if cfg.agent.window_messages != defaults.window_messages:
+            lines.append(f"window_messages = {_toml_value(cfg.agent.window_messages)}")
         if cfg.agent.captured_history:
             lines.append("captured_history = true")
         if cfg.agent.tool_env:

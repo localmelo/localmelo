@@ -48,7 +48,9 @@ and ``reflect_tool_guard`` now default to on, ``chunk`` and on, so
 them (an absent key is the new default, ``fixed_prefix = false`` stays off) and has a
 new hash; ``--fixed-prefix off --window-eviction slide --reflect-tool-guard off``
 send the earlier requests, which the legacy goldens check with those values.
-``_check_args`` is not pinned.
+``--cache-layout`` and ``--window-messages`` add two opt-in flags to ``_direct_options``
+and a check of their config values to ``_build_direct_mode_agent`` (the defaults ``v2``
+and 20 send today's requests), so both have new hashes. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -70,12 +72,12 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "c88b9408a648bc3ca63a35a8ff19119de4afca31e2b2c3f798733c6dcd3d36b2",
+    "_build_direct_mode_agent": "443c640eb422e849e9468869f474850eb38fc4e412fd0f45e94ded9f2a45e91c",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "b5e75a9f080a4b99efff29d5379c2d935ca295503758da015abb2879044e2a03",
+    "_direct_options": "1b7c376ecb388d33257f4fdab48fdb7730d99f538f4a586fc0c4dc18e1c0af65",
     "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

@@ -143,6 +143,10 @@ class WorkingMemory:
 
     # ── Conversation buffer ──
 
+    def holds(self, msg: Message) -> bool:
+        """Whether the window still holds this very message (not an equal one)."""
+        return any(held is msg for held in self._buf)
+
     def append(self, msg: Message, *, aliases: Iterable[str] = ()) -> None:
         """Append *msg*; *aliases* are the recall aliases its block shows."""
         self._buf.append(msg)
@@ -255,7 +259,8 @@ class WorkingMemory:
             return
         # With an eviction chunk, a full window drops down to max_len - chunk
         # in one go, so the oldest retained turn stays put until it fills again.
-        target = max(self._max_len - self._evict_chunk, 0)
+        # At most half the window goes at once, so a small cap keeps some history.
+        target = self._max_len - min(self._evict_chunk, self._max_len // 2)
         while len(self._buf) > target:
             size = self._leading_unit_size()
             if size >= len(self._buf):

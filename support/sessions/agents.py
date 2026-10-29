@@ -37,7 +37,13 @@ EmbeddingWrapper = Callable[[BaseEmbeddingProvider], BaseEmbeddingProvider]
 
 # The settings that keep each request an extension of the previous one. A config
 # file that lacks a key has its default; one that sets a key keeps it.
-CACHE_SETTINGS: Final = ("fixed_prefix", "window_eviction", "reflect_tool_guard")
+CACHE_SETTINGS: Final = (
+    "fixed_prefix",
+    "window_eviction",
+    "reflect_tool_guard",
+    "cache_layout",
+    "window_messages",
+)
 
 
 def configured_cache_options(
