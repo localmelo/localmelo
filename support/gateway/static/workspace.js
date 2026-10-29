@@ -1106,6 +1106,8 @@ function itemNode(item, turn, context = {}) {
       node.dataset.kind = item.noticeKind || "";
       return node;
     }
+    case "fact":
+      return el("div", "fact-item", item.message);
     case "reflection": {
       const card = el("details", "reflection");
       card.open = item.expanded === true;
@@ -1783,9 +1785,16 @@ const chatStatus = setupStatusRow({ api, root: $("status-row") });
 
 let workerMode = false;
 let taskMode = false;
+const workerStatus = setupStatusRow({ api, root: statusRowNode() });
 const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); }, (fn, ms) => {
   const timer = setInterval(fn, ms);
   return () => globalThis.clearInterval?.(timer);
+}, {
+  statusRow: workerStatus,
+  doc: document,
+  open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
+  schedule: (fn, ms) => setTimeout(fn, ms),
+  cancel: (id) => clearTimeout(id),
 });
 const tasks = setupTasks({
   api,
@@ -1952,11 +1961,11 @@ function renderWorkers() {
     for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : formatDuration(duration)], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
       meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
     }
-    nodes.push(meta);
+    nodes.push(meta, workerStatus.element);
     if (state.unsupported) nodes.push(el("p", "muted", "Some recorded event types cannot be shown."));
     if (state.view.turns.length > 1) nodes.push(el("p", "", "This run has multiple recorded turns."));
     if (!state.view.turns.length) nodes.push(el("p", "", "No recorded turn."));
-    if (session.status === "running") nodes.push(el("p", "", "Run not finished. This view updates every few seconds."));
+    if (session.status === "running") nodes.push(el("p", "", "Run not finished. New steps appear as they are recorded."));
     nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
     for (const turn of state.view.turns) {
       nodes.push(el("h2", "", "Brief"), el("p", "worker-brief", turn.userText || "No brief recorded."), el("h2", "", "Work"));

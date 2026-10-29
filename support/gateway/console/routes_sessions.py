@@ -316,7 +316,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
         last_event_id: str | None = Header(None, alias="Last-Event-ID"),
     ) -> Response:
         console.require_store()
-        await _require_session(console, session_id)
+        _, store = await _read_session(console, session_id)
+        worker = store is console.worker_history
+        scope = None if worker else session_id
         # The header wins over ?after, so ?after is judged only without one.
         if last_event_id is not None:
             start = _event_id(last_event_id, "Last-Event-ID")
@@ -327,11 +329,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
         high_water: int | None = None
         if not follow:
             high_water = await _store_call(
-                console, console.store.latest_event_id(session_id), session_id
+                console, store.latest_event_id(session_id), scope
             )
+
+        async def run_is_live() -> bool:
+            info = await store.get_session(session_id)
+            return info is not None and info.busy
+
         console.stream_opened()
         stream = EventStream(
-            console.store,
+            store,
             console.hub,
             console.shutdown,
             session_id,
@@ -339,6 +346,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             follow=follow,
             high_water=high_water,
             on_close=console.stream_closed,
+            # The hub hears only this process's commits; a worker run is
+            # written by another process, so its stream polls the file.
+            live=run_is_live if worker else None,
         )
         return EventStreamResponse(
             stream,

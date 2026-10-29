@@ -429,8 +429,10 @@ The newest sessions first. Only `chat` sessions are listed by default.
   The detail response's top-level `tokens` separately counts completion tokens;
   for a worker it is `null` if no turn has an integer `completion_tokens`.
 - Worker sessions are read-only. Their session detail and turns (including
-  `events=true`) and stored image blobs are available by id; write routes and the `/events` SSE
-  route return 404. For a worker id found only in the CLI file, `/tools`,
+  `events=true`), stored image blobs, `/events` and `/status` are available by
+  id; write routes return 404 (`POST /api/turns/{turn_id}/cancel` returns 409
+  `turn_not_running`: no turn of a worker run runs in the gateway). For a
+  worker id found only in the CLI file, `/tools`,
   `/memory`, `/runs` and the session-scoped submission lookup also return
   404 `not_found`. If an id exists in both files, the gateway session wins.
   Worker session objects add `meta` with the stored provenance, and their
@@ -511,7 +513,7 @@ The session's turns, oldest first within the page.
   turns and `replay_from` is the event id just before the oldest returned
   turn's `turn.started`, or 0 when the session has no turn. For gateway
   sessions, pass it as the event stream's `after` to replay the page's events.
-  Worker sessions expose events only through `events=true`, not SSE.
+  For a worker session, `events=true` is one read; `/events` follows it.
 - With `before=N` (1 to SQLite's largest integer), the page is the newest
   turns numbered below `N`, and there is no `replay_from`.
 - `has_earlier` says that older turns exist beyond the page.
@@ -560,13 +562,20 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it
   missed, once.
+- A worker run (a session of the CLI file) is served from the CLI file with
+  the same frames, `after`, `follow` and `Last-Event-ID`. Another process
+  writes that file, so a following stream reads it about once a second, sends
+  the new events with their ids, and ends once the run holds no live lease
+  and its last event is sent (`busy` is false in the session object). A run
+  with no live lease, as one that crashed leaves, is replayed and ends at
+  once. Keepalives are as for a chat; each open stream is one reader of the
+  file, closed when the client goes away.
 
 ## GET /api/sessions/{id}/status
 
-The numbers the terminal's `/status` and status bar show for one chat or task
-session, folded on the server from its stored events with the terminal's own
-code, so both agree. A worker session (one made by `--save-session`, in the
-CLI's store) is 404 `not_found` until the console reads those events.
+The numbers the terminal's `/status` and status bar show for one chat, task or
+worker session, folded on the server from its stored events with the
+terminal's own code, so both agree. A worker run is read from the CLI's file.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
