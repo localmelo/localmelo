@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import re
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -1296,6 +1297,33 @@ async def test_status_shows_the_facts(
     assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text
     assert "version    melo " in text
+
+
+async def test_status_prints_the_usage_rows(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    session.enter("/status")
+    await _until(lambda: "version    melo " in out.text())
+    text = out.text()
+    assert "cache      no requests yet" in text
+    assert "context    no context budget measured yet" in text
+    assert "steps      no progress facts yet" in text
+    assert "tasks      no task store in this session" in text
+    session.renderer.usage.observe(
+        {
+            "type": "assistant.message",
+            "ts": time.time(),
+            "data": {"usage": {"prompt_tokens": 400, "cached_tokens": 300}},
+        }
+    )
+    session.enter("/status")
+    await _until(lambda: out.text().count("version    melo ") == 2)
+    assert "last request 75% cached (300 of 400 prompt tokens)" in out.text()
 
 
 async def test_retry_runs_the_last_turn_again(setup: Setup) -> None:

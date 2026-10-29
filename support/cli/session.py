@@ -75,6 +75,7 @@ from localmelo.support.sessions.store import (
     title_from_text,
 )
 from localmelo.support.sessions.sync import SessionMark
+from localmelo.support.usage_snapshot import usage_lines
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def _toggle(arguments: str, current: bool) -> bool | None:
     return None
 
 
-def _progress_lines(payload: dict[str, Any], symbols: Any) -> list[str]:
+def _progress_lines(payload: Mapping[str, Any], symbols: Any) -> list[str]:
     """A run.progress payload as /progress prints it, one fact per line."""
     dot = f" {symbols.dot} "
     level = payload.get("level") or 0
@@ -924,7 +925,7 @@ class CliSession:
             )
 
     async def status(self) -> None:
-        """``/status``: the model, workspace, session, approvals, tools, memory, limits, files."""
+        """``/status``: the model, workspace, session, approvals, tools, memory, limits, usage, files."""
         from localmelo.support.cli.render import LOG_PATH
         from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
         from localmelo.support.sessions.display import localmelo_version
@@ -1006,6 +1007,13 @@ class CliSession:
                 f"{options.max_attempts} attempts · commands stop after {limit}"
             )
         )
+        for row in usage_lines(
+            self.renderer.usage,
+            local=backend.local,
+            now=time.time(),
+            steps=lambda payload: _progress_lines(payload, self.renderer.symbols),
+        ):
+            self.out.print(self._text(row))
         files = [getattr(self.store, "path", ""), LOG_PATH]
         if os.environ.get("LOCALMELO_PERSIST_MEMORY") == "1" or getattr(
             self.agent.options, "memory_dir", None
