@@ -188,6 +188,26 @@ from-the-child
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会输出尽力生成的结果、[状态行](../../reference/cli.md#output)（英文）和提示，例如服务器无响应时显示 `Is the model server running at URL?`。
 
+<a id="the-status-bar"></a>
+
+### 状态栏
+
+输入框下方的状态栏显示本会话的用量，数据来自 melo 已收到的事件：不发请求、不轮询、没有定时器。
+在模型和工作区之后从左到右，每一段只在有数据时出现：
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
+  本地服务器在距上次请求超过一分钟后还会显示 `idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
+- `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
+- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。
+- `tasks 1 running 2 queued`：仅在能访问任务存储时出现。
+
+状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
+`/status` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
+
 <a id="streamed-replies"></a>
 
 ### 流式回复

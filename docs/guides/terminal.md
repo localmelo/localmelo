@@ -341,6 +341,35 @@ happens without the explicit `/copy` command.
   prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
 
+### The status bar
+
+The bar under the input box carries the usage figures of the session, taken
+from events melo has already received: no request, no polling, no timer.
+Left to right, after the model and the workspace, each segment appears only
+when it has data:
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+```
+
+- `cache 83%` is the share of the last request's prompt tokens the server
+  reported as cached (`cache --` when the server reports none, never 0%). For
+  a local server, `idle 3m` follows once a minute has passed since the last
+  request; a local server evicts its prefix cache by memory, not by time, so
+  there is no countdown.
+- `ctx 12k/32k` is the last measured prompt over the input limit, or just
+  `ctx 12k` when no limit is known.
+- `step 4 attempt 2 phase fix` are the run's progress facts while a run is
+  active, never a percent or `n/max`.
+- `tasks 1 running 2 queued` appears only when a task store is reachable.
+
+The bar redraws when an event arrives or you press a key, so `idle` is as of
+the last redraw. On a narrow terminal the title goes first, then the segments
+right to left, then the workspace is cut, and the bar never wraps. `/status`
+prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
+it was before these segments: the model, workspace, `ctx` of the last request
+and the title. There is no command-line flag for it.
+
 ### Streamed replies
 
 Streaming is off by default. Turn it on in `config.toml`:

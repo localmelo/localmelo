@@ -15,16 +15,27 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker.checker import Checker
 from localmelo.melo.contracts.events import AgentEvent
-from localmelo.melo.executor import Executor
+from localmelo.melo.executor import (
+    ErrorCategory,
+    ExecutionRequest,
+    ExecutionStatus,
+    Executor,
+)
+from localmelo.melo.schema import CheckResult, ToolCall, ToolDef
 from localmelo.support.cli.worker_contract import WorkerObserver, run_brief_check
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.tests.agent.test_reflection_gate import FakeLLM
 
 
-async def _executor(
-    root: Path | None, builtins: frozenset[str] | None, **options: Any
-) -> Executor:
+async def _agent(
+    root: Path | None,
+    builtins: frozenset[str] | None,
+    *,
+    gate: bool = True,
+    **options: Any,
+) -> Agent:
     agent = Agent(
         llm=FakeLLM([]),
         options=AgentOptions(
@@ -32,11 +43,22 @@ async def _executor(
             mode="direct",
             builtins=builtins,
             workspace_root=None if root is None else str(root),
+            brief_check=run_brief_check if gate else None,
             **options,
         ),
     )
     await agent._ensure_tools()
-    return agent.executor
+    return agent
+
+
+async def _executor(
+    root: Path | None,
+    builtins: frozenset[str] | None,
+    *,
+    gate: bool = True,
+    **options: Any,
+) -> Executor:
+    return (await _agent(root, builtins, gate=gate, **options)).executor
 
 
 SHELL = frozenset({"shell_exec"})
@@ -79,14 +101,58 @@ class TestRunBriefCheck:
         assert "abc" not in named.command
 
     @pytest.mark.asyncio
-    async def test_a_policy_refusal_is_not_run(self, tmp_path: Path) -> None:
-        # The default direct set offers no shell_exec: the call is refused.
-        executor = await _executor(tmp_path, None)
+    @pytest.mark.parametrize("builtins", [None, frozenset(), SHELL])
+    async def test_the_check_runs_in_every_builtins_setting(
+        self, tmp_path: Path, builtins: frozenset[str] | None
+    ) -> None:
+        # The default direct set offers no shell_exec, and --builtins none
+        # nothing at all: the harness's own call still runs.
+        executor = await _executor(tmp_path, builtins)
+        passed = await run_brief_check(executor, "echo fine")
+        assert (passed.passed, passed.exit_code, passed.refused) == (True, 0, "")
+        failed = await run_brief_check(executor, "echo broken; exit 3")
+        assert (failed.passed, failed.exit_code, failed.refused) == (False, 3, "")
+
+    @pytest.mark.asyncio
+    async def test_the_model_still_cannot_call_shell_exec(self, tmp_path: Path) -> None:
+        agent = await _agent(tmp_path, None)
+        marker = tmp_path / "ran"
+        assert "shell_exec" not in [t.name for t in agent.hippo.list_tools()]
+        outcome = await agent.executor.execute_structured(
+            ExecutionRequest(
+                tool_name="shell_exec", arguments={"command": f"touch {marker}"}
+            )
+        )
+        assert outcome.status is ExecutionStatus.ERROR
+        assert outcome.error_category is ErrorCategory.TOOL_NOT_FOUND
+        assert "shell_exec is not available" in outcome.error
+        assert not marker.exists()
+
+    @pytest.mark.asyncio
+    async def test_a_run_without_a_gate_has_no_check_to_run(
+        self, tmp_path: Path
+    ) -> None:
+        executor = await _executor(tmp_path, None, gate=False)
         marker = tmp_path / "ran"
         result = await run_brief_check(executor, f"touch {marker}")
         assert not marker.exists()
         assert result.passed is False and result.exit_code is None
         assert "shell_exec is not available" in result.refused
+
+    @pytest.mark.asyncio
+    async def test_the_checker_can_still_block_a_check(self, tmp_path: Path) -> None:
+        # The check goes through pre_execute like any call.
+        agent = await _agent(tmp_path, None)
+        marker = tmp_path / "ran"
+
+        async def block(call: ToolCall, tool_def: ToolDef | None) -> CheckResult:
+            return CheckResult(allowed=False, reason="not this one")
+
+        agent.checker.pre_execute = block  # type: ignore[assignment,method-assign]
+        result = await run_brief_check(agent.executor, f"touch {marker}")
+        assert not marker.exists()
+        assert result.passed is False and result.exit_code is None
+        assert result.refused == "Blocked: not this one"
 
     @pytest.mark.asyncio
     async def test_a_timeout_is_a_failure_that_is_not_refused(
@@ -180,8 +246,9 @@ class TestCli:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
         brief: str,
-        replies: list[str],
+        replies: list[Any],
         on_request: Callable[[int], None] | None = None,
+        builtins: tuple[str, ...] = ("--builtins", "all"),
     ) -> tuple[dict[str, Any], list[dict[str, Any]], list[AgentOptions]]:
         bodies: list[dict[str, Any]] = []
         built: list[AgentOptions] = []
@@ -191,12 +258,12 @@ class TestCli:
             if on_request is not None:
                 on_request(len(bodies))
             reply = replies[min(len(bodies), len(replies)) - 1]
-            return httpx.Response(
-                200,
-                json={
-                    "choices": [{"message": {"role": "assistant", "content": reply}}]
-                },
+            message = (
+                reply
+                if isinstance(reply, dict)
+                else {"role": "assistant", "content": reply}
             )
+            return httpx.Response(200, json={"choices": [{"message": message}]})
 
         def build(*args: Any, options: AgentOptions, **kwargs: Any) -> Agent:
             built.append(options)
@@ -220,13 +287,16 @@ class TestCli:
             sys,
             "argv",
             ["melo", "--brief", str(file), "--workspace", str(workspace)]
-            + ["--builtins", "all"],
+            + list(builtins),
         )
+        self.exit_code = 0
         try:
             cli.main()
         except SystemExit as exc:
-            assert exc.code in (0, None)
-        return json.loads(capsys.readouterr().out), bodies, built
+            self.exit_code = int(exc.code or 0)
+        captured = capsys.readouterr()
+        self.stderr = captured.err
+        return json.loads(captured.out), bodies, built
 
     def test_a_brief_run_hands_the_agent_the_gate(
         self,
@@ -277,10 +347,14 @@ class TestCli:
         record, bodies, _built = self._main(
             tmp_path, monkeypatch, capsys, "Do it.\nCheck: exit 4\n", ["Done"]
         )
-        assert (record["status"], record["exit_code"]) == ("completed", 0)
+        assert (record["status"], record["exit_code"]) == ("completed", 4)
+        assert self.exit_code == 4
         assert record["tests"]["state"] == "failed"
         assert [i["exit_code"] for i in record["tests"]["items"]] == [4]
         assert len(bodies) == 3  # the answer, and two retries
+        assert self.stderr.splitlines() == [
+            "melo: the brief's check failed: exit 4 (exit 4)"
+        ]
 
     def test_a_brief_without_a_check_line_is_not_recorded(
         self,
@@ -293,3 +367,127 @@ class TestCli:
         )
         assert record["tests"] == {"state": "not_recorded", "items": []}
         assert len(bodies) == 1
+
+    @pytest.mark.parametrize("builtins", [(), ("--builtins", "none")])
+    def test_the_check_runs_by_default_and_a_pass_exits_0(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        builtins: tuple[str, ...],
+    ) -> None:
+        record, bodies, built = self._main(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            "Do it.\nCheck: echo fine\nCheck: test -d .\n",
+            ["Done"],
+            builtins=builtins,
+        )
+        assert built[0].mode == "direct" and "shell_exec" not in (
+            built[0].builtins or ()
+        )
+        assert (record["status"], record["exit_code"], self.exit_code) == (
+            "completed",
+            0,
+            0,
+        )
+        assert record["tests"]["state"] == "passed"
+        assert [i["exit_code"] for i in record["tests"]["items"]] == [0, 0]
+        assert not any("shell_exec" in str(b.get("tools")) for b in bodies)
+        assert self.stderr == ""
+
+    def test_a_failed_check_exits_4_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record, _bodies, _built = self._main(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            "Do it.\nCheck: echo no; exit 7\n",
+            ["Done"],
+            builtins=(),
+        )
+        assert (record["status"], record["exit_code"], self.exit_code) == (
+            "completed",
+            4,
+            4,
+        )
+        assert record["tests"]["state"] == "failed"
+        assert self.stderr.splitlines() == [
+            "melo: the brief's check failed: echo no; exit 7 (exit 7)"
+        ]
+
+    def test_a_refused_check_exits_4(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        async def block(*args: Any, **kwargs: Any) -> CheckResult:
+            return CheckResult(allowed=False, reason="not this one")
+
+        monkeypatch.setattr(Checker, "pre_execute", block)
+        record, _bodies, _built = self._main(
+            tmp_path, monkeypatch, capsys, "Do it.\nCheck: touch ran\n", ["Done"]
+        )
+        assert (record["status"], record["exit_code"], self.exit_code) == (
+            "completed",
+            4,
+            4,
+        )
+        [item] = record["tests"]["items"]
+        assert item["refused"] == "Blocked: not this one"
+        assert not (tmp_path / "work" / "ran").exists()
+        assert self.stderr.splitlines() == [
+            "melo: the brief's check failed: touch ran (not run)"
+        ]
+
+    def test_the_model_still_cannot_call_shell_exec_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        call = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_exec",
+                        "arguments": json.dumps({"command": "touch by_model"}),
+                    },
+                }
+            ],
+        }
+        record, bodies, _built = self._main(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            "Do it.\nCheck: touch by_check\n",
+            [call, "Done"],
+            builtins=(),
+        )
+        assert record["tests"]["state"] == "passed" and self.exit_code == 0
+        assert (tmp_path / "work" / "by_check").exists()
+        assert not (tmp_path / "work" / "by_model").exists()
+        tool_reply = next(m for m in bodies[1]["messages"] if m["role"] == "tool")
+        assert "shell_exec is not available" in tool_reply["content"]
+
+    def test_a_brief_without_a_check_never_exits_4(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        record, _bodies, _built = self._main(
+            tmp_path, monkeypatch, capsys, "Explain.\n", ["Done"], builtins=()
+        )
+        assert (record["exit_code"], self.exit_code) == (0, 0)
+        assert self.stderr == ""

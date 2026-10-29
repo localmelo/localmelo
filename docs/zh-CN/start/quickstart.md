@@ -58,6 +58,8 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 
 答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
 
+直接任务会不经询问就写入文件、运行 Python，并且没有 shell，除非传入 `--builtins all`。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
+
 所有选项见[命令行参考](../../reference/cli.md)（英文）。
 
 <a id="get-the-result-as-json"></a>
@@ -81,6 +83,37 @@ stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码�
 ### 运行结果
 
 `status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../reference/run-results.md)。
+
+<a id="run-a-worker-task"></a>
+
+## 运行 worker 任务
+
+worker 任务是写在文件里的任务简报（brief）。以 `Check:` 开头（前面没有空格）的一行写一条 shell 命令，用来判断任务是否完成：
+
+```bash
+cat > brief.md <<'EOF'
+Write hello.py so that it prints the word hello.
+Check: python3 hello.py | grep -x hello
+EOF
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
+echo "exit code: $?"
+python3 -c 'import json; r = json.load(open("result.json")); print(r["status"], r["tests"]["state"])'
+```
+
+模型完成后，`melo` 在工作区（当前文件夹，或 `--workspace`）中运行该检查，无论这次运行向模型提供了哪些工具。检查失败时，模型会被送回去修复，最多两次。最后两条命令的输出示例（模型的工作结果会有所不同）：
+
+```text
+exit code: 0
+completed passed
+```
+
+最后一轮的所有检查都以 0 退出时，`tests.state` 为 `passed`；有检查失败或无法运行时为 `failed`。运行以 `completed` 结束但检查失败时，退出码为 4，脚本可以据此停下：
+
+```bash
+melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
+```
+
+结果是一行 JSON，含 `status`、`exit_code`、`tests` 和运行记录。所有字段和退出码见[命令行参考](../../reference/cli.md#output)（英文）。
 
 <a id="save-a-configuration"></a>
 

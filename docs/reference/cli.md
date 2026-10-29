@@ -610,19 +610,24 @@ The fourth difference is that the run checks itself. A brief names its checks on
 lines that start with `Check:` (no leading space); the rest of each line is one
 shell command, for example `Check: uv run pytest tests/cli -q`. Before the run
 would end `completed`, the harness runs the commands in order, each as a
-`shell_exec` call of the run's executor: the same mode policy (a run that does
-not offer `shell_exec`, that is one without `--builtins all` or `--builtins
-shell_exec`, has every check refused),
-workspace root (`--workspace`) and shell timeout as the model's own calls. A
-check passes on exit status 0. When one fails, and the attempt has a step left
+`shell_exec` call of the run's executor, whether or not the run offers
+`shell_exec` to the model (in direct mode it does not, unless `--builtins all`
+or `--builtins shell_exec` says so; `--builtins none` does not stop the check:
+to skip it, remove the line). Only the harness's call gets past that filter:
+the model's tool list and its own `shell_exec` calls stay as they are. The
+checker's `pre_execute`, the workspace root (`--workspace`), the shell timeout
+and the redaction apply as they do to the model's own calls. A check passes on
+exit status 0. When one fails, and the attempt has a step left
 (or a `done` reflection can start another attempt), the run does not end: the
 next planning request carries one user message with the command, its exit code
 and the last 60 lines of its output, redacted, then "The task's check failed. Fix
 what it shows, run it again, then finish." Each failing check costs one retry,
 and a run has two. The first failure of a round stops the round. A check that is
 refused is not retried. When a check still fails at the end, the run ends
-`completed` as before, with no change to the exit code, but `tests` is `failed`
-and a `brief_check_failed` notice says so; when every check of the last round
+`completed` as before, but `tests` is `failed`, a `brief_check_failed` notice
+says so, and the exit code is 4 (see [Exit codes](#exit-codes); stderr gets one
+line, `melo: the brief's check failed: <command> (exit N)`, with `not run` for
+a refused check and `no exit status` for a timeout); when every check of the last round
 passes, `tests` is `passed`. Each run of a check emits a `brief_check` notice
 with its command, exit code and duration. A brief with no `Check:` line behaves
 as before, and the model's own account of its checks is still only that.
@@ -772,6 +777,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
 | 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode. |
 | 3 | The gateway could not start, for example because its port is in use. |
+| 4 | A `--brief` run ended `completed`, but its brief's check failed for good: `tests.state` is `failed`, a refused check included. `status` stays `completed` and the record's `exit_code` is 4. A brief without a `Check:` line never exits 4. |
 | 129 | SIGHUP ended the run. |
 | 130 | Ctrl+C (SIGINT) ended the run. |
 | 143 | SIGTERM ended the run. |
@@ -828,6 +834,9 @@ fi
 
 - Exit code 2 covers several statuses. Read `status` to tell them apart; see
   [Run results](run-results.md#statuses).
+- With `--brief`, exit code 4 means the run completed but its `Check:` command
+  failed: `melo --brief brief.md && next-step` does not run `next-step`. Read
+  `tests.state` in the record for the detail.
 - Set `--timeout`. Without it, nothing bounds the whole run: a server that
   sends keep-alive bytes while it generates never times out.
 - To stop `melo` from a supervisor, send SIGTERM and wait about 10 seconds

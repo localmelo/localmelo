@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.checker.checker import Checker
+from localmelo.melo.checker.checker import HARNESS_CALL, Checker
 from localmelo.melo.contracts.approvals import (
     APPROVAL_FAILED,
     ApprovalDecision,
@@ -24,7 +24,7 @@ from localmelo.melo.executor.models import (
     ToolOutput,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
-from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall, ToolDef
 
 if TYPE_CHECKING:
     from localmelo.melo.memory.coordinator import Hippo
@@ -58,6 +58,8 @@ class Executor:
         self._timeouts_ms: dict[str, float] = {}
         # The tools registered as requiring approval.
         self._marked_for_approval: set[str] = set()
+        # Tools only the harness may call (see register_harness_tool).
+        self._harness_defs: dict[str, ToolDef] = {}
         self._default_timeout_ms = timeout_ms
         self._policy = WorkspacePolicy(workspace_root)
 
@@ -98,6 +100,18 @@ class Executor:
         else:
             self._marked_for_approval.discard(name)
 
+    def register_harness_tool(
+        self, tool_def: ToolDef, fn: ToolCallable, *, timeout_ms: float | None = None
+    ) -> None:
+        """Register *fn* for the harness's own calls, not for the model.
+
+        The tool is not in the hippo, so the model is not offered it and its
+        own call is ``TOOL_NOT_FOUND``; only :meth:`execute_structured` with
+        ``harness=True`` runs it, by the same path as any other call.
+        """
+        self._harness_defs[tool_def.name] = tool_def
+        self.register(tool_def.name, fn, timeout_ms=timeout_ms)
+
     def requires_approval(self, name: str) -> bool:
         """Whether tool *name* is registered as requiring approval."""
         return name in self._marked_for_approval
@@ -110,6 +124,7 @@ class Executor:
         *,
         allowed: Collection[str] | None = None,
         approve: ApprovalGate | None = None,
+        harness: bool = False,
     ) -> ExecutionOutcome:
         """Structured execution path with rich outcome metadata.
 
@@ -154,11 +169,18 @@ class Executor:
         resolved again; when the result differs, as when a symlink took the
         file's place during the wait, the call is refused with
         ``PATH_POLICY_VIOLATION`` and does not run.
+
+        *harness* marks a call of the harness itself, such as a brief's
+        check: it also finds the tools of :meth:`register_harness_tool`, and
+        the checker's refusal of an ``exec`` tool that the mode does not
+        offer the model does not apply. Every other check still does.
         """
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
         # 1. Authoritative registry resolution
         tool_def = self.hippo.get_tool(request.tool_name)
+        if tool_def is None and harness:
+            tool_def = self._harness_defs.get(request.tool_name)
         if tool_def is None:
             # A built-in that the run's mode leaves out (P13b): say what the
             # run does offer, so the model can pick a tool that exists. No
@@ -216,7 +238,11 @@ class Executor:
                 )
 
         # 5. Pre-execution safety check
-        check = await self.checker.pre_execute(tool_call, tool_def)
+        slot = HARNESS_CALL.set(harness)
+        try:
+            check = await self.checker.pre_execute(tool_call, tool_def)
+        finally:
+            HARNESS_CALL.reset(slot)
         if not check.allowed:
             return ExecutionOutcome(
                 tool_name=request.tool_name,
