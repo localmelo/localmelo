@@ -760,6 +760,14 @@ def _utility(decision: ReflectionDecision) -> float:
     )
 
 
+# The line a brief run adds to the window when an attempt boundary finds the
+# workspace unchanged since the run started.
+NO_CHANGE_PUSH = (
+    "Nothing has changed in the workspace yet. Start this attempt by writing the "
+    "part of the task you can already write, then continue."
+)
+
+
 def _gate_stop_reason(
     decision: ReflectionDecision, gate: ReflectionGate = "flags"
 ) -> str | None:
@@ -807,14 +815,19 @@ _OUT_OF_REASONS = {
 
 
 def _stop_reason(
-    decision: ReflectionDecision | None, gate: ReflectionGate, out_of: str
+    decision: ReflectionDecision | None,
+    gate: ReflectionGate,
+    out_of: str,
+    *,
+    brief: bool = False,
 ) -> str | None:
     """Why the run does not go on after a reflection, ``None`` if it does.
 
     *decision* is ``None`` for a reply that holds no reflection, and
     *out_of* is the boundary's error (``""`` when another attempt can
     start). The one place that decides: ``continue_run`` is whether this
-    is ``None``.
+    is ``None``. In a *brief* run (``AgentOptions.brief_probe``) a
+    ``continue`` goes on whatever the gate's flags say.
     """
     if decision is None:
         return "unreadable_reply" if out_of else None
@@ -822,6 +835,8 @@ def _stop_reason(
         return "action_not_continue"
     if out_of:
         return _OUT_OF_REASONS[out_of]
+    if brief and decision.recommended_action == "continue":
+        return None
     return _gate_stop_reason(decision, gate)
 
 
@@ -1125,6 +1140,10 @@ class _RunState:
     # run, the recall records not yet sent, and the aliases shown but not yet
     # in the window.
     boundary_block: str = ""
+    # A brief run (AgentOptions.brief_probe): the workspace digest at the
+    # run's start, None outside a git tree.
+    brief: bool = False
+    workspace_digest: str | None = None
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -3333,7 +3352,7 @@ class Agent:
                 requires_replay=self._requires_replay,
             )
             planned = _as_planned(sent, query, query_block)
-            if run is not None and run.inbox is not None:
+            if run is not None and (run.inbox is not None or run.brief):
                 planned = coalesce_user_messages(planned)
             check = await self.checker.pre_plan(
                 others + planned,
@@ -3507,7 +3526,7 @@ class Agent:
             requires_replay=self._requires_replay,
         )
         planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
-        if run is not None and run.inbox is not None:
+        if run is not None and (run.inbox is not None or run.brief):
             planned = coalesce_user_messages(planned)
         all_msgs = long_context + planned + reflection_msgs
         check = await self.checker.pre_plan(
@@ -3567,7 +3586,7 @@ class Agent:
             run.pending_recalls = []
             run.pending_recall_records = []
         plan_args: dict[str, Any] = {}
-        if run is not None and run.inbox is not None:
+        if run is not None and (run.inbox is not None or run.brief):
             plan_args["coalesce_users"] = True
         if on_ready is not None:
             plan_args["on_ready"] = on_ready
@@ -4964,6 +4983,7 @@ class Agent:
             approval=approval,
             routine=routine,
             inbox=inbox,
+            brief=self.options.brief_probe is not None,
             place=place,
             limits=self._limits() if progress else None,
         )
@@ -5001,6 +5021,11 @@ class Agent:
             try:
                 if run.inbox is not None:
                     run.inbox.validate(self.executor.workspace_root or os.getcwd())
+                if run.brief:
+                    assert self.options.brief_probe is not None
+                    run.workspace_digest = await asyncio.to_thread(
+                        self.options.brief_probe, self._workspace_for_brief()
+                    )
                 async with deadline:
                     try:
                         await self._look_up(run, query)
@@ -5950,7 +5975,9 @@ class Agent:
             if reflection is not None:
                 entry, decision = reflection
             # None for a reply with no reflection, only with "flags".
-            stop_reason = _stop_reason(decision, opts.reflection_gate, out_of)
+            stop_reason = _stop_reason(
+                decision, opts.reflection_gate, out_of, brief=run.brief
+            )
             continue_run = stop_reason is None
             verdict = GateVerdict(
                 opts.reflection_gate,
@@ -6000,6 +6027,7 @@ class Agent:
                     run.attempts,
                     run.attempts + 1,
                 )
+                await self._push_if_unchanged(run)
                 continue
             assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
@@ -6037,6 +6065,27 @@ class Agent:
                 run.end("gate_stopped", result=best_effort, error=error)
                 return
             run.events.reflection(reflection, continue_run=True, verdict=verdict)
+            await self._push_if_unchanged(run)
+
+    async def _push_if_unchanged(self, run: _RunState) -> None:
+        """At a brief run's boundary: ask the next attempt to start writing.
+
+        When the workspace digest is the one from the run's start, a
+        ``no_change`` notice is emitted and a user line is added to the
+        window, so the next attempt's first planning request carries it.
+        Nothing happens outside a brief run or a git tree.
+        """
+        probe = self.options.brief_probe
+        if probe is None or run.workspace_digest is None:
+            return
+        digest = await asyncio.to_thread(probe, self._workspace_for_brief())
+        if digest != run.workspace_digest:
+            return
+        run.events.no_change()
+        self.hippo.working.append(Message(role="user", content=NO_CHANGE_PUSH))
+
+    def _workspace_for_brief(self) -> str:
+        return self.executor.workspace_root or os.getcwd()
 
     async def _run_single_attempt(
         self, task: TaskRecord, query: str, run: _RunState

@@ -44,6 +44,7 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "stuck": "The same tool calls or errors repeated; the attempt ends.",
     "budget": "The attempt used its step budget.",
     "empty_reply": "The model returned an empty reply; asking it to continue.",
+    "no_change": "Nothing has changed in the workspace yet.",
 }
 
 # Characters of a failed request's error that a retry notice quotes.
@@ -444,6 +445,12 @@ class _Emitter:
         if self._sink is None:
             return
         self._notice("empty_reply", NOTICE_MESSAGES["empty_reply"], {"count": count})
+
+    def no_change(self) -> None:
+        """A brief run's boundary found the workspace as it was at the start."""
+        if self._sink is None:
+            return
+        self._notice("no_change", NOTICE_MESSAGES["no_change"], {})
 
     def retry(self, request_attempt: int, delay: float, error: ProviderError) -> None:
         """A model request failed and is sent again after *delay* seconds.
