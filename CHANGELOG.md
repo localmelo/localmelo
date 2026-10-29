@@ -50,7 +50,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `brief_check_failed` notice says so; when every check passes `tests` is
   `passed`. Each run of a check is a `brief_check` notice and a `tests` item with
   `source: "brief_check"`. A brief with no `Check:` line, and runs without
-  `--brief`, are unchanged ([#NN]).
+  `--brief`, are unchanged ([#195]).
 
 - The `reflection` event now records the decision's three flags (`flags`), the
   gate in force (`gate`, with `utility` under `"utility"`) and a `stop_reason`
@@ -1188,3 +1188,4 @@ earlier milestones.
 [#192]: https://github.com/localmelo/localmelo/pull/192
 [#193]: https://github.com/localmelo/localmelo/pull/193
 [#194]: https://github.com/localmelo/localmelo/pull/194
+[#195]: https://github.com/localmelo/localmelo/pull/195
