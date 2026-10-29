@@ -144,6 +144,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
+| `window_eviction` | `chunk` or `boundary` when the run used one; absent for the default `slide`. |
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |

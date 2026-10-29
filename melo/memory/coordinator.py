@@ -174,6 +174,7 @@ class Hippo:
         long: LongTerm | None = None,
         procedures: Procedures | None = None,
         short_term_empty_prefix: bool = False,
+        short_term_evict_chunk: int = 0,
         memory: bool = True,
         admit_on_outcome: bool = False,
         keep_decision_text: bool = False,
@@ -199,7 +200,9 @@ class Hippo:
         self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
         self.working = WorkingMemory(
-            max_len=short_term_max, empty_prefix=short_term_empty_prefix
+            max_len=short_term_max,
+            empty_prefix=short_term_empty_prefix,
+            evict_chunk=short_term_evict_chunk,
         )
         self.long = long if long is not None else LongTerm()
         self.procedures: Procedures = (

@@ -236,6 +236,11 @@ offered planning schemas within the run, not actual cache misses; an optional
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 The legacy `/v1` API and the default-off request bytes remain unchanged.
 
+`[agent] window_eviction = "chunk"` or `"boundary"` (default `"slide"`; `--window-eviction`
+overrides it) changes when working memory drops old turns so the retained history stays the same
+for several steps and a server's prompt cache can reuse it. Experimental; `slide` leaves request
+bodies and the JSON result as before. See [Memory](memory.md#working-memory-window).
+
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
 ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of

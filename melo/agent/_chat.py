@@ -479,8 +479,10 @@ class Chat:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         context_budget: ContextBudget | None = None,
         fixed_prefix: bool = False,
+        fit_target: float = 1.0,
     ) -> None:
         self.fixed_prefix = fixed_prefix
+        self.fit_target = fit_target
         self.llm = llm
         self.system_notes = tuple(system_notes)
         self.note_instruction = note_instruction
@@ -627,6 +629,7 @@ class Chat:
                 limit=accounting.budget.input_limit,
                 estimate=estimate,
                 requires_replay=self.llm.requires_reasoning_replay,
+                drop_target=self.fit_target,
             )
         if on_ready is not None:
             on_ready(messages)

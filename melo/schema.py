@@ -13,6 +13,12 @@ from typing import Any, Literal
 # ── Config ──
 
 SHORT_TERM_MAX = 20
+# window_eviction="chunk"/"boundary": a full window drops whole units down to
+# SHORT_TERM_MAX - WINDOW_EVICT_CHUNK messages at once, and the prompt-cap fit
+# and the context fit drop down to WINDOW_FIT_TARGET of their limit, so the
+# retained history stays the same for several steps (prompt-cache reuse).
+WINDOW_EVICT_CHUNK = 8
+WINDOW_FIT_TARGET = 0.7
 LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 
