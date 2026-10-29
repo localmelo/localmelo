@@ -406,3 +406,74 @@ def test_main_sends_bearer_without_proxy_or_redirects(
     assert options["follow_redirects"] is False and options["trust_env"] is False
     assert requests[0].headers["Authorization"] == "Bearer " + "a" * 64
     assert "a" * 64 not in capsys.readouterr().out
+
+
+def _run(args: list[str], payload: dict[str, Any]) -> str:
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=payload)
+        ),
+    ) as client:
+        output = io.StringIO()
+        code = execute(
+            parser().parse_args(args), client, out=output, stdin=io.StringIO()
+        )
+    assert code == 0
+    return output.getvalue()
+
+
+_HELD = {
+    "task_id": "abc",
+    "state": "held",
+    "title": "Write it",
+    "level": 2,
+    "wait_reason": "approval",
+    "pending_approvals": [
+        {
+            "tool_name": "file_write",
+            "arguments": {"path": "/w/out.txt"},
+            "target": {"path_label": "out.txt", "exists": False, "size_bytes": 0},
+        }
+    ],
+}
+_LINE = (
+    "Waiting for your approval: file_write out.txt "
+    "(answer it in the web console, Tasks)"
+)
+
+
+def test_show_names_the_approval_a_held_task_waits_for() -> None:
+    text = _run(["show", "abc"], {"task": _HELD})
+    assert f"  Waiting: {_LINE}\n" in text
+    assert "  Reason: approval\n" in text
+    assert "not recorded" not in text
+
+
+def test_show_gives_a_shell_command_and_keeps_a_recorded_reason() -> None:
+    task = {
+        **_HELD,
+        "reason": "scheduler",
+        "pending_approvals": [
+            {"tool_name": "shell_exec", "arguments": {"command": "make  test\n"}}
+        ],
+    }
+    text = _run(["show", "abc"], {"task": task})
+    assert "Waiting for your approval: shell_exec make test (answer it" in text
+    assert "  Reason: scheduler\n" in text
+
+
+def test_show_without_a_pending_approval_is_unchanged() -> None:
+    task = {**_HELD, "pending_approvals": []}
+    text = _run(["show", "abc"], {"task": task})
+    assert "  Waiting: approval\n" in text and "  Reason: not recorded\n" in text
+
+
+def test_list_adds_the_approval_line_under_a_waiting_task() -> None:
+    quiet = {"task_id": "def", "state": "queued", "title": "Other"}
+    text = _run(["list"], {"tasks": [_HELD, quiet]})
+    assert text.splitlines()[1:] == [
+        "abc  P2            held    Write it",
+        f"  {_LINE}",
+        "def  not recorded  queued  Other",
+    ]

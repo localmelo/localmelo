@@ -1126,7 +1126,15 @@ function approvalNow() {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
-function approvalCard(request) {
+// How the card talks to its view: the chat view redraws its messages and
+// answers a session's approval; the Tasks view passes its own (tasks.mjs).
+const chatApproval = {
+  rerender: () => { messageSnapshot = ""; renderMessages(false); },
+  answer: (request, state, choice) => answerApproval(request, state, choice),
+  reload: (id) => refreshApproval(S.activeId, id),
+};
+
+function approvalCard(request, view = chatApproval) {
   const id = String(request.request_id);
   let state = approvalStates.get(id);
   if (!state) {
@@ -1140,7 +1148,7 @@ function approvalCard(request) {
   card.setAttribute("aria-label", "Approval needed");
   const tool = String(request.tool_name || "tool");
   const args = request.arguments || {};
-  const workspace = request.workspace_label || S.view?.session?.workspace_label || "the workspace";
+  const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || "the workspace";
   let title = `${tool} wants to run with these arguments:`;
   let content = JSON.stringify(args, null, 2);
   if (tool === "shell_exec") {
@@ -1166,16 +1174,15 @@ function approvalCard(request) {
   if (canFold && !state.showAll && lines.length > 20) {
     card.append(button("link-button", `Show all ${lines.length} lines`, () => {
       state.showAll = true;
-      messageSnapshot = "";
-      renderMessages(false);
+      view.rerender();
     }));
   }
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
-  const once = button("secondary-button", "Allow once", () => answerApproval(request, state, "once"));
+  const once = button("secondary-button", "Allow once", () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("secondary-button", `Allow every ${tool} call in this session`, () => answerApproval(request, state, "session"));
+  const session = button("secondary-button", `Allow every ${tool} call in this session`, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const deny = button("secondary-button", "Deny…", () => {
     state.deny = true;
@@ -1199,8 +1206,7 @@ function approvalCard(request) {
   reason.addEventListener("compositionend", () => {
     state.composing = false;
     state.reason = reason.value.slice(0, 500);
-    messageSnapshot = "";
-    renderMessages(false);
+    view.rerender();
   });
   reason.maxLength = 500;
   reason.setAttribute("aria-label", "Tell melo why (optional)");
@@ -1209,7 +1215,7 @@ function approvalCard(request) {
     state.reason = reason.value.slice(0, 500);
     counter.textContent = `${state.reason.length} / 500`;
   });
-  const confirm = button("secondary-button", "Deny", () => answerApproval(request, state, "deny"));
+  const confirm = button("secondary-button", "Deny", () => view.answer(request, state, "deny"));
   const back = button("link-button", "Back", () => {
     state.deny = false;
     denyView.hidden = true;
@@ -1221,7 +1227,7 @@ function approvalCard(request) {
     if (event.key === "Enter") {
       event.preventDefault();
       event.stopPropagation();
-      answerApproval(request, state, "deny");
+      view.answer(request, state, "deny");
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -1239,7 +1245,7 @@ function approvalCard(request) {
       : "Complete approval details are not available; allow is disabled."));
   }
   if (request.arguments_complete !== true || (tool === "file_write" && !request.target)) {
-    card.append(button("link-button", "Reload approval details", () => refreshApproval(S.activeId, id)));
+    card.append(button("link-button", "Reload approval details", () => view.reload(id)));
   }
   const controls = [once, session, deny, confirm];
   const enable = () => {
@@ -1767,7 +1773,7 @@ function presence(force = false) {
 let workerMode = false;
 let taskMode = false;
 const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); });
-const tasks = setupTasks({ api, root: $("task-panel"), newId: newClientRequestId, navigate: (hash) => { globalThis.location.hash = hash; } });
+const tasks = setupTasks({ api, approvalCard, root: $("task-panel"), newId: newClientRequestId, navigate: (hash) => { globalThis.location.hash = hash; } });
 
 function taskRoute() {
   const match = /^#\/tasks(?:\/(.+))?$/.exec(globalThis.location?.hash || "");

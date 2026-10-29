@@ -274,7 +274,7 @@ def execute(
             flush=True,
         )
     elif cmd == "list":
-        rows = [("ID", "LEVEL", "STATE", "TITLE")]
+        rows = [("ID", "LEVEL", "STATE", "TITLE", "")]
         for task in data["tasks"]:
             if not isinstance(task, dict):
                 raise ClientError("gateway returned an invalid task response")
@@ -288,6 +288,7 @@ def execute(
                     _level_label(task),
                     _safe(task.get("state", "")),
                     _safe(title),
+                    _safe(_waiting_approval(task) or ""),
                 )
             )
         # Pad every column but the last, so the table lines up.
@@ -295,6 +296,8 @@ def execute(
         for row in rows:
             cells = [row[i].ljust(widths[i]) for i in range(3)]
             print("  ".join([*cells, row[3]]).rstrip(), file=out)
+            if row[4]:
+                print(f"  {row[4]}", file=out)
         out.flush()
     else:
         task = data["task"]
@@ -306,13 +309,35 @@ def execute(
         if cmd == "show":
             print(f"  Title: {_safe(task.get('title') or 'not recorded')}", file=out)
             print(f"  Level: {_level_label(task)}", file=out)
-            print(f"  Reason: {_safe(task.get('reason') or 'not recorded')}", file=out)
-            print(
-                f"  Waiting: {_safe(task.get('wait_reason') or 'not recorded')}",
-                file=out,
-            )
+            approval = _waiting_approval(task)
+            wait = task.get("wait_reason")
+            reason = task.get("reason") or ("approval" if approval else None)
+            print(f"  Reason: {_safe(reason or 'not recorded')}", file=out)
+            print(f"  Waiting: {_safe(approval or wait or 'not recorded')}", file=out)
         out.flush()
     return 0
+
+
+def _waiting_approval(task: dict[str, Any]) -> str | None:
+    """The line for a task that waits for a person's approval, or None."""
+    pending = task.get("pending_approvals")
+    if not isinstance(pending, list) or not pending or not isinstance(pending[0], dict):
+        return None
+    request = pending[0]
+    target = request.get("target")
+    arguments = request.get("arguments")
+    detail = ""
+    if isinstance(target, dict):
+        detail = str(target.get("path_label") or "")
+    elif isinstance(arguments, dict):
+        detail = str(arguments.get("command") or arguments.get("path") or "")
+    detail = " ".join(detail.split())
+    if len(detail) > 80:
+        detail = detail[:79] + "…"
+    what = " ".join(
+        part for part in (str(request.get("tool_name") or ""), detail) if part
+    )
+    return f"Waiting for your approval: {what} (answer it in the web console, Tasks)"
 
 
 def main(argv: list[str] | None = None) -> int:

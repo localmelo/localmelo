@@ -108,6 +108,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task that waits for a tool approval can be answered (#NN). The task JSON
+  carries `pending_approvals` (the shape a chat session uses), the console's
+  Tasks view shows the same approval card and says "Waiting for your approval",
+  and `melo-task show` and `list` print `Waiting for your approval: <tool>
+  <target> (answer it in the web console, Tasks)`; `Reason:` reads `approval`
+  instead of `not recorded`. Answers use the existing `POST /api/approvals/{id}`.
 - Default mode and developer mode (#186). Every `melo` option has a tier (user,
   advanced or experimental) in one table, `support/option_tiers.py`, copied in the
   CLI reference. `melo --help` now shows the 15 user options and one line pointing

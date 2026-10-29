@@ -2359,3 +2359,27 @@ test('Tasks hands the header to Workers and back without the chat', async () => 
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(h.element('header-title').textContent, 'Tasks');
 });
+
+test('a task waiting for approval shows the chat approval card and answers it', async () => {
+  const request = {
+    request_id: 'req-t', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true,
+    workspace_label: '~/w', target: null,
+  };
+  let reads = 0;
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: reads++ ? [] : [request]})}),
+    'POST /approvals/req-t': {outcome: 'allowed'},
+  });
+  const panel = h.element('task-panel');
+  const card = findNode(panel, (node) => node.classList.contains('approval-card'));
+  assert.equal(card.id, 'approval-card-req-t');
+  assert.match(flatten(panel), /Waiting for your approval/);
+  assert.match(flatten(panel), /shell_exec wants to run a command in ~\/w/);
+  const once = findNode(card, (node) => node.textContent === 'Allow once');
+  h.run('approvalStates.get("req-t").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  await once.click(); await settle();
+  assert.deepEqual(h.net.callsTo('/approvals/req-t')[0].body, {choice: 'once'});
+  assert.equal(findNode(h.element('task-panel'), (node) => node.classList.contains('approval-card')), null, 'the answered card goes away');
+  assert.doesNotMatch(flatten(h.element('task-panel')), /Waiting for your approval/);
+});

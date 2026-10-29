@@ -6,11 +6,12 @@ const WARNING = 'A process from before the restart may still be running. Resumin
 /**
  * Mount the read-and-control view of scheduler tasks. `api` takes paths
  * relative to /api and rejects with an Error carrying status, code and
- * details. `id` is a fresh request or operation id. Every response is checked
- * against an epoch, so a late one never draws over a newer view or a task the
- * user left.
+ * details. `approvalCard(request, view)` draws the console's approval card
+ * (view: rerender, answer, reload, workspace). `id` is a fresh request or
+ * operation id. Every response is checked against an epoch, so a late one
+ * never draws over a newer view or a task the user left.
  */
-export function setupTasks({api, root, newId, navigate}) {
+export function setupTasks({api, root, newId, navigate, approvalCard}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null};
@@ -39,6 +40,9 @@ export function setupTasks({api, root, newId, navigate}) {
   // A started task without a card cannot resume; the server refuses it too.
   const cardMissing = (task) => state.evidence === 'missing_card' || (task.started_at != null && !hasCard(task));
 
+  const pendingOf = (task) => (Array.isArray(task.pending_approvals) ? task.pending_approvals : []);
+  const stateText = (task) => (pendingOf(task).length ? 'Waiting for your approval' : task.state);
+
   function evidenceText(task) {
     if (state.evidence === 'unverified_processes') return 'Earlier processes could not be verified as stopped; confirmation is required to resume.';
     if (state.evidence === 'missing_card') return 'Recovery information is missing.';
@@ -56,7 +60,7 @@ export function setupTasks({api, root, newId, navigate}) {
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', `${task.state} · P${task.level_eff ?? task.level} · updated ${when(task.updated_at)}`, 'muted'));
+        node('span', `${stateText(task)} · P${task.level_eff ?? task.level} · updated ${when(task.updated_at)}`, 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -69,18 +73,22 @@ export function setupTasks({api, root, newId, navigate}) {
     back.href = '#/tasks';
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => meta.append(node('dt', label), node('dd', value));
-    row('State', task.state);
+    row('State', stateText(task));
     row('Priority', `P${task.level_eff ?? task.level}`);
     row('Updated', when(task.updated_at));
     if (task.wait_reason) row('Waiting', task.wait_reason);
     if (task.workspace_label) row('Workspace', task.workspace_label);
     row('Evidence', evidenceText(task));
-    const nodes = [back, meta, node('h2', 'Recovery card')];
+    const nodes = [back, meta];
+    const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label};
+    for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
+    nodes.push(node('h2', 'Recovery card'));
     nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', 'No recovery card is saved.', 'muted'));
     const actions = node('div', undefined, 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button(state.busy === 'resume' ? 'Resuming…' : 'Resume', () => resume(), Boolean(state.busy)));
     }
+    actions.append(button('Refresh', () => refresh(), Boolean(state.busy)));
     if (!FINISHED.has(task.state)) {
       actions.append(button(state.busy === 'stop' ? 'Stopping…' : 'Stop', () => stop(), state.busy === 'stop'));
     }
@@ -188,6 +196,41 @@ export function setupTasks({api, root, newId, navigate}) {
     } finally {
       if (epoch === state.epoch && state.task?.task_id === id) state.busy = '';
     }
+  }
+
+  // Read the task again; a late answer for another view or task is dropped.
+  async function refresh() {
+    const epoch = state.epoch;
+    const id = state.task?.task_id;
+    if (!id) return;
+    try {
+      const data = await api(path(id));
+      if (epoch === state.epoch && state.task?.task_id === id) state.task = data.task;
+    } catch (error) {
+      if (epoch === state.epoch) state.error = errorText(error);
+    }
+    render();
+  }
+
+  // The answer goes to the approvals route, as in a chat; the task moves on
+  // by itself, and its next state is read back.
+  async function answerApproval(request, card, choice) {
+    const id = String(request.request_id);
+    const complete = request.arguments_complete === true && !(request.tool_name === 'file_write' && !request.target);
+    if (card.submitting || (choice !== 'deny' && !complete)) return;
+    card.submitting = true;
+    render();
+    const epoch = state.epoch;
+    try {
+      await api(`/approvals/${encodeURIComponent(id)}`,
+        {body: {choice, ...(choice === 'deny' ? {reason: card.reason} : {})}});
+    } catch (error) {
+      card.submitting = false;
+      if (epoch === state.epoch) state.error = `Could not answer approval: ${errorText(error)}`;
+      render();
+      return;
+    }
+    await refresh();
   }
 
   async function resume(token) {
