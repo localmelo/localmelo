@@ -171,7 +171,8 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   // "Remember across chats with <model>?": offered when the server lists an embedding model (or one is in use already).
   function renderMemory() {
     const inUse = embedding.value !== "none" && !!embedding.value && !!$("s-embed-model").value;
-    const model = inUse ? $("s-embed-model").value : offered;
+    if (inUse) offered = $("s-embed-model").value; // unchecking keeps the offer, so it can be checked again
+    const model = offered;
     $("s-embed-offer").hidden = !model;
     $("s-embed-use").checked = inUse;
     $("s-embed-offer-label").textContent = `Remember across chats with ${model}?`;

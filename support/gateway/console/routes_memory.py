@@ -85,6 +85,17 @@ def _row(
     }
 
 
+async def _identity_changed(console: Console, pinned: str) -> None:
+    """Rebuild idle chats' Agents when the notes their instructions pin changed.
+
+    A chat's instructions list the user's About-you and Preferences notes in
+    their words when its Agent is built; a note that was reworded or deleted
+    must not stay in a chat that is already open.
+    """
+    if await console.memory.pinned_quotes() != pinned:
+        await console.sessions.settings_changed()
+
+
 def add_routes(app: FastAPI, console: Console) -> None:
     """Register the memory routes on *app*."""
 
@@ -111,12 +122,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.patch("/api/memory/records/{record_id}")
     async def memory_record_edit(record_id: int, body: EditBody) -> dict[str, Any]:
+        pinned = await console.memory.pinned_quotes()
         try:
             entry = await console.memory.edit_record(record_id, body.text)
         except ValueError as exc:
             raise ApiError(400, "invalid_request", str(exc)) from exc
         if entry is None:
             raise ApiError(404, "not_found", "That note is not in melo's memory.")
+        await _identity_changed(console, pinned)
         chats = await _chats(console, {entry.session_id})
         return _row(entry, console, chats if console.store_state() == "ok" else None)
 
@@ -124,8 +137,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def memory_record_delete(
         record_id: int, undo: bool = Query(False)
     ) -> Response:
+        pinned = await console.memory.pinned_quotes()
         if not await console.memory.delete_record(record_id, undo=undo):
             raise ApiError(404, "not_found", "That note is not in melo's memory.")
+        await _identity_changed(console, pinned)
         return Response(status_code=204)
 
     @app.delete("/api/memory/records")
@@ -136,7 +151,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 400, "invalid_request", "Forgetting everything needs ?all=true."
             )
+        pinned = await console.memory.pinned_quotes()
         notes, turns = await console.memory.forget_all()
+        await _identity_changed(console, pinned)
         return {"notes": notes, "turns": turns}
 
     @app.put("/api/memory")

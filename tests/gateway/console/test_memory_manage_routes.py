@@ -159,3 +159,42 @@ async def test_reindex_rebuilds_the_index_from_the_chats(
     await console.memory.drain()
     assert (await client.post("/api/memory/reindex")).json() == {"notes": 0, "turns": 1}
     assert (await notes(client))["documents"] == 1
+
+
+async def test_an_open_chat_is_rebuilt_when_a_note_its_instructions_pin_changes(
+    setup: Setup, tmp_path: Path  # noqa: F811
+) -> None:
+    """A chat's instructions list About-you and Preferences notes; one that changed must not stay."""
+    console, client, _ = setup
+    await say(
+        client, tmp_path, "I prefer short answers; Remember that Sam has the lab keys"
+    )
+    by_topic = {r["topic"]: r["id"] for r in (await notes(client))["records"]}
+    assert set(by_topic) == {"preferences", "people"}
+    chat = await say(client, tmp_path, "hello")
+
+    def agent() -> object:
+        return console.sessions._sessions[chat].agent
+
+    assert agent() is not None
+    # A note the instructions do not pin leaves the chat as it is.
+    done = await client.patch(
+        f"/api/memory/records/{by_topic['people']}",
+        json={"text": "Sam has the robotics keys."},
+    )
+    assert done.status_code == 200 and agent() is not None
+    # A reworded preference is pinned in the chat's instructions: its Agent is rebuilt on the next turn.
+    done = await client.patch(
+        f"/api/memory/records/{by_topic['preferences']}",
+        json={"text": "You prefer long answers."},
+    )
+    assert done.status_code == 200 and agent() is None
+    await say(client, tmp_path, "hello again")
+    open_again = await say(client, tmp_path, "and again")
+    assert console.sessions._sessions[open_again].agent is not None
+    assert (
+        await client.delete(f"/api/memory/records/{by_topic['preferences']}")
+    ).status_code == 204
+    assert (
+        console.sessions._sessions[open_again].agent is None
+    ), "a deleted note is gone from open chats too"

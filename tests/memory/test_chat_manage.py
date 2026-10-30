@@ -211,7 +211,19 @@ async def test_a_reindex_rebuilds_the_index_from_the_chats(
         "The CI test failed because the fixture port was taken; use port 0.",
     )
     await _chat(store, "Nothing yet", "A question with no answer yet")
-    assert await memory.reindex(store) == (0, 1)
+    worker = await store.begin_turn(
+        None, "Run the checks", holder=HOLDER, new_session=NewSession(kind="worker")
+    )
+    await store.finish_turn(
+        worker.session_id,
+        worker.turn,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=None,
+        answer="All checks passed.",
+    )
+    assert await memory.reindex(store) == (0, 1), "a worker run is not indexed"
     assert (await memory.status())["documents"] == 1
     found = await memory.search("how did we fix the failing CI test?")
     assert [item.session_id for item in found] == [sid]

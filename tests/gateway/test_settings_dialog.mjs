@@ -453,6 +453,7 @@ test('unchecking the offer turns the embedding model off, and the switch is sent
   h.element('s-embed-use').checked = false;
   await h.element('s-embed-use').emit('change');
   assert.equal(h.element('s-embed-backend').value, 'none');
+  assert.equal(h.element('s-embed-offer').hidden, false, 'the offer stays, so it can be checked again');
   h.element('s-across-chats').checked = false;
   await h.element('create-btn').emit('click');
   const body = h.calls.at(-1).options.body;

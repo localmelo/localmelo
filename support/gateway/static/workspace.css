@@ -1982,7 +1982,7 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 .memory-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
 .memory-switch[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
 .memory-switch[aria-checked="true"] .memory-knob { transform: translateX(16px); background: var(--surface); }
-.memory-search, .memory-edit { width: 100%; padding: 7px 10px; border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font-size: var(--text-small); }
+.memory-search, .memory-edit { appearance: none; width: 100%; padding: 7px 10px; border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font-size: var(--text-small); }
 .memory-edit { resize: vertical; line-height: 1.45; }
 .memory-notes-list { margin: 0; padding: 0; list-style: none; }
 .memory-note { padding: var(--space-3) 2px; border-top: 1px solid var(--line); }

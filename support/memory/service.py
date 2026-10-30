@@ -440,6 +440,8 @@ class ChatMemory:
         if chats is not None:
             since = await index.forgotten_at()
             for session in await chats.list_sessions(limit=100_000, kinds=None):
+                if session.kind == "worker":  # a worker writes nothing to memory
+                    continue
                 source = {
                     "session_id": session.id,
                     "kind": session.kind,

@@ -105,7 +105,9 @@ The **Memory** tab of the console's panel, `/memory` in the terminal and
   deleted note leaves nothing in either file: its vector, the older wordings it
   replaced and the text of its entries in the decision log are removed, and the
   freed space is overwritten and folded out of the write-ahead log. A deleted
-  note is never recalled again.
+  note is never recalled again, and a chat that is already open starts over with its
+  next message, so its instructions stop listing a preference or a fact you reworded or
+  deleted.
 - **In the terminal.** `/memory` lists the notes (type to filter). Enter on a
   note offers `Back`, `Edit it` and `Delete it`; the last row, `Forget
   everything…`, names what goes and offers `Keep everything` first. `/memory
