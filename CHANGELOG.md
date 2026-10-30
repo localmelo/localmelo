@@ -69,7 +69,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `unfinished_answer`); a second reply without an answer ends the run
   `failed` with `melo did not finish an answer`, with `/retry` in the
   terminal and **Try again** in the console. Direct runs and workers report
-  that error instead of returning the thinking as the result ([#NN]).
+  that error instead of returning the thinking as the result ([#288]).
 
 - The console and the terminal no longer show a turn's time twice. A turn that answered
   without tool calls showed `Thought for 2.0s` over the answer and `2.0s · 1 step` under it,
@@ -2217,6 +2217,7 @@ earlier milestones.
 [#284]: https://github.com/localmelo/localmelo/pull/284
 [#285]: https://github.com/localmelo/localmelo/pull/285
 [#287]: https://github.com/localmelo/localmelo/pull/287
+[#288]: https://github.com/localmelo/localmelo/pull/288
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
