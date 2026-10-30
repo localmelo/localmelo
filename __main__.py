@@ -26,6 +26,7 @@ from localmelo.melo.agent.options import (
 )
 from localmelo.melo.checker import builtin_set_for
 from localmelo.melo.executor import builtin_names
+from localmelo.melo.executor.sandbox import ConfinementError
 from localmelo.melo.memory.recall import (
     RECALL_K_MAX,
     parse_kinds,
@@ -194,6 +195,21 @@ def _confine_writes() -> bool:
     if not isinstance(value, bool):
         raise _StartupConfigError("[agent] confine_writes must be a boolean")
     return value
+
+
+def _direct_confinement_refusal(exc: ConfinementError) -> str:
+    """The one line for a plain direct run that cannot be confined.
+
+    The error names ``[agent] confine_writes``; a plain direct run is confined
+    by ``[agent] confine_direct_runs``, so that is the key it names instead.
+    """
+    from localmelo.melo.executor.sandbox import OFF_HINT
+
+    text = _one_line(str(exc)).removesuffix(OFF_HINT)
+    return (
+        f"{text}set agent.confine_direct_runs to false to run without it "
+        "(-X agent.confine_direct_runs=false for one run)"
+    )
 
 
 class _StartupConfigError(Exception):
@@ -2142,6 +2158,11 @@ def main() -> None:
                 args, options=options, tool_providers=tool_providers
             )
         except (Exception, SystemExit) as exc:
+            if args.brief is None and isinstance(exc, ConfinementError):
+                print(
+                    f"melo: error: {_direct_confinement_refusal(exc)}", file=sys.stderr
+                )
+                raise SystemExit(EXIT_CRASHED) from None
             if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
                 raise
             from localmelo.support.cli.worker_contract import failure_record
@@ -2509,6 +2530,12 @@ def _build_direct_mode_agent(
     # A task given on the command line (--brief included), not the `melo ""` loop.
     if budget_cfg.agent.lean_output and "".join(args.query):
         options = dataclasses.replace(options, lean_output=True)
+
+    if not isinstance(budget_cfg.agent.confine_direct_runs, bool):
+        config_value_error("[agent] confine_direct_runs must be a boolean")
+    # A plain direct run (a task or the `melo ""` loop); --brief follows confine_writes.
+    if budget_cfg.agent.confine_direct_runs and getattr(args, "brief", None) is None:
+        options = dataclasses.replace(options, confine_writes=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint

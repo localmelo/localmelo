@@ -127,7 +127,10 @@ run does).
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one. The everyday
+type more letters to narrow them, delete letters to widen them again (the list
+closes when the `/` is deleted), Tab or Enter to take one. Esc closes the list
+until your next edit; moving the cursor alone does not open it. The same goes
+for the file names after an `@`. The everyday
 commands come first, and are the menu's first screen: `/model`, `/new`,
 `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
 the command does and, where it needs one, its argument (`/attach PATH`).

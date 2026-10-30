@@ -23,6 +23,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   before its first command; other systems run unconfined and say so. Chats are
   unchanged; `-X agent.confine_writes=false` turns it off ([#274]).
 
+- A developer setting confines plain direct runs too. `[agent]
+  confine_direct_runs = true` (or `-X agent.confine_direct_runs=true` for one run;
+  off by default, listed by `melo config keys` and `melo -h all`) gives a task
+  given on the command line and the `melo ""` loop the same write confinement
+  that `--brief` runs have, in the workspace (`--workspace`, else the current
+  folder), and the run's JSON result carries `confinement`. `--brief` runs and
+  saved tasks keep `confine_writes`; chats are unchanged. A run that cannot be
+  confined stops before its first command with one line on stderr and exit
+  code 1 ([#284]).
+
 - Gateway authentication is in progress: loopback-only binding, a private bearer
   token for API clients, and a one-use terminal sign-in link for browser sessions.
   Existing unauthenticated API clients must migrate; see the gateway guide.
@@ -53,13 +63,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   with reasoning tokens counted, a streamed reply that repeats the server's
   reasoning, or no thinking and no `</think>` from a model whose thinking ends
   with a mark (declared in `[cli.reasoning_tags]`, or seen from a server that
-  sends reasoning in a field of its own and counted none in this reply). The text becomes the reply's thinking,
-  folded in the terminal and the console, and the model is asked once more
-  (one extra request, with the notice `unfinished_answer`); a second reply
-  without an answer ends the run `failed` with `melo did not finish an
-  answer`, with `/retry` in the terminal and **Try again** in the console.
-  Direct runs and workers report that error instead of returning the thinking
-  as the result ([#NN]).
+  sends reasoning in a field of its own and counted none in this reply). The
+  text becomes the reply's thinking, folded in the terminal and the console,
+  and the model is asked once more (one extra request, with the notice
+  `unfinished_answer`); a second reply without an answer ends the run
+  `failed` with `melo did not finish an answer`, with `/retry` in the
+  terminal and **Try again** in the console. Direct runs and workers report
+  that error instead of returning the thinking as the result ([#NN]).
+
+- The terminal's command list stays open while you delete characters. Typing
+  `/exi` showed `/exit`, but deleting the `i` closed the list instead of showing
+  the `/ex` matches, because prompt_toolkit completes only after text is
+  inserted. Any deletion that removes text (Backspace, Delete, Ctrl+W, Ctrl+U,
+  Ctrl+K) now asks for completions again on the text before the cursor: the
+  commands of `/ex`, all of them at `/`, the names after an `@`, and nothing once
+  the `/` or `@` is gone, which closes the list. Moving the cursor alone still
+  opens nothing, Esc closes the list until the next edit, and Tab, Enter and the
+  arrow keys take a command as before. ([#285])
 
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
@@ -2166,6 +2186,8 @@ earlier milestones.
 [#273]: https://github.com/localmelo/localmelo/pull/273
 [#274]: https://github.com/localmelo/localmelo/pull/274
 [#275]: https://github.com/localmelo/localmelo/pull/275
+[#284]: https://github.com/localmelo/localmelo/pull/284
+[#285]: https://github.com/localmelo/localmelo/pull/285
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
