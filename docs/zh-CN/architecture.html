@@ -145,7 +145,7 @@
             </a>
             <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
               <span class="node-title">对话</span>
-              <span class="node-sub">目前是旁支对话 · 主对话在计划中</span>
+              <span class="node-sub">主对话 · 旁支对话</span>
             </a>
             <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
               <span class="node-title">调度器</span>
@@ -206,9 +206,9 @@
             <h3>对话</h3>
             <p>每个对话是一个会话，它的轮次在重启后仍然保留。</p>
             <ul>
-              <li>每一轮在该对话自己的智能体上运行，一次一轮。</li>
-              <li>每一轮开始之前，记忆会附上为它召回的内容。</li>
-              <li>你正在使用的对话是调度器的焦点；能把工作交给任务的主对话在计划中。</li>
+              <li>每一轮在该对话自己的智能体上运行，一次一轮，并附上记忆为它召回的内容。</li>
+              <li>控制台和 App 打开在主对话上；旁支对话列在它下面，旁支对话结束或任务需要你时，它会显示一张卡片。</li>
+              <li>主对话把工作交给任务，在计划中。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
           </div>
@@ -340,13 +340,13 @@
             </thead>
             <tbody>
               <tr><td>终端</td><td>对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>控制台和 App</td><td>实时对话、对话旁边的面板、Tasks 和 Workers 视图</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>跨对话记忆</td><td>笔记、所有对话的索引、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>浏览</td><td>在 Safari 里读网页、跟随链接；接下来是在网页上操作</td><td><span class="chip building">开发中</span></td></tr>
               <tr><td>调度器和 worker</td><td>任务队列、优先级、worker、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>
-              <tr><td>主对话和旁支对话</td><td>一个了解你、把工作交给任务的对话</td><td><span class="chip building">开发中</span></td></tr>
+              <tr><td>主对话和旁支对话</td><td>控制台和 App 打开在一个主对话上；把工作交给任务在下一步</td><td><span class="chip building">开发中</span></td></tr>
               <tr><td>空闲时学习</td><td>离线回顾过去的工作</td><td>计划中</td></tr>
             </tbody>
           </table>
