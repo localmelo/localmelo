@@ -95,6 +95,7 @@ async def test_nothing_runs_on_a_fresh_console(client: TestClient) -> None:
         "items": [],
         "waiting": [],
         "recent": None,
+        "focus": None,
     }
     # Every field health had before stays.
     assert body["sessions"]["running"] == 0 and body["model"]["name"] == "stub-model"
@@ -112,9 +113,8 @@ async def test_a_running_chat_is_counted_and_listed_by_title(
     monkeypatch.setattr(entry.runner, "_active", object())
     found = status(client)
     assert found["running"]["chats"] == 1
-    assert found["items"] == [
-        {"kind": "chat", "id": turn.session_id, "title": "Fix the build"}
-    ]
+    item = {"kind": "chat", "id": turn.session_id, "title": "Fix the build"}
+    assert found["items"] == [{**item, "activity": "Thinking", "icon": "think"}]
     assert client.get("/api/health").json()["sessions"]["running"] == 1
     monkeypatch.undo()
 
@@ -182,9 +182,10 @@ async def test_running_tasks_are_counted_with_the_queue(
     found = status(client)
     assert found["running"]["tasks"] == 2
     assert found["tasks"] == {"running": 2, "queued": 1, "held": 1, "top_level": 1}
+    thinking = {"activity": "Thinking", "icon": "think"}
     assert found["items"] == [
-        {"kind": "task", "id": "t1", "title": "Index the repo"},
-        {"kind": "task", "id": "t2", "title": "Summarize"},
+        {"kind": "task", "id": "t1", "title": "Index the repo", **thinking},
+        {"kind": "task", "id": "t2", "title": "Summarize", **thinking},
     ]
 
 

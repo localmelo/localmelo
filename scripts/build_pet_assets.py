@@ -112,7 +112,7 @@ MAX_MISMATCH = 0.03  # share of pixels outside the band the edit may still diffe
 # chat, the five faces (the reply icons, the approval bar, the brand) and the three favicons. The portrait and the
 # faces are the @2x files, shown at half their size, so one file looks sharp on any screen the console meets.
 CONSOLE_FILES = {
-    "portrait/sit-idle@2x.png": "sit-idle.png",
+    **{f"portrait/sit-{name}@2x.png": f"sit-{name}.png" for name in FACE_NAMES},
     "portrait/sit-idle-blink@2x.png": "sit-idle-blink.png",
     **{f"face/{name}@2x.png": f"face-{name}.png" for name in FACE_NAMES},
     "face/idle-blink@2x.png": "face-idle-blink.png",

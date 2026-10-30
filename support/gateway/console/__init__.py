@@ -43,6 +43,7 @@ from localmelo.support.sessions.store import (
 )
 
 from . import (
+    activity,
     errors,
     routes_details,
     routes_page,
@@ -209,6 +210,7 @@ class Console:
         routes_page.add_routes(app, self)
         routes_pictures.add_routes(app, self)
         routes_tasks.add_routes(app, self)
+        activity.add_routes(app, self)
         _add_not_found(app)
 
     # ── Lifecycle ──

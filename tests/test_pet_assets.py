@@ -45,16 +45,18 @@ EAR_PIECES = ["pet/lie-idle-body", "pet/lie-idle-ear"]
 FACE_POINTS = 48
 MARGIN = 3  # points of clear canvas around the dogs, as the script leaves them
 MAX_BYTES = 1_500_000
-# What the console serves, as file below the art folder -> file below its own folder: one 2x portrait, the five
-# faces and the three favicons (the same table as CONSOLE_FILES in the script, which Pillow keeps out of the tests).
+# What the console serves, as file below the art folder -> file below its own folder: the five 2x portraits (the
+# panel beside a chat shows one per state), the five faces and the three favicons (the same table as CONSOLE_FILES
+# in the script, which Pillow keeps out of the tests).
 CONSOLE_FILES = {
-    "portrait/sit-idle@2x.png": "sit-idle.png",
+    **{f"portrait/sit-{name}@2x.png": f"sit-{name}.png" for name in FACES},
     "portrait/sit-idle-blink@2x.png": "sit-idle-blink.png",
     **{f"face/{name}@2x.png": f"face-{name}.png" for name in FACES},
     "face/idle-blink@2x.png": "face-idle-blink.png",
     **{f"favicon/{size}.png": f"favicon-{size}.png" for size in FAVICONS},
 }
-MAX_CONSOLE_BYTES = 170_000  # the console's pictures weigh about 155 KB; the two logos they replaced, about 80 KB
+# The console's pictures weigh about 430 KB, of which a page loads the one portrait and face its state shows.
+MAX_CONSOLE_BYTES = 450_000
 
 
 def anchors() -> dict[str, dict[str, Any]]:

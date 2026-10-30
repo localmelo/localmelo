@@ -19,6 +19,7 @@ import { workerHistory } from "./worker-history.mjs";
 import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
+import { setupPanel } from "./panel.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
@@ -522,6 +523,9 @@ function renderSessions() {
     if (session.id === active) row.classList.add("active");
     const info = el("button", "session-info");
     info.type = "button";
+    // A narrow window shows the list as a rail of initials; the title names the chat there.
+    info.dataset.initial = (title(session).trim()[0] || "·").toUpperCase();
+    info.title = title(session);
     if (session.id === active) info.setAttribute("aria-current", "page");
     const asking = session.pending_approvals > 0;
     const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
@@ -2062,6 +2066,7 @@ const sections = { workers: false, tasks: false };
 function setHealth(body) {
   S.health = body;
   running.update(body?.status);
+  panel.update(body);
   const { running: now, tasks: queue } = body?.status ?? {};
   sections.workers ||= (now?.runs ?? 0) + (now?.terminal ?? 0) > 0;
   sections.tasks ||= (now?.tasks ?? 0) + (queue?.queued ?? 0) + (queue?.held ?? 0) > 0;
@@ -2367,6 +2372,21 @@ async function refreshMode(saved) {
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
   } catch { /* Keep the last known mode and folder. */ }
 }
+// The panel beside the chat: Melo, what runs now and what ran today. Below 900 px it is a sheet behind the face chip.
+const panel = setupPanel({
+  api,
+  root: $("panel"),
+  chip: $("panel-chip"),
+  backdrop: $("panel-backdrop"),
+  developer: () => developerMode,
+  openSettings: () => openSettings(),
+  cover: () => [$("sidebar"), document.querySelector(".chat")],
+  live: {
+    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
+    schedule: (fn, ms) => setTimeout(fn, ms),
+    cancel: (id) => clearTimeout(id),
+  },
+});
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 const showSettings = setupSettings({
@@ -2481,6 +2501,7 @@ async function init() {
   }
   S.authenticated = true;
   await refreshMode();
+  panel.update(S.health);
   $("lock-screen").hidden = true;
   delete document.documentElement.dataset.locked;
   $("app").hidden = false;
@@ -2703,6 +2724,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (drawer.close()) return;
+  if (panel.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);
     return;

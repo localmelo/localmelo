@@ -38,9 +38,10 @@ on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect))
 
 The page opens in default mode, which leaves out what only a developer needs: the chat's
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
-status row, and the scheduler priority in Tasks. It says things plainly too: a running chat reads
+status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
+scheduler priority in Tasks. It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the settings call the server **Model server** and its address
-**Server address**. The header shows the running chip and a
+**Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
 **Workers** and **Tasks** join the sidebar once there is a run, a terminal chat or a task
 to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
@@ -93,7 +94,7 @@ for you to send or change, and step aside once there is text.
    most once a second while events arrive and on the page's polls; on a narrow
    screen it drops segments from the right. An open worker run shows the same
    row.
-5. A **N running** chip in the header counts what runs now: this console's
+5. In developer mode, a **N running** chip in the header counts what runs now: this console's
    chats with a turn in flight, tasks, direct runs and terminal chats (a run or
    terminal chat counts only while its process holds a live lease). It is
    hidden at 0 and stays on a narrow screen. Select it for a short list, each
@@ -153,6 +154,40 @@ folder.
   scripts and keeps it from opening as a page
   ([API v2](../reference/api-v2.md#get-apisessionsidpictures)).
 
+## The panel beside a chat
+
+On the right of the chat is Melo's panel. At the top is Melo's portrait, with a ring in the colour of what it is
+doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
+<model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
+settings**. Under it are four tabs: **Activity**, **Approvals**, **Scheduled** and **Memory**. Arrow keys, Home and
+End move between them, and the panel opens the tab you used last. Approvals, Scheduled and Memory say what they will
+list; Activity is the one that works today.
+
+**Activity** has two parts, read from [`GET /api/activity`](../reference/api-v2.md#get-apiactivity) at the page's
+health poll whenever what runs changes, and every 30 seconds:
+
+- **Now** lists what runs or waits: this console's chats, tasks, worker runs and terminal chats. Each row says what
+  it is doing in plain words (`Reading notes.md`, `Running the tests`, `Waiting for your approval`), with an icon for
+  the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and the
+  portrait rests and blinks.
+- **Today** lists what finished today, newest first: the title, a one-line result (`All 412 tests passed.`) and the
+  time. The first eight show; **Earlier today (n)** shows the rest. **All tasks** and **All worker runs** open those
+  views.
+
+Select a row to open it in place. A running row shows its steps as they happen (a mark, the step in words and its
+time), the last lines of the latest output, and, for a task, **Pause** or **Resume**, **Stop** and its priority in
+words (**Now**, **Today**, **Normal**, **Whenever**, **If idle**; developer mode adds P0 to P4), as the terminal's
+task list offers them. **Open task**, **Open chat** or **Open run** goes to the whole view; a row that waits offers
+**Review**, which opens the chat or task with the approval card. One row is open at a time, and its steps follow the
+session's event stream while it runs.
+
+The panel is 340 px wide from a 1180 px window up. From 700 to 1180 px the chat list becomes a rail of initials
+(hover a circle for the chat's title), and the panel stays. Below 900 px the panel becomes a sheet: the face chip in
+the header (`2 · !` when two things run and one waits) opens it from the bottom; Esc, the backdrop or a drag down on
+its handle closes it. The [macOS app](macos-app.md) now opens at 1280 × 800 so the three columns fit.
+
+In developer mode, **Details** opens in the panel, in place of the tabs, until you close it.
+
 ## Melo in the page
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
@@ -163,6 +198,9 @@ under `prefers-reduced-motion: reduce` the page shows the still picture.
 
 - **Empty chat.** Melo sits above *What would you like to work on?* with its calm
   face, and blinks.
+- **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat): resting (and blinking)
+  when nothing runs, working, wide-eyed while something waits for you, happy for a few seconds after a run ends
+  well, and with a drooping ear when the model server cannot be reached or a run just failed.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
   reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
   while an approval waits, happy when it is done, and with a drooping ear when
@@ -183,12 +221,12 @@ The pictures are transparent PNGs with a thin cream rim. On the light canvas the
 navy outline sets Melo off (at least 12:1 against the console's light surfaces);
 on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
 bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
-`sit-idle-blink.png`, `face-idle.png`, `face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
-`face-error.png` and `favicon-16.png`, `-32` and `-64`): 155 KB in all, copies of
+`sit-idle-blink.png`, `sit-working.png`, `sit-waiting.png`, `sit-done.png`, `sit-error.png`, `face-idle.png`,
+`face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
+`face-error.png` and `favicon-16.png`, `-32` and `-64`): 430 KB in all, of which a page loads the portrait and
+the face its state shows. They are copies of
 the app's own pictures in `macos/art/akita` made by the same script (see the
-[macOS app guide](macos-app.md)), and net 70 KB more
-than before, because the two logos `melo.png` and `icon_small.png` (80 KB) left
-the page's assets.
+[macOS app guide](macos-app.md)).
 
 ## Inspect workers
 
@@ -272,11 +310,12 @@ confirmation, a finished task, Stop winning the race) shows the server's text.
 
 ## Inspect a chat
 
-In developer mode, **Details** opens a session drawer with its tools and session grants, working
+In developer mode, **Details** opens the session's details in the [panel](#the-panel-beside-a-chat), in place of
+its tabs: its tools and session grants, working
 and long-term memory status, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
-revoked there; the tools view may open a paused session. On narrow screens the
-drawer stacks below the composer.
+revoked there; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
+screen the panel's sheet opens with them.
 
 ## Developer mode
 
@@ -293,7 +332,7 @@ page reads it. It changes what is shown, never what runs. When it is on:
   turn, and its **Memory** tab adds the agent state and the long-term backend;
 - the **Runs** tab adds each run's recorded counters: requests, tool calls,
   token usage and cache numbers;
-- the header shows the chat's level chip, **Details**, the GPU-lock line and a chip with
+- the header shows the chat's level chip, **Details**, the GPU-lock line, the **N running** chip and a chip with
   the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
   **Workers** and **Tasks**;
 - the status row adds the cache, step, phase and queue segments, and Tasks names each task's

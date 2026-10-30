@@ -514,6 +514,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
+  .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
@@ -715,6 +716,8 @@ function harness(routes, {mobile = false} = {}) {
     setupPictureBox,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
+    // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
+    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false}),
     document,
     location: {hash: '', pathname: '/', search: ''},
     history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},

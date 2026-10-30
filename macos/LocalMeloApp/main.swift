@@ -67,14 +67,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     func windowDidDeminiaturize(_ notification: Notification) { updatePet() }
 
     private func createWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 720),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         window.title = "localmelo"
         window.backgroundColor = Palette.canvas
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1050, height: 720))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         statusView = StatusView(pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"))
         statusView.frame = content.bounds
         statusView.autoresizingMask = [.width, .height]

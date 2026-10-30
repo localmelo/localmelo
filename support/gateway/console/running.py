@@ -7,9 +7,13 @@ what runs, newest kinds first, for the header's list: it is capped, and the
 counts are not. ``waiting`` lists the chats and tasks that wait for the
 person's answer to a tool approval, for the macOS app's menu bar. ``recent``
 says how the newest finished chat turn, task, run or terminal turn ended and
-how many seconds ago (``null`` when none did), for the app's desktop pet. A
-part whose store cannot be read counts as nothing running and nothing recent:
-health is served while a store is unavailable.
+how many seconds ago (``null`` when none did), for the app's desktop pet.
+Each item says what it is doing in plain words (``activity``, with its kind
+``icon``: :func:`~localmelo.support.sessions.display.activity_text`), and
+``focus`` names the one item a glance shows: one that waits for the person
+first, else the one whose newest event is the latest (``null`` when nothing
+runs). A part whose store cannot be read counts as nothing running and
+nothing recent: health is served while a store is unavailable.
 """
 
 from __future__ import annotations
@@ -17,7 +21,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from localmelo.support.sessions.display import status_text
+from localmelo.support.sessions.display import (
+    ActivityText,
+    activity_text,
+    event_activity,
+    status_text,
+)
 from localmelo.support.sessions.store import SessionStoreError
 from localmelo.support.usage_snapshot import TaskCounts
 
@@ -31,6 +40,8 @@ TITLE_CHARS = 200
 # The kind a worker file's session has in `status.items` and `status.recent`.
 WORKER_KINDS = {"worker": "run", "chat": "terminal"}
 # How a task ended, as `status.recent` says it: the person's stop and an expiry are no failure.
+# The newest events read to say what an item is doing.
+EVENTS_READ = 40
 TASK_OUTCOMES = {
     "done": "done",
     "failed": "failed",
@@ -150,6 +161,46 @@ async def recent_outcome(console: Console) -> dict[str, Any] | None:
     }
 
 
+async def item_activity(
+    console: Console, kind: str, owner: str
+) -> tuple[ActivityText, float]:
+    """What a running chat, task, run or terminal chat is doing, and when it last changed.
+
+    A chat or task that waits for an approval or for the scheduler says so;
+    anything else reads from its newest events. An unreadable store reads
+    ``Thinking``, changed at 0.
+    """
+    store = console.worker_history if kind in ("run", "terminal") else console.store
+    try:
+        events = await store.latest_events(owner, limit=EVENTS_READ)
+    except (SessionStoreError, OSError, AttributeError):
+        events = []
+    changed = float(events[0].event.get("ts") or 0) if events else 0.0
+    if kind in ("chat", "task") and console.broker.pending(owner):
+        return activity_text(state="waiting"), changed
+    if kind in ("chat", "task") and console.gate.held(owner):
+        return activity_text(state="held"), changed
+    found = event_activity(stored.event for stored in events)
+    return found or activity_text(state="thinking"), changed
+
+
+async def _with_activity(
+    console: Console, items: list[dict[str, Any]], waiting: list[dict[str, str]]
+) -> dict[str, Any] | None:
+    """Add ``activity`` and ``icon`` to each item; the item ``focus`` names."""
+    changed: dict[str, float] = {}
+    for item in items:
+        text, changed[item["id"]] = await item_activity(
+            console, item["kind"], item["id"]
+        )
+        item.update(activity=text.text, icon=text.icon)
+    if not items:
+        return None
+    asking = {entry["id"] for entry in waiting}
+    first = next((item for item in items if item["id"] in asking), None)
+    return dict(first or max(items, key=lambda item: changed[item["id"]]))
+
+
 async def running_status(console: Console) -> dict[str, Any]:
     """The ``status`` object: counts by kind, the queue, the running, waiting and recent items."""
     chats: list[dict[str, str]] = []
@@ -178,10 +229,12 @@ async def running_status(console: Console) -> dict[str, Any]:
             "title": title,
         }
         (runs if kind == "worker" else terminal).append(item)
-    items = [
+    items: list[dict[str, Any]] = [
         {**item, "title": item["title"][:TITLE_CHARS]}
         for item in (*chats, *tasks, *runs, *terminal)
-    ]
+    ][:MAX_ITEMS]
+    waiting = _waiting(console, live)
+    focus = await _with_activity(console, items, waiting)
     return {
         "running": {
             "chats": len(chats),
@@ -195,7 +248,8 @@ async def running_status(console: Console) -> dict[str, Any]:
             "held": queue.held,
             "top_level": queue.top_level,
         },
-        "items": items[:MAX_ITEMS],
-        "waiting": _waiting(console, live),
+        "items": items,
+        "waiting": waiting,
         "recent": await recent_outcome(console),
+        "focus": focus,
     }
