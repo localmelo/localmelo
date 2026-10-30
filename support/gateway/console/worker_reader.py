@@ -7,7 +7,7 @@ import binascii
 import json
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +16,7 @@ import aiosqlite
 
 from localmelo.support.sessions.store import (
     _SESSION_COLUMNS,
+    FinishedTurn,
     SessionInfo,
     SessionStore,
     SessionStoreError,
@@ -226,6 +227,14 @@ class WorkerReader(SessionStore):
             for kind, sid, title, holder, until in rows
             if self._running_is_live(holder, until, now)
         ]
+
+    async def latest_finished_turn(
+        self, kinds: Collection[str] = READ_KINDS
+    ) -> FinishedTurn | None:
+        """The newest finished worker run or terminal chat turn; ``None`` before the file exists."""
+        if not os.path.exists(self.path):
+            return None
+        return await super().latest_finished_turn(kinds)
 
     async def get_session(self, session_id: str) -> SessionInfo | None:
         if not os.path.exists(self.path):

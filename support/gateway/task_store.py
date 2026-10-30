@@ -997,6 +997,21 @@ class TaskStore:
             )
             return [TaskRecord.from_row(row) for row in rows]
 
+    async def latest_finished(self) -> tuple[str, str, float] | None:
+        """``(task_id, state, finished_at)`` of the task that ended last, or ``None``.
+
+        A task ends as ``done``, ``failed``, ``cancelled`` or ``expired``; the
+        rows it reads are those with a ``finished_at``.
+        """
+        async with self._store.component_transaction("task_list") as conn:
+            rows = await _rows(
+                conn,
+                "SELECT task_id, state, finished_at FROM tasks "
+                "WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
+                (),
+            )
+        return (rows[0][0], rows[0][1], rows[0][2]) if rows else None
+
     async def priority_events(self, task_id: str) -> list[dict[str, Any]]:
         async with self._store.component_transaction("task_events") as conn:
             rows = await _rows(
