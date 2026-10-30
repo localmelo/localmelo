@@ -177,6 +177,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal says which files a turn changed. A turn that wrote files with `file_write`
+  ends with one more quiet line under its footer, `Changed hello.py (+1), README.md (+3
+  −1)`: the paths relative to the folder melo works in, each with the lines the turn added
+  and removed in it, at most three names and then `and 2 more` (fewer on a narrow
+  terminal, never wrapped). A file written twice counts once, as the turn found it against
+  as it left it; a file written back as it was is left out; a new file shows its line
+  count. A file with no counts to show (a new empty file, a file too large or not text,
+  any file of a run with `--yolo`, where nothing read the old file first) shows its name
+  alone. Only the turn's own `file_write` calls count: a write that was denied or refused
+  (a path outside the folder) is not listed, and neither is a file that a shell command or
+  a script changed, since melo never scans the folder. A turn that changed no file prints
+  nothing, and developer mode shows the same line. Direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged ([#258]).
+
+- Developer mode shows the plan of a task melo has run before on every turn. The row of
+  past runs and the steps they took (`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`)
+  showed on the first turn of a session only; in developer mode it now shows on every turn
+  that has past runs to show, and the default mode keeps it on the first turn. Direct
+  mode's stderr line, JSON, exit codes and requests are unchanged ([#258]).
+
 - Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
   default and with no flag: `[agent] lean_output = true` in the config file, or
   `-X agent.lean_output=true` for one run (`melo config keys lean` lists it, and `melo -h all`
@@ -1068,6 +1088,77 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   announcement of a wait are unchanged. `macos/mark.svg` is gone, and the build needs
   `numpy`, which localmelo already uses, and `iconutil` instead of `sips` ([#NN]).
 
+- Coming back to a chat in the terminal reads plainly. The exit line says
+  `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
+  newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
+  otherwise. A resumed chat's recap shows each message and each answer with one
+  mark, the rows under it indented: the answer reads as plain text (its Markdown
+  markers off, no marked blank rows, at most four rows) where it was raw Markdown
+  with a `●` on every line, and the note below the title says `1 turn is back in the
+  model's memory.` Developer mode keeps the tool-call detail (`; its tool calls are
+  not.`). The picker's header reads `Resume a chat · ~/demo-project · tab: this
+  folder or all · esc close`, and a long folder is cut from its middle so the keys
+  stay on the row. The terminal says "chat" where it said "session": `New chat` in the
+  status bar and in the `/new` rule, the `chat` row of `/status`, the picker's footer,
+  the messages around resuming, and the descriptions of `/new`, `/sessions`, `/resume`
+  and `/title`. Command names (`/sessions`, `-c`, `-r`), developer mode's rows and
+  machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#258]).
+
+- `melo -h` says what its everyday commands do. It lists `setup` (choose the model
+  server again), `serve` (run the web console and API) and `console` (open the web
+  console), then `More commands and every setting: melo -h all`, where it listed seven
+  bare words (`setup · config · serve · console · task · worker · import`) that a new
+  user could not tell apart. `-s, --steps` reads `most model calls per task (default 30)`
+  where it said `planning-call limit`. The help is 23 lines instead of 20; `melo -h all`
+  still lists every command and setting, and `melo COMMAND -h` still explains one. Every
+  option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
+  exit codes and requests ([#258]).
+
+- The terminal's status bar says its figures in words in default mode: `context 8% used`
+  (`context 2.6k tokens` when the server's input limit is not known) where it said
+  `ctx 12k/32k`, and `83% cached` where it said `cache 83%`, with `, idle 3m` after it
+  for a local server. The cache shows once the server has reported a value, where it
+  showed `cache --` before. The last request's context figure drops whole on a narrow
+  terminal, like a measured one, before the folder is cut. The words are never cut
+  in the middle. Developer mode keeps the compact segments, and so do the web console's
+  status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#258]).
+
+- The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
+  model chip while it only names the model, which the composer already shows, so a chat's
+  title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
+  model`). `Enter to send · Shift + Enter for a new line` and `⌘ K` are hidden there, and the
+  next steps of a failed turn (Try again, Change the server address, Copy error) are outlined
+  buttons at least 44 px tall instead of text links. In the sidebar, a chat's second line is its
+  folder (`localmelo-workspace`) instead of the model, which every chat shared, and an accent
+  dot before the title marks a chat that waits for an approval; developer mode shows the model
+  first and the folder after it. Direct mode's stdout and stderr, JSON, exit codes and requests
+  are unchanged. ([#257])
+- The console and the app use plain words by default. The settings call the server **Model
+  server** and its address **Server address**, with `The address your model server prints when
+  it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the
+  list of models says `Lists the models this server offers.` A running chat reads `Working…`
+  beside Stop, the status row drops its `step N`, and the sidebar's **LOCAL** badge is gone. In
+  the macOS app the quit dialog says `Quitting stops 1 chat.` (or `Quitting stops what is
+  running: 2 tasks and 1 chat.`) and no longer mentions the gateway, and **Sign In Again** is
+  left out of the menus until it helps: after four failed sign-in attempts in a row, while the
+  console shows its Locked screen, and always in developer mode (the page now carries `data-mode`
+  and `data-locked` on its root element for the app to read). Developer mode keeps every word it
+  shows today: **Chat backend**, **Chat API URL**, `Running on your backend`, the badge and the
+  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#257])
+- The console and the app point the right way when the model server is down. In the console, a
+  run that could not reach the server now says `Could not reach the model server` and asks
+  `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the
+  red line that repeated the error, and the work box's retry line, are gone, and the provider's
+  own text stays under Details. The filled button is **Try again** (**Continue** when the run had
+  used tools), and **Change the server address** is a link beside it; a hosted model reads
+  `Check your network connection, then try again.` and keeps **Open model settings**. A server
+  that answered with an error keeps its card as before. In the macOS app, a gateway that quits
+  on its own shows `Its background service quit unexpectedly. Try Again starts it again; Open
+  Log shows what happened.` instead of `The gateway was terminated by signal 9.`; the signal or
+  exit status goes to `gateway.log`. The provider's error text, direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged. ([#257])
 - The macOS app builds with the Command Line Tools when the full Xcode is not
   installed. The Swift host is compiled with the developer folder that
   `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
@@ -1855,6 +1946,8 @@ earlier milestones.
 [#251]: https://github.com/localmelo/localmelo/pull/251
 [#254]: https://github.com/localmelo/localmelo/pull/254
 [#255]: https://github.com/localmelo/localmelo/pull/255
+[#257]: https://github.com/localmelo/localmelo/pull/257
+[#258]: https://github.com/localmelo/localmelo/pull/258
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

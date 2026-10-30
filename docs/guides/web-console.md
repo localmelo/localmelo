@@ -30,8 +30,10 @@ the configured server stops answering, and it looks for a server only while it i
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
 
 The page opens in default mode, which leaves out what only a developer needs: the chat's
-level chip, **Details**, the GPU-lock line, the cache, phase and queue segments of the
-status row, and the scheduler priority in Tasks. The header shows the running chip and a
+level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
+status row, and the scheduler priority in Tasks. It says things plainly too: a running chat reads
+`Working…` beside **Stop**, and the settings call the server **Model server** and its address
+**Server address**. The header shows the running chip and a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
 **Workers** and **Tasks** join the sidebar once there is a run, a terminal chat or a task
 to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
@@ -49,8 +51,9 @@ developer mode adds it after the model). Three one-line starters under the compo
 the files in this folder**, **Plan a small project with me**, **Explain a piece of code**) fill it
 for you to send or change, and step aside once there is text.
 
-1. Use **Settings** (**Connection settings** in developer mode) to choose the chat
-   backend, model and workspace. With nothing saved the dialog opens on a blank **Choose a server…**, and its
+1. Use **Settings** (**Connection settings** in developer mode) to choose the model
+   server, its address, the model and the workspace (**Chat backend** and **Chat API URL**
+   in developer mode). Changes apply to your next message. With nothing saved the dialog opens on a blank **Choose a server…**, and its
    fields, **Discover models**, **Test connection** and **Save** wait until you
    choose one. Local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
@@ -70,9 +73,9 @@ for you to send or change, and step aside once there is text.
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline.
 4. A status row sits above the composer: the same segments as the terminal's
-   status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
+   developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
-   and step segments only. The cache
+   segment only. The cache
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow
@@ -88,7 +91,9 @@ for you to send or change, and step aside once there is text.
    list shows 20 rows at most and says how many more run.
 
 The sidebar lists chats newest first, with search and switching, and closes a
-chat. Drafts stay with each chat in the current browser tab. The open chat's
+chat. Under each title it names the chat's folder (developer mode puts the model
+first), and a dot in the accent colour before the title marks a chat that waits
+for your approval. Drafts stay with each chat in the current browser tab. The open chat's
 turns arrive on its event stream (SSE); after a page reload the page restores
 the chat, reads its last ten turns, and replays the stored events from there,
 so nothing is lost or drawn twice. **Show earlier turns** loads older turns
@@ -99,6 +104,13 @@ rather than retrying for ever. The list is re-read every 4 seconds while the
 tab is visible, for changes from another browser. **Reconnect now** checks the
 chat before reopening its stream. Independent banners show store, model and
 connection problems without replacing other notices.
+
+On a phone, or in a window 700 px wide or less, the page leaves out what a small
+touch screen does not need. The header drops the model chip while it only names the
+model, since the composer shows it, and keeps the chip when it warns (`Model offline`,
+`No model`). The keyboard hints (`Enter to send · Shift + Enter for a new line` and
+`⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
+turn are buttons at least 44 px tall.
 
 ## Inspect workers
 
@@ -206,8 +218,10 @@ page reads it. It changes what is shown, never what runs. When it is on:
 - the header shows the chat's level chip, **Details**, the GPU-lock line and a chip with
   the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
   **Workers** and **Tasks**;
-- the status row adds the cache, phase and queue segments, and Tasks names each task's
-  priority.
+- the status row adds the cache, step, phase and queue segments, and Tasks names each task's
+  priority;
+- the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the settings
+  keep their technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
 
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:
@@ -281,7 +295,8 @@ reload the details, deny, or stop the run.
 A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
 plain title, the first line of the error and a hint. On the newest turn one next
 step is the filled button and the other actions are links: **Open model
-settings** after a model server error, **Continue** after running out of steps
+settings** after a model server error that came back as an answer (a refused
+key, an unknown model), **Continue** after running out of steps
 or timing out (**Try again** when no tool ran), **Try again** when the run was
 stuck, failed or stopped after reflection, **Show tools** when tools could not
 start, and **Copy details** after a crash inside localmelo. **Try again** and
@@ -290,6 +305,18 @@ turn that ran tools. **Copy error** copies one line and the run id for a bug
 report; the technical fields stay under **Details**. Stopped or interrupted
 turns use a neutral line (■). The banner shown when the page cannot reach the
 gateway has **Try again**.
+
+When the model server cannot be reached at all, the card says `Could not reach
+the model server` and asks `Is your model server still running at
+127.0.0.1:8000? Start it, then try again.`, naming the address that failed. It
+does not repeat the error: the provider's own text stays under **Details**. The
+filled button is **Try again** (**Continue** when the run had used tools, so the
+work is picked up, not started over), and **Change the server address** is a
+link that opens the settings. For a hosted model the hint reads `Check your
+network connection, then try again.` and the link stays **Open model settings**,
+since there is no address to change. A run that ended this way also leaves the
+retry lines out of its work box, which the card already says; while it is still
+retrying they show.
 
 ## Persistence and limits
 

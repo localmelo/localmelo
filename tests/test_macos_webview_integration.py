@@ -199,6 +199,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'onclick="document.body.dataset.settings=\'open\'">Settings</button>test page</body></html>')
         if mode == "folders":
             page = FOLDER_FRAME if self.path == "/frame" else FOLDER_PAGE
+        if mode == "devmode":
+            page = page.replace("<html>", '<html data-mode="developer">')
+        if mode == "locked":
+            page = page.replace("<html>", '<html data-locked="1">')
         body = page.encode()
         if mode == "handoff-probe" and self.path == "/":
             handoff()
@@ -288,6 +292,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             }
         }
         if let failed = child, failed.isRunning {""",
+        "        for item in signInItems { item.isHidden = !show }\n": '        for item in signInItems { item.isHidden = !show }\n        record("signin-item offered=\\(show)")\n',
         "    private func showStep() {": '    private func showStep() {\n        record("step " + startStepText(portKnown: port != 0, ready: ready))',
         "        window.makeFirstResponder(webView)": '        window.makeFirstResponder(webView)\n        record("shown")',
         "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -326,7 +331,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         if let item = NSApp.mainMenu?.items.first?.submenu?.items.first(where: { $0.title == "Sign In Again" }) {
             let name = item.action.map { NSStringFromSelector($0) } ?? "none"
             let resolved = item.action.flatMap { NSApp.target(forAction: $0, to: item.target, from: item) } != nil
-            record("signin-menu " + name + (resolved ? " resolved" : " unresolved"))
+            record("signin-menu " + name + (resolved ? " resolved" : " unresolved") + (item.isHidden ? " hidden" : " visible"))
         } else {
             record("signin-menu missing")
         }
@@ -602,17 +607,39 @@ def test_the_window_and_menus_call_the_app_localmelo(app: Path, tmp_path: Path) 
             "names window=localmelo status= label=localmelo template=false"
             " menu=Open localmelo,Settings…,Sign In Again,Quit localmelo"
         )
-        # Every entry of the item's menu reaches the app; Settings… answers to Command-comma.
+        # Every entry of the item's menu reaches the app; Settings… answers to Command-comma. Sign In Again
+        # is in the menu but hidden until a sign-in fails.
         wired = next(x for x in events.splitlines() if x.startswith("status-menu "))
         assert wired == (
-            "status-menu Open localmelo//true|Settings…/,/true|Sign In Again//true|Quit localmelo/q/true"
+            "status-menu Open localmelo//true|Settings…/,/true|Quit localmelo/q/true"
         )
 
 
 def test_sign_in_again_menu_item_is_wired(app: Path, tmp_path: Path) -> None:
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "signin-menu ", process)
-        assert "signin-menu signInAgain resolved" in events
+        assert "signin-menu signInAgain resolved hidden" in events
+
+
+@pytest.mark.parametrize(
+    ("mode", "offered"),
+    [("correct", False), ("devmode", True), ("locked", True), ("no-cookie", True)],
+    ids=["working", "developer-mode", "locked-console", "sign-ins-fail"],
+)
+def test_sign_in_again_shows_only_after_a_failed_sign_in_a_locked_console_or_developer_mode(
+    app: Path, tmp_path: Path, mode: str, offered: bool
+) -> None:
+    with running(app, tmp_path, mode) as (process, _):
+        if offered:
+            wait_for(
+                tmp_path / "events", "signin-item offered=true", process, timeout=20
+            )
+        else:
+            wait_for(tmp_path / "events", "loaded ", process)
+            time.sleep(5)  # two health polls, which read the page's state
+            events = (tmp_path / "events").read_text()
+            assert "signin-item offered=false" in events
+            assert "offered=true" not in events
 
 
 def item_now(
@@ -788,7 +815,10 @@ def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
         os.kill(child_pid, signal.SIGKILL)
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
-        assert "terminated by signal 9" in events
+        # The window says it in plain words; the signal is for the log.
+        assert "alert Its background service quit unexpectedly." in events
+        assert "signal" not in events
+        assert "The gateway was terminated by signal 9." in log.read_text()
         time.sleep(1)  # the failure is shown in the window: the app stays open
         assert process.poll() is None
 

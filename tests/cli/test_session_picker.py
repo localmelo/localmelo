@@ -64,8 +64,8 @@ async def test_filter_scope_selection_and_draft_preservation(
                 lambda: driver.ui.picker is not None
                 and driver.ui.picker.buffer.text == "中文"
             )
-            await driver.wait(lambda: "1 session" in driver.text())
-            assert "1 turns" not in driver.text() and "1 sessions" not in driver.text()
+            await driver.wait(lambda: "1 chat" in driver.text())
+            assert "1 turns" not in driver.text() and "1 chats" not in driver.text()
             driver.type("\t")
             await driver.wait(lambda: "all folders" in driver.text())
             driver.type(ENTER)
@@ -87,7 +87,7 @@ async def test_picker_close_never_exits_or_sends(
     try:
         async with running_app(columns=40) as driver:
             task = asyncio.create_task(driver.ui.choose_session(store, "/project"))
-            await driver.wait(lambda: "Resume a session" in driver.text())
+            await driver.wait(lambda: "Resume a chat" in driver.text())
             driver.type(close)
             assert await asyncio.wait_for(task, 3) is None
             assert driver.ui.app.is_running

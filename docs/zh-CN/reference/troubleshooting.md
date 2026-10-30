@@ -279,7 +279,7 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 ```
 
 - **原因：** 请求没有把网关写成 `127.0.0.1`、`localhost` 或 `[::1]` 加上端口。例如，网页工作区是以 `http://0.0.0.0:8401/` 打开的，或者通过一个会发送自己主机名的代理访问，或者因为网关监听另一个回环地址而以 `http://127.0.0.2:8401/` 打开。网关会拒绝这些请求，以防另一个站点上的网页通过 DNS 重绑定访问它。由 macOS 应用启动的网关，若 `/api/auth/login` 请求缺少应用匹配的 `X-LocalMelo-Instance`，也会返回这个错误；其登录代码与该次启动绑定。
-- **修复：** 打开 `http://127.0.0.1:8401/` 或 `http://localhost:8401/`，并使用网关的端口。如果网关监听的是另一个回环地址，请让它改为监听 `127.0.0.1`：在 `[gateway]` 中设置 `host = "127.0.0.1"`，或运行 `melo --serve --host 127.0.0.1`。不支持代理和远程访问；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。在 macOS 应用中，请使用 **Sign In Again**，而不要使用在其他地方签发的代码。
+- **修复：** 打开 `http://127.0.0.1:8401/` 或 `http://localhost:8401/`，并使用网关的端口。如果网关监听的是另一个回环地址，请让它改为监听 `127.0.0.1`：在 `[gateway]` 中设置 `host = "127.0.0.1"`，或运行 `melo --serve --host 127.0.0.1`。不支持代理和远程访问；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。在 macOS 应用中，请使用 **Sign In Again**（登录失败或控制台被锁定后才会出现，开发者模式下始终有），而不要使用在其他地方签发的代码。
 
 ### HTTP 403 foreign_origin
 

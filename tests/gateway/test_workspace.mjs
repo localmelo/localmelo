@@ -20,9 +20,12 @@ import {folderChoices, folderName, setupFolderPicker} from '../../support/gatewa
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
   formatBytes, formatDuration, formatPast, formatTokens, liveFacts, newTurn,
-  newView, nextAction, reflectionLine, runElapsed, splitThinking, statusMark, statusText, toolElapsed,
-  toolState, workSummary, holdText,
+  newView, nextAction, reflectionLine, runElapsed, serverAddress, shownItems, splitThinking, statusMark, statusText,
+  toolElapsed, toolState, unreachableUrl, workSummary, holdText,
 } = turns;
+
+// What a provider says when it cannot connect (`support/providers/_http.py`).
+const UNREACHABLE = 'cannot reach the model server at http://127.0.0.1:8000/v1. Start it, or run melo to set one up. (ConnectError: All connection attempts failed)';
 
 // ── Turns: one frame at a time ──
 
@@ -176,6 +179,30 @@ test('a retried request counts down and replaces the notice of its step', () => 
   assert.ok(turn.retryUntil > retryAt);
   push('notice', {kind: 'budget', message: 'The attempt used its step budget.', step: 1, attempt: 1, detail: {}});
   assert.equal(turn.items.filter((item) => item.kind === 'notice').length, 2);
+});
+
+test('an unreachable server is told apart from one that answered, and its address is read out of the error', () => {
+  assert.deepEqual(statusText('provider_error', 'run', UNREACHABLE), {word: 'Model server error', severity: 'error', title: 'Could not reach the model server'});
+  assert.equal(statusText('provider_error', 'run', 'POST /chat returned HTTP 500').title, 'Could not get an answer from the model server');
+  assert.equal(statusText('timeout', 'run', UNREACHABLE).title, 'Timed out', 'only a model-server error is an unreachable one');
+  assert.equal(unreachableUrl(UNREACHABLE), 'http://127.0.0.1:8000/v1');
+  assert.equal(unreachableUrl('cannot reach the model server at https://api.example.test/v1. Check the URL and the network. (ConnectError)'), 'https://api.example.test/v1');
+  assert.equal(unreachableUrl('HTTP 500'), '');
+  assert.equal(serverAddress('http://127.0.0.1:8000/v1'), '127.0.0.1:8000');
+  assert.equal(serverAddress('https://api.example.test/v1'), 'api.example.test');
+  assert.equal(serverAddress('127.0.0.1:8500'), '127.0.0.1:8500', 'text that is not a URL comes back as it is');
+  assert.equal(serverAddress(''), '');
+});
+
+test('a run that ended on a model-server error leaves its retry notices out of the work box', () => {
+  const {turn, push} = fullTurn();
+  push('notice', {kind: 'retry', message: 'Model request failed; retrying in 4 s: boom', step: 1, attempt: 1, detail: {delay_s: 4}});
+  push('notice', {kind: 'budget', message: 'The attempt used its step budget.', step: 1, attempt: 1, detail: {}});
+  assert.deepEqual(shownItems(turn).map((item) => item.noticeKind), ['retry', 'budget'], 'a run that is still going lists both');
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'provider_error', error: UNREACHABLE, cause: 'run'});
+  assert.deepEqual(shownItems(turn).map((item) => item.noticeKind), ['budget'], 'the failure card says the retry once');
+  turn.status = 'timeout';
+  assert.deepEqual(shownItems(turn).map((item) => item.noticeKind), ['retry', 'budget'], 'another ending keeps its history');
 });
 
 test('the live row words the run as the terminal does', () => {
@@ -384,7 +411,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
-  .replace(/^import \{ setupFolderPicker \} from "\.\/folder\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -573,6 +600,7 @@ function harness(routes, {mobile = false} = {}) {
     setupStatusRow,
     setupRunning,
     setupModelCard,
+    folderName,
     setupFolderPicker,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
@@ -1386,6 +1414,9 @@ test('every status maps to one next step or none', () => {
   };
   for (const [status, step] of Object.entries(steps)) assert.equal(nextAction(status), step, status);
   assert.equal(nextAction('crashed', 'run'), 'copy');
+  assert.equal(nextAction('provider_error', 'run', UNREACHABLE), 'continue', 'a server that is down needs starting, not a setting');
+  assert.equal(nextAction('provider_error', 'run', 'POST /chat returned HTTP 401'), 'settings', 'a server that answered keeps its setting');
+  assert.equal(nextAction('timeout', 'run', UNREACHABLE), 'continue');
   assert.equal(nextAction('crashed', 'crash'), null, 'an interrupted run is a neutral line');
   for (const cause of ['user_stop', 'crash', 'shutdown', 'closed', 'takeover', 'park']) assert.equal(nextAction('cancelled', cause), null, cause);
   assert.equal(nextAction('a_status_from_a_newer_version'), null);
@@ -1436,6 +1467,62 @@ test('the model server error says what to check for a local server and for a clo
   assert.match(flatten(h.run('statusNode(turn)')), /Is the model server running at 127\.0\.0\.1:8500\?/);
   h.state().health = {...health, model: {...health.model, backend: 'openai'}};
   assert.match(flatten(h.run('statusNode(turn)')), /Check the API key and the model name in model settings/);
+});
+
+test('an unreachable server gets a plain title, one hint, Try again first, and its raw error only under Details', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, model: {...health.model, backend: 'vllm'}, model_server: {url_label: 'http://127.0.0.1:9/v1', reachable: false}};
+  const make = (result = {}, backend = 'vllm') => {
+    h.state().health = {...h.state().health, model: {...health.model, backend}};
+    const turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: UNREACHABLE, n_tool: 0, ...result}}));
+    h.state().view.turns = [turn];
+    h.context.turn = turn;
+    return h.run('statusNode(turn)');
+  };
+  const part = (card, name) => findNode(card, (node) => node.className === name);
+  const actions = (card) => part(card, 'failure-actions').children.map((node) => [node.textContent, node.className]);
+  const card = make();
+  assert.equal(flatten(part(card, 'failure-title')), '✗ Could not reach the model server');
+  assert.equal(part(card, 'failure-error'), null, 'the red line repeated the hint');
+  assert.equal(part(card, 'failure-hint').textContent, 'Is your model server still running at 127.0.0.1:8000? Start it, then try again.', 'the address is the one that failed');
+  assert.deepEqual(actions(card), [['Try again', 'primary-button'], ['Change the server address', 'link-button'], ['Copy error', 'link-button']]);
+  assert.match(part(card, 'failure-details').children[1].textContent, /Error: cannot reach the model server at http:\/\/127\.0\.0\.1:8000\/v1/);
+  await findNode(card, (node) => node.textContent === 'Change the server address').click();
+  assert.equal(h.context.settingsOpened, 1, 'the link opens the settings');
+
+  const midway = make({n_tool: 2});
+  assert.deepEqual(actions(midway).map(([label]) => label), ['Continue', 'Try again', 'Change the server address', 'Copy error']);
+  assert.equal(findNode(midway, (node) => node.className === 'primary-button').textContent, 'Continue', 'work that ran tools is picked up, not started over');
+
+  h.state().view.turns = [h.context.turn, turns.newTurn(turnRow({id: 'next', turn: 2}))];
+  assert.deepEqual(actions(h.run('statusNode(turn)')).map(([label]) => label), ['Change the server address', 'Copy error'], 'an older failure keeps only its links');
+
+  const cloud = make({error: 'cannot reach the model server at https://api.example.test/v1. Check the URL and the network. (ConnectError)'}, 'openai');
+  assert.equal(part(cloud, 'failure-hint').textContent, 'Check your network connection, then try again.');
+  assert.deepEqual(actions(cloud).map(([label]) => label), ['Try again', 'Open model settings', 'Copy error'], 'a hosted model has no address to change');
+
+  const answered = make({error: 'POST /chat/completions returned HTTP 500: out of memory'});
+  assert.equal(flatten(part(answered, 'failure-title')), '✗ Could not get an answer from the model server');
+  assert.equal(part(answered, 'failure-error').textContent, 'POST /chat/completions returned HTTP 500: out of memory', 'a server that answered keeps its message');
+  assert.equal(findNode(answered, (node) => node.className === 'primary-button').textContent, 'Open model settings');
+});
+
+test('the work box of a failed turn has no retry line, and no box at all when that was all it held', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('notice', {kind: 'retry', message: `Model request failed; retrying in 4 s: ${UNREACHABLE}`, step: 1, attempt: 1, detail: {delay_s: 4}});
+  h.state().view.turns = [turn];
+  h.context.turn = turn;
+  const boxes = () => h.run('assistantNode(turn)').children.map((node) => node.className);
+  assert.ok(boxes().includes('work-group'), 'a turn that is still going shows why it waits');
+  assert.match(flatten(h.run('assistantNode(turn)')), /retrying in 4 s/);
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'provider_error', error: UNREACHABLE, cause: 'run'});
+  assert.deepEqual(boxes(), ['assistant-label', 'failure-card']);
+  push('notice', {kind: 'budget', message: 'The attempt used its step budget.', step: 2, attempt: 1, detail: {}});
+  assert.match(flatten(h.run('assistantNode(turn)')), /used its step budget/);
+  assert.doesNotMatch(flatten(h.run('assistantNode(turn)')), /retrying in 4 s/);
 });
 
 test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {
@@ -1663,6 +1750,38 @@ test('the sidebar escapes a server title and model', async () => {
   assert.match(info.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(info.innerHTML, /a&amp;&quot;b/);
   assert.doesNotMatch(info.innerHTML, /<img/);
+});
+
+test('the sidebar names each chat\'s folder, and an accent dot marks the one that waits for an approval', async () => {
+  const rows = [
+    session('a', {title: 'Notes', workspace_label: '~/Documents/notes', model: 'Qwen-27B', updated_at: 3}),
+    session('b', {title: 'Code', workspace_label: '~/code/app', pending_approvals: 1, busy: true, updated_at: 2}),
+    session('c', {title: 'Old', workspace_label: '', model: 'Qwen-27B', busy: true, updated_at: 1}),
+  ];
+  const lines = async (make) => {
+    const h = harness(make({'GET /sessions': {sessions: rows, machine: null, has_more: false}}));
+    await h.run('init()');
+    return h.element('session-list').children.map((row) => row.children[0].innerHTML);
+  };
+  const [notes, code, old] = await lines(defaultMode);
+  assert.equal(notes, '<div class="session-title">Notes</div><div class="session-meta">notes</div>', 'the folder tells chats apart, the model does not');
+  assert.match(code, /<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"><\/span>Code</);
+  assert.match(code, /<div class="session-meta">app<\/div>/, 'a chat that asks is not also called Working');
+  assert.equal(old, '<div class="session-title">Old</div><div class="session-meta">Working · Qwen-27B</div>', 'with no folder known it falls back to the model');
+  const [devNotes] = await lines(baseRoutes);
+  assert.match(devNotes, /<div class="session-meta">Qwen-27B · notes<\/div>/, 'a developer keeps the model, then the folder');
+});
+
+test('the header chip is dropped on a phone only while it names the model', async () => {
+  const chip = async (make, patch = {}) => {
+    const h = harness(make({'GET /health': {...health, ...patch}}));
+    await h.run('init()');
+    return h.element('connection-btn').classList.contains('names-model');
+  };
+  assert.equal(await chip(defaultMode), true, 'the composer shows the model');
+  assert.equal(await chip(defaultMode, {model_server: server(false)}), false, 'Model offline stays, it warns');
+  assert.equal(await chip(defaultMode, {configured: false}), false, 'No model stays');
+  assert.equal(await chip(baseRoutes), false, 'a developer\'s chip is the page state, not the model');
 });
 
 test('a send in an open chat posts a keyed turn and waits for its event', async () => {
@@ -2177,6 +2296,44 @@ test('the header pill and the composer follow a session hold', async () => {
   h.run('syncUI(); renderMessages(true)');
   assert.equal(h.element('connection-label').textContent, 'Working');
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
+});
+
+test('a running chat says Working by default and keeps "Running on your backend" for a developer', async () => {
+  const working = (routes) => routes({
+    'GET /sessions': {sessions: [session('a', {busy: true})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {busy: true}),
+      pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0,
+    },
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_earlier: false, replay_from: 0},
+  });
+  const plain = harness(working(defaultMode));
+  await plain.run('init()');
+  assert.equal(plain.element('run-status').textContent, 'Working…');
+  const developer = harness(working(baseRoutes));
+  await developer.run('init()');
+  assert.equal(developer.element('run-status').textContent, 'Running on your backend');
+});
+
+test('the LOCAL badge and the page\'s mode for the app follow developer mode', async () => {
+  const plain = harness(defaultMode());
+  await plain.run('init()');
+  assert.equal(plain.element('local-badge').hidden, true, 'a new user has no use for the badge');
+  assert.equal(plain.root.dataset.mode, 'default');
+  const developer = harness(baseRoutes());
+  await developer.run('init()');
+  assert.equal(developer.element('local-badge').hidden, false);
+  assert.equal(developer.root.dataset.mode, 'developer', 'the macOS app reads this to decide what its menu offers');
+});
+
+test('a locked page says so on its root element, and unlocking removes it', async () => {
+  const locked = harness(baseRoutes({'GET /health': {status: 401}}));
+  await locked.run('init()');
+  assert.equal(locked.root.dataset.locked, '1', 'the macOS app reads this to offer Sign In Again');
+  const open = harness(baseRoutes());
+  open.root.dataset.locked = '1';
+  await open.run('init()');
+  assert.equal('locked' in open.root.dataset, false);
 });
 
 test('the 4 s poll redraws the work group when the hold changes', async () => {
@@ -3148,7 +3305,7 @@ test('default mode draws the plain status row and developer mode the whole one',
     await tick();
     return h.element('status-row').children.map((node) => node.textContent);
   };
-  assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k', 'step 3 attempt 2']);
+  assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k']);
   assert.deepEqual(await row(baseRoutes), segments);
   assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['tasks 0 running 0 queued 1 held'], 'A task held for the user is never hidden');
 });
