@@ -23,7 +23,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and that installs, downloads and changes outside the workspace still ask.
   Answering "for this chat" to a high-impact request over the API allows that
   one call, replies `"remember": false` and no longer starts the grant's
-  clock ([#NN]).
+  clock ([#294]).
 
 - High-impact calls ask even inside a session grant. Before an approval
   policy decides, each `shell_exec`, `python_exec` and `file_write` call is
@@ -2314,6 +2314,7 @@ earlier milestones.
 [#291]: https://github.com/localmelo/localmelo/pull/291
 [#292]: https://github.com/localmelo/localmelo/pull/292
 [#293]: https://github.com/localmelo/localmelo/pull/293
+[#294]: https://github.com/localmelo/localmelo/pull/294
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
