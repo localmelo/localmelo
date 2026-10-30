@@ -288,18 +288,22 @@ async def test_an_unreadable_retry_keeps_nothing_of_the_reflection() -> None:
 
 async def test_the_layout_changes_nothing_without_the_fixed_prefix() -> None:
     plain = Stub(_replies())
-    await _run(plain, steps_per_attempt=2, fixed_prefix=False)
+    await _run(plain, steps_per_attempt=2, fixed_prefix=False, cache_layout="v2")
     layout = Stub(_replies())
     await _run(layout, steps_per_attempt=2, fixed_prefix=False, cache_layout="v3")
     assert layout.bodies == plain.bodies
 
 
-async def test_the_default_layout_sends_the_requests_of_v2() -> None:
+async def test_the_default_layout_sends_the_requests_of_v3() -> None:
     default = Stub(_replies())
-    await _run(default, steps_per_attempt=2, fixed_prefix=True, reflect_tool_guard=True)
+    await _run(default, base={}, steps_per_attempt=2)  # every option at its default
     named = Stub(_replies())
-    await _run(named, **V2, window_messages=20)
+    await _run(named, base={}, **V3, window_messages=64)
     assert named.bodies == default.bodies
+    # The opt-outs send the earlier requests, which differ at the reflection.
+    earlier = Stub(_replies())
+    await _run(earlier, base={}, **V2, window_messages=20)
+    assert earlier.bodies != default.bodies
 
 
 async def test_the_boundary_mode_drops_the_attempt_and_keeps_only_the_block() -> None:
@@ -313,8 +317,8 @@ async def test_the_boundary_mode_drops_the_attempt_and_keeps_only_the_block() ->
 
 
 def test_the_options_are_validated() -> None:
-    assert AgentOptions().cache_layout == "v2"
-    assert AgentOptions().window_messages == 20
+    assert AgentOptions().cache_layout == "v3"
+    assert AgentOptions().window_messages == 64
     for bad in (
         {"cache_layout": "v4"},
         {"window_messages": 7},

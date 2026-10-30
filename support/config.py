@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from localmelo.melo.schema import (
+    LOCAL_WINDOW_MESSAGES,
     SHORT_TERM_MAX,
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
@@ -157,8 +158,9 @@ class AgentConfig:
     fixed_prefix: bool = True  # stable prompt prefix; false is the old request
     window_eviction: str = "chunk"  # slide | chunk | boundary
     reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
-    cache_layout: str = "v2"  # v2 | v3 (experimental; needs fixed_prefix)
-    window_messages: int = SHORT_TERM_MAX  # working window cap (8-256, experimental)
+    cache_layout: str = "v3"  # v2 | v3 (the reflection layout; needs fixed_prefix)
+    # Working window cap, 8-256; None: default_window_messages() of the backend.
+    window_messages: int | None = None
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -166,6 +168,26 @@ class AgentConfig:
     brief_items: bool = (
         False  # --brief runs name the items no edit touched (experimental)
     )
+
+    def window_for(self, backend: str) -> int:
+        """The working window's cap: ``window_messages``, else *backend*'s default."""
+        if self.window_messages is not None:
+            return self.window_messages
+        return default_window_messages(backend)
+
+
+def default_window_messages(backend: str) -> int:
+    """The working window's message cap when nothing sets one, for a chat *backend*.
+
+    A local server (ollama, mlc, vllm or oMLX, sglang) and an OpenAI-compatible
+    URL reuse the prompt prefix from their cache, so a long window adds few new
+    tokens per request and keeps more of the task in view: 64, the cap that two
+    benchmark rounds measured. Without prompt caching a longer window costs input
+    tokens on every request, so a cloud vendor's backend keeps 20 until a longer
+    window is measured there. An explicit ``[agent] window_messages`` or
+    ``--window-messages`` always wins.
+    """
+    return SHORT_TERM_MAX if backend in _CLOUD_SECTIONS else LOCAL_WINDOW_MESSAGES
 
 
 @dataclass
@@ -474,7 +496,7 @@ class Config:
                 f"recognised. Must be one of {CACHE_LAYOUTS}."
             )
         window: object = self.agent.window_messages
-        if (
+        if window is not None and (
             isinstance(window, bool)
             or not isinstance(window, int)
             or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX

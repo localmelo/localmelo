@@ -21,9 +21,9 @@ from localmelo.melo.memory.recall import (
     RetrieverMode,
 )
 from localmelo.melo.schema import (
+    LOCAL_WINDOW_MESSAGES,
     MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
-    SHORT_TERM_MAX,
     STEPS_PER_ATTEMPT,
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
@@ -187,7 +187,7 @@ class AgentOptions:
       previous one, so a server's prompt cache can reuse it. ``False`` is the
       behavior before this default changed.
     - ``window_eviction``: how working memory drops old turns. ``"chunk"``
-      (default) drops whole units down to ``SHORT_TERM_MAX -
+      (default) drops whole units down to ``window_messages -
       WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
       context fit then drop down to ``WINDOW_FIT_TARGET`` (70%) of their
       limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
@@ -202,19 +202,23 @@ class AgentOptions:
       ``REFLECT_TOOL_GUARD_NOTE``, which asks for the JSON object and no tool
       call. The retry request is unchanged. The default is true; ``False`` keeps
       the reflection request as it was before the guard (#183).
-    - ``cache_layout``: ``"v2"`` (default) is today's requests. ``"v3"``,
-      with ``fixed_prefix``, appends a reflection once, at the attempt
-      boundary, as an ordinary window message (it moves with the history
-      and leaves by eviction) instead of rebuilding it as the last message
-      of every planning request, keeps a reflection request and its reply in
-      the window so the next planning request continues it, and sends an
-      unreadable reflection's retry on the same prefix (the reply as an
-      assistant message, then the retry note) instead of as a text
-      transcript. Older reflection blocks stay in the history until
-      evicted. Without ``fixed_prefix`` it changes nothing. Experimental.
-    - ``window_messages``: the working window's message cap (8 to 256,
-      default ``SHORT_TERM_MAX``). A larger cap leaves the prompt-size fit
-      (see ``window_eviction``) to drop history. Experimental.
+    - ``cache_layout``: ``"v3"`` (default), with ``fixed_prefix``, appends a
+      reflection once, at the attempt boundary, as an ordinary window message
+      (it moves with the history and leaves by eviction) instead of rebuilding
+      it as the last message of every planning request, keeps a reflection
+      request and its reply in the window so the next planning request
+      continues it, and sends an unreadable reflection's retry on the same
+      prefix (the reply as an assistant message, then the retry note) instead
+      of as a text transcript. Older reflection blocks stay in the history
+      until evicted. ``"v2"`` is the layout before this default changed.
+      Without ``fixed_prefix`` neither value changes anything.
+    - ``window_messages``: the working window's message cap (8 to 256, default
+      ``LOCAL_WINDOW_MESSAGES``, 64). A larger cap leaves the prompt-size fit
+      (see ``window_eviction``) to drop history. 20 is the cap before this
+      default changed, and the one that the CLI, the console and the gateway
+      use on a cloud vendor's backend when the config sets none (see
+      ``support.config.default_window_messages``); a Python caller sets it
+      here.
     - ``typed_assertions``: opt into conservative, evidence-checked typed
       memory updates and historical recall in explicit reasoning modes. The
       default is false; this experimental option is available through Python.
@@ -285,8 +289,8 @@ class AgentOptions:
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
     reflect_tool_guard: bool = True
-    cache_layout: CacheLayout = "v2"
-    window_messages: int = SHORT_TERM_MAX
+    cache_layout: CacheLayout = "v3"
+    window_messages: int = LOCAL_WINDOW_MESSAGES
     brief_items: bool = False
 
     def __post_init__(self) -> None:

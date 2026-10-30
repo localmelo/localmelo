@@ -70,9 +70,12 @@ without reflection on coding exercises.
 
 More about reflections:
 
-- Only the latest reflection is kept: each one replaces the one before, so
-  the prompt stays small. A reflection longer than about 2,000 characters is
-  trimmed to fit, and its decision stands: the last items of its lists go
+- Only the latest reflection is carried forward: each one replaces the one
+  before. By default a reflection is added to the conversation once, as an
+  ordinary message, so an earlier one stays until it leaves with the old turns;
+  with `--cache-layout v2` it is rebuilt as the last message of every request
+  and the prompt holds only the latest. A reflection longer than about 2,000
+  characters is trimmed to fit, and its decision stands: the last items of its lists go
   first, then the end of its summary. With `--reflection-gate utility`, such
   a reflection ends the run instead, unless it chose `done`.
 - When no attempt can follow, because the steps or attempts are used up, the

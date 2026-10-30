@@ -44,8 +44,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `reflection` event gains `repaired` (`unmatched_closer`, `trailing_comma`,
   `control_char` or `null`). When a reply with JSON that the decoder rejected
   is asked for again, the retry adds one line after its note that quotes the
-  decoder's error and up to 60 characters around it. Requests whose first reply
-  reads are unchanged. ([#NN])
+  decoder's error and up to 60 characters around it. The repair changes no
+  request whose first reply reads. ([#NN])
 - `melo --serve` writes its startup lines, the port that `--port 0` picked
   included, as soon as they are printed when stdout is a pipe or a file. They
   used to wait in the buffer until the server exited, so a script or a log
@@ -979,6 +979,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A uv development environment with a committed `uv.lock` ([#25]).
 
 ### Changed
+
+- The measured cache layout is now the default (part of #183 and #185).
+  `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
+  a reflection is appended to the window once, at the attempt boundary, instead of being
+  rebuilt as the last message of every planning request, and an unreadable reflection is
+  asked again on the same prefix. `[agent] window_messages` is 64 (was 20) on a local
+  server and for a `--base-url` server; a cloud backend keeps 20 for now, because without
+  prompt caching a longer window costs input tokens. A key you set keeps its value on any
+  backend, and a file without the key has the default. Two benchmark rounds on 12 coding
+  tasks, two runs each, with a Qwen model on oMLX compared the earlier defaults with these
+  two. With the new defaults 46 of 48 runs passed (earlier: 44 of 48); 86.8% of the prompt
+  tokens were served from the cache (78.9%); the share of tokens that an earlier request of
+  the same run already held and the cache reused rose from 92.9% to 99.7%, and in the worst
+  run from 79.4% to 93.7%; the uncached tokens per run fell from 9,865 to 6,059; a run took
+  8.3 steps (8.7) and 32 s (35 s). `--cache-layout v2 --window-messages 20`, or the same
+  keys in `[agent]`, send the earlier requests. Both flags moved from the experimental to
+  the advanced tier of `melo --developer --help`. A default run's JSON result now carries
+  `config.cache_layout`, and `config.window_messages` on a local server. ([#NN])
 
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said

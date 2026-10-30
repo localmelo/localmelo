@@ -57,7 +57,12 @@ again. A ``--base-url`` run with no ``--chat-model`` asks the server for its mod
 before its first request (``_direct_model``, the interactive UI's choice), so
 ``_build_direct_mode_agent`` takes the model from it instead of ``default`` and has a
 new hash; with ``--chat-model`` that call is not made and the requests are the same,
-as ``tests/cli/test_direct_model_choice.py`` checks. ``_check_args`` is not pinned.
+as ``tests/cli/test_direct_model_choice.py`` checks. The cache layout now defaults to
+``v3`` and the window to 64 messages on a local server (20 on a cloud vendor), so
+``_build_direct_mode_agent`` names the server the run talks to when it resolves the
+cache settings (a URL counts as local) and accepts an unset window in the config, and
+has a new hash; ``--cache-layout v2 --window-messages 20`` send the earlier requests,
+which the legacy goldens check with those values. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -79,7 +84,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "77edea99c367665da8ce30a418ce8c8367676ca4ab8ab1769b03833e9cbf1f8a",
+    "_build_direct_mode_agent": "fc13c9f439fb14a507463f312577590914b9e5c5f0b0b40be2f60c97d146c7f2",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

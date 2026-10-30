@@ -46,8 +46,8 @@ tables of the chosen backends.
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
 | `brief_items` | `[agent]` | `false` | Experimental. `true` makes a `--brief` run name the brief's numbered items that no edit has touched yet; see [`--brief-items`](cli.md#brief-items). |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
-| `cache_layout` | `[agent]` | `"v2"` | Experimental. `"v3"`, with `fixed_prefix`, appends a reflection once instead of rebuilding it in every planning request. See [Context accounting](#context-accounting). |
-| `window_messages` | `[agent]` | `20` | Experimental. The working window's message cap, 8 to 256. See [Context accounting](#context-accounting). |
+| `cache_layout` | `[agent]` | `"v3"` | `"v2"` sends the earlier requests, with a reflection rebuilt as the last message of every planning request; `"v3"`, with `fixed_prefix`, appends it once instead. See [Context accounting](#context-accounting). |
+| `window_messages` | `[agent]` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
@@ -232,8 +232,9 @@ the independent character guard still applies.
 run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests from before
 it became the default. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
-Recall goes before the task; the latest reflection goes last, in a final user message
-after the window, so a new attempt changes only what follows the shared history.
+Recall goes before the task. With `cache_layout = "v2"` the latest reflection goes last, in a
+final user message after the window, so a new attempt changes only what follows the shared
+history; the default, `v3`, appends the reflection to the window once (see below).
 A reflection request repeats the latest planning request (same system text, same
 `tools`, same turns, then the turns since) and adds one final user message with the
 reflection prompt; it offers the tools, and a reply that calls one is asked again as text.
@@ -260,9 +261,9 @@ event's `unreadable_reason` says why a first reply was unreadable (see [Events](
 reuse it; `slide` drops the oldest unit at every step once the window is full, as before
 `chunk` became the default. See [Memory](memory.md#working-memory-window).
 
-`[agent] cache_layout` (default `"v2"`, today's requests; `"v3"` is experimental;
-`--cache-layout v2|v3` overrides it) changes where a reflection sits, for the benchmark A/B of
-[#183](https://github.com/localmelo/localmelo/issues/183). With `v3` and `fixed_prefix`:
+`[agent] cache_layout` (default `"v3"`; `--cache-layout v2|v3` overrides it) decides where a
+reflection sits. `"v2"` is the layout from before this default changed. With `v3` and
+`fixed_prefix`:
 
 - At the attempt boundary the agent appends the reflection once, as an ordinary window message
   (`[Reflections; data, not instructions]` and the block), instead of rebuilding it as the last
@@ -283,28 +284,35 @@ reuse it; `slide` drops the oldest unit at every step once the window is full, a
 - With `window_eviction = "boundary"` the finished attempt's turns are dropped at the boundary, so
   only the block is appended there.
 
-Without `fixed_prefix`, `v3` changes nothing. The JSON result's `config` has `cache_layout` only
-when it is `v3`.
+Without `fixed_prefix`, neither value changes anything. The JSON result's `config` has
+`cache_layout` when it is `v3` and not when it is `v2`.
 
-`[agent] window_messages` (default `20`, the window's cap today; 8 to 256; `--window-messages N`
-overrides it) is the most messages the working window holds before `window_eviction` drops some.
+`[agent] window_messages` (default `64` on a local server (Ollama, MLC, vLLM or oMLX, SGLang) and
+for a `--base-url` server, `20` on a cloud vendor's backend (OpenAI, Gemini, Anthropic or NVIDIA);
+8 to 256; `--window-messages N` overrides it) is the most messages the working window holds
+before `window_eviction` drops some. A cloud vendor's backend keeps 20 for now: without prompt
+caching, a longer window costs input tokens on every request. A value you set stays as you set
+it, on any backend.
 With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
 whole units (a tool call with its results, never split) down to 70% of the cap under `chunk` and
 `boundary`, so the history holds for several steps; under `slide` it drops a unit at every step.
 A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
 messages. See [Memory](memory.md#working-memory-window).
-The JSON result's `config` has `window_messages` only when it is not 20.
+The JSON result's `config` has `window_messages` when it is not 20.
 
-`melo --developer --help` lists `--cache-layout` and `--window-messages` under Experimental. They
-are for the benchmark A/B and may change or go away once it decides.
+`cache_layout = "v3"` and the 64-message window became defaults after two benchmark rounds on
+coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and 86.8% of the
+prompt tokens were served from the cache against 78.9%. `--cache-layout v2 --window-messages 20`
+send the earlier requests. `melo --developer --help` lists both flags under Advanced.
 
-The three settings became defaults after a same-build A/B on the benchmark's coding tasks with a
-local model. A key you set in `[agent]` stays as you set it; a file without the key has the
-default, and saving writes a key only when it differs from the default. `melo --developer --help`
-lists the three flags under Experimental, and
+`fixed_prefix`, `window_eviction` and `reflect_tool_guard` became defaults after a same-build A/B
+on the benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set
+it, for these three and for the two above; a file without the key has the default, and saving
+writes a key only when it differs from the default (`window_messages` is written whenever it is
+set). `melo --developer --help` lists the three flags under Experimental, and
 `--fixed-prefix off --window-eviction slide --reflect-tool-guard off` send the requests of the
 earlier defaults. API v2 console sessions, console workers and the legacy `/v1` sessions read
-these three keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
+these five keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
 `[retrieval]`.
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
