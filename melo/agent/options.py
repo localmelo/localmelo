@@ -241,6 +241,17 @@ class AgentOptions:
       brief's top-level numbered items that no edit has touched yet are named
       in each reflection request and in the deadline check (see
       ``melo/agent/_brief_aids.py``). Default false: nothing changes.
+    - ``lean_output``: experimental, for direct runs: fewer output tokens. The
+      system prompt asks for no text between tool calls, a final answer of at
+      most three lines, relative paths without a ``sys.path`` setup, and for
+      reading the files a task names before listing folders, in place of
+      "Think step by step. Be concise." (the compress modes keep that line:
+      their note before each tool call is such text). With
+      ``reflection_gate="flags"`` the reflection prompt also leaves out the
+      keys nothing reads and asks for ``best_effort_result`` only with ``done``
+      or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
+      ``-X agent.lean_output=true``; the interactive UI and the gateway never
+      do. Default false: requests are as they were before the option.
     """
 
     context_window: int | None = None
@@ -292,6 +303,7 @@ class AgentOptions:
     cache_layout: CacheLayout = "v3"
     window_messages: int = LOCAL_WINDOW_MESSAGES
     brief_items: bool = False
+    lean_output: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -403,6 +415,7 @@ class AgentOptions:
             "captured_history",
             "typed_assertions",
             "brief_items",
+            "lean_output",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

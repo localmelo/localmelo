@@ -118,6 +118,9 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--retrieval-extra-body": "#4",
 }
 
+# Experimental settings that have no option: the issue that decides each.
+EXPERIMENTAL_KEYS: dict[str, str] = {"agent.lean_output": "#183"}
+
 # Long option name -> tier, for every option the parser has.
 OPTION_TIERS: dict[str, str] = {
     **dict.fromkeys(_USER, USER),
@@ -276,7 +279,7 @@ def help_all() -> str:
         shown = (
             default if isinstance(default, str) and default else settings.show(default)
         )
-        issue = EXPERIMENTAL_ISSUES.get(key.flag)
+        issue = EXPERIMENTAL_ISSUES.get(key.flag) or EXPERIMENTAL_KEYS.get(key.name)
         row = f"  {key.name:<27}{shown:<12}{key.flag}" + (
             f" ({issue})" if issue else ""
         )

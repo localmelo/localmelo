@@ -170,6 +170,8 @@ class AgentConfig:
     brief_items: bool = (
         False  # --brief runs name the items no edit touched (experimental)
     )
+    # Experimental: direct runs ask for fewer output tokens (AgentOptions.lean_output).
+    lean_output: bool = False
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -491,6 +493,8 @@ class Config:
             errors.append("[agent] captured_history must be a boolean")
         if not isinstance(self.agent.brief_items, bool):
             errors.append("[agent] brief_items must be a boolean")
+        if not isinstance(self.agent.lean_output, bool):
+            errors.append("[agent] lean_output must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -1178,6 +1182,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.window_messages != defaults.window_messages
         or cfg.agent.captured_history
         or cfg.agent.brief_items
+        or cfg.agent.lean_output
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -1204,6 +1209,8 @@ def save(cfg: Config) -> None:
             lines.append("captured_history = true")
         if cfg.agent.brief_items:
             lines.append("brief_items = true")
+        if cfg.agent.lean_output:
+            lines.append("lean_output = true")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
