@@ -1,5 +1,5 @@
 """scripts/build_pet_assets.py: the same input gives the same bytes, an edit that does not lie on its base stops the
-build with a message, a blink patch changes only the eye band, and the tail split gives the body without the tail. The
+build with a message, a blink patch changes only the eye band, and the tail and ear splits give the body without the part. The
 masters are made here (flat shapes on the sizes of the real ones), so no art is needed. Pillow is not a dependency of
 localmelo, so these run where it is installed: `uv run --with pillow pytest tests/test_pet_assets_build.py`.
 """
@@ -80,16 +80,26 @@ def dog(
     return image
 
 
-def world(tmp_path: Path, shift: int = 0) -> Path:
-    """A picks.json with cut-outs for the 14 states and the three edits; `shift` moves the edits' dogs."""
+def inset(box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """A blob that lies inside a part's box, as the part does."""
+    return (box[0] + 20, box[1] + 20, box[2] - 20, box[3] - 20)
+
+
+def world(tmp_path: Path, shift: int = 0, moved: tuple[str, ...] | None = None) -> Path:
+    """A picks.json with cut-outs for the 14 states and the five edits; `shift` moves the dogs of the edits named in
+    `moved` (all of them when it is None)."""
     mod = script()
     root = tmp_path / "masters"
     cut = root / "cut"
     cut.mkdir(parents=True)
     sit_eyes = mod.BLINKS["sit-idle"][1]
     lie_eyes = mod.BLINKS["lie-idle"][1]
-    tail_box = mod.TAIL["lie-done"][1]
-    tail_blob = (tail_box[0] + 20, tail_box[1] + 20, tail_box[2] - 20, tail_box[3] - 20)
+    rest_eyes = mod.BLINKS["rest-lazy"][1]
+    tail_blob, ear_blob = inset(mod.TAIL["lie-done"][1]), inset(mod.EAR["lie-idle"][1])
+
+    def by(name: str) -> int:
+        return shift if moved is None or name in moved else 0
+
     report: dict[str, Any] = {}
 
     def put(name: str, image: Any) -> str:
@@ -112,22 +122,37 @@ def world(tmp_path: Path, shift: int = 0) -> Path:
             state,
             dog(
                 size,
-                (
-                    sit_eyes
-                    if state == "sit-idle"
-                    else lie_eyes if state == "lie-idle" else None
+                {
+                    "sit-idle": sit_eyes,
+                    "lie-idle": lie_eyes,
+                    "rest-lazy": rest_eyes,
+                }.get(state),
+                tail=(
+                    tail_blob
+                    if state == "lie-done"
+                    else ear_blob if state == "lie-idle" else None
                 ),
-                tail=tail_blob if state == "lie-done" else None,
             ),
         )
     motion = {
         "sit-idle-blink": put(
-            "sit-idle-blink", dog((330, 430), sit_eyes, True, shift=shift)
+            "sit-idle-blink",
+            dog((330, 430), sit_eyes, True, shift=by("sit-idle-blink")),
         ),
         "lie-idle-blink": put(
-            "lie-idle-blink", dog((700, 440), lie_eyes, True, shift=shift)
+            "lie-idle-blink",
+            dog((700, 440), lie_eyes, True, tail=ear_blob, shift=by("lie-idle-blink")),
         ),
-        "lie-done-notail": put("lie-done-notail", dog((700, 440), shift=shift)),
+        "rest-lazy-blink": put(
+            "rest-lazy-blink",
+            dog((700, 440), rest_eyes, True, shift=by("rest-lazy-blink")),
+        ),
+        "lie-done-notail": put(
+            "lie-done-notail", dog((700, 440), shift=by("lie-done-notail"))
+        ),
+        "lie-idle-noear": put(
+            "lie-idle-noear", dog((700, 440), lie_eyes, shift=by("lie-idle-noear"))
+        ),
     }
     (cut / "cut-report.json").write_text(json.dumps(report))
     picks_file = tmp_path / "picks.json"
@@ -162,15 +187,22 @@ def test_the_same_input_gives_the_same_bytes_and_the_moves_are_written(
     assert first == files(tmp_path / "two")
     for piece in (
         "pet/lie-idle-blink",
+        "pet/rest-lazy-blink",
         "portrait/sit-idle-blink",
         "face/idle-blink",
         "pet/lie-done-body",
         "pet/lie-done-tail",
+        "pet/lie-idle-body",
+        "pet/lie-idle-ear",
     ):
         assert f"{piece}.png" in first and f"{piece}@2x.png" in first
     pictures = json.loads(first["anchors.json"])["pictures"]
     assert set(pictures["lie-done"]["tail"]) == {"box", "pivot"}
-    assert pictures["sit-idle"]["eyes"] and pictures["lie-idle"]["eyes"]
+    assert set(pictures["lie-idle"]["ear"]) == {"box", "pivot"}
+    assert "tail" not in pictures["lie-idle"] and "ear" not in pictures["lie-done"]
+    assert all(
+        pictures[state]["eyes"] for state in ("sit-idle", "lie-idle", "rest-lazy")
+    )
     assert pictures["sleep-side"]["z"] == [62, 22]
     # The files the moves add leave the stills as they are: the still of a picture does not depend on its edit.
     assert first["pet/lie-done@2x.png"] != first["pet/lie-done-tail@2x.png"]
@@ -227,3 +259,36 @@ def test_the_tail_split_leaves_a_body_without_the_tail_and_the_rest_as_it_was() 
     left, top, right, bottom = extent(mask > 0)
     assert left >= box[0] - 8 and right <= box[2] + 8
     assert top >= box[1] - 8 and bottom <= box[3] + 8
+
+
+@pytest.mark.parametrize("name", ["rest-lazy-blink", "lie-idle-noear"])
+def test_each_new_edit_is_checked_on_its_own_and_named_in_the_message(
+    tmp_path: Path, name: str
+) -> None:
+    mod = script()
+    with pytest.raises(mod.AlignmentError, match=rf"{name}.*best shift"):
+        mod.build(world(tmp_path, shift=3, moved=(name,)), tmp_path / "out")
+    assert not (tmp_path / "out/anchors.json").exists()
+
+
+def test_the_ear_split_leaves_a_body_without_the_ear_and_no_ghost_of_its_outline() -> (
+    None
+):
+    mod = script()
+    box, pivot = mod.EAR["lie-idle"][1], mod.EAR["lie-idle"][2]
+    blob = inset(box)
+    base, edit = dog((700, 440), tail=blob), dog((700, 440))
+    body, mask = mod.tail_split(base, edit, box, mod.GROW["lie-idle"])
+    body, mask = np.asarray(body), np.asarray(mask)
+    middle = ((blob[0] + blob[2]) // 2, (blob[1] + blob[3]) // 2)
+    assert mask[middle[1], middle[0]] == 255 and body[middle[1], middle[0], 3] == 0
+    left, top, right, bottom = extent(mask > 0)
+    assert left >= box[0] - 12 and right <= box[2] + 12 and top >= 0
+    assert bottom <= box[3] + 12
+    # The ear stands in the clear: where the edit has nothing, the body keeps under 5% of the old outline. The
+    # default feather leaves more, which is why the ear grows its mask further.
+    clear = np.asarray(edit)[..., 3] == 0
+    assert body[clear][:, 3].max() < 0.05 * 255
+    plain = np.asarray(mod.tail_split(base, edit, box)[0])
+    assert plain[clear][:, 3].max() > 0.05 * 255
+    assert box[0] <= pivot[0] <= box[2] and box[1] <= pivot[1] <= box[3]

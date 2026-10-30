@@ -189,24 +189,27 @@ def test_each_mood_gets_its_breath_and_its_beat_and_nothing_moves_when_it_may_no
         tmp_path,
         ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
         r"""
-// The plan: stopped lies still; unknown does not breathe but blinks (its picture has the patch); sleeping breathes
-// slow and deep and has its "z"; the rest breathe awake; only a finished run wags the tail.
+// The plan: stopped lies still; unknown does not breathe but blinks and twitches its ear (its picture has the patch
+// and the ear pieces); sleeping breathes slow and deep and has its "z"; the resting dog breathes awake and blinks;
+// the rest breathe awake; only a finished run wags the tail.
 let still = PetMotionPlan(breath: nil, beat: nil)
 precondition(petMotionPlan(.stopped) == still)
-precondition(petMotionPlan(.unknown) == PetMotionPlan(breath: nil, beat: nil, blinks: true))
+precondition(petMotionPlan(.unknown) == PetMotionPlan(breath: nil, beat: nil, blinks: true, twitches: true))
 let asleep = PetBreath(amount: 1.03, seconds: 4.4), awake = PetBreath(amount: 1.02, seconds: 3.2)
 for pose in PetState.sleepPoses {
     precondition(petMotionPlan(.sleeping(pose)) == PetMotionPlan(breath: asleep, beat: nil, blinks: false, drifts: true))
 }
-precondition(petMotionPlan(.resting) == PetMotionPlan(breath: awake, beat: nil))  // rest-lazy has no blink patch
+precondition(petMotionPlan(.resting) == PetMotionPlan(breath: awake, beat: nil, blinks: true))  // rest-lazy blinks too
 precondition(petMotionPlan(.failed) == PetMotionPlan(breath: awake, beat: nil))
 precondition(petMotionPlan(.working(1)) == PetMotionPlan(breath: awake, beat: .bob))
 precondition(petMotionPlan(.working(1)) == petMotionPlan(.working(7)))  // a changed count is not a new beat
 precondition(petMotionPlan(.waiting) == PetMotionPlan(breath: awake, beat: .hop))
 precondition(petMotionPlan(.done) == PetMotionPlan(breath: awake, beat: .wag))
-// Which moods get which loop: the blink follows the picture, the "z" the sleeping poses, the wag the finished run.
+// Which moods get which loop: the blink and the ear follow the picture, the "z" the sleeping poses, the wag the
+// finished run.
 let moods: [PetMood] = [.unknown, .resting, .working(1), .waiting, .done, .failed, .stopped, .sleeping(.sleepSide)]
-precondition(moods.filter { petMotionPlan($0).blinks } == [.unknown])
+precondition(moods.filter { petMotionPlan($0).blinks } == [.unknown, .resting])
+precondition(moods.filter { petMotionPlan($0).twitches } == [.unknown])
 precondition(moods.filter { petMotionPlan($0).drifts } == [.sleeping(.sleepSide)])
 precondition(moods.filter { petMotionPlan($0).beat == .wag } == [.done])
 
@@ -218,10 +221,13 @@ for layer in [motion.moving, motion.picture] {
     precondition(layer.frame.size == CGSize(width: 132, height: 97))
 }
 precondition(motion.picture.superlayer === motion.moving)
-// The blink patch and the tail lie over the picture, canvas-sized; the tail turns about its base, 101.8 pt from the
-// left and 53 pt from the top, so 44 pt up from the bottom of the layer.
+// The blink patch, the tail and the ear lie over the picture, canvas-sized; the tail turns about its base, 101.8 pt
+// from the left and 53 pt from the top, so 44 pt up from the bottom of the layer; the ear about 64.98 pt and 19.82 pt.
 precondition(motion.blink.superlayer === motion.picture && motion.tail.superlayer === motion.picture)
-for layer in [motion.blink, motion.tail] { precondition(layer.bounds.size == CGSize(width: 132, height: 97)) }
+precondition(motion.ear.superlayer === motion.picture && motion.ear.opacity == 0)
+for layer in [motion.blink, motion.tail, motion.ear] { precondition(layer.bounds.size == CGSize(width: 132, height: 97)) }
+precondition(abs(motion.ear.anchorPoint.x - 64.98 / 132) < 1e-9 && abs(motion.ear.anchorPoint.y - 77.18 / 97.0) < 1e-9)
+precondition(abs(motion.ear.position.x - 64.98) < 1e-9 && abs(motion.ear.position.y - 77.18) < 1e-9)
 precondition(abs(motion.tail.anchorPoint.x - 101.8 / 132) < 1e-9 && abs(motion.tail.anchorPoint.y - 44.0 / 97.0) < 1e-9)
 precondition(motion.tail.position == CGPoint(x: 101.8, y: 44) && motion.blink.opacity == 0 && motion.tail.isHidden)
 precondition(motion.drift.superlayer === motion.moving && motion.drift.opacity == 0)  // the "z" is not on a still picture
@@ -295,11 +301,46 @@ for (start, begins) in [(1, 4.2), (5, 9.6)] {
         precondition(abs((at[start + step + 1] - at[start + step]) * 1000 - expected) < 1e-6)
     }
 }
-motion.play(petMotionPlan(.resting), entering: true, animate: true)  // a mood whose picture has no patch does not blink
+motion.play(petMotionPlan(.working(1)), entering: true, animate: true)  // a mood whose picture has no patch does not blink
 precondition(motion.blink.animation(forKey: "blink") == nil)
+motion.play(petMotionPlan(.resting), entering: true, animate: true)  // the resting dog's picture has its own patch
+precondition(motion.blink.animation(forKey: "blink") != nil)
 motion.show(picture, fade: 0)  // a picture with no patch has nothing to fade in
 motion.play(petMotionPlan(.unknown), entering: true, animate: true)
 precondition(motion.blink.contents == nil && motion.blink.animation(forKey: "blink") == nil)
+
+// The ear twitch: only with the ear pieces, every 13 s, 420 ms: the ear turns -12 degrees in 0.12 s, +4 in 0.16 s and
+// back to rest in 0.14 s, about its base, and shows only then; the picture is its ear-less body for that window and
+// the whole still picture the rest of the time, so the still (the model value) is never cut.
+let calm = PetParts(blink: patch, body: nil, tail: nil, zStart: nil, earBody: body, ear: tailPiece)
+motion.show(picture, parts: calm, fade: 0)
+motion.play(petMotionPlan(.unknown), entering: true, animate: true)
+let twitch = motion.ear.animation(forKey: "twitch") as? CAAnimationGroup
+precondition(twitch?.duration == 13 && twitch?.repeatCount == .infinity && twitch?.animations?.count == 2)
+let turn = twitch?.animations?.first as? CAKeyframeAnimation, shows = twitch?.animations?.last as? CAKeyframeAnimation
+precondition(turn?.keyPath == "transform.rotation.z" && turn?.duration == 13 && turn?.values?.count == 6)
+let turns = (turn?.values ?? []).map { number($0)! * 180 / Double.pi }, when = (turn?.keyTimes ?? []).map { number($0)! * 13 }
+for (got, want) in zip(turns, [0.0, 0, -12, 4, 0, 0]) { precondition(abs(got - want) < 1e-9) }
+precondition(abs(when[1] - 7) < 1e-9 && abs((when[2] - when[1]) * 1000 - 120) < 1e-6)
+precondition(abs((when[3] - when[2]) * 1000 - 160) < 1e-6 && abs((when[4] - when[3]) * 1000 - 140) < 1e-6)
+precondition(abs((when[4] - when[1]) * 1000 - 420) < 1e-6 && turn?.timingFunctions?.count == 5)
+precondition(shows?.keyPath == "opacity" && shows?.calculationMode == .discrete && shows?.values?.count == 3)
+precondition((shows?.values ?? []).map { number($0)! } == [0, 1, 0])
+precondition((shows?.keyTimes ?? []).map { number($0)! * 13 }.enumerated().allSatisfy { abs($0.element - [0.0, 7, 7.42][$0.offset]) < 1e-9 })
+let swap = motion.picture.animation(forKey: "twitch") as? CAKeyframeAnimation
+precondition(swap?.keyPath == "contents" && swap?.calculationMode == .discrete && swap?.duration == 13)
+precondition(swap?.repeatCount == .infinity && swap?.values?.count == 3 && swap?.keyTimes == shows?.keyTimes)
+precondition(same(swap?.values?[0], picture) && same(swap?.values?[1], body) && same(swap?.values?[2], picture))
+precondition(same(motion.picture.contents, picture) && motion.ear.opacity == 0 && motion.tail.isHidden)
+motion.stop()
+precondition(motion.ear.animation(forKey: "twitch") == nil && motion.picture.animation(forKey: "twitch") == nil)
+// No pieces, no twitch; a mood whose picture has none does not twitch even if the layers still hold pieces.
+motion.show(picture, parts: idle, fade: 0)
+motion.play(petMotionPlan(.unknown), entering: true, animate: true)
+precondition(motion.ear.animation(forKey: "twitch") == nil && motion.picture.animation(forKey: "twitch") == nil)
+motion.show(picture, parts: calm, fade: 0)
+motion.play(petMotionPlan(.resting), entering: true, animate: true)
+precondition(motion.ear.animation(forKey: "twitch") == nil && motion.picture.animation(forKey: "twitch") == nil)
 
 // The "z": only on a sleeping pose, 3 s, up 4 pt while fading in and out, starting where the pose says (y-up layers).
 let asleepParts = PetParts(blink: nil, body: nil, tail: nil, zStart: CGPoint(x: 86, y: 24))
@@ -315,19 +356,20 @@ motion.play(petMotionPlan(.resting), entering: true, animate: true)
 precondition(motion.drift.animation(forKey: "drift") == nil)
 
 // When the pet may not move, no loop runs and the still picture stays (Reduce Motion, Low Power, heat, covered, asleep).
-for (mood, parts) in [(PetMood.done, finished), (.unknown, idle), (.sleeping(.sleepFront), asleepParts)] {
+for (mood, parts) in [(PetMood.done, finished), (.unknown, idle), (.unknown, calm), (.sleeping(.sleepFront), asleepParts)] {
     motion.show(picture, parts: parts, fade: 0)
     motion.play(petMotionPlan(mood), entering: true, animate: true)
     precondition(motion.picture.animation(forKey: "breath") != nil || mood == .unknown)
-    precondition([motion.moving, motion.blink, motion.tail, motion.drift].contains { $0.animationKeys() != nil })
+    precondition([motion.moving, motion.blink, motion.tail, motion.ear, motion.drift].contains { $0.animationKeys() != nil })
     motion.play(petMotionPlan(mood), entering: true, animate: false)
     precondition(motion.picture.animation(forKey: "breath") == nil)
-    for layer in [motion.moving, motion.blink, motion.tail, motion.drift] { precondition(layer.animationKeys() == nil) }
-    precondition(motion.tail.isHidden && motion.blink.opacity == 0 && motion.drift.opacity == 0)
+    for layer in [motion.moving, motion.blink, motion.tail, motion.ear, motion.drift] { precondition(layer.animationKeys() == nil) }
+    precondition(motion.tail.isHidden && motion.blink.opacity == 0 && motion.ear.opacity == 0 && motion.drift.opacity == 0)
+    precondition(motion.picture.animation(forKey: "twitch") == nil)
     precondition(same(motion.picture.contents, picture))  // the whole still picture, tail and all
     motion.play(petMotionPlan(mood), entering: true, animate: true)
     motion.stop()
-    for layer in [motion.moving, motion.blink, motion.tail, motion.drift] { precondition(layer.animationKeys() == nil) }
+    for layer in [motion.moving, motion.blink, motion.tail, motion.ear, motion.drift] { precondition(layer.animationKeys() == nil) }
     precondition(motion.picture.animation(forKey: "breath") == nil && same(motion.picture.contents, picture))
 }
 // A fade in progress is not a loop: stopping the loops leaves it alone.
