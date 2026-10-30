@@ -268,7 +268,8 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
-    shutil.copy(ROOT / "macos/mark.svg", bundle / "Resources/mark.svg")
+    for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
+        shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.
@@ -603,9 +604,9 @@ def test_the_window_and_menus_call_the_app_localmelo(app: Path, tmp_path: Path) 
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "names ", process)
         line = next(x for x in events.splitlines() if x.startswith("names "))
-        # Nothing is known yet, so the item is the mark alone, named for VoiceOver.
+        # Nothing is known yet, so the item is the logo alone, in colour, named for VoiceOver.
         assert line == (
-            "names window=localmelo status= label=localmelo template=true"
+            "names window=localmelo status= label=localmelo template=false"
             " menu=Open localmelo,Settings…,Sign In Again,Quit localmelo"
         )
         # Every entry of the item's menu reaches the app; Settings… answers to Command-comma. Sign In Again
@@ -670,7 +671,7 @@ def test_the_menu_bar_item_follows_the_health_and_an_approval_shows_in_one_poll(
     status, events = tmp_path / "status.json", tmp_path / "events"
     with running(app, tmp_path, "menubar") as (process, _):
         idle = item_now(events, process, "localmelo, nothing running")
-        assert (idle["title"], idle["template"], idle["width"]) == ("", "true", "18.0")
+        assert (idle["title"], idle["template"], idle["width"]) == ("", "false", "18.0")
         assert (idle["waiting"], idle["line"]) == ("false", "Nothing running")
         status.write_text(
             json.dumps({"running": {"chats": 2, "tasks": 1, "runs": 0, "terminal": 0}})
@@ -692,10 +693,10 @@ def test_the_menu_bar_item_follows_the_health_and_an_approval_shows_in_one_poll(
             )
         )
         waiting = item_now(events, process, "localmelo, waiting for your approval")
-        # The dot makes the template image wider; the count stays beside it.
+        # The dot makes the image wider; the count stays beside it.
         assert (waiting["title"], waiting["template"], waiting["width"]) == (
             "3",
-            "true",
+            "false",
             "23.0",
         )
         assert (waiting["waiting"], waiting["line"]) == ("true", "3 running")

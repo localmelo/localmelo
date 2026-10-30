@@ -7,6 +7,7 @@ import io
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -300,9 +301,10 @@ def test_build_assembles_locked_runtime_and_swift(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     (root / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
-    (root / "macos/mark.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L1 1 Z"/></svg>'
-    )
+    (root / "macos/assets").mkdir(parents=True)
+    # Each asset holds its own name, so a copy under the wrong name shows.
+    for name in ("AppIcon.icns", "MenuBarLogo.png", "MenuBarLogo@2x.png"):
+        (root / "macos/assets" / name).write_bytes(name.encode())
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
@@ -333,8 +335,6 @@ def test_build_assembles_locked_runtime_and_swift(
         elif args[0] == "/usr/bin/xcrun":
             assert env and env["DEVELOPER_DIR"] == developer
             Path(args[-1]).touch()
-        elif args[0] in ("/usr/bin/sips", "/usr/bin/iconutil"):
-            Path(args[-1]).touch()  # both end with the file they write
 
     monkeypatch.setattr(build_app, "run", fake_run)
     output = tmp_path / "app with spaces/LocalMelo.app"
@@ -342,7 +342,11 @@ def test_build_assembles_locked_runtime_and_swift(
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
     assert (output / "Contents/Resources/melo.png").is_file()  # the starting view
-    assert (output / "Contents/Resources/mark.svg").is_file()  # the menu-bar item
+    # The committed icon and menu-bar logo are copied, the icon under the name the plist gives.
+    resources = output / "Contents/Resources"
+    assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"
+    assert (resources / "MenuBarLogo.png").read_bytes() == b"MenuBarLogo.png"
+    assert (resources / "MenuBarLogo@2x.png").read_bytes() == b"MenuBarLogo@2x.png"
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()
@@ -370,9 +374,8 @@ def test_build_assembles_locked_runtime_and_swift(
     assert plist["CFBundleIdentifier"] == "org.localmelo.app"
     # The Dock and the app menu say localmelo; only the file and the executable keep LocalMelo.
     assert plist["CFBundleName"] == plist["CFBundleDisplayName"] == "localmelo"
-    # Alerts and the Dock show the icon the plist names, built before the bundle is signed.
+    # Alerts and the Dock show the icon the plist names, which is in the bundle when it is signed.
     assert (output / "Contents/Resources" / plist["CFBundleIconFile"]).is_file()
-    assert [c[0] for c in commands].index("/usr/bin/iconutil") < len(commands) - 2
     assert summary in capsys.readouterr().out.splitlines()
     with pytest.raises(FileExistsError):
         build_app.build(output)
@@ -419,20 +422,35 @@ def test_no_swift_compiler_refuses_in_one_line_before_any_work(
     assert not (tmp_path / "home/Applications").exists()  # nothing was made
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="needs macOS sips and iconutil")
-def test_the_icon_is_rendered_from_the_mark(tmp_path: Path) -> None:
-    resources, stage = tmp_path / "Resources", tmp_path / "stage"
-    resources.mkdir()
-    stage.mkdir()
-    build_app.make_icon(resources, stage)
-    data = (resources / "LocalMelo.icns").read_bytes()
+ASSETS = Path(__file__).resolve().parents[1] / "macos/assets"
+
+
+def png_header(data: bytes) -> tuple[int, int, int]:
+    """The width, height and colour type of a PNG, read from its header (colour type 6 is RGBA)."""
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    width, height, _, color = struct.unpack(">IIBB", data[16:26])
+    return width, height, color
+
+
+def test_the_committed_icon_holds_every_size() -> None:
+    data = (ASSETS / "AppIcon.icns").read_bytes()
     assert data[:4] == b"icns" and int.from_bytes(data[4:8], "big") == len(data)
-    kinds, offset = set(), 8
+    entries, offset = {}, 8
     while offset < len(data):
-        kinds.add(data[offset : offset + 4])
-        offset += int.from_bytes(data[offset + 4 : offset + 8], "big")
-    # 16 to 1024 px: ic04 and ic05 are the two small sizes, ic07 to ic14 the others.
-    assert {b"ic04", b"ic05", *(b"ic%02d" % n for n in range(7, 15))} <= kinds
+        size = int.from_bytes(data[offset + 4 : offset + 8], "big")
+        entries[data[offset : offset + 4]] = data[offset + 8 : offset + size]
+        offset += size
+    # 16 to 1024 px: ic04 and ic05 are the two small sizes (not PNG), ic07 to ic14 the others.
+    pixels = {b"ic07": 128, b"ic08": 256, b"ic09": 512, b"ic10": 1024}
+    pixels |= {b"ic11": 32, b"ic12": 64, b"ic13": 256, b"ic14": 512}
+    assert {b"ic04", b"ic05", *pixels} <= set(entries)
+    for kind, size in pixels.items():
+        assert png_header(entries[kind]) == (size, size, 6), kind
+
+
+def test_the_committed_menu_bar_logo_has_a_png_for_each_scale() -> None:
+    for name, size in (("MenuBarLogo.png", 18), ("MenuBarLogo@2x.png", 36)):
+        assert png_header((ASSETS / name).read_bytes()) == (size, size, 6), name
 
 
 def test_bundled_python_is_precompiled_and_nothing_writes_bytecode(
