@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- High-impact calls ask even inside a session grant. Before an approval
+  policy decides, each `shell_exec`, `python_exec` and `file_write` call is
+  reviewed by fixed rules (the shell command split, the Python code parsed;
+  nothing runs) as routine, high-impact or undecided. Installing software or
+  a project's packages, creating an environment, downloading installers,
+  large files or anything outside the workspace, running downloaded code,
+  writing or deleting outside the workspace, setting up something that runs
+  later, using passwords or keys, changing system settings, opening a network
+  service, sending files out and running code built at run time are
+  high-impact. "Allow for this chat" now covers routine calls only: a
+  high-impact or undecided call asks every time and is never granted, and the
+  terminal's `auto` mode asks for them too. A call that would change
+  localmelo itself (an install into the Python that runs it, a write under
+  `~/.cache/localmelo`) is denied without asking. A denied high-impact call
+  tells the model why melo asked. Direct, `--brief` and `--yolo` runs are not
+  reviewed ([#290]).
+
 - A worker's shell and Python write only inside its workspace on macOS. In a
   `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
   `python_exec`, the brief's checks included, start under a `sandbox-exec`
@@ -258,6 +275,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bar redraws once a second only while it shows a clock. A list open above the
   bar now ends with a blank row ([#NN]).
 
+- Melo moves. It blinks, wags its tail and sleeps with a "z". The calm portrait of the app's
+  first window, the console's calm portrait and its calm face beside older replies blink twice
+  every 11 seconds (an eyes-closed patch fades in over the eyes for a tenth of a second); the
+  pet blinks on its calm lying picture too. When a run is done the pet's tail swings about its
+  base, four times, instead of the whole picture swaying; and a sleeping Melo sends up a small
+  "z". The patches and the tail are cut from pictures the art model redrew, only where they
+  differ from the originals, and `scripts/build_pet_assets.py` stops with a message if a redrawn
+  picture does not lie on its original. All of it is Core Animation in the app (no timer) and
+  CSS in the console (no script), and stops under Reduce Motion (`prefers-reduced-motion` in the
+  console), in Low Power Mode, when the Mac runs hot, while the window or Melo is hidden or
+  covered and while the screen sleeps. ([#292])
+
 - Chats say who they are. A model that is told nothing answers "who are you?" with the
   assistant it was trained as. The terminal chat, the web console and the macOS app now tell
   the model one short paragraph first: it is melo, the assistant built into localmelo, an
@@ -270,6 +299,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   model menu) names the new one from the next turn. It is the new `AgentOptions.identity`
   (default `None`: direct runs, workers and the gateway's v1 sessions send no identity).
   ([#287])
+
+- Pictures a turn makes show under its answer in the web console and the app. Ask for a chart
+  and the chart is there: the PNG, JPEG, GIF, WebP and SVG files the turn created or changed
+  in the chat's folder (found by looking at the folder when the turn starts and when it ends, so
+  a file written by `python_exec` or `shell_exec` counts), and any picture the answer names by a
+  path inside that folder, appear as a row of previews with the file name and size. Four show;
+  `+N more` shows the rest. Select one to see it full size; a file that is gone says `No longer
+  in the folder`. The list is stored with the turn as a new `turn.pictures` event, so a reopened
+  chat shows its pictures too. The pictures come from a new route, `GET
+  /api/sessions/{id}/pictures?path=`, behind the console's sign-in: it serves a file only when
+  its real path (links followed) is inside that chat's folder, its name and its content are a
+  PNG, JPEG, GIF, WebP or SVG, and it is at most 20 MB, with `nosniff`, `Cache-Control: private`
+  and, for SVG, `Content-Security-Policy: sandbox; default-src 'none'; style-src
+  'unsafe-inline'`, so a picture never runs as a page. It writes and lists nothing. Direct runs
+  and the terminal are unchanged. ([#291])
 
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
@@ -2250,6 +2294,9 @@ earlier milestones.
 [#287]: https://github.com/localmelo/localmelo/pull/287
 [#288]: https://github.com/localmelo/localmelo/pull/288
 [#289]: https://github.com/localmelo/localmelo/pull/289
+[#290]: https://github.com/localmelo/localmelo/pull/290
+[#291]: https://github.com/localmelo/localmelo/pull/291
+[#292]: https://github.com/localmelo/localmelo/pull/292
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

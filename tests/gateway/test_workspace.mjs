@@ -16,6 +16,7 @@ import {plainSegments, setupStatusRow} from '../../support/gateway/static/status
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
+import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -515,6 +516,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -612,6 +614,10 @@ function findNode(node, predicate) {
   return null;
 }
 
+function findNodes(node, predicate) {
+  return [...(predicate(node) ? [node] : []), ...(node.children ?? []).flatMap((child) => findNodes(child, predicate))];
+}
+
 const quietDeny = (card) => findNode(card, (node) => 'approvalDeny' in node.dataset);
 const confirmDeny = (card) => findNode(card, (node) => 'approvalConfirm' in node.dataset);
 
@@ -705,6 +711,8 @@ function harness(routes, {mobile = false} = {}) {
     setupModelCard,
     folderName,
     setupFolderPicker,
+    picturesNode,
+    setupPictureBox,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     document,
@@ -1130,6 +1138,54 @@ test('Escape leaves the deny box first, and stops a running turn only while focu
   h.element('input').focus();
   press();
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'Escape in the composer stops it');
+});
+
+const picturesOf = (h) => findNodes(h.element('messages'), (node) => node.className === 'picture');
+
+test('pictures a turn made show as a row under its answer, and the row is reachable by keyboard', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  assert.equal(picturesOf(h).length, 0, 'a turn without pictures draws no row');
+  h.stream().emit({id: 8, turn: 1, ts: 21, type: 'turn.pictures', data: {turn: 1, turn_id: 'turn-1', pictures: [
+    {path: 'charts/fcf.png', size: 84000, mtime: 1761000000.5, state: 'new'},
+    {path: 'plot.svg', size: 4100, mtime: 1761000001, state: 'new'},
+  ]}});
+  const tiles = picturesOf(h);
+  assert.equal(tiles.length, 2);
+  assert.ok(tiles.every((tile) => tile.tag === 'button' && tile.type === 'button'));
+  const article = findNode(h.element('messages'), (node) => node.className === 'msg assistant');
+  const order = article.children.map((child) => child.className);
+  assert.ok(order.indexOf('pictures') > order.indexOf('answer'));
+  assert.ok(order.indexOf('pictures') < order.indexOf('message-actions'));
+  const image = findNode(tiles[0], (node) => node.tag === 'img');
+  assert.equal(image.src, '/api/sessions/a/pictures?path=charts%2Ffcf.png&v=1761000000500');
+  tiles[1].click();
+  assert.equal(h.element('picture-box').open, true);
+  assert.match(flatten(h.element('picture-box')), /plot\.svg/);
+});
+
+test('more than four pictures wait behind +N more until asked', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const pictures = Array.from({length: 6}, (_, index) => ({path: `p${index}.png`, size: 10, mtime: 1, state: 'new'}));
+  h.stream().emit({id: 8, turn: 1, ts: 21, type: 'turn.pictures', data: {turn: 1, turn_id: 'turn-1', pictures}});
+  assert.equal(picturesOf(h).length, 4);
+  const more = findNode(h.element('messages'), (node) => node.className === 'link-button picture-more');
+  assert.equal(more.textContent, '+2 more');
+  more.click();
+  assert.equal(picturesOf(h).length, 6);
+  findNode(h.element('messages'), (node) => node.className === 'link-button picture-more').click();
+  assert.equal(picturesOf(h).length, 4);
+});
+
+test('Escape with a picture open leaves the stop to the picture', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task'}});
+  h.element('input').focus();
+  h.element('picture-box').open = true;
+  h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
 });
 
 test('approval bar navigates to the card only on request', async () => {
@@ -1800,6 +1856,25 @@ test('the newest reply shows its turn\'s face, older replies the idle face, and 
   const [, , third, fourth] = faces();
   assert.equal(third[0], 'idle', 'the previous newest reply goes back to the idle face');
   assert.deepEqual(fourth, ['done', '/assets/akita/face-done.png', 'Done'], 'a bare answer has no words for the state, so its face has them');
+});
+
+test('only the idle face blinks: it sits in a wrapper whose CSS fades the eyes-closed patch in, and the other faces stay still', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {
+      turns: [turnRow({id: 'one', turn: 1}), turnRow({id: 'two', turn: 2, status: 'provider_error', answer: '', result: {error: 'e'}})],
+      has_earlier: false, replay_from: 10,
+    },
+  }));
+  await h.run('init()');
+  const [older, newest] = Array.from(h.element('messages').children);
+  const wrapper = findNode(older, (node) => node.className === 'blinks face');
+  assert.ok(wrapper, 'an older reply keeps the idle face, and it blinks');
+  assert.equal(wrapper.children.length, 1, 'the wrapper holds the face and nothing else: the patch is CSS');
+  assert.equal(wrapper.children[0].dataset.face, 'idle');
+  assert.equal(wrapper.children[0].src, '/assets/akita/face-idle.png');
+  assert.equal(findNode(newest, (node) => String(node.className).includes('blinks')), null, 'an error face has no patch');
+  const label = findNode(older, (node) => node.className === 'assistant-label');
+  assert.equal(label.children[0], wrapper, 'the face keeps its place before the name');
 });
 
 test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {

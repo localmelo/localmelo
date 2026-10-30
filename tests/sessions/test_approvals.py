@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 
 import pytest
@@ -12,10 +13,12 @@ from localmelo.melo.contracts.approvals import (
     ApprovalPolicy,
     ApprovalRequest,
 )
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.sessions.approvals import (
     RESOLVED_IDS_KEPT,
     ApprovalBroker,
     RememberingPolicy,
+    RoutineOnlyPolicy,
 )
 
 
@@ -195,3 +198,62 @@ async def test_the_broker_remembers_the_last_resolved_ids() -> None:
         ids.append(req.request_id)
     assert broker.answer(ids[0], ApprovalDecision(True)) == "unknown"  # forgotten
     assert broker.answer(ids[-1], ApprovalDecision(True)) == "already_resolved"
+
+
+# ── Grants cover routine calls only (#279) ──────────────────────────────────
+
+HIGH = ActionReview("high", ("install",), ("Installs x with pip.",))
+UNDECIDED = ActionReview("undecided", (), ("Runs a command melo could not read.",))
+
+
+def reviewed(review: ActionReview | None) -> ApprovalRequest:
+    return dataclasses.replace(request("python_exec"), review=review)
+
+
+async def test_a_grant_covers_routine_calls_and_never_a_high_impact_one() -> None:
+    asked: list[ApprovalRequest] = []
+
+    async def ask(req: ApprovalRequest) -> ApprovalDecision:
+        asked.append(req)
+        return ApprovalDecision(True, remember=True)
+
+    policy = RememberingPolicy(ask)
+    first = await policy.decide(reviewed(ActionReview("routine")))
+    assert first == ApprovalDecision(True, remember=True)
+    assert policy.allowed_tools == {"python_exec"}
+    routine = await policy.decide(reviewed(ActionReview("routine")))
+    assert routine == ApprovalDecision(True, origin="session")
+    assert await policy.decide(reviewed(None)) == routine  # nothing reviewed it
+    # A high-impact call asks under the grant, and its "remember" is dropped.
+    assert await policy.decide(reviewed(HIGH)) == ApprovalDecision(True)
+    # An undecided call asks too (no model review yet); its grant is kept.
+    assert await policy.decide(reviewed(UNDECIDED)) == ApprovalDecision(
+        True, remember=True
+    )
+    assert [r.review for r in asked] == [ActionReview("routine"), HIGH, UNDECIDED]
+    assert policy.allowed_tools == {"python_exec"}
+
+
+async def test_a_high_impact_answer_never_grants_the_tool() -> None:
+    async def ask(req: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, remember=True)
+
+    policy = RememberingPolicy(ask)
+    await policy.decide(reviewed(HIGH))
+    assert policy.allowed_tools == frozenset()
+
+
+async def test_routine_only_runs_routine_calls_and_asks_about_the_rest() -> None:
+    asked: list[ApprovalRequest] = []
+
+    async def ask(req: ApprovalRequest) -> ApprovalDecision:
+        asked.append(req)
+        return ApprovalDecision(False, "no")
+
+    policy = RoutineOnlyPolicy(RememberingPolicy(ask))
+    allowed = ApprovalDecision(True, origin="policy")
+    assert await policy.decide(reviewed(ActionReview("routine"))) == allowed
+    assert await policy.decide(reviewed(None)) == allowed
+    assert await policy.decide(reviewed(HIGH)) == ApprovalDecision(False, "no")
+    assert await policy.decide(reviewed(UNDECIDED)) == ApprovalDecision(False, "no")
+    assert [r.review for r in asked] == [HIGH, UNDECIDED]

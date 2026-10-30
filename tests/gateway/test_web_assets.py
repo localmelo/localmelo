@@ -235,6 +235,67 @@ def test_the_faces_and_the_portrait_are_not_clipped_to_a_rounded_tile() -> None:
             assert "border-radius" not in body, group.strip()
 
 
+def _blink_timeline() -> list[tuple[float, float]]:
+    """The melo-blink keyframes as (seconds into the 11 s loop, opacity), in order."""
+    body = re.search(r"@keyframes melo-blink\s*\{(.*?)\n\}", _stylesheet(), re.S)
+    assert body, "the blink keyframes"
+    points = []
+    for stops, opacity in re.findall(
+        r"([\d.%, ]+)\{\s*opacity:\s*([\d.]+);\s*\}", body.group(1)
+    ):
+        for stop in stops.split(","):
+            points.append((float(stop.strip().rstrip("%")) * 11 / 100, float(opacity)))
+    return sorted(points)
+
+
+def test_the_blink_is_css_only_two_blinks_in_eleven_seconds_and_still_under_reduced_motion() -> (
+    None
+):
+    css = _stylesheet()
+    # The patch is the background of the wrapper's ::after: clear at rest, with one animation over 11 s, for ever.
+    rule = re.search(r"\.blinks::after\s*\{([^}]*)\}", css)
+    assert rule and "opacity: 0;" in rule.group(1)
+    assert re.search(r"animation:\s*melo-blink 11s linear infinite", rule.group(1))
+    for picture in ("sit-idle-blink", "face-idle-blink"):
+        assert f"url(/assets/akita/{picture}.png)" in css
+        assert (webapp._STATIC / "akita" / f"{picture}.png").is_file()
+    # Two blinks, at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing); clear in between.
+    timeline = _blink_timeline()
+    assert timeline[0] == (0.0, 0.0) and timeline[-1] == (11.0, 0.0)
+    for start in (4.2, 9.6):
+        edges = [
+            (round(s - start, 2), o)
+            for s, o in timeline
+            if start - 0.01 <= s <= start + 0.17
+        ]
+        assert edges == [(0.0, 0.0), (0.06, 1.0), (0.09, 1.0), (0.16, 0.0)], start
+    assert sum(1 for _, o in timeline if o == 1.0) == 4  # no third blink
+    # Reduce Motion removes every animation: the patch stays clear, which is the still picture.
+    reduced = re.search(
+        r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?)\n\}", css, re.S
+    )
+    assert reduced and "animation: none !important" in reduced.group(1)
+    assert "*::after" in reduced.group(1)
+    # And no script runs the blink: the lines that mention it set up markup and nothing else.
+    script = (webapp._STATIC / "workspace.js").read_text(encoding="utf-8")
+    for line in (line for line in script.splitlines() if "blink" in line):
+        assert not re.search(
+            r"setTimeout|setInterval|requestAnimationFrame|animate\(", line
+        )
+
+
+async def test_the_portrait_sits_in_the_blinking_wrapper_with_its_picture_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    page = (await client.get("/")).text
+    assert re.search(
+        r'<span class="blinks portrait"\s*><img\s+class="welcome-mascot"\s+src="/assets/akita/sit-idle.png"',
+        page,
+    )
+    # The patch is laid over the same 108 x 140 frame as the picture, so the two stay in step.
+    assert re.search(r"\.blinks\.portrait\s*\{[^}]*margin: 0 auto 16px", _stylesheet())
+
+
 async def test_chat_url_placeholder_matches_the_omlx_hint(
     client: httpx.AsyncClient,
 ) -> None:
@@ -443,6 +504,17 @@ async def test_running_module_is_served_and_the_shell_has_its_chip(
     assert re.search(r'<div\b[^>]*\bid="running-root"[^>]*\bhidden\b', page.text)
     assert re.search(r'<div\b[^>]*\bid="running-menu"[^>]*\bhidden\b', page.text)
     assert 'id="running-btn"' in page.text
+
+
+async def test_pictures_module_is_served_and_the_shell_has_its_light_box(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/pictures.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "picturesNode" in response.text
+    page = await client.get("/")
+    assert re.search(r'<dialog\b[^>]*\bid="picture-box"', page.text)
 
 
 def _stylesheet() -> str:

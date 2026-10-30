@@ -32,6 +32,14 @@ PET = [
 PORTRAIT = ["sit-idle", "sit-working", "sit-waiting", "sit-done", "sit-error"]
 FACES = ["idle", "working", "waiting", "done", "error"]
 FAVICONS = [16, 32, 64]
+# The pieces of the moves, each on the canvas of the picture it moves over: eyes-closed patches (one per calm
+# picture, and the small face) and the tail's two pieces.
+BLINKS = {
+    "portrait/sit-idle-blink": "sit-idle",
+    "pet/lie-idle-blink": "lie-idle",
+    "face/idle-blink": "idle",
+}
+TAIL_PIECES = ["pet/lie-done-body", "pet/lie-done-tail"]
 FACE_POINTS = 48
 MARGIN = 3  # points of clear canvas around the dogs, as the script leaves them
 MAX_BYTES = 1_500_000
@@ -39,10 +47,12 @@ MAX_BYTES = 1_500_000
 # faces and the three favicons (the same table as CONSOLE_FILES in the script, which Pillow keeps out of the tests).
 CONSOLE_FILES = {
     "portrait/sit-idle@2x.png": "sit-idle.png",
+    "portrait/sit-idle-blink@2x.png": "sit-idle-blink.png",
     **{f"face/{name}@2x.png": f"face-{name}.png" for name in FACES},
+    "face/idle-blink@2x.png": "face-idle-blink.png",
     **{f"favicon/{size}.png": f"favicon-{size}.png" for size in FAVICONS},
 }
-MAX_CONSOLE_BYTES = 160_000  # the console's pictures weigh about 150 KB; the two logos they replaced, about 80 KB
+MAX_CONSOLE_BYTES = 170_000  # the console's pictures weigh about 155 KB; the two logos they replaced, about 80 KB
 
 
 def anchors() -> dict[str, dict[str, Any]]:
@@ -103,6 +113,9 @@ def test_the_folder_holds_exactly_the_expected_files() -> None:
     for folder, names in (("pet", PET), ("portrait", PORTRAIT), ("face", FACES)):
         expected |= {f"{folder}/{n}{s}.png" for n in names for s in ("", "@2x")}
     expected |= {f"favicon/{n}.png" for n in FAVICONS}
+    expected |= {
+        f"{piece}{s}.png" for piece in (*BLINKS, *TAIL_PIECES) for s in ("", "@2x")
+    }
     found = {str(p.relative_to(ART)) for p in ART.rglob("*") if p.is_file()}
     assert found == expected
     # The design asked for about 1.2 MB; a larger set has to be a deliberate change.
@@ -241,3 +254,63 @@ def test_the_picture_stays_visible_on_every_console_surface_in_both_themes(
         # Dark: the outline vanishes, so the rim, as it looks on the surface, has to.
         edge = rim * rim_alpha + dark * (1 - rim_alpha)
         assert contrast(edge, dark) >= 4.5, (name, surface, "dark rim")
+
+
+def extent(mask: np.ndarray) -> tuple[int, int, int, int]:
+    """Left, top, right and bottom (inclusive) of the true pixels of a mask."""
+    xs, ys = np.flatnonzero(mask.any(axis=0)), np.flatnonzero(mask.any(axis=1))
+    return int(xs[0]), int(ys[0]), int(xs[-1]), int(ys[-1])
+
+
+def mass(path: Path) -> np.ndarray:
+    """The picture as float RGBA with the colour multiplied by the alpha (premultiplied), 0 to 1."""
+    pixels = rgba_plane(path).astype(float) / 255
+    return np.dstack([pixels[..., :3] * pixels[..., 3:], pixels[..., 3]])
+
+
+@pytest.mark.parametrize("scale, suffix", [(1, ""), (2, "@2x")])
+def test_the_pieces_lie_on_their_pictures_and_a_blink_changes_only_the_eyes(
+    scale: int, suffix: str
+) -> None:
+    pictures = anchors()
+    for piece, state in BLINKS.items():
+        folder = piece.split("/")[0]
+        base = ART / folder / f"{state}{suffix}.png"
+        patch = ART / f"{piece}{suffix}.png"
+        assert header(patch) == header(base)  # the same canvas: laid at the same frame
+        alpha = alpha_plane(patch)
+        assert 0 < (alpha > 0).mean() < 0.08, piece  # a patch, not a picture
+        if folder != "face":
+            # Everything the patch draws lies in the eye band of anchors.json (with the feather's margin).
+            x, y, w, h = pictures[state]["eyes"]
+            left, top, right, bottom = extent(alpha > 0)
+            margin = 3  # the feather, and the scaling filter's reach
+            assert left >= (x - margin) * scale, piece
+            assert right <= (x + w + margin) * scale, piece
+            assert top >= (y - margin) * scale, piece
+            assert bottom <= (y + h + margin) * scale, piece
+            # And it is drawn on the dog: the base is solid wherever the patch is.
+            assert (alpha_plane(base)[alpha > 0] == 255).all(), piece
+
+
+@pytest.mark.parametrize("scale, suffix", [(1, ""), (2, "@2x")])
+def test_the_body_and_the_tail_laid_together_are_the_still_picture(
+    scale: int, suffix: str
+) -> None:
+    still = mass(ART / f"pet/lie-done{suffix}.png")
+    body = mass(ART / f"pet/lie-done-body{suffix}.png")
+    tail = mass(ART / f"pet/lie-done-tail{suffix}.png")
+    assert still.shape == body.shape == tail.shape
+    both = tail + body * (1 - tail[..., 3:])  # the tail over the body, premultiplied
+    gap = np.abs(still - both).max(axis=-1)
+    assert gap.mean() < 0.001 and (gap > 0.25).mean() < 0.0015
+    # The tail is a small part of the picture, inside the box and about the pivot that anchors.json gives.
+    entry = anchors()["lie-done"]["tail"]
+    x, y, w, h = entry["box"]
+    left, top, right, bottom = extent(tail[..., 3] > 0.5)
+    assert left >= (x - 2) * scale and right <= (x + w + 2) * scale
+    assert top >= (y - 2) * scale and bottom <= (y + h + 2) * scale
+    assert (tail[..., 3] > 0.5).mean() < 0.2
+    assert x <= entry["pivot"][0] <= x + w and y <= entry["pivot"][1] <= y + h
+    # The body has no tail: nothing is drawn where the tail's far end is.
+    assert body[top : top + 4, right - 4 : right + 1, 3].max() < 0.5

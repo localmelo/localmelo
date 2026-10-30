@@ -78,7 +78,8 @@ for you to send or change, and step aside once there is text.
    tool cards it ran, its reasoning, its notices and reflections, the live
    row while it runs, and the final answer with `Copy response`. Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
-   GIF, WebP) show inline. A turn that answers without tool calls shows its
+   GIF, WebP) show inline, and the pictures the turn made show under the answer
+   (see [Pictures in the answer](#pictures-in-the-answer)). A turn that answers without tool calls shows its
    time once, in the line under the answer; its reasoning, when it has some,
    opens under a `Thought` line. Chats tell the model that it is melo from
    localmelo and which model and server it runs on, so asking "who are you?"
@@ -123,19 +124,50 @@ model, since the composer shows it, and keeps the chip when it warns (`Model off
 `⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
 turn are buttons at least 44 px tall.
 
+## Pictures in the answer
+
+When a turn makes a picture it shows under the answer, in the browser and in the
+[macOS app](macos-app.md) alike, so a chart you asked for is there without opening the
+folder.
+
+- **Which pictures.** The PNG, JPEG, GIF, WebP and SVG files the turn created or changed in
+  the chat's folder, and the picture files its answer names by a path inside that folder.
+  The gateway looks at the folder when the turn starts and when it ends, so a file written by
+  `python_exec` counts although no tool listed it. The look skips hidden folders,
+  `node_modules`, links and folders more than three levels down, stops after 4,000 entries,
+  and a turn keeps 24 pictures at most.
+- **The row.** Each preview shows the picture, its file name and its size (`updated` when the
+  turn changed an existing file). Four show; `+N more` shows the rest and **Show fewer** folds
+  them. A click, Enter or Space on a preview opens it at full size; Esc, **Close** or a click
+  outside closes it. The previews work in both themes and at phone width.
+- **Reopened chats.** The list is stored with the turn (the
+  [`turn.pictures` event](../reference/events.md#session-events)), so a chat you reopen shows its
+  pictures for as long as the files are in the folder. A preview whose file is gone says
+  `No longer in the folder`; one that is no longer a picture says `Not a picture file`.
+- **What the gateway serves.** `GET /api/sessions/{id}/pictures?path=` returns a file only
+  when its real path, links followed, is inside that chat's folder, its name and its content
+  are a PNG, JPEG, GIF, WebP or SVG, and it is at most 20 MB. A path with `..`, an absolute
+  path outside the folder, a link that leads out and another chat's folder are refused (403);
+  a text file named `chart.png` is refused (415); nothing is written or listed. The route
+  needs the console's sign-in like every `/api` route. An SVG is sent with a policy that stops
+  scripts and keeps it from opening as a page
+  ([API v2](../reference/api-v2.md#get-apisessionsidpictures)).
+
 ## Melo in the page
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
-app and in a browser alike. Every picture is a still image: the page moves
-nothing, so Reduce Motion needs no special case.
+app and in a browser alike. The pictures are still images, except that the calm
+portrait and the calm (idle) face blink: an eyes-closed patch, laid over the
+picture, fades in twice every 11 seconds. It is CSS only, with no script, and
+under `prefers-reduced-motion: reduce` the page shows the still picture.
 
 - **Empty chat.** Melo sits above *What would you like to work on?* with its calm
-  face.
+  face, and blinks.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
   reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
   while an approval waits, happy when it is done, and with a drooping ear when
   it ended with a warning or an error. A turn you stopped is not a failure and
-  keeps the calm face, and so does every older reply.
+  keeps the calm face, and so does every older reply; the calm face blinks.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
   wide-eyed face.
 - **Brand and tab.** The sidebar and the sign-in screen show the calm face, and
@@ -151,8 +183,8 @@ The pictures are transparent PNGs with a thin cream rim. On the light canvas the
 navy outline sets Melo off (at least 12:1 against the console's light surfaces);
 on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
 bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
-`face-idle.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
-`face-error.png` and `favicon-16.png`, `-32` and `-64`): 150 KB in all, copies of
+`sit-idle-blink.png`, `face-idle.png`, `face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
+`face-error.png` and `favicon-16.png`, `-32` and `-64`): 155 KB in all, copies of
 the app's own pictures in `macos/art/akita` made by the same script (see the
 [macOS app guide](macos-app.md)), and net 70 KB more
 than before, because the two logos `melo.png` and `icon_small.png` (80 KB) left

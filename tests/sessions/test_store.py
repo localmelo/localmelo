@@ -716,6 +716,7 @@ def test_the_session_event_keys_are_pinned() -> None:
         "turn.started": {"turn", "turn_id", "user_text", "client_request_id"},
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
+        "turn.pictures": {"turn", "turn_id", "pictures"},
         "session.title": {"title"},
         "session.updated": {"model", "workspace", "workspace_label", "meta"},
         "approval.requested": {
