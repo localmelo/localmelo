@@ -177,6 +177,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo the Akita lies on your desktop when you put the macOS app away. Close the window,
+  minimize it or hide the app and a small Melo appears at the bottom right, above the Dock,
+  over other windows and on every Space, without taking the keyboard. It rests lazily while
+  nothing runs, works, waits for your approval, is happy when a run is done, looks sad when
+  one did not finish and sleeps in a different pose after a quiet minute, all from the
+  health check the app already makes. Click it to open the window (or the chat that waits
+  for you), drag it anywhere (it remembers its place on each screen), right-click it for
+  Open localmelo, Hide Melo and Quit localmelo; Hide Melo is remembered and **Show Melo** in
+  the menu-bar menu brings it back. It breathes, bobs when work starts, hops when it waits
+  and wags when a run is done, with Core Animation only: all of that stops under Reduce
+  Motion, in Low Power Mode, when the Mac runs hot, and when Melo is covered or the screen
+  sleeps. VoiceOver reads its mood when Melo is focused; the menu-bar item still announces a wait, Melo stays silent so it is not read twice. The Dock icon now opens the window
+  again after it was closed. ([#272])
+
 - Melo the Akita puppy gets pictures, a mood policy and a place in `GET /api/health`, the
   first step towards a desktop pet. `macos/art/akita` holds 14 transparent pictures, each at
   1x and `@2x` (1.17 MB): nine for a pet (lying, resting lazily, three sleeping poses), five
@@ -2103,6 +2117,7 @@ earlier milestones.
 [#266]: https://github.com/localmelo/localmelo/pull/266
 [#268]: https://github.com/localmelo/localmelo/pull/268
 [#271]: https://github.com/localmelo/localmelo/pull/271
+[#272]: https://github.com/localmelo/localmelo/pull/272
 [#NN]: https://github.com/localmelo/localmelo/pull/NN
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
