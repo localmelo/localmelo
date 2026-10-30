@@ -801,12 +801,13 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
 
     The first line says what the first run needs: a model server. A server
     found on this machine is offered with one question (``n`` asks for a URL,
-    prefilled with it); the model is chosen from the server's list. With none found, it prints the commands that start one
-    and looks again on each Enter; an address typed instead is checked as a
-    URL is. Only ``GET <url>/models`` is sent, and ``GET /api/version`` once
-    when saving, to tell Ollama apart. When the check of a URL fails the user
-    may retry, start without saving, or quit (None). EOFError and
-    KeyboardInterrupt reach the caller.
+    prefilled with it); the model is chosen from the server's list. With none
+    found, it prints the commands that start one and looks again on each
+    Enter; an address typed instead is checked as a URL is. Only
+    ``GET <url>/models`` is sent, and ``GET /api/version`` once when saving, to
+    tell Ollama apart. When the check of a URL fails the user may retry, start
+    without saving, or quit (None). EOFError and KeyboardInterrupt reach the
+    caller.
 
     With *ask_keep* (``--reconfigure``), a ``n``, or no server found while a
     backend is saved, raises :class:`_FullMenuError` before anything is saved,
