@@ -100,7 +100,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   folder are not memory; to answer a memory question in one or two plain sentences without
   describing internals; and to reply in the language and script you write in, simplified or
   traditional Chinese for example (this replaces "Answer in the user's language."). Direct runs,
-  workers and the benchmark send no identity and are unchanged ([#NN]).
+  workers and the benchmark send no identity and are unchanged ([#305]).
 
 - `/clear` clears the screen. In the terminal it was another spelling of `/new`: it started a
   new chat and printed a `New chat` rule under the whole page. Now `/clear` is a command of
@@ -2388,6 +2388,7 @@ earlier milestones.
 [#296]: https://github.com/localmelo/localmelo/pull/296
 [#297]: https://github.com/localmelo/localmelo/pull/297
 [#304]: https://github.com/localmelo/localmelo/pull/304
+[#305]: https://github.com/localmelo/localmelo/pull/305
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
