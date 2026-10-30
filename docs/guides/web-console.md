@@ -43,8 +43,8 @@ scheduler priority in Tasks. It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
-**Tasks** joins the sidebar once there is a task to see in it; worker runs are a link
-from the [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows all of it. Everything stays in the
+**Tasks** joins the sidebar once there is a task to see in it; worker runs are in the
+panel's **Workers** tab and a link in the empty [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows all of it. Everything stays in the
 page, hidden.
 
 A new chat shows where melo will work before you send anything. The chip in the composer reads
@@ -148,8 +148,9 @@ message: the model never reads it. Between two of your messages a busy side chat
 only its newest card. A stop of your own, a shutdown or an approval answered before the
 main chat was looked at makes no card.
 
-Until the panel lists workers, an empty main chat links **See what worker runs did**
-(once a run or a terminal chat exists, and always in developer mode).
+The panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
+the main chat all of today's. For runs of earlier days, an empty main chat links **See what
+worker runs did** (once a run or a terminal chat exists, and always in developer mode).
 
 ## Pictures in the answer
 

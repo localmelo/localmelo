@@ -467,6 +467,11 @@ built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
   `request_key` makes a repeat of the same normalized request return 200
   `{"task": ..., "repeated": true}`; reusing it for a different request
   returns 409 `submission_conflict`. A repeat does not start a new worker.
+- `front_id` (optional) is the chat that starts the task: a side chat's or the
+  main chat's session id. The task belongs to it (the task's `front_id`, which
+  the panel's Workers tab of that chat lists); absent, the main chat. An id
+  that names no console chat (unknown, or a task's session) is 400
+  `invalid_request`.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
@@ -792,8 +797,9 @@ chat's conversation never holds it. Its `data`:
 - The gateway writes the cards when the main chat or the list is read, and
   once a minute; a waiting card whose approval was answered first is never
   written. The main chat's stream carries new cards as `attention.card` frames.
-- A task created through `POST /api/tasks` records the main chat as its
-  `front_id`.
+- A task created through `POST /api/tasks` belongs to the chat its
+  `front_id` names, else to the main chat; its cards still come to the main
+  chat.
 
 ## GET /api/sessions/{id}/events
 

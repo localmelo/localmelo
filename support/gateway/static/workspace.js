@@ -525,7 +525,7 @@ function syncUI() {
         ? `${session.model || "Your model"} is ready. Start a conversation below.`
         : "A quiet space to think, build, and explore with your own model.";
   }
-  // Worker history, until the panel lists workers: the main chat's empty state links to it.
+  // Worker history of earlier days (the panel's Workers tab lists today's): the main chat's empty state links to it.
   $("welcome-workers").hidden = !mainActive() || !(developerMode || sections.workers);
   setTextIfChanged($("new-label"), S.main ? "New side chat" : "New chat");
   setTextIfChanged($("list-label"), S.main ? "Side chats" : "Chats");

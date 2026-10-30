@@ -43,6 +43,8 @@ class CreateTask(Body):
     level: StrictInt | StrictStr | None = None
     deadline: StrictStr | StrictFloat | StrictInt | None = None
     request_key: StrictStr | None = None
+    # The chat that starts the task; the main chat when absent.
+    front_id: StrictStr | None = None
 
 
 class UpdateTask(Body):

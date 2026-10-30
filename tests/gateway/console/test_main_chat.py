@@ -355,3 +355,23 @@ def _client(app: Any) -> Any:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url=f"http://127.0.0.1:{PORT}"
     )
+
+
+async def test_a_chat_that_starts_a_task_owns_it(tmp_path: Path) -> None:
+    workspace = Path.home() / "slides"
+    workspace.mkdir()
+    async with console_with(tmp_path, answer("hello")) as (console, client, _):
+        side = (await _create(client, tmp_path, "Slides"))["session"]["id"]
+        await _wait_turn(client, side)
+        body = {"objective": "Make slides", "level": "p5", "workspace": str(workspace)}
+        response = await client.post("/api/tasks", json={**body, "front_id": side})
+        assert response.status_code == 202, response.text
+        task = response.json()["task"]
+        assert task["front_id"] == side
+        # Without one, the main chat owns it.
+        plain = (await client.post("/api/tasks", json=body)).json()["task"]
+        assert plain["front_id"] == console.main_id
+        for wrong in ("gone", task["task_id"]):
+            refused = await client.post("/api/tasks", json={**body, "front_id": wrong})
+            assert refused.status_code == 400
+            assert refused.json()["error"]["code"] == "invalid_request"

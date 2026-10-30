@@ -14,7 +14,7 @@
 
 首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。没有服务器在运行时，卡片会显示启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致），放在一个点按一次即可全选的方框里，并提供键盘可用的 **Copy commands** 按钮；卡片在屏幕上且标签页可见时，每三秒再次寻找，服务器一响应，模型就会出现。**Check again** 立即寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 
-页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务里的调度优先级。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。当有任务可看时，**Tasks** 才会出现在侧边栏；worker 运行从[主对话](#the-main-chat-and-side-chats)里的链接进入。[开发者模式](#developer-mode)显示全部内容。这些元素都保留在页面中，只是隐藏。
+页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务里的调度优先级。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。当有任务可看时，**Tasks** 才会出现在侧边栏；worker 运行在面板的 **Workers** 标签页里，空的[主对话](#the-main-chat-and-side-chats)里也有链接。[开发者模式](#developer-mode)显示全部内容。这些元素都保留在页面中，只是隐藏。
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
@@ -35,7 +35,7 @@
 
 旁支对话的一次运行结束，或任务完成、失败或等你批准时，主对话会在事情发生的那一天下面显示一张卡片：`Done: Plan the Tokyo trip` 加上回答的第一句，`Did not finish: Fix CI` 加上它结束的方式，或 `Fix CI needs your approval`。**Open side chat**、**Open task** 或 **Review** 会前往它。卡片不是消息：模型从不读取它。在你的两条消息之间，一个忙碌的旁支对话只保留最新的一张卡片。你自己的停止、关机，或在查看主对话之前就已答复的审批，都不会产生卡片。
 
-在面板列出 worker 之前，空的主对话会链接到 **See what worker runs did**（有运行或终端对话之后出现；开发者模式下始终出现）。
+面板的 **Workers** 标签页列出当前对话的 worker：旁支对话列出它自己的，主对话列出今天的全部。要看更早几天的运行，空的主对话会链接到 **See what worker runs did**（有运行或终端对话之后出现；开发者模式下始终出现）。
 
 <a id="pictures-in-the-answer"></a>
 ## 回答里的图片

@@ -258,6 +258,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用内置工具 `file_read`、`file_write` 和 `python_exec`（不含 `shell_exec` 和 `list_files`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
 
 - `POST /api/tasks` 接受 `objective`（或其别名 `prompt`）、可选的 `title`、`workspace`、`level` 和 `request_key`。objective 必须非空，且不超过 100,000 个字符；title 不超过 200 个字符，默认为从 objective 派生的标题。level 为 0–5 的整数或 `P0`–`P5`；省略时为计算出的 P2。提供的 `deadline`（即使为 null）都会被拒绝；截止时间尚不支持。其他字段也会被拒绝。objective 缺失、为空白或过长、title 过长或 level 无效，都返回 400 `invalid_task`；模式或类型错误返回 400 `invalid_request`。创建新任务时返回 202 `{"task": ...}`。显式为空的 `request_key` 返回 400 `invalid_request`。非空的 `request_key` 使同一规范化请求的重复提交返回 200 `{"task": ..., "repeated": true}`；将其用于不同的请求会返回 409 `submission_conflict`。重复提交不会启动新的 worker。
+- `front_id`（可选）是发起该任务的对话：某个旁支对话或主对话的会话 id。任务属于它（即任务的 `front_id`，该对话的面板 Workers 标签页会列出它）；缺失时属于主对话。不指向任何控制台对话的 id（未知 id，或任务的会话）返回 400 `invalid_request`。
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
 - `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。`first` 会被 400 `invalid_request` 拒绝；它被推迟到 S6b。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
 
@@ -382,7 +383,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `state` 为 `done`、`failed` 或 `waiting`（有审批在等待答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`line` 是一行平实的话：回答的第一句、运行结束的方式，或 `Waiting for your approval`。`at` 是事情发生的时间。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入。主对话的事件流以 `attention.card` 帧送来新卡片。
-- 通过 `POST /api/tasks` 创建的任务把主对话记为它的 `front_id`。
+- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
 
 ## GET /api/sessions/{id}/events
 
