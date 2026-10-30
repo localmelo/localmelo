@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -507,10 +508,13 @@ def test_the_legacy_json_line_has_none_of_the_new_keys(
 
 def test_the_interactive_help_lists_the_flags() -> None:
     text = cli._build_parser(developer=True).format_help()
-    assert "--reasoning {legacy,drop,replay,compress,compress+replay}" in text
-    assert "--reasoning-field {auto,reasoning_content,reasoning}" in text
-    assert "--replay-turns N" in text
-    assert "--note-writer {auto,heuristic}" in text
+    for key, flag in (
+        ("agent.reasoning", "--reasoning"),
+        ("endpoint.reasoning_field", "--reasoning-field"),
+        ("agent.replay_turns", "--replay-turns"),
+        ("agent.note_writer", "--note-writer"),
+    ):
+        assert re.search(rf"^  {key} .* {flag} \(#183\)$", text, re.M)
 
 
 def test_a_config_refusal_leaves_no_memory_dir(

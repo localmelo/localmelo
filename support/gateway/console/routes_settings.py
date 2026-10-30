@@ -35,7 +35,12 @@ from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
 from localmelo.support.gateway.console.running import running_status
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
-from localmelo.support.option_tiers import ADVANCED, EXPERIMENTAL_ISSUES, OPTION_TIERS
+from localmelo.support.option_tiers import (
+    ADVANCED,
+    EVERYDAY_OLD,
+    EXPERIMENTAL_ISSUES,
+    OPTION_TIERS,
+)
 from localmelo.support.sessions import display
 from localmelo.support.sessions.runner import DEFAULT_RESUME_MODE
 
@@ -193,7 +198,8 @@ def _advanced_options() -> list[dict[str, str]]:
     return [
         {"option": name, "tier": tier, "issue": EXPERIMENTAL_ISSUES.get(name, "")}
         for name, tier in OPTION_TIERS.items()
-        if tier == ADVANCED or name in EXPERIMENTAL_ISSUES
+        if (tier == ADVANCED or name in EXPERIMENTAL_ISSUES)
+        and name not in EVERYDAY_OLD
     ]
 
 

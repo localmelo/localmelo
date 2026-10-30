@@ -21,7 +21,7 @@ Models on http://127.0.0.1:8000/v1:
 Model [1]:
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
 Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
@@ -97,17 +97,18 @@ cloud API or another backend, use the wizard.
 ## Set up with the wizard
 
 ```bash
-melo --reconfigure          # the wizard, then the interactive UI
+melo setup                  # the wizard, then the interactive UI
 melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
 The wizard asks for a chat backend, its URL and model, and an embedding
 backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lists the
 prompts. It sends a short test request to each server, saves the config
-file, and then opens the interactive UI or, with `--serve`, starts the
-gateway. Press Ctrl+C to stop the gateway.
+file, and then opens the interactive UI or, with `--serve --reconfigure` (the
+one setup that has no command-word form), starts the gateway. Press Ctrl+C to
+stop the gateway.
 
-Without `--serve` and in default mode, `melo --reconfigure` starts as the first
+In default mode, `melo setup` starts as the first
 run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
 full menu follows only after `n`, when no server is found, or with
 `--developer`.
@@ -133,11 +134,11 @@ full menu follows only after `n`, when no server is found, or with
 - When the embedding server's check fails, the wizard saves with embedding
   off (`embedding_backend = "none"`, no long-term memory) and says so. A
   detected model that fails its probe is not left in the config's table.
-- `melo --serve` runs the wizard by itself when there is no config file.
+- `melo serve` runs the wizard by itself when there is no config file.
 - Without a terminal the wizard reads its answers from stdin. With no
-  config file and no terminal, `melo --serve` exits with code 1 and one
+  config file and no terminal, `melo serve` exits with code 1 and one
   line on stderr instead of waiting for answers that cannot come, as under
-  launchd. Pass `--allow-unconfigured` with `melo --serve` to start the
+  launchd. Pass `--force` with `melo serve` to start the
   gateway anyway and configure it over `/api/settings`.
 - Run the wizard again to change backends. It keeps the other settings it
   knows, such as `request_timeout_s` and `extra_body`, and rewrites the file
@@ -159,7 +160,7 @@ If you installed with pip, repeat the last command of
 
 ## Uninstall localmelo
 
-1. If you installed the background service, run `melo --daemon uninstall`.
+1. If you installed the background service, run `melo serve uninstall`.
 2. Delete the clone.
 3. Delete `~/.cache/localmelo` (your configuration and saved memory),
    `~/.localmelo` (the background service's logs), and any directory you

@@ -53,17 +53,17 @@ pip install -e ".[gateway]"
 > 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，见[选择内置工具](../guides/tools-mcp.md#choose-the-built-in-tools)。另见[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../guides/tools-mcp.md#what-the-checks-do)。
 
 ```bash
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
+melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
-答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
+答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。`-u` 和 `-m` 是 `--url` 和 `--model` 的字母写法；旧写法 `--base-url` 和 `--chat-model` 仍然可用（[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)）。
 
-不带 `--chat-model` 时，melo 会先询问服务器有哪些模型，使用其唯一的对话模型，或服务器说明已在内存中的那一个。有多个对话模型且不知道哪个在内存中时，它会以退出码 2 停止并列出这些模型，因为请求一个尚未加载的模型可能让服务器加载一个很大的模型：请传入 `--chat-model <id>`。
+不带 `--model` 时，melo 会先询问服务器有哪些模型，使用其唯一的对话模型，或服务器说明已在内存中的那一个。有多个对话模型且不知道哪个在内存中时，它会以退出码 2 停止并列出这些模型，因为请求一个尚未加载的模型可能让服务器加载一个很大的模型：请传入 `--model <id>`。
 
 使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx) 时，填写它的 URL 和模型文件夹的名称：
 
 ```bash
-melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
 
 直接任务会不经询问就写入文件、运行 Python，并且没有 `shell_exec` 工具，除非传入 `--builtins all`。这不是沙箱：`python_exec` 仍可启动程序（见[上面的警告](#run-your-first-task)）。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
@@ -75,7 +75,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7
 ## 以 JSON 获取结果
 
 ```bash
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"
+melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7?"
 ```
 
 输出示例（数值会有所不同）：
@@ -103,7 +103,7 @@ cat > brief.md <<'EOF'
 Write hello.py so that it prints the word hello.
 Check: python3 hello.py | grep -x hello
 EOF
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json
+melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.json
 echo "exit code: $?"
 python3 -c 'import json; r = json.load(open("result.json")); print(r["status"], r["tests"]["state"])'
 ```
@@ -118,10 +118,10 @@ completed passed
 最后一轮的所有检查都以 0 退出时，`tests.state` 为 `passed`；有检查失败或无法运行时为 `failed`。运行以 `completed` 结束但检查失败时，退出码为 4，脚本可以据此停下：
 
 ```bash
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
+melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.json && echo "check passed"
 ```
 
-实验性的 `--brief-items on` 还会在模型的反思请求和最后几步之前，指出简报中尚未被任何编辑触及的编号条目（见[参考](../../reference/cli.md#brief-items)）。
+实验性设置 `agent.brief_items`（`-X agent.brief_items=true`）还会在模型的反思请求和最后几步之前，指出简报中尚未被任何编辑触及的编号条目（见[参考](../../reference/cli.md#brief-items)）。
 
 结果是一行 JSON，含 `status`、`exit_code`、`tests` 和运行记录。所有字段和退出码见[命令行参考](../../reference/cli.md#output)（英文）。
 
@@ -129,7 +129,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md
 
 ## 保存配置
 
-配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--base-url` 即可工作。
+配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--url` 即可工作。
 
 对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表先列对话模型；嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
 
@@ -139,8 +139,8 @@ melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
 Try: What is this project? · / commands · ctrl+d quit
@@ -175,13 +175,13 @@ melo --serve --reconfigure
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。不带 `--serve` 时，`melo --reconfigure` 会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才会出现上面的完整菜单。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才会出现上面的完整菜单。
 
 <a id="start-the-gateway"></a>
 
 ## 启动网关
 
-如果配置是用 `melo` 保存的，就用 `melo --serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
+如果配置是用 `melo` 保存的，就用 `melo serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
 
 示例把网关的 bearer token 从其私有文件通过管道传给 curl，使它不出现在命令行参数和 shell 历史中。不要开启 curl 的详细输出，也不要记录这个请求头；同一用户的其他进程仍能读取 token 文件。
 
@@ -199,7 +199,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 {"result":"42","session_id":"a7e8f646ca2e"}
 ```
 
-健康检查不会联系模型服务器；任务会。要使用网页工作区，在终端中运行 `melo --gateway-login`，并在 60 秒内打开它打印的一次性链接。不要分享这个链接。见[交互式对话](#interactive-conversations)。
+健康检查不会联系模型服务器；任务会。要使用网页工作区，在终端中运行 `melo console`，并在 60 秒内打开它打印的一次性链接。不要分享这个链接。见[交互式对话](#interactive-conversations)。
 
 在第一个终端中按 Ctrl+C 停止网关。任务使用已保存的配置：
 
@@ -207,7 +207,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 melo "What is 6*7?"
 ```
 
-要跳过向导再次启动网关，运行 `melo --serve`。用 `melo --serve --port 0` 时由系统选一个空闲端口：启动信息会显示真实地址，`melo --gateway-login --port PORT` 和 `melo-task --gateway URL` 需要用它。
+要跳过向导再次启动网关，运行 `melo serve`。用 `melo serve --port 0` 时由系统选一个空闲端口：启动信息会显示真实地址，`melo console --port PORT` 和 `melo-task --gateway URL` 需要用它。
 
 <a id="run-a-task-through-the-gateway"></a>
 
@@ -229,7 +229,7 @@ c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
   Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
 ```
 
-默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo --gateway-login`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
+默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
 
 ```bash
 melo-task show c5b2d38ceecc
@@ -252,19 +252,19 @@ c5b2d38ceecc  done
 ```bash
 melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
-# --chat-model it uses the server's only chat model or its one loaded model;
+# --model it uses the server's only chat model or its one loaded model;
 # with several chat models and not exactly one loaded, it exits 2 and lists them:
-melo --base-url http://127.0.0.1:8000/v1
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
+melo --url http://127.0.0.1:8000/v1
+melo --url http://127.0.0.1:8000/v1 --model YOUR_MODEL_ID
 ```
 
-- 输入 `/` 查看命令：`/model` 列出服务器的模型并切换模型，`/backend` 切换到另一个服务器（两者都会保存为默认值，`melo --base-url` 会话除外），`/new` 重新开始，`/exit` 或 Ctrl+D 退出。
+- 输入 `/` 查看命令：`/model` 列出服务器的模型并切换模型，`/backend` 切换到另一个服务器（两者都会保存为默认值，`melo --url` 会话除外），`/new` 重新开始，`/exit` 或 Ctrl+D 退出。
 - melo 运行 shell 命令、Python 代码或写入文件前会询问：按 `1` 允许，按 `2` 在本会话中允许该工具，按 `3` 拒绝并告诉 melo 原因。Esc 停止当前轮次。
 - melo 在当前文件夹中工作（`--workspace DIR` 可选择其他文件夹）：文件工具限制在该文件夹内；命令和 Python 可以访问其他文件，因此 melo 会先询问。
 
-[交互式界面](../guides/terminal.md#the-interactive-ui)介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo --serve` 启动网关。
+[交互式界面](../guides/terminal.md#the-interactive-ui)介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo serve` 启动网关。
 
-`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo --reconfigure` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../guides/web-console.md#web-workspace)。
+`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo setup` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../guides/web-console.md#web-workspace)。
 
 <a id="next-steps"></a>
 

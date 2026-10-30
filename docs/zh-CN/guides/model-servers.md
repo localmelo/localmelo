@@ -44,10 +44,10 @@
 5. 使用该 ID 运行任务：
 
    ```bash
-   melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+   melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
    ```
 
-   oMLX 在首次请求时加载模型，大模型可能需要一分钟。如果该请求超时，添加 `--request-timeout 600`。不指定 `--chat-model` 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 `melo --base-url http://127.0.0.1:8000/v1`（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，会以退出码 2 退出，列出这些模型，并要求使用 `--chat-model <id>`。用 `--chat-model` 指定模型可以跳过这次查询。
+   oMLX 在首次请求时加载模型，大模型可能需要一分钟。如果该请求超时，添加 `--request-timeout 600`。不指定 `--model` 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 `melo --url http://127.0.0.1:8000/v1`（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，会以退出码 2 退出，列出这些模型，并要求使用 `--model <id>`。用 `--model` 指定模型可以跳过这次查询。
 
 要将 oMLX 设为默认值，在保存任何配置之前在终端运行 `melo`：它会在端口 8000 找到 oMLX，列出模型并保存你的选择；[首次运行](configure.md#first-run)展示了整个过程。oMLX 在第一个请求到达时才加载模型，因此列出的模型不一定在内存中，加载大模型可能要几分钟。所以设置按下面的方式选择；列出多个对话模型时，它会向 oMLX 询问哪些模型已加载（`GET /v1/models/status`，最多等一秒）：
 
@@ -55,7 +55,7 @@
 - 有多个，且 oMLX 说明了哪些已加载：设置会给已加载的模型标上 `(loaded)`，并以其中第一个作为默认值。
 - 有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 **Allow inference without API key**，oMLX 也不会说明，此时设置会输出 `The server did not say which models are loaded (it needs a key for that).` 在 oMLX 中设置了别名的模型会以别名列出，状态回复会在文件夹名旁边给出该别名（`model_alias`，oMLX 0.7.1rc1 就是这样发送的），所以该模型会被标出，并且可以在别名下成为默认值。状态回复中没有别名的服务器无法标出这样的模型。
 
-已有配置时，先运行第 5 步以加载模型，再运行 `melo --reconfigure`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 oMLX 或 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
+已有配置时，先运行第 5 步以加载模型，再运行 `melo setup`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 oMLX 或 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
 
 <a id="backends"></a>
 
@@ -91,7 +91,7 @@ chat_model = "Qwen3-8B-4bit"
 enable_thinking = false
 ```
 
-- `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。`--chat-model ID` 可在一次运行中替换它。
+- `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。`--model ID` 可在一次运行中替换它。
 - [首次运行](configure.md#first-run)会写入 `chat_backend`、`chat_url` 和 `chat_model` 行：在没有配置文件的终端中运行 `melo`，同时让 oMLX 运行。当它提供嵌入模型时，还会写入 `embedding_backend = "omlx"`，以及该表的 `embedding_url` 和 `embedding_model`。其他行请手动添加。
 - `request_timeout_s = 600` 为 oMLX 留出时间，以便在请求遇到未加载的模型时加载它；见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
 - `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快。省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用上述表中的设置。

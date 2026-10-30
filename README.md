@@ -54,21 +54,24 @@ omlx serve --model-dir ~/models --port 8000
 In a second terminal, run a task:
 
 ```bash
-melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
 
 On other systems, or if you prefer [Ollama](https://ollama.com), pull a model
 with `ollama pull qwen3:8b` and run:
 
 ```bash
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
+melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
 Run `melo` in a terminal to chat. On the first run it finds a running server
 (oMLX on port 8000, Ollama on 11434), picks a model or asks for one, and saves
-a configuration; `melo --serve` starts the gateway; run `melo --gateway-login`
+a configuration; `melo serve` starts the gateway; run `melo console`
 in a terminal and open the one-use link within 60 seconds. The HTTP API and
-web workspace are at `http://127.0.0.1:8401/`.
+web workspace are at `http://127.0.0.1:8401/`. `-u` and `-m` are the letters of `--url`
+and `--model`; the old spellings (`--base-url`, `--chat-model`, `--serve`,
+`--reconfigure`, `--gateway-login`) still work, and
+[Old spelling to new](docs/reference/cli.md#old-spelling-to-new) lists them all.
 The interactive UI accepts the same [reasoning and recall options](docs/reference/cli.md#interactive-ui)
 as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
 also honor the saved reasoning mode (default `legacy`). The separate

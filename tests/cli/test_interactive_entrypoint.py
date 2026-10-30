@@ -207,7 +207,7 @@ def test_no_config_and_no_terminal_exits_with_one_line(
     gateway.assert_not_called()
     assert capsys.readouterr() == (
         "",
-        "melo: no backend is configured; run melo --reconfigure in a terminal\n",
+        "melo: no backend is configured; run melo setup in a terminal\n",
     )
 
 
@@ -300,7 +300,9 @@ def test_a_task_with_chat_model_and_no_base_url_sends_that_model(
         return httpx.Response(200, json=body), body
 
     with (
-        mock.patch("sys.argv", ["melo", "--chat-model", "selected-model", "task"]),
+        mock.patch(
+            "sys.argv", ["melo", "--chat-model", "selected-model", "--", "task"]
+        ),
         mock.patch("localmelo.support.config.load", return_value=_config()),
         mock.patch("localmelo.support.config.save") as save,
         mock.patch(
