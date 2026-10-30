@@ -239,6 +239,18 @@ def test_read_does_not_follow_a_link_swapped_in_after_the_check(
     assert refusal(workspace, "a.png").status == 403
 
 
+def test_read_checks_where_the_open_file_really_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "ws"
+    make(workspace / "a.png")
+    outside = make(tmp_path / "secret.png")
+    monkeypatch.setattr(pictures, "_opened_path", lambda fd: str(outside))
+    assert refusal(workspace, "a.png").status == 403
+    monkeypatch.setattr(pictures, "_opened_path", lambda fd: None)
+    assert pictures.read(str(workspace), "a.png").mime == "image/png"
+
+
 def test_read_refuses_a_missing_file_and_bad_requests(tmp_path: Path) -> None:
     assert refusal(tmp_path, "gone.png").status == 404
     assert refusal(tmp_path, "").status == 404
