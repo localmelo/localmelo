@@ -37,10 +37,74 @@ func runningCounts(_ data: Data) -> RunningCounts? {
     return RunningCounts(chats: chats, tasks: tasks, runs: runs, terminal: terminal)
 }
 
-/// The menu-bar title: the plain name at 0 or when the count is unknown.
-func menuTitle(_ counts: RunningCounts?) -> String {
-    guard let counts = counts, counts.total > 0 else { return "localmelo" }
-    return "localmelo · \(counts.total)"
+/// What the menu-bar item says: nothing known yet, idle, working, or waiting for the person.
+enum MenuBarState: Equatable {
+    case unknown
+    case idle
+    case running(Int)
+    case waiting(running: Int)
+}
+
+/// A chat or task that waits for an answer to a tool approval, from `status.waiting` of `GET /api/health`.
+struct WaitingItem: Equatable {
+    let kind: String
+    let id: String
+
+    /// The console route that opens it.
+    var route: String { kind == "task" ? "#/tasks/\(id)" : "#/s/\(id)" }
+}
+
+private let routeCharacters = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-")
+
+/// The list is empty when it is missing or damaged. An entry whose kind or id the console would not
+/// open is left out, so a route is always safe to hand to the page.
+func waitingItems(_ data: Data) -> [WaitingItem] {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let status = body["status"] as? [String: Any],
+          let list = status["waiting"] as? [[String: Any]] else { return [] }
+    return list.compactMap { entry in
+        guard let kind = entry["kind"] as? String, kind == "chat" || kind == "task",
+              let id = entry["id"] as? String, (1...128).contains(id.count),
+              id.unicodeScalars.allSatisfy(routeCharacters.contains) else { return nil }
+        return WaitingItem(kind: kind, id: id)
+    }
+}
+
+func waitingRoute(_ data: Data) -> String? { waitingItems(data).first?.route }
+
+/// Waiting wins over running. A held task is not running, so a wait can come with a count of 0.
+func menuBarState(_ data: Data) -> MenuBarState {
+    guard let counts = runningCounts(data) else { return .unknown }
+    if !waitingItems(data).isEmpty { return .waiting(running: counts.total) }
+    return counts.total > 0 ? .running(counts.total) : .idle
+}
+
+/// The count beside the mark: what the console's header chip counts as running, and nothing at 0.
+func menuTitle(_ state: MenuBarState) -> String {
+    switch state {
+    case .running(let n), .waiting(running: let n): return n > 0 ? "\(n)" : ""
+    case .unknown, .idle: return ""
+    }
+}
+
+/// What VoiceOver reads for the item, and what hovering shows.
+func menuBarLabel(_ state: MenuBarState) -> String {
+    switch state {
+    case .unknown: return "localmelo"
+    case .idle: return "localmelo, nothing running"
+    case .running(let n): return "localmelo, \(n) running"
+    case .waiting: return "localmelo, waiting for your approval"
+    }
+}
+
+/// The first line of the item's menu; nil while nothing is known.
+func menuStatusLine(_ state: MenuBarState) -> String? {
+    switch state {
+    case .unknown: return nil
+    case .idle: return "Nothing running"
+    case .running(let n), .waiting(running: let n): return n > 0 ? "\(n) running" : "Nothing running"
+    }
 }
 
 private func counted(_ n: Int, _ noun: String) -> String {
