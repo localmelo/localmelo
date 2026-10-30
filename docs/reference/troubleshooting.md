@@ -117,6 +117,20 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 - **Fix:** run `melo "<task>"` for one task, or `melo serve` for the
   gateway, or run `melo` in a real terminal.
 
+### No model server is running at the first run
+
+```text
+No model server is running yet. To start one with oMLX:
+```
+
+- **Cause:** none of the four usual ports (8000, 8400, 11434, 30000, or the URLs
+  in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`.
+- **Fix:** run the commands melo prints (oMLX on a Mac, Ollama elsewhere; they
+  are the ones in the [model servers guide](../guides/model-servers.md)), then
+  press Enter to check again. A server on another port: type its address.
+  `q` quits without saving. The web console's setup card shows the same
+  commands and looks again by itself.
+
 ### A model server cannot be used at the first run
 
 ```text

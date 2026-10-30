@@ -18,8 +18,8 @@ lists them.
 
 - When there is no config file yet, `melo serve` asks first, as `melo setup`
   does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`, and
-  the full backend menu follows only after `n`, when no server is found, or
-  with `--developer`; see [Configuration](configure.md#set-up-with-the-wizard).
+  the full backend menu follows only after `n` or with `--developer`, and with
+  no server running it prints the commands that start one; see [Configuration](configure.md#set-up-with-the-wizard).
   Without a terminal it cannot ask, so it prints
   `melo: no backend is configured; run melo setup in a terminal`
   and exits with code 1.

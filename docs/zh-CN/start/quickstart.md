@@ -175,7 +175,7 @@ melo --serve --reconfigure
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才会出现上面的完整菜单。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
 
 <a id="start-the-gateway"></a>
 

@@ -246,7 +246,8 @@ success it prints `Config saved to …`, the path of
 `melo setup` alone opens the interactive UI instead, and in
 default mode it starts with the first run's question: it prints
 `Found a model server at …` and asks `Use it? [Y/n]:`. The full menu above
-follows only after `n`, when no server is found, or with `--developer`.
+follows only after `n`, with `--developer`, or when no server is found while a backend
+is saved; with nothing saved, it prints the commands that start a server instead.
 
 ## Start the gateway
 

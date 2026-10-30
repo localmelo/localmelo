@@ -6,7 +6,7 @@ import asyncio
 import os
 import sys
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from localmelo.support import config
@@ -533,9 +533,34 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _start_a_server() -> str:
-    """The servers the first run suggests: oMLX first on a Mac, then Ollama."""
-    return "omlx serve or ollama serve" if sys.platform == "darwin" else "ollama serve"
+def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
+    """Say how to start a model server, then look again each time Enter is pressed.
+
+    Returns the server a look found, or the address typed in its place (the
+    caller checks it), or None when the user quits. EOFError and
+    KeyboardInterrupt reach the caller.
+    """
+    how = discovery.how_to_start()
+    _say(f"No model server is running yet. To start one with {how.name}:")
+    print()
+    for command in how.commands:
+        print(f"  {command}")
+    print()
+    _say(f"{how.note} The guide shows how:")
+    print(discovery.GUIDE_URL)
+    while True:
+        answer = input(
+            "Press Enter to check again, type an address, or q to quit: "
+        ).strip()
+        if answer.lower() in ("q", "quit"):
+            return None
+        if answer:
+            return answer
+        found = asyncio.run(discovery.detect_local_server(urls))
+        if found is not None:
+            return found
+        ports = ", ".join(_port(url) for url in urls)
+        _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
 
 
 def _servers_named() -> str:
@@ -772,24 +797,37 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
 
     The first line says what the first run needs: a model server. A server
     found on this machine prefills the URL; the model is chosen from the
-    server's list. Only ``GET <url>/models`` is sent, and
-    ``GET /api/version`` once when saving, to tell Ollama apart. When the
-    check fails the user may retry, start without saving, or quit
-    (None). EOFError and KeyboardInterrupt reach the caller.
+    server's list. With none found, it prints the commands that start one
+    and looks again on each Enter; an address typed instead is checked as a
+    URL is. Only ``GET <url>/models`` is sent, and ``GET /api/version`` once
+    when saving, to tell Ollama apart. When the check of a URL fails the user
+    may retry, start without saving, or quit (None). EOFError and
+    KeyboardInterrupt reach the caller.
 
     With *ask_keep* (``--reconfigure``), the found server is offered with one
-    question instead of the URL question; no server found, or a ``n``,
-    raises :class:`_FullMenuError` before anything is saved.
+    question instead of the URL question; a ``n``, or no server found while a
+    backend is saved, raises :class:`_FullMenuError` before anything is saved.
     """
     urls = discovery.detect_urls()
     # A reconfigure knows what melo needs; a first run says it, also when it
     # reaches this question through `melo serve`.
-    if not ask_keep or not config.load().is_configured:
+    first = not ask_keep or not config.load().is_configured
+    if first:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
-    if ask_keep and (found is None or not found.models):
+    typed = ""
+    if found is None and urls and first:
+        waited = _wait_for_a_server(urls)
+        if waited is None:
+            return None
+        if isinstance(waited, str):
+            typed = waited
+        else:
+            found = waited
+    if ask_keep and not typed and (found is None or not found.models):
         raise _FullMenuError()
-    keep = False
+    keep = bool(typed)
+    default_url = typed
     if found is not None and found.models:
         count = len(found.models)
         _say(
@@ -804,16 +842,8 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     elif found is not None:
         _say(f"A model server at {found.url} answered, but {found.problem}.")
         default_url = found.url
-    else:
-        if urls:
-            ports = ", ".join(_port(url) for url in urls)
-            _say(
-                f"No model server found on this computer (looked at ports {ports}). "
-                f"Start one (for example {_start_a_server()}), or enter its URL."
-            )
-        # URLs named in the environment are the ones to try first.
-        overridden = discovery.DETECT_URLS_ENV in os.environ
-        default_url = urls[0] if overridden and urls else _FIRST_RUN_URL
+    elif not typed:
+        default_url = _FIRST_RUN_URL  # detection is off: the usual address is a guess
 
     while True:
         url = default_url if keep else _question("Server URL", default_url)

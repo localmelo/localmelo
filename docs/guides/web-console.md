@@ -23,8 +23,13 @@ server) with its model, **A model server needs an API key**, or **No model serve
 is running on this Mac**. **Use this model** saves the server, tests it and makes
 the welcome ready without opening settings. With several chat models and none
 known to be loaded, the card lists them, marks the loaded one and waits for you to
-choose; it never picks one for you. **Check again** looks again after you start a
-server, **Enter a server address…** opens connection settings, and the composer
+choose; it never picks one for you. With no server running, the
+card shows the commands that start one (oMLX on a Mac, Ollama elsewhere, as in the
+[model servers guide](model-servers.md)) in a block that one click selects, with a
+**Copy commands** button for the keyboard, and asks
+again every three seconds while it is on screen and the tab is visible, so the model
+appears once the server answers. **Check again** asks at once, **Enter a server
+address…** opens connection settings, and the composer
 reads `Connect a model to start` until a model is set up. The card also shows when
 the configured server stops answering, and it looks for a server only while it is
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).

@@ -89,6 +89,9 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   Ollama: its version endpoint is asked at the root, and chat requests drop
   a trailing `/v1`.
 
+- With no server running, it prints the commands that start one (oMLX on a Mac,
+  Ollama elsewhere) and looks again each time you press Enter; the web console's
+  setup card shows the same commands and looks again every three seconds.
 - A server that does not answer, refuses the request without an API key,
   or lists no models is named with the reason, and you can retry, start
   without saving or quit. localmelo never asks for an API key for a local
@@ -115,8 +118,9 @@ stop the gateway.
 
 In default mode, `melo setup` starts as the first
 run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
-full menu follows only after `n`, when no server is found, or with
-`--developer`. `melo serve` before any setup asks the same first.
+full menu follows only after `n`, with `--developer`, or when no server is found
+while a backend is saved. With nothing saved and no server running, it prints the
+commands that start one instead. `melo serve` before any setup does the same.
 
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers the saved backend; with

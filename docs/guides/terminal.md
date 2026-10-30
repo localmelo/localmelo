@@ -56,8 +56,9 @@ The first of these that applies:
 1. `melo setup`: the setup wizard, then the backend it saved. In default
    mode it first offers the model server it finds on this computer (`Found a
    model server at …`, `Use it? [Y/n]:`) with the first run's questions; the
-   full backend menu follows only after `n`, when none is found, or with
-   `--developer`. Without a task it cannot be combined with `--url`.
+   full backend menu follows only after `n`, with `--developer`, or when none is
+   found while a backend is saved (with nothing saved, it prints the commands
+   that start a server). Without a task it cannot be combined with `--url`.
 2. `--url URL`: that server, without the config file. The model is
    `--model`, else the only chat model that `GET URL/models` lists
    (ids containing `embed` or `rerank` are not chat models), else the one
@@ -627,12 +628,28 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   lists a chat model comes first; one that lists only embedding or reranking
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none
-  answers, it prints
-  `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example omlx serve or ollama serve), or enter its URL.`
-  (elsewhere than macOS it names only `ollama serve`) and offers
-  `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
-  four URLs with a comma-separated list, and its first URL is then the one
-  offered; an empty value turns the search off.
+  answers, it prints the commands that start one (oMLX on a Mac, Ollama
+  elsewhere, the ones in the [model servers guide](model-servers.md)) and
+  waits:
+
+  ```text
+  No model server is running yet. To start one with oMLX:
+
+    brew tap jundot/omlx https://github.com/jundot/omlx
+    brew install jundot/omlx/omlx
+    omlx serve --model-dir ~/models --port 8000
+
+  Put a model in its own folder of ~/models first. The guide shows how:
+  https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
+  Press Enter to check again, type an address, or q to quit:
+  ```
+
+  Enter looks at the same ports again and, when a server answers, goes on as
+  above (`✗ No model server found yet (looked at ports …).` when none does).
+  An address typed instead is checked like a URL, below; `q` exits with code 0.
+  `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated
+  list, which Enter looks at; an empty value turns the search off, and melo
+  then asks `Server URL [http://127.0.0.1:8000/v1]:`.
 - A server that lists several models is shown as a list to choose from. On a
   terminal (stdin and stdout, `TERM` not `dumb`) it is the same list as `/model`:
   type to filter, ↑ ↓ to move, Enter to choose, Esc or Ctrl+C to cancel the

@@ -194,6 +194,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     ``Ollama``, ``oMLX`` or empty. ``models`` are the chat models, ``loaded``
     those the server says are in memory, and ``suggested`` the one to offer:
     null when several are served and none is known loaded, so the user picks.
+    ``start`` is how to start a server on this computer, for the card that finds none.
     """
     transport = console.options.detect_transport
     urls = discovery.detect_urls()
@@ -201,7 +202,13 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
         await discovery.detect_local_server(urls, transport=transport) if urls else None
     )
     body: dict[str, Any] = dict.fromkeys(("name", "backend", "url", "problem"), "")
-    body.update(state="none", models=[], loaded=[], suggested=None)
+    body.update(
+        state="none",
+        models=[],
+        loaded=[],
+        suggested=None,
+        start=discovery.how_to_start().to_json(),
+    )
     if found is None:
         return body
     body["url"] = url_label(found.url)
