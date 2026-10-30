@@ -36,6 +36,7 @@ ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay
 NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["slide", "chunk", "boundary"]
 CacheLayout = Literal["v2", "v3"]
+ToolImages = Literal["auto", "on", "off"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -279,6 +280,18 @@ class AgentOptions:
       ``RunResult.confinement`` says so. The CLI sets it for ``--brief``
       runs and the gateway for saved tasks, unless ``[agent]
       confine_writes`` is false. Default false: nothing changes.
+    - ``tool_images``: whether the pictures that tools return reach the
+      model. ``"off"`` names them in the tool message only, as before
+      this option. ``"on"`` also sends the pixels of the newest
+      ``tool_images_keep`` of them (up to ``tool_images_keep +
+      tool_images_retire - 1``; the oldest ``tool_images_retire`` retire
+      together) in each planning request, scaled to at most 1,280 pixels
+      wide once, when stored, and each counts toward the prompt cap (see
+      ``melo/agent/_tool_images.py``). ``"auto"``, the default, is
+      ``"on"`` when the provider says the model reads images
+      (``BaseLLMProvider.takes_images``, asked once, when a tool first
+      returns an image) and ``"off"`` otherwise. A run whose tools return
+      no image sends the same requests in every mode.
     """
 
     context_window: int | None = None
@@ -333,6 +346,9 @@ class AgentOptions:
     lean_output: bool = False
     confine_writes: bool = False
     identity: str | None = None
+    tool_images: ToolImages = "auto"
+    tool_images_keep: int = 3
+    tool_images_retire: int = 2
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -365,7 +381,13 @@ class AgentOptions:
                 raise ValueError(
                     "context_window must exceed output_reserve plus safety_margin"
                 )
-        for name in ("max_steps", "steps_per_attempt", "max_attempts"):
+        for name in (
+            "max_steps",
+            "steps_per_attempt",
+            "max_attempts",
+            "tool_images_keep",
+            "tool_images_retire",
+        ):
             value = getattr(self, name)
             if not _is_positive_int(value):
                 raise ValueError(f"{name} must be an int >= 1, got {value!r}")
@@ -380,6 +402,7 @@ class AgentOptions:
             ("note_writer", get_args(NoteWriter)),
             ("window_eviction", get_args(WindowEviction)),
             ("cache_layout", get_args(CacheLayout)),
+            ("tool_images", get_args(ToolImages)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

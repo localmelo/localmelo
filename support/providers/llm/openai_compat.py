@@ -30,6 +30,7 @@ from localmelo.support.providers.llm._protocol import (
     raw_tool_arguments,
 )
 from localmelo.support.providers.llm._sse import sse_data
+from localmelo.support.providers.llm._vision import server_takes_images
 
 # The most bytes of a response that is one JSON body (not a stream) that
 # stream_chat reads, for a server that ignores ``stream``.
@@ -787,6 +788,13 @@ class OpenAICompatLLM(BaseLLMProvider):
         self.last_reasoning_key = reason_key
         self.last_usage = _usage_details(raw_usage)
         yield StreamFragment(kind="reply", reply=reply, finish_reason=finish)
+
+    async def takes_images(self) -> bool | None:
+        """Whether the server says the model reads images (oMLX, Ollama); else None."""
+        root = str(self._http.base_url).rstrip("/").removesuffix("/v1")
+        return await server_takes_images(
+            self._http, self.model, status="/models/status", show=f"{root}/api/show"
+        )
 
     async def close(self) -> None:
         await self._http.aclose()

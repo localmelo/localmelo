@@ -122,6 +122,9 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
 EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.lean_output": "#183",
     "agent.confine_direct_runs": "#183",
+    "agent.tool_images": "#280",
+    "agent.tool_images_keep": "#280",
+    "agent.tool_images_retire": "#280",
 }
 
 # Long option name -> tier, for every option the parser has.

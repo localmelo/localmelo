@@ -32,14 +32,23 @@ if TYPE_CHECKING:
     from localmelo.melo.contracts.review import ActionReview
 
 
+# The characters one image with pixels counts for in the prompt cap: a
+# 1280x1024 screenshot is about 1,300 tokens on the local vision models, at
+# about 3.45 characters per token. A reference (no pixels) counts nothing.
+IMAGE_PROMPT_CHARS = 4_500
+
+
 def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
     """Characters *msg* contributes to a planning prompt.
 
     With *count_thinking*, an assistant message's ``thinking`` counts too:
     a replay request sends it, so it must fit the cap. The default counts
     the content and tool calls only, as every request before replay did.
+    Each image the message sends (one with data) counts
+    :data:`IMAGE_PROMPT_CHARS`.
     """
     total = len(msg.content)
+    total += IMAGE_PROMPT_CHARS * sum(1 for image in msg.images if image.data)
     if count_thinking and msg.role == "assistant":
         total += len(msg.thinking)
     for tc in msg.tool_calls:

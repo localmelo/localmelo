@@ -96,3 +96,16 @@ def test_invalid_result() -> None:
     out = tool_result_to_output(["not", "a", "dict"])
     assert out.is_error
     assert "invalid MCP tool result" in out.text
+
+
+def test_structured_content_is_not_text_beside_an_image() -> None:
+    # A screenshot tool that repeats its base64 in structuredContent: the
+    # model gets the picture, never its base64 as text.
+    out = tool_result_to_output(
+        {
+            "content": [{"type": "image", "data": PNG, "mimeType": "image/png"}],
+            "structuredContent": {"screenshot": PNG},
+        }
+    )
+    assert out.text == ""
+    assert len(out.images) == 1
