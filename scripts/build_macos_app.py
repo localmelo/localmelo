@@ -72,6 +72,9 @@ UNUSED = (
 )
 BUNDLE_ID = "org.localmelo.app"
 XCODE = "/Applications/Xcode.app/Contents/Developer"
+NO_SWIFT = (
+    "The app needs Apple's Swift compiler. Install it with: xcode-select --install"
+)
 LAUNCHER_PATH = "Contents/Resources/runtime/bin/melo"
 # The app icon: the mark in paper white on a deep sage tile, in the macOS icon grid (824 of 1024 px).
 ICON_TILE, ICON_INK = "#2f4a2b", "#fbfbf9"
@@ -252,9 +255,42 @@ def make_icon(resources: Path, stage: Path) -> None:
     run(["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o", str(icns)])
 
 
+def xcode_select_path() -> str:
+    """The developer folder that `xcode-select -p` names, or "" when none is set."""
+    done = subprocess.run(
+        ["/usr/bin/xcode-select", "-p"], capture_output=True, text=True
+    )
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def swift_developer_dir() -> str:
+    """The developer folder whose swiftc builds the app, chosen in this order.
+
+    DEVELOPER_DIR when the caller set it; else the full Xcode; else the folder that
+    `xcode-select -p` names, when it has a Swift compiler (the Command Line Tools).
+    """
+    if os.environ.get("DEVELOPER_DIR"):
+        return os.environ["DEVELOPER_DIR"]
+    if Path(XCODE).is_dir():
+        return XCODE
+    selected = xcode_select_path()
+    if selected and (Path(selected) / "usr/bin/swiftc").is_file():
+        return selected
+    raise RefusalError(NO_SWIFT)
+
+
+def tools_name(developer: str) -> str:
+    """The developer folder in words, for the build's summary."""
+    if Path(developer).name == "CommandLineTools":
+        return "the Command Line Tools"
+    app = Path(developer).parent.parent.name  # the Xcode.app above Contents/Developer
+    return app.removesuffix(".app") if app.endswith(".app") else developer
+
+
 def build(output: Path) -> None:
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         raise RuntimeError("Building requires an arm64 macOS host")
+    developer = swift_developer_dir()  # refused here, before any work
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"Output already exists: {output}")
     swift_files = sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))
@@ -350,7 +386,7 @@ def build(output: Path) -> None:
             ],
             env={
                 **os.environ,
-                "DEVELOPER_DIR": XCODE,
+                "DEVELOPER_DIR": developer,
             },
         )
         precompile(interpreter, python, site)
@@ -374,9 +410,10 @@ def build(output: Path) -> None:
             )
         sign(app)
         shutil.move(str(app), str(output))
+    print(f"Built with {tools_name(developer)}.", flush=True)
 
 
-class InstallError(RuntimeError):
+class RefusalError(RuntimeError):
     """A refusal, worded for the person who ran the command."""
 
 
@@ -390,7 +427,7 @@ def check_target(target: Path) -> bool:
     except (OSError, ValueError, ExpatError):
         found = None
     if found != BUNDLE_ID or target.is_symlink():
-        raise InstallError(
+        raise RefusalError(
             "~/Applications/LocalMelo.app is a different app, so it was left as it is.\n"
             "Move or rename it, then run this command again."
         )
@@ -418,6 +455,7 @@ def links_to(link: Path, launcher: Path) -> bool:
 
 def install() -> str:
     """Build the app, put it in ~/Applications and link the melo command. No admin."""
+    swift_developer_dir()  # refused before anything is made or printed
     target = Path.home() / "Applications/LocalMelo.app"
     check_target(target)  # before the long build
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -507,7 +545,7 @@ def main() -> None:
         else:
             build(args.output.absolute())
             print(f"Built development app (signed ad hoc): {args.output}")
-    except InstallError as exc:
+    except RefusalError as exc:
         parser.exit(1, f"{exc}\n")
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"Build failed: {exc}\n")

@@ -99,8 +99,9 @@ source .venv/bin/activate</code></pre>
           <code>uv run python scripts/build_macos_app.py --install</code>, builds
           it, signs it ad hoc and installs it in <code>~/Applications</code>
           without admin rights. It needs no Apple developer account and stays
-          on the Mac that builds it, and it needs the release Xcode: it is a
-          development bundle, not a notarized release or a Homebrew cask.
+          on the Mac that builds it, and it needs a Swift compiler, from the release
+          Xcode or the Command Line Tools: it is a development bundle, not a
+          notarized release or a Homebrew cask.
         </p>
         <p>
           The rest of this guide calls <code>melo</code> directly. Activation
