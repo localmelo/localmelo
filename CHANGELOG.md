@@ -186,7 +186,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   approval for a shell command. A direct run, `melo --brief`, the Python API's default
   mode and task workers keep the three built-ins they had, so their requests do not
   change; `--builtins list_files` or `all` names it. `/status all` counts five built-ins
-  in the terminal. ([#NN])
+  in the terminal. ([#259])
 
 - The terminal says which files a turn changed. A turn that wrote files with `file_write`
   ends with one more quiet line under its footer, `Changed hello.py (+1), README.md (+3
@@ -1947,6 +1947,7 @@ earlier milestones.
 [#255]: https://github.com/localmelo/localmelo/pull/255
 [#257]: https://github.com/localmelo/localmelo/pull/257
 [#258]: https://github.com/localmelo/localmelo/pull/258
+[#259]: https://github.com/localmelo/localmelo/pull/259
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
