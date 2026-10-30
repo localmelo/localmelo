@@ -61,7 +61,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   such a turn, or `Thought` over its reasoning when it has some (the reasoning is the body of
   that line, not a second `Thought` inside it); the terminal prints `✻ Thought` for a reply
   that ends a turn without tool calls. The footer keeps the turn's time. A turn with tool calls
-  is unchanged ([#NN]).
+  is unchanged ([#287]).
 
 - The terminal's command list stays open while you delete characters. Typing
   `/exi` showed `/exit`, but deleting the `i` closed the list instead of showing
@@ -230,7 +230,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   question it can answer directly without tools. Switching the model (`/model`, the console's
   model menu) names the new one from the next turn. It is the new `AgentOptions.identity`
   (default `None`: direct runs, workers and the gateway's v1 sessions send no identity).
-  ([#NN])
+  ([#287])
 
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
@@ -1204,7 +1204,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   whether to start its answers with it. The date line stays, and `prefix_cache.version` in a
   run's result still names the layout. Every request of a run with the fixed prefix (the
   default), direct runs included, differs from before by that one line, so a server's prompt
-  cache warms once after the upgrade ([#NN]).
+  cache warms once after the upgrade ([#287]).
 
 - The terminal's new look, part 2: panels, lists, the status bar and the welcome. The approval
   panel has an amber frame with its title bold, the chosen answer sits on a moss band, and a
@@ -2200,6 +2200,7 @@ earlier milestones.
 [#275]: https://github.com/localmelo/localmelo/pull/275
 [#284]: https://github.com/localmelo/localmelo/pull/284
 [#285]: https://github.com/localmelo/localmelo/pull/285
+[#287]: https://github.com/localmelo/localmelo/pull/287
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
