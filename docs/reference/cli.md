@@ -41,7 +41,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
 | `melo serve [install\|uninstall\|status]` | Run the gateway, or manage it as a login service (macOS). | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
-| `melo console [--reset]` | Print a one-use link to the web console; `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
+| `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
 | `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | Import a worker history. | `--title T` |
@@ -594,7 +594,7 @@ These options apply to `melo` without a task.
 |---|---|---|
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
-| `--port PORT` | `8401` | The port the gateway listens on. With `--serve`, `0` asks the system for a free port: the startup lines print the real address, the sign-in line names the port for `melo --gateway-login --port PORT`, and `melo-task` needs `--gateway URL`. `0` is refused with `--daemon` and the gateway authentication commands, and in `[gateway] port`. |
+| `--port PORT` | `8401` | The port the gateway listens on. With `--serve`, `0` asks the system for a free port: the startup lines print the real address, the sign-in line (printed when no browser opens) names the port for `melo --gateway-login --port PORT`, and `melo-task` needs `--gateway URL`. `0` is refused with `--daemon` and the gateway authentication commands, and in `[gateway] port`. |
 | `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
 | `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use this model server?`; the full menu after `Use another server`, with `--developer`, or with none found while a backend is saved), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
@@ -614,7 +614,12 @@ These options apply to `melo` without a task.
   cannot be combined with `--reconfigure` or used without `--serve`.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
-- `melo --gateway-login [--port PORT]` prints a one-use sign-in link to a terminal;
+- `melo --gateway-login [--port PORT]` (`melo console`) opens the web console in
+  the default browser when stdin and stdout are terminals on this computer (no
+  `SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY`; `BROWSER` picks the browser). It
+  prints the one-use sign-in link, to a terminal only, when no browser starts
+  or over SSH. Exit 2 when stdout is not a terminal (a message on stderr, nothing on stdout),
+  exit 1 when nothing listens on the port.
   `melo --gateway-rotate-token` rotates the shared local gateway token.
   The gateway refuses non-loopback binds and requires authentication; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).

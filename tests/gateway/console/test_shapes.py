@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
@@ -76,6 +77,43 @@ def test_an_existing_file_target(tmp_path: Path) -> None:
     path.write_text("abc")
     target = approval_json(request("file_write", str(path), str(workspace)))["target"]
     assert target == {"path_label": "todo.md", "exists": True, "size_bytes": 3}
+
+
+def test_a_write_over_a_file_carries_what_it_replaces(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    path = workspace / "todo.md"
+    path.write_text("abc\n")
+    asked = request("file_write", str(path), str(workspace))
+    asked = replace(asked, arguments={"path": str(path), "content": "abd\n"})
+    pending = approval_json(asked)
+    assert pending["target"] == {
+        "path_label": "todo.md",
+        "exists": True,
+        "size_bytes": 4,
+        "diff": {
+            "added": 1,
+            "removed": 1,
+            "rows": [
+                {"kind": "removed", "line": 1, "text": "abc"},
+                {"kind": "added", "line": 1, "text": "abd"},
+            ],
+            "note": "",
+        },
+    }
+    # Nothing else of the approval changes.
+    assert set(pending) == {
+        "request_id",
+        "call_id",
+        "tool_name",
+        "arguments",
+        "arguments_complete",
+        "preview",
+        "workspace_root",
+        "workspace_label",
+        "target",
+    }
+    assert pending["arguments"] == {"path": str(path), "content": "abd\n"}
 
 
 def test_another_tools_target_is_null(tmp_path: Path) -> None:

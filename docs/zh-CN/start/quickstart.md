@@ -202,7 +202,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 {"result":"42","session_id":"a7e8f646ca2e"}
 ```
 
-健康检查不会联系模型服务器；任务会。要使用网页工作区，在终端中运行 `melo console`，并在 60 秒内打开它打印的一次性链接。不要分享这个链接。见[交互式对话](#interactive-conversations)。
+健康检查不会联系模型服务器；任务会。在本机终端里运行 `melo serve` 时，网页工作区会在浏览器中自动打开；`melo console` 可再次打开它。通过 SSH 或没有浏览器能启动时，`melo console` 会输出一次性链接，请在 60 秒内打开。不要分享这个链接。见[交互式对话](#interactive-conversations)。
 
 在第一个终端中按 Ctrl+C 停止网关。任务使用已保存的配置：
 
@@ -232,7 +232,7 @@ c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
   Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
 ```
 
-默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console`，打开它打印的链接，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
+默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console` 打开控制台，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
 
 ```bash
 melo-task show c5b2d38ceecc

@@ -37,6 +37,9 @@ button:disabled {
   --ok: light-dark(#2b6a30, #7fcf83);
   --warn: light-dark(#865300, #e9bc54);
   --error: light-dark(#a23129, #f6a296);
+  /* Rows of a diff: what a file write removes and adds. Text and numbers keep 4.5:1 on both. */
+  --diff-del: light-dark(#fbe9e6, #3b2420);
+  --diff-add: light-dark(#e5f2e3, #213424);
   --control: light-dark(#82877a, #767d6c);
   --line: light-dark(#e1e3db, #33372f);
   --primary: var(--ink);
@@ -1406,6 +1409,19 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   background: var(--sidebar);
   font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.approval-note { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
+/* A diff: its rows fill the box, so a removed or added one is tinted edge to edge. */
+.approval-diff { padding: 0; white-space: normal; }
+.diff-row { display: grid; grid-template-columns: 4ch 1.5ch minmax(0, 1fr); gap: 0 var(--space-2); padding: 0 10px; white-space: pre-wrap; }
+.diff-num { color: var(--ink-3); text-align: right; user-select: none; }
+.diff-sign { text-align: center; font-weight: 700; user-select: none; }
+.diff-text { min-width: 0; text-decoration: none; }
+.diff-context { color: var(--ink-2); }
+.diff-gap { color: var(--ink-3); }
+.diff-removed { background: var(--diff-del); }
+.diff-removed .diff-sign { color: var(--error); }
+.diff-added { background: var(--diff-add); }
+.diff-added .diff-sign { color: var(--ok); }
 .approval-actions, .failure-actions, .approval-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .approval-actions { margin: 12px 0 8px; }
 .approval-actions button, .deny-view button { font-size: var(--text-body); min-height: 36px; padding: 6px 16px; }

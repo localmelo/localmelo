@@ -40,9 +40,15 @@ lists them.
     Model: qwen3:8b on Ollama
     Embedding: none
     Gateway: http://127.0.0.1:8401
-    Web UI:  http://127.0.0.1:8401/
-    Sign in: run melo console -p 8401 in another terminal
+    Web console: opened in your browser (melo console opens it again).
   ```
+
+  The last line appears once the gateway listens. At a terminal on this
+  computer, `melo serve` opens the web console in your default browser, signed
+  in (`BROWSER` picks another browser). Over SSH, in a pipe, as a login service
+  and in the macOS app's gateway it opens none; it prints `Web UI:  http://127.0.0.1:8401/`
+  and `Sign in: run melo console -p 8401 in another terminal` instead. If no
+  browser starts, it prints the one-use link, as `melo console` does.
 
 - Starting does not contact the model server. Run a task to check it.
 - Press Ctrl+C to stop the gateway.
@@ -52,9 +58,11 @@ lists them.
 > [!WARNING]
 > The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
 
-Start the gateway, then run `melo console` in a terminal and open the
-printed single-use link within 60 seconds. For a nondefault port, add
-`--port PORT`. Do not share the link. The page exchanges its fragment for an
+Start the gateway: at a terminal on this computer `melo serve` opens the web
+console in your browser, signed in. Run `melo console` to open it again; over
+SSH, or when no browser starts, it prints a single-use link to open within 60
+seconds, and exits 1 when no gateway listens on the port. For a nondefault
+port, add `--port PORT`. Do not share the link. The page exchanges its fragment for an
 HttpOnly, SameSite=Strict cookie valid for up to 30 days and removes the
 fragment. Run `melo console --reset` to replace the private token file.
 All gateways using that file reject old credentials; revocation of open event

@@ -50,7 +50,8 @@ startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gat
 20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
 reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
 first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
-quitting always asks before stopping the gateway and any running tasks. The quit dialog names what would stop, for example
+quitting asks only when something would stop: a chat or task runs or waits for your answer, or the app cannot tell what runs.
+With nothing to stop, it quits at once. The quit dialog names what would stop, for example
 `Quitting stops what is running: 2 tasks and 1 chat.` (`Quitting stops 1 chat.` for one); direct runs and terminal chats
 belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background
 service, `melo serve status` checks it and `melo serve uninstall` stops and removes it. Child output goes to

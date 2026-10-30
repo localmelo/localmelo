@@ -132,6 +132,13 @@ func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
     return text
 }
 
+/// Whether quitting needs the person's say: a chat or task would stop, something waits for an answer, or
+/// the health reply did not say. Runs and terminal chats belong to other processes and go on.
+func quitNeedsConfirmation(_ health: Data?) -> Bool {
+    guard let data = health, let counts = runningCounts(data) else { return true }
+    return counts.chats + counts.tasks > 0 || !waitingItems(data).isEmpty
+}
+
 /// What the console page says about itself that the app's menu needs: `data-mode` and `data-locked` on
 /// its root element (set by `refreshMode` and `lock` in workspace.js).
 struct PageState: Equatable {

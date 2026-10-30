@@ -2023,14 +2023,24 @@ def main() -> None:
             host = "localhost"
         elif host != "127.0.0.1":
             parser.error("gateway authentication requires a supported loopback host")
-        if getattr(args, "gateway_login", False) and not sys.stdout.isatty():
-            parser.exit(2, "melo: sign-in links are printed only to a terminal.\n")
+        if getattr(args, "gateway_login", False):
+            from localmelo.support import console_link
+
+            if not sys.stdout.isatty():
+                parser.exit(2, "melo: sign-in links are printed only to a terminal.\n")
+            if not console_link.listening(host, auth_port):
+                parser.exit(
+                    EXIT_CRASHED,
+                    f"melo: no gateway is running on port {auth_port}. "
+                    "Start it with melo serve, or name its port: melo console -p PORT\n",
+                )
         auth = GatewayAuth(allow_corrupt=getattr(args, "gateway_rotate_token", False))
         try:
             if getattr(args, "gateway_login", False):
-                login_code = auth.issue_login(auth_port)
-                print(
-                    f"Open http://{host}:{auth_port}/#login={login_code} within 60 seconds. Do not share this link."
+                console_link.show_sign_in(
+                    f"http://{host}:{auth_port}/",
+                    auth.issue_login(auth_port),
+                    opened="Opened the web console in your browser.",
                 )
             else:
                 auth.rotate()
@@ -2716,6 +2726,7 @@ def _model_line(cfg: Config) -> str:
 
 def _start_gateway(cfg: Config) -> None:
     """Thin seam for gateway startup — keeps the lazy import local."""
+    from localmelo.support import console_link
     from localmelo.support.gateway import bind_free_port, start_gateway
 
     # --port 0: bind first, so every line below names the port in use.
@@ -2727,10 +2738,14 @@ def _start_gateway(cfg: Config) -> None:
     print(f"  Model: {_model_line(cfg)}")
     print(f"  Embedding: {cfg.embedding_backend}")
     print(f"  Gateway: http://{host}:{cfg.gateway.port}")
-    print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
-    # The gateway always checks a bearer token or a browser cookie, so the
-    # console needs a sign-in link from `melo console` (on the same port).
-    print(f"  Sign in: run melo console -p {cfg.gateway.port} in another terminal")
+    # At a terminal on this computer, the console opens by itself once the
+    # gateway listens. The app's gateway, a daemon and a pipe never open one.
+    opens = console_link.can_open()
+    if not opens:
+        print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
+        # The gateway always checks a bearer token or a browser cookie, so the
+        # console needs a sign-in link from `melo console` (on the same port).
+        print(f"  Sign in: run melo console -p {cfg.gateway.port} in another terminal")
     if sockets is not None:
         print(f"  melo-task: pass --gateway http://{host}:{cfg.gateway.port}")
     print()
@@ -2738,6 +2753,8 @@ def _start_gateway(cfg: Config) -> None:
     sys.stdout.flush()
 
     extra: dict[str, Any] = {} if sockets is None else {"sockets": sockets}
+    if opens:
+        extra["on_ready"] = lambda: console_link.open_console(host, cfg.gateway.port)
     if getattr(cfg, "_allow_unconfigured", False):
         start_gateway(cfg, allow_unconfigured=True, **extra)
     else:

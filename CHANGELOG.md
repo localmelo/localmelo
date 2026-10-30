@@ -177,6 +177,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web console shows what a file write replaces before you allow it. The approval card
+  for a write of text over an existing file now asks "Replace notes.txt?", counts the lines
+  ("5 lines removed, 1 added") and lists them as numbered − and + rows with two lines of
+  context, as the terminal's panel does, with a secret read as `[redacted]`. A file that is
+  not text, cannot be read or is over 200 KB, a change of more than 1,000 rows and a private
+  key are told in a line, and the card keeps its old title with the file's size and the new
+  text. `GET /api/sessions/{id}` and the task routes carry the comparison as `target.diff` of a
+  pending approval; nothing else in the approval changes, and no answer works differently.
+  The terminal's file-edit helpers moved to `support/sessions/edits.py` for it, and
+  `support/cli/edits.py` re-exports them. ([#265])
+
 - A first question about the folder needs no approval. The interactive UI and the
   gateway (the web console's chats included) have a read-only `list_files` tool: a
   folder's folders (`name/`) and files with their sizes, 1 to 3 levels deep (`depth`),
@@ -1104,6 +1115,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   so scripts keep working; a direct run, `--output-format json` and workers never ask.
   The inline list the first run's model question uses now serves them all ([#NN]).
 
+- Quitting the macOS app asks only when something would stop. With no chat or task running and
+  nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task
+  runs, something waits for an approval, or the app cannot tell what runs, the dialog is the
+  same as before (`Quit and Stop` / `Cancel`, naming what would stop). Direct runs and terminal
+  chats are other processes, so they do not make it ask. Direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged. ([#264])
+- The web console opens in your browser. At a terminal on your computer, `melo serve` opens
+  the console once the gateway listens, already signed in, and prints `Web console: opened in
+  your browser (melo console opens it again).` in place of the `Web UI:` and `Sign in:` lines;
+  `melo console` opens it the same way and says `Opened the web console in your browser.` Over
+  SSH, or when no browser starts, both print the one-use link instead (`Open this link within 60
+  seconds. Do not share it:` and the link on its own line). The app's gateway, a login service
+  and a pipe never open a browser, and a pipe keeps the `Web UI:` and `Sign in:` lines.
+  `melo console` with nothing listening on the port says `no gateway is running on port N` and
+  exits 1, instead of printing a link to nothing. A console page opened without a link now says
+  `Sign in to localmelo` and `In a terminal, run melo console. It opens this page signed in.`
+  The `Gateway:` line, direct mode's stdout and stderr, JSON, exit codes and requests are
+  unchanged. ([#264])
 - The macOS app and its menu-bar item use the localmelo logo, Melo the mascot,
   instead of the placeholder mark. The app icon (Dock, Finder, Spotlight and every
   dialog) is the README's emblem, `docs/assets/melo.png`, whole, on a rounded tile of
@@ -2020,6 +2049,8 @@ earlier milestones.
 [#259]: https://github.com/localmelo/localmelo/pull/259
 [#260]: https://github.com/localmelo/localmelo/pull/260
 [#263]: https://github.com/localmelo/localmelo/pull/263
+[#264]: https://github.com/localmelo/localmelo/pull/264
+[#265]: https://github.com/localmelo/localmelo/pull/265
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -640,6 +640,29 @@ class TestGatewayMode:
         assert "Chat:" not in out
         assert out.index("  Model:") < out.index("  Gateway: http://")
 
+    def test_start_gateway_has_the_console_opened_when_it_listens_at_a_terminal(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from localmelo.support import console_link
+
+        cfg = _valid_cfg(host="127.0.0.1", port=5000)
+        mock_start, opened = mock.MagicMock(), mock.MagicMock()
+        gateway = mock.MagicMock(start_gateway=mock_start)
+        monkeypatch.setattr(console_link, "can_open", lambda: True)
+        monkeypatch.setattr(console_link, "open_console", opened)
+
+        with mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}):
+            from localmelo.__main__ import _start_gateway
+
+            _start_gateway(cfg)
+
+        out = capsys.readouterr().out
+        assert "  Gateway: http://127.0.0.1:5000\n" in out  # the app reads this line
+        assert "Web UI" not in out and "Sign in" not in out
+        opened.assert_not_called()  # not before the gateway listens
+        mock_start.call_args.kwargs["on_ready"]()
+        opened.assert_called_once_with("127.0.0.1", 5000)
+
     def test_serve_allow_unconfigured_skips_setup_and_validation(self) -> None:
         """melo --serve --allow-unconfigured starts without config or TTY."""
         empty_cfg = Config(chat_backend="", embedding_backend="")

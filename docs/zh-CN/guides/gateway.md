@@ -25,9 +25,10 @@ melo serve
     Model: qwen3:8b on Ollama
     Embedding: none
     Gateway: http://127.0.0.1:8401
-    Web UI:  http://127.0.0.1:8401/
-    Sign in: run melo console -p 8401 in another terminal
+    Web console: opened in your browser (melo console opens it again).
   ```
+
+  最后一行在网关开始监听后才出现。在本机终端里运行 `melo serve` 时，它会用默认浏览器打开已登录的网页控制台（`BROWSER` 环境变量可指定其他浏览器）。通过 SSH、管道、作为登录服务运行，或在 macOS 应用的网关里，它不会打开浏览器，而是改为输出 `Web UI:  http://127.0.0.1:8401/` 和 `Sign in: run melo console -p 8401 in another terminal`。如果没有浏览器能启动，它会像 `melo console` 一样输出一次性链接。
 
 - 启动时不会连接模型服务器。运行一个任务来检查连接。
 - 按 Ctrl+C 停止网关。
@@ -39,7 +40,7 @@ melo serve
 > [!WARNING]
 > 网关只允许绑定回环地址，访问受保护的 API 需要 bearer 令牌或浏览器会话 cookie。持有令牌者可以使用你的权限执行操作。私有令牌文件无法防范以同一操作系统用户身份运行的恶意进程、浏览器扩展或被攻陷的同源代码。浏览器 cookie 不按端口隔离：针对特定端口的名称不能构成抵御同一主机上其他服务的安全边界。不要通过代理暴露网关。
 
-启动网关后，在终端中运行 `melo console`，并在 60 秒内打开输出的一次性链接。如果使用非默认端口，请加上 `--port PORT`。不要分享该链接。页面会用链接的片段交换一个有效期最长为 30 天、具有 HttpOnly 和 SameSite=Strict 属性的 cookie，然后移除该片段。运行 `melo console --reset` 可替换私有令牌文件。所有使用该文件的网关都会拒绝旧凭证；对已打开的事件流撤销凭证约在 250 毫秒内生效。一个正在发送的事件仍可能发送完成。
+启动网关：在本机终端里，`melo serve` 会在浏览器中打开已登录的网页控制台。运行 `melo console` 可再次打开；通过 SSH 或没有浏览器能启动时，它会输出一次性链接，请在 60 秒内打开，该端口上没有网关在监听时则以退出码 1 结束。如果使用非默认端口，请加上 `--port PORT`。不要分享该链接。页面会用链接的片段交换一个有效期最长为 30 天、具有 HttpOnly 和 SameSite=Strict 属性的 cookie，然后移除该片段。运行 `melo console --reset` 可替换私有令牌文件。所有使用该文件的网关都会拒绝旧凭证；对已打开的事件流撤销凭证约在 250 毫秒内生效。一个正在发送的事件仍可能发送完成。
 
 bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway/auth/token`（目录权限为 0700，文件权限为 0600）。非浏览器客户端的每个 `/api/` 和 `/v1/` 请求都应发送 `Authorization: Bearer <token>`，包括健康检查、流和 blob 请求。凭证缺失或无效时返回 401。页面和静态资源仅作为公开的引导资源。不要将令牌放入 URL、日志或 shell 历史记录；在命令行中提供请求头可能使其暴露于本地进程检查。此令牌与模型服务器凭证相互独立。
 

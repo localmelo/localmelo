@@ -12,9 +12,11 @@ permissions and are not sandboxed; review a task before approving a tool call.
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](../reference/api-v2.md)), so the gateway
-must be running to serve it: `melo serve`. Run `melo console` in a
-terminal and open its single-use link within 60 seconds (add `--port PORT`
-for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
+must be running to serve it: `melo serve` opens it in your browser, signed in.
+A page opened without a link says *Sign in to localmelo*: run `melo console`
+in a terminal and it opens the page signed in (add `--port PORT` for a
+nondefault port). Over SSH, or when no browser starts, it prints a single-use
+link to open within 60 seconds instead. Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
 On a first run, with no model set up, the welcome shows one card in place of the
 starters. It looks for a model server on this Mac, as the terminal's first run
@@ -283,8 +285,19 @@ security boundary against a bearer holder or a malicious process under the same
 OS account, which can answer them.
 
 The card asks a plain question ("Run this command in demo-project?", "Replace
-notes.txt (125 bytes)?", "Let melo use <tool>?") and shows exactly what would
-run. **Allow once**, the filled button, runs this call only. **Allow for this
+notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A file
+write over an existing text file shows what it replaces: the line under the
+question counts the lines ("5 lines removed, 1 added"), and the box lists the
+changed lines, each with its number, a − or + sign and two lines of context on
+each side. Removed lines are tinted red and added ones green, and the signs say
+the same without the colours. A long change shows its first 20 rows; **Show all
+N lines** shows the rest. A secret in a row reads `[redacted]`. When melo cannot
+compare (the file is not text, cannot be read, is over 200 KB or holds a private
+key, or the change runs past 1,000 rows) the card says so in one line, asks
+"Replace logo.bin (480 bytes)?" with the file's size, and shows the new text
+alone. The comparison is for you to read: the answers below work as they do for
+any other file write. **Allow once**, the filled button, runs this call only.
+**Allow for this
 chat** (**Allow for this task** in Tasks) stops asking about that tool for the
 rest of the chat; the line under the buttons says so, and for a command or
 Python code it warns that it can reach files outside the workspace. **Deny**

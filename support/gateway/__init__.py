@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import socket
+import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Any
@@ -45,6 +46,8 @@ class GatewayServer:
             host = host[1:-1]
         self.host = host
         self.port = cfg.gateway.port
+        # Called once, in a thread of its own, when the server accepts connections.
+        self.on_ready: Callable[[], None] | None = None
         self._started_at: float | None = None
         self._checker = Checker()
         if not is_loopback(self.host):
@@ -360,7 +363,7 @@ class GatewayServer:
             log_level="info",
             timeout_graceful_shutdown=int(GRACEFUL_SHUTDOWN_S),
         )
-        return _ConsoleServer(config, console=self.console)
+        return _ConsoleServer(config, console=self.console, on_ready=self.on_ready)
 
     def run(self, sockets: list[socket.socket] | None = None) -> None:
         self.uvicorn_server().run(sockets=sockets)
@@ -396,6 +399,7 @@ def start_gateway(
     *,
     allow_unconfigured: bool = False,
     sockets: list[socket.socket] | None = None,
+    on_ready: Callable[[], None] | None = None,
 ) -> None:
     if not allow_unconfigured:
         cfg.validate_or_raise()
@@ -405,6 +409,7 @@ def start_gateway(
             f"  - [gateway] port={cfg.gateway.port} is out of range (1-65535)"
         )
     server = GatewayServer(cfg)
+    server.on_ready = on_ready
     server.run(sockets)
 
 
@@ -417,9 +422,25 @@ class _ConsoleServer(uvicorn.Server):
     SIGTERM do not hang on an open console tab.
     """
 
-    def __init__(self, config: uvicorn.Config, *, console: Console | None) -> None:
+    def __init__(
+        self,
+        config: uvicorn.Config,
+        *,
+        console: Console | None,
+        on_ready: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(config)
         self._console = console
+        self._on_ready = on_ready
+
+    async def startup(self, sockets: Any = None) -> None:
+        """Start, then tell *on_ready*: a page opened now must find the server.
+
+        A server that could not bind never gets here, so it never announces.
+        """
+        await super().startup(sockets=sockets)
+        if self.started and self._on_ready is not None:
+            threading.Thread(target=self._on_ready, daemon=True).start()
 
     async def shutdown(self, sockets: Any = None) -> None:
         if self._console is not None:
