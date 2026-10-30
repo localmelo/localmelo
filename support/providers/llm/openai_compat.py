@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -34,6 +37,58 @@ from localmelo.support.providers.llm._vision import server_takes_images
 _MAX_WHOLE_BODY = 16 * 1024 * 1024
 
 _UTF8_BOM = b"\xef\xbb\xbf"
+
+
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
+_DURATION = re.compile(r"(?:\d+(?:\.\d+)?(?:ms|h|m|s))+|\d+(?:\.\d+)?")
+_UNIT_S = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "": 1.0}
+
+
+def _reset_at(value: str, now: float) -> float | None:
+    """A reset header as a time: a duration (``6m0s``, ``20ms``, ``30``) or RFC 3339."""
+    if _DURATION.fullmatch(value):
+        parts = _DURATION_PART.findall(value) or [(value, "")]
+        return now + sum(float(n) * _UNIT_S[unit] for n, unit in parts)
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def rate_limits(
+    headers: Mapping[str, str], now: float | None = None
+) -> tuple[int, float | None] | None:
+    """The tightest rate-limit window a response reports, or None.
+
+    ``(percent used, reset time)`` from ``x-ratelimit-{limit,remaining,reset}-W``
+    or ``anthropic-ratelimit-W-{limit,remaining,reset}``: the window with the
+    largest share used, its reset as epoch seconds (None when not given).
+    """
+    now = time.time() if now is None else now
+    windows: dict[tuple[str, str], dict[str, str]] = {}
+    for raw, value in headers.items():
+        name = raw.lower()
+        for prefix in ("x-ratelimit-", "anthropic-ratelimit-"):
+            if name.startswith(prefix):
+                rest = name[len(prefix) :]
+                if prefix[0] == "x":
+                    field, _, window = rest.partition("-")
+                else:
+                    window, _, field = rest.rpartition("-")
+                if window and field in ("limit", "remaining", "reset"):
+                    windows.setdefault((prefix, window), {})[field] = value.strip()
+    best: tuple[int, float | None] | None = None
+    for fields in windows.values():
+        try:
+            limit, remaining = int(fields["limit"]), int(fields["remaining"])
+        except (KeyError, ValueError):
+            continue
+        if limit <= 0:
+            continue
+        used = min(100, max(0, round(100 * (limit - remaining) / limit)))
+        if best is None or used > best[0]:
+            best = (used, _reset_at(fields.get("reset", ""), now))
+    return best
 
 
 def _reject_nonfinite(value: str) -> None:
@@ -329,7 +384,9 @@ class OpenAICompatLLM(BaseLLMProvider):
     ``last_reasoning_key`` is ``reasoning_content`` or ``reasoning``, the
     key its reasoning came from, or ``""``, and ``last_usage`` is the
     reply's usage with ``cached_tokens`` and ``reasoning_tokens`` from the
-    usage details when the server sent them.
+    usage details when the server sent them. ``last_limits`` is the
+    tightest rate limit the last response's headers reported
+    (:func:`rate_limits`), for the terminal's status bar.
 
     :meth:`stream_chat` copes with a server that does not stream: it reads a
     response that is one JSON body as the completion :meth:`chat` would
@@ -402,6 +459,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         # reply (see stream_chat); later stream_chat calls then do not ask it
         # to stream.
         self.sends_whole_replies = False
+        self.last_limits: tuple[int, float | None] | None = None
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -472,6 +530,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         resp, data = await post_json(
             self._http, path, self._payload(messages, tools), headers=attempt_headers()
         )
+        self.last_limits = rate_limits(resp.headers)
         return self._completion(resp, path, data)
 
     async def chat(
@@ -559,6 +618,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                         context_overflow=_context_overflow(error_response),
                     )
                 opened = True
+                self.last_limits = rate_limits(response.headers)
                 chunks = response.aiter_bytes()
                 head = await _head_chunks(chunks)
                 if _is_object(head):

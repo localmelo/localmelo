@@ -122,6 +122,7 @@ requests are as before.
 | ↑ ↓ | Move between lines, then through earlier messages. On an empty draft during a turn, ↑ takes back the queued message. |
 | Ctrl+R | Search earlier messages. |
 | Ctrl+O | List the turn's steps (during a turn, or the last one after it); Esc closes the list. |
+| Ctrl+T | List the tasks beside the chat (the gateway's); Enter on one lists its actions. |
 | Tab | Complete a command or a listed model; ↑ ↓ pick in the menu, and Enter takes the one picked. |
 | Ctrl+L | Clear the screen. |
 | Ctrl+Z | Nothing (melo does not suspend in this version). |
@@ -444,21 +445,48 @@ happens without the explicit `/copy` command.
 
 ### The status bar
 
-The bar under the input box is split into three zones that keep their place,
-with a rule between them: who and where (the model, bold, and the folder),
-the run, and resources (the prompt cache and the context). Its figures come
-from events melo has already received: no request, no polling, no timer. The
-default mode says them in words:
+The bar under the input box answers "how much has this used" and "what runs
+beside it". The model and the folder are in the welcome and `/status`, not
+here. Its zones keep their place, with a rule between them: usage, the work
+beside the chat, and the run (the chat's title when no turn runs). On a local
+server:
 
 ```text
-  stub-model · ~/demo-project │ List the files. │ 83% cached · context 8% used
+  ↑ 3.0k ↓ 15 · ctx 2.6k/32k ▮▯▯▯▯ · cache 61% (avg 72%) · idle 2m │ Fix the parser
 ```
 
-- **The run.** When no turn runs, the zone holds the chat's title. While a
-  turn runs it gives the steps in brief and the key that lists them:
+- `↑ 3.0k ↓ 15`: the tokens this session sent and received.
+- `ctx 2.6k/32k ▮▯▯▯▯`: the last measured prompt over the input limit, with a
+  meter in fifths. It turns amber from 70% and red from 90%. Without a limit it
+  is the tokens alone (`ctx 2.6k`), with no meter.
+- `cache 61% (avg 72%)`: the share of the last request's prompt the server
+  reported as cached, then the session's average once two requests reported
+  one. It is teal from 50%, and amber under 20% after the first request (the
+  first is always cold). A server that reports no cached tokens shows no cache
+  figure, never 0%.
+- `idle 2m`: the time since the last request, from one minute on. A local
+  server evicts its prefix cache by memory, not by time, so there is no
+  countdown.
+
+On a cloud API the usage zone says what the session cost instead, from the
+prices you configured (see [`[pricing]`](../reference/configuration.md#pricing)),
+and the tightest rate limit the last response reported:
+
+```text
+  $0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m │ Fix the parser
+```
+
+`limit 42%` is the share of the window used, from the response's
+`x-ratelimit-*` or `anthropic-ratelimit-*` headers (no extra request), and
+`↻3m` is the time until it resets. A model with no configured price shows its
+tokens (`↑ 100k ↓ 5`), and a server that sends no limit headers shows no limit.
+melo bundles no prices.
+
+- **The run.** While a turn runs, the run zone gives its steps in brief and the
+  key that lists them:
 
   ```text
-    stub-model · ~/demo-project │ 2/~4 · ctrl+o steps │ context 1.8k tokens
+    ↑ 1.0k ↓ 5 · ctx 1.0k · cache 83% │ 2/~4 · ctrl+o steps
   ```
 
   `2/~4` is step 2 of about 4: the task was done before and took 4 steps then,
@@ -469,41 +497,42 @@ default mode says them in words:
   status and time, then the steps the last run of the task still had after
   this point (`◌ Run the tests · to come`); Esc closes it. After the turn the
   same key lists the last turn's steps.
-- `context 8% used` is the last measured prompt over the input limit; when no
-  limit is known it says the tokens instead (`context 2.6k tokens`).
-- `83% cached` is the share of the last request's prompt tokens the server
-  reported as cached. It shows once the server has reported a value: a server
-  that reports none shows nothing, never 0%. For a local server, `, idle 3m`
-  follows once a minute has passed since the last request; a local server
-  evicts its prefix cache by memory, not by time, so there is no countdown.
-- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
+- **The work beside the chat.** When the gateway (`melo serve`) has tasks that
+  have not finished, a zone counts them by state, with the top priority of
+  those not paused and the key that lists them:
 
-Developer mode (`--developer`, or `[ui] mode = "developer"`) keeps the compact
-figures, which are also what the web console's status row draws:
+  ```text
+    … │ 2 running · 1 queued · P1 · ctrl+t tasks │ Fix the parser
+  ```
 
-```text
-  stub-model · ~/demo-project │ 2/~4 · ctrl+o steps │ cache 83% · ctx 1.4k/32k  ask
-```
+  `running` is moss and `held` (a task that waits for you, such as an
+  approval) amber; `queued` and `paused` are muted. Ctrl+T lists the tasks
+  (`P2  running  Bench the cache`); Enter on one lists what its state allows:
+  Pause, or Resume for a paused one, Raise to and Lower to the next priority
+  (P0 is the highest; lowering stops at P4, since P5 is paused), and Stop,
+  which asks `Stop it` or `Keep it` first. Each goes to the gateway exactly as
+  `melo task pause|resume|level|stop` does, and a hint says what happened
+  (`Paused: Bench the cache`) or why the gateway refused. melo asks the
+  gateway for its tasks every 5 seconds while the terminal is open, and only
+  when a gateway token exists (`~/.cache/localmelo/gateway/auth`); without a
+  gateway there is no zone, and Ctrl+T says how to add a task.
 
-- `cache 83%` is the cached share (`cache --` when the server reports none,
-  never 0%), with `idle 3m` after it for a local server.
-- `ctx 12k/32k` is the last measured prompt over the input limit, or just
-  `ctx 12k` when no limit is known.
-- The live row above the input box adds the run's facts (`step 4 · attempt 2 ·
-  phase fix`).
+On a narrow terminal the title goes first, then the work's details (the
+priority, then the key), then the usage's details (right to left: idle time,
+average, meter), then a running turn's key; then the figures go right to left,
+and a running turn's figure stays. The bar never wraps. The mode shows at the
+right edge only when it is not `ask` (`auto`, `deny`, or the
+`⚠ YOLO: no approvals` warning); developer mode always shows it. While the
+completion menu or a list is open, a blank row sets the bar apart from it.
 
-The bar redraws when an event arrives or you press a key, so `idle` is as of
-the last redraw. The approval mode shows at the right edge only when it is not
-`ask` (`auto`, `deny`, or the `⚠ YOLO: no approvals` warning); developer mode
-always shows it. On a narrow terminal the title is cut first, then the
-resources go right to left, whole (the words are never cut), then the folder
-is cut and then left out; the run zone stays (its key's word, then the model,
-then the key give way before the figure), and the bar never wraps. With
-`NO_COLOR` or `LOCALMELO_ASCII=1` the zones are still apart: a plain `│`, or
-`|`. `/status` prints the figures in full. `[cli] status_line = "off"` keeps
-the bar without the usage figures: the model, workspace, the run zone and the
-context of the last request (`context 1.0k tokens`, or `ctx 1.0k` in
-developer mode). There is no command-line flag for it.
+The figures come from events melo has already received; nothing asks the
+model server. The bar redraws when an event arrives or you press a key, and
+once a second while it shows a clock (the idle time, a limit's reset); nothing
+else redraws it while idle. With `NO_COLOR` or `LOCALMELO_ASCII=1` the zones
+are still apart (`│` or `|`), and ASCII says `in 3.0k out 15`, `##---` and
+`reset 3m`. `/status` prints the figures in full. `[cli] status_line = "off"`
+keeps only the run zone, the title and the last request's context
+(`ctx 1.0k`). There is no command-line flag for it.
 
 ### Streamed replies
 
@@ -581,16 +610,36 @@ of the input box, and your draft stays:
 ❯ 1. Yes
   2. Yes, and allow every shell_exec call in this session
   3. No, and tell melo why
-  "Allow every" lets any shell command run without asking for the rest of this session.
-  Commands can reach files outside ~/demo-project.
+  "Allow every" lets routine shell commands run without asking for the rest of this session.
+  Installs, downloads and changes outside ~/demo-project still ask.
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
+```
+
+A call that installs software, downloads files, changes files outside the
+folder or does anything else [high-impact](tools-mcp.md#high-impact-calls) gets
+a panel with the question that names it, the reasons above the code, no
+session choice, and the answer No selected, so that Enter alone never allows it:
+
+```text
+╭─ Install software? ────────────────────────────────────────────────────────╮
+│ shell_exec · in ~/demo-project                                             │
+│ ⚠ melo asks because this call installs playwright with pip (downloads      │
+│   about 42 MB).                                                            │
+│   pip install playwright                                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+  1. Yes
+❯ 2. No, and tell melo why
+  Session grants never cover installs, downloads or changes outside the
+  folder.
+  ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
 - `1` allows this call, `2` allows the tool's routine calls for the rest of
   the session (a call that installs, downloads, changes files outside the
   folder or does anything else
   [high-impact](tools-mcp.md#high-impact-calls) still asks), and `3` opens a field for a reason (at most 500 characters) that the
-  model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
+  model reads; Enter sends it. A high-impact panel has no session choice, so
+  `2` there is No. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.
 - The header names the tool and the folder. Developer mode adds the tool's
@@ -663,7 +712,7 @@ Panels, lists and bars use the same colours:
 | The list under the input box (`/`, `@`, an argument) | no background; names in your text colour, descriptions muted, the chosen row on the moss band with one `❯`; a slim bar in the rule colour only when there are more rows than the eight shown |
 | A line of keys (`↑↓ select · enter confirm · esc stop the turn`) | the keys in your text colour, their words muted (plain at 16 colours, never dim) |
 | The live row | the spinner moss, what melo does in your text colour, the time and tokens muted; while an approval waits, an amber `⚠` and bold words |
-| The status bar | the model bold, the folder gold, the rest muted, a rule between the zones |
+| The status bar | muted, with the cost in your text colour, a good cache teal, a filling context or limit amber then red, running work moss, held work amber, and a rule between the zones |
 | A command in advice (`Start it, then /retry.`) | moss, bold |
 
 Without the exact background the bands go and the chosen row is moss and bold;

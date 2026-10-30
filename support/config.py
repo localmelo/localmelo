@@ -13,7 +13,7 @@ import tempfile
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
@@ -325,6 +325,10 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    # [pricing.<model>]: dollars per million tokens (input, output, and
+    # cache_read for cached prompt tokens), for the terminal's session cost.
+    # Configuration only: no price is bundled.
+    pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     _enable_playground: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
@@ -760,6 +764,31 @@ class Config:
         """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
         return self._validate_ui()
 
+    def pricing_errors(self) -> list[str]:
+        """What is wrong in ``[pricing]``; display only, so a bad table warns.
+
+        Each model's table needs ``input`` and ``output`` and may have
+        ``cache_read``: numbers of at least 0, dollars per million tokens.
+        """
+        if not isinstance(self.pricing, dict):
+            return [f"[pricing] must be a table, got {self.pricing!r}"]
+        errors = []
+        for model, price in self.pricing.items():
+            if not isinstance(price, dict) or not {"input", "output"} <= set(price):
+                errors.append(f"[pricing.{model!r}] needs input and output")
+                continue
+            for key, value in price.items():
+                if key not in PRICE_KEYS:
+                    errors.append(f"[pricing.{model!r}] has an unknown key {key!r}")
+                elif isinstance(value, bool) or not isinstance(value, int | float):
+                    errors.append(f"[pricing.{model!r}] {key} must be a number")
+                elif not 0 <= value < float("inf"):
+                    errors.append(f"[pricing.{model!r}] {key} must be 0 or more")
+        return errors
+
+
+PRICE_KEYS: Final = ("input", "output", "cache_read")
+
 
 def has_control_or_surrogate(text: str) -> bool:
     """Whether *text* holds a control character, newline or lone surrogate."""
@@ -992,6 +1021,10 @@ def _load_file() -> Config:
             tags = section["reasoning_tags"]
             # Keep a malformed value so Config.validate can report it.
             cfg.cli.reasoning_tags = dict(tags) if isinstance(tags, dict) else tags
+
+    if "pricing" in data:  # a bad table is kept for Config.pricing_errors
+        pricing = data["pricing"]
+        cfg.pricing = dict(pricing) if isinstance(pricing, dict) else pricing
 
     # A bad mode is kept so Config.ui_errors can report it.
     if isinstance(data.get("ui"), dict):
@@ -1340,6 +1373,15 @@ def save(cfg: Config) -> None:
         lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
         lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
         lines.append("")
+
+    # Kept as written, even when invalid (it only warns), so a save loses nothing.
+    for model, price in (cfg.pricing if isinstance(cfg.pricing, dict) else {}).items():
+        if isinstance(price, dict):
+            lines.append(f"[pricing.{_toml_string(str(model))}]")
+            lines += [
+                f"{_toml_string(str(k))} = {_toml_value(v)}" for k, v in price.items()
+            ]
+            lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that
     # cannot be encoded (a str holding a lone surrogate) fails the save

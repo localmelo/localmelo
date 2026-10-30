@@ -450,6 +450,7 @@ async def main_async(
         wants_no_color,
     )
     from localmelo.support.cli.views import banner
+    from localmelo.support.cli.work import GatewayTasks, WorkBeside
     from localmelo.support.sessions.display import display_version, home_label
     from localmelo.support.sessions.runner import ResumeMode
     from localmelo.support.sessions.store import (
@@ -553,6 +554,13 @@ async def main_async(
             logging.getLogger(__name__).warning(
                 "Invalid [sessions] resume_mode %r; using pairs", raw_mode
             )
+        pricing = session_config.pricing
+        if errors := session_config.pricing_errors():
+            logging.getLogger(__name__).warning(
+                "Invalid [pricing]; showing tokens instead of cost: %s",
+                "; ".join(errors),
+            )
+            pricing = {}
         session = CliSession(
             store=store,
             factory=factory,
@@ -566,6 +574,8 @@ async def main_async(
             status_line=session_config.cli.status_line,
             out=out,
             developer=developer,
+            pricing=pricing,
+            work=WorkBeside(GatewayTasks()),
         )
 
         def show_banner(selected: SessionInfo | None = None) -> None:
@@ -642,6 +652,9 @@ async def main_async(
             no_color=no_color,
         )
         session.attach(ui)
+        if session.work is not None:
+            session.work.on_change = ui.invalidate
+            session.spawn(session.work.watch())
         session.models = list(choice.models)
         restore = save_terminal()
 

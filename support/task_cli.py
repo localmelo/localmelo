@@ -355,40 +355,51 @@ def _waiting_approval(task: dict[str, Any]) -> str | None:
     return f"Waiting for your approval: {what} (answer it in the web console, Tasks)"
 
 
+def token_path() -> Path:
+    """Where the gateway keeps its token."""
+    return Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
+
+
+def connect(gateway: str | None = None, *, timeout: float = 10) -> httpx.Client:
+    """An authenticated client of the local gateway: *gateway*, else the config's.
+
+    Raises ValueError for an address that is not loopback and
+    :class:`ClientError` when the token cannot be read safely.
+    """
+    if gateway is not None:
+        url = address(gateway)
+    else:
+        from localmelo.support.config import load
+
+        cfg = load().gateway
+        host = cfg.host
+        if ":" in host and not (host.startswith("[") and host.endswith("]")):
+            host = f"[{host}]"
+        url = address(f"http://{host}:{cfg.port}")
+    try:
+        token = read_token(token_path())
+    except (OSError, ValueError) as exc:
+        raise ClientError(
+            "gateway token unavailable or unsafe; start melo serve or check permissions"
+        ) from exc
+    return httpx.Client(
+        base_url=url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Host": f"{'[::1]' if urlsplit(url).hostname == '::1' else '127.0.0.1'}:{urlsplit(url).port}",
+        },
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    )
+
+
 def main(argv: list[str] | None = None, prog: str = "melo-task") -> int:
     args = parser(prog).parse_args(argv)
     try:
         if args.command == "follow" and not 0 <= args.after <= 2**63 - 1:
             raise ValueError("invalid event cursor")
-        explicit = getattr(args, "gateway", None)
-        if explicit is not None:
-            url = address(explicit)
-        else:
-            from localmelo.support.config import load
-
-            cfg = load().gateway
-            host = cfg.host
-            if ":" in host and not (host.startswith("[") and host.endswith("]")):
-                host = f"[{host}]"
-            url = address(f"http://{host}:{cfg.port}")
-        try:
-            token = read_token(
-                Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
-            )
-        except (OSError, ValueError) as exc:
-            raise ClientError(
-                "gateway token unavailable or unsafe; start melo serve or check permissions"
-            ) from exc
-        with httpx.Client(
-            base_url=url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Host": f"{'[::1]' if urlsplit(url).hostname == '::1' else '127.0.0.1'}:{urlsplit(url).port}",
-            },
-            timeout=10,
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
+        with connect(getattr(args, "gateway", None)) as client:
             return execute(args, client, out=sys.stdout, stdin=sys.stdin)
     except KeyboardInterrupt:
         return 130

@@ -69,7 +69,7 @@ tables of the chosen backends.
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
 | `stream` | `[cli]` | `true` | Live streaming in the interactive UI only, on unless turned off (`/stream off`, `-X cli.stream=false`, `melo config set cli.stream false`); runs without that UI never stream. `/new` puts `/stream` back to this value. An invalid value warns and falls back in the UI; direct runs and the gateway never fail on it. See [Streamed replies](../guides/terminal.md#streamed-replies). |
-| `status_line` | `[cli]` | `"auto"` | `"auto"`: the interactive status bar's resources zone shows `cache`, `ctx` and `tasks` figures from events already received, each hidden without data. `"off"`: the bar keeps its zones without those figures (model, workspace, the run zone: the title, or a running turn's steps, and `ctx` of the last request). Advanced: no command-line flag. Any other value warns and falls back in the UI; direct runs and the gateway never fail on it. See [The status bar](../guides/terminal.md#the-status-bar). |
+| `status_line` | `[cli]` | `"auto"` | `"auto"`: the interactive status bar shows the usage zone (tokens or cost, `ctx`, the cache and idle time or the rate limit) from events already received, and the gateway's tasks when it has some. `"off"`: only the run zone (the title, or a running turn's steps) and `ctx` of the last request. Advanced: no command-line flag. Any other value warns and falls back in the UI; direct runs and the gateway never fail on it. See [The status bar](../guides/terminal.md#the-status-bar). |
 | `colors` | `[cli]` | `"auto"` | The interactive UI's colour depth: `"auto"` (from `COLORTERM` and `TERM`), `"16"`, `"256"` or `"truecolor"`. `NO_COLOR` still turns colour off. Developer setting: `-X cli.colors=256` for one run. Any other value warns and falls back. See [Terminal colours](../guides/terminal.md#terminal-colours). |
 | `background` | `[cli]` | `"auto"` | The terminal's background for the interactive UI: `"auto"` (asks the terminal, then `COLORFGBG`), `"dark"` or `"light"` for a terminal that answers nothing (tmux, screen, ssh). Developer setting: `-X cli.background=light`. See [Terminal colours](../guides/terminal.md#terminal-colours). |
 | `reasoning_tags` | `[cli]` | not set | A `MODEL = "explicit" \| "closing_only" \| "none"` table: the trusted framing declaration for a model's replies, which also splits the completed reply when `stream = false`. A model with no entry keeps the conservative rule (content is held until the reply ends). Set by hand: no onboarding prompt asks for it yet. |
@@ -383,6 +383,26 @@ See [Memory](memory.md).
 - `--base-url` sends no API key, so use a config file for cloud APIs.
 - The macOS background service does not get your shell's variables; see
   [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos).
+
+## Pricing
+
+The interactive UI's status bar shows a cloud API session's cost only from
+prices you set; melo bundles none, since prices change. One table per model
+id, in dollars per million tokens:
+
+```toml
+[pricing."your-model-id"]   # the chat_model, as /status names it; example numbers
+input = 2.0        # prompt tokens
+output = 8.0       # completion tokens
+cache_read = 0.5   # prompt tokens the server reported cached; input when absent
+```
+
+`input` and `output` are required, every value is a number of at least 0, and
+no other key is read. A model the session used without a table makes the bar
+show tokens (`↑ 100k ↓ 5`) instead of a cost. A local server is never priced.
+An invalid table warns and the bar shows tokens; nothing else reads it, and
+saving the config keeps it as written. See
+[The status bar](../guides/terminal.md#the-status-bar).
 
 ## Extra request fields (extra_body)
 

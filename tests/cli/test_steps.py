@@ -15,6 +15,7 @@ from localmelo.support.cli.steps import (
 )
 from localmelo.support.cli.text import cells
 from localmelo.support.cli.theme import ASCII, UNICODE
+from localmelo.support.usage_snapshot import BarPart
 from localmelo.tests.cli.test_render import Turn
 from localmelo.tests.cli.ui_helpers import ESC, FakeController, running_app
 
@@ -71,16 +72,16 @@ def test_a_call_status_becomes_a_row_status(
 # ── The run zone ──
 
 
+USAGE = (
+    BarPart("↑ 12k ↓ 900"),
+    BarPart("ctx 2.6k/32k"),
+    BarPart("▮▯▯▯▯", detail=True, glued=True),
+    BarPart("cache 83%", "ok"),
+)
+
+
 def _bar(width: int, run: str = "2/~8 · ctrl+o steps", mode: str = "") -> str:
-    bar = StatusBar(
-        "qwen3-8b",
-        "~/demo-project",
-        "",
-        "Add a --json flag",
-        mode,
-        segments=("83% cached", "context 8% used"),
-        run=run,
-    )
+    bar = StatusBar("Add a --json flag", mode, usage=USAGE, run=run)
     line = "".join(part[1] for part in status_fragments(bar, width, "…"))
     assert cells(line) == width, (width, line)
     return line
@@ -88,26 +89,25 @@ def _bar(width: int, run: str = "2/~8 · ctrl+o steps", mode: str = "") -> str:
 
 def test_the_zones_keep_their_place_and_order() -> None:
     assert _bar(100).rstrip() == (
-        "  qwen3-8b · ~/demo-project │ 2/~8 · ctrl+o steps"
-        " │ 83% cached · context 8% used"
+        "  ↑ 12k ↓ 900 · ctx 2.6k/32k ▮▯▯▯▯ · cache 83% │ 2/~8 · ctrl+o steps"
     )
     # Idle, the run zone holds the chat's title.
     assert _bar(100, run="").rstrip() == (
-        "  qwen3-8b · ~/demo-project │ Add a --json flag"
-        " │ 83% cached · context 8% used"
+        "  ↑ 12k ↓ 900 · ctx 2.6k/32k ▮▯▯▯▯ · cache 83% │ Add a --json flag"
     )
 
 
-def test_resources_go_first_then_the_folder_is_cut_and_the_run_stays() -> None:
-    # The context goes whole, then the cache, then the folder is cut.
-    assert _bar(70).rstrip().endswith("│ 83% cached")
-    assert "~/demo-project │ 2/~8 · ctrl+o steps" in _bar(70)
-    assert _bar(50).rstrip() == "  qwen3-8b · ~/demo-project │ 2/~8 · ctrl+o steps"
-    assert _bar(40) == "  qwen3-8b · ~/de… │ 2/~8 · ctrl+o steps"
-    # Then the folder goes, the key's word, the model, the key: the figure stays.
-    assert _bar(30).rstrip() == "  qwen3-8b │ 2/~8 · ctrl+o"
-    assert _bar(16).rstrip() == "  2/~8 · ctrl+o"
-    assert _bar(10).rstrip() == "  2/~8"
+def test_details_go_first_then_the_key_then_figures_and_the_run_stays() -> None:
+    # The meter goes, then the key's word, the key, the figures right to left.
+    assert _bar(64).rstrip() == (
+        "  ↑ 12k ↓ 900 · ctx 2.6k/32k · cache 83% │ 2/~8 · ctrl+o steps"
+    )
+    assert (
+        _bar(56).rstrip() == "  ↑ 12k ↓ 900 · ctx 2.6k/32k · cache 83% │ 2/~8 · ctrl+o"
+    )
+    assert _bar(48).rstrip() == "  ↑ 12k ↓ 900 · ctx 2.6k/32k · cache 83% │ 2/~8"
+    assert _bar(40).rstrip() == "  ↑ 12k ↓ 900 · ctx 2.6k/32k │ 2/~8"
+    assert _bar(16).rstrip() == "  2/~8"
 
 
 @pytest.mark.parametrize("width", range(8, 110, 3))
@@ -122,27 +122,23 @@ def test_the_bar_with_a_run_never_overflows_or_shows_a_bare_ellipsis(
 
 
 def test_the_zones_are_drawn_in_their_roles() -> None:
-    bar = StatusBar(
-        "qwen3-8b", "~/demo-project", "", "", "", segments=("83% cached",), run="2/~8"
-    )
+    bar = StatusBar("", "", usage=(BarPart("cache 83%", "ok"),), run="2/~8")
     parts = status_fragments(bar, 80, "…")
     styles = {text: style for style, text, *_ in parts}
-    assert styles["qwen3-8b"] == "class:status_model"
-    assert styles["~/demo-project"] == "class:status_path"
     assert styles[" │ "] == "class:status_sep"
     assert styles["2/~8"] == "class:status_run"
-    assert styles["83% cached"] == "class:status"
-    running = StatusBar("m", "~/p", "", "", "", run="2/~8 · ctrl+o steps")
+    assert styles["cache 83%"] == "class:status_ok"
+    running = StatusBar("", "", run="2/~8 · ctrl+o steps")
     parts = status_fragments(running, 80, "…")
     assert ("class:key", "ctrl+o") in parts and ("class:faint", " steps") in parts
 
 
 def test_ascii_and_no_color_get_a_plain_separator() -> None:
-    bar = StatusBar("m", "~/p", "", "chat", "", run="")
+    bar = StatusBar("chat", "", usage=(BarPart("in 12k out 900"), BarPart("ctx 2.6k")))
     line = "".join(
         part[1] for part in status_fragments(bar, 40, "...", " - ", f" {ASCII.gutter} ")
     )
-    assert line.startswith("  m - ~/p | chat")
+    assert line.startswith("  in 12k out 900 - ctx 2.6k | chat")
 
 
 # ── The list ──
@@ -240,9 +236,7 @@ async def test_ctrl_o_with_no_steps_says_so() -> None:
 
 
 @pytest.mark.parametrize("width", range(10, 40))
-def test_a_control_character_in_the_model_is_never_drawn_raw(width: int) -> None:
-    bar = StatusBar(
-        "evil\x1b]0;x\x07model", "~/p", "", "", "", run="2/~8 · ctrl+o steps"
-    )
+def test_a_control_character_in_the_title_is_never_drawn_raw(width: int) -> None:
+    bar = StatusBar("evil\x1b]0;x\x07title", "", usage=(BarPart("ctx 1.0k"),))
     line = "".join(part[1] for part in status_fragments(bar, width, "…"))
     assert "\x1b" not in line and "\x07" not in line and cells(line) == width
