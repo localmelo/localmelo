@@ -44,7 +44,12 @@ from rich.text import Text
 from rich.theme import Theme
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS
-from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
+from localmelo.melo.schema import (
+    UNFINISHED_ANSWER_ERROR,
+    ReasoningTags,
+    RunResult,
+    split_thinking,
+)
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
@@ -285,10 +290,8 @@ class LiveState:
     retry_until: float = 0.0
     finished: bool = False
     waiting: bool = False
-    # Released provisional text of the planning reply being streamed, and
-    # whether text is held (nothing safe to show yet).
+    # Released provisional text of the planning reply being streamed.
     stream_text: str = ""
-    stream_held: bool = False
 
 
 @dataclass(frozen=True)
@@ -455,6 +458,8 @@ def run_end(
         headline, action = _server_end(error, backend)
     elif status == "failed" and error == "empty replies":
         headline, action = "The model returned only empty replies", _ACTIONS["failed"]
+    elif status == "failed" and error == UNFINISHED_ANSWER_ERROR:
+        headline, action = UNFINISHED_ANSWER_ERROR, _ACTIONS["failed"]
     else:
         headline, action = status_text(status, cause).title, _ACTIONS.get(status, "")
         if status == "budget_exhausted" and steps:
@@ -681,13 +686,13 @@ class TurnRenderer:
         self._stream_chunks = 0
         if self.live is not None:
             self.live.stream_text = ""
-            self.live.stream_held = True
             self.live.activity = "Thinking"
 
     def stream_held(self) -> None:
-        """Text arrived but the release filter holds all of it for now."""
-        if self.live is not None:
-            self.live.stream_held = True
+        """Text arrived but the release filter holds all of it for now.
+
+        Nothing is drawn for it: the live row already says Thinking.
+        """
 
     def stream_content(self, delta: str) -> None:
         """Keep and show a released, already-redacted content delta."""
@@ -696,7 +701,6 @@ class TurnRenderer:
         self._stream_texts[step] = self._stream_texts.get(step, "") + delta
         if self.live is not None:
             self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
-            self.live.stream_held = False
             self.live.activity = "Replying"
 
     def stream_whole(self) -> None:
@@ -708,8 +712,6 @@ class TurnRenderer:
         # No hint and one released part: the filter held the reply to its end.
         if self._stream_chunks == 1 and self.stream_hint() is None:
             self._buffered = True
-        if self.live is not None:
-            self.live.stream_held = False
 
     def _claim_stream(self, step: object) -> bool:
         """Take the text of *step*'s reply as claimed; whether it had any.
@@ -722,7 +724,6 @@ class TurnRenderer:
         text = self._stream_texts.pop(key, "")
         if key == self._stream_step and self.live is not None:
             self.live.stream_text = ""
-            self.live.stream_held = False
         return bool(text.strip())
 
     def _clear_stream(self) -> None:
@@ -730,7 +731,6 @@ class TurnRenderer:
         self._stream_texts.clear()
         if self.live is not None:
             self.live.stream_text = ""
-            self.live.stream_held = False
 
     def _flush_stream(
         self,
@@ -774,7 +774,6 @@ class TurnRenderer:
             printed = shown
         if self.live is not None:
             self.live.stream_text = ""
-            self.live.stream_held = False
         return printed
 
     @property
@@ -892,12 +891,18 @@ class TurnRenderer:
         if not thinking.strip():
             thinking = block
         if thinking.strip():
-            self._print_thinking(thinking, _float(data.get("duration_s")))
+            # A turn without tool calls ends in this reply: the time the
+            # footer gives is this reply's time, so the line does not repeat it.
+            timed = bool(calls) or self._tool_count > 0
+            self._print_thinking(thinking, _float(data.get("duration_s")), timed=timed)
         text = clean_output(text).strip()
         if not isinstance(calls, list) or not calls:
             # The last message may be the answer: hold it until the end
-            # says whether to print it (section 3).
+            # says whether to print it (section 3). One with no text (only
+            # thinking, #278) leaves no provisional copy behind either.
             self._held = text
+            if not text:
+                self._claim_stream(data.get("step"))
             return
         self._held = ""
         streamed = self._claim_stream(data.get("step"))
@@ -911,14 +916,15 @@ class TurnRenderer:
                 )
             self.out.print(self._intermediate(text))
 
-    def _print_thinking(self, text: str, duration_s: float) -> None:
-        """``✻ Thought for 1.2s`` and the thinking's first rows (section 3)."""
-        self.out.print(
-            Text(
-                f"{self.symbols.thought} Thought for {format_duration(duration_s)}",
-                style="thinking",
-            )
-        )
+    def _print_thinking(
+        self, text: str, duration_s: float, *, timed: bool = True
+    ) -> None:
+        """``✻ Thought for 1.2s`` and the thinking's first rows (section 3).
+
+        Without *timed* the line is ``✻ Thought``.
+        """
+        label = f"Thought for {format_duration(duration_s)}" if timed else "Thought"
+        self.out.print(Text(f"{self.symbols.thought} {label}", style="thinking"))
         if not (self.thinking or self.verbose):
             return
         limit = VERBOSE_THINKING_LINES if self.verbose else THINKING_LINES
@@ -1059,7 +1065,7 @@ class TurnRenderer:
                 self.live.activity = "Retrying"
                 self.live.retry_until = self._clock() + delay if delay > 0 else 0.0
             return
-        if kind == "empty_reply":
+        if kind in ("empty_reply", "unfinished_answer"):
             line = Text(f"{self.symbols.dot} {message}", style="muted")
         else:
             line = Text(f"{self.symbols.warn} {message}", style="warn")
@@ -1953,19 +1959,6 @@ def live_rows(
     rows[0] = [fragment for fragment in rows[0] if fragment[1]]
     if live.stream_text:
         rows.extend(_stream_rows(live.stream_text, width, symbols, stream_lines))
-    elif live.stream_held and not live.waiting:
-        rows.append(
-            [
-                (
-                    "class:muted",
-                    cut_cells(
-                        f"{symbols.thought} thinking{symbols.ellipsis}",
-                        width,
-                        symbols.ellipsis,
-                    ),
-                )
-            ]
-        )
     if live.tool and not live.waiting:
         clock = tool_elapsed(now - live.tool_started)
         if live.tool_limit_s:

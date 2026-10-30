@@ -268,7 +268,9 @@ def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
     term = streamed("stream_slow", hint=None)
     term.see("Ask melo")
     term.type("stream please\r")
-    term.see("✻ thinking…")
+    assert term.read_until(lambda _out: "Thinking…" in screen(term), 30)
+    shown = screen(term)  # the spinner row alone says it: no second row repeats it
+    assert "thinking…" not in shown and "Streaming line one." not in shown
     assert "Streaming line one." not in term.text()  # held, not drawn
     term.see("Worked for")
     text = screen(term)
@@ -331,4 +333,54 @@ def test_a_stream_that_breaks_after_part_of_a_reply_is_not_asked_again(
     term.see("Could not get an answer from the model server: Streaming response")
     assert SERVER_WHOLE not in " ".join(screen(term).split())
     assert all(_asked_to_stream(servers[0]))  # no request without streaming
+    assert term.quit() == 0
+
+
+# ── A reply that is only unfinished thinking (#278) ──
+
+GREETING = "The user just said hello. I'll keep it simple and friendly."
+
+
+@pytest.mark.parametrize(
+    "scenario,stream,answer",
+    [
+        # The server found no end mark and sent the thinking as content.
+        (
+            "unfinished_server",
+            True,
+            "Hello! The folder is empty. What would you like to make?",
+        ),
+        # It streamed the reasoning, then sent it again as content.
+        ("unfinished_stream_echo", True, "Hello! What can I do for you?"),
+        # A <think> that is never closed, without streaming.
+        ("unfinished_open", False, "Hello! What can I do for you?"),
+    ],
+    ids=["server", "stream echo", "open tag"],
+)
+def test_unfinished_thinking_is_folded_and_the_model_answers_again(
+    streamed: Callable[..., Melo], scenario: str, stream: bool, answer: str
+) -> None:
+    term = streamed(scenario, hint=None, stream=stream)
+    term.see("Ask melo")
+    term.type("Say hello\r")
+    term.see("Worked for")
+    text = " ".join(screen(term).split())
+    assert text.count(f"● {answer}") == 1
+    assert "asking it for its answer" in text
+    assert "keep it simple and friendly" not in text  # folded: no excerpt by default
+    assert "partial reply" not in text
+    assert term.quit() == 0
+
+
+def test_a_second_unfinished_reply_ends_the_turn_with_a_plain_error(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    term = streamed("unfinished_twice", hint=None)
+    term.see("Ask melo")
+    term.type("Say hello\r")
+    term.see("melo did not finish an answer.")
+    text = " ".join(screen(term).split())
+    assert "/retry, or try another model." in text
+    assert GREETING not in text
+    assert len(servers[0].requests) == 2  # asked once more, no more
     assert term.quit() == 0

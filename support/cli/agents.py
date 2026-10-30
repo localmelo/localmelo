@@ -188,6 +188,7 @@ class AgentFactory:
                 retrieval_extra_body=self._retrieval_extra_body,
                 mcp_config=mcp_config,
                 browser_driver=self.browser_driver,
+                identify=True,
             )
         cfg = self._cfg
         if url is not None:
@@ -203,6 +204,7 @@ class AgentFactory:
             retrieval_extra_body=self._retrieval_extra_body,
             mcp_config=mcp_config,
             browser_driver=self.browser_driver,
+            identify=True,
         )
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:

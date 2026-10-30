@@ -351,6 +351,67 @@ def test_a_real_direct_run_is_served_and_summarised(
     assert body["cache"]["requests"] >= 1
 
 
+@pytest.mark.parametrize(
+    "scenario,answer",
+    [
+        (
+            "unfinished_server",
+            "Hello! The folder is empty. What would you like to make?",
+        ),
+        ("unfinished_twice", ""),
+    ],
+    ids=["answers on the second request", "never answers"],
+)
+def test_a_direct_run_never_returns_unfinished_thinking_and_the_console_folds_it(
+    tmp_path: Path, client: TestClient, console: Console, scenario: str, answer: str
+) -> None:
+    """#278: the reply that is only thinking is served as thinking with no
+    content, and the run's result is the answer or a plain error, never it."""
+    from localmelo.melo.schema import UNFINISHED_ANSWER_ERROR
+    from localmelo.tests.fixtures.stub_llm import (
+        SCENARIOS_DIR,
+        StubServer,
+        load_scenarios,
+    )
+
+    server = StubServer(load_scenarios([SCENARIOS_DIR]), default=scenario).start()
+    try:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALMELO_")}
+        env["HOME"] = str(tmp_path)
+        done = subprocess.run(
+            [sys.executable, "-m", "localmelo", "--base-url", server.base_url]
+            + ["--chat-model", "stub-model", "--", "Say hello"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            timeout=120,
+        )
+    finally:
+        server.close()
+    assert "keep it simple and friendly" not in done.stdout
+    if answer:
+        assert done.returncode == 0, done.stderr
+        assert done.stdout.strip() == answer
+    else:
+        assert done.returncode != 0
+        assert UNFINISHED_ANSWER_ERROR in done.stderr
+    path = tmp_path / ".cache/localmelo/cli/sessions.db"
+    console.worker_history = WorkerReader(str(path))
+    [item] = client.get("/api/sessions?kind=worker").json()["sessions"]
+    resp = client.get(f"/api/sessions/{item['id']}/events?follow=false")
+    events, _ = parse_frames(resp.text)
+    replies = [e["data"] for e in events if e["type"] == "assistant.message"]
+    folded = [r for r in replies if not r["tool_calls"] and not r["content"]]
+    assert folded and all("keep it simple" in r["thinking"] for r in folded)
+    notices = [e["data"]["kind"] for e in events if e["type"] == "notice"]
+    assert notices == ["unfinished_answer"]
+    [finished] = [e["data"]["result"] for e in events if e["type"] == "run.finished"]
+    assert finished["result"] == answer
+    assert finished["error"] == ("" if answer else UNFINISHED_ANSWER_ERROR)
+
+
 # What a loaded machine slows down in the test below: the run's process start
 # (the CLI creates its file, then the schema), the writer task that stores each
 # event, and the model call. Every wait is for the event it needs, under one

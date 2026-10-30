@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
+from localmelo.support.sessions.identity import config_identity, url_identity
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -195,6 +196,7 @@ async def build_session_agent(
     browser_driver: str = "off",
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
+    identify: bool = False,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -219,6 +221,12 @@ async def build_session_agent(
     ``Chat`` holds is the wrapped one. None, the default, passes the provider
     through as this builder always did. An embedding that was not built is
     not wrapped.
+
+    *identify* gives the Agent the identity of a chat (see
+    :mod:`~localmelo.support.sessions.identity`): melo, and the model, server
+    and place of the backend the Agent is built on, unless *options* set an
+    identity already. The terminal chat and the console pass it; workers and
+    the other callers do not, and their requests carry no identity.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace
@@ -294,6 +302,11 @@ async def build_session_agent(
             from localmelo.melo.agent.agent import _providers_from_config
 
             llm, embedding = _providers_from_config(cfg)
+    if identify and agent_options.identity is None:
+        identity = url_identity(base_url, model) if base_url else None
+        if cfg is not None and not base_url:
+            identity = config_identity(cfg)
+        agent_options = dataclasses.replace(agent_options, identity=identity)
     try:
         if not from_config:
             assert llm is not None

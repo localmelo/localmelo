@@ -347,10 +347,16 @@ export function serverAddress(url) {
   }
 }
 
+// The error of a run whose replies stayed unfinished thinking (`UNFINISHED_ANSWER_ERROR` in `melo/schema.py`).
+export const UNFINISHED_ANSWER = "melo did not finish an answer";
+
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
   if (serverUnreachable(status, error)) {
     return {...STATUS_TEXT.provider_error, title: "Could not reach the model server"};
+  }
+  if (status === "failed" && error === UNFINISHED_ANSWER) {
+    return {...STATUS_TEXT.failed, title: UNFINISHED_ANSWER};
   }
   const found =
     STATUS_TEXT[`${status}|${cause}`] ?? STATUS_TEXT[status] ?? null;
@@ -997,8 +1003,13 @@ export function holdText(held) {
  * The work group's summary line: what the turn did, and how it ended.
  *
  * `Working · 3 tool calls`, `Worked for 14s · 3 tool calls · 1 failed`,
- * `Thought for 1.2s`, `Stopped after 6s · 2 tool calls`. *held* is the
- * session's scheduler hold, when the gate is keeping a model call waiting.
+ * `Thought`, `Stopped after 6s · 2 tool calls`. *held* is the session's
+ * scheduler hold, when the gate is keeping a model call waiting.
+ *
+ * A finished chat turn without tool calls has no line of its own, because the
+ * footer under its answer already gives the turn's time: it reads `Thought`
+ * when it has reasoning to open (the events carry the step's time, not the
+ * reasoning's own, so no time is shown) and is empty when it has none.
  */
 export function workSummary(turn, {held = ""} = {}) {
   const calls = toolCount(turn);
@@ -1007,9 +1018,12 @@ export function workSummary(turn, {held = ""} = {}) {
     const activity = held ? holdText(held) : "Working";
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
+  if (turn.status === "completed" && calls === 0) {
+    return turn.items.some((item) => item.kind === "thinking") ? "Thought" : "";
+  }
   const duration = formatDuration(turnDuration(turn));
   if (turn.status === "completed") {
-    const parts = calls > 0 ? [`Worked for ${duration}`, callWord] : [`Thought for ${duration}`];
+    const parts = [`Worked for ${duration}`, callWord];
     const failed = failedCount(turn);
     const denied = deniedCount(turn);
     if (failed) parts.push(`${failed} failed`);
