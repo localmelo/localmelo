@@ -190,7 +190,7 @@ def element_line(ref: str, item: Element, origin: str = "") -> str:
 def render_page(snap: Snapshot, *, part: int = 1, view: str = "all") -> str:
     """The page block for *part* of *snap*; *view* is ``text``, ``elements`` or ``all``."""
     total = len(snap.parts)
-    attrs = f'tab={snap.tab} origin={snap.origin} title="{field_text(snap.title, TITLE_CHARS)}"'
+    attrs = f'tab={field_text(snap.tab, 40)} origin={snap.origin} title="{field_text(snap.title, TITLE_CHARS)}"'
     if total > 1 and view != "elements":
         attrs += f" part={part}/{total}"
     if snap.payment:
@@ -233,5 +233,5 @@ def render_find(snap: Snapshot, query: str, role: str = "any") -> str:
         f'{total} of {len(snap.elements)} elements match "{field_text(query, 60)}":'
     ]
     lines.extend(element_line(ref, item, snap.origin) for ref, item in found)
-    attrs = f"tab={snap.tab} origin={snap.origin}"
+    attrs = f"tab={field_text(snap.tab, 40)} origin={snap.origin}"
     return block(snap.id, attrs, "\n".join(lines))

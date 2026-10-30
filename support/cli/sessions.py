@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from localmelo.support.cli import browsing
 from localmelo.support.cli.render import ToolOutput
 from localmelo.support.cli.views import resume_recap
 from localmelo.support.sessions.display import home_label
@@ -173,6 +174,7 @@ class SessionNavigation:
         old, s.runner = s.runner, candidate
         self.mark = mark
         s.approvals.reset()
+        browsing.forget(s)
         s.session_tools.reset()
         s.title = current.title
         s.renderer.clear_session()

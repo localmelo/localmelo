@@ -11,6 +11,7 @@ so a chat that never browses opens nothing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import logging
 from typing import Any
@@ -28,7 +29,6 @@ from localmelo.support.browser.driver import (
 logger = logging.getLogger(__name__)
 
 GROUP = "browser"
-CALL_TIMEOUT_MS = 90_000.0
 WAIT_DEFAULT_S = 10.0
 WAIT_MAX_S = 30.0
 
@@ -165,12 +165,10 @@ class BrowserToolProvider(BaseToolProvider):
             "browser_screenshot": self._screenshot,
         }
         return [
-            ProvidedTool(
-                definition=tool,
-                function=impls[tool.name],
-                timeout_ms=CALL_TIMEOUT_MS,
-                group=GROUP,
-            )
+            # No timeout of its own: a call may wait for the person's answer about
+            # a site, so the run's tool timeout applies, and the driver bounds
+            # each call to the browser.
+            ProvidedTool(definition=tool, function=impls[tool.name], group=GROUP)
             for tool in TOOLS
         ]
 
@@ -179,6 +177,12 @@ class BrowserToolProvider(BaseToolProvider):
 
     def kill(self) -> None:
         self._driver.kill()
+
+    def forget(self) -> None:
+        """Take back what this chat was allowed: tabs stay open, but nothing is approved."""
+        self._tab = None
+        self._snaps.clear()
+        self._origins.clear()
 
     async def check(self) -> None:
         """Start the driver now (``/browser``); raises what a first call would."""
@@ -202,7 +206,8 @@ class BrowserToolProvider(BaseToolProvider):
             try:
                 await sites.require_site(origin)
             except BrowserError:
-                await self._driver.blank(tab)  # leave the page the redirect led to
+                with contextlib.suppress(BrowserError):
+                    await self._driver.blank(tab)  # leave the page the redirect led to
                 self._origins.pop(tab, None)
                 self._snaps.pop(tab, None)
                 raise

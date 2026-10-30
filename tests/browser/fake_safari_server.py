@@ -2,7 +2,8 @@
 
 It speaks newline-delimited JSON-RPC like the real server, lists the tools the
 design names (plus filler) and understands just enough of the scripts melo
-sends to answer from a tiny set of pages. Modes (``FAKE_SAFARI_MODE``):
+sends to answer from a tiny set of pages. Modes (the first argument, or
+``FAKE_SAFARI_MODE`` in the environment):
 
 - ``automation_off``: every tool call fails as Safari does when remote
   automation is off
@@ -23,7 +24,9 @@ import os
 import sys
 from typing import Any
 
-MODE = os.environ.get("FAKE_SAFARI_MODE", "")
+MODE = os.environ.get("FAKE_SAFARI_MODE") or (
+    sys.argv[1] if len(sys.argv) > 2 else ""  # `fake_safari_server.py MODE --mcp`
+)
 OFF = (
     "Could not create a session: You must enable the 'Allow Remote Automation' "
     "option in Safari's Develop menu to control Safari via WebDriver."

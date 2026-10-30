@@ -225,3 +225,18 @@ async def test_auto_mode_allows_everything_but_still_asks_about_a_website() -> N
     ).origin == "session"  # the chat's grant holds in auto mode
     approvals = Approvals(ask, "yolo")
     assert approvals.policy() is None  # --yolo asks about nothing
+
+
+async def test_a_new_chat_starts_with_no_page_approved(chat: Any) -> None:
+    session, out, _, factory = chat
+    session.enter("/browser on")
+    await _until(lambda: _tools(session) != [] and session.state == "idle")
+    provider = next(
+        p for p in session.agent._tool_providers if isinstance(p, BrowserToolProvider)
+    )
+    tools = {t.definition.name: t for t in await provider.start()}
+    await tools["browser_open"].function(url="https://example.com/")
+    assert provider._origins and provider._snaps
+    session.enter("/new")
+    await _until(lambda: "New chat" in out.text() and session.state == "idle")
+    assert not provider._origins and not provider._snaps and provider._tab is None

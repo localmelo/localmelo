@@ -193,3 +193,31 @@ async def test_a_setup_problem_in_a_tool_call_is_the_tools_result() -> None:
     finally:
         await provider.close()
     assert isinstance(out, ToolOutput) and out.is_error and out.text == SETUP_MESSAGE
+
+
+def test_the_probe_reports_each_step_against_the_fake(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from localmelo.support.browser import probe
+
+    monkeypatch.setenv("LOCALMELO_SAFARIDRIVER", f"{sys.executable} -I {FAKE}")
+    assert asyncio.run(probe.probe("https://example.com/")) == 0
+    out = capsys.readouterr().out
+    assert "tools (17):" in out and "  navigate_to_url(url)" in out
+    assert "opened: tab=" in out and "title='Example Home'" in out
+    assert "page: " in out and "link 'News' https://example.com/news" in out
+    assert "screenshot: image/png" in out and out.rstrip().endswith("ok")
+
+
+def test_the_probe_says_what_to_turn_on(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from localmelo.support.browser import probe
+
+    monkeypatch.setenv("LOCALMELO_SAFARIDRIVER", f"{sys.executable} -I {FAKE} exit_off")
+    assert asyncio.run(probe.probe("https://example.com/")) == 1
+    assert "FAILED: Safari is not set up for melo yet." in capsys.readouterr().out

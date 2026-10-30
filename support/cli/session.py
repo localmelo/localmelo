@@ -1330,6 +1330,7 @@ class CliSession:
         self.navigation.mark = SessionMark(0, 0)
         self.agent.load_conversation([])
         self.approvals.reset()
+        browsing.forget(self)
         self.title = ""
         self.renderer.context_tokens = 0
         self.renderer.new_session()

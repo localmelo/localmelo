@@ -11,6 +11,7 @@ chat. Without a policy (``--yolo``, a library caller) nobody is asked.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK, denial_text
@@ -27,7 +28,7 @@ def origin_of(url: str) -> str | None:
         scheme, host, port = parts.scheme.lower(), parts.hostname, parts.port
     except ValueError:
         return None
-    if scheme not in _PORTS or not host:
+    if scheme not in _PORTS or not host or not re.fullmatch(r"[\w.\-\[\]:%]+", host):
         return None
     shown = f"[{host}]" if ":" in host else host
     return f"{scheme}://{shown}" + (
