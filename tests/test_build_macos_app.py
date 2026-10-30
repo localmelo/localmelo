@@ -302,10 +302,9 @@ def test_build_assembles_locked_runtime_and_swift(
         path.touch()
     (root / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
     (root / "macos/assets").mkdir(parents=True)
+    # Each asset holds its own name, so a copy under the wrong name shows.
     for name in ("AppIcon.icns", "MenuBarLogo.png", "MenuBarLogo@2x.png"):
-        (root / "macos/assets" / name).write_bytes(
-            name.encode()
-        )  # told apart by content
+        (root / "macos/assets" / name).write_bytes(name.encode())
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
