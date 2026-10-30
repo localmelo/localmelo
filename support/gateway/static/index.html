@@ -101,7 +101,6 @@
               aria-haspopup="listbox"
               aria-expanded="false"
               aria-label="Chat level"
-              title="Chat level"
             >
               P2
             </button>
@@ -121,6 +120,10 @@
         </header>
         <div class="banner" id="store-banner" role="status" hidden></div>
         <div class="banner" id="model-banner" role="status" hidden></div>
+        <div class="banner" id="offline-banner" role="status" hidden>
+          <span>Could not reach the gateway. Check that the gateway is running.</span>
+          <button type="button" class="link-button" id="offline-retry">Try again</button>
+        </div>
         <div class="banner" id="stream-banner" role="status" hidden>
           <span id="stream-banner-text"></span>
           <button type="button" class="link-button" id="reconnect-btn">Reconnect now</button>
@@ -137,14 +140,11 @@
               height="128"
               alt="Melo, the localmelo Akita mascot"
             />
-            <p class="eyebrow">A LITTLE MORE POSSIBILITY</p>
             <h1>What would you like to work on?</h1>
             <p id="welcome-description">
               A quiet space to think, build, and explore with your own model.
             </p>
-            <button class="primary-button" id="setup-btn" hidden>
-              Connect a model <span aria-hidden="true">↗</span>
-            </button>
+            <section class="setup-card" id="setup-card" aria-labelledby="setup-title" aria-live="polite" tabindex="-1" hidden></section>
             <div class="suggestions">
               <button
                 data-prompt="Help me plan a small coding project. Ask me about the goal first."
@@ -177,8 +177,8 @@
         <div class="composer-area">
           <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" hidden></div>
           <div id="approval-bar" class="approval-bar" role="status" hidden>
-            <span>Approval needed</span>
-            <button type="button" id="approval-go" class="link-button">Go to approval</button>
+            <span>melo is waiting for your answer</span>
+            <button type="button" id="approval-go" class="outline-button">Review</button>
           </div>
           <form class="composer" id="composer">
             <label class="sr-only" for="input">Message</label>
@@ -206,7 +206,6 @@
                 id="send-btn"
                 disabled
                 aria-label="Send message"
-                title="Send message (Enter)"
               >
                 ↑
               </button>

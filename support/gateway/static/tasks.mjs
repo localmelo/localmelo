@@ -105,7 +105,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     row('Evidence', evidenceText(task));
     const nodes = [back, meta];
     if (statusRow) nodes.push(statusRow.element);
-    const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label};
+    const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (live) { drawLive(); nodes.push(liveBox); }
     nodes.push(node('h2', 'Recovery card'));
