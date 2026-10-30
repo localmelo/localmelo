@@ -186,7 +186,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   text. `GET /api/sessions/{id}` and the task routes carry the comparison as `target.diff` of a
   pending approval; nothing else in the approval changes, and no answer works differently.
   The terminal's file-edit helpers moved to `support/sessions/edits.py` for it, and
-  `support/cli/edits.py` re-exports them. ([#NN])
+  `support/cli/edits.py` re-exports them. ([#265])
 
 - A first question about the folder needs no approval. The interactive UI and the
   gateway (the web console's chats included) have a read-only `list_files` tool: a
@@ -2033,6 +2033,7 @@ earlier milestones.
 [#260]: https://github.com/localmelo/localmelo/pull/260
 [#263]: https://github.com/localmelo/localmelo/pull/263
 [#264]: https://github.com/localmelo/localmelo/pull/264
+[#265]: https://github.com/localmelo/localmelo/pull/265
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
