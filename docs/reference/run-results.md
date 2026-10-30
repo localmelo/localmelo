@@ -45,11 +45,13 @@ Details:
   `decompose`; other JSON, such as a tool call written out as text, does not
   count. A reply that holds none as it stands gets one repair of a common
   slip in its JSON: a `]` or `}` that no opener matches, a comma before a
-  closer, or raw newline, carriage return and tab characters inside strings
-  (see `repaired` in [Events](events.md#reflection)). Nothing is closed or
-  inserted, and a reply that needs two repairs is unreadable. An unreadable
-  reply is asked for once more, without tools: the attempt's turns are
-  written out as text, and a closing line asks for the JSON object only; when
+  closer, raw newline, carriage return and tab characters inside strings, a
+  backslash before a character that JSON has no escape for (such as `\;`), or
+  an array that the next key breaks off (see `repaired` in
+  [Events](events.md#reflection)). Nothing is closed or inserted beyond the
+  one backslash or `]`, and a reply that needs two repairs is unreadable. An
+  unreadable reply is asked for once more, without tools: the attempt's turns
+  are written out as text, and a closing line asks for the JSON object only; when
   the reply had JSON that the decoder rejected, one more line quotes the
   decoder's error. Both requests count in `n_aux`. When the second reply is
   unreadable too, nothing of it is kept and the next attempt starts. If none

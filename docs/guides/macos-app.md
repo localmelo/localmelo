@@ -58,6 +58,13 @@ removes after sign-in. It verifies the health cookie and retries a login that st
 signs in again and reloads; the app menu's **Sign In Again** action does the same on demand. The codes come from a
 private in-bundle snippet; a documented `melo` command for this is A1b work, not yet available. Same-user processes and other localhost services remain outside the authentication boundary, and tools run as the user. Do not expose it on a network or use it with untrusted tasks.
 
+The console's folder chip reaches the app through one message handler, `localmeloFolder`. The app takes a
+message only from the gateway's own page (its main frame, over `http` from `127.0.0.1` on the gateway's port)
+and only a request it knows; a frame in the page, any other page and any other request is refused.
+**Choose a folder…** opens the system's folder panel and answers with the path the person picked, never one
+from the page. **Show in Finder** shows an existing folder only when the gateway lists it as a chat's
+(`GET /api/sessions`) or the person picked it in the panel; any other path is refused.
+
 The app and console use the regular localmelo config and session store under `~/.cache/localmelo`;
 first-run setup is the web console's settings dialog. The app does not install or remove the
 separate launchd service. Quit the app before removing its bundle.

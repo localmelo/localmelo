@@ -223,3 +223,49 @@ func failureNotice(reason: String, ready: Bool) -> FailureNotice {
 func gatewayExitMessage(status: Int32, signalled: Bool) -> String {
     signalled ? "The gateway was terminated by signal \(status)." : "The gateway exited (status \(status))."
 }
+
+/// What the console's folder chip may ask of the app.
+enum FolderRequest: Equatable {
+    case choose
+    case reveal(String)
+}
+
+/// The request a page message holds, or nil: an unknown action, or a path that is not absolute or `~/`, has a NUL or is over 4096 bytes.
+func folderRequest(_ body: Any) -> FolderRequest? {
+    guard let message = body as? [String: Any], let action = message["action"] as? String else { return nil }
+    switch action {
+    case "choose":
+        return .choose
+    case "reveal":
+        guard let path = message["path"] as? String, path.utf8.count <= 4096, !path.contains("\0"),
+              path.hasPrefix("/") || path.hasPrefix("~/") else { return nil }
+        return .reveal(path)
+    default:
+        return nil
+    }
+}
+
+/// Whether a message came from the gateway's own page: its main frame, over http, from 127.0.0.1 and the gateway's port.
+func acceptsBridgeMessage(scheme: String, host: String, port: Int, isMainFrame: Bool, gatewayPort: Int) -> Bool {
+    isMainFrame && gatewayPort > 0 && scheme == "http" && host == "127.0.0.1" && port == gatewayPort
+}
+
+/// The `workspace` of every chat in `GET /api/sessions`: the folders that count as a chat's own.
+func chatFolders(_ data: Data) -> [String] {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let sessions = body["sessions"] as? [[String: Any]] else { return [] }
+    return sessions.compactMap { $0["workspace"] as? String }
+}
+
+/// The folder to show in Finder for `requested`: an existing directory that is one of `allowed`, as real paths.
+func revealTarget(_ requested: String, allowed: [String]) -> URL? {
+    func real(_ path: String) -> String {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        return URL(fileURLWithPath: path.hasPrefix("~/") ? home + path.dropFirst() : path).resolvingSymlinksInPath().path
+    }
+    var isDirectory: ObjCBool = false
+    let target = real(requested)
+    guard allowed.map(real).contains(target),
+          FileManager.default.fileExists(atPath: target, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+    return URL(fileURLWithPath: target, isDirectory: true)
+}
