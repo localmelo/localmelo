@@ -303,7 +303,7 @@ def test_second_install_upgrades_and_a_failed_one_keeps(
     home: Path, monkeypatch: MP
 ) -> None:
     build_app.install()
-    assert build_app.install().startswith("LocalMelo is updated")
+    assert build_app.install().startswith("localmelo is updated")
     assert melo_says(home) == "melo build 2"
 
     def broken(output: Path) -> None:
@@ -382,9 +382,31 @@ def test_uninstall_removes_exactly_what_install_made(home: Path) -> None:
     first, second = build_app.uninstall().splitlines()
     assert (
         first
-        == "Removed LocalMelo from ~/Applications and the melo command from ~/.local/bin."
+        == "Removed localmelo from ~/Applications and the melo command from ~/.local/bin."
     )
     assert "settings and chats" in second and all(other.exists() for other in others)
     assert not (home / "Applications/LocalMelo.app").exists()
     assert not (home / ".local/bin/melo").exists()
     assert "nothing to remove" in build_app.uninstall()
+
+
+def test_install_and_uninstall_print_localmelo(
+    home: Path, tmp_path: Path, monkeypatch: MP, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The home fixture puts tmp_path/bin on PATH: a melo that is not ours, so the
+    # install leaves it alone and prints the refusal line.
+    other = tmp_path / "bin/melo"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("#!/bin/sh\necho mine\n")
+    other.chmod(0o755)
+    printed = ""
+    for flag in ("--install", "--uninstall", "--uninstall"):
+        monkeypatch.setattr(sys, "argv", ["build_macos_app.py", flag])
+        build_app.main()
+        printed += capsys.readouterr().out
+    assert "Building localmelo. This can take a minute." in printed
+    assert "localmelo is installed in ~/Applications" in printed
+    assert "To use localmelo's instead" in printed
+    assert "Removed localmelo from ~/Applications" in printed
+    assert "localmelo is not installed in ~/Applications" in printed
+    assert "LocalMelo" not in printed  # a file or folder name only, never printed
