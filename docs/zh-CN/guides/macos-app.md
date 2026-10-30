@@ -24,6 +24,8 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 构建器拒绝覆盖已存在的输出。它把 Python 运行时和网关额外依赖复制进应用包，用正式版 Xcode 编译 Swift 宿主，把内置的 Python 编译为字节码，先对其中每个 Mach-O 文件、再对整个应用包签名，并包含可重定位的 `Contents/Resources/runtime/bin/melo`。字节码基于哈希且从不检查源文件，启动器和直接运行内置解释器都不会再写入字节码，因此签名保持有效。精确的独立解释器归档已固定版本，解压前会校验 SHA-256；wheel 的哈希则对照锁文件检查。构建工具静默运行，只在失败时才输出。
 
+在装入依赖之前，构建器会先精简它复制来的 Python 运行时：去掉 IDLE、tkinter 和 turtle（连同它们加载的 Tcl/Tk 库）、pip、setuptools、ensurepip 和 2to3，共 36 MB，因此应用约为 147 MB，而不是 183 MB。去掉什么由运行时之下的一份固定路径清单决定（`scripts/build_macos_app.py` 中的 `UNUSED`）；`unittest`、`distutils`、`venv` 和 `pydoc` 保留，依赖会导入的所有内容也保留。清单中的路径若经由链接指向运行时之外，构建会中止。在内置解释器上运行的代码（例如 `python_exec` 工具）无法导入被去掉的部分，`python -m venv` 需要加上 `--without-pip`。
+
 在控制台加载完成之前，窗口显示一个原生的启动视图：Melo 的画像、`Starting localmelo…`，以及在旋转指示器旁说明当前步骤的一行（`Starting the local server`、`Signing in`、`Opening your workspace`）。如果网关在 20 秒的期限内无法启动，或之后停止，同一个视图会在 `localmelo could not start` 或 `localmelo stopped` 之下说明原因，并提供 **Try Again**（启动一个新的网关）、**Open Log**（打开 `~/Library/Logs/LocalMelo/gateway.log`）和 **Quit**。问题不会弹出对话框，也不会关闭应用。窗口和网页视图使用控制台的画布颜色，因此深色窗口不会闪白。
 
 菜单栏项是 Melo 的头像，一张模板图像，系统会按浅色菜单栏、深色菜单栏和打开的菜单为它着色。空闲时只显示头像。有内容运行时，头像旁边显示正在运行的数量，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同）。当某个对话或任务在等你回答工具审批时，头像旁边会出现一个圆点。这些全部来自应用每 2 秒一次的健康检查，因此审批会在一次轮询之内显示出来。VoiceOver 和悬停提示用文字说出状态（`localmelo, nothing running`、`localmelo, 3 running` 或 `localmelo, waiting for your approval`），等待开始时还会朗读出来。菜单以正在运行的内容（`Nothing running`、`3 running`）开头；有审批在等待时，还有 **Waiting for your approval**，它会让窗口打开到那个对话或任务。其后是 **Open localmelo**、**Settings…**（应用菜单中也是 Command-逗号，打开控制台的设置）、**Sign In Again** 和 **Quit localmelo**。如果应用包中缺少这个图案，菜单栏项改为显示文字 `localmelo`。

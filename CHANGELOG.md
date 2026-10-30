@@ -1028,6 +1028,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
+  build leaves out the parts of the standalone Python that the app never runs: IDLE,
+  tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
+  fixed list of paths below the runtime decides, never a pattern matched against the
+  build folder's own path, and a listed path that leads out of the runtime through a
+  link stops the build. `unittest`, `distutils`, `venv`, `pydoc` and everything the
+  dependencies import stay: every module of localmelo and of the bundled dependencies
+  still imports, the gateway starts and answers `GET /api/health`, the signature
+  verifies, and `melo --version` from the bundle takes 0.28 s as before (median of five
+  runs). Code that runs on the bundled interpreter, such as the `python_exec` tool,
+  can no longer import tkinter or turtle or run pip, and `python -m venv` needs
+  `--without-pip`. ([#NN])
+
 - `/model` is a list to pick from. Alone, it opens the server's chat models under
   the input box: type to filter, ↑ ↓ to move, Enter to switch and save the model as
   the default, Esc to keep the current one. `✓` marks the current model, `(loaded)`

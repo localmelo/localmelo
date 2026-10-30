@@ -75,6 +75,161 @@ def test_verify_links_rejects_escape_and_broken(tmp_path: Path) -> None:
         build_app.verify_links(root)
 
 
+STD = "lib/python3.11"
+# One file in each place the trim clears, laid out as the standalone archive has them.
+UNUSED_FILES = [
+    f"{STD}/idlelib/__init__.py",
+    f"{STD}/idlelib/idle_test/test_config.py",
+    f"{STD}/tkinter/__init__.py",
+    f"{STD}/turtle.py",
+    f"{STD}/turtledemo/two_canvases.py",
+    f"{STD}/ensurepip/_bundled/pip-24.0-py3-none-any.whl",
+    f"{STD}/lib2to3/main.py",
+    f"{STD}/lib-dynload/_tkinter.cpython-311-darwin.so",
+    "lib/libtcl9.0.dylib",
+    "lib/libtcl9tk9.0.dylib",
+    "lib/tcl9.0/init.tcl",
+    "lib/tcl9/9.0/tcltest-2.5.11.tm",
+    "lib/tk9.0/tk.tcl",
+    "lib/itcl4.3.8/pkgIndex.tcl",
+    "lib/thread3.0.6/pkgIndex.tcl",
+    f"{STD}/site-packages/pip/__init__.py",
+    f"{STD}/site-packages/pip-26.2.1.dist-info/METADATA",
+    f"{STD}/site-packages/setuptools/__init__.py",
+    f"{STD}/site-packages/setuptools-84.0.0.dist-info/METADATA",
+    f"{STD}/site-packages/_distutils_hack/__init__.py",
+    f"{STD}/site-packages/distutils-precedence.pth",
+    "bin/pip",
+    "bin/pip3",
+    "bin/pip3.11",
+    "bin/idle3.11",
+    "bin/2to3-3.11",
+    # The standard library's own tests: the stripped archive has none, another may.
+    f"{STD}/test/support/__init__.py",
+    f"{STD}/ctypes/test/test_wintypes.py",
+    f"{STD}/distutils/tests/test_build.py",
+    f"{STD}/sqlite3/test/dbapi.py",
+    f"{STD}/unittest/test/test_case.py",
+]
+# What stays: the rest of the standard library, and every dependency, test folders and
+# names that start like a removed one included.
+USED_FILES = [
+    "bin/python3.11",
+    "bin/pydoc3.11",
+    "lib/libpython3.11.dylib",
+    f"{STD}/os.py",
+    f"{STD}/pydoc.py",
+    f"{STD}/unittest/__init__.py",
+    f"{STD}/distutils/__init__.py",
+    f"{STD}/venv/__init__.py",
+    f"{STD}/ctypes/__init__.py",
+    f"{STD}/sqlite3/__init__.py",
+    f"{STD}/email/test/not_the_stdlib_tests.py",
+    f"{STD}/lib-dynload/_dbm.cpython-311-darwin.so",
+    f"{STD}/site-packages/README.txt",
+    f"{STD}/site-packages/localmelo/__init__.py",
+    f"{STD}/site-packages/dep/__init__.py",
+    f"{STD}/site-packages/dep/test/test_dep.py",
+    f"{STD}/site-packages/dep/tests/test_dep.py",
+    f"{STD}/site-packages/test/__init__.py",
+    f"{STD}/site-packages/pipdeptree/__init__.py",
+    f"{STD}/site-packages/setuptools_scm/__init__.py",
+]
+
+
+def make_tree(root: Path, names: list[str]) -> None:
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name)
+
+
+def test_the_trim_list_holds_only_paths_below_the_runtime() -> None:
+    assert build_app.UNUSED
+    for pattern in build_app.UNUSED:
+        path = Path(pattern)
+        assert not path.is_absolute() and ".." not in path.parts
+        assert path.parts[0] in ("bin", "lib")
+
+
+def test_trim_removes_exactly_the_unused_parts(tmp_path: Path) -> None:
+    python = tmp_path / "python"
+    make_tree(python, UNUSED_FILES + USED_FILES)
+    links = {"2to3": "2to3-3.11", "idle3": "idle3.11", "python3": "python3.11"}
+    for name, target in links.items():
+        (python / "bin" / name).symlink_to(target)
+    build_app.trim_python(python)
+    left = {
+        p.relative_to(python).as_posix() for p in python.rglob("*") if not p.is_dir()
+    }
+    assert left == {*USED_FILES, "bin/python3"}
+    build_app.verify_links(python)  # no link was left without its file
+    build_app.trim_python(python)  # nothing is left to remove, and that is fine
+
+
+def test_trim_removes_a_link_and_never_follows_it(tmp_path: Path) -> None:
+    python = tmp_path / "python"
+    make_tree(python, [f"{STD}/site-packages/dep/__init__.py"])
+    (python / STD / "tkinter").symlink_to("site-packages/dep")  # inside, so allowed
+    build_app.trim_python(python)
+    assert not (python / STD / "tkinter").is_symlink()
+    assert (python / STD / "site-packages/dep/__init__.py").is_file()
+
+
+def test_trim_leaves_lookalike_test_folders_alone(tmp_path: Path) -> None:
+    # Folders named like the removed parts, above the runtime and inside a dependency.
+    above = tmp_path / "test/tests/tkinter/pip"
+    python = above / "python"
+    make_tree(python, UNUSED_FILES + USED_FILES)
+    make_tree(tmp_path / "test", ["keep.txt", "tests/keep.txt"])
+    make_tree(above, ["keep.txt", "idlelib/keep.txt"])
+    build_app.trim_python(python)
+    assert not (python / STD / "idlelib").exists()
+    assert not (python / STD / "unittest/test").exists()
+    for kept in (
+        tmp_path / "test/keep.txt",
+        tmp_path / "test/tests/keep.txt",
+        above / "keep.txt",
+        above / "idlelib/keep.txt",
+        python / STD / "site-packages/dep/test/test_dep.py",
+        python / STD / "site-packages/dep/tests/test_dep.py",
+        python / STD / "site-packages/test/__init__.py",
+    ):
+        assert kept.is_file(), kept
+
+
+@pytest.mark.parametrize(
+    "link, target",
+    [
+        (f"{STD}/idlelib", "idlelib"),  # a listed folder that is a link out
+        (STD, ""),  # a link out above the listed folders
+        ("bin/pip", "keep.txt"),  # a listed file that is a link out
+    ],
+)
+def test_trim_refuses_a_listed_path_that_leads_out_of_the_runtime(
+    tmp_path: Path, link: str, target: str
+) -> None:
+    outside = tmp_path / "outside"
+    make_tree(outside, ["idlelib/__init__.py", "tkinter/__init__.py", "keep.txt"])
+    python = tmp_path / "python"
+    make_tree(python, UNUSED_FILES + USED_FILES)
+    path = python / link
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+    path.symlink_to(outside / target)
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        build_app.trim_python(python)
+    assert sorted(p.name for p in outside.iterdir()) == [
+        "idlelib",
+        "keep.txt",
+        "tkinter",
+    ]
+    assert (outside / "idlelib/__init__.py").is_file()
+    assert (python / "lib/libtcl9.0.dylib").is_file()  # the refusal removed nothing
+
+
 def test_verified_archive_before_extraction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,11 +284,14 @@ def test_build_assembles_locked_runtime_and_swift(
     )
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     commands = []
+    unused_at_install: list[bool] = []
 
     def fake_fetch(stage: Path) -> Path:
         python = stage / "extracted/python"
         (python / "bin").mkdir(parents=True)
         (python / "bin/python3").touch()
+        make_tree(python, [f"{STD}/os.py", f"{STD}/idlelib/__init__.py"])
+        make_tree(python, [f"{STD}/site-packages/pip/__init__.py"])
         return python
 
     monkeypatch.setattr(build_app, "fetch_python", fake_fetch)
@@ -142,6 +300,9 @@ def test_build_assembles_locked_runtime_and_swift(
         commands.append(args)
         if args[:2] == ["uv", "export"]:
             Path(args[-1]).touch()
+        elif args[:3] == ["uv", "pip", "install"]:
+            python = Path(args[args.index("--python") + 1]).parent.parent
+            unused_at_install.append((python / STD / "idlelib").exists())
         elif args[0] == "/usr/bin/xcrun":
             assert (
                 env
@@ -163,6 +324,12 @@ def test_build_assembles_locked_runtime_and_swift(
     ).is_file()
     assert "--locked" in commands[0] and "gateway" in commands[0]
     assert "--require-hashes" in commands[1] and "--only-binary" in commands[1]
+    # The parts the app never runs are gone before the dependencies go in, so a
+    # dependency can never be mistaken for one of them, and before the compile.
+    assert unused_at_install == [False]
+    assert (runtime / "python" / STD / "os.py").is_file()
+    assert not (runtime / "python" / STD / "idlelib").exists()
+    assert not (runtime / "python" / STD / "site-packages/pip").exists()
     assert str(root / "macos/LocalMeloApp/App.swift") in commands[2]
     site = runtime / "python/lib/python3.11/site-packages"
     distributions = list(importlib.metadata.distributions(path=[str(site)]))
