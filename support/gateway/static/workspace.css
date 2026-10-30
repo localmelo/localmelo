@@ -605,6 +605,15 @@ button:hover:not(:disabled) {
   overflow-wrap: anywhere;
   font-size: var(--text-reading);
 }
+/* Under a message: what memory across chats recalled and kept for it (memory.mjs). */
+.msg.user:has(.memory-notes) { flex-wrap: wrap; }
+.memory-notes { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); margin-top: var(--space-2); font-size: var(--text-small); color: var(--muted); }
+.memory-notes p { margin: 0; text-align: right; }
+.memory-notes button { padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; }
+.memory-notes button:hover { text-decoration: underline; }
+.memory-list { max-width: 85%; margin: 0; padding: 0; list-style: none; color: var(--ink-2); }
+.memory-list li { margin: 2px 0; }
+.memory-source { color: var(--muted); }
 /* A picture that blinks: its eyes-closed patch, laid over it as the ::after's background, fades in twice in an 11 s
    loop (CSS only, no script). Without the animation (Reduce Motion, below) the patch stays clear: the still picture. */
 .blinks {

@@ -64,6 +64,7 @@ from localmelo.support.gateway.worker_evidence import (
     SafePointEvidence,
     committed_evidence,
 )
+from localmelo.support.memory import ChatMemory
 from localmelo.support.scheduler.model import TERMINAL_PHASES, LevelSource, Phase, Task
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
@@ -162,8 +163,12 @@ class TaskWorkers:
         settings: Callable[[], Config],
         hub: SessionHub,
         broker: ApprovalBroker | None = None,
+        memory: ChatMemory | None = None,
     ) -> None:
         self.store = store
+        # A task's result goes into the conversation index; a worker writes
+        # no record and recalls nothing.
+        self.memory = memory
         self.gate = gate
         self.settings = settings
         self.hub = hub
@@ -1436,7 +1441,14 @@ class TaskWorkers:
                     inner, client, self._ready[task_id]
                 ),
             )
-            runner = SessionRunner(agent, self.store, task_id, progress=True)
+            runner = SessionRunner(
+                agent,
+                self.store,
+                task_id,
+                progress=True,
+                memory=self.memory,
+                index_only=True,
+            )
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
                 answer = self.broker.begin(task_id, request)

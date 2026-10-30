@@ -35,6 +35,14 @@ from localmelo.melo.memory.long import (
 logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
+# A records file (``SqliteLongTerm(path, records=True)``) is version 2: v1
+# plus the columns of a record the user sees and edits.
+_RECORDS_VERSION = 2
+_RECORD_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("topic", "TEXT NOT NULL DEFAULT ''"),
+    ("quote", "TEXT NOT NULL DEFAULT ''"),
+    ("edited_at", "REAL NOT NULL DEFAULT 0"),
+)
 
 # The base table; kept under its old name for callers that read it.
 _SCHEMA = """CREATE TABLE IF NOT EXISTS long_term (
@@ -195,10 +203,15 @@ class SqliteLongTerm(LongTerm):
     an existing one keeps its mode. Writes serialize through
     ``_write_lock``; the cosine scan and BM25 ranking run in a worker thread
     so a long fetch does not stall the loop.
+
+    With *records*, the file is a records file (schema version 2), whose
+    rows also keep the record's ``topic``, the user's ``quote`` and when it
+    was ``edited_at``; a plain store refuses such a file.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, records: bool = False) -> None:
         self._db_path = str(db_path)
+        self._version = _RECORDS_VERSION if records else _SCHEMA_VERSION
         self._conn: aiosqlite.Connection | None = None
         self._init_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
@@ -225,7 +238,7 @@ class SqliteLongTerm(LongTerm):
             return conn
 
     async def _migrate(self, conn: aiosqlite.Connection) -> None:
-        """Migrate the file to v1 in one transaction; a v1 file is left alone."""
+        """Migrate the file to its version in one transaction; a current one is left alone."""
         await conn.execute("BEGIN IMMEDIATE")
         try:
             # Read the version inside the transaction, as history does, so a
@@ -233,12 +246,12 @@ class SqliteLongTerm(LongTerm):
             async with conn.execute("PRAGMA user_version") as cur:
                 row = await cur.fetchone()
             version = int(row[0]) if row else 0
-            if version > _SCHEMA_VERSION:
+            if version > self._version:
                 raise LongTermSchemaError(
                     f"{self._db_path} is at schema version {version}; this "
-                    f"localmelo understands version {_SCHEMA_VERSION} and older"
+                    f"localmelo understands version {self._version} and older"
                 )
-            if version == _SCHEMA_VERSION:
+            if version == self._version:
                 # A v1 file may still lack the decisions table after an
                 # unusual interruption; CREATE IF NOT EXISTS repairs it
                 # without touching the entries.
@@ -249,7 +262,10 @@ class SqliteLongTerm(LongTerm):
                 return
             async with conn.execute("PRAGMA table_info(long_term)") as cur:
                 existing = {str(row[1]) for row in await cur.fetchall()}
-            for name, ddl in _COLUMNS:
+            columns = _COLUMNS
+            if self._version == _RECORDS_VERSION:
+                columns += _RECORD_COLUMNS
+            for name, ddl in columns:
                 if name in existing:
                     continue
                 await conn.execute(f"ALTER TABLE long_term ADD COLUMN {name} {ddl}")
@@ -269,7 +285,7 @@ class SqliteLongTerm(LongTerm):
             for statement in _DECISIONS.split(";"):
                 if statement.strip():
                     await conn.execute(statement)
-            await conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            await conn.execute(f"PRAGMA user_version = {self._version}")
             await conn.commit()
         except BaseException:
             with contextlib.suppress(Exception):
@@ -327,8 +343,13 @@ class SqliteLongTerm(LongTerm):
         candidate_id: str,
         typed_assertion: bool = False,
         decision_details: dict[str, Any] | None = None,
+        record: dict[str, str] | None = None,
     ) -> tuple[int | None, str]:
-        """Write one decision, its entry and its decision row, in one transaction."""
+        """Write one decision, its entry and its decision row, in one transaction.
+
+        *record* (a records file only) sets the new row's ``topic``,
+        ``quote`` and ``embed_model`` columns.
+        """
         for name, value, allowed in (
             ("kind", kind, KINDS),
             ("source", source, SOURCES),
@@ -434,6 +455,17 @@ class SqliteLongTerm(LongTerm):
                         ),
                     )
                     entry_id = int(cursor.lastrowid or 0) or None
+                    if record and self._version == _RECORDS_VERSION:
+                        await conn.execute(
+                            "UPDATE long_term SET topic = ?, quote = ?, "
+                            "embed_model = ? WHERE id = ?",
+                            (
+                                record.get("topic", ""),
+                                record.get("quote", ""),
+                                record.get("embed_model", ""),
+                                entry_id,
+                            ),
+                        )
                     if supersedes is not None:
                         await conn.execute(
                             "UPDATE long_term SET status = 'superseded' WHERE id = ?",
@@ -616,6 +648,52 @@ class SqliteLongTerm(LongTerm):
         async with conn.execute("SELECT COUNT(*) FROM long_term") as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+    async def delete_entry(self, entry_id: int, *, restore: bool = False) -> bool:
+        """Delete one entry and its vector; ``False`` when there is none.
+
+        The text of every decision row about it is blanked (``decisions.text``
+        would keep it otherwise), and a ``DELETE`` row records the delete.
+        With *restore*, the entry it superseded is active again, as an undo
+        of the write wants. The delete overwrites the freed pages.
+        """
+        conn = await self._ensure_ready()
+        async with self._write_lock, secure_deletes(conn):
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute(
+                    "SELECT kind, supersedes FROM long_term WHERE id = ?", (entry_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                if row is not None:
+                    await conn.execute(
+                        "DELETE FROM long_term WHERE id = ?", (entry_id,)
+                    )
+                    await conn.execute(
+                        "UPDATE decisions SET text = NULL, text_sha256 = '' "
+                        "WHERE entry_id = ? OR target_id = ?",
+                        (entry_id, entry_id),
+                    )
+                    if restore and row[1] is not None:
+                        await conn.execute(
+                            "UPDATE long_term SET status = 'active' "
+                            "WHERE id = ? AND status = 'superseded'",
+                            (row[1],),
+                        )
+                    await conn.execute(
+                        "INSERT INTO decisions (candidate_id, action, kind, "
+                        "admitted_by, target_id, reason, source_ids_json, "
+                        "text_sha256, timestamp) VALUES ('', 'DELETE', ?, "
+                        "'user_edit', ?, 'deleted by the user', '[]', '', ?)",
+                        (row[0], entry_id, time.time()),
+                    )
+                await conn.commit()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+                raise
+        self._index = None
+        return row is not None
 
     async def forget(self, task_id: str) -> None:
         """Delete the entries and decisions whose ``task_id`` is *task_id*."""

@@ -670,6 +670,7 @@ and `"run_id": ""`.
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
 | `turn.pictures` | A console turn made pictures: after its run's last event, before `turn.finished`. Absent when it made none, and in the terminal's file. | `turn`, `turn_id`, `pictures` |
+| `turn.memory` | What [memory across chats](../concepts/memory.md#memory-across-chats) did for a console turn, before its run's first event: `used` (`[{kind: record\|chat, id, text, source, session_id, turn, at}]`, what was recalled into the message), `remembered` (`[{id, text, topic}]`, the notes the typed text made), `refused` (why a statement was not kept, or `""`). Absent when it did nothing, and in the terminal's file. | `turn`, `turn_id`, `used`, `remembered`, `refused` |
 | `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
 | `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |

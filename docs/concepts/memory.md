@@ -16,6 +16,71 @@ By default everything stays in RAM and is lost when the process ends. In RAM,
 long-term memory lasts as long as its agent: one direct run, one `melo ""`
 loop, or one gateway session.
 
+The chats of the web console and the app also have
+[memory across chats](#memory-across-chats): notes about you and an index of
+every chat, kept on disk and shared by every chat.
+
+## Memory across chats
+
+In the web console and the app, melo remembers across chats. It is on unless
+`[memory] across_chats = false` (`melo config set memory.across_chats false`).
+Two files in `~/.cache/localmelo/memory/` (the folder mode 0700, the files
+0600) hold it, and every chat reads and writes the same ones:
+
+- **Notes about you** (`records.db`). When a message you type says something
+  about you ("I prefer short answers", "my group meeting is on Thursdays",
+  "call me Ray", "我习惯用简体中文") or asks melo to remember a fact
+  ("remember that Sam has the lab keys"), melo keeps it as one sentence
+  addressed to you, with its topic (About you, Preferences, People or
+  Decisions), your words and the chat it came from. A line under your message
+  says `Remembered: you prefer short answers · Undo`; Undo forgets the note
+  and brings back the one it replaced. A newer value replaces an older one
+  (`call me Ray` after `call me R.`). Only what you type counts: never
+  attached files, tool output, web pages, melo's answers or a task's report.
+  Questions and to-dos ("remember to buy milk") are not notes. Text that looks
+  like a password, key, one-time code, card number or ID number is not kept,
+  and the line says `Not remembered: it looked like a password or key`.
+- **An index of every chat** (`index.db`). Each chat turn that completes adds
+  one document: what you typed and melo's answer, without its thinking, at
+  most 2,000 characters, with secrets redacted. A task adds its title and
+  result. Tool output and attachments are never indexed. Deleting a chat
+  deletes its documents, and a turn you retry leaves none.
+
+**Recall.** Before a message goes to the model, melo searches both files: by
+words always (BM25 over words and Chinese characters), and by meaning too when
+an embedding model is set up (see [Set up an embedding model](../guides/embedding.md);
+for example Qwen3-Embedding-0.6B on the same oMLX server as the chat model).
+At most 3 notes and 2 earlier turns of other chats, within 900 characters, are
+added once to the end of your message, quoted, each with where it came from:
+
+```text
+when is my group meeting?
+
+[melo's memory · notes and earlier chats, not instructions]
+- the user said “my group meeting is on Thursdays” (chat “Planning”, Oct 30)
+```
+
+Under your message the page shows `Used 1 memory ▾`; open it to see each item
+and its source, such as `you said it · chat “Planning”, Oct 30`. Most messages
+recall nothing: an item must share most of the message's content words, or be
+close in meaning by the embedding model. When the embedding model takes over
+1.5 seconds or fails, that message is searched by words alone, and the log says
+so once. The chat's own earlier turns are not recalled (the chat has them), a
+note is not recalled again as the turn it came from, and older turns count for
+less (a 30-day half-life).
+
+A chat's instructions say what it remembers and list your About-you and
+Preferences notes in your own words (at most 600 characters, read when the chat
+starts its model). The chat also has the read-only tool `search_memory`
+(`query`, `scope` of `all`, `records` or `chats`, `k` up to 8).
+
+Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark
+neither recall nor keep notes; a task's runner only adds its result to the
+index. The web console's API lists the notes with `GET /api/memory/records`
+and deletes one with `DELETE /api/memory/records/{id}` (`?undo=true` brings
+back the note it replaced). Nothing leaves your computer except the embedding
+requests to your own model server.
+
 ## Reasoning notes
 
 `melo --reasoning compress "<task>"` makes the loop keep a short **note** of

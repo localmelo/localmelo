@@ -29,6 +29,7 @@ from starlette.routing import Match
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
 from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions import display
 from localmelo.support.sessions.approvals import ApprovalBroker
 from localmelo.support.sessions.hub import SessionHub
@@ -45,6 +46,7 @@ from localmelo.support.sessions.store import (
 from . import (
     errors,
     routes_details,
+    routes_memory,
     routes_page,
     routes_pictures,
     routes_sessions,
@@ -94,7 +96,8 @@ class ConsoleOptions:
     :func:`~.registry.default_builder`, and *probe* is the
     real cached model-server probe. *dev_reload* is read by the static
     bundle of PR 5. *detect_transport* answers the requests of
-    ``GET /api/setup/detect`` in place of the network.
+    ``GET /api/setup/detect`` in place of the network. *memory_dir* is the
+    folder of memory across chats (``~/.cache/localmelo/memory`` when None).
     """
 
     store_path: str | None = None
@@ -106,6 +109,7 @@ class ConsoleOptions:
     gate: ChatGate | None = None
     dev_reload: bool = False
     detect_transport: httpx.AsyncBaseTransport | None = None
+    memory_dir: str | None = None
 
 
 class Console:
@@ -130,15 +134,22 @@ class Console:
         # to the gateway, which closes it after both surfaces' sessions.
         self._owns_gate = self.options.gate is None
         self._monitor = None if self.options.gate is not None else self._build_monitor()
+        self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
             builder=self.options.builder,
             gate=self.gate,
+            memory=self.memory,
         )
         self.workers = TaskWorkers(
-            self.store, self.gate, lambda: self.cfg, self.hub, broker=self.broker
+            self.store,
+            self.gate,
+            lambda: self.cfg,
+            self.hub,
+            broker=self.broker,
+            memory=self.memory,
         )
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         self._started_at = time.time()
@@ -208,6 +219,7 @@ class Console:
         routes_details.add_routes(app, self)
         routes_page.add_routes(app, self)
         routes_pictures.add_routes(app, self)
+        routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
         _add_not_found(app)
 
@@ -321,6 +333,8 @@ class Console:
                     logger.debug("Closing the session store failed", exc_info=True)
                 with contextlib.suppress(Exception):
                     await self.worker_history.aclose()
+                with contextlib.suppress(Exception):
+                    await self.memory.aclose()
                 with contextlib.suppress(Exception):
                     await self.probe.aclose()
 

@@ -1,0 +1,186 @@
+"""The conversation index: one document per finished turn of every session.
+
+A document is the user's typed text and the answer without its thinking, cut
+to :data:`DOC_CHARS` and passed through ``redact_secrets``; a task's carries
+its title too. Tool output, page text and attachments are never indexed. The
+file is ``index.db`` in the memory folder, mode 0600, shared by every surface;
+deleting a chat deletes its documents. It can be rebuilt from the session files.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import time
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Final
+
+import aiosqlite
+import numpy as np
+
+from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.memory._sqlite import (
+    create_private_file,
+    prepare_connection,
+    secure_deletes,
+)
+
+DOC_CHARS: Final = 2_000
+
+_SCHEMA: Final = """
+CREATE TABLE IF NOT EXISTS documents (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    turn        INTEGER NOT NULL,
+    surface     TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'chat',
+    title       TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    vector      BLOB,
+    embed_model TEXT NOT NULL DEFAULT '',
+    UNIQUE (session_id, turn)
+);
+CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id);
+"""
+_COLUMNS: Final = (
+    "id, session_id, turn, surface, kind, title, text, created_at, vector, embed_model"
+)
+
+
+@dataclass(frozen=True)
+class Document:
+    """One indexed turn; ``id`` is 0 until it is stored."""
+
+    session_id: str
+    turn: int
+    surface: str
+    kind: str
+    title: str
+    text: str
+    created_at: float
+    vector: tuple[float, ...] | None = None
+    embed_model: str = ""
+    id: int = 0
+
+
+def document_text(typed: str, answer: str, *, title: str = "") -> str:
+    """What a turn's document holds: a task's title, who said what, bounded."""
+    parts = [f"Task: {title.strip()}"] if title.strip() else []
+    parts += [f"User: {typed.strip()}", f"melo: {answer.strip()}"]
+    return redact_secrets("\n".join(parts)[:DOC_CHARS])[0]
+
+
+class ConversationIndex:
+    """``index.db``: add, list and delete the documents of every session."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._conn: aiosqlite.Connection | None = None
+        self._lock = asyncio.Lock()
+
+    async def _ready(self) -> aiosqlite.Connection:
+        async with self._lock:
+            if self._conn is None:
+                create_private_file(self._path)
+                conn = await aiosqlite.connect(self._path)
+                try:
+                    await prepare_connection(conn, _SCHEMA)
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await conn.close()
+                    raise
+                self._conn = conn
+            return self._conn
+
+    async def add(self, doc: Document) -> None:
+        """Store *doc*, in place of an earlier document of the same turn."""
+        conn = await self._ready()
+        vector = None if doc.vector is None else np.asarray(doc.vector, np.float32)
+        await conn.execute(
+            "INSERT OR REPLACE INTO documents (session_id, turn, surface, kind, "
+            "title, text, created_at, vector, embed_model) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                doc.session_id,
+                doc.turn,
+                doc.surface,
+                doc.kind,
+                doc.title,
+                doc.text,
+                doc.created_at or time.time(),
+                None if vector is None else vector.tobytes(),
+                doc.embed_model if vector is not None else "",
+            ),
+        )
+        await conn.commit()
+
+    async def ids(self) -> set[int]:
+        conn = await self._ready()
+        async with conn.execute("SELECT id FROM documents") as cur:
+            return {int(row[0]) for row in await cur.fetchall()}
+
+    async def fetch(self, ids: Iterable[int]) -> list[Document]:
+        """The documents with these ids (in chunks; SQLite caps the parameters)."""
+        conn = await self._ready()
+        wanted = sorted(ids)
+        out: list[Document] = []
+        for start in range(0, len(wanted), 500):
+            chunk = wanted[start : start + 500]
+            marks = ", ".join("?" * len(chunk))
+            async with conn.execute(
+                f"SELECT {_COLUMNS} FROM documents WHERE id IN ({marks})", chunk
+            ) as cur:
+                for row in await cur.fetchall():
+                    blob = row[8]
+                    vector = (
+                        tuple(float(v) for v in np.frombuffer(blob, np.float32))
+                        if blob
+                        else None
+                    )
+                    out.append(
+                        Document(
+                            session_id=str(row[1]),
+                            turn=int(row[2]),
+                            surface=str(row[3]),
+                            kind=str(row[4]),
+                            title=str(row[5]),
+                            text=str(row[6]),
+                            created_at=float(row[7]),
+                            vector=vector,
+                            embed_model=str(row[9]),
+                            id=int(row[0]),
+                        )
+                    )
+        return out
+
+    async def count(self) -> int:
+        conn = await self._ready()
+        async with conn.execute("SELECT COUNT(*) FROM documents") as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def delete(self, session_id: str, turn: int | None = None) -> int:
+        """Delete a session's documents (one turn's with *turn*); returns how many."""
+        conn = await self._ready()
+        sql = "DELETE FROM documents WHERE session_id = ?"
+        args: list[object] = [session_id]
+        if turn is not None:
+            sql += " AND turn = ?"
+            args.append(turn)
+        async with secure_deletes(conn):
+            cur = await conn.execute(sql, args)
+            await conn.commit()
+        return int(cur.rowcount or 0)
+
+    async def forget_all(self) -> None:
+        conn = await self._ready()
+        async with secure_deletes(conn):
+            await conn.execute("DELETE FROM documents")
+            await conn.commit()
+
+    async def aclose(self) -> None:
+        if self._conn is not None:
+            conn, self._conn = self._conn, None
+            await conn.close()

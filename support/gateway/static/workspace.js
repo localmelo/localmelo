@@ -22,6 +22,7 @@ import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
+import { memoryNodes } from "./memory.mjs";
 import {
   activity,
   applyEvent,
@@ -881,6 +882,8 @@ function viewSnapshot() {
     turn.userText,
     turn.pictures,
     turn.picturesOpen,
+    turn.memory,
+    turn.memoryOpen,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1001,7 +1004,7 @@ function turnNode(turn, newest = false) {
 
 function userNode(turn) {
   const article = el("article", "msg user");
-  article.append(el("div", "user-bubble", turn.userText));
+  article.append(el("div", "user-bubble", turn.userText), ...memoryOf(turn));
   if (turn.undone) {
     article.append(
       el(
@@ -1047,6 +1050,28 @@ function assistantNode(turn, newest = false) {
     article.append(answerNode(turn.answer), ...picturesOf(turn), actionsNode(turn));
   }
   return article;
+}
+
+// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo".
+function memoryOf(turn) {
+  return memoryNodes({
+    doc: document,
+    memory: turn.memory,
+    open: turn.memoryOpen === true,
+    toggle: () => {
+      turn.memoryOpen = !turn.memoryOpen;
+      renderMessages(false, true);
+    },
+    undo: async (note) => {
+      try {
+        await api(`/memory/records/${note.id}?undo=true`, { method: "DELETE" });
+      } catch (error) {
+        if (error.status !== 404) return;
+      }
+      note.undone = true;
+      renderMessages(false, true);
+    },
+  });
 }
 
 // The row of previews under an answer: the pictures the turn made, or none.

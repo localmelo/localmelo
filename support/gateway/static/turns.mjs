@@ -12,6 +12,8 @@
  * facts of a first turn. A string that reads differently here is a bug.
  */
 
+import { readMemory } from "./memory.mjs";
+
 const SEPARATOR = " · ";
 // `support/cli/render.py`: these two calls end after SESSION_TOOL_TIMEOUT_S.
 const LIMITED_TOOLS = new Set(["shell_exec", "python_exec"]);
@@ -554,6 +556,9 @@ export function newTurn(row) {
     // The picture files the turn made or changed, or its answer names (`turn.pictures`).
     pictures: [],
     picturesOpen: false,
+    // What memory across chats recalled and kept for the message (`turn.memory`), or null.
+    memory: null,
+    memoryOpen: false,
     error: "",
   };
 }
@@ -970,6 +975,10 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     }
     case "turn.pictures": {
       turn.pictures = readPictures(data.pictures);
+      break;
+    }
+    case "turn.memory": {
+      turn.memory = readMemory(data);
       break;
     }
     default:

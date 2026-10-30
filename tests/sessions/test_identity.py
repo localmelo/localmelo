@@ -417,3 +417,58 @@ async def test_the_stub_sees_the_memory_words_in_chat_requests_and_not_in_direct
     assert "Reply in the language and script the user writes in" in chat_system
     for words in ("You remember", "no notes", "Reply in the language", "melo from"):
         assert words not in direct_system
+
+
+# With memory across chats (localmelo.support.memory).
+
+
+def test_a_chat_with_notes_says_what_it_keeps_and_pins_the_users_words() -> None:
+    from localmelo.support.sessions.identity import NOTES_TEXT, PINNED_TEXT
+
+    plain = url_identity(URL, MODEL, notes="")
+    assert memory_line(plain) == NOTES_TEXT
+    assert ALONE not in plain and NO_NOTES not in plain and PLAIN in plain
+    assert plain.count("\n") == 4
+    for word in ("embedding", "sqlite", "reflection", "retriev", "bm25", "hippo"):
+        assert word not in plain.lower()
+    pinned = config_identity(local(), notes="- “I prefer tea”")
+    assert f"{NOTES_TEXT}\n{PINNED_TEXT}- “I prefer tea”\n" in pinned
+    assert pinned.index(PINNED_TEXT) < pinned.index("Reply in the language and script")
+
+
+async def test_a_session_agent_with_memory_pins_notes_and_offers_search(
+    tmp_path: Path,
+) -> None:
+    from localmelo.support.memory import ChatMemory
+    from localmelo.support.sessions.identity import NOTES_TEXT
+    from localmelo.support.sessions.store import NewSession, SessionStore
+
+    on, off = local(), local()
+    off.memory.across_chats = False
+    store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
+    await store.open()
+    for cfg, notes in ((on, True), (off, False)):
+        memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+        memory._settings = lambda cfg=cfg: cfg  # type: ignore[misc]
+        turn = await store.begin_turn(
+            None, "x", holder="h:1:x", title="x", new_session=NewSession()
+        )
+        await memory.before_turn(store, turn, "I prefer tea.")
+        agent = await build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=None,
+            workspace=str(tmp_path),
+            identify=True,
+            memory=memory,
+        )
+        try:
+            identity = agent.chat.identity or ""
+            assert (NOTES_TEXT in identity) is notes
+            assert ("“I prefer tea.”" in identity) is notes
+            tools = {tool.name for tool in agent.list_tools()}
+            assert ("search_memory" in tools) is notes
+        finally:
+            await agent.close()
+            await memory.aclose()
+    await store.aclose()

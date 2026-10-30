@@ -62,6 +62,7 @@ tables of the chosen backends.
 | `cross_task_ratio` | `[retrieval]` | `1.1` | Cross-task episodic digests need this multiple of the best same-task digest's score from the same long-store backend; 1–10. |
 | `cross_task_cap` | `[retrieval]` | `1` | Maximum cross-task digests per recall, 0–2; the existing total long-hit limit remains two. |
 | `cross_task_cold` | `[retrieval]` | `0` | Without a matching same-task digest, permit 0 or 1 cross-task digest; still subject to the cap and backend floor. General memories bypass this gate. |
+| `across_chats` | `[memory]` | `true` | Memory across chats in the web console and the app: melo keeps a note of what you tell it about yourself, indexes every finished chat turn and task result, and brings back what matches each new message, with where it came from. `false` turns all of it off. Direct runs and workers never use it. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
@@ -87,9 +88,10 @@ tables of the chosen backends.
 | `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and the web console eight read-only tools that open pages in Safari's automation windows (asks once per site per chat; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
-A `[memory]` table that is all defaults is not written. Its one key,
-`admit_on_outcome`, must be a bool; any other value is a configuration error
-(exit 1). It is accepted and inert in `legacy`. The `--keep-decision-text`
+A `[memory]` table that is all defaults is not written. Its keys,
+`across_chats` and `admit_on_outcome`, must be bools; any other value is a
+configuration error (exit 1). `admit_on_outcome` is accepted and inert in
+`legacy`. The `--keep-decision-text`
 switch is flag-only, because it writes potentially personal text to the
 store and a saved default would be a privacy footgun.
 

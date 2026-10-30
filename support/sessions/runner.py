@@ -26,10 +26,11 @@ import time
 import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import CANCELLED_ERROR, FINALIZE_TIMEOUT_S
+from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
@@ -58,6 +59,7 @@ from localmelo.support.sessions.store import (
     CAUSES,
     CLOSED_ERROR,
     LEASE_S,
+    MEMORY_EVENT_TYPE,
     PICTURES_EVENT_TYPE,
     RESERVED_EVENT_PREFIXES,
     RESERVED_EVENT_TYPE_RE,
@@ -79,6 +81,9 @@ from localmelo.support.sessions.store import (
 from localmelo.support.sessions.submissions import check_submission
 from localmelo.support.sessions.window import WINDOW_CODEC_VERSION, decode_window
 from localmelo.support.sessions.worker import redact_worker, sensitive_read
+
+if TYPE_CHECKING:
+    from localmelo.support.memory import ChatMemory
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +143,8 @@ class _Turn:
     agent: Agent
     text: str
     approval: ApprovalPolicy | None
+    # What the person typed, without attachments: memory reads only this.
+    typed: str = ""
     # The run's routine name, run_task's ``routine=`` (UR-N).
     routine: str | None = None
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
@@ -220,7 +227,10 @@ class SessionRunner:
     factory for synchronizing conversation under that lease; do not retain it.
     With *pictures*, each turn looks at the Agent's folder before and after its
     run and stores the picture files it made or changed, and those its answer
-    names, as one ``turn.pictures`` event (:mod:`~.pictures`).
+    names, as one ``turn.pictures`` event (:mod:`~.pictures`). With *memory*,
+    each turn of a chat recalls what matches its typed text and keeps what it
+    states (one ``turn.memory`` event), and a completed turn is indexed;
+    *index_only* (a task's runner) only indexes.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -243,6 +253,8 @@ class SessionRunner:
         observe: Callable[[AgentEvent], object] | None = None,
         inbox: InboxSource | None = None,
         pictures: bool = False,
+        memory: ChatMemory | None = None,
+        index_only: bool = False,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -265,6 +277,8 @@ class SessionRunner:
         self._observe = observe
         self._inbox = inbox
         self._pictures = pictures
+        self._memory = None if self._worker else memory
+        self._index_only = index_only
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -558,6 +572,7 @@ class SessionRunner:
             text=text,
             approval=approval,
             routine=routine,
+            typed=typed_text,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -668,8 +683,11 @@ class SessionRunner:
                 kwargs["routine"] = turn.routine
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
+            text = turn.text
+            if self._memory is not None and not self._index_only:
+                text = await self._recall(turn)
             before = await self._scan_folder(turn)
-            returned = await turn.agent.run_task(turn.text, **kwargs)
+            returned = await turn.agent.run_task(text, **kwargs)
         except BaseException as exc:
             run_exc = exc
         if before is not None:
@@ -685,6 +703,24 @@ class SessionRunner:
                 if task.cancelling() > turn.runner_cancels:
                     break  # cancelled from outside again: step 7 goes on alone
         return self._outcome(turn, task, run_exc, returned)
+
+    async def _recall(self, turn: _Turn) -> str:
+        """The turn's text with what memory recalls for it; queues ``turn.memory``."""
+        assert self._memory is not None
+        try:
+            found = await self._memory.before_turn(self._store, turn.turn, turn.typed)
+        except Exception:
+            logger.warning("Memory across chats failed for this turn", exc_info=True)
+            return turn.text
+        data = found.event()
+        if data is not None:
+            info = turn.turn
+            self._enqueue(
+                turn, MEMORY_EVENT_TYPE, {"turn": info.turn, "turn_id": info.id, **data}
+            )
+        if found.block and len(turn.text) + len(found.block) <= MAX_QUERY_LEN:
+            return turn.text + found.block
+        return turn.text
 
     async def _scan_folder(self, turn: _Turn) -> turn_pictures.Snapshot | None:
         """The picture files in the Agent's folder, or ``None`` when pictures are off."""
@@ -787,6 +823,10 @@ class SessionRunner:
                 await asyncio.wait({turn.writer})
             # 3. and 4. The window and the end.
             await self._record_end(turn, run_exc, cancelled)
+            outcome = turn.outcome
+            if self._memory is not None and outcome and outcome.status == "completed":
+                answer = split_thinking(outcome.result)[1]
+                self._memory.after_turn(self._store, turn.turn, turn.typed, answer)
         except Exception:
             logger.exception(
                 "Could not end turn %d of session %s",
@@ -1432,6 +1472,9 @@ class SessionRunner:
         """:meth:`undo`'s work, under ``_loading``, in a task of its own."""
         await self._record_lost_end()
         undone = await self._store.undo_last_turn(session_id)
+        if self._memory is not None and undone is not None:
+            with contextlib.suppress(Exception):
+                await self._memory.forget_session(session_id, undone.turn)
         try:
             await self._resume(RESUME_MAX_TURNS)
         except BaseException:

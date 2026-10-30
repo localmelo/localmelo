@@ -17,6 +17,7 @@ import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
 import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
+import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -517,6 +518,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -713,6 +715,7 @@ function harness(routes, {mobile = false} = {}) {
     setupFolderPicker,
     picturesNode,
     setupPictureBox,
+    memoryNodes,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     document,
@@ -1247,6 +1250,26 @@ test('pictures a turn made show as a row under its answer, and the row is reacha
   tiles[1].click();
   assert.equal(h.element('picture-box').open, true);
   assert.match(flatten(h.element('picture-box')), /plot\.svg/);
+});
+
+test('what memory recalled and kept shows under the message, and Undo forgets the note', async () => {
+  const h = harness(baseRoutes({'DELETE /memory/records/7?undo=true': {status: 204}}));
+  await h.run('init()');
+  const notes = () => findNode(h.element('messages'), (node) => node.className === 'memory-notes');
+  assert.equal(notes(), null, 'a message without memory draws nothing');
+  h.stream().emit({id: 8, turn: 1, ts: 21, type: 'turn.memory', data: {turn: 1, turn_id: 'turn-1',
+    used: [{kind: 'record', id: 4, text: 'Your group meeting is on Thursdays.', source: 'you said it · chat “Planning”, Oct 30'}],
+    remembered: [{id: 7, text: 'You prefer short answers.', topic: 'preferences'}], refused: ''}});
+  const user = findNode(h.element('messages'), (node) => node.className === 'msg user');
+  assert.deepEqual(user.children.map((child) => child.className), ['user-bubble', 'memory-notes']);
+  assert.match(flatten(notes()), /Used 1 memory ▾/);
+  assert.match(flatten(notes()), /Remembered: you prefer short answers\. · Undo/);
+  findNode(notes(), (node) => node.tag === 'button' && node.textContent.startsWith('Used')).click();
+  assert.match(flatten(notes()), /Your group meeting is on Thursdays\. \(you said it · chat “Planning”, Oct 30\)/);
+  findNode(notes(), (node) => node.tag === 'button' && node.textContent === 'Undo').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.net.callsTo('/memory/records/7?undo=true')[0].method, 'DELETE');
+  assert.match(flatten(notes()), /Forgotten: you prefer short answers\./);
 });
 
 test('more than four pictures wait behind +N more until asked', async () => {

@@ -296,6 +296,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Memory across chats: melo remembers what you tell it, in every chat of the web console
+  and the app. When a message you type says something about you ("I prefer short
+  answers", "my group meeting is on Thursdays", "call me Ray", "我习惯用简体中文") or asks
+  melo to remember a fact, melo keeps it as a note, and a line under your message says
+  "Remembered: you prefer short answers · Undo". A newer value replaces an older one;
+  only what you type counts, never files, tool output, web pages, answers or task reports;
+  text that looks like a password, key, code, card or ID number is not kept ("Not
+  remembered"). Every completed chat turn and task result is also indexed. Before each
+  message, melo brings back what matches it from other chats (at most 3 notes and 2
+  earlier turns, quoted, with the chat and day each came from), and the page shows "Used 1
+  memory ▾" under your message to list them. It searches by words, and by meaning too
+  when an embedding model is set up on the same server; an embedding that is slow (over
+  1.5 s) or fails falls back to words. Chats now say what they remember accordingly, list
+  your About-you and Preferences notes in your words, and can look up more with
+  `search_memory`. Deleting a chat deletes its index entries. The notes and the index live
+  in `~/.cache/localmelo/memory/` (`records.db`, `index.db`); `[memory] across_chats =
+  false` turns it all off. Direct runs, workers, the terminal chat and the benchmark are
+  unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#NN]).
 - Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
   "safari-automation"` (off by default; `/browser on` in the terminal chat, or
   `-X browser.driver=safari-automation` for one run) the terminal chat and the web console

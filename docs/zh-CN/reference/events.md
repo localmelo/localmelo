@@ -428,6 +428,7 @@ asyncio.run(main())
 | `turn.finished` | 该轮结束：它的最后一个事件。 | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | 某轮被撤销；该事件不属于任何轮次。 | `turn`, `turn_id` |
 | `turn.pictures` | 控制台的一轮产生了图片：在其运行的最后一个事件之后、`turn.finished` 之前。没有图片时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `pictures` |
+| `turn.memory` | [跨对话记忆](../concepts/memory.md#memory-across-chats)为控制台的一轮做了什么，在其运行的第一个事件之前：`used`（`[{kind: record\|chat, id, text, source, session_id, turn, at}]`，召回到消息中的内容）、`remembered`（`[{id, text, topic}]`，输入的文字产生的笔记）、`refused`（某条陈述没有被保存的原因，或 `""`）。什么也没做时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `used`, `remembered`, `refused` |
 | `session.title` | 第一轮设置会话标题，或标题被重命名。 | `title` |
 | `session.updated` | 会话的模型、工作区或 `meta` 发生变化。 | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | 向用户询问某个工具调用（`SessionRunner.observe`）。 | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
