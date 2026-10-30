@@ -1041,6 +1041,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app builds with the Command Line Tools when the full Xcode is not
+  installed. The Swift host is compiled with the developer folder that
+  `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
+  folder `xcode-select -p` names when it has a Swift compiler. With none of them
+  the build stops before it does any work and prints `xcode-select --install` as
+  the fix. The build's summary says which tools built the app ([#254]).
+
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
@@ -1819,6 +1826,7 @@ earlier milestones.
 [#249]: https://github.com/localmelo/localmelo/pull/249
 [#250]: https://github.com/localmelo/localmelo/pull/250
 [#251]: https://github.com/localmelo/localmelo/pull/251
+[#254]: https://github.com/localmelo/localmelo/pull/254
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
