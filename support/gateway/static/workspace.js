@@ -32,7 +32,9 @@ import {
   formatDuration,
   formatPast,
   formatTokens,
+  holdText,
   liveFacts,
+  LOCK_HOLD,
   newTurn,
   newView,
   nextAction,
@@ -335,14 +337,11 @@ function setupShown() {
   return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
 }
 
-// The scheduler's reason for a call that waits on a foreign GPU lock.
-const LOCK_HOLD = "Reservation";
-
 /** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
 function connectionState({ turn, held, pending, session }) {
   if (!S.online) return { text: "Gateway offline", offline: true };
   if (developerMode) {
-    const text = turn ? (held ? `Waiting: ${held}` : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
+    const text = turn ? (held ? holdText(held) : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
     return { text, offline: false };
   }
   const model = S.health?.model;
@@ -439,7 +438,7 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  $("run-status").textContent = turn ? (held ? `Waiting: ${held}` : "Running on your backend") : "";
+  $("run-status").textContent = turn ? (held ? holdText(held) : "Running on your backend") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;

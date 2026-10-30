@@ -238,8 +238,9 @@ menu with focus on the chat's level, the arrow keys, Home and End move between t
 and Escape closes it and returns to the button. While a call waits (for a slot, the background cap or
 a foreign lock), the header's status pill and the status label say
 `Waiting: <reason>`, the sidebar says `● Waiting` and the live row says the
-same; the reason is the scheduler's own code (`Resources`, `Priority`,
-`Reservation`, …). These are the same facts the terminal shows, read from and
+same; the reason is the scheduler's own code (`Resources`, `Priority`, …), except that a
+wait on a foreign GPU lock (`Reservation`) reads "Waiting for this Mac's GPU", as the
+banner does. These are the same facts the terminal shows, read from and
 written to the one gate the gateway shares:
 `level` and `held` on a session, `machine` on the list, and
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.

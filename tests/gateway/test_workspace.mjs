@@ -21,7 +21,7 @@ const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
   formatBytes, formatDuration, formatPast, formatTokens, liveFacts, newTurn,
   newView, nextAction, reflectionLine, runElapsed, splitThinking, statusMark, statusText, toolElapsed,
-  toolState, workSummary,
+  toolState, workSummary, holdText,
 } = turns;
 
 // ── Turns: one frame at a time ──
@@ -3079,6 +3079,26 @@ test('Workers and Tasks show in default mode once a run, a terminal chat or a ta
   none.context.location.hash = '#/s/a';
   await none.windowListeners.hashchange[0]();
   assert.deepEqual(hiddenOf(none, ['level-btn', 'details-trigger', 'connection-btn']), [true, true, false]);
+});
+
+test('a wait on a foreign GPU lock reads as the banner does, in the turn, the header and the composer, in both modes', async () => {
+  const {turn} = started();
+  const gpu = "Waiting for this Mac's GPU";
+  assert.deepEqual([holdText('Reservation'), workSummary(turn, {held: 'Reservation'}), activity(turn, {held: 'Reservation', now: 200})], [gpu, gpu, gpu]);
+  assert.equal(toolState({status: 'running', durationS: null, startedTs: 1, name: 'shell_exec', approval: null, exitCode: null}, {held: 'Reservation', now: 2}).text, gpu);
+  assert.equal(holdText('Resources'), 'Waiting: Resources', 'Another hold keeps the scheduler\'s code');
+  const listed = {
+    'GET /sessions': {sessions: [session('a', {busy: true, held: 'Reservation'})], machine: null, has_more: false},
+    'GET /sessions/a': {session: session('a', {busy: true, held: 'Reservation'}), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0},
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_earlier: false, replay_from: 0},
+  };
+  for (const routes of [baseRoutes(listed), defaultMode(listed)]) {
+    const h = harness(routes);
+    await h.run('init()');
+    assert.equal(h.text('run-status'), gpu);
+    assert.match(h.text('messages'), /Waiting for this Mac's GPU/);
+    assert.doesNotMatch(h.text('messages') + h.text('run-status') + h.text('connection-label'), /Reservation/);
+  }
 });
 
 test('a chat that waits on the GPU lock gets a plain banner in default mode only', async () => {

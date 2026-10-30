@@ -1041,6 +1041,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A chat that waits on a foreign GPU lock says so in plain words in both modes of the
+  web console: its work group, live row, tool card, header chip and composer read
+  "Waiting for this Mac's GPU" where they read "Waiting: Reservation". Other waits keep
+  the scheduler's code; the terminal and the API are unchanged. ([#NN])
+
 - The web console starts with fewer choices. In default mode the header shows the
   running chip and a model chip (the model's name, "Model offline" or "No model")
   that opens settings. The chat's level (P2), Details and the GPU-lock line are for

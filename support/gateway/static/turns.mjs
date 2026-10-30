@@ -933,6 +933,14 @@ export function turnDuration(turn) {
   return 0;
 }
 
+/** The scheduler's hold for a call that waits on a foreign GPU lock. */
+export const LOCK_HOLD = "Reservation";
+
+/** What a held call says: the GPU lock in plain words, as the console's banner does; any other hold keeps its code. */
+export function holdText(held) {
+  return held === LOCK_HOLD ? "Waiting for this Mac's GPU" : `Waiting: ${held}`;
+}
+
 /**
  * The work group's summary line: what the turn did, and how it ended.
  *
@@ -944,7 +952,7 @@ export function workSummary(turn, {held = ""} = {}) {
   const calls = toolCount(turn);
   const callWord = calls === 1 ? "1 tool call" : `${calls} tool calls`;
   if (!turn.finishedAt) {
-    const activity = held ? `Waiting: ${held}` : "Working";
+    const activity = held ? holdText(held) : "Working";
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
   const duration = formatDuration(turnDuration(turn));
@@ -969,7 +977,7 @@ export function workSummary(turn, {held = ""} = {}) {
  * before a retry, and the model's own work last.
  */
 export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0} = {}) {
-  if (held) return `Waiting: ${held}`;
+  if (held) return holdText(held);
   if (pending > 0) return "Waiting for your approval";
   if (cancelling) return "Stopping";
   if (turn.retryUntil > now) {
@@ -1022,7 +1030,7 @@ export function liveFacts(turn) {
  * A tool card's mark, state and short text, as the terminal shows them.
  *
  * `✓` with an `exit 1` warning, `✗ Failed`, `⊘ denied`, `◌ not run`,
- * `● Needs approval`; *held* turns a running call into `Waiting: <held>`. The
+ * `● Needs approval`; *held* turns a running call into `holdText(held)`. The
  * words beside a mark say what it says, so a colour is never the only signal.
  */
 export function toolState(item, {held = "", now = 0} = {}) {
@@ -1030,7 +1038,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   switch (item.status) {
     case "running": {
-      if (held) return {state: "held", mark: "●", text: `Waiting: ${held}`};
+      if (held) return {state: "held", mark: "●", text: holdText(held)};
       let clock = item.startedTs ? toolElapsed(now - item.startedTs) : "0:00";
       if (LIMITED_TOOLS.has(item.name)) {
         clock += ` of ${toolElapsed(SESSION_TOOL_TIMEOUT_S)}`;
