@@ -2404,6 +2404,17 @@ def test_one_long_path_is_cut_in_the_middle_and_keeps_its_file_name() -> None:
     assert "..." in row and "…" not in row and cells(row) <= 44, row
 
 
+def test_a_long_first_path_loses_its_counts_before_its_file_name() -> None:
+    writes = Writes(width=44).write(
+        "src/components/settings/panels/ThemeSwitcher.tsx", "a\n"
+    )
+    for name in ("a.py", "b.py", "c.py", "d.py"):
+        writes.write(name, "x\n")
+    [row] = _after_footer(writes.done())
+    assert row == "  Changed src/…/ThemeSwitcher.tsx and 4 more"
+    assert cells(row) <= 44
+
+
 def test_the_names_are_the_default_color_on_a_light_terminal() -> None:
     from rich.console import Console
 

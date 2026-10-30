@@ -1472,8 +1472,9 @@ def changed_text(
     ``  Changed hello.py (+1), README.md (+3 −1)``: at most :data:`CHANGED_NAMES`
     names, then ``and N more``. The names are the default color, since they are what a
     person looks for, and the words and counts around them are dim. A line that is too
-    wide gives up names before it cuts one; a lone path that still does not fit is cut
-    in the middle, so its file name stays. ``None`` when nothing changed.
+    wide gives up names before it cuts one; the first path that still does not fit is
+    cut in the middle, so its file name stays, after its counts have gone if it must.
+    ``None`` when nothing changed.
     """
     if not changes:
         return None
@@ -1497,8 +1498,13 @@ def changed_text(
             return text
     name, counts = entries[0]
     more = len(entries) - 1
-    room = width - cells(line([("", counts)], more).plain)
-    text = line([(cut_middle(name, max(1, room), symbols.ellipsis), counts)], more)
+    file_name = name.rpartition("/")[2]
+    for kept in (counts, ""):  # the counts go before the file name is cut
+        room = width - cells(line([("", kept)], more).plain)
+        cut = cut_middle(name, max(1, room), symbols.ellipsis)
+        if cut.endswith(file_name):
+            break
+    text = line([(cut, kept)], more)
     text.truncate(width, overflow="ellipsis")
     return text
 
