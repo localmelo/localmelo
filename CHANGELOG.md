@@ -282,6 +282,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   no-ear picture. Both are Core Animation in the app (no timer) and
   stop under the same conditions as the other moves ([#NN]).
 
+- Pictures that tools return reach a model that can see. A screenshot from an MCP server used to
+  reach the model only as a line such as `[1 image: sha256:... image/jpeg]`. With
+  `[agent] tool_images = "on"` (or `-X agent.tool_images=on` for one run) each planning request
+  now carries the newest three to four pictures as `image_url` data URLs, in a `user` message
+  after the tool results that names the call (Ollama: its `images` field). The oldest two lose
+  their pixels together, so the prompt prefix a server caches changes once every two pictures; a
+  picture already sent is not sent again; one wider than 1,280 pixels is scaled to a 1,280-wide
+  JPEG once (macOS `sips`); each counts 4,500 characters toward the prompt cap (pictures a user
+  attaches now count too). The default, `auto`, sends pixels only when the server says the model
+  reads images (oMLX's `model_type` `vlm`, Ollama's `vision` capability), asked once at the first
+  picture. `tool_images_keep` and `tool_images_retire` set the counts. A run whose tools return no
+  picture sends the same requests as before. An MCP result's `structuredContent` is no longer
+  sent as text beside a picture, so a server that repeats a screenshot's base64 there sends the
+  picture, not the base64 ([#295]).
+
 - The terminal's status bar says what the session uses and what runs beside
   it, not the model and folder again (the welcome and `/status` keep those).
   On a local server it shows the tokens sent and received, the context with a
@@ -2324,6 +2339,7 @@ earlier milestones.
 [#292]: https://github.com/localmelo/localmelo/pull/292
 [#293]: https://github.com/localmelo/localmelo/pull/293
 [#294]: https://github.com/localmelo/localmelo/pull/294
+[#295]: https://github.com/localmelo/localmelo/pull/295
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

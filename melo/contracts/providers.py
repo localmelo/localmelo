@@ -164,6 +164,14 @@ class BaseLLMProvider(ABC):
         """
         yield StreamFragment(kind="reply", reply=await self.chat(messages, tools))
 
+    async def takes_images(self) -> bool | None:
+        """Whether the server says :attr:`model` reads images; ``None`` when unknown.
+
+        The agent asks once, when a tool first returns an image and
+        ``AgentOptions.tool_images`` is ``"auto"``. The default does not know.
+        """
+        return None
+
     @abstractmethod
     async def close(self) -> None:
         """Release underlying resources (HTTP connections, etc.)."""

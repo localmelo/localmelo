@@ -2448,6 +2448,7 @@ def _build_direct_mode_agent(
         CACHE_SETTINGS,
         configured_cache_options,
         configured_context_options,
+        configured_image_options,
     )
 
     def config_value_error(message: str) -> NoReturn:
@@ -2536,6 +2537,10 @@ def _build_direct_mode_agent(
     # A plain direct run (a task or the `melo ""` loop); --brief follows confine_writes.
     if budget_cfg.agent.confine_direct_runs and getattr(args, "brief", None) is None:
         options = dataclasses.replace(options, confine_writes=True)
+    try:
+        options = configured_image_options(budget_cfg, options)
+    except ValueError as exc:
+        config_value_error(str(exc))
 
     if base_url:
         # Generic OpenAI-compatible endpoint

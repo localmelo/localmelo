@@ -33,6 +33,7 @@ from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
     configured_cache_options,
     configured_context_options,
+    configured_image_options,
     configured_session_options,
 )
 
@@ -314,6 +315,7 @@ def run_interactive(
             )
             if "captured_history" not in explicit and loaded.agent.captured_history:
                 options = replace(options, captured_history=True)
+            options = configured_image_options(loaded, options)
             options = configured_context_options(
                 loaded,
                 options,
