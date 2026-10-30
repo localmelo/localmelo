@@ -188,7 +188,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the menu-bar menu brings it back. It breathes, bobs when work starts, hops when it waits
   and wags when a run is done, with Core Animation only: all of that stops under Reduce
   Motion, in Low Power Mode, when the Mac runs hot, and when Melo is covered or the screen
-  sleeps. VoiceOver reads its mood and announces a wait. The Dock icon now opens the window
+  sleeps. VoiceOver reads its mood when Melo is focused; the menu-bar item still announces a wait, Melo stays silent so it is not read twice. The Dock icon now opens the window
   again after it was closed. ([#NN])
 
 - Melo the Akita puppy gets pictures, a mood policy and a place in `GET /api/health`, the

@@ -208,10 +208,6 @@ final class PetController: NSObject {
             shownState = mood.picture
         }
         applyMotion(beginning: beginning)
-        if mood == .waiting && old != .waiting {
-            NSAccessibility.post(element: view, notification: .announcementRequested,
-                                 userInfo: [.announcement: mood.label, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-        }
     }
 
     // The animations run on their own; they are started again only when what they should be doing changed, so a

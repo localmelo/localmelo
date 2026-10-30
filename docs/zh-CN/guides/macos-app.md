@@ -57,7 +57,7 @@ Melo 的样子说明 localmelo 在做什么，来自菜单栏图标用的同一�
 
 点击 Melo 会打开窗口；它在等你批准时，则打开需要你回答的那个对话或任务。可以把它拖到任何地方；它会为每块屏幕记住自己的位置，放在靠近底边处时会吸附到底边，屏幕变化时会回到屏幕内。右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo** 和 **Quit localmelo**。**Hide Melo** 会让它一直隐藏，重启应用后也一样，此时菜单栏菜单里会出现 **Show Melo**，这是唯一的回来方式（下次窗口被收起时，Melo 就会再出现）。它记住的内容保存在 `~/Library/Application Support/LocalMelo/pet.json`：是否隐藏、上次所在的屏幕，以及它在每块屏幕上的位置。
 
-Melo 趴着时会慢慢呼吸，开始工作时颠一下，等待时跳一下，运行完成时摇一摇，换图片时有短暂的淡入淡出（睡姿之间更慢）。这些全部由 Core Animation 完成，应用自己不做任何绘制：没有为 Melo 运行的定时器，它的状态在收到健康检查回复、被触碰或窗口变化时重新计算。在“减弱动态效果”下（此时图片直接切换，没有淡入淡出）、低电量模式下、Mac 发热时、Melo 被遮住或隐藏时，以及屏幕休眠时，Melo 会停止动作，每种状态只显示它的静态图片。VoiceOver 会把 Melo 读作一个按钮，并说出它的状态（`Melo, resting. Nothing running.`、`Melo, working. 2 running.`、`Melo, waiting for your approval.`、`Melo, done.`、`Melo, the last run did not finish.`、`Melo, localmelo stopped.`），并在开始等待时播报。
+Melo 趴着时会慢慢呼吸，开始工作时颠一下，等待时跳一下，运行完成时摇一摇，换图片时有短暂的淡入淡出（睡姿之间更慢）。这些全部由 Core Animation 完成，应用自己不做任何绘制：没有为 Melo 运行的定时器，它的状态在收到健康检查回复、被触碰或窗口变化时重新计算。在“减弱动态效果”下（此时图片直接切换，没有淡入淡出）、低电量模式下、Mac 发热时、Melo 被遮住或隐藏时，以及屏幕休眠时，Melo 会停止动作，每种状态只显示它的静态图片。VoiceOver 会把 Melo 读作一个按钮，并说出它的状态（`Melo, resting. Nothing running.`、`Melo, working. 2 running.`、`Melo, waiting for your approval.`、`Melo, done.`、`Melo, the last run did not finish.`、`Melo, localmelo stopped.`），开始等待时它不会自己出声播报：菜单栏图标已经播报了，因此 VoiceOver 不会读两遍。
 
 图片在应用包的 `Contents/Resources/akita` 下：九张给桌面宠物用（趴着、慵懒地趴着，以及三种睡姿），五张坐姿的用于启动视图，另有小头像和网站图标的各种尺寸，每张都有 1x 和 `@2x`。和图标一样，它们是提交进仓库的文件，位于 `macos/art/akita`（1.17 MB，透明 PNG，带一圈很细的奶油色外沿，让轮廓在深色桌面上依然看得见），构建会原样复制这个文件夹。`anchors.json` 以点为单位给出每张图片的画布、地面线和中心，因此换姿势时不会跳动。美术母版留在仓库之外；要在 Mac 上根据它们重新生成这些图片：
 

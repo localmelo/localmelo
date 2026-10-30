@@ -61,6 +61,17 @@ def test_the_panel_is_the_canvas_the_lying_pictures_share() -> None:
     assert "let petBelowPaws: CGFloat = 3" in source  # 97 - 94
 
 
+def test_the_pet_is_silent_when_a_wait_starts_because_the_menu_bar_item_announces_it() -> (
+    None
+):
+    # Two announcements of one wait would be read twice by VoiceOver: only the menu-bar item posts one, and the pet
+    # is read through its label when it is focused.
+    assert "announcementRequested" in (APP / "MenuBar.swift").read_text()
+    pet = (APP / "PetPanel.swift").read_text()
+    assert "announcementRequested" not in pet and "announcement:" not in pet
+    assert "setAccessibilityLabel(mood.label)" in pet
+
+
 @darwin
 def test_the_pet_shows_only_while_the_window_is_put_away_and_a_click_goes_where_it_is_needed(
     tmp_path: Path,
