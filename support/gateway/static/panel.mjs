@@ -75,12 +75,17 @@ export function headline(health) {
 export function setupPanel({
   root, chip, backdrop, api, developer = () => false, openSettings = () => {}, cover = () => [],
   storage = globalThis.localStorage, clock = Date.now, live: follow = {},
+  wide = globalThis.matchMedia?.('(min-width: 900px)'),
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '',
     tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
-  const live = taskLive({api, changed: () => drawBody(), doc, ...follow});
+  // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
+  const newest = (path, options) => (/\/turns\?/.test(path)
+    ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
+    : api(path, options));
+  const live = taskLive({api: newest, changed: () => drawBody(), doc, ...follow});
   let reads = 0;
 
   function node(tag, className, text) {
@@ -370,6 +375,8 @@ export function setupPanel({
     return true;
   }
   chip.addEventListener('click', () => setSheet(!state.sheet));
+  // A window grown past the sheet's width has no chip to close it with: it closes, and the page is usable again.
+  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false); });
   backdrop.addEventListener('click', () => setSheet(false));
   let drag = null;
   handle.addEventListener('pointerdown', (event) => { drag = {y: event.clientY, moved: 0}; handle.setPointerCapture?.(event.pointerId); });

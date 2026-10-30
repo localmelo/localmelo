@@ -58,7 +58,7 @@ const row = (extra) => ({kind: 'task', id: 't1', title: 'Slides for the 3 pm mee
 const started = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Make slides'}};
 const tool = (id, call, type, data = {}) => ({id, turn: 1, ts: id, type, data: {step: 1, call_id: call, ...data}});
 
-function harness({rows = [], turns = null, storage = null, failActivity = false} = {}) {
+function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null} = {}) {
   const {doc, Element} = dom();
   const root = new Element('aside');
   const drawer = new Element('section');
@@ -81,6 +81,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false}
   h.panel = setupPanel({
     root, chip, backdrop, api, cover: () => [chat], storage: storage ?? {getItem: () => null, setItem: () => {}},
     clock: () => 86400 * 1000 * 400,
+    wide,
     live: {
       doc,
       open: (url) => { const source = new FakeSource(url); h.sources.push(source); return source; },
@@ -221,6 +222,8 @@ test('a running task opens to its live steps, which follow the task stream until
   assert.deepEqual(steps(), [['running', '● Reading notes.md now']]);
   assert.equal(h.sources.length, 1);
   assert.equal(h.sources[0].url, '/api/sessions/t1/events?after=2');
+  assert.deepEqual(h.calls.filter(([, path]) => path.includes('/turns')).map(([, path]) => path),
+    ['/sessions/t1/turns?limit=1&events=true'], 'only the newest turn is read');
   h.sources[0].emit(tool(3, 'c1', 'tool.finished', {name: 'file_read', status: 'success', output: 'Meeting notes\n- one\n- two\n- three', duration_s: 0.2}));
   h.sources[0].emit(tool(4, 'c2', 'tool.started', {name: 'file_write', arguments: {path: 'slides.md', content: 'x'}}));
   h.timers.at(-1).fn();
@@ -294,4 +297,14 @@ test('Details stays in the panel: its section is kept after the header and the t
   const h = harness();
   assert.equal(h.root.children.at(-1), h.drawer);
   assert.deepEqual(h.root.children.slice(0, 3).map((node) => node.className), ['panel-head', 'panel-tabs', 'panel-body']);
+});
+
+test("a window grown past the sheet's width closes the sheet, so the page is not left covered", () => {
+  const wide = {matches: false, listeners: [], addEventListener(type, fn) { this.listeners.push(fn); }};
+  const h = harness({wide});
+  h.chip.click();
+  assert.equal(h.chat.inert, true);
+  wide.matches = true;
+  for (const fn of wide.listeners) fn();
+  assert.deepEqual([h.root.classList.contains('sheet-open'), h.chat.inert, h.backdrop.hidden], [false, false, true]);
 });
