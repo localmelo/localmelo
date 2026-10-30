@@ -186,7 +186,8 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。
 
+- **卡片会说明原因。** 高影响调用在网页控制台有专门的卡片，在终端有专门的面板。它们都用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”），列出最多三条原因，不提供会话授权的选项，在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改。控制台卡片还会显示发起本轮的那条消息。参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)。
 - **会话授权只覆盖常规调用。** “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）让该工具的常规调用无需询问即可运行。同一工具的高影响或无法判定的调用每次都会询问；对它选择会话授权只允许这一次调用，不会授权该工具。终端的 `auto` 模式运行常规调用，其余调用会先询问。
 - **永不更改 localmelo 本身。** 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …`
 - **模型会读到原因。** 拒绝高影响调用时，文本会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.`
-- **限制。** 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。审批卡片和终端面板暂时还不显示原因。
+- **限制。** 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。

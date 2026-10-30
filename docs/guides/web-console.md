@@ -337,17 +337,32 @@ key, or the change runs past 1,000 rows) the card says so in one line, asks
 alone. The comparison is for you to read: the answers below work as they do for
 any other file write. **Allow once**, the filled button, runs this call only.
 **Allow for this
-chat** (**Allow for this task** in Tasks) stops asking about that tool for the
-rest of the chat; the line under the buttons says so, and for a command or
-Python code it warns that it can reach files outside the workspace. **Deny**
+chat** (**Allow for this task** in Tasks) stops asking about the routine calls
+of that tool for the rest of the chat; the line under the buttons says so, and
+for a command or Python code it adds that installs, downloads and changes
+outside the workspace still ask. **Deny**
 opens an optional box, "Tell melo what to do instead", and sends the denial
 with that text; **Back** or Escape returns to the answers. The controls wait
 500 ms before they can be used; arrival does not move focus and no single-key
 shortcut answers a request. When the card is outside the view, a bar above the
 message box reads "melo is waiting for your answer", and **Review** opens its
-group and moves to **Allow once**. If approval details cannot be loaded, or
-arguments were truncated or converted, both allow buttons are disabled; you can
-reload the details, deny, or stop the run.
+group and moves to **Allow once** (to **Deny** on a high-impact card). If
+approval details cannot be loaded, or arguments were truncated or converted,
+both allow buttons are disabled; you can reload the details, deny, or stop the
+run.
+
+A call that installs software, downloads files, changes files outside the
+workspace or does anything else [high-impact](tools-mcp.md#high-impact-calls)
+asks every time, with a different card. Its question names what the call does
+("Install software?"), the line under it reads `python_exec · asks every
+time`, and **Why melo asks** lists up to three reasons ("Installs playwright
+with pip into .signin_venv (downloads about 42 MB)."). **You asked:** repeats
+the message that started the turn, so you can compare it with what melo is
+about to do. The card has **Allow once** and **Deny** only, and **Deny** is the
+filled button: there is no chat-wide allow, and the line under the buttons
+says so ("A chat-wide allow never covers installs, downloads or changes outside
+~/demo-project."). A call melo cannot read, or that it asks about for another
+reason, shows the plain card.
 
 A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
 plain title, the first line of the error and a hint. On the newest turn one next

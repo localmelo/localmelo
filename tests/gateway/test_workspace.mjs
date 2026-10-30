@@ -1083,10 +1083,94 @@ test('the card has a filled answer, an outlined grant and a quiet deny, and says
     [['Allow once', 'primary-button'], ['Allow for this chat', 'outline-button'], ['Deny', 'quiet-button']]);
   const warning = findNode(card, (node) => node.id === 'approval-scope-roles');
   assert.equal(actions.children[1].attributes['aria-describedby'], 'approval-scope-roles', 'the grant is read with what it covers');
-  assert.match(warning.textContent, /“Allow for this chat” lets any shell command run without asking/);
-  assert.match(warning.textContent, /outside ~\/w/);
+  assert.match(warning.textContent, /“Allow for this chat” lets routine shell commands run without asking/);
+  assert.match(warning.textContent, /Installs, downloads and changes outside ~\/w still ask/);
   h.context.request = {request_id: 'roles-file', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0}};
   assert.match(flatten(h.run('approvalCard(request)')), /will not ask again before writing files in this chat/);
+});
+
+// A command the rules found high-impact: what `GET /api/sessions/{id}` gives the card (#279).
+const highImpact = (extra = {}) => ({
+  request_id: 'high', tool_name: 'python_exec', arguments: {code: 'import subprocess\nsubprocess.run(["pip", "install", "playwright"])'},
+  arguments_complete: true, workspace_label: '~/melo_test_workspace',
+  review: {
+    verdict: 'high', title: 'Install software?',
+    reasons: ['Installs playwright with pip into .signin_venv (downloads about 43 MB).', 'Creates a Python environment in .signin_venv.'],
+  },
+  ...extra,
+});
+
+test('a high-impact card says why melo asks, shows the request, and offers no chat-wide allow', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = highImpact();
+  h.context.asked = '你有办法帮我去一亩三分地自动签到吗每天';
+  const card = h.run('approvalCard(request, chatApproval, asked)');
+  const text = (name) => findNode(card, (node) => node.className === name)?.textContent;
+  assert.equal(card.dataset.impact, 'high');
+  assert.equal(text('approval-title'), 'Install software?');
+  assert.equal(text('approval-caption'), 'python_exec · asks every time');
+  assert.equal(text('approval-why'), 'Why melo asks');
+  const reasons = findNode(card, (node) => node.className === 'approval-reasons');
+  assert.deepEqual(reasons.children.map((node) => node.textContent), highImpact().review.reasons);
+  assert.equal(text('approval-asked'), 'You asked: “你有办法帮我去一亩三分地自动签到吗每天”');
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => [node.textContent, node.className.split(' ')[0]]),
+    [['Allow once', 'outline-button'], ['Deny', 'primary-button']], 'the safe answer is the filled one');
+  assert.equal(findNode(card, (node) => String(node.textContent).startsWith('Allow for this')), null);
+  assert.equal(findNode(card, (node) => node.id === 'approval-scope-high').textContent,
+    'A chat-wide allow never covers installs, downloads or changes outside ~/melo_test_workspace.');
+  assert.doesNotMatch(flatten(card), /lets routine/);
+});
+
+test('a high-impact card in Tasks says a task-wide allow, and cuts a long request', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = highImpact();
+  h.context.asked = 'x'.repeat(250);
+  const card = h.run('approvalCard(request, {...chatApproval, scope: "task"}, asked)');
+  assert.match(findNode(card, (node) => node.id === 'approval-scope-high').textContent, /^A task-wide allow never covers/);
+  const asked = findNode(card, (node) => node.className === 'approval-asked').textContent;
+  assert.equal(asked, `You asked: “${'x'.repeat(200)}…”`);
+  h.context.request = highImpact({review: {verdict: 'high', title: 'Run this?', reasons: []}});
+  const bare = h.run('approvalCard(request)');
+  assert.equal(findNode(bare, (node) => node.className === 'approval-why'), null, 'no reasons, no heading');
+  assert.equal(findNode(bare, (node) => node.className === 'approval-asked'), null, 'no request text, no line');
+});
+
+test('a routine or undecided card stays the plain card, and says what the grant covers', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  for (const review of [null, undefined, {verdict: 'routine', title: '', reasons: []}, {verdict: 'undecided', title: '', reasons: ['melo could not check this call.']}]) {
+    h.context.request = highImpact({review});
+    const card = h.run('approvalCard(request, chatApproval, "Install playwright")');
+    assert.equal(card.dataset.impact, undefined);
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, 'Run this Python code in melo_test_workspace?');
+    assert.equal(findNode(card, (node) => node.className === 'approval-caption').textContent, 'python_exec · ~/melo_test_workspace');
+    for (const name of ['approval-why', 'approval-reasons', 'approval-asked']) {
+      assert.equal(findNode(card, (node) => node.className === name), null, name);
+    }
+    const actions = findNode(card, (node) => node.className === 'approval-actions');
+    assert.deepEqual(actions.children.map((node) => node.textContent), ['Allow once', 'Allow for this chat', 'Deny']);
+    assert.equal(findNode(card, (node) => node.id === 'approval-scope-high').textContent,
+      '“Allow for this chat” lets routine Python code run without asking for the rest of this chat. Installs, downloads and changes outside ~/melo_test_workspace still ask.');
+  }
+});
+
+test('a high-impact card: Allow once and Deny answer, there is no session answer, and Review lands on Deny', async () => {
+  const h = harness(baseRoutes({'POST /approvals/high': {outcome: 'allowed'}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Sign me in every day', client_request_id: 'k'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'python_exec', arguments: {code: 'pass'}}});
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'high', call_id: 'c', tool_name: 'python_exec', arguments: {code: 'pass'}}});
+  h.run('S.view.pending.get("high").arguments_complete = true; S.view.pending.get("high").review = {verdict: "high", title: "Install software?", reasons: ["Installs x."]}; approvalStates.get("high").mountedAt -= 1000; messageSnapshot = ""; renderMessages(false)');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  const card = h.context.document.getElementById('approval-card-high');
+  assert.match(flatten(card), /You asked: “Sign me in every day”/, 'the turn\'s request is on the card');
+  h.element('approval-go').click();
+  assert.equal(h.context.document.activeElement.textContent, 'Deny', 'Review moves to the safe answer');
+  await findNode(card, (node) => node.textContent === 'Allow once').click();
+  assert.deepEqual(h.net.callsTo('/approvals/high')[0].body, {choice: 'once'});
 });
 
 test('Deny opens a box for what melo should do instead and sends it with the denial', async () => {

@@ -13,6 +13,7 @@ from typing import Any
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.events import json_safe_payload
+from localmelo.melo.contracts.review import ActionReview, review_title
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions import display
 from localmelo.support.sessions.store import (
@@ -120,11 +121,29 @@ def _arguments_complete(original: dict[str, Any], safe: dict[str, Any]) -> bool:
     return True
 
 
+def _review_json(
+    review: ActionReview | None, root: str | None
+) -> dict[str, Any] | None:
+    """The review as the card reads it: the verdict, the reasons and the title.
+
+    ``title`` is the card's question for a high-impact call and ``""`` for
+    any other. A reason goes through the secret redaction.
+    """
+    if review is None:
+        return None
+    return {
+        "verdict": review.verdict,
+        "title": review_title(review, display.folder_name(root)),
+        "reasons": [redact_secrets(reason)[0] for reason in review.reasons],
+    }
+
+
 def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     """One pending approval, as the console's card reads it.
 
     ``target`` is the shared ``approval_target`` shape for a ``file_write``
     request, read per response, and ``None`` for every other tool.
+    ``review`` is what the checker's rules found, or ``None`` (#279).
     """
     root = request.workspace_root
     arguments = dict(request.arguments)
@@ -145,6 +164,7 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
                 "workspace_root": root,
             }
         ),
+        "review": _review_json(request.review, root),
     }
 
 

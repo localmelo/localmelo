@@ -590,6 +590,14 @@ token total.
   conversion. Clients should not allow a request when it is false or missing;
   denial remains available. Approval event arguments alone may be truncated,
   so fetch session details before allowing.
+- A `pending_approvals` entry's `review` is what melo's rules found in a
+  `shell_exec`, `python_exec` or `file_write` call, and `null` for any other
+  tool: `verdict` is `routine`, `high` or `undecided`; `title` is the card's
+  question for a `high` call ("Install software?") and `""` otherwise;
+  `reasons` are at most three sentences that say why melo asks ("Installs
+  playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
+  redacted. A `high` call asks every time and the card offers no `session`
+  answer.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the
@@ -964,8 +972,10 @@ event stream, or from `pending_approvals`.
 {"request_id": "386183e1811b4ba68c3768bfb96ac8e6", "outcome": "allowed", "remember": true}
 ```
 
-- `choice` is `once` (this call), `session` (this call and every later one
-  of that tool in this session) or `deny`.
+- `choice` is `once` (this call), `session` (this call and every later
+  routine one of that tool in this session) or `deny`. For a high-impact
+  call (see `review` under `GET /api/sessions/{id}`), `session` allows this
+  call only: the reply says `"remember": false` and no grant is made.
 - `reason` belongs to a `deny` only, at most 500 characters; a reason with
   another choice is 400 `invalid_request`.
 - 404 `not_found` for an unknown or expired request; 409 `already_answered`

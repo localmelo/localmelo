@@ -282,6 +282,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `agent` 为 `open`、`paused`（已关闭，但保留其对话）或 `not_loaded`（本网关尚未打开的会话，例如重启之后）。创建操作即使没有轮次也会打开会话；读取路由从不打开会话，而轮次或重试会打开。因此，`not_loaded` 会持续到网关启动后的第一次打开，而已关闭的智能体读作 `paused`。
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
+- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖。`high` 调用每次都会询问，卡片不提供 `session` 回答。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
 - 对已有文件写入文本的 `file_write`，其 `target` 还带有 `diff`，即这次写入会替换的内容；它在生成响应时读取，显示方式与终端的审批面板相同。新文件或没有文本的调用，`target` 没有 `diff`。
 
@@ -523,7 +524,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 {"request_id": "386183e1811b4ba68c3768bfb96ac8e6", "outcome": "allowed", "remember": true}
 ```
 
-- `choice` 为 `once`（仅本次调用）、`session`（本次调用及本会话中该工具之后的每一次调用）或 `deny`。
+- `choice` 为 `once`（仅本次调用）、`session`（本次调用及本会话中该工具之后的每一次常规调用）或 `deny`。对 `high` 调用（见 `GET /api/sessions/{id}` 的 `review`），`session` 只允许这一次调用：回复为 `"remember": false`，不会产生授权。
 - `reason` 只属于 `deny`，最多 500 个字符；与其他 choice 一起使用的 reason 会返回 400 `invalid_request`。
 - 未知或已过期的请求返回 404 `not_found`；已被答复的请求返回 409 `already_answered`，因此两个客户端竞争同一张卡片时，只会得到一个答复。
 - 审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。

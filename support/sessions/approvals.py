@@ -173,6 +173,11 @@ class ApprovalBroker:
         self._resolved.append(request_id)
         self._resolved_set.add(request_id)
 
+    def request(self, request_id: str) -> ApprovalRequest | None:
+        """The pending request *request_id*, or ``None`` once it is answered."""
+        entry = self._pending.get(request_id)
+        return entry.request if entry is not None and not entry.answer.done() else None
+
     def pending(self, session_id: str) -> list[ApprovalRequest]:
         """The requests of *session_id* that wait for an answer, oldest first."""
         return [
