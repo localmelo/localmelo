@@ -1151,6 +1151,7 @@ test('Use this model saves the server that was found, tests it, and the welcome 
   assert.deepEqual(h.net.callsTo('/settings/test')[0].body, candidate);
   assert.equal(card.hidden, true);
   assert.equal(h.element('input').disabled, false);
+  assert.equal(h.context.document.activeElement, h.element('input'), 'The composer has focus');
   assert.equal(h.context.settingsOpened, undefined, 'Settings never opened');
 });
 
