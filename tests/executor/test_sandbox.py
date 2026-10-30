@@ -24,6 +24,7 @@ import pytest
 from localmelo.melo.executor import sandbox
 from localmelo.melo.executor.builtins import ToolFunction, rooted_builtins
 from localmelo.melo.executor.env import child_env
+from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import (
     TMP_DIR,
     ConfinementError,
@@ -317,6 +318,27 @@ class TestReal:
         assert await shell("touch in && echo ok") == "ok"
         assert "Operation not permitted" in await shell(f"touch {tmp_path}/out")
         assert not (tmp_path / "out").exists()
+
+    async def test_the_gated_launch_of_a_saved_task_is_confined_too(
+        self, ws: Path, home: Path
+    ) -> None:
+        recorded: list[int] = []
+
+        async def record(pid: int) -> None:
+            recorded.append(pid)
+
+        c, shell, python = _tools(ws, {"HOME": str(home)})
+        token = PROCESS_RECORD.set(record)
+        try:
+            out = await shell("echo $$; touch in ~/out")
+            assert int(out.splitlines()[2]) == recorded[0]  # the leader execs
+            assert out.splitlines()[1].startswith("melo: writing outside")
+            assert await python("open('py.txt', 'w').write('x')") == ""
+        finally:
+            PROCESS_RECORD.reset(token)
+        assert len(recorded) == 2 and c.refused == 1
+        assert (ws / "in").exists() and (ws / "py.txt").exists()
+        assert not (home / "out").exists()
 
     async def test_cd_out_and_write_is_refused(self, ws: Path, home: Path) -> None:
         c, shell, _ = _tools(ws, {"HOME": str(home)})
