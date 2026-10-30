@@ -72,7 +72,7 @@ uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         <p>uv 会创建虚拟环境 <code>.venv/</code>（如果你没有 Python 3.13，它会自动安装），并安装 localmelo 及网关所需的依赖。</p>
         <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（<code>localmelo-main</code>）会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</p>
-        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>会在控制台外面构建一个未签名的原生窗口。它需要 release Xcode，而且是开发包，不是发行版或 Homebrew cask。</p>
+        <p>在 Apple 芯片的 Mac 上，<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>会在控制台外面套上一个原生窗口。一条命令 <code>uv run python scripts/build_macos_app.py --install</code> 就能构建它、做临时签名（ad hoc），并安装到 <code>~/Applications</code>，不需要管理员权限。它不需要 Apple 开发者账号，只留在构建它的这台 Mac 上，而且需要正式版 Xcode：它是开发包，不是经过公证的发行版，也不是 Homebrew cask。</p>
         <p>本教程后面的命令直接调用 <code>melo</code>。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 <code>source &lt;clone&gt;/.venv/bin/activate</code>，其中 <code>&lt;clone&gt;</code> 是你的 <code>localmelo</code> 目录。使用 uv 时，也可以在克隆目录中运行 <code>uv run melo …</code>，或在其他任何位置运行 <code>uv run --project &lt;clone&gt; melo …</code>。</p>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
@@ -89,16 +89,16 @@ pip install -e ".[gateway]"</code></pre>
         <div class="callout warning">
           <p><strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件：没有沙箱。</strong>如果想让任务不使用任何工具，请加上 <code>--builtins none</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
         </div>
-        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
-        <p>答案会输出到 stdout，命令的退出码为 0（<code>echo $?</code> 会输出 <code>0</code>）。<code>--base-url</code> 让 localmelo 在这一次运行中直接连接一个兼容 OpenAI 接口的服务器，不需要配置文件。它不会发送 API 密钥，所以适合本地服务器；使用云端 API 时，请先保存配置（见下文）。</p>
+        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
+        <p>答案会输出到 stdout，命令的退出码为 0（<code>echo $?</code> 会输出 <code>0</code>）。<code>-u</code>（<code>--url</code>）让 localmelo 在这一次运行中直接连接一个兼容 OpenAI 接口的服务器，不需要配置文件，<code>-m</code>（<code>--model</code>）指定模型。旧写法 <code>--base-url</code> 和 <code>--chat-model</code> 仍然可用（<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#old-spelling-to-new">旧写法对应的新写法</a>）。它不会发送 API 密钥，所以适合本地服务器；使用云端 API 时，请先保存配置（见下文）。</p>
         <p>使用 <a href="#serve-a-model-with-omlx">oMLX</a> 时，填写它的地址和模型文件夹的名称：</p>
-        <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
         <p>所有选项见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a>。</p>
       </section>
 
       <section class="section" id="json-output">
         <h2>以 JSON 格式获取结果</h2>
-        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"</code></pre>
+        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"</code></pre>
         <p>示例输出（具体数值会不同）：</p>
         <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}</code></pre>
         <p>stdout 上只有这一行。只有当 <code>status</code> 为 <code>completed</code> 时，退出码才是 0。</p>
@@ -109,15 +109,15 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="save-a-configuration">
         <h2>保存配置</h2>
-        <p>配置文件会保存后端设置，这样 <code>melo</code>、<code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>--base-url</code>。</p>
+        <p>配置文件会保存后端设置，这样 <code>melo</code>、<code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>-u</code>。</p>
         <p>使用本地服务器时，在终端里运行 <code>melo</code>。还没有配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问服务器地址（按回车接受找到的地址），再从服务器列出的模型里选一个（列表先列对话模型，嵌入或重排模型会加标签），保存 <code>~/.cache/localmelo/config.toml</code>，然后打开交互式界面：</p>
         <pre><code>$ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
 Try: What is this project? · / commands · ctrl+d quit</code></pre>
@@ -144,7 +144,7 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
         </div>
         <p>使用云端 API 时，请选择对应的服务商。向导接着会询问 <code>API key env var</code>（即你导出的那个变量的名字）和 <code>Chat model</code>，而不是 <code>Base URL</code> 和 <code>Chat model name</code>。</p>
         <p>Ollama 的默认地址 <code>http://localhost:11434</code> 没有 <code>/v1</code>，这是正确的：<code>ollama</code> 后端使用 Ollama 自己的 API，而不是兼容 OpenAI 的 API。</p>
-        <p>接着，向导会向每个服务器发送一个简短的测试请求（<code>Probing backends ...</code>）。如果对话服务器没有响应，它会输出 <code>Probe failed: …</code> 并询问 <code>[r]etry, [s]ave anyway, [N]o [N]:</code>；输入 <code>r</code> 会重新询问地址和模型，直接按回车则什么也不保存。如果只有嵌入服务器失败，向导会关闭嵌入后保存，并给出提示。成功时，它会输出 <code>Config saved to …</code>（后面是 <code>~/.cache/localmelo/config.toml</code> 的路径），然后<strong>启动网关</strong>，地址为 <code>http://127.0.0.1:8401</code>。网关会一直在这个终端中运行。不加 <code>--serve</code> 时，<code>melo --reconfigure</code> 改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 <code>Found a model server at …</code> 并询问 <code>Use it? [Y/n]:</code>。只有回答 <code>n</code>、没有找到服务器或使用 <code>--developer</code> 时，才会出现上面的完整菜单。</p>
+        <p>接着，向导会向每个服务器发送一个简短的测试请求（<code>Probing backends ...</code>）。如果对话服务器没有响应，它会输出 <code>Probe failed: …</code> 并询问 <code>[r]etry, [s]ave anyway, [N]o [N]:</code>；输入 <code>r</code> 会重新询问地址和模型，直接按回车则什么也不保存。如果只有嵌入服务器失败，向导会关闭嵌入后保存，并给出提示。成功时，它会输出 <code>Config saved to …</code>（后面是 <code>~/.cache/localmelo/config.toml</code> 的路径），然后<strong>启动网关</strong>，地址为 <code>http://127.0.0.1:8401</code>。网关会一直在这个终端中运行。单独运行 <code>melo setup</code> 时，改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 <code>Found a model server at …</code> 并询问 <code>Use it? [Y/n]:</code>。只有回答 <code>n</code>、没有找到服务器或使用 <code>--developer</code> 时，才会出现上面的完整菜单。</p>
       </section>
 
       <section class="section" id="set-up-an-embedding-model">
@@ -155,7 +155,7 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
 curl -sS http://127.0.0.1:11434/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
         <p>回复中必须包含非空的 <code>data[0].embedding</code>。<code>nomic-embed-text</code> 是更小的纯英文替代品。</p>
         <p>使用 oMLX 时，对话服务器也提供嵌入模型：</p>
         <pre><code>curl -sS http://127.0.0.1:8000/v1/models
@@ -168,8 +168,8 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 
       <section class="section" id="start-the-gateway">
         <h2>启动网关</h2>
-        <p>如果你是用 <code>melo</code> 保存的配置，请用 <code>melo --serve</code> 启动网关；上面的向导会自己启动网关。在第二个终端中检查网关，并通过它运行一个任务：</p>
-        <p>在终端运行 <code>melo --gateway-login</code>，在 60 秒内打开私密的一次性链接。API 示例通过管道把网关令牌传给 curl，不会将令牌放进命令行参数或 shell 历史记录。请勿启用 curl 的详细输出或记录请求头；同一用户的进程仍可读取令牌文件。</p>
+        <p>如果你是用 <code>melo</code> 保存的配置，请用 <code>melo serve</code> 启动网关；上面的向导会自己启动网关。在第二个终端中检查网关，并通过它运行一个任务：</p>
+        <p>在终端运行 <code>melo console</code>，在 60 秒内打开私密的一次性链接。API 示例通过管道把网关令牌传给 curl，不会将令牌放进命令行参数或 shell 历史记录。请勿启用 curl 的详细输出或记录请求头；同一用户的进程仍可读取令牌文件。</p>
         <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -180,7 +180,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <p>健康检查不会连接模型服务器，运行任务时才会。在浏览器中打开 <code>http://127.0.0.1:8401/</code> 即可使用网页工作区（见<a href="#interactive-conversations">交互式对话</a>）。</p>
         <p>在第一个终端中按 Ctrl+C 停止网关。运行任务会使用保存的配置：</p>
         <pre><code>melo "What is 6*7?"</code></pre>
-        <p>以后想跳过向导、直接启动网关时，运行 <code>melo --serve</code>。</p>
+        <p>以后想跳过向导、直接启动网关时，运行 <code>melo serve</code>。</p>
         <p>独立的 <code>melo-task</code> 客户端通过认证的回环 HTTP 创建、查看、跟随和控制网关任务，从不启动网关。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/scheduler.md#task-command">任务命令</a>。</p>
       </section>
 
@@ -189,17 +189,17 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <p>不带任务运行 <code>melo</code>，即可在终端里对话。轮次运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本次运行的进度事实。答案按 Markdown 输出：</p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
-# --chat-model it uses the server's only chat model or its one loaded model;
+# -m it uses the server's only chat model or its one loaded model;
 # with several chat models and not exactly one loaded, it exits 2 and lists them:
-melo --base-url http://127.0.0.1:8000/v1
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
+melo -u http://127.0.0.1:8000/v1
+melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ul>
           <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/attach PATH</code> 把一个工作区文本文件（最大 256 KiB）暂存到下一条消息，<code>/attachments</code> 和 <code>/detach N|all</code> 列出和移除已暂存的文件，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
           <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前轮次。</li>
-          <li>melo 在当前文件夹中工作（<code>--workspace DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
+          <li>melo 在当前文件夹中工作（<code>-w DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>
-        <p>按键和其余细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">交互式界面（英文）</a>。<code>melo ""</code> 打开的是早先版本的简单对话循环。没有终端时，单独的 <code>melo</code> 会以退出码 2 结束；请用 <code>melo --serve</code> 启动网关。</p>
-        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区就是控制台的实时页面，只访问 <code>/api</code>：它使用网关配置的模型，可以在连接设置中或用 <code>melo --reconfigure</code> 修改。它按最新在前列出你的对话，支持搜索和每个对话各自的草稿，并像终端一样显示一轮：你的消息、每个工具调用一张工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 <code>Copy response</code> 的答案。Stop 会取消轮次，等待中的审批显示为 <code>Needs approval</code>，对话保存在网关的 <code>sessions.db</code> 中，所以重启后仍然保留。同一网关上的其他浏览器标签页会看到相同的对话。审批卡片让你允许或拒绝工具调用，设置对话框用于配置连接；Workers 区域以只读方式显示保存的 worker 运行记录。网关要求认证，可用 <code>melo --gateway-login</code> 登录；审批不能防止同一用户的进程或其他本机服务访问。</p>
+        <p>按键和其余细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">交互式界面（英文）</a>。<code>melo ""</code> 打开的是早先版本的简单对话循环。没有终端时，单独的 <code>melo</code> 会以退出码 2 结束；请用 <code>melo serve</code> 启动网关。</p>
+        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区就是控制台的实时页面，只访问 <code>/api</code>：它使用网关配置的模型，可以在连接设置中或用 <code>melo setup</code> 修改。它按最新在前列出你的对话，支持搜索和每个对话各自的草稿，并像终端一样显示一轮：你的消息、每个工具调用一张工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 <code>Copy response</code> 的答案。Stop 会取消轮次，等待中的审批显示为 <code>Needs approval</code>，对话保存在网关的 <code>sessions.db</code> 中，所以重启后仍然保留。同一网关上的其他浏览器标签页会看到相同的对话。审批卡片让你允许或拒绝工具调用，设置对话框用于配置连接；Workers 区域以只读方式显示保存的 worker 运行记录。网关要求认证，可用 <code>melo console</code> 登录；审批不能防止同一用户的进程或其他本机服务访问。</p>
       </section>
 
       <section class="section" id="serve-a-model-with-omlx">
@@ -229,8 +229,8 @@ brew install jundot/omlx/omlx</code></pre>
           </li>
           <li>
             <p>用这个 ID 运行一个任务：</p>
-            <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
-            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。不指定 <code>--chat-model</code> 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 <code>melo --base-url http://127.0.0.1:8000/v1</code>（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，以退出码 2 结束，列出这些模型，并要求使用 <code>--chat-model &lt;id&gt;</code>。用 <code>--chat-model</code> 指定模型可以跳过这次查询。</p>
+            <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
+            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>-X request_timeout_s=600</code>（<code>-X KEY=VALUE</code> 只为这一次运行修改一项设置）。不指定 <code>-m</code> 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 <code>melo -u http://127.0.0.1:8000/v1</code>（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，以退出码 2 结束，列出这些模型，并要求使用 <code>--chat-model &lt;id&gt;</code>。用 <code>-m</code> 指定模型可以跳过这次查询。</p>
           </li>
         </ol>
         <p>要把 oMLX 设为默认：在还没有任何配置时，在终端里运行 <code>melo</code>，它会在 8000 端口找到 oMLX，列出模型并保存你选的那个；<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">首次运行（英文）</a>展示了整个过程。oMLX 在第一个请求到达时才加载模型，因此列出的模型不一定在内存中，加载大模型可能要几分钟。所以设置按下面的方式选择；列出多个对话模型时，它会向 oMLX 询问哪些模型已加载（<code>GET /v1/models/status</code>，最多等一秒）：</p>
@@ -239,7 +239,7 @@ brew install jundot/omlx/omlx</code></pre>
           <li>有多个，且 oMLX 说明了哪些已加载：设置会给已加载的模型标上 <code>(loaded)</code>，并以其中第一个作为默认值。</li>
           <li>有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 <strong>Allow inference without API key</strong>，oMLX 也不会说明，此时设置会输出 <code>The server did not say which models are loaded (it needs a key for that).</code> 在 oMLX 中设置了别名的模型会以别名列出，状态回复会在文件夹名旁边给出该别名（<code>model_alias</code>，oMLX 0.7.1rc1 就是这样发送的），所以该模型会被标出，并且可以在别名下成为默认值。状态回复中没有别名的服务器无法标出这样的模型。</li>
         </ul>
-        <p>已经有配置时，先完成第 5 步，让模型加载好，再运行 <code>melo --reconfigure</code>：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 <code>n</code> 之后，或使用 <code>--developer</code>），对话后端选 oMLX 或 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">配置（英文）</a>。网页工作区随后会使用这个模型；它读取配置文件。</p>
+        <p>已经有配置时，先完成第 5 步，让模型加载好，再运行 <code>melo setup</code>：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 <code>n</code> 之后，或使用 <code>--developer</code>），对话后端选 oMLX 或 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">配置（英文）</a>。网页工作区随后会使用这个模型；它读取配置文件。</p>
       </section>
 
       <section class="section" id="next-steps">

@@ -95,8 +95,12 @@ source .venv/bin/activate</code></pre>
         <p>
           On a Mac with Apple silicon, the
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS development app</a>
-          builds an unsigned native window around the console. It needs the release
-          Xcode, and it is a development bundle, not a release or a Homebrew cask.
+          puts a native window around the console. One command,
+          <code>uv run python scripts/build_macos_app.py --install</code>, builds
+          it, signs it ad hoc and installs it in <code>~/Applications</code>
+          without admin rights. It needs no Apple developer account and stays
+          on the Mac that builds it, and it needs the release Xcode: it is a
+          development bundle, not a notarized release or a Homebrew cask.
         </p>
         <p>
           The rest of this guide calls <code>melo</code> directly. Activation
@@ -132,19 +136,23 @@ pip install -e ".[gateway]"</code></pre>
             and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">what the checks do</a>.
           </p>
         </div>
-        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
+        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
         <p>
           The answer is printed on stdout, and the command exits with code 0
-          (<code>echo $?</code> prints <code>0</code>). <code>--base-url</code>
-          points localmelo at an OpenAI-compatible server for this one run,
-          without a configuration file. It sends no API key, so use it for
-          local servers; for a cloud API, save a configuration (below).
+          (<code>echo $?</code> prints <code>0</code>). <code>-u</code>
+          (<code>--url</code>) points localmelo at an OpenAI-compatible server
+          for this one run, without a configuration file, and <code>-m</code>
+          (<code>--model</code>) names the model. The old spellings
+          <code>--base-url</code> and <code>--chat-model</code> still work
+          (<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#old-spelling-to-new">old spelling to new</a>).
+          It sends no API key, so use it for local servers; for a cloud API,
+          save a configuration (below).
         </p>
         <p>
           With <a href="#serve-a-model-with-omlx">oMLX</a>, use its URL and the
           name of a model folder:
         </p>
-        <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
         <p>
           For every option, see the
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">command-line reference</a>.
@@ -153,7 +161,7 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="json-output">
         <h2>Get the result as JSON</h2>
-        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"</code></pre>
+        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"</code></pre>
         <p>Example output (values vary):</p>
         <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}</code></pre>
         <p>
@@ -178,7 +186,7 @@ pip install -e ".[gateway]"</code></pre>
         <p>
           A configuration file saves the backends, so that <code>melo</code>,
           <code>melo "&lt;task&gt;"</code> and the gateway work without
-          <code>--base-url</code>.
+          <code>-u</code>.
         </p>
         <p>
           For a local server, run <code>melo</code> in a terminal. With no
@@ -195,8 +203,8 @@ melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
 Try: What is this project? · / commands · ctrl+d quit</code></pre>
@@ -267,8 +275,8 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           the path of <code>~/.cache/localmelo/config.toml</code>, and then
           <strong>starts the gateway</strong> on
           <code>http://127.0.0.1:8401</code>. The gateway keeps running in this
-          terminal. Without <code>--serve</code>,
-          <code>melo --reconfigure</code> opens the interactive UI instead, and in
+          terminal. <code>melo setup</code> alone
+          opens the interactive UI instead, and in
           default mode it starts with the first run's question: it prints
           <code>Found a model server at …</code> and asks
           <code>Use it? [Y/n]:</code>. The full menu above follows only after
@@ -290,7 +298,7 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
 curl -sS http://127.0.0.1:11434/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
         <p>
           The reply must hold a non-empty <code>data[0].embedding</code>.
           <code>nomic-embed-text</code> is a smaller English-only alternative.
@@ -319,11 +327,11 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <h2>Start the gateway</h2>
         <p>
           If you saved the configuration with <code>melo</code>, start the
-          gateway with <code>melo --serve</code>; the wizard above starts it by
+          gateway with <code>melo serve</code>; the wizard above starts it by
           itself. From a second terminal, check the gateway and run a task
           through it:
         </p>
-        <p>Run <code>melo --gateway-login</code> in a terminal and open the private one-use link within 60 seconds. API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
+        <p>Run <code>melo console</code> in a terminal and open the private one-use link within 60 seconds. API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
         <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -341,7 +349,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
           saved configuration:
         </p>
         <pre><code>melo "What is 6*7?"</code></pre>
-        <p>To start the gateway again without the wizard, run <code>melo --serve</code>.</p>
+        <p>To start the gateway again without the wizard, run <code>melo serve</code>.</p>
         <p>
           The separate <code>melo-task</code> client creates, inspects, follows and
           controls gateway tasks over authenticated loopback HTTP, and never starts
@@ -361,10 +369,10 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         </p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
-# --chat-model it uses the server's only chat model or its one loaded model;
+# -m it uses the server's only chat model or its one loaded model;
 # with several chat models and not exactly one loaded, it exits 2 and lists them:
-melo --base-url http://127.0.0.1:8000/v1
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
+melo -u http://127.0.0.1:8000/v1
+melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ul>
           <li>Type <code>/</code> for the commands: <code>/model</code> lists
             the server's models and switches to one, <code>/backend</code>
@@ -383,7 +391,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
             write: press <code>1</code> to allow it, <code>2</code> to allow
             that tool for the session, <code>3</code> to refuse and tell melo
             why. Esc stops a turn.</li>
-          <li>melo works in the current folder (<code>--workspace DIR</code>
+          <li>melo works in the current folder (<code>-w DIR</code>
             picks another): file tools stay in it; commands and Python can
             reach other files, so melo asks first.</li>
         </ul>
@@ -392,13 +400,13 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           has the keys and the rest. <code>melo ""</code> opens the plain
           conversation loop of earlier releases. Without a terminal,
           <code>melo</code> alone exits with code 2; start the gateway with
-          <code>melo --serve</code>.
+          <code>melo serve</code>.
         </p>
         <p>
           The web workspace at <code>http://127.0.0.1:8401/</code> is the
           console's live page and talks only to <code>/api</code>: it uses the
           gateway's configured model, which you can change in connection settings
-          or with <code>melo --reconfigure</code>. It lists your chats newest first, with search and a draft for
+          or with <code>melo setup</code>. It lists your chats newest first, with search and a draft for
           each, and draws a turn as the terminal does: your message, a work
           card for each tool call, folded reasoning and reflections, notices,
           the live progress row and the answer with its facts and
@@ -408,7 +416,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           browser tabs on the same gateway see the same chats. Approval cards
           let you allow or deny tool calls; the settings dialog configures the
           connection. The Workers section shows saved worker runs read-only.
-          The gateway requires authentication; use <code>melo --gateway-login</code>
+          The gateway requires authentication; use <code>melo console</code>
           to sign in. Approvals are not a security boundary against same-user
           processes or other localhost services.
         </p>
@@ -492,18 +500,19 @@ brew install jundot/omlx/omlx</code></pre>
           </li>
           <li>
             <p>Run a task with that id:</p>
-            <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+            <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
             <p>
               oMLX loads the model on its first request, which can take a
               minute for a large model. If that request times out, add
-              <code>--request-timeout 600</code>. Without
-              <code>--chat-model</code>, melo asks oMLX which models it has and
+              <code>-X request_timeout_s=600</code> (<code>-X KEY=VALUE</code>
+              changes one setting for one run). Without
+              <code>-m</code>, melo asks oMLX which models it has and
               uses the only chat model or the one that is loaded, for a task and
-              for <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
+              for <code>melo -u http://127.0.0.1:8000/v1</code> without a
               task (the interactive UI); with several chat models and not exactly
               one loaded, it exits 2, lists them and asks for
               <code>--chat-model &lt;id&gt;</code>. Name the model with
-              <code>--chat-model</code> to skip that lookup.
+              <code>-m</code> to skip that lookup.
             </p>
           </li>
         </ol>
@@ -525,7 +534,7 @@ brew install jundot/omlx/omlx</code></pre>
         </ul>
         <p>
           With a configuration saved already, run step 5 first, so that the
-          model is loaded, then <code>melo --reconfigure</code>: in default mode
+          model is loaded, then <code>melo setup</code>: in default mode
           it offers the server it finds with the first run's questions. In the
           full menu (after <code>n</code>, or with <code>--developer</code>),
           choose oMLX or vLLM (<code>3</code>) as the chat backend, enter
