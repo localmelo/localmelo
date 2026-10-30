@@ -317,6 +317,12 @@ function pendingOutbox() {
   return S.outbox[S.activeId ?? "new"] ?? null;
 }
 
+/** Whether the welcome screen offers "Connect a model": no model is configured, or the configured server is known to be down. */
+function needsModel(health) {
+  if (!health) return false;
+  return health.configured === false || health.model_server?.reachable === false;
+}
+
 function syncUI() {
   const view = S.activeId ? S.view : null;
   const session = activeSession();
@@ -364,6 +370,7 @@ function syncUI() {
         : "New chat";
   $("connection-dot").classList.toggle("offline", !S.online);
   $("model-btn").textContent = model?.name ? `${model.name}  ⌄` : "Choose a model  ⌄";
+  $("setup-btn").hidden = !needsModel(S.health);
   $("send-btn").hidden = !!turn;
   $("stop-btn").hidden = !turn;
   $("stop-btn").disabled = !turn || S.cancelling.has(turn.id);

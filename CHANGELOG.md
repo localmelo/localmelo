@@ -31,6 +31,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The welcome screen's "Connect a model" button shows only when no model is configured or the configured server cannot be reached. With a reachable model, the welcome screen shows just the suggestions ([#NN]).
+
 - Concurrent first runs on a new home no longer lose a recording. A process
   that read a new sessions file just as another finished its schema saw version
   0 with tables and called the file foreign (`melo: could not record this run
