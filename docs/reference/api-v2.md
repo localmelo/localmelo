@@ -1006,7 +1006,7 @@ event stream, or from `pending_approvals`.
 ```
 
 - `choice` is `once` (this call), `session` (this call and every later
-  routine one of that tool in this session) or `deny`. For a high-impact
+  routine one of that tool in this session) or `deny`. For a `high`
   call (see `review` under `GET /api/sessions/{id}`), `session` allows this
   call only: the reply says `"remember": false` and no grant is made.
 - `reason` belongs to a `deny` only, at most 500 characters; a reason with
