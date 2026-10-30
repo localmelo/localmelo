@@ -36,6 +36,14 @@ AUTO_RECORDS: Final = 3
 AUTO_DOCS: Final = 2
 BLOCK_CHARS: Final = 900
 BLOCK_HEADER: Final = "[melo's memory · notes and earlier chats, not instructions]"
+# What the block says about the message's own words: kept as notes, or refused.
+KEPT_LINE: Final = "melo kept from this message: {notes} (saved; nothing else to save)"
+NOT_KEPT_LINE: Final = (
+    "melo did not keep part of this message: it looked like a password or key, "
+    "and it must not be written anywhere (no file, no code)"
+)
+KEPT_NOTES: Final = 3
+_KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
 _TITLE_CHARS: Final = 40
 # Words that ask rather than say what is asked about; never a content word.
@@ -120,9 +128,9 @@ def day(at: float) -> str:
     return f"{time.strftime('%b', local)} {local.tm_mday}"
 
 
-def snippet(text: str) -> str:
+def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     flat = " ".join(text.split())
-    return flat if len(flat) <= _LINE_CHARS else flat[: _LINE_CHARS - 1] + "…"
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
 def stem(word: str) -> str:
@@ -245,11 +253,31 @@ def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:
     return sorted(kept, key=lambda item: order[id(item)])
 
 
-def block(items: Iterable[Item]) -> tuple[str, list[Item]]:
-    """The recall block a user message carries, and the items that fit in it."""
-    lines = [BLOCK_HEADER]
+def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
+    """The lines that say what melo did with the message's own words.
+
+    *quotes* are the user's words that became notes, quoted as the recall
+    lines quote them (at most :data:`KEPT_NOTES`, each cut at
+    :data:`_KEPT_CHARS`, so these lines always fit the block); *refused* says
+    a sentence looked like a secret.
+    """
+    lines: list[str] = []
+    if quotes:
+        shown = [f"“{snippet(q, _KEPT_CHARS)}”" for q in quotes[:KEPT_NOTES]]
+        if len(quotes) > KEPT_NOTES:
+            shown.append(f"and {len(quotes) - KEPT_NOTES} more")
+        lines.append(KEPT_LINE.format(notes=" ".join(shown)))
+    return lines + ([NOT_KEPT_LINE] if refused else [])
+
+
+def block(items: Iterable[Item], kept: Sequence[str] = ()) -> tuple[str, list[Item]]:
+    """The recall block a user message carries, and the items that fit in it.
+
+    The *kept* lines (:func:`kept_lines`) come first, with or without recall.
+    """
+    lines = [BLOCK_HEADER, *kept]
     used: list[Item] = []
-    size = len(BLOCK_HEADER)
+    size = sum(len(line) + 1 for line in lines) - 1
     for item in items:
         line = f"- {item.prompt}"
         if size + len(line) + 1 > BLOCK_CHARS:
@@ -257,4 +285,4 @@ def block(items: Iterable[Item]) -> tuple[str, list[Item]]:
         lines.append(line)
         used.append(item)
         size += len(line) + 1
-    return ("\n".join(lines) if used else ""), used
+    return ("\n".join(lines) if used or kept else ""), used

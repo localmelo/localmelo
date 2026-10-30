@@ -45,6 +45,7 @@ from localmelo.support.memory.recall import (
     block,
     chat_label,
     day,
+    kept_lines,
     pick,
     ranked,
     snippet,
@@ -552,7 +553,9 @@ class ChatMemory:
             docs_k=AUTO_DOCS,
             exclude_session=info.session_id,
         )
-        text, used = block(used)
+        text, used = block(
+            used, kept_lines([cand.quote for cand in found], refused=refused)
+        )
         recall.used = len(used)
         written: list[records.Written] = []
         if found:
