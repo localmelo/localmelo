@@ -163,7 +163,7 @@ func petSnapped(_ frame: CGRect, belowPaws: CGFloat, in visible: CGRect) -> CGRe
 
 /// Where to save a panel for its screen: how far its bottom-right corner is from the bottom-right corner of the
 /// screen's usable area. A change of Dock size or of the screen's resolution moves the pet with that corner.
-struct PetSpot: Equatable {
+struct PetSpot: Equatable, Codable {
     let dx: CGFloat
     let dy: CGFloat
 }
@@ -176,4 +176,79 @@ func petSpot(of frame: CGRect, on visible: CGRect) -> PetSpot {
 func petFrame(size: CGSize, spot: PetSpot, belowPaws: CGFloat, on visible: CGRect) -> CGRect {
     petClamped(CGRect(x: visible.maxX + spot.dx - size.width, y: visible.minY + spot.dy,
                       width: size.width, height: size.height), belowPaws: belowPaws, in: visible)
+}
+
+/// The panel's size in points: the canvas every lying and sleeping picture shares (`canvas` in anchors.json), and
+/// the clear strip under the paws (its height minus `ground`).
+let petPanelSize = CGSize(width: 132, height: 97)
+let petBelowPaws: CGFloat = 3
+/// A press that moved no further than this many points is a click, not the start of a drag.
+let petClickSlop: CGFloat = 3
+
+func petIsClick(moved distance: CGFloat) -> Bool { distance <= petClickSlop }
+
+/// Whether the app's main window is in front of the person: ordered in, not minimized, the app not hidden.
+func petWindowShown(visible: Bool, minimized: Bool, appHidden: Bool) -> Bool { visible && !minimized && !appHidden }
+
+/// The pet lies on the desktop only while the window is put away and the person has not hidden it.
+func petShouldShow(windowShown: Bool, hiddenByPerson: Bool) -> Bool { !windowShown && !hiddenByPerson }
+
+/// Where a click on the pet goes: to the chat or task that waits for an approval, else to the window.
+enum PetClick: Equatable {
+    case waiting, window
+}
+
+func petClickTarget(_ mood: PetMood) -> PetClick { mood == .waiting ? .waiting : .window }
+
+/// What the app remembers about the pet between launches: whether the person hid it, the screen it was last on,
+/// and its spot on each screen. A missing, damaged or partly damaged file gives what is left of it.
+struct PetSettings: Equatable, Codable {
+    var hidden = false
+    var screen: String?
+    var spots: [String: PetSpot] = [:]
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Keys.self)
+        hidden = (try? values.decode(Bool.self, forKey: .hidden)) ?? false
+        screen = try? values.decode(String.self, forKey: .screen)
+        let raw = (try? values.decode([String: PetSpot].self, forKey: .spots)) ?? [:]
+        spots = raw.filter { $0.value.dx.isFinite && $0.value.dy.isFinite && $0.key.count <= 128 }
+    }
+
+    private enum Keys: String, CodingKey { case hidden, screen, spots }
+
+    /// `key` is where the pet was dropped, at `spot`. Other screens keep theirs, up to 16 of them.
+    mutating func remember(screen key: String, spot: PetSpot) {
+        screen = key
+        spots[key] = spot
+        while spots.count > 16, let extra = spots.keys.first(where: { $0 != key }) { spots[extra] = nil }
+    }
+}
+
+func petSettings(_ data: Data?) -> PetSettings {
+    data.flatMap { try? JSONDecoder().decode(PetSettings.self, from: $0) } ?? PetSettings()
+}
+
+func petSettingsData(_ settings: PetSettings) -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+    return (try? encoder.encode(settings)) ?? Data("{}".utf8)
+}
+
+/// One screen the pet may lie on: a key that stays the same across launches, and its usable area.
+struct PetScreen: Equatable {
+    let key: String
+    let visible: CGRect
+}
+
+/// Where the panel goes: on the screen it was last on if that is still there, else the first screen (the one with
+/// the menu bar); at that screen's saved spot, else at its bottom right. Nil when there is no screen.
+func petPlacement(_ settings: PetSettings, screens: [PetScreen]) -> (screen: PetScreen, frame: CGRect)? {
+    guard let screen = screens.first(where: { $0.key == settings.screen }) ?? screens.first else { return nil }
+    if let spot = settings.spots[screen.key] {
+        return (screen, petFrame(size: petPanelSize, spot: spot, belowPaws: petBelowPaws, on: screen.visible))
+    }
+    return (screen, petDefaultFrame(size: petPanelSize, belowPaws: petBelowPaws, in: screen.visible))
 }

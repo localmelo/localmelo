@@ -351,11 +351,8 @@ def test_real_host_typechecks() -> None:
             "/usr/bin/xcrun",
             "swiftc",
             "-typecheck",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
-            str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
-            str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
-            str(ROOT / "macos/LocalMeloApp/main.swift"),
+            # The files the build compiles, as it finds them.
+            *map(str, sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))),
         ],
         env={
             **os.environ,

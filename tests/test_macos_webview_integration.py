@@ -11,9 +11,10 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import unquote
 
 import pytest
@@ -45,6 +46,104 @@ var quitPhase = 0
 var didSignInAgain = false
 var didRetry = false
 var didClickItems = false
+var petDriven = false
+
+// What the pet tests do to the host once the console has loaded (TEST_PET names the script), all through the host's
+// own objects: the window is closed with performClose, the pet is pressed with mouse events sent to its panel,
+// and its menu items are run as the menu would run them.
+extension App {
+    func drivePet() {
+        let mode = ProcessInfo.processInfo.environment["TEST_PET"] ?? ""
+        guard !mode.isEmpty, !petDriven else { return }
+        petDriven = true
+        func state(_ tag: String) {
+            let frame = pet.panel.frame
+            record("pet \(tag) shown=\(pet.isShown) window=\(window.isVisible) label=\(pet.view.accessibilityLabel() ?? "")"
+                   + " frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))"
+                   + " level=\(pet.panel.level == .floating) hidden=\(pet.hiddenByPerson) offered=\(!menuBar.showPetLine.isHidden)"
+                   + " key=\(pet.panel.isKeyWindow)")
+        }
+        func mouse(_ type: NSEvent.EventType, _ dx: CGFloat = 0, _ dy: CGFloat = 0) {
+            // Pointer positions are in the panel's own coordinates, from its middle, wherever it is on the screen.
+            let size = pet.panel.frame.size
+            let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: size.width / 2 + dx, y: size.height / 2 + dy),
+                                           modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: pet.panel.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: 1, pressure: 1)!
+            pet.panel.sendEvent(event)
+        }
+        func run(_ menu: NSMenu?, _ title: String) {
+            if let item = menu?.items.first(where: { $0.title == title }), let action = item.action {
+                _ = NSApp.sendAction(action, to: item.target, from: item)
+            } else {
+                record("pet no-menu-item " + title)
+            }
+        }
+        func after(_ seconds: Double, _ step: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
+        }
+        state("start")
+        window.performClose(nil)
+        after(0.7) {
+            state("closed")
+            switch mode {
+            case "closed": break
+            case "close":
+                self.openWindow()
+                after(0.7) { state("reopened") }
+            case "hide-app":
+                self.openWindow()
+                after(0.7) {
+                    NSApp.hide(nil)
+                    after(1) {
+                        state("app-hidden")
+                        NSApp.unhide(nil)
+                        after(1) { state("app-shown") }
+                    }
+                }
+            case "minimize":
+                self.openWindow()
+                after(0.7) {
+                    self.window.miniaturize(nil)
+                    after(1.5) {
+                        state("minimized")
+                        self.openWindow()
+                        after(1) { state("restored") }
+                    }
+                }
+            case "click":
+                mouse(.leftMouseDown)
+                mouse(.leftMouseUp)
+                after(0.7) {
+                    state("clicked")
+                    self.webView.evaluateJavaScript("location.hash") { value, _ in record("route " + String(describing: value ?? "nil")) }
+                }
+            case "menu":
+                run(self.pet.view.menu, "Open localmelo")
+                after(0.7) { state("opened") }
+            case "hide":
+                run(self.pet.view.menu, "Hide Melo")
+                after(0.7) { state("hidden") }
+            case "stay-hidden":
+                after(1) {
+                    state("later")
+                    run(self.menuBar.statusItem.menu, "Show Melo")
+                    after(0.7) { state("shown-again") }
+                }
+            case "drag":
+                after(0.3) {
+                    mouse(.leftMouseDown)
+                    mouse(.leftMouseDragged, -2, 1)  // within the slop of a click: nothing moves yet
+                    state("pressed")
+                    mouse(.leftMouseDragged, -240, 150)
+                    mouse(.leftMouseUp, -240, 150)
+                    state("dropped")
+                }
+            default: record("pet unknown-script " + mode)
+            }
+        }
+    }
+}
 """
 
 FAKE_GATEWAY = r"""import http.server, json, os, pathlib, sys, threading, time
@@ -270,6 +369,9 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.chmod(0o755)
     for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
         shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
+    shutil.copytree(
+        ROOT / "macos/art/akita", bundle / "Resources/akita"
+    )  # the pet's pictures
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.
@@ -380,6 +482,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             }
             performSignIn(100)
         }""",
+        # Where the pet is after each health reply, for the tests that follow it.
+        "                self.pet.update(health: data, stopped: false)\n": r"""                self.pet.update(health: data, stopped: false)
+                record("pet-poll shown=\(self.pet.isShown) label=\(self.pet.view.accessibilityLabel() ?? "")"
+                       + " help=\(self.pet.view.accessibilityHelp() ?? "") tip=\(self.pet.view.toolTip ?? "")")
+""",
+        "        showConsole()\n    }\n": "        showConsole()\n        drivePet()\n    }\n",
         "                self.menuBar.show(menuBarState(data))\n": r"""                self.menuBar.show(menuBarState(data))
                 let item = self.menuBar.statusItem.button
                 record("menubar t=\(Date().timeIntervalSince1970) title=\(item?.title ?? "") label=\(item?.accessibilityLabel() ?? "") "
@@ -438,6 +546,8 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
+            str(ROOT / "macos/LocalMeloApp/PetPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/PetPanel.swift"),
             str(main),
             "-o",
             str(executable),
@@ -735,6 +845,201 @@ def test_waiting_and_settings_items_reach_the_page(app: Path, tmp_path: Path) ->
         )  # the console's own Settings button was pressed
     finally:
         stop(process, tmp_path)
+
+
+PET_STATE = re.compile(
+    r"pet (\S+) shown=(\S+) window=(\S+) label=(.*?) frame=(-?\d+),(-?\d+),(\d+),(\d+)"
+    r" level=(\S+) hidden=(\S+) offered=(\S+) key=(\S+)"
+)
+
+
+class PetStep(NamedTuple):
+    """The pet, the window and the menu-bar entry at one step of the host's pet script."""
+
+    shown: str
+    window: str
+    label: str
+    frame: tuple[int, int, int, int]
+    floating: str
+    hidden: str
+    offered: str
+    key: str
+
+
+def pet_states(path: Path) -> dict[str, PetStep]:
+    states: dict[str, PetStep] = {}
+    for line in path.read_text().splitlines():
+        match = PET_STATE.fullmatch(line)
+        if match:
+            (
+                tag,
+                shown,
+                window,
+                label,
+                x,
+                y,
+                w,
+                h,
+                level,
+                hidden,
+                offered,
+                key,
+            ) = match.groups()
+            frame = (int(x), int(y), int(w), int(h))
+            states[tag] = PetStep(
+                shown, window, label, frame, level, hidden, offered, key
+            )
+    return states
+
+
+def run_pet(
+    app: Path,
+    home: Path,
+    script: str,
+    until: str,
+    status: Mapping[str, object] | None = None,
+) -> dict[str, PetStep]:
+    """Launches the host with a pet script, waits for its step `until`, stops the host and returns the steps."""
+    if status is not None:
+        (home / "status.json").write_text(json.dumps(status))
+    process = launch(app, home, "menubar", TEST_PET=script)
+    try:
+        wait_for(home / "events", f"pet {until} ", process, timeout=30)
+        return pet_states(home / "events")
+    finally:
+        stop(process, home)
+
+
+def test_closing_the_window_puts_melo_on_the_desktop_and_the_window_coming_back_takes_it_off(
+    app: Path, tmp_path: Path
+) -> None:
+    steps = run_pet(app, tmp_path, "close", "reopened")
+    assert (steps["start"].shown, steps["start"].window) == ("false", "true")
+    closed = steps["closed"]
+    assert (closed.shown, closed.window) == ("true", "false")
+    assert closed.label == "Melo, resting. Nothing running."
+    # A floating panel the size of the pictures that never takes the keyboard from the app in front.
+    assert closed.floating == "true" and closed.key == "false"
+    assert closed.frame[2:] == (132, 97)
+    assert (steps["reopened"].shown, steps["reopened"].window) == (
+        "false",
+        "true",
+    )
+
+
+@pytest.mark.parametrize(
+    ("script", "put_away", "back"),
+    [("hide-app", "app-hidden", "app-shown"), ("minimize", "minimized", "restored")],
+)
+def test_hiding_the_app_or_minimizing_the_window_puts_melo_on_the_desktop_too(
+    app: Path, tmp_path: Path, script: str, put_away: str, back: str
+) -> None:
+    steps = run_pet(app, tmp_path, script, back)
+    assert steps[put_away].shown == "true"
+    assert steps[back].shown == "false"
+
+
+def test_a_click_opens_the_window_and_one_on_a_waiting_melo_opens_what_waits(
+    app: Path, tmp_path: Path
+) -> None:
+    steps = run_pet(app, tmp_path, "click", "clicked")
+    assert steps["closed"].shown == "true"
+    assert (steps["clicked"].shown, steps["clicked"].window) == ("false", "true")
+    waiting = tmp_path / "waiting"
+    waiting.mkdir()
+    status = {
+        "running": {"chats": 1, "tasks": 0, "runs": 0, "terminal": 0},
+        "waiting": [{"kind": "chat", "id": "chat-1"}],
+    }
+    steps = run_pet(app, waiting, "click", "clicked", status)
+    assert steps["closed"].label == "Melo, waiting for your approval."
+    assert steps["clicked"].window == "true"
+    assert "route #/s/chat-1" in (waiting / "events").read_text()
+
+
+def test_the_menu_opens_the_window_and_hide_melo_is_remembered_until_show_melo(
+    app: Path, tmp_path: Path
+) -> None:
+    opened = tmp_path / "menu"
+    opened.mkdir()
+    steps = run_pet(app, opened, "menu", "opened")
+    assert (steps["opened"].shown, steps["opened"].window) == ("false", "true")
+    steps = run_pet(app, tmp_path, "hide", "hidden")
+    assert steps["closed"].shown == "true" and steps["closed"].offered == "false"
+    # Hidden: gone at once, remembered, and the menu-bar menu offers the way back.
+    hidden = steps["hidden"]
+    assert (hidden.shown, hidden.hidden, hidden.offered) == (
+        "false",
+        "true",
+        "true",
+    )
+    saved = tmp_path / "Library/Application Support/LocalMelo/pet.json"
+    assert json.loads(saved.read_text())["hidden"] is True
+    # A new launch: closing the window shows no pet, and Show Melo brings it.
+    (tmp_path / "events").unlink()
+    steps = run_pet(app, tmp_path, "stay-hidden", "shown-again")
+    assert (steps["closed"].shown, steps["closed"].offered) == ("false", "true")
+    assert steps["later"].shown == "false"
+    assert (steps["shown-again"].shown, steps["shown-again"].offered) == (
+        "true",
+        "false",
+    )
+    assert json.loads(saved.read_text())["hidden"] is False
+
+
+def test_melo_s_words_follow_the_health_reply(app: Path, tmp_path: Path) -> None:
+    status, events = tmp_path / "status.json", tmp_path / "events"
+    run = {"chats": 2, "tasks": 0, "runs": 0, "terminal": 0}
+    ended = {"kind": "chat", "id": "chat-1", "ended_s_ago": 0.5}
+    steps = [
+        ({}, "Melo, resting. Nothing running.", "Opens localmelo"),
+        ({"running": run}, "Melo, working. 2 running.", "Opens localmelo"),
+        (
+            {"running": run, "waiting": [{"kind": "chat", "id": "chat-1"}]},
+            "Melo, waiting for your approval.",
+            "Opens what waits for your approval",
+        ),
+        (
+            {"recent": {**ended, "outcome": "done"}},
+            "Melo, done.",
+            "Opens localmelo",
+        ),
+        (
+            {"recent": {**ended, "outcome": "failed"}},
+            "Melo, the last run did not finish.",
+            "Opens localmelo",
+        ),
+        ({}, "Melo, resting. Nothing running.", "Opens localmelo"),
+    ]
+    process = launch(app, tmp_path, "menubar", TEST_PET="closed")
+    try:
+        wait_for(events, "pet closed ", process, timeout=30)
+        for reply, label, help_text in steps:
+            marker = f"pet-poll shown=true label={label} help={help_text} tip={label}"
+            seen = events.read_text().count(marker)
+            status.write_text(json.dumps(reply))
+            wait_for(events, marker, process, timeout=15, count=seen + 1)
+    finally:
+        stop(process, tmp_path)
+
+
+def test_a_dragged_melo_is_where_it_was_dropped_next_time(
+    app: Path, tmp_path: Path
+) -> None:
+    steps = run_pet(app, tmp_path, "drag", "dropped")
+    home = steps["closed"].frame
+    # Within the click's slop nothing moves; then it follows the pointer by what it moved.
+    assert steps["pressed"].frame == home
+    dropped = steps["dropped"].frame
+    assert (dropped[0] - home[0], dropped[1] - home[1]) == (-240, 150)
+    assert steps["dropped"].window == "false"  # a drag is not a click
+    saved = json.loads(
+        (tmp_path / "Library/Application Support/LocalMelo/pet.json").read_text()
+    )
+    assert len(saved["spots"]) == 1 and saved["screen"] in saved["spots"]
+    (tmp_path / "events").unlink()
+    again = run_pet(app, tmp_path, "closed", "closed")
+    assert again["closed"].frame == dropped
 
 
 @pytest.mark.parametrize("mode", ["handoff-probe", "handoff-health"])

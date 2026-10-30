@@ -21,6 +21,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var webView: WKWebView!
     private var statusView: StatusView!
     private var menuBar: MenuBar!
+    // Melo on the desktop while the window is put away.
+    private var pet: PetController!
     // Where "Waiting for your approval" goes: the console route of the first chat or task that waits.
     private var pendingRoute: String?
     private var child: Process?
@@ -50,8 +52,19 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         NSApp.setActivationPolicy(.regular)
         createWindow()
         createMenu()
+        createPet()
         startGateway()
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !window.isVisible || window.isMiniaturized { openWindow() }
+        return false
+    }
+
+    func applicationDidHide(_ notification: Notification) { updatePet() }
+    func applicationDidUnhide(_ notification: Notification) { updatePet() }
+    func windowDidMiniaturize(_ notification: Notification) { updatePet() }
+    func windowDidDeminiaturize(_ notification: Notification) { updatePet() }
 
     private func createWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 720),
@@ -95,10 +108,29 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         editEntry.submenu = edit
         root.addItem(editEntry)
         NSApp.mainMenu = root
-        menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting))
+        menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting),
+                          showPet: #selector(showPet))
         signInItems = [signIn] + (menuBar.statusItem.menu?.items.filter { $0.action == #selector(signInAgain) } ?? [])
         updateSignInItems()
     }
+
+    private func createPet() {
+        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
+        pet = PetController(settingsURL: home.appendingPathComponent("Library/Application Support/LocalMelo/pet.json"),
+                            pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"))
+        pet.openWindow = { [weak self] in self?.openWindow() }
+        pet.openWaiting = { [weak self] in self?.openWaiting() }
+        pet.hiddenChanged = { [weak self] hidden in self?.menuBar.showPetLine.isHidden = !hidden }
+        menuBar.showPetLine.isHidden = !pet.hiddenByPerson
+        updatePet()
+    }
+
+    // The pet lies on the desktop while the window is closed, minimized or the app hidden.
+    private func updatePet() {
+        pet?.windowShown(petWindowShown(visible: window.isVisible, minimized: window.isMiniaturized, appHidden: NSApp.isHidden))
+    }
+
+    @objc private func showPet() { pet.setHidden(false) }
 
     private func handle(_ action: FailureAction) {
         switch action {
@@ -129,8 +161,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     @objc private func openWindow() {
+        if NSApp.isHidden { NSApp.unhide(nil) }
+        if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        updatePet()
     }
 
     // The console has no route for its settings, so this presses the button its sidebar has; it needs
@@ -178,6 +213,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        updatePet()
         return false
     }
 
@@ -247,6 +283,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         nextLoginAttempt = Date()
         signInFailures = 0
         updateSignInItems()
+        pet?.update(health: nil, stopped: false)
         port = 0
         showStep()
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
@@ -476,6 +513,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.healthAuthenticated = true
                 self.signInFailures = 0
                 self.menuBar.show(menuBarState(data))
+                self.pet.update(health: data, stopped: false)
                 self.pendingRoute = waitingRoute(data)
                 self.refreshPageState()
                 guard health.store == "ok" else {
@@ -730,6 +768,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
         child = nil
         menuBar.show(.unknown)
+        pet.update(health: nil, stopped: true)
         pendingRoute = nil
         statusView.showFailure(failureNotice(reason: text, ready: ready))
         openWindow()
