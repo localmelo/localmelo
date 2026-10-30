@@ -26,10 +26,9 @@ export function dayLabel(ts, now) {
   return day.getFullYear() === new Date(now * 1000).getFullYear() ? label : `${label}, ${day.getFullYear()}`;
 }
 
-/** "09:41", on this computer's clock. */
+/** "7:35 PM", as this computer writes a time (the panel's rows write it the same way). */
 export function clock(ts) {
-  const day = new Date(ts * 1000);
-  return `${String(day.getHours()).padStart(2, "0")}:${String(day.getMinutes()).padStart(2, "0")}`;
+  return new Date(ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
 }
 
 /** A time beside a row: the clock today, else the day. */

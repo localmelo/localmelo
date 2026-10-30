@@ -623,12 +623,12 @@ function mainRow(main, unread) {
       ? main.held ? "Waiting" : "Working"
       : unread
         ? unread.state === "waiting" ? `${unread.title || "A side chat"} needs you` : `New: ${unread.title || "a result"}`
-        : "Where results come back";
+        : "";
   const when = shortTime(Math.max(main.updated_at || 0, Number(main.last_card?.ts) || 0), nowSeconds());
   const dot = asking || unread
     ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${asking ? "Approval needed" : "New results"}" title="${asking ? "Approval needed" : "New results"}"></span>`
     : "";
-  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">Main chat</span><span class="session-meta">${esc(meta)}</span></span><span class="main-when">${esc(when)}${dot}</span>`;
+  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">Main chat</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
   info.addEventListener("click", () => {
     openSession(main.id);
   });

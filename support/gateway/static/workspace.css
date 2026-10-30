@@ -295,7 +295,8 @@ button:hover:not(:disabled) {
 .main-when .attention-dot { margin: 0; }
 .attention-dot.waits { background: var(--warn); }
 /* The thread: side chats sit under the main chat's face, on one quiet line. */
-.session-list.nested { margin-left: 23px; padding-left: 6px; border-left: 1px solid var(--line); }
+.session-list.nested { flex: 0 1 auto; margin-left: 23px; padding-left: 4px; border-left: 1px solid var(--line); }
+.sidebar-bottom { margin-top: auto; }
 .list-day { margin: 12px 4px 2px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; }
 .list-day:first-child { margin-top: 2px; }
 .header-trail { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -328,6 +329,10 @@ button:hover:not(:disabled) {
 }
 @media (max-width: 700px), (pointer: coarse) {
   .header-parent, .main-card-foot .link-button { min-height: 44px; }
+  /* The target is tall; the line stays as tall as the title. */
+  .header-trail { align-items: center; }
+  .header-parent { margin-block: -12px; }
+  .main-card-foot { margin-top: 0; }
 }
 @media (max-width: 700px) {
   .main-card { margin-bottom: 16px; }

@@ -18,7 +18,8 @@ test('days read as people say them', () => {
   assert.equal(dayLabel(NOON - DAY, NOON), 'Yesterday');
   assert.equal(dayLabel(NOON - 2 * DAY, NOON), 'Oct 28');
   assert.equal(dayLabel(NOON - 365 * DAY, NOON), 'Oct 30, 2025');
-  assert.equal(shortTime(NOON - HOUR, NOON), '11:00');
+  const time = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  assert.equal(shortTime(NOON - HOUR, NOON), time(NOON - HOUR), 'Today reads as the clock, as the panel writes it');
   assert.equal(shortTime(NOON - DAY, NOON), 'Yesterday');
   assert.equal(shortTime(0, NOON), '');
 });
@@ -92,5 +93,6 @@ test('a card node opens its source', () => {
   assert.equal(action.textContent, 'Review');
   action.listeners.click();
   assert.deepEqual(opened, [card]);
-  assert.equal(made.find((item) => item.className === 'main-card-time').textContent, '12:00');
+  const noon = new Date(NOON * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  assert.equal(made.find((item) => item.className === 'main-card-time').textContent, noon);
 });
