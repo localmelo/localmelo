@@ -16,6 +16,7 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 
 from localmelo.support.cli.app import StatusBar, open_history, status_fragments
+from localmelo.support.cli.commands import COMMANDS
 from localmelo.support.cli.completion import SlashCompleter
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
@@ -602,6 +603,137 @@ async def test_tab_completes_at_once_before_the_menu_shows(
         await app.wait(lambda: app.ui.buffer.text == completed)
         app.type(ENTER)
         await app.wait(lambda: controller.entered == [completed])
+
+
+# ── The menu follows the text when characters are deleted (#277) ──
+
+LEFT = "\x1b[D"
+HOME = "\x01"  # ctrl+a
+CTRL_W = "\x17"
+DELETE = "\x1b[3~"
+
+
+def _offered(app: Driver) -> list[str]:
+    state = app.ui.buffer.complete_state
+    return [] if state is None else [item.text for item in state.completions]
+
+
+async def _menu(app: Driver, offered: list[str]) -> None:
+    """Wait until the menu offers *offered* (all of the command list when empty)."""
+    await app.wait(lambda: _offered(app) == offered, timeout_s=5)
+
+
+async def test_the_menu_follows_a_slash_command_while_characters_are_deleted() -> None:
+    async with running_app(completer=SlashCompleter()) as app:
+        app.type("/exi")
+        await _menu(app, ["/exit"])
+        app.type(BACKSPACE)
+        await _menu(app, ["/exit", "/expand"])
+        assert app.ui.buffer.text == "/ex"
+        await app.wait(lambda: "/expand" in app.text())  # drawn, not only held
+        app.type(BACKSPACE)
+        await app.wait(lambda: app.ui.buffer.text == "/e")
+        await _menu(app, ["/exit", "/expand"])
+        app.type(BACKSPACE)
+        await _menu(app, [f"/{command.name}" for command in COMMANDS])
+        assert app.ui.buffer.text == "/"
+        app.type(BACKSPACE)  # the "/" is gone: the context is gone
+        await app.wait(lambda: app.ui.buffer.text == "")
+        await app.settle(0.4)
+        assert _offered(app) == []
+        await app.wait(lambda: "/expand" not in app.text())
+
+
+async def test_the_menu_follows_attachment_names_while_characters_are_deleted(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "file.txt").write_text("x")
+    (tmp_path / "other.txt").write_text("x")
+
+    class Controller(FakeController):
+        agent = SimpleNamespace(workspace_root=str(tmp_path))
+
+    async with running_app(Controller(), completer=SlashCompleter()) as app:
+        app.type("look @fi")
+        await _menu(app, ["@file.txt"])
+        app.type(BACKSPACE)
+        await _menu(app, ["@file.txt"])
+        app.type(BACKSPACE)
+        await _menu(app, ["@file.txt", "@other.txt"])
+        assert app.ui.buffer.text == "look @"
+        app.type(BACKSPACE)  # the "@" is gone
+        await app.wait(lambda: app.ui.buffer.text == "look ")
+        await app.settle(0.4)
+        assert _offered(app) == []
+
+
+@pytest.mark.parametrize(
+    ("typed", "keys", "text", "offered"),
+    [
+        # A word deleted at once, back to where an argument is offered.
+        ("/verbose on", CTRL_W, "/verbose ", ["on", "off"]),
+        # Delete forward: "/ex|it" loses its "i".
+        ("/exit", LEFT + LEFT + DELETE, "/ext", ["/exit", "/expand"]),
+        # Ctrl+K: "/ex|it" loses the rest of the line.
+        ("/exit", LEFT + LEFT + "\x0b", "/ex", ["/exit", "/expand"]),
+    ],
+)
+async def test_other_deleting_keys_ask_again_too(
+    typed: str, keys: str, text: str, offered: list[str]
+) -> None:
+    async with running_app(completer=SlashCompleter()) as app:
+        app.type(typed)
+        await app.wait(lambda: app.ui.buffer.text == typed)
+        await app.settle(0.3)
+        app.type(keys)
+        await app.wait(lambda: app.ui.buffer.text == text)
+        await _menu(app, offered)
+
+
+async def test_esc_closes_the_menu_until_the_next_edit_and_moving_opens_none() -> None:
+    async with running_app(completer=SlashCompleter()) as app:
+        app.type("/exi")
+        await _menu(app, ["/exit"])
+        app.type(BACKSPACE)
+        await _menu(app, ["/exit", "/expand"])
+        app.type(ESC)
+        await app.wait(lambda: app.ui.buffer.complete_state is None, timeout_s=3)
+        await app.settle(0.6)
+        assert _offered(app) == []
+        app.type(LEFT)  # the cursor alone opens nothing
+        await app.settle(0.4)
+        assert _offered(app) == []
+        app.type("\x1b[C")
+        await app.settle(0.4)
+        assert _offered(app) == []
+        app.type(BACKSPACE)  # the next change opens it again
+        await app.wait(lambda: app.ui.buffer.text == "/e")
+        await _menu(app, ["/exit", "/expand"])
+
+
+async def test_deleting_nothing_opens_no_menu() -> None:
+    async with running_app(completer=SlashCompleter()) as app:
+        app.type(BACKSPACE)  # an empty draft
+        await app.settle(0.4)
+        assert _offered(app) == []
+        app.type("/exit" + ESC)
+        await app.settle(0.4)
+        app.type(HOME + BACKSPACE)  # the start of the draft: nothing to delete
+        await app.settle(0.4)
+        assert app.ui.buffer.text == "/exit" and _offered(app) == []
+
+
+async def test_tab_and_enter_still_take_the_menu_after_a_deletion() -> None:
+    controller = FakeController()
+    async with running_app(controller, completer=SlashCompleter()) as app:
+        app.type("/exi")
+        await _menu(app, ["/exit"])
+        app.type(BACKSPACE)
+        await _menu(app, ["/exit", "/expand"])
+        app.type("\t")
+        await app.wait(lambda: app.ui.buffer.text == "/exit")
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == ["/exit"])
 
 
 async def test_printing_above_the_app_keeps_the_terminal_raw(

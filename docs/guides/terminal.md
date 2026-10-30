@@ -93,6 +93,23 @@ model row with that name; a saved server is listed after the box, so the box
 shows what the file says, unless the run already listed the server (the first
 run does).
 
+### What melo says about itself
+
+Every chat tells its model who it is, so that "who are you?" is answered as
+melo and not as the assistant the model was trained as. The paragraph says that
+melo is melo from localmelo, an open-source agent that works in your folder with
+tools and asks before it changes anything; that it names the model it runs on
+when asked; that it does not present itself as the model's own assistant or as
+made by its maker; and that it answers in your language. It also names the
+server as the banner does (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a
+cloud provider) and says whether the server is on this computer (`on this
+computer`, or `at 192.168.1.20` for a server on another machine), and it asks
+the model to answer a greeting, or a question it can answer directly, without
+tools. `/model` and `/backend` start the next turn on the new choice, and that
+turn names the new model. The web console and the macOS app do the same; direct
+runs (`melo "task"`), workers and the benchmark send no such paragraph, so their
+requests are as before.
+
 ### Keys
 
 | Key | What it does |
@@ -127,12 +144,14 @@ run does).
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one. The list has no
-background block: the names are in your text colour, their descriptions muted,
-the chosen row has the `❯` and moss band every list has, and the names stand
-under the text you typed. At most eight rows show, with a slim bar at the
-right when there are more. An `@` file name and a command's argument
-(`/model NAME`) use the same list. The everyday
+type more letters to narrow them, delete letters to widen them again (the list
+closes when the `/` is deleted), Tab or Enter to take one. Esc closes the list
+until your next edit; moving the cursor alone does not open it. The same goes
+for the file names after an `@`. The list has no background block: the names
+are in your text colour, their descriptions muted, the chosen row has the `❯`
+and moss band every list has, and the names stand under the text you typed. At
+most eight rows show, with a slim bar at the right when there are more. A
+command's argument (`/model NAME`) uses the same list. The everyday
 commands come first, and are the menu's first screen: `/model`, `/new`,
 `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
 the command does and, where it needs one, its argument (`/attach PATH`).
@@ -353,7 +372,9 @@ happens without the explicit `/copy` command.
   progress line would, with the steps they took: `last time 6 steps, 2m10s:
   Run ls ✓ · Read app.py ✓`. It shows on a session's first turn, and in
   developer mode on every turn.
-- **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
+- **Thinking.** `✻ Thought for 1.2s`: one line. A reply that ends a turn without
+  any tool call prints `✻ Thought`, because the footer under the answer gives
+  that time. `/thinking on` and developer
   mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
   width. An intermediate message prints as Markdown after `●`; the
   last one is held, prints at the next step, and at the end only when it

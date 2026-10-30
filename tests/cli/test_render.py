@@ -1481,6 +1481,35 @@ def test_thinking_shows_its_excerpt_in_developer_mode_and_when_asked(how: str) -
     assert len(body) == (41 if how == "verbose" else 4)
 
 
+def test_a_reply_without_tool_calls_does_not_repeat_the_footers_time() -> None:
+    # The turn's only reply is its answer: the footer gives the time.
+    text = _message(Turn(), content="Hi.", thinking="a greeting").text()
+    assert "✻ Thought\n" in text and "Thought for" not in text
+
+
+def test_the_answer_after_tool_calls_keeps_its_own_time() -> None:
+    turn = Turn()
+    call = [{"id": "c1", "name": "file_read", "preview": "a"}]
+    _message(turn, thinking="read it", tool_calls=call)
+    turn.event(
+        "tool.finished",
+        step=1,
+        call_id="c1",
+        name="file_read",
+        status="success",
+        error_category="none",
+        output="x",
+        output_chars=1,
+        error="",
+        duration_s=0.1,
+        images=[],
+        approval=None,
+        exit_code=None,
+    )
+    text = _message(turn, content="Done.", thinking="the answer", step=2).text()
+    assert "✻ Thought for 0.1s" in text
+
+
 def test_a_new_session_restores_the_modes_thinking_default() -> None:
     quiet, developer = Turn(), Turn(developer=True)
     quiet.renderer.thinking, developer.renderer.thinking = True, False
@@ -1513,7 +1542,8 @@ def test_verbose_shows_forty_thinking_rows_and_thinking_off_none() -> None:
     assert body[40].strip().startswith("… +")
     off = Turn()
     off.renderer.thinking = False
-    text = _message(off, thinking=thinking).text()
+    call = [{"id": "c1", "name": "file_read", "preview": "a"}]
+    text = _message(off, thinking=thinking, tool_calls=call).text()
     assert "✻ Thought for 0.1s" in text
     assert not any(row.startswith("  w") for row in text.split("\n"))
 
