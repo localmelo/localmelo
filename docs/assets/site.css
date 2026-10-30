@@ -1105,8 +1105,7 @@ a.show-card:hover,
   text-decoration: none;
 }
 
-.show-card img,
-.shot-thumb img {
+.show-card img {
   display: block;
   width: 100%;
   height: auto;
@@ -1191,8 +1190,7 @@ a.show-card:hover,
   font-weight: 500;
 }
 
-.content .board-col ul,
-.content .day-points {
+.content .board-col ul {
   display: grid;
   gap: 10px;
   margin: 0;
@@ -1218,8 +1216,10 @@ a.show-card:hover,
   font-size: 0.88rem;
 }
 
-.chip {
+.chip,
+.board-card .chip {
   display: inline-flex;
+  width: fit-content;
   align-items: center;
   gap: 6px;
   margin-top: 8px;
@@ -1232,6 +1232,8 @@ a.show-card:hover,
 
 .chip::before {
   content: "";
+  display: inline-block;
+  flex: none;
   width: 7px;
   height: 7px;
   border: 1.5px solid currentColor;
@@ -1270,34 +1272,25 @@ a.show-card:hover,
   font-size: 1.15rem;
 }
 
+.day .shot {
+  max-width: 820px;
+  margin: 0 0 12px;
+}
+
+.day .shot img {
+  box-shadow: var(--shadow);
+}
+
 .content .day-points {
-  gap: 0;
+  display: block;
+  margin: 0;
+  padding-left: 22px;
+  list-style: disc;
 }
 
 .content .day-points li {
-  display: grid;
-  grid-template-columns: 184px minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  margin: 0;
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
+  margin: 6px 0;
   color: var(--ink);
-}
-
-.content .day-points li > p:only-child {
-  grid-column: 1 / -1;
-}
-
-.day-points p {
-  margin: 0;
-}
-
-.shot-thumb {
-  display: block;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 
 .anchors {
@@ -1334,30 +1327,6 @@ a.show-card:hover,
   margin-top: 0;
 }
 
-.group.flow {
-  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
-  background: var(--teal-soft);
-}
-
-a.group {
-  z-index: 0;
-  color: inherit;
-}
-
-a.group:hover {
-  text-decoration: none;
-}
-
-.node.planned,
-.legend-box.planned {
-  border-style: dashed;
-}
-
-.legend-box.planned {
-  border-color: var(--line-2);
-  background: var(--surface);
-}
-
 @media (max-width: 920px) {
   .comp-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1371,11 +1340,6 @@ a.group:hover {
     grid-template-columns: 1fr;
   }
 
-  .content .day-points li {
-    grid-template-columns: 112px minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
-  }
 }
 
 .conn.planned {

@@ -51,90 +51,59 @@
 
       <section class="section" id="diagram">
         <h2>Diagram</h2>
-        <p>A message comes in from a surface, runs in a chat's agent loop with memory beside it, and reaches your model server. Select a box to jump to its card.</p>
+        <h3 id="core">The agent's core</h3>
+        <p>A task runs in the agent, which keeps its context in memory and runs tools through the executor. Providers that the backends build from the config file reach the model servers.</p>
 
         <div class="diagram-scroll">
-          <div class="diagram" id="dia-overview" style="width:930px;height:700px">
-            <div class="group infra" style="left:735px;top:12px;width:185px;height:676px">
-              <span class="group-label">model access</span>
+          <div class="diagram" id="dia-overview" style="width:930px;height:440px">
+            <div class="group core" style="left:180px;top:16px;width:410px;height:410px">
+              <span class="group-label">melo/ · the agent</span>
             </div>
-            <div class="group core" id="g-loop" style="left:10px;top:340px;width:700px;height:160px">
-              <span class="group-label">the agent loop</span>
+            <div class="group infra" style="left:620px;top:16px;width:300px;height:410px">
+              <span class="group-label">support/ · model access</span>
             </div>
-            <a class="group flow" id="n-memory" href="#c-memory" style="left:10px;top:545px;width:700px;height:145px">
-              <span class="group-label">memory</span>
-            </a>
 
-            <a class="node" id="n-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
-              <span class="node-title">Terminal</span>
-              <span class="node-sub">melo · chats and one-off tasks</span>
+            <a class="node" id="n-cli" href="#c-cli" style="left:10px;top:40px;width:140px">
+              <span class="node-title">Command line</span>
+              <span class="node-sub">melo · direct mode<br>interactive UI</span>
             </a>
-            <a class="node" id="n-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
-              <span class="node-title">Console and app</span>
-              <span class="node-sub">browser page · macOS window</span>
-            </a>
-            <a class="node" id="n-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
-              <span class="node-title">HTTP API</span>
-              <span class="node-sub">/v1 for scripts · /api</span>
-            </a>
-            <a class="node" id="n-config" href="#c-config" style="left:750px;top:40px;width:155px">
-              <span class="node-title">Config</span>
-              <span class="node-sub">config.toml · melo setup</span>
-            </a>
-
-            <a class="node" id="n-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+            <a class="node" id="n-gateway" href="#c-gateway" style="left:10px;top:170px;width:140px">
               <span class="node-title">Gateway</span>
-              <span class="node-sub">melo serve · token sign-in · loopback only</span>
+              <span class="node-sub">HTTP API · sessions · web workspace</span>
+            </a>
+            <a class="node" id="n-mcp" href="#c-mcp" style="left:10px;top:300px;width:140px">
+              <span class="node-title">MCP servers</span>
+              <span class="node-sub">local stdio processes</span>
             </a>
 
-            <a class="node" id="n-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
-              <span class="node-title">Chats</span>
-              <span class="node-sub">one session per chat · a main chat is planned</span>
+            <a class="node" id="n-agent" href="#c-agent" style="left:230px;top:40px;width:310px">
+              <span class="node-title">Agent</span>
+              <span class="node-sub">run loop · reflection · run options · events</span>
             </a>
-            <a class="node" id="n-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
-              <span class="node-title">Scheduler</span>
-              <span class="node-sub">task queue · P0–P5 · GPU lock gate</span>
-            </a>
-            <a class="node" id="n-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
-              <span class="node-title">Workers</span>
-              <span class="node-sub">headless task sessions</span>
-            </a>
-
-            <a class="node" id="n-agent" href="#c-agent" style="left:30px;top:392px;width:170px">
-              <span class="node-title">Planner</span>
-              <span class="node-sub">plans each step · reflects</span>
-            </a>
-            <a class="checker-zone" id="n-checker" href="#c-checker" style="left:222px;top:368px;width:262px;height:118px">
+            <a class="checker-zone" id="n-checker" href="#c-checker" style="left:200px;top:170px;width:370px;height:230px">
               <span class="cz-label">Checker</span>
+              <span class="cz-sub">a refused tool call returns an error the model sees</span>
             </a>
-            <a class="node" id="n-executor" href="#c-executor" style="left:240px;top:392px;width:226px">
+            <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">Executor</span>
-              <span class="node-sub">runs tool calls · approvals · time limits</span>
+              <span class="node-sub">built-in, MCP and browser tools<br>time limits</span>
             </a>
-            <a class="node" id="n-mcp" href="#c-mcp" style="left:510px;top:392px;width:180px">
-              <span class="node-title">Tools</span>
-              <span class="node-sub">built-in · MCP servers · browser</span>
+            <a class="node" id="n-memory" href="#c-memory" style="left:395px;top:250px;width:160px">
+              <span class="node-title">Memory</span>
+              <span class="node-sub">working memory<br>history · long-term<br>tool registry</span>
             </a>
-            <a class="node" id="n-providers" href="#c-providers" style="left:750px;top:392px;width:155px">
+
+            <a class="node" id="n-config" href="#c-config" style="left:645px;top:40px;width:250px">
+              <span class="node-title">Config and setup</span>
+              <span class="node-sub">config.toml · setup wizard</span>
+            </a>
+            <a class="node" id="n-providers" href="#c-providers" style="left:645px;top:180px;width:250px">
               <span class="node-title">Providers</span>
               <span class="node-sub">chat and embedding clients</span>
             </a>
-
-            <a class="node" id="n-notes" href="#c-memory" style="left:30px;top:592px;width:200px">
-              <span class="node-title">Notes and chat index</span>
-              <span class="node-sub">every chat · recalled with its source</span>
-            </a>
-            <a class="node" id="n-working" href="#c-memory" style="left:255px;top:592px;width:200px">
-              <span class="node-title">Working memory</span>
-              <span class="node-sub">this run's recent messages</span>
-            </a>
-            <a class="node" id="n-long" href="#c-memory" style="left:480px;top:592px;width:210px">
-              <span class="node-title">Long-term store</span>
-              <span class="node-sub">history and lasting entries · SQLite</span>
-            </a>
-            <a class="node" id="n-backends" href="#c-backends" style="left:750px;top:580px;width:155px">
-              <span class="node-title">Model servers</span>
-              <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · cloud APIs</span>
+            <a class="node" id="n-backends" href="#c-backends" style="left:645px;top:320px;width:250px">
+              <span class="node-title">Backends</span>
+              <span class="node-sub">ollama · mlc · vllm · sglang<br>openai · anthropic · gemini · nvidia</span>
             </a>
 
             <svg class="conns" id="svg-overview" aria-hidden="true" focusable="false">
@@ -149,14 +118,69 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
           <div class="legend-item"><div class="legend-line dashed"></div>requests to model servers</div>
-          <div class="legend-item"><div class="legend-line dotted"></div>planned</div>
           <div class="legend-item"><div class="legend-box"></div>guarded by the checker</div>
+          <div class="legend-item"><div class="legend-line fail-l"></div>a failed check ends the run</div>
+        </div>
+
+        <h3 id="around">Around the agent</h3>
+        <p>Messages come in from a surface, run in a chat or a worker, and each one runs the same agent with memory beside it. Select a box to jump to its card.</p>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-around" style="width:930px;height:460px">
+            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
+              <span class="node-title">Terminal</span>
+              <span class="node-sub">melo · runs its own chats</span>
+            </a>
+            <a class="node" id="a-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
+              <span class="node-title">Console and app</span>
+              <span class="node-sub">browser page · macOS window</span>
+            </a>
+            <a class="node" id="a-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
+              <span class="node-title">HTTP API</span>
+              <span class="node-sub">/v1 for scripts · /api</span>
+            </a>
+            <a class="node" id="a-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+              <span class="node-title">Gateway</span>
+              <span class="node-sub">melo serve · token sign-in · loopback only</span>
+            </a>
+            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
+              <span class="node-title">Chats</span>
+              <span class="node-sub">side chats today · a main chat is planned</span>
+            </a>
+            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
+              <span class="node-title">Scheduler</span>
+              <span class="node-sub">task queue · P0–P5 · GPU lock gate</span>
+            </a>
+            <a class="node" id="a-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
+              <span class="node-title">Workers</span>
+              <span class="node-sub">headless task sessions</span>
+            </a>
+            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:372px;width:220px">
+              <span class="node-title">Memory</span>
+              <span class="node-sub">notes and the index of every chat</span>
+            </a>
+            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:372px;width:280px">
+              <span class="node-title">Agent</span>
+              <span class="node-sub">the core above · one per chat or task</span>
+            </a>
+            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:372px;width:270px">
+              <span class="node-title">Model servers</span>
+              <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · cloud APIs</span>
+            </a>
+            <svg class="conns" id="svg-around" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
+          <div class="legend-item"><div class="legend-line dashed"></div>requests to model servers</div>
+          <div class="legend-item"><div class="legend-line dotted"></div>planned</div>
         </div>
       </section>
 
       <section class="section" id="components">
         <h2>Components</h2>
-        <p>Each card says what a part does; its link opens the reference page.</p>
+        <p>Each card says what a part does; the boxes of both diagrams open them, and each card links to its reference page.</p>
         <div class="comp-grid">
           <div class="comp-card" id="c-cli">
             <h3>Terminal</h3>
@@ -209,8 +233,8 @@
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">Worker reference</a>
           </div>
           <div class="comp-card" id="c-agent">
-            <h3>Planner</h3>
-            <p>The agent loop: plan a step, run its tools, reflect between attempts.</p>
+            <h3>Agent</h3>
+            <p>The run loop: plan a step, run its tools, reflect between attempts.</p>
             <ul>
               <li>Each step's request holds the task, working memory, recalled memory and the last reflection.</li>
               <li>The model calls only the tools the step offers.</li>
@@ -351,27 +375,35 @@
     (() => {
       const SVG_NS = "http://www.w3.org/2000/svg";
 
-      // Connectors of the diagram. fs/ts: the side of each end; ff/tf: where
-      // along that side (0 to 1, default 0.5); dy: label offset in pixels.
-      const CONNS = [
-        { from: "n-cli", fs: "bottom", to: "n-chats", ts: "top", tf: 0.2, label: "terminal chats" },
-        { from: "n-console", fs: "bottom", to: "n-gateway", ts: "top", tf: 0.2, label: "API v2" },
-        { from: "n-api", fs: "bottom", to: "n-gateway", ts: "top", tf: 0.8, label: "HTTP" },
-        { from: "n-gateway", fs: "bottom", ff: 0.15, to: "n-chats", ts: "top", tf: 0.75, label: "console chats" },
-        { from: "n-gateway", fs: "bottom", ff: 0.7, to: "n-scheduler", ts: "top", label: "tasks" },
-        { from: "n-scheduler", fs: "right", to: "n-workers", ts: "left" },
-        { from: "n-chats", fs: "right", to: "n-scheduler", ts: "left", type: "planned", dy: 22 },
-        { from: "n-chats", fs: "bottom", ff: 0.35, to: "n-agent", ts: "top", label: "each turn" },
-        { from: "n-workers", fs: "bottom", to: "g-loop", ts: "top", tf: 0.9, label: "same loop", dy: 2 },
-        { from: "n-agent", fs: "right", to: "n-executor", ts: "left" },
-        { from: "n-executor", fs: "right", to: "n-mcp", ts: "left" },
-        { from: "n-notes", fs: "top", to: "n-agent", ts: "bottom", label: "recall" },
-        { from: "g-loop", fs: "bottom", ff: 0.5, to: "n-working", ts: "top", bidi: true, label: "context" },
-        { from: "g-loop", fs: "bottom", ff: 0.83, to: "n-long", ts: "top", bidi: true, label: "remember" },
-        { from: "g-loop", fs: "right", to: "n-providers", ts: "left", type: "dashed" },
-        { from: "n-config", fs: "bottom", to: "n-providers", ts: "top", label: "builds" },
-        { from: "n-providers", fs: "bottom", to: "n-backends", ts: "top", type: "dashed", label: "chat and\nembeddings" }
-      ];
+      // Connectors of each diagram, by its svg. fs/ts: the side of each end; ff/tf: where
+      // along that side (0 to 1, default 0.5); dx, dy: label offset in pixels.
+      const DIAGRAMS = {
+        "svg-overview": [
+          { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "one task" },
+          { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "sessions", dy: -14 },
+          { from: "n-mcp", fs: "right", to: "n-executor", ts: "left", label: "tools" },
+          { from: "n-agent", fs: "bottom", ff: 0.2, to: "n-executor", ts: "top", bidi: true, label: "tool calls", dy: 40 },
+          { from: "n-agent", fs: "bottom", ff: 0.8, to: "n-memory", ts: "top", bidi: true, label: "context", dy: 40 },
+          { from: "n-checker", fs: "top", to: "n-agent", ts: "bottom", type: "fail-line", mk: "arr-r", label: "failed check:\nrun ends as failed" },
+          { from: "n-config", fs: "left", to: "n-agent", ts: "right", tf: 0.3, label: "config file" },
+          { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "chat" },
+          { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "embeddings" },
+          { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "builds" }
+        ],
+        "svg-around": [
+          { from: "a-cli", fs: "bottom", to: "a-chats", ts: "top", tf: 0.2, label: "terminal chats" },
+          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.2, label: "API v2" },
+          { from: "a-api", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.8, label: "HTTP" },
+          { from: "a-gateway", fs: "bottom", ff: 0.15, to: "a-chats", ts: "top", tf: 0.75, label: "console chats" },
+          { from: "a-gateway", fs: "bottom", ff: 0.7, to: "a-scheduler", ts: "top", label: "tasks" },
+          { from: "a-scheduler", fs: "right", to: "a-workers", ts: "left" },
+          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", type: "planned" },
+          { from: "a-chats", fs: "bottom", ff: 0.75, to: "a-agent", ts: "top", tf: 0.2, label: "each turn" },
+          { from: "a-workers", fs: "bottom", to: "a-agent", ts: "top", tf: 0.85, label: "same agent" },
+          { from: "a-memory", fs: "right", to: "a-agent", ts: "left", bidi: true, label: "recall", dy: -16 },
+          { from: "a-agent", fs: "right", to: "a-models", ts: "left", type: "dashed" }
+        ]
+      };
 
       // A point on one side of el, relative to the diagram.
       function point(el, side, f) {
@@ -401,31 +433,33 @@
       }
 
       function draw() {
-        const svg = document.getElementById("svg-overview");
-        const dia = svg.closest(".diagram");
-        CONNS.forEach((c) => {
-          const fe = document.getElementById(c.from);
-          const te = document.getElementById(c.to);
-          if (!fe || !te) return;
-          const p1 = point(fe, c.fs, c.ff);
-          const p2 = point(te, c.ts, c.tf);
-          const c1 = control(p1, c.fs, p2);
-          const c2 = control(p2, c.ts, p1);
-          const path = document.createElementNS(SVG_NS, "path");
-          path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
-          path.setAttribute("class", `conn ${c.type || ""}`);
-          path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
-          if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
-          svg.appendChild(path);
-          if (c.label) {
-            const label = document.createElement("div");
-            label.className = "conn-label";
-            label.setAttribute("aria-hidden", "true");
-            label.textContent = c.label;
-            label.style.left = `${(p1.x + p2.x) / 2}px`;
-            label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
-            dia.appendChild(label);
-          }
+        Object.entries(DIAGRAMS).forEach(([id, conns]) => {
+          const svg = document.getElementById(id);
+          const dia = svg.closest(".diagram");
+          conns.forEach((c) => {
+            const fe = document.getElementById(c.from);
+            const te = document.getElementById(c.to);
+            if (!fe || !te) return;
+            const p1 = point(fe, c.fs, c.ff);
+            const p2 = point(te, c.ts, c.tf);
+            const c1 = control(p1, c.fs, p2);
+            const c2 = control(p2, c.ts, p1);
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
+            path.setAttribute("class", `conn ${c.type || ""}`);
+            path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
+            if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
+            svg.appendChild(path);
+            if (c.label) {
+              const label = document.createElement("div");
+              label.className = "conn-label";
+              label.setAttribute("aria-hidden", "true");
+              label.textContent = c.label;
+              label.style.left = `${(p1.x + p2.x) / 2 + (c.dx || 0)}px`;
+              label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
+              dia.appendChild(label);
+            }
+          });
         });
       }
 
