@@ -324,7 +324,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   running chip; developer mode opens **Details** in the panel. The app's window
   opens at 1280 × 800. For clients, `status.items` of `GET /api/health` gains
   `activity` and `icon`, `status.focus` names the item a glance shows, and
-  `GET /api/activity?since=` lists the day ([#NN]).
+  `GET /api/activity?since=` lists the day ([#308]).
 
 - Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
   "safari-automation"` (off by default; `/browser on` in the terminal chat, or
@@ -2420,6 +2420,7 @@ earlier milestones.
 [#304]: https://github.com/localmelo/localmelo/pull/304
 [#305]: https://github.com/localmelo/localmelo/pull/305
 [#306]: https://github.com/localmelo/localmelo/pull/306
+[#308]: https://github.com/localmelo/localmelo/pull/308
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
