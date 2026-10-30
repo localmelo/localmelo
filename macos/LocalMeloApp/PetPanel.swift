@@ -1,7 +1,7 @@
 import AppKit
 import ImageIO
 
-/// What the pet's panel shows and hears: one picture on a layer, a press that is a click or a drag,
+/// What the pet's panel shows and hears: one picture on two layers (`PetMotion`), a press that is a click or a drag,
 /// the pointer coming and going, and VoiceOver. It decides nothing itself.
 final class PetView: NSView {
     var onTouch: (() -> Void)?
@@ -11,10 +11,10 @@ final class PetView: NSView {
     private var panelOrigin = NSPoint.zero
     private var dragged = false
 
-    init(picture: CALayer) {
+    init(motion: PetMotion) {
         super.init(frame: NSRect(origin: .zero, size: petPanelSize))
         wantsLayer = true
-        layer?.addSublayer(picture)
+        layer?.addSublayer(motion.moving)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
@@ -81,11 +81,11 @@ final class PetPanel: NSPanel {
 /// Melo on the desktop. A small borderless panel above other windows, on every Space, that shows while the app's
 /// window is put away (closed, minimized or the app hidden) and the person has not hidden Melo. The app's health
 /// poll feeds it (`update`); it adds no timer: its mood is worked out again on each reply, each touch and each
-/// change of window.
+/// change of window, and its motion is Core Animation's.
 final class PetController: NSObject {
     let panel: PetPanel
     let view: PetView
-    let picture = CALayer()
+    let motion: PetMotion
     /// What a click opens: the window, or the chat or task that waits.
     var openWindow: () -> Void = {}
     var openWaiting: () -> Void = {}
@@ -93,6 +93,7 @@ final class PetController: NSObject {
     var hiddenChanged: (Bool) -> Void = { _ in }
     private(set) var mood = PetMood.unknown
     private(set) var settings: PetSettings
+    private(set) var environment = PetEnvironment()
     private let settingsURL: URL
     private let pictures: URL?
     private var images: [PetState: CGImage] = [:]
@@ -100,9 +101,12 @@ final class PetController: NSObject {
     private var health: Data?
     private var stopped = false
     private var windowShown = true
+    private var screenOn = true
+    private var sessionActive = true
     private var touched = Date()
     private var poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
     private var shownState: PetState?
+    private var applied: (plan: PetMotionPlan, animate: Bool)?
 
     var hiddenByPerson: Bool { settings.hidden }
     var isShown: Bool { panel.isVisible }
@@ -112,10 +116,9 @@ final class PetController: NSObject {
         self.settingsURL = settingsURL
         self.pictures = pictures
         settings = petSettings(try? Data(contentsOf: settingsURL))
-        picture.frame = CGRect(origin: .zero, size: petPanelSize)
-        picture.contentsGravity = .resize
-        picture.actions = ["contents": NSNull()]
-        view = PetView(picture: picture)
+        let anchor = CGPoint(x: petPanelSize.width / 2, y: petBelowPaws)
+        motion = PetMotion(size: petPanelSize, anchor: anchor)
+        view = PetView(motion: motion)
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: petPanelSize),
                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
@@ -172,9 +175,13 @@ final class PetController: NSObject {
             poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
             shownState = nil
             panel.orderFrontRegardless()
+            environmentChanged()
             refresh()
         } else if !wanted && panel.isVisible {
             panel.orderOut(nil)
+            motion.stop()
+            applied = nil
+            environmentChanged()
         }
     }
 
@@ -189,19 +196,31 @@ final class PetController: NSObject {
     }
 
     private func refresh() {
+        environmentChanged()  // each reply also reads the system again, so a missed notification cannot stick
         let old = mood
         mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched),
                        poseSeed: poseSeed)
         if shownState == nil || mood != old { view.describe(mood) }
+        // A beat plays when the mood begins: when the pet appears, and when what it does changes.
+        let beginning = shownState == nil || petMotionPlan(old) != petMotionPlan(mood)
         if mood.picture != shownState, let image = picture(for: mood.picture) {
-            self.picture.contentsScale = CGFloat(image.width) / petPanelSize.width
-            self.picture.contents = image
+            motion.show(image, fade: petFade(from: shownState, to: mood.picture, environment: environment))
             shownState = mood.picture
         }
+        applyMotion(beginning: beginning)
         if mood == .waiting && old != .waiting {
             NSAccessibility.post(element: view, notification: .announcementRequested,
                                  userInfo: [.announcement: mood.label, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
+    }
+
+    // The animations run on their own; they are started again only when what they should be doing changed, so a
+    // breath is not cut short by each health reply.
+    private func applyMotion(beginning: Bool) {
+        let plan = petMotionPlan(mood), animate = shouldAnimate(environment)
+        if !beginning, let done = applied, done.plan == plan, done.animate == animate { return }
+        applied = (plan, animate)
+        motion.play(plan, entering: beginning, animate: animate)
     }
 
     /// The picture for the panel's screen scale, decoded once; nil when the file is missing.
@@ -284,9 +303,42 @@ final class PetController: NSObject {
     // MARK: What the system says
 
     private func observe() {
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil,
-                                               queue: .main) { [weak self] _ in
+        let center = NotificationCenter.default, workspace = NSWorkspace.shared.notificationCenter
+        let changed: (Notification) -> Void = { [weak self] _ in self?.environmentChanged() }
+        center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main, using: changed)
+        for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
+            center.addObserver(forName: name, object: nil, queue: .main, using: changed)
+        }
+        workspace.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil,
+                              queue: .main, using: changed)
+        // The screen being off and the session being switched out stop the loops the same way.
+        let awake: [(Notification.Name, (PetController) -> Void)] = [
+            (NSWorkspace.screensDidSleepNotification, { $0.screenOn = false }),
+            (NSWorkspace.screensDidWakeNotification, { $0.screenOn = true }),
+            (NSWorkspace.sessionDidResignActiveNotification, { $0.sessionActive = false }),
+            (NSWorkspace.sessionDidBecomeActiveNotification, { $0.sessionActive = true })]
+        for (name, set) in awake {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                guard let self = self else { return }
+                set(self)
+                self.environmentChanged()
+            }
+        }
+        center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             if self?.isShown == true { self?.place() }
         }
+        environmentChanged()
+    }
+
+    private func environmentChanged() {
+        var now = PetEnvironment()
+        now.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        now.lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        now.thermal = ProcessInfo.processInfo.thermalState
+        now.visible = panel.isVisible && panel.occlusionState.contains(.visible)
+        now.screenAwake = screenOn && sessionActive
+        guard now != environment else { return }
+        environment = now
+        if isShown { applyMotion(beginning: false) }
     }
 }

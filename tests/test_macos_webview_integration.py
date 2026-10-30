@@ -61,7 +61,7 @@ extension App {
             record("pet \(tag) shown=\(pet.isShown) window=\(window.isVisible) label=\(pet.view.accessibilityLabel() ?? "")"
                    + " frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))"
                    + " level=\(pet.panel.level == .floating) hidden=\(pet.hiddenByPerson) offered=\(!menuBar.showPetLine.isHidden)"
-                   + " key=\(pet.panel.isKeyWindow)")
+                   + " key=\(pet.panel.isKeyWindow) breathing=\(pet.motion.picture.animation(forKey: "breath") != nil)")
         }
         func mouse(_ type: NSEvent.EventType, _ dx: CGFloat = 0, _ dy: CGFloat = 0) {
             // Pointer positions are in the panel's own coordinates, from its middle, wherever it is on the screen.
@@ -547,6 +547,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(ROOT / "macos/LocalMeloApp/PetPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/PetMotion.swift"),
             str(ROOT / "macos/LocalMeloApp/PetPanel.swift"),
             str(main),
             "-o",
@@ -849,7 +850,7 @@ def test_waiting_and_settings_items_reach_the_page(app: Path, tmp_path: Path) ->
 
 PET_STATE = re.compile(
     r"pet (\S+) shown=(\S+) window=(\S+) label=(.*?) frame=(-?\d+),(-?\d+),(\d+),(\d+)"
-    r" level=(\S+) hidden=(\S+) offered=(\S+) key=(\S+)"
+    r" level=(\S+) hidden=(\S+) offered=(\S+) key=(\S+) breathing=(\S+)"
 )
 
 
@@ -864,6 +865,7 @@ class PetStep(NamedTuple):
     hidden: str
     offered: str
     key: str
+    breathing: str
 
 
 def pet_states(path: Path) -> dict[str, PetStep]:
@@ -884,10 +886,11 @@ def pet_states(path: Path) -> dict[str, PetStep]:
                 hidden,
                 offered,
                 key,
+                breathing,
             ) = match.groups()
             frame = (int(x), int(y), int(w), int(h))
             states[tag] = PetStep(
-                shown, window, label, frame, level, hidden, offered, key
+                shown, window, label, frame, level, hidden, offered, key, breathing
             )
     return states
 
@@ -920,6 +923,8 @@ def test_closing_the_window_puts_melo_on_the_desktop_and_the_window_coming_back_
     assert closed.label == "Melo, resting. Nothing running."
     # A floating panel the size of the pictures that never takes the keyboard from the app in front.
     assert closed.floating == "true" and closed.key == "false"
+    # It breathes while it can be seen (the system says the panel is on screen), and not once it is away.
+    assert closed.breathing == "true" and steps["reopened"].breathing == "false"
     assert closed.frame[2:] == (132, 97)
     assert (steps["reopened"].shown, steps["reopened"].window) == (
         "false",

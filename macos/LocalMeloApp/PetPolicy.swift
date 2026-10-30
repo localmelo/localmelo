@@ -133,6 +133,13 @@ func shouldAnimate(_ environment: PetEnvironment) -> Bool {
 /// Seconds a change of picture takes: a short cross-fade, and none under Reduce Motion (the picture swaps).
 func petCrossfade(_ environment: PetEnvironment) -> TimeInterval { environment.reduceMotion ? 0 : 0.15 }
 
+/// Seconds the change from one picture to the next takes: none for the first picture or under Reduce Motion; a slow
+/// 0.9 s between two sleeping poses while the pet may move, so the turn reads as rolling over; else the short fade.
+func petFade(from old: PetState?, to new: PetState, environment: PetEnvironment) -> TimeInterval {
+    guard let old = old, old != new, !environment.reduceMotion else { return 0 }
+    return old.isAsleep && new.isAsleep && shouldAnimate(environment) ? 0.9 : petCrossfade(environment)
+}
+
 /// Points between the pet's panel and the right edge of the screen's usable area when it first appears.
 let petEdgeInset: CGFloat = 16
 /// A drop whose paws are this close to the bottom edge of the usable area puts them on it.
