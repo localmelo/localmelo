@@ -48,6 +48,8 @@ chat_model = "qwen3:8b"
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行从不受此限制。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
+| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
+| `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |

@@ -72,6 +72,21 @@ def configured_cache_options(
     return dataclasses.replace(options, **changes) if changes else options
 
 
+# The settings of the pictures that tools return (AgentOptions.tool_images).
+IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
+
+
+def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions:
+    """*options* with the config's ``tool_images`` keys; ValueError for a bad value."""
+    values = {name: getattr(cfg.agent, name) for name in IMAGE_SETTINGS}
+    if all(getattr(options, name) == value for name, value in values.items()):
+        return options
+    try:
+        return dataclasses.replace(options, **values)
+    except ValueError as exc:
+        raise ValueError(f"[agent] {exc}") from None
+
+
 def configured_context_options(
     cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
 ) -> AgentOptions:
@@ -124,6 +139,7 @@ def configured_session_options(
             "note_writer",
             *CACHE_SETTINGS,
             "captured_history",
+            *IMAGE_SETTINGS,
         )
         if name not in explicit
     }

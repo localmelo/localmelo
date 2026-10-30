@@ -213,6 +213,15 @@ class TestToolCalls:
         assert image.sha256 == hashlib.sha256(PNG_1X1).hexdigest()
         assert base64.b64decode(image.data) == PNG_1X1
 
+    async def test_structured_screenshot_sends_no_base64_as_text(
+        self, client: StdioMcpClient
+    ) -> None:
+        result = await client.call_tool("screenshot", {"structured": True})
+        assert result["structuredContent"]["screenshot"]  # the server repeats it
+        output = tool_result_to_output(result)
+        assert output.text == ""
+        assert [base64.b64decode(i.data) for i in output.images] == [PNG_1X1]
+
     async def test_tool_level_error(self, client: StdioMcpClient) -> None:
         output = tool_result_to_output(await client.call_tool("fail", {}))
         assert output.is_error

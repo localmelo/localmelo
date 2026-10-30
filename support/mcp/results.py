@@ -15,7 +15,9 @@ def tool_result_to_output(result: Any) -> ToolOutput:
     Text parts are joined with newlines. Image parts (and image blobs in
     embedded resources) become :class:`ImagePart`; other binary content is
     replaced by a short text note. ``structuredContent`` is used as text
-    only when there is no other text. ``isError`` is kept.
+    only when there is no other text and no image: a server that returns a
+    screenshot often repeats its base64 there, which would reach the model
+    as text. ``isError`` is kept.
     """
     if not isinstance(result, dict):
         return ToolOutput(
@@ -28,7 +30,7 @@ def tool_result_to_output(result: Any) -> ToolOutput:
         for item in content:
             _convert_item(item, texts, images)
     structured = result.get("structuredContent")
-    if not texts and structured is not None:
+    if not texts and not images and structured is not None:
         texts.append(json.dumps(structured, ensure_ascii=False))
     return ToolOutput(
         text="\n".join(texts), images=images, is_error=result.get("isError") is True
