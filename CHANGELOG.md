@@ -1028,6 +1028,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `/model` is a list to pick from. Alone, it opens the server's chat models under
+  the input box: type to filter, ↑ ↓ to move, Enter to switch and save the model as
+  the default, Esc to keep the current one. `✓` marks the current model, `(loaded)`
+  the ones the server says are in memory, and embedding or reranking models are
+  left out. `/sessions` uses the same list. On a terminal the first run's
+  model question is the same list (nothing is highlighted when several chat models
+  are served and none is known to be loaded, so Enter does nothing until a key moves
+  to one; Esc cancels the setup); with the answers piped in, the numbered
+  `Model [N]:` question is unchanged. `/model NAME` and `/model N` work as before.
+  ([#NN])
+
 - The web console is easier to read, in light and dark: no text under 12px, text
   at 4.5:1 contrast or better, field, composer and focus edges at 3:1 or better,
   a 2px focus ring on the composer, muted lines in Tasks and Workers drawn muted,

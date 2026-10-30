@@ -19,9 +19,9 @@ import errno
 import os
 import select
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Final, Protocol, TextIO
+from typing import Any, Final, Protocol, TextIO, TypeVar
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer, CompletionState
@@ -70,7 +70,12 @@ from localmelo.support.cli.approvals import (
     session_warning,
 )
 from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
-from localmelo.support.cli.picker import SessionPicker
+from localmelo.support.cli.picker import (
+    ListPicker,
+    ModelPicker,
+    ModelRow,
+    SessionPicker,
+)
 from localmelo.support.cli.render import STREAM_LIVE_LINES, TurnRenderer, live_rows
 from localmelo.support.cli.text import (
     cells,
@@ -103,6 +108,8 @@ HISTORY_MAX_BYTES: Final = 1_000_000
 HISTORY_KEPT: Final = 1_000
 
 SPINNER_FRAME_ENV: Final = "LOCALMELO_SPINNER_FRAME"
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -390,7 +397,7 @@ class InteractiveApp:
         self._hint_until = 0.0
         self._last_ctrl_c = -DOUBLE_PRESS_S
         self._question: _Question | None = None
-        self.picker: SessionPicker | None = None
+        self.picker: ListPicker[Any] | None = None
         self._last_rows = 0
         frame = os.environ.get(SPINNER_FRAME_ENV, "")
         self._frame = int(frame) if frame.isdigit() else None
@@ -528,23 +535,11 @@ class InteractiveApp:
         if os.environ.get("LOCALMELO_BELL") != "0":
             self.app.output.bell()
 
-    async def choose_session(
-        self,
-        store: SessionStore,
-        workspace: str,
-        *,
-        query: str = "",
-        choices: list[SessionInfo] | None = None,
-    ) -> SessionInfo | None:
-        picker = SessionPicker(
-            store,
-            workspace,
-            query=query,
-            choices=choices,
-            width=lambda: max(1, self.app.output.get_size().columns),
-            invalidate=self.invalidate,
-            symbols=self.symbols,
-        )
+    def _width(self) -> int:
+        return max(1, self.app.output.get_size().columns)
+
+    async def choose(self, picker: ListPicker[T]) -> T | None:
+        """Open *picker* over the input box; its choice, or None when it is closed."""
         self.picker = picker
         self.buffer.cancel_completion()
         self.app.layout.focus(picker.control)
@@ -555,6 +550,43 @@ class InteractiveApp:
             self.picker = None
             self.app.layout.focus(self.input_window)
             self.invalidate()
+
+    async def choose_session(
+        self,
+        store: SessionStore,
+        workspace: str,
+        *,
+        query: str = "",
+        choices: list[SessionInfo] | None = None,
+    ) -> SessionInfo | None:
+        return await self.choose(
+            SessionPicker(
+                store,
+                workspace,
+                query=query,
+                choices=choices,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+
+    async def choose_model(
+        self, models: Sequence[ModelRow], *, where: str, current: str
+    ) -> str | None:
+        """The model picked from *models*, with *current* marked; None when closed."""
+        row = await self.choose(
+            ModelPicker(
+                models,
+                where=where,
+                current=current,
+                start=current,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+        return None if row is None else row.id
 
     async def ask(self, prompt: str, default: str = "") -> str | None:
         """Ask *prompt* in the input box; the answer, *default* on Enter, None on Esc."""

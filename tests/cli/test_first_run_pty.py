@@ -73,12 +73,16 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     try:
         assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
         term.type(b"\r")
-        assert term.read_until(lambda out: b"Model: " in out, 30), term.output
-        term.type(b"\r")  # no model is known to be loaded: Enter alone asks again
-        assert term.read_until(
-            lambda out: b"Type the number of the model to use." in out, 30
-        ), term.output
-        term.type(b"2\r")  # chat-a, chat-b, then the embedding model
+        assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
+        # No model is known to be loaded, so none is highlighted and Enter alone
+        # chooses nothing; the arrow keys move to a row, the filter narrows them.
+        term.type(b"\r")
+        assert term.read_until(lambda out: b"choose one, then enter" in out, 30)
+        term.type(b"\x1b[B")  # chat-a
+        assert term.read_until(lambda out: b"enter chooses" in out, 30), term.output
+        term.type(b"-b")  # the filter leaves chat-b, and the cursor goes to it
+        assert term.read_until(lambda out: b"1 model " in out, 30), term.output
+        term.type(b"\r")
         assert term.read_until(
             lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
             30,
@@ -87,7 +91,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"hi\r")
         assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
-        term.type(b"/status\r")  # the welcome no longer names the server
+        term.type(b"/status all\r")  # the welcome no longer names the server
         assert term.read_until(lambda out: b"version    melo" in out, 30), term.output
         term.type(b"/exit\r")
         assert _exit_code(term) == 0, term.output
@@ -97,14 +101,11 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     text = _text(term)
     assert text.startswith("melo uses a model server on this computer (")
     assert f"Found a model server at {url} (3 models).\n" in text
-    # The chat models come first; the embedding model is tagged.
-    assert "[1] chat-a\n" in text and "[2] chat-b\n" in text
-    assert "[3] nomic-embed-text  (embedding)\n" in text
-    # The hint is wrapped at a word boundary to the 100 columns of this terminal.
-    rows = text.split("\n")
-    start = next(i for i, row in enumerate(rows) if "Type the number" in row)
-    hint = " ".join(row.strip() for row in rows[start : start + 2])
-    assert hint == discovery.NO_DEFAULT_HINT
+    # The note about loading a model is one row at 100 columns; the list is the
+    # arrow-key picker (no numbers), with chat models only.
+    assert f"  {discovery.LOAD_COST_NOTE}\n" in text and "[1] chat-a" not in text
+    picker = text[text.index("Choose a model") : text.index("lists 3 models")]
+    assert "chat-a" in picker and "chat-b" in picker and "nomic" not in picker
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
     assert "chat-b (/model to change)" in text and "Try: What is this project?" in text
     assert f"model      chat-b · {label} · {url}" in text
