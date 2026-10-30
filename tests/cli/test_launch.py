@@ -515,10 +515,10 @@ def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
             embedding_model="nomic-embed-text",
         )
     )
-    assert choice.backend.embedding == "OpenAI-compatible · nomic-embed-text"
+    assert choice.backend.embedding == "OpenAI-compatible server · nomic-embed-text"
     assert (
         memory_text(choice.backend, memory=True)
-        == "long-term memory · OpenAI-compatible · nomic-embed-text"
+        == "long-term memory · OpenAI-compatible server · nomic-embed-text"
     )
     plain = _choice(Faked(cfg=_configured(), listed=["chat-a"]).choose(base_url=URL))
     assert plain.backend.embedding == ""
@@ -537,10 +537,10 @@ def test_memory_text_names_a_configured_embedding_backend_and_model() -> None:
     cfg.vllm.embedding_url = URL
     cfg.vllm.embedding_model = "Qwen3-Embedding-0.6B"
     backend = config_backend(cfg, None)
-    assert backend.embedding == "vLLM · Qwen3-Embedding-0.6B"
+    assert backend.embedding == "OpenAI-compatible server · Qwen3-Embedding-0.6B"
     assert (
         memory_text(backend, memory=True)
-        == "long-term memory · vLLM · Qwen3-Embedding-0.6B"
+        == "long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B"
     )
 
 
@@ -551,7 +551,7 @@ def test_the_embedding_name_uses_the_backends_display_name() -> None:
     cfg.embedding_backend = "vllm"
     cfg.vllm.embedding_url = URL
     cfg.vllm.embedding_model = "Qwen3-Embedding-0.6B"
-    assert _embedding_name(cfg) == "vLLM · Qwen3-Embedding-0.6B"
+    assert _embedding_name(cfg) == "OpenAI-compatible server · Qwen3-Embedding-0.6B"
     cfg.embedding_backend = "ollama"
     cfg.ollama.embedding_url = URL
     cfg.ollama.embedding_model = "bge-m3"

@@ -572,3 +572,138 @@ def test_pick_model_has_no_default_between_chat_models_without_a_loaded_one(
 def test_pick_model_keeps_the_only_chat_model_and_the_first_of_no_chat_model() -> None:
     assert pick_model(["embed-x", "only"]) == "only"
     assert pick_model(["embed-x", "rerank-y"], _loaded("rerank-y")) == "embed-x"
+
+
+# ── A model served under an alias ──
+
+# oMLX lists a model under its alias and reports it under its folder name,
+# with the alias beside it (checked in oMLX 0.7.1rc1).
+_ALIASED_STATUS = httpx.Response(
+    200,
+    json={
+        "models": [
+            {"id": "Qwen3-8B-4bit", "model_alias": "qwen3", "loaded": True},
+            {"id": "Qwen3-32B-4bit", "model_alias": "qwen3-big", "loaded": False},
+            {"id": "plain", "loaded": True},
+            {"id": "blank", "model_alias": "  ", "loaded": True},
+            {"id": "typed", "model_alias": 7, "loaded": True},
+        ]
+    },
+)
+
+
+async def test_a_loaded_model_counts_under_its_alias_as_well_as_its_id() -> None:
+    transport = _server({"/v1/models/status": _ALIASED_STATUS})
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(
+        frozenset({"Qwen3-8B-4bit", "qwen3", "plain", "blank", "typed"}), True
+    )
+
+
+def test_a_model_listed_under_its_alias_is_the_default_when_loaded() -> None:
+    # /v1/models lists the alias, so that is the id the setup menu holds.
+    models = ["qwen3", "qwen3-big", "plain"]
+    loaded = _loaded("Qwen3-8B-4bit", "qwen3")
+    assert pick_model(models, loaded) == "qwen3"
+    assert pick_model(models, loaded, unique=True) == "qwen3"
+
+
+def test_an_alias_of_a_model_that_is_not_loaded_is_not_counted() -> None:
+    payload = {"models": [{"id": "big", "model_alias": "large", "loaded": False}]}
+    assert discovery.parse_loaded_ids(payload) == set()
+
+
+# ── Which server is oMLX ──
+
+_OMLX_LISTING = {
+    "object": "list",
+    "data": [
+        {"id": "Qwen3-8B-4bit", "object": "model", "owned_by": "omlx"},
+        {"id": "Qwen3-Embedding-0.6B", "object": "model", "owned_by": "omlx"},
+    ],
+}
+_VLLM_LISTING = {"object": "list", "data": [{"id": "m", "owned_by": "vllm"}]}
+
+
+def _replying(payload: object) -> httpx.MockTransport:
+    return httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+
+
+async def test_a_listing_that_names_omlx_as_owner_marks_the_server() -> None:
+    assert not discovery.is_omlx(URL)
+    assert discovery.server_name(URL) == "OpenAI-compatible server"
+    await list_models("vllm", URL, transport=_replying(_OMLX_LISTING))
+    assert discovery.is_omlx(URL)
+    assert discovery.server_name(URL) == "oMLX"
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [
+        _VLLM_LISTING,
+        {"data": [{"id": "m"}]},
+        {"data": [{"id": "m", "owned_by": None}]},
+        {"data": ["m"]},
+        {"models": [{"name": "m", "owned_by": "omlx"}]},
+        {"data": []},
+    ],
+)
+async def test_any_other_listing_does_not_mark_the_server(listing: object) -> None:
+    await list_models("vllm", URL, transport=_replying(listing))
+    assert not discovery.is_omlx(URL)
+    assert discovery.server_name(URL) == "OpenAI-compatible server"
+
+
+async def test_the_server_is_known_by_its_url_however_it_is_written() -> None:
+    await list_models(
+        "vllm", "http://127.0.0.1:8500/", transport=_replying(_OMLX_LISTING)
+    )
+    for spelled in (URL, "http://127.0.0.1:8500", URL + "/"):
+        assert discovery.is_omlx(spelled)
+    assert not discovery.is_omlx("http://127.0.0.1:8501/v1")
+    assert not discovery.is_omlx("")
+
+
+async def test_the_latest_listing_wins() -> None:
+    await list_models("vllm", URL, transport=_replying(_OMLX_LISTING))
+    await list_models("vllm", URL, transport=_replying(_VLLM_LISTING))
+    assert not discovery.is_omlx(URL)
+
+
+async def test_a_failed_listing_keeps_what_was_known() -> None:
+    await list_models("vllm", URL, transport=_replying(_OMLX_LISTING))
+    with pytest.raises(DiscoveryError):
+        await list_models("vllm", URL, transport=_status(500))
+    assert discovery.is_omlx(URL)
+
+
+async def test_a_declared_server_is_omlx_without_a_listing() -> None:
+    assert discovery.server_name(URL, declared=True) == "oMLX"
+    assert discovery.server_name(declared=True) == "oMLX"
+    assert discovery.server_name() == "OpenAI-compatible server"
+
+
+async def test_omlx_is_known_when_only_its_status_route_wants_a_key() -> None:
+    """The listing works with "Allow inference without API key"; /status says 401."""
+    routes: dict[str, httpx.Response | Exception] = {
+        "/v1/models": httpx.Response(200, json=_OMLX_LISTING),
+        "/v1/models/status": httpx.Response(401, json={"detail": "API key required"}),
+    }
+    transport = _server(routes)
+    await list_models("vllm", URL, transport=transport)
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(frozenset(), False, True)
+    assert discovery.is_omlx(URL)
+
+
+async def test_naming_a_server_adds_no_request() -> None:
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url}")
+        return httpx.Response(200, json=_OMLX_LISTING)
+
+    await list_models("vllm", URL, transport=httpx.MockTransport(handle))
+    assert seen == [f"GET {URL}/models"]
+    assert discovery.is_omlx(URL)
+    assert seen == [f"GET {URL}/models"]  # asking again sends nothing

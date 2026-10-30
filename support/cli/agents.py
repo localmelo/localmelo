@@ -15,7 +15,7 @@ import io
 import os
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Final
+from typing import Any
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support import config, onboard
@@ -23,15 +23,16 @@ from localmelo.support.backends import discovery
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import build_session_agent
 
-URL_LABEL: Final = "OpenAI-compatible"
 
+def _backend_label(cfg: config.Config, key: str, *, embedding: bool = False) -> str:
+    """What the backend *key* of *cfg* is called, or *key* when it is not registered.
 
-def _backend_label(key: str) -> str:
-    """The backend's display name, or *key* when it is not registered."""
+    A ``vllm`` backend is ``oMLX`` when the config or a listing says so.
+    """
     from localmelo.support.backends.registry import get_backend
 
     try:
-        return get_backend(key).display_name
+        return get_backend(key).label(cfg, embedding=embedding)
     except KeyError:
         return key
 
@@ -43,7 +44,7 @@ def _embedding_name(cfg: config.Config) -> str:
     key = cfg.embedding_backend
     section = getattr(cfg, key, None)
     model = getattr(section, "embedding_model", "")
-    label = _backend_label(key)
+    label = _backend_label(cfg, key, embedding=True)
     return f"{label} · {model}" if model else label
 
 
@@ -53,7 +54,7 @@ def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
     section = getattr(cfg, key, None)
     return BackendInfo(
         key=key,
-        label=_backend_label(key),
+        label=_backend_label(cfg, key),
         model=model or getattr(section, "chat_model", "") or "default",
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
         embedding=_embedding_name(cfg),
@@ -67,7 +68,7 @@ def url_backend(
     """A server at *url* that is not the config's; *embedding* names its memory's."""
     return BackendInfo(
         key=discovery.OPENAI_COMPATIBLE,
-        label=URL_LABEL,
+        label=discovery.server_name(url),
         model=model or "default",
         base_url=url,
         embedding=embedding,
@@ -78,7 +79,8 @@ def url_backend(
 
 def url_embedding(base_url: str | None, model: str | None) -> str:
     """How the banner names ``--embedding-base-url``'s server; ``""`` without one."""
-    return f"{URL_LABEL} · {model or 'default'}" if base_url else ""
+    name = discovery.server_name(base_url or "")
+    return f"{name} · {model or 'default'}" if base_url else ""
 
 
 class AgentFactory:
@@ -209,6 +211,8 @@ class AgentFactory:
         """
         assert self._cfg is not None
         cfg = copy.deepcopy(self._cfg)
+        if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
+            cfg.chat_alias = ""  # the file's "omlx" named another server
         if ollama:
             cfg.chat_backend = "ollama"
             cfg.ollama.chat_url = url
@@ -234,9 +238,26 @@ class AgentFactory:
         return self.backend.local and bool(self.backend.base_url)
 
     async def list_models(self, url: str | None = None) -> list[str]:
-        """The models the server lists; :class:`DiscoveryError` when it cannot."""
+        """The models the server lists; :class:`DiscoveryError` when it cannot.
+
+        A listing of the session's own server can show it is oMLX: the
+        backend is then named so from here on (see :meth:`relabel`).
+        """
         key = discovery.OPENAI_COMPATIBLE if url else self.backend.key
-        return await discovery.list_models(key, url or self.backend.base_url)
+        models = await discovery.list_models(key, url or self.backend.base_url)
+        if url is None:
+            self.relabel()
+        return models
+
+    def relabel(self) -> None:
+        """Call the session's server oMLX if a model listing said it is one."""
+        backend = self.backend
+        if (
+            backend.label != discovery.OMLX_NAME
+            and backend.key in ("vllm", discovery.OPENAI_COMPATIBLE)
+            and discovery.is_omlx(backend.base_url)
+        ):
+            self.backend = replace(backend, label=discovery.OMLX_NAME)
 
     def use_model(self, model: str) -> None:
         self.backend = replace(self.backend, model=model, listed=0)

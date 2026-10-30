@@ -126,12 +126,16 @@ def _redact(text: str) -> str:
 
 
 def model_json(cfg: Any) -> dict[str, Any]:
-    """The settings' chat model, with the registry's label for its backend."""
+    """The settings' chat model, with the registry's label for its backend.
+
+    A ``vllm`` backend is labelled ``oMLX`` when the config says so or the
+    health probe's last model listing did.
+    """
     backend = cfg.chat_backend
     section = getattr(cfg, backend, None) if backend else None
     name = getattr(section, "chat_model", "") if section is not None else ""
     try:
-        label = get_backend(backend).display_name
+        label = get_backend(backend).label(cfg)
     except KeyError:
         label = backend
     return {

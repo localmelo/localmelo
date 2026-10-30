@@ -44,10 +44,15 @@ def _confirm(prompt: str = "Save and continue?") -> bool:
 
 # ── Backend choice lists ──
 
+# oMLX is the "vllm" backend, so its entry names it. A menu is drawn before any
+# server is chosen, so it cannot tell oMLX from vLLM; a banner can (see
+# discovery.server_name).
+VLLM_LABEL = "oMLX or vLLM (OpenAI-compatible, local)"
+
 CHAT_BACKENDS: list[tuple[str, str]] = [
     ("mlc", "MLC (local endpoint)"),
     ("ollama", "Ollama (local endpoint)"),
-    ("vllm", "vLLM (local endpoint)"),
+    ("vllm", VLLM_LABEL),
     ("sglang", "SGLang (local endpoint)"),
     ("openai", "OpenAI"),
     ("gemini", "Google Gemini"),
@@ -58,7 +63,7 @@ CHAT_BACKENDS: list[tuple[str, str]] = [
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
     ("mlc", "MLC (local endpoint)"),
     ("ollama", "Ollama (local endpoint)"),
-    ("vllm", "vLLM (local endpoint)"),
+    ("vllm", VLLM_LABEL),
     ("sglang", "SGLang (local endpoint)"),
     ("none", "None (no long-term memory)"),
 ]
@@ -94,7 +99,8 @@ def _onboard_local(cfg: config.Config, key: str) -> bool:
         default_url = section.chat_url or default_url
         default_model = section.chat_model or default_model
 
-    print(f"\n  -- {key} (local endpoint) --\n")
+    name = "oMLX or vLLM" if key == "vllm" else key
+    print(f"\n  -- {name} (local endpoint) --\n")
 
     url = _ask("Base URL", default_url)
     model = _ask("Chat model name", default_model)
@@ -491,6 +497,11 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
+def _start_a_server() -> str:
+    """The servers the first run suggests: oMLX first on a Mac, then Ollama."""
+    return "omlx serve or ollama serve" if sys.platform == "darwin" else "ollama serve"
+
+
 class ModelChoiceError(Exception):
     """Several models are served, none is known to be loaded, and none was named."""
 
@@ -550,9 +561,12 @@ def _with_chat_server(
 
     *ollama* makes the chat backend ``ollama``; otherwise it is ``vllm``.
     With *embedding_model*, the same table's embedding URL and model are
-    set too, so a first run can probe exactly what it will save. Nothing
+    set too, so a first run can probe exactly what it will save. A file's
+    ``omlx`` spelling stays only while the chat server is the same. Nothing
     is written to disk.
     """
+    if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
+        cfg.chat_alias = ""  # the file's "omlx" named another server
     if ollama:
         cfg.chat_backend = "ollama"
         cfg.ollama.chat_url = url
@@ -562,6 +576,7 @@ def _with_chat_server(
         cfg.vllm.chat_url = url
         cfg.vllm.chat_model = model
     if embedding_model is not None:
+        cfg.embedding_alias = ""
         cfg.embedding_backend = cfg.chat_backend
         embedding_section = getattr(cfg, cfg.chat_backend)
         embedding_section.embedding_url = url
@@ -680,7 +695,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
             ports = ", ".join(_port(url) for url in urls)
             print(
                 f"No model server found on this computer (looked at ports {ports}). "
-                "Start one (for example ollama serve), or enter its URL."
+                f"Start one (for example {_start_a_server()}), or enter its URL."
             )
         # URLs named in the environment are the ones to try first.
         overridden = discovery.DETECT_URLS_ENV in os.environ

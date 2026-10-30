@@ -85,7 +85,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     text = _text(term)
     assert f"Found a model server at {url} (3 models).\n" in text
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
-    assert f"chat-b · vLLM · {url}" in text
+    assert f"chat-b · OpenAI-compatible server · {url}" in text
     assert "saved as the default" in text
     assert chat_server.bodies[0]["model"] == "chat-b"
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
@@ -103,8 +103,8 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     finally:
         term.close()
     text = _text(term)
-    assert f"chat-b · vLLM · {url}" in text
-    assert "long-term memory · vLLM · nomic-embed-text" in text
+    assert f"chat-b · OpenAI-compatible server · {url}" in text
+    assert "long-term memory · OpenAI-compatible server · nomic-embed-text" in text
     assert "Model server URL" not in text
 
 
