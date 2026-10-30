@@ -95,19 +95,20 @@ run does).
 
 ### What melo says about itself
 
-Every chat tells its model who it is, so "who are you?" gets the same answer
-whichever model runs. Melo answers that it is melo from localmelo, an
-open-source agent that works in your folder with tools and asks before it
-changes anything, and it names the model it runs on; it does not present itself
-as the model's own assistant or as made by its maker, and it answers in your
-language. The paragraph also names the server as the banner does (`oMLX`,
-`Ollama`, an `OpenAI-compatible server`, or a cloud provider) and says whether it
-is on this computer (`on this computer`, or `at 192.168.1.20` for a server on
-another machine). `/model` and `/backend` start the next turn on the new choice,
-and that turn names the new model. A greeting or a question it can answer
-directly is answered without tools. The web console and the macOS app do the
-same; direct runs (`melo "task"`), workers and the benchmark send no such
-paragraph, so their requests are as before.
+Every chat tells its model who it is, so that "who are you?" is answered as
+melo and not as the assistant the model was trained as. The paragraph says that
+melo is melo from localmelo, an open-source agent that works in your folder with
+tools and asks before it changes anything; that it names the model it runs on
+when asked; that it does not present itself as the model's own assistant or as
+made by its maker; and that it answers in your language. It also names the
+server as the banner does (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a
+cloud provider) and says whether the server is on this computer (`on this
+computer`, or `at 192.168.1.20` for a server on another machine), and it asks
+the model to answer a greeting, or a question it can answer directly, without
+tools. `/model` and `/backend` start the next turn on the new choice, and that
+turn names the new model. The web console and the macOS app do the same; direct
+runs (`melo "task"`), workers and the benchmark send no such paragraph, so their
+requests are as before.
 
 ### Keys
 
