@@ -369,3 +369,139 @@ async def test_running_module_is_served_and_the_shell_has_its_chip(
     assert re.search(r'<div\b[^>]*\bid="running-root"[^>]*\bhidden\b', page.text)
     assert re.search(r'<div\b[^>]*\bid="running-menu"[^>]*\bhidden\b', page.text)
     assert 'id="running-btn"' in page.text
+
+
+def _stylesheet() -> str:
+    css = (webapp._STATIC / "workspace.css").read_text(encoding="utf-8")
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def _outside_tokens() -> str:
+    """The stylesheet without its custom-property definitions: the token block."""
+    return re.sub(r"--[a-z0-9-]+\s*:[^;]+;", "", _stylesheet())
+
+
+def _tokens(scale: str) -> dict[str, str]:
+    """The px tokens of a scale ("text" or "radius"): name to value."""
+    return dict(re.findall(rf"--({scale}-[a-z]+):\s*(\d+px)", _stylesheet()))
+
+
+def _off_scale(scale: str, values: list[str]) -> set[str]:
+    """The values that are neither a token of *scale* nor its px value."""
+    tokens = _tokens(scale)
+    allowed = {f"var(--{name})" for name in tokens} | set(tokens.values())
+    return {value.strip() for value in values} - allowed - {"inherit"}
+
+
+def test_font_sizes_come_from_the_scale_and_none_is_under_12px() -> None:
+    css = _outside_tokens()
+    sizes = re.findall(r"font-size:\s*([^;}]+)", css)
+    for font in re.findall(r"\bfont:\s*([^;}]+)", css):
+        sizes.append(font.split()[0].split("/")[0])
+    assert sizes and not _off_scale("text", sizes), _off_scale("text", sizes)
+    assert min(int(px[:-2]) for px in _tokens("text").values()) >= 12
+
+
+def test_radii_come_from_the_four_tokens() -> None:
+    radii = re.findall(r"border-radius:\s*([^;}]+)", _outside_tokens())
+    assert len(_tokens("radius")) == 4
+    assert radii and not _off_scale("radius", radii), _off_scale("radius", radii)
+
+
+def test_no_colour_literal_sits_outside_the_token_block() -> None:
+    literal = r"(?<![\w-])#[0-9a-fA-F]{3,8}(?![\w-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\("
+    found = re.findall(literal, _outside_tokens())
+    assert not found, f"colour literals outside the token block: {found}"
+
+
+def test_every_variable_the_stylesheet_uses_is_defined() -> None:
+    css = _stylesheet()
+    used = set(re.findall(r"var\((--[a-z0-9-]+)", css))
+    undefined = used - set(re.findall(r"(--[a-z0-9-]+)\s*:", css))
+    assert used and not undefined, f"undefined variables: {sorted(undefined)}"
+
+
+def test_muted_text_has_a_rule_and_undone_turns_do_not_fade() -> None:
+    css = _stylesheet()
+    assert re.search(r"(?m)^\.muted\s*\{[^}]*\bcolor:\s*var\(--ink-3\)", css)
+    undone = re.search(r"\.turn\.undone\s*\{([^}]*)\}", css)
+    assert undone and "opacity" not in undone.group(1)
+    ring = r"\.composer:focus-within\s*\{[^}]*outline:\s*2px solid var\(--accent\)"
+    assert re.search(ring, css)
+
+
+def test_shell_buttons_have_no_native_title_tooltips() -> None:
+    page = (webapp._STATIC / "index.html").read_text(encoding="utf-8")
+    assert not re.findall(r"<button\b[^>]*\btitle=", page)
+
+
+async def test_setup_card_module_is_served_and_the_shell_has_its_card(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/setup-card.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "setupModelCard" in response.text
+    page = await client.get("/")
+    assert re.search(r'<section\b[^>]*\bid="setup-card"[^>]*\bhidden\b', page.text)
+    assert "setup-btn" not in page.text and "POSSIBILITY" not in page.text
+
+
+def test_a_done_status_line_draws_in_the_success_colour() -> None:
+    css = _stylesheet()
+    assert re.search(
+        r'\.turn-status\[data-severity="ok"\]\s*\{[^}]*color:\s*var\(--ok\)', css
+    )
+
+
+def test_the_selected_chat_row_has_a_cue_that_is_not_only_a_colour() -> None:
+    css = _stylesheet()
+    active = re.search(r"\.session-item\.active\s*\{([^}]*)\}", css)
+    assert active and "box-shadow: inset 3px 0 0 var(--accent)" in active.group(1)
+    assert re.search(
+        r"\.session-item\.active \.session-title\s*\{[^}]*font-weight:\s*600", css
+    )
+
+
+def test_red_marks_an_error_and_nothing_milder_in_a_status_card() -> None:
+    css = _stylesheet()
+    for name in ("failure-error", "failure-hint", "approval-warning"):
+        rule = re.search(rf"(?m)^\.{name}\s*\{{([^}}]*)\}}", css)
+        assert rule and "--error" not in rule.group(1), name
+    assert re.search(r'\.failure-card\[data-severity="error"\] \.failure-error', css)
+    assert re.search(r'\.status-mark\[data-severity="error"\]\s*\{[^}]*--error', css)
+
+
+def test_the_task_view_buttons_skip_the_answer_classes() -> None:
+    # `.task-panel button` (0,1,1) would out-rank `.primary-button`, `.outline-button` and
+    # `.quiet-button` (0,1,0), so every rule that paints a task button must leave those out.
+    answers = ("primary-button", "outline-button", "quiet-button")
+    paint = re.compile(r"(?:^|;)\s*(?:color|background[\w-]*|border[\w-]*)\s*:")
+    for group, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _stylesheet()):
+        if not paint.search(body):
+            continue
+        for selector in re.split(r",\s*(?![^()]*\))", group):
+            selector = selector.strip()
+            if re.match(r"\.task-panel button(?![\w-])", selector):
+                missing = [name for name in answers if f".{name}" not in selector]
+                assert not missing, f"{selector} restyles {missing} in the Tasks view"
+
+
+async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> None:
+    page = (await client.get("/")).text
+    bar = re.search(r'<div id="approval-bar".*?</div>', page, re.S)
+    assert bar is not None
+    assert "melo is waiting for your answer" in bar.group(0)
+    go = r'<button\b[^>]*\bid="approval-go"[^>]*>\s*Review\s*</button>'
+    assert re.search(go, bar.group(0))
+
+
+async def test_the_shell_offers_try_again_when_the_gateway_is_unreachable(
+    client: httpx.AsyncClient,
+) -> None:
+    page = (await client.get("/")).text
+    banner = re.search(r'<div\b[^>]*\bid="offline-banner"[^>]*>.*?</div>', page, re.S)
+    assert banner is not None and "hidden" in banner.group(0).split(">")[0]
+    assert "Could not reach the gateway" in banner.group(0)
+    retry = r'<button\b[^>]*\bid="offline-retry"[^>]*>\s*Try again\s*</button>'
+    assert re.search(retry, banner.group(0))

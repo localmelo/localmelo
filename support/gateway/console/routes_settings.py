@@ -6,6 +6,8 @@ reachability comes from the cached probe without waiting for the network.
 ``GET/PUT /api/settings``, ``POST /api/settings/test``,
 ``GET /api/settings/key-status`` and ``GET /api/models`` read and update
 ``config.toml`` without ever returning, accepting or logging an API key value.
+``GET /api/setup/detect`` looks for a model server on this machine, as the
+terminal's first run does, for the welcome's setup card.
 """
 
 from __future__ import annotations
@@ -184,6 +186,49 @@ async def health_json(console: Console) -> dict[str, Any]:
     }
 
 
+async def setup_detect_json(console: Console) -> dict[str, Any]:
+    """The whole ``GET /api/setup/detect`` body: the model server on this Mac.
+
+    ``state`` is ``found``, ``needs_key`` or ``none``. ``backend`` is what the
+    terminal's first run would save (``ollama`` or ``vllm``) and ``name`` is
+    ``Ollama``, ``oMLX`` or empty. ``models`` are the chat models, ``loaded``
+    those the server says are in memory, and ``suggested`` the one to offer:
+    null when several are served and none is known loaded, so the user picks.
+    """
+    transport = console.options.detect_transport
+    urls = discovery.detect_urls()
+    found = (
+        await discovery.detect_local_server(urls, transport=transport) if urls else None
+    )
+    body: dict[str, Any] = dict.fromkeys(("name", "backend", "url", "problem"), "")
+    body.update(state="none", models=[], loaded=[], suggested=None)
+    if found is None:
+        return body
+    body["url"] = url_label(found.url)
+    body["problem"] = _redact(redact_userinfo(found.problem))
+    if discovery.NO_API_KEY_HINT in found.problem:
+        return {**body, "state": "needs_key"}
+    ollama = await discovery.is_ollama(
+        found.url, timeout_s=discovery.DETECT_TIMEOUT_S, transport=transport
+    )
+    omlx = discovery.is_omlx(found.url)
+    body["name"] = "Ollama" if ollama else discovery.OMLX_NAME if omlx else ""
+    chat = [model for model in found.models if discovery.is_chat_model(model)]
+    if not chat:
+        return {**body, "problem": body["problem"] or "it lists only embedding models"}
+    loaded = discovery.LoadedModels()
+    if len(chat) > 1:
+        loaded = await discovery.loaded_models(found.url, transport=transport)
+    return {
+        **body,
+        "state": "found",
+        "backend": "ollama" if ollama else "vllm",
+        "models": chat,
+        "loaded": [model for model in chat if model in loaded.ids],
+        "suggested": discovery.pick_model(chat, loaded),
+    }
+
+
 def _ui_mode(cfg: config.Config) -> str:
     """The saved ``[ui] mode``; a value the CLI warns about reads as default."""
     return cfg.ui.mode if cfg.ui.mode in config.UI_MODES else "default"
@@ -352,6 +397,18 @@ def _build_candidate(
     return before, candidate
 
 
+def _spell_server(before: config.Config, candidate: config.Config) -> None:
+    """Spell a ``vllm`` chat backend ``omlx`` as the terminal's first run does.
+
+    The file's ``omlx`` stays only while the chat server is the one it named,
+    and a server whose last model listing named oMLX is written so.
+    """
+    server = (candidate.chat_backend, candidate.vllm.chat_url)
+    if server != (before.chat_backend, before.vllm.chat_url):
+        candidate.chat_alias = ""
+    onboard._spell_omlx(candidate)
+
+
 def _check_probe_url(field: str, url: str) -> None:
     if not url_label(url):
         raise ApiError(
@@ -421,6 +478,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def api_get_settings() -> JSONResponse:
         return JSONResponse(content=settings_json())
 
+    @app.get("/api/setup/detect")
+    async def api_setup_detect() -> JSONResponse:
+        return JSONResponse(content=await setup_detect_json(console))
+
     @app.get("/api/settings/key-status")
     async def api_key_status(name: str | None = None) -> JSONResponse:
         if not name or not _ENV_NAME_RE.fullmatch(name):
@@ -434,6 +495,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.put("/api/settings")
     async def api_put_settings(body: SettingsPutBody) -> JSONResponse:
         before, candidate = _build_candidate(body, check_revision=body.revision)
+        _spell_server(before, candidate)
         changed = _changed_fields(before, candidate)
         config.save(candidate)
         logger.info(

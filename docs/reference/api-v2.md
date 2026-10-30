@@ -293,6 +293,39 @@ can be contacted.
 - An unreachable server or an empty model list returns 502
   `backend_unreachable`.
 
+## GET /api/setup/detect
+
+Look for a model server on this machine, as the terminal's first run does. It
+asks `GET <url>/models` of each URL in `LOCALMELO_DETECT_URLS` with a 1 s
+timeout (by default `127.0.0.1` ports 8000, 8400, 11434 and 30000; an empty
+value turns detection off), then `GET <root>/api/version` of the server it
+found, and, between several chat models, its status routes. It works before
+anything is configured, takes no parameters and writes nothing. The web console's
+setup card calls it, and only while the card is shown.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/setup/detect
+```
+
+```json
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+```
+
+- `state` is `found` (a chat model to offer), `needs_key` (a server answered 401
+  or 403; localmelo sends no key to a local server) or `none`.
+- `name` is `Ollama`, `oMLX` (its model listing names oMLX as the owner) or `""`.
+  `backend` is the `chat_backend` to save: `ollama`, or `vllm`, which
+  `PUT /api/settings` writes as `omlx` when a listing named oMLX; `""` unless
+  `state` is `found`.
+- `models` are the chat models in listing order (embedding and reranking models
+  left out). `loaded` are those the server says are in memory; it is asked only
+  between several chat models, and `[]` also means it did not say.
+- `suggested` is the model to offer: the only chat model, or a loaded one. It is
+  `null` when several are served and none is known to be loaded, and the client
+  must let the user choose.
+- `url` is empty when nothing answered. `problem` says why a server that answered
+  cannot be used. A user name or password in a URL is never returned.
+
 ## Scheduler tasks (S3a.2)
 
 These routes create and control user-origin tasks in the gateway process.
