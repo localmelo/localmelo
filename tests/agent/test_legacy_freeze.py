@@ -348,7 +348,8 @@ async def test_history_gets_the_same_calls_in_the_same_order(tmp_path: Path) -> 
 
 
 def test_no_new_flag_and_the_same_exit_codes() -> None:
-    """R1 adds no flag: the options are R1's base and those of later stages."""
+    """R1 adds no flag: the options are R1's base and those of later stages, and the
+    letters and one-word names that are more names for them."""
     assert sorted(cli._build_parser()._option_string_actions) == sorted(
         BASE_OPTIONS
         + LATER_OPTIONS
@@ -359,6 +360,8 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
             "--developer",
             "--version",
         ]
+        + ["-m", "--model", "-u", "--url", "-w", "-s", "--steps", "-t", "-o"]
+        + ["--output", "--mcp", "-y", "-V"]
     )
     ui_or_help = {
         "--yolo",
@@ -369,7 +372,9 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
         "--help",
         "-h",
     }
+    direct_spellings = {"-m", "--model", "-u", "--url", "-w", "-s", "--steps", "-t"}
+    direct_spellings |= {"-o", "--output", "--mcp"}
     assert set(cli._build_parser(direct_only=True)._option_string_actions) == (
-        set(BASE_OPTIONS + LATER_OPTIONS) - ui_or_help
+        set(BASE_OPTIONS + LATER_OPTIONS) - ui_or_help | direct_spellings
     )
     assert (cli.EXIT_COMPLETED, cli.EXIT_CRASHED, cli.EXIT_NOT_COMPLETED) == (0, 1, 2)

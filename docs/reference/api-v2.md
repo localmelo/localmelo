@@ -143,6 +143,11 @@ output or log the header; same-user processes can still read the token file.
   are not capped. A store that cannot be read counts as nothing running; one
   call reads the task states by their index and the running turns of the CLI
   file by theirs.
+- `status.waiting` lists the chats and tasks with a tool-approval request that
+  waits for an answer, chats first, at most 20, each `{"kind", "id"}` (`kind` is
+  `chat` or `task`). The console opens them at `#/s/<id>` and `#/tasks/<id>`, and
+  the macOS app's menu bar reads the list at each poll. `sessions.pending_approvals`
+  counts the open chats' requests only.
 
 ## GET /api/settings
 

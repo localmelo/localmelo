@@ -1,3 +1,7 @@
+// A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
+// terminal. This dialog is where the user fixes it, so the advice is left out.
+const terminalAdvice = (message) => /\brun 'melo /i.test(message);
+
 /** Wire the connection dialog. The caller owns entry buttons and health refresh. */
 export function setupSettings({ api, onSaved }) {
   const $ = (id) => document.getElementById(id);
@@ -188,8 +192,8 @@ export function setupSettings({ api, onSaved }) {
       renderChat();
       renderEmbedding();
       enable(true);
-      // "not set (run 'melo --reconfigure')" is advice for the terminal: here the empty select says it.
-      const errors = (loaded.errors || []).filter((item) => typeof item === "string" && item && !item.includes("melo --reconfigure"));
+      // "not set (run 'melo setup')" is advice for the terminal: here the empty select says it.
+      const errors = (loaded.errors || []).filter((item) => typeof item === "string" && item && !terminalAdvice(item));
       status.textContent = !loaded.chat_backend ? "Choose a server to continue." : errors.length ? "Review your settings before saving." : "";
       showError(errors.join("\n"));
     } catch (err) {

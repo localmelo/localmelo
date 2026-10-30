@@ -74,25 +74,27 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
 - **原因：** 没有配置文件，且命令没有 `--base-url`。`melo` 以退出码 1 退出。
 - **修复：** 在终端中运行 `melo`，它会询问模型服务器并保存（见[首次运行](../guides/terminal.md#first-run)）；或者用 `melo --serve --reconfigure` 保存配置；或者添加 `--base-url` 和 `--chat-model`。
 
-### No backend is configured; run melo --reconfigure in a terminal
+<a id="no-backend-is-configured-run-melo---reconfigure-in-a-terminal"></a>
+
+### No backend is configured; run melo setup in a terminal
 
 ```text
-melo: no backend is configured; run melo --reconfigure in a terminal
+melo: no backend is configured; run melo setup in a terminal
 ```
 
 - **原因：** `melo --serve` 没有找到配置文件，而设置向导在没有终端时无法提问。在 launchd 下，这一行会进入网关的错误日志。`melo` 以退出码 1 退出。
-- **修复：** 在终端中运行一次 `melo` 或 `melo --reconfigure`，然后再次启动网关。
+- **修复：** 在终端中运行一次 `melo` 或 `melo setup`，然后再次启动网关。
 
 ### The interactive UI needs a terminal
 
 ```text
 melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Run one task:      melo "your task"
-  Start the gateway: melo --serve
+  Start the gateway: melo serve
 ```
 
 - **原因：** 不带任务的 `melo` 会打开交互式界面，它需要 stdin 和 stdout 都是终端，并且 `TERM` 不是 `dumb`：这里其中之一是管道或文件（脚本、`melo | tee`），或者 `TERM=dumb`。`melo` 以退出码 2 退出。
-- **修复：** 运行 `melo "<task>"` 执行一个任务，或运行 `melo --serve` 启动网关，或者在真正的终端中运行 `melo`。
+- **修复：** 运行 `melo "<task>"` 执行一个任务，或运行 `melo serve` 启动网关，或者在真正的终端中运行 `melo`。
 
 ### A model server cannot be used at the first run
 
@@ -142,11 +144,11 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: embedding probe failed: …
-  Saving with embedding off: no long-term memory (melo --reconfigure sets it again).
+  Saving with embedding off: no long-term memory (melo setup sets it again).
 ```
 
 - **原因：** `POST /v1/embeddings` 探测失败。**HTTP 404** 表示服务器不提供该模型 id；**HTTP 400** 表示该 id 是对话模型，而不是嵌入模型；**connection refused** 表示该 URL 上没有进程在监听。
-- **修复：** 用 `curl -sS <url>/v1/models` 列出服务器的模型，使用它列出的 id，并确认用该 id 发起的 `POST /v1/embeddings` 会返回非空的 `data[0].embedding`。然后再次运行 `melo --reconfigure`。见[设置嵌入模型](../guides/embedding.md#check-the-server)。
+- **修复：** 用 `curl -sS <url>/v1/models` 列出服务器的模型，使用它列出的 id，并确认用该 id 发起的 `POST /v1/embeddings` 会返回非空的 `data[0].embedding`。然后再次运行 `melo setup`。见[设置嵌入模型](../guides/embedding.md#check-the-server)。
 - **更换模型后召回为空：** 旧的向量维度不同，会被跳过。请恢复旧模型，或停止 localmelo，删除 `~/.cache/localmelo/memory/long_term.db*`，让存储重新填充。见[变更内容](../guides/embedding.md#what-changes)。
 
 ### Probe failed

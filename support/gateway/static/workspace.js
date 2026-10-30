@@ -1034,7 +1034,7 @@ function failureHint(turn, can) {
     case "gate_stopped": return "melo judged that another attempt would not help. Rephrase the request, or try again.";
     case "context_budget_exceeded": return "This chat no longer fits the model's context window. Start a new chat, or shorten the request.";
     case "setup_error": return "An MCP server failed to start. Show tools lists what is set up; fix it, then try again.";
-    case "crashed": return "This is a bug in localmelo. Copy the details into a bug report. The log is in the terminal running melo --serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
+    case "crashed": return "This is a bug in localmelo. Copy the details into a bug report. The log is in the terminal running melo serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
     default: return "";
   }
 }

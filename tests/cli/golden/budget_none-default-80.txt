@@ -21,6 +21,6 @@
   └ 9
 ⚠ The attempt used its step budget.
 ⚠ Ran out of steps (9).
-  /retry tries again; for more steps, quit and run melo -c --max-steps 60.
+  /retry tries again; for more steps, quit and run melo -c --steps 60.
 ✻ Stopped after 0.4s · 9 tool calls · ↓ 72 tokens
 

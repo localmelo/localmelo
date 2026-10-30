@@ -34,13 +34,13 @@ localmelo 可以使用以本地进程运行的 [Model Context Protocol（英文�
 }
 ```
 
-此示例使用 MCP 项目的参考时间服务器，`uvx` 首次使用时会下载它。保存文件，例如保存为 `mcp.json`，然后通过 `--mcp-config` 传入：
+此示例使用 MCP 项目的参考时间服务器，`uvx` 首次使用时会下载它。保存文件，例如保存为 `mcp.json`，然后通过 `--mcp` 传入：
 
 ```bash
-melo --mcp-config mcp.json "What time is it in Tokyo?"
+melo --mcp mcp.json "What time is it in Tokyo?"
 ```
 
-服务器的工具注册为 `mcp__time__<tool>`。要查看它们，添加 `--output-format json` 并读取 `config.tools`。要仅使用 MCP 工具，添加 `--mcp-only`。
+服务器的工具注册为 `mcp__time__<tool>`。要查看它们，添加 `--output json` 并读取 `config.tools`。要仅使用 MCP 工具，添加 `--mcp-only`。
 
 服务器不继承 melo 的环境：它只获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量、`TMPDIR` 和其配置项中的 `env`，没有其他变量。melo 环境中的 API 密钥不会传给任何服务器；需要密钥的服务器必须在其 `env` 中获得字面值。
 
@@ -155,7 +155,7 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 - **范围限制。** `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，空路径或包含 NUL 字符的路径会以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。`~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。
 - **打开文件。** 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。`file_read` 最多读取 200,000 字节。超过 200,000 字节或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。
 - **命令。** `shell_exec` 和 `python_exec` 始终在拥有独立进程组的子进程中运行，超时或取消会终止它及其启动的所有进程；根目录只决定它们的启动目录。Shell 命令的标准输入是 `/dev/null`；`python_exec` 通过管道接收代码（绝不通过 argv），随后将 fd 0 指向 `/dev/null`，因此 `input()` 得到 EOF，两者都不读取 melo 所在的终端。这两个工具不受范围限制：它们可以访问任何路径。
-- **环境。** `shell_exec` 和 `python_exec` 的子进程不继承 melo 的环境：它获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；使用 `--base-url` 的会话和运行会忽略该设置。Python API 可以在其映射中传入任何变量。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。
+- **环境。** `shell_exec` 和 `python_exec` 的子进程不继承 melo 的环境：它获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；使用 `--url` 的会话和运行会忽略该设置。Python API 可以在其映射中传入任何变量。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。
 - **退出状态。** `shell_exec` 命令以非零状态退出时，其文本以 `[exit code <n>]` 行开头（被信号终止的命令使用 `-<signal>`），调用仍然成功。该行位于开头，因此输出被截断时仍会保留。Python 代码以非零状态退出时，调用以 `Python exited with code <n>` 失败，后面附上输出的最后 4,000 个字符。
 - **时限。** `AgentOptions(tool_timeout_s=...)` 以秒为单位设置 `shell_exec` 和 `python_exec` 的时限。不设置时，Shell 命令保持 30 秒，Python 保持 60 秒。运行过久的 Shell 命令以 `Command timed out after <n> s` 失败；子进程仍在运行的 Python 调用以超时结束，提示 `Execution timed out after <n>s`，并终止子进程。
 

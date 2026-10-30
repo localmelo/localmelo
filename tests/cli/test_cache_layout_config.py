@@ -196,10 +196,17 @@ def test_both_flags_are_advanced_options() -> None:
 
 
 def test_the_help_names_the_defaults() -> None:
+    # `-h all` lists each setting with its default; the options keep their own help,
+    # which says what the layouts are and what an unset window means.
     text = " ".join(cli._build_parser(developer=True).format_help().split())
-    assert "v3 (default) appends a reflection" in text
-    assert "v2 sends the earlier requests" in text
-    assert "(default 64 on a local server or a URL, 20 on a cloud vendor)" in text
+    assert "agent.cache_layout v3 --cache-layout" in text
+    assert "agent.window_messages unset --window-messages" in text
+    actions = cli._build_parser()._option_string_actions
+    layout = " ".join(str(actions["--cache-layout"].help).split())
+    window = " ".join(str(actions["--window-messages"].help).split())
+    assert "v3 (default) appends a reflection" in layout
+    assert "v2 sends the earlier requests" in layout
+    assert "(default 64 on a local server or a URL, 20 on a cloud vendor)" in window
 
 
 @pytest.mark.parametrize("name", SETTINGS)

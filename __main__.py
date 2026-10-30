@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import copy
 import dataclasses
 import importlib.metadata
 import json
@@ -1146,8 +1147,8 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             parser.error(
                 "--import-session cannot be combined with a task or another mode"
             )
-    elif args.title is not None:
-        parser.error("--title requires --import-session")
+    elif args.title is not None and not args.query and args.brief is None:
+        parser.error("--title is for a task, melo worker or melo import")
     if args.no_save_session and args.save_session is not None:
         parser.error("--no-save-session cannot be combined with --save-session")
     if args.no_save_session and args.parent_run is not None:
@@ -1426,14 +1427,19 @@ class _WorkerFlagParser(argparse.ArgumentParser):
     """
 
     developer: bool | None = None
+    help_topic: str | None = None  # `melo -h all`, `melo -h serve`
 
     def format_help(self) -> str:
-        from localmelo.support.option_tiers import format_help
+        from localmelo.support import command_words, option_tiers
 
+        if self.help_topic in command_words.COMMANDS:
+            return command_words.help_text(self.help_topic)
         developer = self.developer
         if developer is None:
             developer = _config_wants_developer_help()
-        return format_help(self, developer=developer)
+        if developer or self.help_topic == "all":
+            return option_tiers.help_all()
+        return option_tiers.help_short()
 
     def format_usage(self) -> str:
         """A usage error shows every flag in developer mode, else two short lines."""
@@ -1473,11 +1479,19 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--context-window",
             "--output-reserve",
             "--safety-margin",
+            "--model",
+            "--url",
+            "--steps",
+            "--output",
+            "--mcp",
         }
         return [
             item
             for item in super()._get_option_tuples(option_string)
+            # A new letter takes its value apart (`-s 5`, `-s=5`): `-unknown` is
+            # still an unknown option, not `-u nknown`.
             if item[1] not in full_name_only
+            and not (item[1] in _NEW_LETTERS and not option_string.startswith("--"))
         ]
 
 
@@ -1505,12 +1519,35 @@ class _InteractiveParser(_WorkerFlagParser):
     def parse_known_args(self, args: Any = None, namespace: Any = None) -> Any:
         # --help may come before --developer, so look at the whole command line.
         argv = sys.argv[1:] if args is None else list(args)
-        if "--developer" in argv[: argv.index("--") if "--" in argv else len(argv)]:
+        head = argv[: argv.index("--") if "--" in argv else len(argv)]
+        if "--developer" in head:
             self.developer = True
+        for flag in ("-h", "--help"):
+            if flag in head[:-1]:
+                self.help_topic = head[head.index(flag) + 1]
         return super().parse_known_args(args, namespace)
 
     def error(self, message: str) -> NoReturn:
         super().error(self.validation_error or message)
+
+
+# Old option -> the letters and one-word names that also mean it.
+_NEW_SPELLINGS = {
+    "--chat-model": ("-m", "--model"),
+    "--base-url": ("-u", "--url"),
+    "--workspace": ("-w",),
+    "--max-steps": ("-s", "--steps"),
+    "--timeout": ("-t",),
+    "--output-format": ("-o", "--output"),
+    "--mcp-config": ("--mcp",),
+    "--yolo": ("-y",),
+    "--version": ("-V",),
+}
+
+
+_NEW_LETTERS = frozenset(
+    name for names in _NEW_SPELLINGS.values() for name in names if name[1] != "-"
+)
 
 
 def _build_parser(
@@ -1882,15 +1919,28 @@ def _build_parser(
         choices=["install", "uninstall", "status"],
         help="Manage launchd daemon",
     )
+    for old_name, names in _NEW_SPELLINGS.items():
+        action = parser._option_string_actions.get(old_name)
+        if action is not None:
+            # A copy keeps the type, choices and dest of the old option, and the old
+            # option keeps its name in its own errors (`argument --timeout: ...`).
+            alias = copy.copy(action)
+            alias.option_strings = list(names)
+            alias.default = alias.help = argparse.SUPPRESS
+            parser._add_action(alias)
     return parser
 
 
-def main() -> None:
-    _register_backends()
+def _parse(argv: Sequence[str]) -> tuple[argparse.ArgumentParser, argparse.Namespace]:
+    """The parser and the checked namespace of a command line (words included)."""
+    from localmelo.support import settings
+    from localmelo.support.command_words import expand, refuse_after_options
 
+    typed = list(argv)
+    argv = settings.expand(expand(argv))
     legacy = _build_parser(direct_only=True)
     try:
-        args, unknown = legacy.parse_known_args()
+        args, unknown = legacy.parse_known_args(argv)
     except argparse.ArgumentError:
         args, unknown = None, []
     # Keep the legacy namespace for direct runs (even query == [""]). The
@@ -1899,7 +1949,16 @@ def main() -> None:
     if isinstance(parser, _InteractiveParser) and isinstance(legacy, _DirectParser):
         parser.validation_error = legacy.validation_error
     if args is None or unknown or not args.query or args.serve or args.daemon:
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
+    if (
+        args.title is not None
+        and args.import_session is None
+        and (args.query or args.brief is not None)
+    ):
+        # `--title T` names a task's worker session, as `--save-session T` does.
+        if args.save_session is not None:
+            parser.error("--title and --save-session both name the session")
+        args.save_session, args.title = args.title, None
     if args.inbox is not None and args.brief is None:
         parser.error("--inbox requires --brief")
     if args.inbox_fd is not None and args.brief is None:
@@ -1928,6 +1987,14 @@ def main() -> None:
     elif args.output_format == "stream-json":
         parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
+    if args.brief is None:  # a brief's own text is the task, whatever it says
+        refuse_after_options(args.query, typed)
+    return parser, args
+
+
+def main() -> None:
+    _register_backends()
+    parser, args = _parse(sys.argv[1:])
 
     if getattr(args, "gateway_login", False) or getattr(
         args, "gateway_rotate_token", False
@@ -2211,7 +2278,7 @@ def _exit_without_setup() -> NoReturn:
     without a terminal, reading the answers from stdin.
     """
     print(
-        "melo: no backend is configured; run melo --reconfigure in a terminal",
+        "melo: no backend is configured; run melo setup in a terminal",
         file=sys.stderr,
     )
     raise SystemExit(EXIT_CRASHED)
@@ -2630,11 +2697,8 @@ def _start_gateway(cfg: Config) -> None:
     print(f"  Gateway: http://{host}:{cfg.gateway.port}")
     print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
     # The gateway always checks a bearer token or a browser cookie, so the
-    # console needs a sign-in link from --gateway-login (on the same port).
-    print(
-        "  Sign in: run melo --gateway-login "
-        f"--port {cfg.gateway.port} in another terminal"
-    )
+    # console needs a sign-in link from `melo console` (on the same port).
+    print(f"  Sign in: run melo console -p {cfg.gateway.port} in another terminal")
     if sockets is not None:
         print(f"  melo-task: pass --gateway http://{host}:{cfg.gateway.port}")
     print()

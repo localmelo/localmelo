@@ -10,11 +10,11 @@
 
 ## 网页工作区
 
-在浏览器中打开 `http://127.0.0.1:8401/` 即可进入网页工作区。这是控制台的页面，只与 `/api`（[API v2](../../reference/api-v2.md)（英文））通信，因此网关必须运行才能提供该页面：先运行 `melo --serve`。在终端运行 `melo --gateway-login`，并在 60 秒内打开其一次性链接（非默认端口需加上 `--port PORT`）。不要分享该链接；见[网关安全](gateway.md#keep-the-gateway-private)。
+在浏览器中打开 `http://127.0.0.1:8401/` 即可进入网页工作区。这是控制台的页面，只与 `/api`（[API v2](../../reference/api-v2.md)（英文））通信，因此网关必须运行才能提供该页面：先运行 `melo serve`。在终端运行 `melo console`，并在 60 秒内打开其一次性链接（非默认端口需加上 `--port PORT`）。不要分享该链接；见[网关安全](gateway.md#keep-the-gateway-private)。
 
 首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。启动服务器后，点按 **Check again** 重新寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 
-1. 使用 **Connection settings** 选择对话后端、模型和工作区。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Theme** 会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。你也可以使用 `melo --reconfigure`。
+1. 使用 **Connection settings** 选择对话后端、模型和工作区。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Theme** 会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。你也可以使用 `melo setup`。
 2. 输入并发送消息。第一条消息会创建对话：页面以该对话的第一轮回答你的草稿，绝不会自行创建对话。回答以 Markdown 渲染，包含代码块。
 3. 一轮的呈现方式与终端类似：你的消息、包含已运行工具卡片的工作组、推理、通知和反思、运行时的实时行，以及带有 `Copy response` 的最终回答。工具输出中的转义序列会被清除，其图片（PNG、JPEG、GIF、WebP）会在页面内显示。
 4. 输入框上方有一行状态行：与终端状态栏相同的段，`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。

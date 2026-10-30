@@ -306,7 +306,7 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
     term.type("n\r")
     term.see("Ask melo")
     assert "stub-model (/model to change)" in term.text()
-    assert f"{stub.base_url} · from --base-url (not saved)" in term.text()
+    assert f"{stub.base_url} · from --url (not saved)" in term.text()
     assert term.quit() == 0
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
 

@@ -22,7 +22,7 @@ Models on http://127.0.0.1:8000/v1:
 Model [1]:
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
 Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - 如果本机服务器在端口 8000、8400、11434 或 30000 上列出模型，提示中会填入它的 URL；有对话模型的服务器排在最前。列出服务器模型时发送 `GET /v1/models`。列表先列对话模型；嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。有多个对话模型时，设置还会询问哪些模型已在内存中：用 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），各等一秒，不带密钥；已加载的模型会标上 `(loaded)`，第一个作为默认值，没有已加载的模型时没有默认值，请输入编号。保存选择时会发送一次 `GET /api/version`，以区分 Ollama 服务器；回答 `y` 则会发送一次 `POST /v1/embeddings`，探测提供的模型。
@@ -74,21 +74,21 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ## 使用向导配置
 
 ```bash
-melo --reconfigure          # the wizard, then the interactive UI
+melo setup                  # the wizard, then the interactive UI
 melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
-向导会询问对话后端、其 URL 和模型，以及嵌入后端；[保存配置](../start/quickstart.md#save-a-configuration)列出了这些提示。它会向每个服务器发送简短的测试请求，保存配置文件，然后打开交互式界面，或者在使用 `--serve` 时启动网关。按 Ctrl+C 停止网关。
+向导会询问对话后端、其 URL 和模型，以及嵌入后端；[保存配置](../start/quickstart.md#save-a-configuration)列出了这些提示。它会向每个服务器发送简短的测试请求，保存配置文件，然后打开交互式界面，或者在使用 `--serve --reconfigure`（唯一没有命令词写法的设置方式）时启动网关。按 Ctrl+C 停止网关。
 
-不带 `--serve` 且在默认模式下，`melo --reconfigure` 像首次运行一样开始：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整菜单。
+在默认模式下，`melo setup` 像首次运行一样开始：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整菜单。
 
 - 每个问题都会在方括号中提供配置文件中的当前值：按 Enter 保留。嵌入问题提供已保存的后端；如果尚未保存，则提供对话服务器列出的第一个候选模型，没有候选时为 `None`。
 - 没有保存嵌入配置时，向导会列出一次对话服务器的模型（仅限本地对话后端），并将找到的每个嵌入模型作为选项 `6`、`7` 等追加在固定的五个选项之后。第一个候选模型是默认值；选择它会保存对话后端的 URL 和模型，不再询问端点。固定的 `1`–`4` 选项仍会询问另一个服务器的 URL 和模型，`5` 是 `None`。无法读取模型列表时，向导会静默回退到这五个选项；向导结束时的检查会报告无法连接的服务器。
 - 对话服务器检查失败时，向导显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`。`r` 重新询问 URL 和模型，以你输入的值为默认值；`s` 仍然保存；Enter 或 `N` 不保存任何内容。
 - 本地服务器返回 HTTP 401 或 403 时，向导会提示 localmelo 不向本地服务器发送 API 密钥。在 oMLX 中请启用 **Allow inference without API key**。
 - 嵌入服务器检查失败时，向导会关闭嵌入并保存（`embedding_backend = "none"`，没有长期记忆），同时告知你。检测到但探测失败的模型不会留在配置表中。
-- 没有配置文件时，`melo --serve` 会自行运行向导。
-- 没有终端时，向导从 stdin 读取答案。既没有配置文件也没有终端时，`melo --serve` 会以退出码 1 退出，并在 stderr 输出一行，而不是等待不可能到来的答案（例如在 launchd 下）。给 `melo --serve` 传入 `--allow-unconfigured` 可照常启动网关，再通过 `/api/settings` 配置。
+- 没有配置文件时，`melo serve` 会自行运行向导。
+- 没有终端时，向导从 stdin 读取答案。既没有配置文件也没有终端时，`melo serve` 会以退出码 1 退出，并在 stderr 输出一行，而不是等待不可能到来的答案（例如在 launchd 下）。给 `melo serve` 传入 `--force` 可照常启动网关，再通过 `/api/settings` 配置。
 - 重新运行向导可以更换后端。它会保留认识的其他设置，例如 `request_timeout_s` 和 `extra_body`，并以当前格式原子重写文件（如果 `config.toml` 是符号链接则跟随链接，保留现有文件的权限，新建文件使用 `0600` 权限）；注释和未知键会被丢弃。
 
 <a id="update-localmelo"></a>
@@ -108,6 +108,6 @@ uv sync --extra gateway
 
 ## 卸载 localmelo
 
-1. 如果安装了后台服务，运行 `melo --daemon uninstall`。
+1. 如果安装了后台服务，运行 `melo serve uninstall`。
 2. 删除克隆目录。
 3. 删除 `~/.cache/localmelo`（配置和已保存的记忆）、`~/.localmelo`（后台服务的日志），以及通过 `LOCALMELO_MEMORY_DIR` 或 `--memory-dir` 使用的所有目录。

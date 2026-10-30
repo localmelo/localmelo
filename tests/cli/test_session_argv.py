@@ -339,7 +339,7 @@ def test_the_legacy_probe_has_no_ui_options_help_or_output(
 def test_the_default_parser_keeps_session_help() -> None:
     text = " ".join(cli._build_parser().format_help().split())
     assert "-c, --continue" in text
-    assert "--resume [ID|TITLE]" in text
+    assert "-r, --resume [ID]" in text
     resume = next(
         action for action in cli._build_parser()._actions if action.dest == "resume"
     )

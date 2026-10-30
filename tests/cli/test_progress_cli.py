@@ -122,7 +122,7 @@ def test_without_a_terminal_the_run_starts_as_before(
 def test_the_help_names_both_flags(capsys: pytest.CaptureFixture[str]) -> None:
     assert _main("--developer", "--help").code == 0
     out = capsys.readouterr().out
-    assert "--progress {auto,off}" in out
+    assert "--progress auto|off" in out
     assert "--routine NAME" in out
 
 

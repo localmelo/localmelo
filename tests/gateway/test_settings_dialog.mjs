@@ -131,7 +131,7 @@ test('unconfigured defaults, cloud manual model and safe key status', async () =
 });
 
 test('nothing is chosen for a user who has saved nothing, and the terminal advice stays out', async () => {
-  const advice = "chat_backend is not set (run 'melo --reconfigure')";
+  const advice = "chat_backend is not set (run 'melo setup')"; // the server's message since the command words
   const h = harness({'GET /settings': fixture({chat_backend: '', embedding_backend: '', revision: '', errors: [advice, 'workspace: not a folder']})});
   await h.open();
   assert.equal(h.element('s-adapter').value, '', 'The select does not fall back to its first entry');
@@ -141,6 +141,15 @@ test('nothing is chosen for a user who has saved nothing, and the terminal advic
   assert.equal(h.element('create-error').textContent, 'workspace: not a folder', 'Other problems still show');
   await change(h, 's-adapter', 'vllm', 'change');
   for (const id of ['create-btn', 'settings-test', 'discover-btn', 's-chat-url', 's-chat-model']) assert.equal(h.element(id).disabled, false, id);
+});
+
+test('terminal advice stays out whichever command it names', async () => {
+  // One backend's message still names the old option; both mean "do this in a terminal".
+  const advice = ["embedding_backend is not set (run 'melo setup')", "[mlc] chat_model is empty. Run 'melo --reconfigure' to select a model."];
+  const h = harness({'GET /settings': fixture({errors: [...advice, 'workspace: not a folder']})});
+  await h.open();
+  assert.equal(h.element('create-error').textContent, 'workspace: not a folder');
+  assert.equal(h.element('settings-status').textContent, 'Review your settings before saving.');
 });
 
 test('conflict preserves edits and explicit reload replaces them', async () => {

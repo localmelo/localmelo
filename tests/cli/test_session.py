@@ -663,7 +663,7 @@ async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> N
     await setup.session.check_server()
     out = " ".join(setup.out.text().split())
     assert (
-        "This server lists Qwen3-Embedding-0.6B; melo --reconfigure adds it "
+        "This server lists Qwen3-Embedding-0.6B; melo setup adds it "
         "for long-term memory."
     ) in out
 
@@ -695,7 +695,7 @@ async def test_check_server_does_not_suggest_an_embedding_where_it_cannot_act(
     setup.factory._options = replace(setup.factory._options, memory=memory)
     setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
     await setup.session.check_server()
-    assert "melo --reconfigure adds it" not in setup.out.text()
+    assert "melo setup adds it" not in setup.out.text()
 
 
 async def test_esc_after_the_run_ended_does_not_stop_the_turn(
@@ -910,6 +910,39 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert built[0]["cfg"].vllm.chat_url == new_url
     assert config.load().vllm.chat_model == "m3"
     assert config.load().embedding_backend == "sglang"
+
+
+async def test_a_model_switch_never_saves_an_x_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support import config
+    from localmelo.support.cli.agents import config_backend
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    config.save(
+        config.Config(
+            chat_backend="sglang",
+            embedding_backend="none",
+            sglang=config.LocalBackendConfig(chat_url=URL, chat_model="m1"),
+        )
+    )
+    config.set_overrides({"cli.stream": True, "retrieval.k": 9})
+    cfg = config.load()
+    assert cfg.cli.stream is True  # this session runs with the setting
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+    )
+    factory.use_model("m2")
+    assert await factory.save() == ""
+    text = path.read_text(encoding="utf-8")
+    assert 'chat_model = "m2"' in text
+    assert "stream" not in text and "[retrieval]" not in text
+    assert config.load().cli.stream is True
 
 
 async def test_backend_saves_an_ollama_server_as_the_ollama_backend(

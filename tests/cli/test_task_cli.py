@@ -324,6 +324,47 @@ def test_explicit_gateway_ignores_invalid_config(
     assert cli.main(["--gateway", "", "list"]) == 2
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--gateway", "http://127.0.0.1:8901", "list"],
+        ["--gateway", "", "list"],
+        ["follow", "abc", "--after", "-1"],
+    ],
+    ids=["list", "bad-gateway", "bad-cursor"],
+)
+def test_melo_task_is_this_client(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``melo task ...`` makes the same requests and exits the same way, under its own name."""
+    import localmelo.support.task_cli as cli
+    from localmelo.support.command_words import expand
+
+    monkeypatch.setattr(cli, "read_token", lambda path: "a" * 64)
+    requests: list[httpx.Request] = []
+    factory = httpx.Client
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"tasks": []})
+
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda **kw: factory(**kw, transport=httpx.MockTransport(reply)),
+    )
+    direct = cli.main(argv)
+    plain = (len(requests), capsys.readouterr().err)
+    requests.clear()
+    with pytest.raises(SystemExit) as exc:
+        expand(["task", *argv])
+    assert exc.value.code == direct
+    assert (len(requests), capsys.readouterr().err) == (
+        plain[0],
+        plain[1].replace("melo-task:", "melo task:"),
+    )
+
+
 @pytest.mark.parametrize("cursor", ["-1", "9223372036854775808"])
 def test_bad_cursor_is_usage_error(
     cursor: str, capsys: pytest.CaptureFixture[str]

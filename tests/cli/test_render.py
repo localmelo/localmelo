@@ -413,7 +413,7 @@ _UNREACHABLE = (
             "Max steps reached",
             "⚠",
             "Ran out of steps.",
-            "/retry tries again; for more steps, quit and run melo -c --max-steps 60.",
+            "/retry tries again; for more steps, quit and run melo -c --steps 60.",
         ),
         (
             "stuck",
@@ -551,7 +551,10 @@ def test_ollama_and_cloud_hints() -> None:
         )
         .text()
     )
-    assert "The server refused the key in OPENAI_API_KEY." in text
+    assert (
+        "The server refused the key in OPENAI_API_KEY. melo setup changes the backend."
+        in " ".join(text.split())
+    )
     text = (
         Turn(key="openai", label="OpenAI", base_url="")
         .finish("provider_error", error=_UNREACHABLE)
@@ -788,10 +791,10 @@ def test_the_welcome_names_the_server_only_for_a_model_that_is_not_saved() -> No
         assert len(_welcome(source=source)) == 3
     wide = _welcome(120, source="--base-url", listed=3)
     assert wide[2] == (
-        f"{URL} · from --base-url (not saved) · the loaded one of 3; /model lists them"
+        f"{URL} · from --url (not saved) · the loaded one of 3; /model lists them"
     )
     assert _welcome(80, source="--base-url", listed=3)[2] == (
-        f"{URL} · from --base-url (not saved)"
+        f"{URL} · from --url (not saved)"
     )
     assert _welcome(44, source="unsaved")[2] == URL  # the longer notes give way
 
@@ -817,7 +820,7 @@ def test_the_banner_names_the_configured_embedding_model() -> None:
 
 def test_the_banner_without_an_embedding_names_the_wizard() -> None:
     text = _banner(key="vllm", label="vLLM")
-    assert "│ memory     no long-term memory · melo --reconfigure adds one" in text
+    assert "│ memory     no long-term memory · melo setup adds one" in text
 
 
 def test_the_banner_after_the_first_run_does_not_repeat_how_to_add_memory() -> None:

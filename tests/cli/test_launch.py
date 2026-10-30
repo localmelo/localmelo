@@ -319,7 +319,7 @@ def test_without_a_terminal_the_ui_explains_and_exits_2(
         "",
         "melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).\n"
         '  Run one task:      melo "your task"\n'
-        "  Start the gateway: melo --serve\n",
+        "  Start the gateway: melo serve\n",
     )
 
 

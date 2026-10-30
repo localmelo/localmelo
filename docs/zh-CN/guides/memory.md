@@ -116,7 +116,7 @@ asyncio.run(main())
 
 要删除全部内容，包括 API 不涉及的内容，请停止所有 localmelo 进程并删除文件：
 
-1. 停止所有 localmelo 进程：直接运行、`melo --serve` 和后台服务。使用 `melo --daemon uninstall` 停止服务；单纯使用 `kill` 后 launchd 会重新启动它。
+1. 停止所有 localmelo 进程：直接运行、`melo serve` 和后台服务。使用 `melo serve uninstall` 停止服务；单纯使用 `kill` 后 launchd 会重新启动它。
 2. 删除文件：
 
    ```bash
@@ -166,4 +166,4 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 - 工具返回的图像只存储引用：MIME 类型、SHA-256 摘要和大小，绝不存储图像本身。
 - 交互式界面将每个轮次及其工具调用和输出保存在 `~/.cache/localmelo/cli/sessions.db`，将你的消息保存在 `~/.cache/localmelo/cli_history`（两者均为 `0600`，明文，未加密）；`~/.cache/localmelo/logs/cli.log` 记录请求 URL 和错误。
 - 这些文件的私密程度取决于你的主目录。删除方法见[重置记忆](#reset-memory)。Python API 的 `forget` 会覆盖所删除的单元并截断 WAL，因此文本不会留在数据库文件的空闲页或 `history.db-wal`/`long_term.db-wal` 中。
-- 控制台将会话行和轮次存储在 `~/.cache/localmelo/gateway/sessions.db`。旧版 playground 默认禁用；使用 `melo --serve --enable-playground` 启用后，它会将聊天的历史记录和程序性记忆保存在 `~/.cache/localmelo/playground/`；选择了嵌入模型时，也会在那里保存长期记忆。
+- 控制台将会话行和轮次存储在 `~/.cache/localmelo/gateway/sessions.db`。旧版 playground 默认禁用；使用 `melo serve --playground` 启用后，它会将聊天的历史记录和程序性记忆保存在 `~/.cache/localmelo/playground/`；选择了嵌入模型时，也会在那里保存长期记忆。

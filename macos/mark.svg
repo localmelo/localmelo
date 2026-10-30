@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>localmelo mark: Melo's head</title>
+  <!-- One shape: the head and ears, with the eyes, the muzzle and the nose as holes (even-odd).
+       No colour and no gradient, so the menu bar can tint it as a template image. -->
+  <path fill-rule="evenodd" d="M 32 19.8 C 35.2 19.8 38 20.4 40.4 22.4 L 50.2 8.2 Q 52.6 4.8 54.4 8.2 L 58.8 25.8 C 60.2 31.4 61.8 41 59.6 47.6 C 56.4 56.6 46 61.2 32 61.2 C 18 61.2 7.6 56.6 4.4 47.6 C 2.2 41 3.8 31.4 5.2 25.8 L 9.6 8.2 Q 11.4 4.8 13.8 8.2 L 23.6 22.4 C 26 20.4 28.8 19.8 32 19.8 Z
+        M 19.6 34.4 a2.6 3.2 0 1 0 5.2 0 a2.6 3.2 0 1 0 -5.2 0 Z
+        M 39.2 34.4 a2.6 3.2 0 1 0 5.2 0 a2.6 3.2 0 1 0 -5.2 0 Z
+        M 21.4 49.4 a10.6 6.9 0 1 0 21.2 0 a10.6 6.9 0 1 0 -21.2 0 Z
+        M 28.4 44.4 L 35.6 44.4 Q 36.8 44.4 36.2 45.6 L 33.4 49.9 Q 32 51.3 30.6 49.9 L 27.8 45.6 Q 27.2 44.4 28.4 44.4 Z"/>
+</svg>

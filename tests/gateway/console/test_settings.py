@@ -825,6 +825,26 @@ def test_mode_round_trips_through_put_and_the_cli_config(
     assert "[ui]" not in isolated_config.read_text()
 
 
+def test_saving_settings_never_writes_an_x_setting(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    config.set_overrides({"cli.stream": True, "ui.mode": "developer"})
+    first = client.get("/api/settings").json()
+    assert first["mode"] == "developer"  # this process runs with the setting
+    resp = client.put("/api/settings", json=_put_body(first["revision"]))
+    assert resp.status_code == 200
+    text = isolated_config.read_text()
+    assert "stream" not in text and "[cli]" not in text and "[ui]" not in text
+    # A value the page changes is the page's.
+    resp = client.put(
+        "/api/settings", json=_put_body(resp.json()["revision"], mode="default")
+    )
+    assert resp.status_code == 200 and "[ui]" not in isolated_config.read_text()
+    config.set_overrides({})
+    assert config.load().ui.mode == "default" and config.load().cli.stream is False
+
+
 def test_saving_without_a_mode_does_not_write_a_ui_table(
     client: TestClient, isolated_config: Path
 ) -> None:
