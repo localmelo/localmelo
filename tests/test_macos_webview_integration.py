@@ -472,9 +472,7 @@ def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:
         wait_for(tmp_path / "events", "selection 5", process)
 
 
-def test_the_window_and_menus_call_the_app_localmelo(
-    app: Path, tmp_path: Path
-) -> None:
+def test_the_window_and_menus_call_the_app_localmelo(app: Path, tmp_path: Path) -> None:
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "names ", process)
         line = next(x for x in events.splitlines() if x.startswith("names "))
