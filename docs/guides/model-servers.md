@@ -8,8 +8,8 @@ This guide shows how to run a model server yourself and point localmelo at it: o
 OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later.
 localmelo supports it as a local server: first-run setup finds it on port
 8000 and asks it which models are loaded. In the config file it is the
-`vllm` backend; [oMLX](model-servers.md#omlx) explains why. To use it
-instead of Ollama:
+`vllm` backend, also spelled `omlx`; [oMLX](model-servers.md#omlx)
+explains why. To use it instead of Ollama:
 
 1. Install oMLX with Homebrew:
 
@@ -100,12 +100,15 @@ like this, and with several chat models it asks oMLX which are loaded
   set, oMLX does not say, even with **Allow inference without API key** on,
   and setup prints `The server did not say which models are loaded (it needs
   a key for that).` A model that has an alias in oMLX is listed under the
-  alias but reported as loaded under its folder name, so it is not marked.
+  alias, and the status reply names the alias beside the folder name
+  (`model_alias`, as oMLX 0.7.1rc1 sends it), so the model is marked and can
+  be the default under the alias. A server whose reply has no alias cannot
+  mark such a model.
 
 With a configuration saved already, run step 5 first, so that the model is
 loaded, then `melo --reconfigure`: in default mode it offers the server it
 finds with the first run's questions. In the full menu (after `n`, or with
-`--developer`), choose vLLM (`3`) as the chat backend, enter
+`--developer`), choose oMLX or vLLM (`3`) as the chat backend, enter
 `http://127.0.0.1:8000/v1` and the model id, and choose `5` (None) as the
 embedding backend unless oMLX also serves an embedding model.
 [oMLX configuration](model-servers.md#omlx) shows the file they save and the
@@ -128,16 +131,23 @@ uses that model; it reads the configuration file.
 The wizard suggests the local URLs; use your server's address and port.
 localmelo only connects to a local server: you start and stop it yourself.
 `mlc`, `vllm` and `sglang` use the plain OpenAI-compatible API, so another
-OpenAI-compatible server works with any of them. There is no `omlx` key:
-oMLX is a supported server, and `vllm` is the key for it
-([details](model-servers.md#omlx)).
+OpenAI-compatible server works with any of them. In the config file `omlx` is
+another spelling of `vllm` ([details](model-servers.md#omlx)).
 
 ### oMLX
 
 [oMLX](https://github.com/jundot/omlx) is a supported local server. Its API
 is OpenAI-compatible, and the `vllm` key stands for any OpenAI-compatible
-server, vLLM's own included. So oMLX has no key of its own: the config file
-says `chat_backend = "vllm"`, and first-run setup saves oMLX that way.
+server, vLLM's own included. So oMLX has no backend of its own: first-run
+setup saves `chat_backend = "vllm"`, and a file may spell it
+`chat_backend = "omlx"` (and `embedding_backend = "omlx"`), which loads as
+the same backend, with its settings in the `[vllm]` table, and is saved back
+as written. The banner, `/status` and the web console call the server oMLX
+when the file says `omlx` or a model listing of the server did (oMLX names
+itself as the owner of every model it lists), and otherwise an
+OpenAI-compatible server. A saved server is listed after the banner is
+printed, so the banner shows what the file says, unless the run already
+listed the server, as the first run does.
 [Serve a model with oMLX](model-servers.md#serve-a-model-with-omlx) shows how
 to start it.
 

@@ -238,7 +238,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
               <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default is the saved backend, else <code>[1]</code>, MLC. For oMLX or another OpenAI-compatible server, choose vLLM (<code>3</code>).</td></tr>
+              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default is the saved backend, else <code>[1]</code>, MLC. For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (<code>3</code>).</td></tr>
               <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
               <tr><td><code>Save and continue?</code></td><td>Press Enter (yes) to save and continue.</td></tr>
@@ -529,7 +529,7 @@ brew install jundot/omlx/omlx</code></pre>
           model is loaded, then <code>melo --reconfigure</code>: in default mode
           it offers the server it finds with the first run's questions. In the
           full menu (after <code>n</code>, or with <code>--developer</code>),
-          choose vLLM (<code>3</code>) as the chat backend, enter
+          choose oMLX or vLLM (<code>3</code>) as the chat backend, enter
           <code>http://127.0.0.1:8000/v1</code> and the model id, and choose
           <code>5</code> (None) as the embedding backend unless oMLX also
           serves an embedding model.

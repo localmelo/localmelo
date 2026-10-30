@@ -156,7 +156,7 @@ embedding_model = "nomic-embed-text"
 
 ## 会有哪些变化
 
-- 交互式界面横幅的记忆行会显示后端和模型，例如 `long-term memory · vLLM · Qwen3-Embedding-0.6B`；没有嵌入后端时显示 `no long-term memory · melo --reconfigure adds one`（在 `--base-url` 会话中则显示 `--embedding-base-url adds one`）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
+- 交互式界面横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）；没有嵌入后端时显示 `no long-term memory · melo --reconfigure adds one`（在 `--base-url` 会话中则显示 `--embedding-base-url adds one`）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
 - 新建的长期记忆存储初始为空。运行结束和步骤完成时，符合条件的条目可能被接纳；已有的纯文本条目不会重新生成嵌入。
 - 更换模型会改变向量空间。已存向量的维度与新模型不同时，该向量会被跳过，因此旧条目不再参与排序，而不会破坏召回。要回收空间，请停止 localmelo 并删除 `~/.cache/localmelo/memory/long_term.db*`；见[重置记忆](memory.md#reset-memory)。
 - 网页工作区也有连接设置。见[网页工作区](web-console.md#web-workspace)。

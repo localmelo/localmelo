@@ -13,7 +13,7 @@ input box and a status bar stay at the bottom.
 
 ```text
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      Qwen3-8B · vLLM · http://127.0.0.1:8000/v1                    │
+│ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1                    │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
 │ memory     no long-term memory · melo --reconfigure adds one             │
@@ -77,7 +77,11 @@ The banner's title shows the package version, and on a git checkout the short
 commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
 backend, a second line says where they come from (`from --base-url (not
 saved)`, `saved as the default`) and, when melo took the one model the server says is loaded out of several,
-`the loaded one of N; /model lists them`.
+`the loaded one of N; /model lists them`. The server is called `oMLX` when the
+config file says `omlx` or a model listing of the server did, and otherwise
+`OpenAI-compatible server` (Ollama, MLC LLM and SGLang keep their names); a
+saved server is listed after the banner, so the banner shows what the file
+says, unless the run already listed the server (the first run does).
 
 ### Keys
 
@@ -571,8 +575,9 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none
   answers, it prints
-  `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.`
-  and offers `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
+  `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example omlx serve or ollama serve), or enter its URL.`
+  (elsewhere than macOS it names only `ollama serve`) and offers
+  `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
 - A server that lists several models shows them as a numbered list and asks
@@ -587,9 +592,10 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
   `[ollama]` table's `chat_url` and `chat_model`; the banner then says
   Ollama, and chat requests use Ollama's native API with its 300 s timeout.
-  Any other OpenAI-compatible server is saved as `chat_backend = "vllm"`
-  (the key for any OpenAI-compatible server), with its `[vllm]` table's
-  `chat_url` and `chat_model`. The file's other settings are kept.
+  Any other OpenAI-compatible server, oMLX included, is saved as
+  `chat_backend = "vllm"` (the key for any OpenAI-compatible server), with
+  its `[vllm]` table's `chat_url` and `chat_model`. The file's other
+  settings are kept.
 - When the server lists an embedding model other than the chosen chat model,
   melo asks `Use <model> for long-term memory? [Y/n]:`, recommending
   Qwen3-Embedding first. `y` sends one `POST /v1/embeddings` probe and saves

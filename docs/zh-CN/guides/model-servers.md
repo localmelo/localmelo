@@ -8,7 +8,7 @@
 
 ## 使用 oMLX 提供模型服务
 
-[oMLX](https://github.com/jundot/omlx) 在搭载 Apple silicon 且运行 macOS 15 或更新版本的 Mac 上，通过 OpenAI 兼容 API 提供 MLX 模型服务。localmelo 支持把它作为本地服务器：首次运行时的设置会在 8000 端口找到它，并询问它哪些模型已加载。在配置文件中它是 `vllm` 后端；原因见 [oMLX](model-servers.md#omlx)。要用它替代 Ollama：
+[oMLX](https://github.com/jundot/omlx) 在搭载 Apple silicon 且运行 macOS 15 或更新版本的 Mac 上，通过 OpenAI 兼容 API 提供 MLX 模型服务。localmelo 支持把它作为本地服务器：首次运行时的设置会在 8000 端口找到它，并询问它哪些模型已加载。在配置文件中它是 `vllm` 后端，也可写作 `omlx`；原因见 [oMLX](model-servers.md#omlx)。要用它替代 Ollama：
 
 1. 使用 Homebrew 安装 oMLX：
 
@@ -53,9 +53,9 @@
 
 - 只有一个对话模型：它就是默认值。
 - 有多个，且 oMLX 说明了哪些已加载：设置会给已加载的模型标上 `(loaded)`，并以其中第一个作为默认值。
-- 有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 **Allow inference without API key**，oMLX 也不会说明，此时设置会输出 `The server did not say which models are loaded (it needs a key for that).` 在 oMLX 中设置了别名的模型，会以别名列出，却以文件夹名报告为已加载，所以也不会被标出。
+- 有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 **Allow inference without API key**，oMLX 也不会说明，此时设置会输出 `The server did not say which models are loaded (it needs a key for that).` 在 oMLX 中设置了别名的模型会以别名列出，状态回复会在文件夹名旁边给出该别名（`model_alias`，oMLX 0.7.1rc1 就是这样发送的），所以该模型会被标出，并且可以在别名下成为默认值。状态回复中没有别名的服务器无法标出这样的模型。
 
-已有配置时，先运行第 5 步以加载模型，再运行 `melo --reconfigure`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
+已有配置时，先运行第 5 步以加载模型，再运行 `melo --reconfigure`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 oMLX 或 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
 
 <a id="backends"></a>
 
@@ -72,11 +72,11 @@
 | `gemini` | 云端 | Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai` | 不支持 |
 | `nvidia` | 云端 | NVIDIA API | `https://integrate.api.nvidia.com/v1` | 不支持 |
 
-向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只负责连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。没有 `omlx` 键：oMLX 是受支持的服务器，对应的键是 `vllm`（[详情](model-servers.md#omlx)）。
+向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只负责连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。在配置文件中，`omlx` 是 `vllm` 的另一种写法（[详情](model-servers.md#omlx)）。
 
 ### oMLX
 
-[oMLX](https://github.com/jundot/omlx) 是受支持的本地服务器。它的 API 与 OpenAI 兼容，而 `vllm` 键代表任何 OpenAI 兼容服务器（包括 vLLM 自己的）。所以 oMLX 没有自己的键：配置文件里写 `chat_backend = "vllm"`，首次运行的设置也是这样保存 oMLX 的。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
+[oMLX](https://github.com/jundot/omlx) 是受支持的本地服务器。它的 API 与 OpenAI 兼容，而 `vllm` 键代表任何 OpenAI 兼容服务器（包括 vLLM 自己的）。所以 oMLX 没有自己的后端：首次运行的设置会保存 `chat_backend = "vllm"`，文件也可以写成 `chat_backend = "omlx"`（以及 `embedding_backend = "omlx"`），它们按同一个后端加载，设置仍在 `[vllm]` 表中，并按原样保存回去。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时（oMLX 会把自己标为它所列每个模型的所有者），横幅、`/status` 和网页控制台把这台服务器称为 oMLX，否则称为 OpenAI 兼容服务器。已保存的服务器在横幅显示之后才列出模型，所以横幅显示的是配置文件所写的名称；本次运行已经列出过该服务器时（首次运行就是如此）除外。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
 
 ```toml
 chat_backend = "vllm"

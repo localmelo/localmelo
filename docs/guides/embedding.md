@@ -187,7 +187,8 @@ See [Mix backends](model-servers.md#mix-backends).
 ## What changes
 
 - The interactive banner's memory row names the backend and model, for
-  example `long-term memory · vLLM · Qwen3-Embedding-0.6B`; without one it
+  example `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
+  (`oMLX` where the config file says `omlx`); without one it
   says `no long-term memory · melo --reconfigure adds one` (or
   `--embedding-base-url adds one` in a `--base-url` session). This row
   describes the embedding configuration, not whether explicit modes can use

@@ -167,7 +167,7 @@ melo --serve --reconfigure
 
 | 提示 | 输入内容 |
 |---|---|
-| `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于 oMLX 或其他 OpenAI 兼容服务器，选择 vLLM（`3`）。 |
+| `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于 oMLX 或其他 OpenAI 兼容服务器，选择 oMLX 或 vLLM（`3`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
 | `Save and continue?` | 按 Enter（是）保存并继续。 |

@@ -212,7 +212,7 @@ The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For oMLX or another OpenAI-compatible server, choose vLLM (`3`). |
+| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Save and continue?` | Press Enter (yes) to save and continue. |

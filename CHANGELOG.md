@@ -950,6 +950,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
+  settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
+  `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`
+  server `oMLX` when the config file says so or a model listing of the server did (oMLX names
+  itself as the owner of every model it lists, so no request is added), and `OpenAI-compatible
+  server` otherwise (they said `vLLM`); `--base-url` sessions use the same two names (the second
+  was `OpenAI-compatible`), and so do the backend's error messages. `chat_backend = "omlx"` and
+  `embedding_backend = "omlx"` are accepted as another spelling of `vllm`: they load as the same
+  backend and are saved as written. On macOS the no-server hint names `omlx serve` before
+  `ollama serve`. A model that oMLX serves under an alias is marked `(loaded)` and can be the
+  default under the alias, because its status reply names the alias (`model_alias`). The requests
+  of `melo --base-url … --chat-model …` runs are unchanged ([#NN]).
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that
