@@ -30,7 +30,7 @@ Two files in `~/.cache/localmelo/memory/` (the folder mode 0700, the files
 
 - **Notes about you** (`records.db`). When a message you type says something
   about you ("I prefer short answers", "my group meeting is on Thursdays",
-  "call me Ray", "我习惯用简体中文") or asks melo to remember a fact
+  "my reading group meets on Tuesdays", "call me Ray", "我习惯用简体中文") or asks melo to remember a fact
   ("remember that Sam has the lab keys"), melo keeps it as one sentence
   addressed to you, with its topic (About you, Preferences, People or
   Decisions), your words and the chat it came from. A line under your message
@@ -63,7 +63,8 @@ when is my group meeting?
 
 Under your message the page shows `Used 1 memory ▾`; open it to see each item
 and its source, such as `you said it · chat “Planning”, Oct 30`. Most messages
-recall nothing: an item must share most of the message's content words, or be
+recall nothing: an item must share most of the message's content words (a
+plural, `-ing` or `-ed` ending does not matter: "meet" finds "meets"), or be
 close in meaning by the embedding model. When the embedding model takes over
 1.5 seconds or fails, that message is searched by words alone, and the log says
 so once. The chat's own earlier turns are not recalled (the chat has them), a

@@ -88,6 +88,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Memory across chats keeps and finds more of what you say. "My reading group meets on
+  Tuesdays." and "我的猫叫团子。" were not kept as notes, because only "my ... is" sentences
+  counted; a sentence that starts with "my" or "our" and has a verb of habit or state
+  (meets, starts, lives, plays, likes ...), or "我的X" with 叫, 姓, 住在, 喜欢 or 每周, is now
+  a note. And a chat asked "which day does my reading group meet?" recalled nothing
+  though an earlier turn said it: the words were compared as written, so "meet" did not
+  match "meets" and only 2 of the 4 content words matched. A plural, "-ing" or "-ed"
+  ending is now ignored when words are compared ([#NN]).
+
 - A chat says plainly what it remembers and answers in the script you write in. Asked about
   memory, melo had described how the system around it works ("retrieved context and
   reflections", "cannot write to long-term memory") and had answered in traditional characters
