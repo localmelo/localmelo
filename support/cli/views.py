@@ -19,6 +19,7 @@ from localmelo.melo.schema import (
     ToolInfo,
     split_thinking,
 )
+from localmelo.support.cli import mark
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
@@ -27,7 +28,7 @@ from localmelo.support.cli.text import (
     pad_cells,
     wrap_words,
 )
-from localmelo.support.cli.theme import Symbols, in_symbols
+from localmelo.support.cli.theme import Palette, Symbols, in_symbols
 from localmelo.support.sessions.attachments import parse_user_text
 from localmelo.support.sessions.display import (
     clean_output,
@@ -192,28 +193,31 @@ def welcome(
     yolo: bool,
     width: int,
     symbols: Symbols,
+    palette: Palette | None = None,
 ) -> RenderableType:
     """Three rows that start the conversation: the model, the folder, what to try.
 
     The model's server shows in a row of its own only when the model is not
     the saved default; the tools, memory and session are in ``/status``. Narrow,
-    a row drops its least needed parts whole before anything is cut.
+    a row drops its least needed parts whole before anything is cut. With a
+    *palette* that has the colours for it, Melo's face stands beside the rows
+    (:mod:`~localmelo.support.cli.mark`), and the rows take the rest.
     """
+    marked = palette is not None and mark.shows(palette, symbols, width)
+    width -= mark.CELLS + mark.GAP if marked else 0
     dot, ellipsis = symbols.dot, symbols.ellipsis
     model = clean_output(backend.model)
-    change = " (/model to change)"
+    change: Parts = [(" (", "muted"), ("/model", "accent"), (" to change)", "muted")]
     named: list[Parts] = [
-        [("melo", "bold"), (f" {v} {dot} ", "muted"), (model, ""), (change, "muted")]
+        [("melo", "brand"), (f" {v} {dot} ", "muted"), (model, ""), *change]
         for v in (version, version.split(" (")[0])  # then without the commit
     ]
-    cut = cut_cells(model, max(1, width - cells(change)), ellipsis)
+    cut = cut_cells(model, max(1, width - cells(" (/model to change)")), ellipsis)
     lines = [
-        _fitting(
-            [*named, [(model, ""), (change, "muted")], [(cut, ""), (change, "muted")]],
-            width,
-        ),
+        _fitting([*named, [(model, ""), *change], [(cut, ""), *change]], width),
         Text(
             cut_middle(clean_output(home_label(workspace)), width, ellipsis),
+            style="path",
             no_wrap=True,
             overflow="ellipsis",
         ),
@@ -229,17 +233,26 @@ def welcome(
                 width,
             )
         )
-    example = "Try: What is this project?"
+    try_it: Parts = [("Try: ", "muted"), ("What is this project?", "")]
+    quit_it: Parts = [(f" {dot} ", "muted"), ("ctrl+d", ""), (" quit", "muted")]
+    commands: Parts = [(f" {dot} ", "muted"), ("/", ""), (" commands", "muted")]
     lines.append(
-        _fitting(
-            [
-                [(example, ""), (f" {dot} / commands {dot} ctrl+d quit", "muted")],
-                [(example, ""), (f" {dot} ctrl+d quit", "muted")],
-                [(example, "")],
-            ],
-            width,
-        )
+        _fitting([[*try_it, *commands, *quit_it], [*try_it, *quit_it], try_it], width)
     )
+    if marked and palette is not None:
+        art = mark.rows(palette.polarity)
+        blank = Text(" " * mark.CELLS)
+        lines = [
+            Text.assemble(
+                art[number] if number < len(art) else blank,
+                " " * mark.GAP,
+                line,
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+            for number, line in enumerate(lines)
+        ]
+        lines += art[len(lines) :]
     lines += _warnings(workspace, yolo=yolo, symbols=symbols)
     # A blank row on each side: it sets the rows apart from the shell's prompt
     # line, or from the first run's questions above.
@@ -258,6 +271,7 @@ def banner(
     symbols: Symbols,
     session_title: str | None = None,
     developer: bool = False,
+    palette: Palette | None = None,
 ) -> RenderableType:
     """The startup banner: the welcome, or in developer mode a box of every row."""
     if not developer:
@@ -268,6 +282,7 @@ def banner(
             yolo=yolo,
             width=width,
             symbols=symbols,
+            palette=palette,
         )
     rows: list[tuple[str, str, str]] = []
     for number, text in enumerate(model_rows(backend)):
