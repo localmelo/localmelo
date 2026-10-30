@@ -130,11 +130,22 @@ CALL_RECORDER: contextvars.ContextVar[CallRecorder | None] = contextvars.Context
     "CALL_RECORDER", default=None
 )
 
-SYSTEM_PROMPT = (
+_SYSTEM_BASE = (
     "You are a task-solving agent. You can use tools to accomplish tasks.\n"
     "When you need to use a tool, respond with a tool call.\n"
     "When the task is complete, respond with your final answer directly.\n"
-    "Think step by step. Be concise."
+)
+
+SYSTEM_PROMPT = _SYSTEM_BASE + "Think step by step. Be concise."
+
+# SYSTEM_PROMPT under ``AgentOptions.lean_output``: its last line gives way to
+# hints that cut a direct run's output tokens.
+LEAN_SYSTEM_PROMPT = _SYSTEM_BASE + (
+    "Write no text between tool calls, and keep the final answer to three "
+    "lines at most.\n"
+    "Use relative paths: code runs in the working directory, so do not edit "
+    "sys.path.\n"
+    "If the task names files, read them first instead of listing folders."
 )
 
 STEP_ESTIMATE_PROMPT = (
@@ -151,7 +162,7 @@ def _parse_step_estimate(text: str) -> int:
     return int(match.group()) if match else -1
 
 
-REFLECTION_PROMPT = (
+_REFLECTION_INTRO = (
     "The current attempt has ended without a final answer. "
     "Reflect on what happened and decide how to proceed.\n\n"
     "IMPORTANT: this reflection is the *only* state carried into the next "
@@ -164,6 +175,9 @@ REFLECTION_PROMPT = (
     "Choose 'done' only if the task is already complete, and put the final "
     "answer in best_effort_result.\n\n"
     "Respond with a JSON object (no markdown fences):\n"
+)
+
+REFLECTION_PROMPT = _REFLECTION_INTRO + (
     "{\n"
     '  "summary": "one-sentence summary of what was attempted",\n'
     '  "failed_hypotheses": ["approaches that did not work"],\n'
@@ -184,6 +198,27 @@ REFLECTION_PROMPT = (
     '  "repeat_risk": 0.0-1.0,\n'
     '  "novelty": 0.0-1.0,\n'
     '  "feasibility": 0.0-1.0\n'
+    "}"
+)
+
+# REFLECTION_PROMPT under ``AgentOptions.lean_output`` and ``reflection_gate="flags"``:
+# the gate's action and three flags, not the five estimates (only "utility" reads
+# them), ``progress_made`` or ``new_information_gained`` (nothing does), and the
+# answer only with ``done`` or ``stop``.
+LEAN_REFLECTION_PROMPT = _REFLECTION_INTRO + (
+    "{\n"
+    '  "summary": "one-sentence summary of what was attempted",\n'
+    '  "failed_hypotheses": ["approaches that did not work"],\n'
+    '  "useful_evidence": ["facts discovered that may help"],\n'
+    '  "recommended_avoids": ["actions to avoid next"],\n'
+    '  "next_promising_directions": ["concrete next steps to try"],\n'
+    '  "task_still_feasible": true/false,\n'
+    '  "next_step_is_concrete": true/false,\n'
+    '  "next_step_is_novel": true/false,\n'
+    '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
+    '  "rationale": "why you chose this action",\n'
+    '  "best_effort_result": "only with done or stop: the final answer if done, '
+    'else the best partial answer so far"\n'
     "}"
 )
 
@@ -328,11 +363,12 @@ def _build_system_prompt(
     reflections: list[ReflectionEntry] | None = None,
     notes: Sequence[str] = (),
     instruction: str = "",
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[str, list[Message]]:
     """Merge all system messages into a single system prompt.
 
     *instruction*, the compress modes' static note instruction, comes right
-    after ``SYSTEM_PROMPT``; then *notes*, such as the agent's workspace
+    after *system_prompt*; then *notes*, such as the agent's workspace
     note, each as a paragraph of its own. Memory items (prefixed with
     ``[memory] ``) are collected under a single ``[RECALL]`` section.
     Reflection entries are rendered under a ``[REFLECTION]`` section.
@@ -355,7 +391,7 @@ def _build_system_prompt(
         else:
             non_system.append(msg)
 
-    parts: list[str] = [SYSTEM_PROMPT]
+    parts: list[str] = [system_prompt]
     if instruction:
         parts.append(instruction)
     parts.extend(notes)
@@ -506,7 +542,10 @@ class Chat:
     compress modes they append the ``used_notes`` paragraph when
     *note_instruction* is set. *empty_prefix* passes to
     :func:`~localmelo.melo.memory.short.tail_turns`, for the compress
-    modes' empty-reply label that carries a note.
+    modes' empty-reply label that carries a note. *system_prompt* and
+    *reflection_prompt* take the places of ``SYSTEM_PROMPT`` and
+    ``REFLECTION_PROMPT`` in every request (``AgentOptions.lean_output``
+    passes the lean ones).
 
     A request that fails with a retryable :class:`ProviderError` is sent
     again after each delay in *retry_delays* (default
@@ -528,7 +567,11 @@ class Chat:
         fit_target: float = 1.0,
         tool_guard: bool = False,
         window_reflection: bool = False,
+        system_prompt: str = SYSTEM_PROMPT,
+        reflection_prompt: str = REFLECTION_PROMPT,
     ) -> None:
+        self.system_prompt = system_prompt
+        self.reflection_prompt = reflection_prompt
         self.fixed_prefix = fixed_prefix
         self.tool_guard = tool_guard
         # cache_layout v3: the reflection lives in the window (the agent appends
@@ -567,7 +610,7 @@ class Chat:
         scoped = PREFIX_RUN.get()
         if scoped is None or scoped[0] is not self:
             raise RuntimeError("fixed prefix requires a run-scoped date")
-        parts = [SYSTEM_PROMPT]
+        parts = [self.system_prompt]
         if self.note_instruction:
             parts.append(self.note_instruction)
         parts.extend(self.system_notes)
@@ -1026,7 +1069,12 @@ class Chat:
                 **ready_args,
             )
         system_prompt, other_msgs = _build_system_prompt(
-            context, short, reflections, self.system_notes, self.note_instruction
+            context,
+            short,
+            reflections,
+            self.system_notes,
+            self.note_instruction,
+            self.system_prompt,
         )
         messages = [Message(role="system", content=system_prompt)]
         if lacks_task_query(short, query):
@@ -1152,9 +1200,9 @@ class Chat:
             return await self._retry_on_prefix(fit, retry_hint)
         # Build system prompt with prior reflection context
         system_parts = (
-            [self._fixed_system(), REFLECTION_PROMPT]
+            [self._fixed_system(), self.reflection_prompt]
             if self.fixed_prefix
-            else [REFLECTION_PROMPT]
+            else [self.reflection_prompt]
         )
         prior_data = ""
         if self.note_instruction:
@@ -1216,7 +1264,7 @@ class Chat:
             same = self.window_reflection or shared.reflections == list(
                 prior_reflections or []
             )
-            lead = [REFLECTION_PROMPT]
+            lead = [self.reflection_prompt]
             if self.note_instruction:
                 lead.append(USED_NOTES_NOTE)
             asking = Message(
