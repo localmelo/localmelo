@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 
 from localmelo.support.sessions.display import (
     activity_text,
-    approval_words,
+    request_words,
     split_thinking,
     status_text,
 )
@@ -275,7 +275,7 @@ def approvals_of(events: Iterable[StoredEvent]) -> dict[str, list[dict[str, Any]
             ts = event.get("ts")
             asked[key] = {
                 "id": key[1],
-                "what": approval_words(
+                "what": request_words(
                     str(data.get("tool_name") or ""),
                     data.get("arguments"),
                     root=root if isinstance(root, str) else None,

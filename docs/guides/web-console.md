@@ -159,9 +159,13 @@ folder.
 On the right of the chat is Melo's panel. At the top is Melo's portrait, with a ring in the colour of what it is
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
-settings**. Under it are four tabs: **Activity**, **Approvals**, **Scheduled** and **Memory**. Arrow keys, Home and
-End move between them, and the panel opens the tab you used last. Approvals and Scheduled say what they will list;
-Activity and Memory work today.
+settings**. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
+End move between them, and the panel opens the tab you used last. Scheduled says what it will list; Activity,
+Workers and Memory work today.
+
+The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
+workers it started; the main chat's panel, and the panel with no chat open, list everything of the day. Melo's status
+line follows the chat too: in a side chat it says what that chat is doing. Opening another chat reads the lists again.
 
 **Activity** has two parts, read from [`GET /api/activity`](../reference/api-v2.md#get-apiactivity) at the page's
 health poll whenever what runs changes, and every 30 seconds:
@@ -171,8 +175,18 @@ health poll whenever what runs changes, and every 30 seconds:
   the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and the
   portrait rests and blinks.
 - **Today** lists what finished today, newest first: the title, a one-line result (`All 412 tests passed.`) and the
-  time. The first eight show; **Earlier today (n)** shows the rest. **All tasks** and **All worker runs** open those
-  views.
+  time. The first eight show; **Earlier today (n)** shows the rest.
+
+A result line is always plain words. A run stopped before it answered reads `Stopped before answering`, a picture
+reads `Made a picture`, a file the file's name, and an answer that is code the first sentence around the code (`Wrote
+some code` when there is none).
+
+A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1
+waiting`. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
+the command itself), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
+when it was asked. A request that waits for you has **Allow once** and **Deny** right there, the same answers as the
+approval card in the chat, and **Review**, which opens the chat or task with the card and the exact content. There is
+no separate Approvals tab.
 
 Select a row to open it in place. A running row shows its steps as they happen (a mark, the step in words and its
 time), the last lines of the latest output, and, for a task, **Pause** or **Resume**, **Stop** and its priority in
@@ -180,6 +194,14 @@ words (**Now**, **Today**, **Normal**, **Whenever**, **If idle**; developer mode
 task list offers them. **Open task**, **Open chat** or **Open run** goes to the whole view; a row that waits offers
 **Review**, which opens the chat or task with the approval card. One row is open at a time, and its steps follow the
 session's event stream while it runs.
+
+**Workers** lists the workers of the scope above: the tasks the open chat started, running ones first, then those
+that finished today. Each row has the title, its state in words (`Working`, `Waiting for your approval`, `Waiting to
+start`, `Paused`, `Done`, `Failed`, `Stopped`), the time and, for a finished worker, its result line. Select a worker
+to open its steps as they happen, or its history once it is done, with **Pause** or **Resume**, **Stop** and its
+priority, as in Activity. The main chat's Workers also lists the worker runs recorded as sessions, such as `melo
+worker`. With none, the tab says when they appear (`This chat has not started any workers. When it hands a task to
+one, the worker is listed here, running first.`). **All tasks** and **All worker runs** at its foot open those views.
 
 The panel is 340 px wide from a 1180 px window up. From 700 to 1180 px the chat list becomes a rail of initials
 (hover a circle for the chat's title), and the panel stays. Below 900 px the panel becomes a sheet: the face chip in

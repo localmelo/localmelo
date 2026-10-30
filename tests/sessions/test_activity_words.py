@@ -10,8 +10,8 @@ import pytest
 from localmelo.support.sessions.display import (
     ActivityText,
     activity_text,
-    approval_words,
     event_activity,
+    request_words,
 )
 
 
@@ -138,7 +138,7 @@ def test_the_newest_events_say_what_a_turn_does() -> None:
             "Write slides.md",
         ),
         ("file_read", {}, "Read a file"),
-        ("list_files", {"path": "/w"}, "Look through ."),
+        ("list_files", {"path": "/w"}, "Look through the folder"),
         ("shell_exec", {"command": "rm -rf ~/x --token abc"}, "Run a command"),
         ("shell_exec", {"command": "uv run pytest"}, "Run the tests"),
         ("python_exec", {"code": "print(1)"}, "Run Python"),
@@ -151,4 +151,4 @@ def test_the_newest_events_say_what_a_turn_does() -> None:
 def test_an_approval_puts_the_call_as_a_request_without_its_command_or_text(
     tool: str, arguments: Any, words: str
 ) -> None:
-    assert approval_words(tool, arguments, root="/w") == words
+    assert request_words(tool, arguments, root="/w") == words

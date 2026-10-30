@@ -1510,6 +1510,40 @@ async def test_blobs_are_stored_once_per_digest(tmp_path: Path) -> None:
     await store.aclose()
 
 
+async def test_approval_events_are_the_approval_events_of_the_listed_sessions_since_a_time(
+    tmp_path: Path,
+) -> None:
+    store = cli(tmp_path / "s.db")
+    first = await store.begin_turn(None, "a", holder=HOLDER, new_session=NewSession())
+    second = await store.begin_turn(None, "b", holder=HOLDER, new_session=NewSession())
+    old = approval_event("approval.requested", "old")
+    old["ts"] = 10.0
+    new = approval_event("approval.requested", "new")
+    new["ts"] = 20.0
+    await store.append_events(
+        first.session_id,
+        1,
+        [old, new, core_event("step.started")],
+        holder=HOLDER,
+    )
+    await store.append_events(
+        second.session_id,
+        1,
+        [approval_event("approval.requested", "other")],
+        holder=HOLDER,
+    )
+    found = await store.approval_events([first.session_id], 15.0)
+    assert [event.event["data"]["request_id"] for event in found] == ["new"]
+    both = await store.approval_events([first.session_id], 0.0)
+    assert [event.event["data"]["request_id"] for event in both] == ["old", "new"]
+    assert await store.approval_events([], 0.0) == []
+    newest = await store.approval_events([first.session_id], 0.0, limit=1)
+    assert [event.event["data"]["request_id"] for event in newest] == ["new"]
+    with pytest.raises(ValueError):
+        await store.approval_events([first.session_id], 0.0, limit=0)
+    await store.aclose()
+
+
 async def test_a_turns_end_withdraws_the_approvals_left_open(tmp_path: Path) -> None:
     path = tmp_path / "s.db"
     store = cli(path)

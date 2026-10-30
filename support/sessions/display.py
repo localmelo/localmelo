@@ -10,7 +10,7 @@ end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
 ended, and :func:`activity_text` for what a running session is doing, in
 plain words (:func:`event_activity` reads it from the session's newest
-events; :func:`approval_words` puts a call as a request). Nothing here
+events; :func:`request_words` puts a call as a request). Nothing here
 imports the UI's libraries or the gateway.
 """
 
@@ -488,7 +488,7 @@ _ASKED: Final[Mapping[str, str]] = {
 }
 
 
-def approval_words(
+def request_words(
     tool: str, arguments: object = None, *, root: str | None = None
 ) -> str:
     """What a call that asked for approval would do, in plain words: ``Write slides.md``.
