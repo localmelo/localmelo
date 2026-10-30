@@ -33,13 +33,15 @@ PORTRAIT = ["sit-idle", "sit-working", "sit-waiting", "sit-done", "sit-error"]
 FACES = ["idle", "working", "waiting", "done", "error"]
 FAVICONS = [16, 32, 64]
 # The pieces of the moves, each on the canvas of the picture it moves over: eyes-closed patches (one per calm
-# picture, and the small face) and the tail's two pieces.
+# picture, and the small face), the tail's two pieces and the ear's two.
 BLINKS = {
     "portrait/sit-idle-blink": "sit-idle",
     "pet/lie-idle-blink": "lie-idle",
+    "pet/rest-lazy-blink": "rest-lazy",
     "face/idle-blink": "idle",
 }
 TAIL_PIECES = ["pet/lie-done-body", "pet/lie-done-tail"]
+EAR_PIECES = ["pet/lie-idle-body", "pet/lie-idle-ear"]
 FACE_POINTS = 48
 MARGIN = 3  # points of clear canvas around the dogs, as the script leaves them
 MAX_BYTES = 1_500_000
@@ -114,7 +116,9 @@ def test_the_folder_holds_exactly_the_expected_files() -> None:
         expected |= {f"{folder}/{n}{s}.png" for n in names for s in ("", "@2x")}
     expected |= {f"favicon/{n}.png" for n in FAVICONS}
     expected |= {
-        f"{piece}{s}.png" for piece in (*BLINKS, *TAIL_PIECES) for s in ("", "@2x")
+        f"{piece}{s}.png"
+        for piece in (*BLINKS, *TAIL_PIECES, *EAR_PIECES)
+        for s in ("", "@2x")
     }
     found = {str(p.relative_to(ART)) for p in ART.rglob("*") if p.is_file()}
     assert found == expected
@@ -314,3 +318,27 @@ def test_the_body_and_the_tail_laid_together_are_the_still_picture(
     assert x <= entry["pivot"][0] <= x + w and y <= entry["pivot"][1] <= y + h
     # The body has no tail: nothing is drawn where the tail's far end is.
     assert body[top : top + 4, right - 4 : right + 1, 3].max() < 0.5
+
+
+@pytest.mark.parametrize("scale, suffix", [(1, ""), (2, "@2x")])
+def test_the_body_and_the_ear_laid_together_are_the_still_picture(
+    scale: int, suffix: str
+) -> None:
+    still = mass(ART / f"pet/lie-idle{suffix}.png")
+    body = mass(ART / f"pet/lie-idle-body{suffix}.png")
+    ear = mass(ART / f"pet/lie-idle-ear{suffix}.png")
+    assert still.shape == body.shape == ear.shape
+    both = ear + body * (1 - ear[..., 3:])  # the ear over the body, premultiplied
+    gap = np.abs(still - both).max(axis=-1)
+    assert gap.mean() < 0.001 and (gap > 0.25).mean() < 0.0015
+    # The ear is a small part of the picture, inside its box, and turns about its base, the pivot of anchors.json.
+    entry = anchors()["lie-idle"]["ear"]
+    x, y, w, h = entry["box"]
+    left, top, right, bottom = extent(ear[..., 3] > 0.5)
+    assert left >= (x - 2) * scale and right <= (x + w + 2) * scale
+    assert top >= (y - 2) * scale and bottom <= (y + h + 2) * scale
+    assert (ear[..., 3] > 0.5).mean() < 0.1
+    assert x <= entry["pivot"][0] <= x + w and y <= entry["pivot"][1] <= y + h
+    # The body has no ear: nothing is drawn at the ear's tip, and the head's top is round there.
+    tip = left + int(np.argmax(ear[top, left : right + 1, 3]))
+    assert body[top : top + 4, max(tip - 2, 0) : tip + 3, 3].max() < 0.5

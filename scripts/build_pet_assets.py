@@ -7,8 +7,9 @@ Pillow is not a dependency of localmelo: `--with` fetches it for this one run. T
 macos/art/akita are committed, and scripts/build_macos_app.py only copies them into the app. The masters (about
 600 to 700 px wide, cut out with a soft edge) stay outside the repository; `picks.json` lists them as
 `{"root": DIR, "picks": {STATE: PATH below DIR}, "motion": {EDIT: PATH below DIR}}` for the 14 states below and the
-three edits of the moves (`sit-idle-blink`, `lie-idle-blink`, `lie-done-notail`; the cut-outs sit next to a
-cut-report.json that says where each one lies in the generated picture). The same input gives the same bytes.
+edits of the moves (`sit-idle-blink`, `lie-idle-blink`, `rest-lazy-blink`, `lie-done-notail`, `lie-idle-noear`; the
+cut-outs sit next to a cut-report.json that says where each one lies in the generated picture). The same input gives
+the same bytes.
 
 Per picture: the cut-out's soft dark fringe is cut away (an alpha ramp seven pixels wide becomes an edge two pixels
 wide), the picture is trimmed, scaled with a Lanczos filter on premultiplied colour, and given a 1 pt cream outer rim
@@ -24,12 +25,14 @@ for the whole set, so Melo is the same size sitting, lying and asleep.
 - face/<name>.png and @2x: a square of the sitting head, 48 pt, for the small slots (idle, working, waiting, done,
   error); favicon/16.png, 32.png and 64.png: the idle face.
 - the moves' pieces, each on the canvas of the picture it belongs to (so a layer is placed with the picture's own
-  frame): pet/lie-idle-blink, portrait/sit-idle-blink and face/idle-blink are eyes-closed patches (the edit's pixels
-  where it differs from its base, nothing elsewhere); pet/lie-done-body and pet/lie-done-tail are the picture cut at
-  the tail, which wags about its pivot. Every edit is checked against its base first (check_alignment).
+  frame): pet/lie-idle-blink, pet/rest-lazy-blink, portrait/sit-idle-blink and face/idle-blink are eyes-closed patches
+  (the edit's pixels where it differs from its base, nothing elsewhere); pet/lie-done-body and pet/lie-done-tail are
+  the picture cut at the tail, which wags about its pivot, and pet/lie-idle-body and pet/lie-idle-ear the picture cut
+  at its right ear, which twitches about its base. Every edit is checked against its base first (check_alignment).
 - anchors.json: per picture, its canvas (pt), `ground` (pt from the top: where the paws rest), `centre` (pt from the
   left) and `box` (x, y, width, height of the drawn dog on the canvas, pt, from the @2x file); `eyes` (the eye band
-  of a blink patch), `tail` (its box and pivot) and `z` (where a sleeping dog's "z" starts), all in pt.
+  of a blink patch), `tail` and `ear` (the box and pivot of the part that swings) and `z` (where a sleeping dog's "z"
+  starts), all in pt.
 
 The web console shows the same pictures, so the same run copies the ones it needs, at 2x, into
 support/gateway/static/akita (see CONSOLE_FILES); `--console-only` makes that copy again from the committed files in
@@ -90,8 +93,16 @@ SCALES = (1, 2)
 BLINKS = {
     "sit-idle": ("sit-idle-blink", (103, 174, 309, 248)),
     "lie-idle": ("lie-idle-blink", (95, 164, 303, 232)),
+    "rest-lazy": ("rest-lazy-blink", (120, 180, 326, 260)),
 }
 TAIL = {"lie-done": ("lie-done-notail", (468, 162, 678, 366), (548, 290))}
+EAR = {"lie-idle": ("lie-idle-noear", (270, 0, 420, 140), (331, 95))}
+# The parts that swing about a pivot: the picture's edit without the part, the part's box, its pivot.
+SWING = {**TAIL, **EAR}
+PART = {**dict.fromkeys(TAIL, "tail"), **dict.fromkeys(EAR, "ear")}
+# How far (px) a part's mask grows past the pixels that changed: an ear stands against the clear background, so
+# the feather must not leave a ghost of its old outline in the body.
+GROW = {"lie-idle": 5}
 # Where a sleeping dog's "z" starts, in points of the pet's canvas.
 SLEEP_Z = {"sleep-front": (86, 24), "sleep-side": (62, 22), "sleep-back": (30, 40)}
 OPEN = 7  # px: parts of the tail mask thinner than this are not the tail
@@ -209,11 +220,15 @@ def blink_patch(
 
 
 def tail_split(
-    base: Image.Image, edit: Image.Image, box: tuple[int, int, int, int]
+    base: Image.Image,
+    edit: Image.Image,
+    box: tuple[int, int, int, int],
+    grow: int = 2,
 ) -> tuple[Image.Image, Image.Image]:
-    """The base cut at its tail, from the same picture drawn without it: (body, mask). The mask is where the edit
-    lacks what the base has, inside `box`, holes filled (tail fur that is the colour of the back), feathered. The
-    body is the base outside the mask and the edit inside it, so it shows the back where the tail was.
+    """The base cut at its tail (or ear), from the same picture drawn without it: (body, mask). The mask is where
+    the edit lacks what the base has, inside `box`, holes filled (tail fur that is the colour of the back), grown by
+    `grow` px and feathered. The body is the base outside the mask and the edit inside it, so it shows the back where
+    the tail was.
     """
     hard = Image.fromarray(
         changed_in(base, edit, box).astype(np.uint8) * 255
@@ -226,7 +241,7 @@ def tail_split(
     opened = whole.filter(ImageFilter.MinFilter(OPEN)).filter(
         ImageFilter.MaxFilter(OPEN)
     )
-    soft = softened(np.asarray(opened) > 0, 2, 1.5)[..., None]
+    soft = softened(np.asarray(opened) > 0, grow, 1.5)[..., None]
     one, two = (np.asarray(image, np.float32) for image in (base, edit))
     alpha = (one[..., 3:] * (1 - soft) + two[..., 3:] * soft) / 255
     colour = (
@@ -367,11 +382,11 @@ def family(
                 name, patch = patches[state]
                 save(out / folder / f"{name}{suffix}.png", lay(patch))
             if state in splits:
-                body, tail = split_tail(
+                body, part = split_tail(
                     still, lay(splits[state][0]), lay(splits[state][1]), rim
                 )
                 save(out / folder / f"{state}-body{suffix}.png", body)
-                save(out / folder / f"{state}-tail{suffix}.png", tail)
+                save(out / folder / f"{state}-{PART[state]}{suffix}.png", part)
         # Points per master pixel, and where the dog's box starts, from the @2x pass: marks go from the master's
         # frame to the canvas.
         unit = size[0] / 2 / cut[state].width, size[1] / 2 / cut[state].height
@@ -388,9 +403,9 @@ def family(
         if state in patches:
             anchors[state]["eyes"] = marked(trimmed_box(patches[state][1]), on_canvas)
         if state in splits:
-            anchors[state]["tail"] = {
+            anchors[state][PART[state]] = {
                 "box": marked(trimmed_box(splits[state][1]), on_canvas),
-                "pivot": on_canvas(*TAIL[state][2]),
+                "pivot": on_canvas(*SWING[state][2]),
             }
         if state in SLEEP_Z:
             anchors[state]["z"] = list(SLEEP_Z[state])
@@ -463,7 +478,7 @@ def moves(
 ) -> tuple[
     dict[str, tuple[str, Image.Image]], dict[str, tuple[Image.Image, Image.Image]]
 ]:
-    """The blink patches and the tail split, each checked against its base: (patches, splits), by base state."""
+    """The blink patches and the splits (tail, ear), each checked against its base: (patches, splits), by state."""
     picks, edits = spec["picks"], spec["motion"]
     assert isinstance(picks, dict) and isinstance(edits, dict)
 
@@ -483,8 +498,10 @@ def moves(
         for state, (name, box) in BLINKS.items()
     }
     splits = {
-        state: tail_split(masters[state], edit_of(state, name, box), box)
-        for state, (name, box, _) in TAIL.items()
+        state: tail_split(
+            masters[state], edit_of(state, name, box), box, GROW.get(state, 2)
+        )
+        for state, (name, box, _) in SWING.items()
     }
     return patches, splits
 

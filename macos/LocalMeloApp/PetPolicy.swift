@@ -26,17 +26,24 @@ enum PetState: String, CaseIterable {
     func pieceFile(_ name: String, scale: Int) -> String { scale >= 2 ? "\(name)@2x.png" : "\(name).png" }
 
     /// The eyes-closed patch laid over the picture for a blink, nil where the picture has none. A patch fits only the
-    /// picture it was cut from: the lazy and the sleeping dogs have their eyes half or fully shut already.
+    /// picture it was cut from: the sleeping dogs have their eyes shut already, and the working, waiting, done and
+    /// error faces have no patch.
     var blinkPatch: String? {
         switch self {
         case .sitIdle: return "sit-idle-blink"
         case .lieIdle: return "lie-idle-blink"
+        case .restLazy: return "rest-lazy-blink"
         default: return nil
         }
     }
 
     /// The picture without its tail, and the tail alone, for the wag; nil where the picture has no tail to wag.
     var tailPieces: (body: String, tail: String)? { self == .lieDone ? ("lie-done-body", "lie-done-tail") : nil }
+
+    /// The picture without its right ear, and the ear alone, for the twitch; nil where the picture has no ear piece. Only
+    /// the idle dog has them: the other lying pictures' heads do not lie on its no-ear head (the alignment check of
+    /// `scripts/build_pet_assets.py` fails for them), and the lazy dog's head is another drawing.
+    var earPieces: (body: String, ear: String)? { self == .lieIdle ? ("lie-idle-body", "lie-idle-ear") : nil }
 
     /// Where a sleeping dog's "z" starts, in points from the top left of the pet's canvas (`z` in anchors.json).
     var sleepZ: CGPoint? {
@@ -52,6 +59,10 @@ enum PetState: String, CaseIterable {
 /// Where the lying dog's tail joins its back, in points from the top left of the pet's canvas: the tail wags about it
 /// (`tail.pivot` of `lie-done` in anchors.json).
 let petTailPivot = CGPoint(x: 101.8, y: 53)
+
+/// Where the idle dog's right ear joins its head, in the same points: the ear twitches about it (`ear.pivot` of
+/// `lie-idle` in anchors.json).
+let petEarPivot = CGPoint(x: 64.98, y: 19.82)
 
 /// The sitting picture of the app's first window: the working puppy while the server starts and signs in, the calm
 /// one once the gateway is ready and the console is on its way, the one with the drooping ear when it cannot go on.
