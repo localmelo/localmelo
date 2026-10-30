@@ -273,7 +273,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (a good cache teal, a filling context amber then red, held work amber), a
   narrow terminal drops the title, then details, before any figure, and the
   bar redraws once a second only while it shows a clock. A list open above the
-  bar now ends with a blank row ([#NN]).
+  bar now ends with a blank row ([#293]).
 
 - Melo moves. It blinks, wags its tail and sleeps with a "z". The calm portrait of the app's
   first window, the console's calm portrait and its calm face beside older replies blink twice
@@ -2297,6 +2297,7 @@ earlier milestones.
 [#290]: https://github.com/localmelo/localmelo/pull/290
 [#291]: https://github.com/localmelo/localmelo/pull/291
 [#292]: https://github.com/localmelo/localmelo/pull/292
+[#293]: https://github.com/localmelo/localmelo/pull/293
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
