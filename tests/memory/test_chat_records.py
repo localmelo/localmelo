@@ -17,6 +17,7 @@ import pytest
 from localmelo.melo.memory.long import LongTermSchemaError
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory.recall import BLOCK_HEADER, NOT_KEPT_LINE
 from localmelo.support.sessions.store import NewSession, SessionStore
 
 HOLDER = "test-host:1:memory"
@@ -156,7 +157,13 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
         memory, store, sid, "I prefer short answers; my wifi password is x9"
     )
     assert [w.text for w in found.remembered] == ["You prefer short answers."]
-    assert found.refused and found.block == ""
+    assert found.refused
+    # The block says what was kept and what was refused, never the secret itself.
+    assert found.block == (
+        f"\n\n{BLOCK_HEADER}\nmelo kept from this message: “I prefer short "
+        f"answers” (saved; nothing else to save)\n{NOT_KEPT_LINE}"
+    )
+    assert "x9" not in found.block
     data = found.event()
     assert data is not None
     data.pop("recall")  # its numbers are pinned in test_chat_retriever.py
@@ -186,6 +193,40 @@ async def test_saying_it_again_keeps_one_record(
     await _say(memory, store, sid, "I prefer short answers.")
     again = await _say(memory, store, sid, "I prefer short answers!")
     assert again.remembered == () and len(await memory.records()) == 1
+
+
+@pytest.mark.parametrize(
+    ("typed", "quote"),
+    [
+        ("Call me Ray.", "Call me Ray."),
+        ("Remember that Sam has the lab keys.", "Sam has the lab keys."),
+        ("我的猫叫团子。", "我的猫叫团子。"),
+    ],
+)
+async def test_the_block_says_a_fact_was_kept_even_when_nothing_is_recalled(
+    memory: ChatMemory, store: SessionStore, typed: str, quote: str
+) -> None:
+    sid = await _session(store)
+    said = await _say(memory, store, sid, typed)
+    assert said.remembered and said.used == () and said.recall is not None
+    assert said.recall.used == 0
+    # The user's words, as the recall lines quote them; a repeat says it again.
+    line = f"melo kept from this message: “{quote}” (saved; nothing else to save)"
+    assert said.block == f"\n\n{BLOCK_HEADER}\n{line}"
+    again = await _say(memory, store, sid, typed)
+    assert again.remembered == () and line in again.block
+
+
+async def test_a_question_or_a_lone_secret_carries_no_kept_line(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    sid = await _session(store)
+    asked = await _say(memory, store, sid, "What is my name?")
+    assert asked.block == "" and asked.remembered == () and not asked.refused
+    secret = await _say(memory, store, sid, "My wifi password is hunter2-lighthouse.")
+    assert secret.refused and secret.remembered == ()
+    assert secret.block == f"\n\n{BLOCK_HEADER}\n{NOT_KEPT_LINE}"
+    assert "hunter2" not in secret.block and await memory.records() == []
 
 
 @pytest.mark.parametrize(
