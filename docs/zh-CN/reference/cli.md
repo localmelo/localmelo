@@ -316,7 +316,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
 | `--max-steps N` | `30` | 整个运行最多可以使用的规划步数。 |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试之后都进行一次反思。`none`：只做一次尝试，不进行反思。 |
-| `--reflection-gate flags\|utility` | `flags` | 反思之后，当它选择 `continue` 且三项检查都成立时（`flags`），开始下一次尝试；或者还要求其效用分数达到 0.1（`utility`，即本选项出现之前的行为）。 |
+| `--reflection-gate flags\|utility\|patient` | `flags` | 反思之后，当它选择 `continue` 且三项检查都成立时（`flags`），开始下一次尝试；或者还要求其效用分数达到 0.1（`utility`，即本选项出现之前的行为）；或者与 `flags` 相同，但每次运行中有一次，下一步不新时也开始下一次尝试（`patient`，开发者设置）。 |
 | `--tool-exposure retrieve\|all` | `retrieve` | 每个步骤向模型提供哪些工具。 |
 | `--builtins all\|none\|NAME,...` | 所在模式的默认集合 | 要注册的内置工具。不带该旗标时，直接运行获得 `file_read`、`file_write` 和 `python_exec`；`all` 会加上 `shell_exec` 和 `list_files`（交互式界面默认保留全部五个）。 |
 | `--mcp-config PATH` | 未设置 | 添加此 JSON 文件中列出的 MCP 服务器提供的工具。 |
@@ -347,7 +347,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 - `--workspace`：不指定时，任务在当前文件夹中运行，与以前完全一致。指定后，`~` 会被展开，路径的解析方式与交互式界面相同，运行在该文件夹中：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动。它不增加任何审批（见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。不是文件夹的路径是用法错误（退出码 2，只输出一行）；见[用法错误](#usage-errors)。`melo ""` 和 `--serve` 拒绝该旗标。
 - 三个上下文旗标分别覆盖对应的 `[agent]` 键，在直接模式和交互式界面中均如此。超出预算的请求会在副本上做适配，否则运行以 `context_budget_exceeded` 结束；输出预留不是生成长度上限。见[上下文记账](configuration.md#context-accounting)。
 - `--max-steps`：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 10 个步骤，最多 5 次尝试，总步骤数最多为 `--max-steps`。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。
-- `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。
+- `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。`patient` 是开发者设置（`-X agent.reflection_gate=patient` 仅对一次运行生效）。
 - `--tool-exposure`：见[工具的提供方式](tools.md#how-tools-are-offered)。
 - `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`list_files`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。
 - `--mcp-only` 需要 `--mcp-config`，且不能与 `--builtins` 或 `--tool-exposure` 同用。见[工具与 MCP](../guides/tools-mcp.md#add-tools-from-mcp-servers)。

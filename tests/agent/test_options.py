@@ -176,11 +176,11 @@ def test_unknown_builtins_lists_unknown_and_known_names() -> None:
 
 
 def test_reflection_gate_names_its_values() -> None:
-    assert get_args(ReflectionGate) == ("flags", "utility")
+    assert get_args(ReflectionGate) == ("flags", "utility", "patient")
     with pytest.raises(ValueError) as excinfo:
         AgentOptions(reflection_gate="legacy")  # type: ignore[arg-type]
     assert str(excinfo.value) == (
-        "reflection_gate must be one of 'flags', 'utility', got 'legacy'"
+        "reflection_gate must be one of 'flags', 'patient', 'utility', got 'legacy'"
     )
 
 

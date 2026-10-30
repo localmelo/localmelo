@@ -429,7 +429,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   when the continuation gate stops the run.
 - `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
   `next_step_is_novel`, as booleans; `null` when the reply was not readable.
-- `gate`: the `reflection_gate` in force, `flags` or `utility`.
+- `gate`: the `reflection_gate` in force, `flags`, `utility` or `patient`.
 - `utility`: with `"utility"`, the decision's utility (see the option); else
   `null`.
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the

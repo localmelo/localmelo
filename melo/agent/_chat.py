@@ -268,6 +268,19 @@ REFLECT_TOOL_GUARD_NOTE = "Answer with the JSON object only; do not call any too
 REFLECTION_TRANSCRIPT_INTRO = "The end of this attempt, written out as text:"
 
 
+# AgentOptions.answer_on_stop: the request for the answer a stopped run did not
+# give carries at most this many characters of the window written out as text
+# (the newest), then the latest reflection, then this note.
+ANSWER_EVIDENCE_CHARS = 24_000
+ANSWER_ON_STOP_NOTE = (
+    "The run has stopped and no further step can be taken. Give your final "
+    "answer to the original task from the evidence above alone, in the answer "
+    "format the task asks for (follow its closing line if it names one). If "
+    "the evidence does not support an answer, give unknown as the answer, in "
+    "that same format. Do not call any tool; reply with the answer only."
+)
+
+
 def _with_hint(note: str, hint: str) -> str:
     """*note* with *hint*, when there is one, on the line after it."""
     return f"{note}\n{hint}" if hint else note
@@ -1182,6 +1195,43 @@ class Chat:
     async def retrieve(self, messages: list[Message]) -> Message:
         """One retrieval request: no tools, no retry, kind ``retrieve``."""
         return await self._request(messages, tools=None, kind="retrieve", retry=False)
+
+    async def final_answer(
+        self,
+        short: Sequence[Message],
+        query: str,
+        reflections: list[ReflectionEntry] | None = None,
+    ) -> Message:
+        """One request, no tools, for the answer that a stopped run did not give.
+
+        The request is the system message, then one user message: the original
+        task, the turns of *short* written out as text
+        (:func:`render_transcript`; only the newest
+        :data:`ANSWER_EVIDENCE_CHARS` characters), the block of *reflections*
+        and :data:`ANSWER_ON_STOP_NOTE`. The call is of kind ``reflect`` and
+        counts as auxiliary.
+        """
+        evidence = render_transcript(short)
+        start = len(evidence) - ANSWER_EVIDENCE_CHARS
+        if start > 0:
+            cut = evidence.find("\n\n", start)
+            evidence = (
+                "[earlier turns left out]\n\n"
+                + evidence[cut + 2 if cut != -1 else start :]
+            )
+        parts = [f"Original task: {query}"]
+        if evidence:
+            parts.append(f"The evidence gathered, written out as text:\n\n{evidence}")
+        parts.extend(
+            self.reflection_message(entry).content for entry in reflections or ()
+        )
+        parts.append(ANSWER_ON_STOP_NOTE)
+        system = self._fixed_system() if self.fixed_prefix else self.system_prompt
+        messages = [
+            Message(role="system", content=system),
+            Message(role="user", content="\n\n".join(parts)),
+        ]
+        return await self._request(messages, tools=None, kind="reflect")
 
     async def _retry_on_prefix(
         self,
