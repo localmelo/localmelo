@@ -1,8 +1,7 @@
-/** A new user's row: the cache share, the scheduler's queue and a run's phase are for developers. */
+/** A new user's row: the cache share, the step and phase and the scheduler's queue are for developers. */
 export function plainSegments(segments) {
-  return segments
-    .filter((text) => !text.startsWith('cache') && !(text.startsWith('tasks ') && !/ \d+ held$/.test(text)))
-    .map((text) => (text.startsWith('step ') ? text.replace(/ phase .*$/, '') : text));
+  return segments.filter((text) => !text.startsWith('cache') && !text.startsWith('step ')
+    && !(text.startsWith('tasks ') && !/ \d+ held$/.test(text)));
 }
 
 /**

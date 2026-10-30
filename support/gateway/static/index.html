@@ -28,7 +28,7 @@
             width="32"
             height="32"
             alt=""
-          /><strong>localmelo</strong><span class="local-badge">LOCAL</span>
+          /><strong>localmelo</strong><span class="local-badge" id="local-badge" hidden>LOCAL</span>
         </div>
         <nav class="worker-navigation" id="section-nav" aria-label="History sections">
           <a href="#/new" id="chats-link">Chats</a>
@@ -231,7 +231,7 @@
         </div>
         <button type="button" class="icon-button" id="close-settings" aria-label="Close settings">×</button>
       </div>
-      <p class="settings-description">Settings apply to subsequent turns. Current turns finish with their existing connection.</p>
+      <p class="settings-description" id="settings-description">Changes apply to your next message.</p>
       <p id="settings-status" class="field-hint" role="status" aria-live="polite"></p>
       <nav class="settings-tabs" id="settings-tabs" aria-label="Settings sections">
         <button type="button" id="settings-tab-model" aria-pressed="true">Model</button>
@@ -242,13 +242,13 @@
       <h3 class="settings-section" id="settings-head-model" hidden>Model</h3>
       <section id="settings-panel-model" aria-label="Model settings">
       <div class="field">
-        <label for="s-adapter">Chat backend</label>
+        <label for="s-adapter" id="s-adapter-label">Model server</label>
         <select id="s-adapter" disabled></select>
       </div>
       <div class="field" id="s-chat-url-field">
-        <label for="s-chat-url">Chat API URL</label>
-        <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" />
-        <p class="field-hint">Use your model server's API address. oMLX supports the OpenAI-compatible adapter.</p>
+        <label for="s-chat-url" id="s-chat-url-label">Server address</label>
+        <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" aria-describedby="s-chat-url-hint" />
+        <p class="field-hint" id="s-chat-url-hint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
       </div>
       <div id="s-cloud-fields" hidden>
         <div class="field">

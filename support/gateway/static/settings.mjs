@@ -2,6 +2,27 @@
 // terminal. This dialog is where the user fixes it, so the advice is left out.
 const terminalAdvice = (message) => /\brun 'melo /i.test(message);
 
+// The dialog's words for a model server: plain ones by default, and the technical ones a developer reads
+// today (backend, API URL, adapter). `layout()` writes the set of the mode.
+const WORDS = {
+  plain: {
+    description: "Changes apply to your next message.",
+    adapter: "Model server",
+    url: "Server address",
+    urlHint: "The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.",
+    discover: "Lists the models this server offers.",
+    needUrl: "Enter a server address before listing its models.",
+  },
+  developer: {
+    description: "Settings apply to subsequent turns. Current turns finish with their existing connection.",
+    adapter: "Chat backend",
+    url: "Chat API URL",
+    urlHint: "Use your model server's API address. oMLX supports the OpenAI-compatible adapter.",
+    discover: "Discovery lists models without starting a chat.",
+    needUrl: "Enter a chat API URL before discovering models.",
+  },
+};
+
 /**
  * Wire the connection dialog. The caller owns entry buttons and health refresh. `developer()` says whether
  * developer mode is on: default mode stacks Model (with its test), Appearance and one Developer toggle;
@@ -48,7 +69,13 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
       $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
     }
   }
+  let words = WORDS.plain;
   function layout(isDeveloper) {
+    words = isDeveloper ? WORDS.developer : WORDS.plain;
+    $("settings-description").textContent = words.description;
+    $("s-adapter-label").textContent = words.adapter;
+    $("s-chat-url-label").textContent = words.url;
+    $("s-chat-url-hint").textContent = words.urlHint;
     dialog.dataset.layout = isDeveloper ? "tabs" : "plain";
     $("settings-tabs").hidden = !isDeveloper;
     $("settings-head-model").hidden = isDeveloper;
@@ -125,7 +152,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     $("s-key-env").value = data.api_key_env || "";
     $("s-base-url").value = data.base_url || "";
     $("s-model-options").replaceChildren();
-    modelStatus.textContent = cloud ? "Type the model name." : "Discovery lists models without starting a chat.";
+    modelStatus.textContent = cloud ? "Type the model name." : words.discover;
     discover.disabled = busy || cloud || !chat.value;
     if (cloud) checkKey();
     else { keyVersion += 1; keyStatus.textContent = ""; }
@@ -239,7 +266,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
       if (id === "s-chat-url") {
         discoveryVersion += 1;
         $("s-model-options").replaceChildren();
-        modelStatus.textContent = "Discovery lists models without starting a chat.";
+        modelStatus.textContent = words.discover;
         discover.disabled = busy || isCloud();
       }
     });
@@ -254,7 +281,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     const currentGeneration = generation;
     const params = new URLSearchParams({ backend: chat.value, url: $("s-chat-url").value });
     if (!$("s-chat-url").value) {
-      modelStatus.textContent = "Enter a chat API URL before discovering models.";
+      modelStatus.textContent = words.needUrl;
       return;
     }
     discover.disabled = true;

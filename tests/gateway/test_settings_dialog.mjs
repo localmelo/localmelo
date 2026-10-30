@@ -376,6 +376,40 @@ test('developer mode keeps the tabs, the file and its revision, and the layout i
   assert.equal(h.element('settings-theme-legend').textContent, 'Theme');
 });
 
+const NAMES = ['settings-description', 's-adapter-label', 's-chat-url-label', 's-chat-url-hint'];
+
+test('default mode names the server and its address in plain words', async () => {
+  const h = harness({'GET /settings': fixture({mode: 'default'})});
+  await h.open();
+  assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
+    'Changes apply to your next message.',
+    'Model server',
+    'Server address',
+    'The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.',
+  ]);
+  assert.equal(h.element('discover-status').textContent, 'Lists the models this server offers.');
+  await change(h, 's-chat-url', '');
+  await h.element('discover-btn').emit('click');
+  assert.equal(h.element('discover-status').textContent, 'Enter a server address before listing its models.');
+  await change(h, 's-chat-url', 'http://localhost:9/v1');
+  assert.equal(h.element('discover-status').textContent, 'Lists the models this server offers.', 'a new address resets the hint');
+});
+
+test('developer mode keeps the technical words of the dialog', async () => {
+  const h = harness({'GET /settings': fixture({mode: 'developer'})}, new Map(), () => true);
+  await h.open();
+  assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
+    'Settings apply to subsequent turns. Current turns finish with their existing connection.',
+    'Chat backend',
+    'Chat API URL',
+    "Use your model server's API address. oMLX supports the OpenAI-compatible adapter.",
+  ]);
+  assert.equal(h.element('discover-status').textContent, 'Discovery lists models without starting a chat.');
+  await change(h, 's-chat-url', '');
+  await h.element('discover-btn').emit('click');
+  assert.equal(h.element('discover-status').textContent, 'Enter a chat API URL before discovering models.');
+});
+
 test('a mode written in the file by hand wins over what the page believed', async () => {
   const h = harness({'GET /settings': fixture({mode: 'developer'})});
   await h.open();
