@@ -4,7 +4,8 @@ import QuartzCore
 /// How the desktop pet moves. Every motion is a Core Animation animation added once to a layer: the render server
 /// runs it, so the app does no per-frame work (no timer, no `draw`). The pictures are bitmaps, so the motions are
 /// transforms of the whole picture, cross-fades between pictures, an eyes-closed patch that fades in over the eyes
-/// (the blink), the tail as a layer of its own that swings about its base, and the "z" the app draws itself. All of
+/// (the blink), the tail and the ear as layers of their own that swing about their base, and the "z" the app draws
+/// itself. All of
 /// them stop (the state's still picture stays) when `shouldAnimate` says so; a change of picture still cross-fades
 /// unless Reduce Motion asks for a plain swap (`petFade`).
 
@@ -32,6 +33,8 @@ struct PetMotionPlan: Equatable {
     var blinks = false
     /// A "z" drifts up from the sleeping dog.
     var drifts = false
+    /// The ear twitches now and then (the mood's picture has an ear piece).
+    var twitches = false
 }
 
 /// The pieces of a picture's family that move over it; each is nil where the picture has none.
@@ -41,11 +44,14 @@ struct PetParts {
     var tail: CGImage?
     /// Where the "z" starts, in points from the top left of the canvas.
     var zStart: CGPoint?
+    /// The picture without its ear, and the ear alone.
+    var earBody: CGImage?
+    var ear: CGImage?
 }
 
 /// What a mood does: it breathes unless nothing is known yet or the app stopped; the sleeping breath is slower and
 /// a little deeper, and a sleeping dog has its "z". `beat` is for the moment the mood begins and is not repeated. A
-/// picture with an eyes-closed patch blinks, even before anything is known.
+/// picture with an eyes-closed patch blinks, and one with an ear piece twitches it, even before anything is known.
 func petMotionPlan(_ mood: PetMood) -> PetMotionPlan {
     var plan: PetMotionPlan
     switch mood {
@@ -58,6 +64,7 @@ func petMotionPlan(_ mood: PetMood) -> PetMotionPlan {
     }
     plan.blinks = mood.picture.blinkPatch != nil
     plan.drifts = mood.picture.sleepZ != nil
+    plan.twitches = mood.picture.earPieces != nil
     return plan
 }
 
@@ -69,9 +76,11 @@ final class PetMotion {
     let picture = CALayer()
     let blink = CALayer()
     let tail = CALayer()
+    let ear = CALayer()
     let drift = CATextLayer()
     private var still: CGImage?
     private var body: CGImage?
+    private var earBody: CGImage?
     private var zStart: CGPoint?
     private let size: CGSize
 
@@ -90,18 +99,22 @@ final class PetMotion {
         }
         moving.addSublayer(picture)
         picture.position = anchor
-        // The patch and the tail are canvas-sized layers over the picture, so each lies where its picture does. The
-        // tail's anchor point is its base (the pivot; layers are y-up).
-        let pivot = CGPoint(x: petTailPivot.x, y: size.height - petTailPivot.y)
-        for layer in [blink, tail] {
+        // The patch, the tail and the ear are canvas-sized layers over the picture, so each lies where its picture
+        // does. The tail's and the ear's anchor point is their base (the pivot; layers are y-up).
+        for layer in [blink, tail, ear] {
             layer.bounds = bounds
             layer.contentsGravity = .resize
-            layer.position = layer === tail ? pivot : CGPoint(x: size.width / 2, y: size.height / 2)
+            layer.position = CGPoint(x: size.width / 2, y: size.height / 2)
             layer.actions = ["contents": NSNull(), "transform": NSNull(), "opacity": NSNull(), "hidden": NSNull()]
             picture.addSublayer(layer)
         }
+        for (layer, point) in [(tail, petTailPivot), (ear, petEarPivot)] {
+            let pivot = CGPoint(x: point.x, y: size.height - point.y)
+            layer.position = pivot
+            layer.anchorPoint = CGPoint(x: pivot.x / size.width, y: pivot.y / size.height)
+        }
         blink.opacity = 0
-        tail.anchorPoint = CGPoint(x: pivot.x / size.width, y: pivot.y / size.height)
+        ear.opacity = 0
         tail.isHidden = true
         // The sleeping dog's "z": a navy letter with a cream outline, as the pictures have a cream rim, so it reads on a
         // light and a dark desktop. Clear (opacity 0) except while its drift plays.
@@ -119,7 +132,7 @@ final class PetMotion {
     }
 
     /// Shows `image` (as many pixels as `points` times its scale) with the `parts` that move over it; `fade` seconds of
-    /// cross-fade, 0 for a swap. The tail stays hidden until its wag plays.
+    /// cross-fade, 0 for a swap. The tail stays hidden until its wag plays, and the ear until its twitch.
     func show(_ image: CGImage, parts: PetParts = PetParts(), fade: TimeInterval) {
         picture.contentsScale = CGFloat(image.width) / picture.bounds.width
         if fade > 0 {
@@ -131,12 +144,13 @@ final class PetMotion {
         }
         still = image
         picture.contents = image
-        for (layer, piece) in [(blink, parts.blink), (tail, parts.tail)] {
+        for (layer, piece) in [(blink, parts.blink), (tail, parts.tail), (ear, parts.ear)] {
             layer.contents = piece
             layer.contentsScale = CGFloat(piece?.width ?? 1) / size.width
         }
         tail.isHidden = true
         body = parts.body
+        earBody = parts.earBody
         zStart = parts.zStart
         if let start = parts.zStart { drift.position = CGPoint(x: start.x, y: size.height - start.y) }
     }
@@ -149,6 +163,12 @@ final class PetMotion {
         if let breath = plan.breath { picture.add(Self.breathing(breath), forKey: "breath") }
         if plan.blinks && blink.contents != nil { blink.add(Self.blinking(), forKey: "blink") }
         if plan.drifts && zStart != nil { drift.add(Self.drifting(), forKey: "drift") }
+        if plan.twitches, let still = still, let earBody = earBody, ear.contents != nil {
+            // The picture shows its ear-less body for the twitch only, and the ear turns over it; the rest of the
+            // 13 s the still picture shows, so nothing is cut at rest.
+            picture.add(Self.swapping(to: earBody, from: still), forKey: "twitch")
+            ear.add(Self.twitching(), forKey: "twitch")
+        }
         guard entering, let beat = plan.beat else { return }
         switch beat {
         case .bob: moving.add(Self.lift(points: 3), forKey: "beat")
@@ -164,8 +184,9 @@ final class PetMotion {
 
     func stop() {
         moving.removeAllAnimations()
-        for layer in [blink, tail, drift] { layer.removeAllAnimations() }
+        for layer in [blink, tail, ear, drift] { layer.removeAllAnimations() }
         picture.removeAnimation(forKey: "breath")
+        picture.removeAnimation(forKey: "twitch")
         tail.isHidden = true
         if let still = still { picture.contents = still }
     }
@@ -214,6 +235,47 @@ final class PetMotion {
         animation.keyTimes = [0, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1]
         animation.timingFunctions = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: 10)
         animation.duration = 1.6
+        return animation
+    }
+
+    /// The ear's twitch window in its 13 s loop: it starts at 7 s (between the blinks, which are at 4.2 s and 9.6 s of
+    /// their 11 s loop) and takes 0.42 s.
+    static let twitchLoop: TimeInterval = 13
+    static let twitchAt: TimeInterval = 7
+    static let twitchFor: TimeInterval = 0.42
+
+    /// The ear's twitch, every 13 s: it turns 12 degrees one way in 0.12 s, 4 degrees the other way in 0.16 s and back
+    /// to rest in 0.14 s, 420 ms in all (layers are y-up: the first turn is clockwise, the ear's tip going outward).
+    /// The ear shows only while it turns.
+    static func twitching() -> CAAnimationGroup {
+        let angle = CGFloat.pi / 180
+        let loop = twitchLoop, start = twitchAt, end = twitchAt + twitchFor
+        let turn = CAKeyframeAnimation(keyPath: "transform.rotation.z")
+        turn.values = [0, 0, -12 * angle, 4 * angle, 0, 0]
+        turn.keyTimes = [0, start, start + 0.12, start + 0.28, end, loop].map { NSNumber(value: $0 / loop) }
+        turn.timingFunctions = [CAMediaTimingFunction(name: .linear), CAMediaTimingFunction(name: .easeOut),
+                                CAMediaTimingFunction(name: .easeInEaseOut), CAMediaTimingFunction(name: .easeOut),
+                                CAMediaTimingFunction(name: .linear)]
+        let show = CAKeyframeAnimation(keyPath: "opacity")
+        show.values = [0, 1, 0]
+        show.keyTimes = [0, start, end].map { NSNumber(value: $0 / loop) }
+        show.calculationMode = .discrete
+        let group = CAAnimationGroup()
+        group.animations = [turn, show]
+        for animation in [turn, show, group] { animation.duration = loop }
+        group.repeatCount = .infinity
+        return group
+    }
+
+    /// The picture's own contents for the 13 s loop, with the ear-less `body` in place of the `still` while the ear
+    /// turns (discrete: the picture jumps, it does not blend).
+    static func swapping(to body: CGImage, from still: CGImage) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: "contents")
+        animation.values = [still, body, still]
+        animation.keyTimes = [0, twitchAt, twitchAt + twitchFor].map { NSNumber(value: $0 / twitchLoop) }
+        animation.calculationMode = .discrete
+        animation.duration = twitchLoop
+        animation.repeatCount = .infinity
         return animation
     }
 

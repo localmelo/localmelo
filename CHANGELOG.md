@@ -273,6 +273,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo moves, part 2: the resting pet blinks and flicks an ear. The lazy picture the
+  pet rests in (the default when nothing runs) blinks twice every 11 seconds, as the
+  calm pictures do, and the calm lying picture also flicks its right ear every 13
+  seconds: the ear, cut from the picture without it, turns about its base (12 degrees
+  one way, 4 the other, back in 420 ms) while the head stays. The other lying pictures
+  do not flick an ear: their heads are separate drawings that do not lie on the
+  no-ear picture. Both are Core Animation in the app (no timer) and
+  stop under the same conditions as the other moves ([#NN]).
+
 - The terminal's status bar says what the session uses and what runs beside
   it, not the model and folder again (the welcome and `/status` keep those).
   On a local server it shows the tokens sent and received, the context with a

@@ -232,13 +232,15 @@ final class PetController: NSObject {
     /// The picture for the panel's screen scale, decoded once; nil when the file is missing.
     private func picture(for state: PetState) -> CGImage? { piece(state, state.rawValue) }
 
-    /// The pieces that move over a picture (the blink patch, the body and the tail, the "z"'s start); a missing
-    /// file leaves that move out.
+    /// The pieces that move over a picture (the blink patch, the bodies, the tail and the ear, the "z"'s start); a
+    /// missing file leaves that move out.
     private func parts(for state: PetState) -> PetParts {
         PetParts(blink: state.blinkPatch.flatMap { piece(state, $0) },
                  body: state.tailPieces.flatMap { piece(state, $0.body) },
                  tail: state.tailPieces.flatMap { piece(state, $0.tail) },
-                 zStart: state.sleepZ)
+                 zStart: state.sleepZ,
+                 earBody: state.earPieces.flatMap { piece(state, $0.body) },
+                 ear: state.earPieces.flatMap { piece(state, $0.ear) })
     }
 
     private func piece(_ state: PetState, _ name: String) -> CGImage? {

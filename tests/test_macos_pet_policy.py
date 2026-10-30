@@ -263,10 +263,16 @@ def test_each_state_gets_its_own_moves_and_only_those(tmp_path: Path) -> None:
     run_swift(
         tmp_path,
         r"""
-// The blink: only the two calm pictures have an eyes-closed patch (the lazy and the sleeping dogs' eyes are shut).
+// The blink: the three calm pictures have an eyes-closed patch (the sleeping dogs' eyes are shut, the working,
+// waiting, done and error faces have none).
 let blinking = PetState.allCases.filter { $0.blinkPatch != nil }
-precondition(Set(blinking) == [.sitIdle, .lieIdle])
+precondition(Set(blinking) == [.sitIdle, .lieIdle, .restLazy])
 precondition(PetState.sitIdle.blinkPatch == "sit-idle-blink" && PetState.lieIdle.blinkPatch == "lie-idle-blink")
+precondition(PetState.restLazy.blinkPatch == "rest-lazy-blink")
+// The ear twitch: only the idle dog, as a body without its right ear and the ear.
+let twitching = PetState.allCases.filter { $0.earPieces != nil }
+precondition(twitching == [.lieIdle])
+precondition(PetState.lieIdle.earPieces?.body == "lie-idle-body" && PetState.lieIdle.earPieces?.ear == "lie-idle-ear")
 // The tail wag: only the finished picture, as a body without its tail and the tail.
 let wagging = PetState.allCases.filter { $0.tailPieces != nil }
 precondition(wagging == [.lieDone])
@@ -291,7 +297,8 @@ def test_the_moves_use_the_pieces_and_anchors_the_build_ships() -> None:
     # Every piece the Swift names is a file in both scales, on its picture's canvas.
     for state, folder, pieces in (
         ("sit-idle", "portrait", ["sit-idle-blink"]),
-        ("lie-idle", "pet", ["lie-idle-blink"]),
+        ("lie-idle", "pet", ["lie-idle-blink", "lie-idle-body", "lie-idle-ear"]),
+        ("rest-lazy", "pet", ["rest-lazy-blink"]),
         ("lie-done", "pet", ["lie-done-body", "lie-done-tail"]),
     ):
         for name in pieces:
@@ -313,10 +320,16 @@ def test_the_moves_use_the_pieces_and_anchors_the_build_ships() -> None:
         assert f"case .{camel}: return CGPoint(x: {point[0]}, y: {point[1]})" in source
     pivot = pictures["lie-done"]["tail"]["pivot"]
     assert f"petTailPivot = CGPoint(x: {pivot[0]}, y: {pivot[1]:g})" in source
+    ear = pictures["lie-idle"]["ear"]
+    assert (
+        f"petEarPivot = CGPoint(x: {ear['pivot'][0]}, y: {ear['pivot'][1]})" in source
+    )
     # The marks lie on their pictures: the eye bands inside the dog's box, the tail's pivot inside the tail's box.
-    for state in ("sit-idle", "lie-idle"):
+    for state in ("sit-idle", "lie-idle", "rest-lazy"):
         x, y, w, h = pictures[state]["eyes"]
         bx, by, bw, bh = pictures[state]["box"]
         assert bx < x and by < y and x + w < bx + bw and y + h < by + bh
     x, y, w, h = pictures["lie-done"]["tail"]["box"]
     assert x <= pivot[0] <= x + w and y <= pivot[1] <= y + h
+    x, y, w, h = ear["box"]
+    assert x <= ear["pivot"][0] <= x + w and y <= ear["pivot"][1] <= y + h
