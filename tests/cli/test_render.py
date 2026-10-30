@@ -697,7 +697,7 @@ def test_a_narrow_banner_keeps_the_memory_text_in_full(
 
 def test_the_banner_names_where_the_model_came_from() -> None:
     text = _banner(source="found on this machine", listed=3)
-    assert "│            found on this machine · first of 3; /model lists them" in text
+    assert "│            found on this machine · the loaded one of 3; /model lists them" in text
 
 
 def test_the_banner_border_stays_straight_with_wide_characters(

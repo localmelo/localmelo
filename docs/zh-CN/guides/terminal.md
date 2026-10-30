@@ -55,7 +55,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 3. 已保存的后端；若指定 `--chat-model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. 没有已保存的后端：先回答[首次运行](#first-run)的问题，然后打开界面。
 
-横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了第一个，还会显示 `first of N; /model lists them`。
+横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了服务器报告已加载的那个，还会显示 `the loaded one of N; /model lists them`。
 
 <a id="keys"></a>
 

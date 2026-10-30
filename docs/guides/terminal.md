@@ -76,8 +76,8 @@ The first of these that applies:
 The banner's title shows the package version, and on a git checkout the short
 commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
 backend, a second line says where they come from (`from --base-url (not
-saved)`, `saved as the default`) and, when melo took the first of several
-models, `first of N; /model lists them`.
+saved)`, `saved as the default`) and, when melo took the one model the server says is loaded out of several,
+`the loaded one of N; /model lists them`.
 
 ### Keys
 
