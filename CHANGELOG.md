@@ -55,6 +55,45 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
+  replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
+  it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
+  add something (the streamed text, the running tool, the past runs) stay ([#289]).
+
+- A reply that is only the model's unfinished thinking is never shown as the
+  answer. When a thinking model stopped before its end-of-thinking mark, a
+  server could return the thinking as the reply's text, and a greeting got the
+  model's notes to itself as its answer. localmelo now tells such a reply by
+  facts, never by its wording: a `<think>` that is never closed, no answer
+  with reasoning tokens counted, a streamed reply that repeats the server's
+  reasoning, or no thinking and no `</think>` from a model whose thinking ends
+  with a mark (declared in `[cli.reasoning_tags]`, or seen from a server that
+  sends reasoning in a field of its own and counted none in this reply). The
+  text becomes the reply's thinking, folded in the terminal and the console,
+  and the model is asked once more (one extra request, with the notice
+  `unfinished_answer`); a second reply without an answer ends the run
+  `failed` with `melo did not finish an answer`, with `/retry` in the
+  terminal and **Try again** in the console. Direct runs and workers report
+  that error instead of returning the thinking as the result ([#288]).
+
+- The console and the terminal no longer show a turn's time twice. A turn that answered
+  without tool calls showed `Thought for 2.0s` over the answer and `2.0s · 1 step` under it,
+  the step's time and the turn's time being the same. The console now shows no summary line for
+  such a turn, or `Thought` over its reasoning when it has some (the reasoning is the body of
+  that line, not a second `Thought` inside it); the terminal prints `✻ Thought` for a reply
+  that ends a turn without tool calls. The footer keeps the turn's time. A turn with tool calls
+  is unchanged ([#287]).
+
+- The terminal's command list stays open while you delete characters. Typing
+  `/exi` showed `/exit`, but deleting the `i` closed the list instead of showing
+  the `/ex` matches, because prompt_toolkit completes only after text is
+  inserted. Any deletion that removes text (Backspace, Delete, Ctrl+W, Ctrl+U,
+  Ctrl+K) now asks for completions again on the text before the cursor: the
+  commands of `/ex`, all of them at `/`, the names after an `@`, and nothing once
+  the `/` or `@` is gone, which closes the list. Moving the cursor alone still
+  opens nothing, Esc closes the list until the next edit, and Tab, Enter and the
+  arrow keys take a command as before. ([#285])
+
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
   not be decoded, so it was asked for again, and a second failure lost the
@@ -218,6 +257,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   narrow terminal drops the title, then details, before any figure, and the
   bar redraws once a second only while it shows a clock. A list open above the
   bar now ends with a blank row ([#NN]).
+
+- Chats say who they are. A model that is told nothing answers "who are you?" with the
+  assistant it was trained as. The terminal chat, the web console and the macOS app now tell
+  the model one short paragraph first: it is melo, the assistant built into localmelo, an
+  open-source agent that runs on your computer, works in your folder with tools and asks before
+  it changes anything; it runs on the model you chose, served by the server named as the banner
+  names it (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a cloud provider), on this
+  computer or at the server's host; it says so when asked who or what it is, does not present
+  itself as the model's own assistant, answers in your language, and answers a greeting or a
+  question it can answer directly without tools. Switching the model (`/model`, the console's
+  model menu) names the new one from the next turn. It is the new `AgentOptions.identity`
+  (default `None`: direct runs, workers and the gateway's v1 sessions send no identity).
+  ([#287])
 
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
@@ -1185,6 +1237,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A uv development environment with a committed `uv.lock` ([#25]).
 
 ### Changed
+
+- The command list under the input box is in the terminal's colours. Typing `/`, `@` or a
+  command's argument showed a grey block (prompt_toolkit's default, black text on grey bars);
+  the list now has no background: names in your text colour, their descriptions muted, and the
+  chosen row on the same moss band with one `❯` as every other list, with the names standing
+  under the text you typed. The scrollbar is a slim rule-coloured bar and appears only when
+  there are more rows than the eight shown. Without the exact background the chosen row is
+  moss and bold, and with `NO_COLOR` it is in reverse video ([#289]).
+
+- The fixed system section of a request no longer has the line `Prefix: fixed-prefix-v2`.
+  The model read the layout's internal name as an instruction and spent a reply deciding
+  whether to start its answers with it. The date line stays, and `prefix_cache.version` in a
+  run's result still names the layout. Every request of a run with the fixed prefix (the
+  default), direct runs included, differs from before by that one line, so a server's prompt
+  cache warms once after the upgrade ([#287]).
 
 - The terminal's new look, part 2: panels, lists, the status bar and the welcome. The approval
   panel has an amber frame with its title bold, the chosen answer sits on a moss band, and a
@@ -2179,6 +2246,10 @@ earlier milestones.
 [#274]: https://github.com/localmelo/localmelo/pull/274
 [#275]: https://github.com/localmelo/localmelo/pull/275
 [#284]: https://github.com/localmelo/localmelo/pull/284
+[#285]: https://github.com/localmelo/localmelo/pull/285
+[#287]: https://github.com/localmelo/localmelo/pull/287
+[#288]: https://github.com/localmelo/localmelo/pull/288
+[#289]: https://github.com/localmelo/localmelo/pull/289
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

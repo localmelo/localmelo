@@ -315,6 +315,20 @@ melo: run ended with status failed: empty replies
   call.
 - **Fix:** try another model, or check the model server's log.
 
+### failed: melo did not finish an answer
+
+```text
+melo: run ended with status failed: melo did not finish an answer
+```
+
+- **Cause:** the model stopped inside its thinking, before its answer, and
+  did the same when localmelo asked it once more. Its thinking is kept as
+  thinking (`/thinking on` in the terminal, the folded thinking in the
+  console), never as the answer.
+- **Fix:** try again (`/retry`, or Try again in the console). If it keeps
+  happening, raise the model's output limit on the server, or try another
+  model.
+
 ### budget_exhausted: Max steps reached
 
 ```text

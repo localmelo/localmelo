@@ -40,6 +40,7 @@ from localmelo.melo.schema import (
     NO_ANSWER_LABEL,
     SESSION_TEXT_CHARS,
     SHORT_TERM_MAX,
+    UNFINISHED_ANSWER_ERROR,
     Message,
     ReflectionEntry,
     ToolCall,
@@ -413,16 +414,12 @@ class TestThinkingBlocks:
             ("<think>\nI should greet.\n</think>\n\nHello.", "Hello."),
             ("<THINK>I should greet.</Think>\nHello.", "Hello."),
             (
-                "<think>I should greet, but the output was cut",
-                "[no answer: the run ended with status completed]",
-            ),
-            (
                 "<think>\nOnly thinking.\n</think>\n\n",
                 "[no answer: the run ended with status completed]",
             ),
             ("I should greet.\n</think>\n\nHello.", "Hello."),
         ],
-        ids=["ollama_prefix", "upper_case", "unclosed", "only_a_block", "bare_closing"],
+        ids=["ollama_prefix", "upper_case", "only_a_block", "bare_closing"],
     )
     @pytest.mark.asyncio
     async def test_the_kept_answer_leaves_the_block_out(
@@ -434,6 +431,27 @@ class TestThinkingBlocks:
 
         assert result.result == reply  # the RunResult keeps the block
         assert _window(agent)[-1] == ("assistant", kept)
+
+    @pytest.mark.asyncio
+    async def test_an_unclosed_block_is_no_answer_and_never_kept_as_one(self) -> None:
+        # #278: a reply that opens thinking and never closes it is unfinished
+        # thinking; the model is asked once more, and the run keeps no answer.
+        cut = "<think>I should greet, but the output was cut"
+        llm = ScriptedLLM([_answer(cut), _answer(cut)])
+        agent = _agent(llm, record_answers=True)
+
+        result = await agent.run_task("hi")
+
+        assert (result.status, result.error, result.result) == (
+            "failed",
+            UNFINISHED_ANSWER_ERROR,
+            "",
+        )
+        assert len(llm.requests) == 2
+        assert _window(agent)[-1] == (
+            "assistant",
+            "[no answer: the run ended with status failed]",
+        )
 
     @pytest.mark.parametrize(
         ("text", "split"),

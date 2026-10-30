@@ -165,7 +165,7 @@ asyncio.run(main())
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
 | `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
-| `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
+| `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
@@ -204,7 +204,9 @@ asyncio.run(main())
   `""`. OpenAI-compatible servers send it as `reasoning_content` or
   `reasoning`, Ollama as `thinking`. Ollama's provider also puts it at the
   start of `content`, as a `<think>` block, and a server without a reasoning
-  parser leaves it only there.
+  parser leaves it only there. A reply that is only unfinished thinking
+  (see the `unfinished_answer` notice) has all its text here and `""` in
+  `content`.
 - `tool_calls`: the calls of the reply, each as
   `{id, name, arguments, preview}`. `preview` is as on `tool.started`.
 - `usage`: the integer token counts of the reply, such as `prompt_tokens`,
@@ -383,6 +385,7 @@ ignores it.
 | `stuck` | An attempt ends because the same tool calls or errors repeated. | `The same tool calls or errors repeated; the attempt ends.` | `{}` |
 | `budget` | An attempt ends because it used its steps. | `The attempt used its step budget.` | `{}` |
 | `empty_reply` | The model gave an empty reply, and localmelo asks it to continue. A second empty reply in a row ends the run as `failed` instead, with no notice. | `The model returned an empty reply; asking it to continue.` | `{"count": <empty replies in a row>}` |
+| `unfinished_answer` | The reply was only the model's unfinished thinking (see [How it works](../concepts/how-it-works.md)): its `assistant.message` has the text as `thinking` and no `content`, and localmelo asks once more. It counts as an empty reply; when it would be the second in a row, the run ends as `failed` with the error `melo did not finish an answer` instead, with no notice. | `The model's reply ended inside its thinking; asking it for its answer.` | `{}` |
 | `no_change` | Only in a `--brief` run: an attempt boundary where another attempt starts finds the workspace unchanged since the run started (the digest of `git status`, `git diff HEAD` and untracked files is equal; never outside a git tree). A user line, "Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.", is added for the next attempt, and ends with "Start with: <first next_promising_directions of the reflection>" when it has one. The same kind comes with `scope: "step"` after 6 steps of an attempt in a row in which the digest has not changed since the last change seen (or the start): the line added is "You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue." | `Nothing has changed in the workspace yet.` | `{}` (boundary) or `{"scope": "step"}` |
 | `brief_check` | Only in a `--brief` run (`AgentOptions.brief_check`): the gate ran one of the brief's `Check:` commands before the run would end `completed`. | `The task's check passed.`, `The task's check failed.` or `The task's check was refused and did not run.` | `{"round", "command", "exit_code", "duration_s", "refused", "output_tail"}`: `round` counts the gate's runs from 1 (a check run two steps before the end of the last attempt counts too); `command` is redacted; `output_tail` is the last 20 lines of the check's output, redacted, at most 4,000 characters; `exit_code` is `null` for a refused check or one with no status (a timeout); `refused` is the reason a refused check did not run, else `""`. |
 | `brief_check_failed` | The gate gives up: a check failed with no retry left (two are allowed per run), with no step or attempt left to retry in, or was refused. The run ends `completed`. | `The task's check still fails; the run ends completed with failing tests.` | `{"retries": <retries used>}` |
@@ -593,7 +596,8 @@ returned.
   events: it appears only in `assistant.message`'s `tool_calls`.
 - **Order within a step.** `step.started`; the `retry` notices of the
   planning request; `assistant.message`, unless planning failed; the tool
-  pairs, in call order; then a `stuck`, `budget` or `empty_reply` notice.
+  pairs, in call order; then a `stuck`, `budget`, `empty_reply` or
+  `unfinished_answer` notice.
   With the default `attempt_policy="reflect"`, the notice that ends an
   attempt is followed by `reflection.started`, the `retry` notices of the
   reflection's requests, and `reflection`, unless one of its requests

@@ -76,10 +76,49 @@ def test_released_text_shows_in_the_live_region() -> None:
     feed = renderer.stream_feed()
     feed.opened()
     feed.held()
-    assert "thinking" in _rows(renderer.live)  # type: ignore[arg-type]
+    assert "Hello" not in _rows(renderer.live)  # type: ignore[arg-type]
     feed.content("Hello\n")
     assert "Hello" in _rows(renderer.live)  # type: ignore[arg-type]
     assert "thinking" not in _rows(renderer.live)  # type: ignore[arg-type]
+
+
+def test_waiting_for_the_model_is_one_row_not_two() -> None:
+    """The spinner row says Thinking; held text adds no row that says it again."""
+    _, renderer = _renderer()  # a model with no hint: the filter holds its text
+    feed = renderer.stream_feed()
+    feed.opened()
+    assert _rows(renderer.live).count("\n") == 0  # type: ignore[arg-type]
+    feed.held()
+    feed.held()
+    rows = live_rows(renderer.live, 100.0, 80, UNICODE, frame=0)  # type: ignore[arg-type]
+    assert len(rows) == 1
+    assert "".join(text for _, text in rows[0]).startswith("· Thinking…")
+    assert _rows(renderer.live).lower().count("thinking") == 1  # type: ignore[arg-type]
+
+
+def test_no_activity_repeats_itself_in_a_second_row() -> None:
+    """Held text under any activity draws only the spinner row (Replying, Retrying, ...)."""
+    _, renderer = _renderer()
+    feed = renderer.stream_feed()
+    feed.opened()
+    live = renderer.live
+    assert live is not None
+    for activity in ("Thinking", "Replying", "Reflecting", "Stopping", "Starting"):
+        live.activity = activity
+        feed.held()
+        assert len(live_rows(live, 100.0, 80, UNICODE, frame=0)) == 1, activity
+    live.retry_until = 130.0
+    assert len(live_rows(live, 100.0, 80, UNICODE, frame=0)) == 1
+    live.waiting = True
+    feed.held()
+    assert len(live_rows(live, 100.0, 80, UNICODE, frame=0)) == 1
+    # Rows that add something stay: streamed text, the tool row.
+    live.waiting, live.retry_until, live.activity = False, 0.0, "Running"
+    live.tool, live.tool_started = "shell_exec", 99.0
+    feed.content("Let me look.")
+    rows = live_rows(live, 100.0, 80, UNICODE, frame=0)
+    assert [row[0][1].split()[0] for row in rows[1:]] == ["Let", "└"]
+    assert "shell_exec" in rows[-1][0][1]
 
 
 def test_the_live_region_keeps_its_row_budget_and_shows_the_tail() -> None:

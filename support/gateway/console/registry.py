@@ -140,6 +140,7 @@ async def default_builder(
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))
         ),
+        identify=True,
     )
 
 

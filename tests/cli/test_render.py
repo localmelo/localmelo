@@ -569,6 +569,13 @@ _UNREACHABLE = (
         ),
         (
             "failed",
+            "melo did not finish an answer",
+            "⚠",
+            "melo did not finish an answer.",
+            "/retry, or try another model.",
+        ),
+        (
+            "failed",
             "post_plan refused",
             "⚠",
             "A check stopped the run: post_plan refused.",
@@ -1422,6 +1429,42 @@ def test_an_empty_reply_is_a_dim_notice() -> None:
     assert "· The model returned an empty reply; asking it to continue." in turn.text()
 
 
+def test_unfinished_thinking_is_folded_and_its_notice_is_dim() -> None:
+    """#278: the stored reply has no content, only thinking; nothing of it is
+    held as the answer, and the notice that asks again is dim."""
+    turn = Turn()
+    feed = turn.renderer.stream_feed()  # a server that streamed it as content
+    feed.step(1)
+    feed.opened()
+    feed.content("The user just said hello. I'll keep it simple and friendly.")
+    feed.closed()
+    turn.event(
+        "assistant.message",
+        step=1,
+        content="",
+        thinking="The user just said hello. I'll keep it simple and friendly.",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.5,
+    )
+    turn.event(
+        "notice",
+        kind="unfinished_answer",
+        message="The model's reply ended inside its thinking; asking it for its answer.",
+        detail={},
+        step=1,
+        attempt=1,
+    )
+    text = turn.text()
+    assert "✻ Thought" in text and "keep it simple" not in text
+    assert (
+        "· The model's reply ended inside its thinking; asking it for its answer."
+        in text
+    )
+    assert turn.renderer._held == "" and turn.renderer._stream_texts == {}
+
+
 def test_a_budget_and_a_stuck_notice_are_warnings() -> None:
     text = (
         Turn()
@@ -1481,6 +1524,35 @@ def test_thinking_shows_its_excerpt_in_developer_mode_and_when_asked(how: str) -
     assert len(body) == (41 if how == "verbose" else 4)
 
 
+def test_a_reply_without_tool_calls_does_not_repeat_the_footers_time() -> None:
+    # The turn's only reply is its answer: the footer gives the time.
+    text = _message(Turn(), content="Hi.", thinking="a greeting").text()
+    assert "✻ Thought\n" in text and "Thought for" not in text
+
+
+def test_the_answer_after_tool_calls_keeps_its_own_time() -> None:
+    turn = Turn()
+    call = [{"id": "c1", "name": "file_read", "preview": "a"}]
+    _message(turn, thinking="read it", tool_calls=call)
+    turn.event(
+        "tool.finished",
+        step=1,
+        call_id="c1",
+        name="file_read",
+        status="success",
+        error_category="none",
+        output="x",
+        output_chars=1,
+        error="",
+        duration_s=0.1,
+        images=[],
+        approval=None,
+        exit_code=None,
+    )
+    text = _message(turn, content="Done.", thinking="the answer", step=2).text()
+    assert "✻ Thought for 0.1s" in text
+
+
 def test_a_new_session_restores_the_modes_thinking_default() -> None:
     quiet, developer = Turn(), Turn(developer=True)
     quiet.renderer.thinking, developer.renderer.thinking = True, False
@@ -1513,7 +1585,8 @@ def test_verbose_shows_forty_thinking_rows_and_thinking_off_none() -> None:
     assert body[40].strip().startswith("… +")
     off = Turn()
     off.renderer.thinking = False
-    text = _message(off, thinking=thinking).text()
+    call = [{"id": "c1", "name": "file_read", "preview": "a"}]
+    text = _message(off, thinking=thinking, tool_calls=call).text()
     assert "✻ Thought for 0.1s" in text
     assert not any(row.startswith("  w") for row in text.split("\n"))
 

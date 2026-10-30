@@ -255,6 +255,13 @@ class AgentOptions:
       or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
       ``-X agent.lean_output=true``; the interactive UI and the gateway never
       do. Default false: requests are as they were before the option.
+    - ``identity``: a paragraph for the system prompt of a chat surface: who
+      the agent is and which model it runs on (the terminal chat and the
+      gateway's sessions build it per Agent, from the backend the Agent
+      talks to). The fixed system section carries it right after the base
+      text, in planning and reflection requests. ``None`` (the default)
+      adds nothing: direct runs, workers and the benchmark send the base
+      text alone.
     - ``confine_writes``: when true, the ``shell_exec`` and ``python_exec``
       children start, on macOS, under a ``sandbox-exec`` profile that
       refuses every file write outside the workspace (the
@@ -325,6 +332,7 @@ class AgentOptions:
     brief_items: bool = False
     lean_output: bool = False
     confine_writes: bool = False
+    identity: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -441,6 +449,13 @@ class AgentOptions:
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")
+
+        if self.identity is not None and (
+            not isinstance(self.identity, str) or not self.identity.strip()
+        ):
+            raise ValueError(
+                f"identity must be None or a non-empty str, got {self.identity!r}"
+            )
 
         if self.memory_dir is not None and (
             not isinstance(self.memory_dir, str) or not self.memory_dir

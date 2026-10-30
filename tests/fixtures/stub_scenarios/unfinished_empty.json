@@ -1,0 +1,20 @@
+{
+  "sequential": true,
+  "replies": [
+    {
+      "reasoning": "A greeting. I should answer it briefly.",
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 12,
+        "completion_tokens_details": {
+          "reasoning_tokens": 12
+        }
+      }
+    },
+    {
+      "reasoning": "A greeting; answer it.",
+      "content": "Hello! What can I do for you?"
+    }
+  ]
+}
