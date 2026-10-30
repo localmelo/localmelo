@@ -90,7 +90,10 @@ async def test_the_tail_of_the_output_is_bounded(
     monkeypatch.setattr(usershell, "MAX_OUTPUT_BYTES", 1000)
     result = await _run("seq 1 2000", tmp_path)
     assert len(result.output) == 1000 and result.truncated
-    assert result.total_bytes == len("".join(f"{n}\r\n" for n in range(1, 2001)))
+    expected = len("".join(f"{n}\r\n" for n in range(1, 2001)))
+    # A busy macOS pty repeats the \r of a \r\n when its output queue fills between
+    # the two bytes, so a slow reader can count a few bytes more than seq wrote.
+    assert expected <= result.total_bytes < expected + 2000
     item = snapshot(result)
     assert item is not None
     assert item.content.startswith("[earlier output left out: the last 1,000 of ")
