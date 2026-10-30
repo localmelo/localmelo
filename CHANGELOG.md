@@ -1041,6 +1041,43 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Coming back to a chat in the terminal reads plainly. The exit line says
+  `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
+  newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
+  otherwise. A resumed chat's recap shows each message and each answer with one
+  mark, the rows under it indented: the answer reads as plain text (its Markdown
+  markers off, no marked blank rows, at most four rows) where it was raw Markdown
+  with a `●` on every line, and the note below the title says `1 turn is back in the
+  model's memory.` Developer mode keeps the tool-call detail (`; its tool calls are
+  not.`). The picker's header reads `Resume a chat · ~/demo-project · tab: this
+  folder or all · esc close`, and a long folder is cut from its middle so the keys
+  stay on the row. The terminal says "chat" where it said "session": `New chat` in the
+  status bar and in the `/new` rule, the `chat` row of `/status`, the picker's footer,
+  the messages around resuming, and the descriptions of `/new`, `/sessions`, `/resume`
+  and `/title`. Command names (`/sessions`, `-c`, `-r`), developer mode's rows and
+  machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#NN]).
+
+- `melo -h` says what its everyday commands do. It lists `setup` (choose the model
+  server again), `serve` (run the web console and API) and `console` (open the web
+  console), then `More commands and every setting: melo -h all`, where it listed seven
+  bare words (`setup · config · serve · console · task · worker · import`) that a new
+  user could not tell apart. `-s, --steps` reads `most model calls per task (default 30)`
+  where it said `planning-call limit`. The help is 23 lines instead of 20; `melo -h all`
+  still lists every command and setting, and `melo COMMAND -h` still explains one. Every
+  option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
+  exit codes and requests ([#NN]).
+
+- The terminal's status bar says its figures in words in default mode: `context 8% used`
+  (`context 2.6k tokens` when the server's input limit is not known) where it said
+  `ctx 12k/32k`, and `83% cached` where it said `cache 83%`, with `, idle 3m` after it
+  for a local server. The cache shows once the server has reported a value, where it
+  showed `cache --` before. The last request's context figure drops whole on a narrow
+  terminal, like a measured one, before the folder is cut. The words are never cut
+  in the middle. Developer mode keeps the compact segments, and so do the web console's
+  status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+
 - The macOS app builds with the Command Line Tools when the full Xcode is not
   installed. The Swift host is compiled with the developer folder that
   `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the

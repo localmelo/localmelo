@@ -671,6 +671,54 @@ def test_the_status_row_never_wraps_at_any_width(width: int) -> None:
         assert "stub-model" in line and "~/demo" in line
 
 
+WORDS = ("83% cached", "context 8% used")
+
+
+def _words_line(width: int, mode: str = "") -> str:
+    bar = StatusBar(
+        "stub-model",
+        "~/demo-project",
+        "",
+        "What is this project?",
+        mode,
+        segments=WORDS,
+    )
+    line = "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
+    assert len(line) == width  # nothing wraps
+    return line
+
+
+def test_the_bar_in_words_shows_both_figures_at_100_columns() -> None:
+    assert _words_line(100).rstrip() == (
+        "  stub-model · ~/demo-project · 83% cached · context 8% used"
+        " · What is this project?"
+    )
+
+
+def test_the_bar_in_words_at_80_columns_cuts_the_title_before_a_figure() -> None:
+    line = _words_line(80)
+    assert "  stub-model · ~/demo-project · 83% cached · context 8% used · " in line
+    assert line.rstrip().endswith("…")  # the title, never a figure
+
+
+def test_the_bar_in_words_drops_figures_whole_at_44_columns() -> None:
+    # The words are longer than the compact figures, so the last one goes first
+    # and whole, as the row always dropped them; none is cut ("context 8%…").
+    line = _words_line(44)
+    assert line.rstrip() == "  stub-model · ~/demo-project · 83% cached"
+    # A mode at the right edge takes room from the figures.
+    line = _words_line(44, "auto")
+    assert line.startswith("  stub-model · ~/demo-project") and line.endswith(" auto")
+    assert "cached" not in line and "context" not in line and "…" not in line
+
+
+@pytest.mark.parametrize("width", range(30, 100, 5))
+def test_a_figure_in_words_shows_whole_or_not_at_all(width: int) -> None:
+    line = _words_line(width, "auto")
+    for figure in WORDS:
+        assert figure in line or figure[:6] not in line, (width, line)
+
+
 def test_without_segments_the_bar_is_the_old_one() -> None:
     bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", "ask")
     left = "  stub-model · ~/demo-project · ctx 120 · fail please"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -21,8 +22,8 @@ from localmelo.support.sessions.sync import SessionMark, session_mark
 if TYPE_CHECKING:
     from localmelo.support.cli.session import CliSession
 
-DELETED = "This session was deleted in another window. /new starts a new one; your draft is kept."
-BUSY = "This session is running a turn in another melo window. Wait for it to finish, or start a new session with /new."
+DELETED = "This chat was deleted in another window. /new starts a new one; your draft is kept."
+BUSY = "This chat is running a turn in another melo window. Wait for it to finish, or start a new chat with /new."
 
 
 class SessionNavigation:
@@ -53,11 +54,11 @@ class SessionNavigation:
                 )
                 info = rows[0] if rows else None
                 if info is None:
-                    note = f"No earlier session in {home_label(s.agent.workspace_root or '')}; starting a new one."
+                    note = f"No earlier chat in {home_label(s.agent.workspace_root or '')}; starting a new one."
             elif ref:
                 if not await self.resolve(ref):
                     print(
-                        f"melo: no session matches '{ref}' (melo -r lists them)",
+                        f"melo: no chat matches '{ref}' (melo -r lists them)",
                         file=sys.stderr,
                     )
                     s.exit_code = 2
@@ -70,7 +71,7 @@ class SessionNavigation:
             ):
                 info = await self.choose()
             else:
-                note = f"No sessions yet in {home_label(s.agent.workspace_root or '')}."
+                note = f"No chats yet in {home_label(s.agent.workspace_root or '')}."
             if on_choice is not None:
                 on_choice(info)
             announced = True
@@ -120,7 +121,7 @@ class SessionNavigation:
                 return choices[0]
             choices = choices or await self.resolve(ref)
             if not choices:
-                raise ValueError(f"No session matches '{ref}'.")
+                raise ValueError(f"No chat matches '{ref}'.")
         assert s.app is not None
         return await s.app.choose_session(
             s.store,
@@ -161,7 +162,7 @@ class SessionNavigation:
             if current is None:
                 raise UnknownSessionError(f"Unknown session: {info.id}")
             if current.kind != "chat" or not current.turns:
-                raise ValueError("No finished chat turns in this session.")
+                raise ValueError("No finished turns in this chat.")
             await candidate.resume()
             await self.metadata(current)
         except BaseException:
@@ -184,6 +185,7 @@ class SessionNavigation:
                 candidate.last_resume,
                 width=s.out.width,
                 symbols=s.renderer.symbols,
+                developer=s.developer,
             )
         )
         if old is not None:
@@ -202,7 +204,7 @@ class SessionNavigation:
             if info.workspace != workspace:
                 s.out.print(
                     s._text(
-                        f"This session last worked in {home_label(info.workspace or '')}; "
+                        f"This chat last worked in {home_label(info.workspace or '')}; "
                         f"it now works in {home_label(workspace or '')}.",
                     )
                 )
@@ -221,7 +223,7 @@ class SessionNavigation:
             await (reload or s.runner.resume)()
             s.out.print(
                 s._text(
-                    "◆ This session changed in another window; the latest turns "
+                    "◆ This chat changed in another window; the latest turns "
                     "were reloaded into the model's memory.",
                 )
             )
@@ -285,9 +287,30 @@ class SessionNavigation:
         )
 
     async def saved_hint(self) -> str:
+        """The exit line for a saved chat: how to come back to it.
+
+        ``melo -c`` when it is the newest chat of this folder and melo ran in
+        that folder, so ``-c`` finds it; its id for ``melo -r`` otherwise.
+        """
         s = self.session
         if s.runner is not None and s.runner.session_id is not None:
             info = await s.store.get_session(s.runner.session_id)
             if info is not None and info.turns:
+                workspace = s.agent.workspace_root
+                newest = await s.store.list_sessions(
+                    workspace=workspace, limit=1, min_turns=1
+                )
+                if newest and newest[0].id == info.id and _runs_in(workspace):
+                    return f'◆ Saved "{info.title}". Continue it with: melo -c'
                 return f'◆ Saved "{info.title}". Resume it with: melo -r {info.id}'
         return ""
+
+
+def _runs_in(workspace: str | None) -> bool:
+    """Whether the process runs in *workspace*, the folder ``melo -c`` looks in."""
+    try:
+        return workspace is not None and os.path.realpath(
+            workspace
+        ) == os.path.realpath(os.getcwd())
+    except OSError:  # the folder it started in is gone
+        return False

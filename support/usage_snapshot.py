@@ -276,6 +276,7 @@ def status_segments(
     now: float,
     tasks: TaskCounts | None = None,
     steps: bool = True,
+    words: bool = False,
 ) -> list[str]:
     """The status row's segments, left to right: cache, ctx, steps, tasks.
 
@@ -284,26 +285,36 @@ def status_segments(
     facts (never a percent or ``n/max``) and show only while a run is active.
     The idle time is as of the last redraw (the row redraws on events only),
     so it shows from one minute on.
+
+    With *words* (the terminal's default mode) the cache and the context read
+    as words, ``83% cached`` and ``context 8% used``, and the cache waits until
+    the server has reported a value instead of showing ``cache --``. The
+    console's status route keeps the compact segments.
     """
     segments: list[str] = []
     if snap.requests:
         if snap.last_cached is None or not snap.last_prompt:
-            cache = "cache --"
+            cache = "" if words else "cache --"
         else:
-            cache = f"cache {_percent(snap.last_cached, snap.last_prompt)}"
-        if local and snap.last_request_ts is not None:
-            idle = now - snap.last_request_ts
-            if idle >= 60:
-                cache += f" idle {_idle_text(idle)}"
-        segments.append(cache)
+            share = _percent(snap.last_cached, snap.last_prompt)
+            cache = f"{share} cached" if words else f"cache {share}"
+        if cache:
+            if local and snap.last_request_ts is not None:
+                idle = now - snap.last_request_ts
+                if idle >= 60:
+                    cache += f"{',' if words else ''} idle {_idle_text(idle)}"
+            segments.append(cache)
     context = snap.context or {}
     measured = _count(context.get("measured_prompt_tokens"))
     if measured:
         limit = _count(context.get("input_limit"))
-        segments.append(
-            f"ctx {format_tokens(measured)}"
-            + (f"/{format_tokens(limit)}" if limit else "")
-        )
+        if words:
+            segments.append(context_words(measured, limit))
+        else:
+            segments.append(
+                f"ctx {format_tokens(measured)}"
+                + (f"/{format_tokens(limit)}" if limit else "")
+            )
     if steps and snap.run_active and snap.progress is not None:
         facts = [f"step {_count(snap.progress.get('step')) or 0}"]
         attempt = _count(snap.progress.get("attempt")) or 1
@@ -318,3 +329,10 @@ def status_segments(
         # A task held on an approval waits for the user: never hide it.
         segments.append(text + (f" {tasks.held} held" if tasks.held else ""))
     return segments
+
+
+def context_words(measured: int, limit: int | None = None) -> str:
+    """The status bar's context in words: ``context 8% used``, or the tokens."""
+    if limit:
+        return f"context {_percent(measured, limit)} used"
+    return f"context {format_tokens(measured)} tokens"

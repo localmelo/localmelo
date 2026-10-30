@@ -75,9 +75,9 @@ class SessionTools:
             info = await s.store.get_session(runner.session_id)
             if s.runner is runner:
                 if info is None:
-                    raise UnknownSessionError("The session was deleted.")
+                    raise UnknownSessionError("The chat was deleted.")
                 s.title = info.title
-        s.out.print(s._text(f"Title: {s.title or 'New session'}"))
+        s.out.print(s._text(f"Title: {s.title or 'New chat'}"))
 
     async def apply_title(self) -> None:
         s, text = self.session, self.pending_title
@@ -85,7 +85,7 @@ class SessionTools:
         if text is None or runner is None or runner.session_id is None:
             return
         if not await s.store.rename_session(runner.session_id, text):
-            raise UnknownSessionError("The session was deleted.")
+            raise UnknownSessionError("The chat was deleted.")
         if s.runner is runner and self.pending_title == text:
             self.pending_title = None
             s.title = text
