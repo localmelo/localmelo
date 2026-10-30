@@ -127,7 +127,7 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.</li>
-          <li>A run needs a model server: pass <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>, or run <code>uv run melo setup</code> once.</li>
+          <li>A run needs a model server: pass <code class="wrap">-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>, or run <code>uv run melo setup</code> once.</li>
           <li>Point <code>HOME</code> at a temporary folder so a run never touches your own <code>~/.cache/localmelo</code>.</li>
         </ul>
       </section>
@@ -146,9 +146,9 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>The suite needs no model server and sends no request to one; a few CLI tests serve a fake API on loopback.</li>
-          <li>To run one folder, name it: <code>uv run pytest tests/agent -q</code>.</li>
+          <li>To run one folder, name it: <code class="wrap">uv run pytest tests/agent -q</code>.</li>
           <li>Every test runs with <code>HOME</code> in a temporary folder; one that writes the real <code>~/.cache/localmelo</code> fails.</li>
-          <li>A test that genuinely needs the real home is marked <code>@pytest.mark.allow_real_cache</code>.</li>
+          <li>A test that genuinely needs the real home is marked <code class="wrap">@pytest.mark.allow_real_cache</code>.</li>
         </ul>
         <div class="table-wrap">
           <table>
@@ -184,7 +184,7 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>They ask Ollama on <code>127.0.0.1:11434</code> and MLC LLM on <code>127.0.0.1:8400</code>, and skip a server that does not answer.</li>
-          <li><code>tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
+          <li><code class="wrap">tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
         </ul>
       </section>
 
@@ -347,7 +347,7 @@ uv run mypy .</code></pre>
         <ul>
           <li>
             Write the commit subject as <code>[Area] Imperative summary</code>,
-            as in <code>[Agent] Sort the retrieved extra tools by name</code>.
+            as in <code class="wrap">[Agent] Sort the retrieved extra tools by name</code>.
             Areas include CLI, Agent, Executor, Memory, Tests, Docs, Gateway,
             Backends, Sessions and Scheduler.
           </li>

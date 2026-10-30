@@ -120,7 +120,7 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>在其他地方，指明克隆目录：<code>uv run --project DIR melo …</code>。</li>
-          <li>运行需要模型服务器：传入 <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>，或者先运行一次 <code>uv run melo setup</code>。</li>
+          <li>运行需要模型服务器：传入 <code class="wrap">-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>，或者先运行一次 <code>uv run melo setup</code>。</li>
           <li>把 <code>HOME</code> 指向临时文件夹，运行就不会动到你自己的 <code>~/.cache/localmelo</code>。</li>
         </ul>
       </section>
@@ -141,9 +141,9 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>整套测试不需要模型服务器，也不向它发请求；少数命令行测试会在回环地址上提供一个模拟 API。</li>
-          <li>只运行一个文件夹时写出它的名字：<code>uv run pytest tests/agent -q</code>。</li>
+          <li>只运行一个文件夹时写出它的名字：<code class="wrap">uv run pytest tests/agent -q</code>。</li>
           <li>每个测试都以临时文件夹作为 <code>HOME</code>；写入真实 <code>~/.cache/localmelo</code> 的测试会失败。</li>
-          <li>确实需要真实主目录的测试标记为 <code>@pytest.mark.allow_real_cache</code>。</li>
+          <li>确实需要真实主目录的测试标记为 <code class="wrap">@pytest.mark.allow_real_cache</code>。</li>
         </ul>
         <div class="table-wrap">
           <table>
@@ -179,7 +179,7 @@ uv run melo serve</code></pre>
         </figure>
         <ul>
           <li>它们询问 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM，跳过没有响应的服务器。</li>
-          <li><code>tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
+          <li><code class="wrap">tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
         </ul>
       </section>
 
@@ -278,7 +278,7 @@ uv run mypy .</code></pre>
         <h2>提交和 pull request</h2>
         <ul>
           <li>
-            提交信息写成 <code>[Area] Imperative summary</code>，例如 <code>[Agent] Sort the retrieved extra tools by name</code>。常用的领域包括 CLI、Agent、Executor、Memory、Tests、Docs、Gateway、Backends、Sessions 和 Scheduler。
+            提交信息写成 <code>[Area] Imperative summary</code>，例如 <code class="wrap">[Agent] Sort the retrieved extra tools by name</code>。常用的领域包括 CLI、Agent、Executor、Memory、Tests、Docs、Gateway、Backends、Sessions 和 Scheduler。
           </li>
           <li>
             pull request 的标题要加类型，例如 <code>[Feature][CLI] …</code> 或 <code>[Bug][Memory] …</code>。

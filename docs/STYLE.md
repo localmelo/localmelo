@@ -53,6 +53,6 @@ the same PR, or add a visible dated stale notice naming the English revision,
 affected sections, owner and follow-up issue. Keep code, options, IDs and URLs
 identical. A second
 reviewer checks meaning, terminology and missing or added facts;
-the lead spot-checks. The glossary in [Maintaining the docs](project/documentation.md)
+a maintainer spot-checks. The glossary in [Maintaining the docs](project/documentation.md)
 records the established terms. Every twin must be reviewed before Docs-1
 closes.
