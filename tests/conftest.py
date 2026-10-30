@@ -52,6 +52,28 @@ def _no_env_retention(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_browser(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """No test opens a real browser, or takes the run for a person at a terminal.
+
+    A test of opening fakes ``console_link.can_open`` and ``webbrowser.open`` itself.
+    """
+    import webbrowser
+
+    from localmelo.support import console_link
+
+    opened: list[str] = []
+
+    def refuse(url: str, *args: object, **kwargs: object) -> bool:
+        opened.append(url)
+        return False
+
+    monkeypatch.setattr(console_link, "can_open", lambda: False)
+    monkeypatch.setattr(webbrowser, "open", refuse)
+    yield
+    assert not opened, f"a test opened a browser: {opened}"
+
+
+@pytest.fixture(autouse=True)
 def _forget_servers() -> None:
     """Start every test knowing nothing about which server is oMLX.
 

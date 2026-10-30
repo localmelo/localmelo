@@ -1056,6 +1056,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The web console opens in your browser. At a terminal on your computer, `melo serve` opens
+  the console once the gateway listens, already signed in, and prints `Web console: opened in
+  your browser (melo console opens it again).` in place of the `Web UI:` and `Sign in:` lines;
+  `melo console` opens it the same way and says `Opened the web console in your browser.` Over
+  SSH, or when no browser starts, both print the one-use link instead (`Open this link within 60
+  seconds. Do not share it:` and the link on its own line). The app's gateway, a login service
+  and a pipe never open a browser, and a pipe keeps the `Web UI:` and `Sign in:` lines.
+  `melo console` with nothing listening on the port says `no gateway is running on port N` and
+  exits 1, instead of printing a link to nothing. A console page opened without a link now says
+  `Sign in to localmelo` and `In a terminal, run melo console. It opens this page signed in.`
+  The `Gateway:` line, direct mode's stdout and stderr, JSON, exit codes and requests are
+  unchanged. ([#NN])
 - The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
   model chip while it only names the model, which the composer already shows, so a chat's
   title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No

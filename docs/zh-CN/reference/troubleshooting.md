@@ -161,7 +161,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 - **原因：** 设置向导的测试请求失败。服务器没有运行，URL 或模型有误，或者缺少 API 密钥。对于本地服务器，HTTP 401 或 403 会附带一条说明：localmelo 不会向本地服务器发送 API 密钥。
 - **修复：** 纠正问题，然后输入 `r`：向导会再次询问 URL 和模型，并以你之前输入的内容作为默认值。按 Enter 则不保存任何内容（`Setup cancelled — config not saved.`）。嵌入服务器检查失败不会中止设置：向导会在关闭嵌入的情况下保存。
 
-网关的 HTTP 401 表示其 bearer 令牌或浏览器会话缺失或无效。请在终端中运行 `melo --gateway-login`，获取新的一次性链接；需要时加上 `--port PORT`。对于 API 客户端，请使用私有的网关令牌；轮换令牌会使现有的浏览器会话失效。见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
+网关的 HTTP 401 表示其 bearer 令牌或浏览器会话缺失或无效。请在终端中运行 `melo console` 重新登录：它会在浏览器中打开控制台；通过 SSH 或没有浏览器能启动时，它会输出新的一次性链接。需要时加上 `--port PORT`。对于 API 客户端，请使用私有的网关令牌；轮换令牌会使现有的浏览器会话失效。见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
 
 ### `melo --serve --reconfigure` does not return
 

@@ -211,8 +211,9 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
   embedding off.
 
 A gateway HTTP 401 means its bearer or browser session is missing or invalid.
-Run `melo --gateway-login` in a terminal for a fresh single-use link, adding
-`--port PORT` when needed. For API clients use the private gateway token;
+Run `melo console` in a terminal to sign in again: it opens the console in your
+browser, or over SSH or when no browser starts it prints a fresh single-use
+link. Add `--port PORT` when needed. For API clients use the private gateway token;
 rotation invalidates existing browser sessions. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 ### `melo --serve --reconfigure` does not return

@@ -55,7 +55,8 @@ _HELP = {
     ),
     "console": (
         "melo console [--reset] [options]",
-        "Print a one-use link that opens the web console (valid for 60 seconds).\n"
+        "Open the web console in your browser, signed in. Over SSH, or when no\n"
+        "browser opens, print a one-use link instead (valid for 60 seconds).\n"
         "--reset signs every browser out and makes a new access token instead.",
         "  --reset         rotate the access token\n"
         "  --host H        the gateway's address (default: the configured one)\n"
@@ -94,7 +95,7 @@ SUMMARIES = (
     ("setup", "choose the model server again"),
     ("config", "show or change the settings"),
     ("serve [ACTION]", "run the gateway; install | uninstall | status"),
-    ("console", "print a one-use link to the web console"),
+    ("console", "open the web console in your browser"),
     ("task VERB", "manage background tasks (melo task -h)"),
     ("worker BRIEF", "run a worker brief and print its result"),
     ("import FORMAT FILE", "import a worker history"),
