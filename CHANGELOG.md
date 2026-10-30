@@ -1041,6 +1041,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The console and the app use plain words by default. The settings call the server **Model
+  server** and its address **Server address**, with `The address your model server prints when
+  it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the
+  list of models says `Lists the models this server offers.` A running chat reads `Working…`
+  beside Stop, the status row drops its `step N`, and the sidebar's **LOCAL** badge is gone. In
+  the macOS app the quit dialog says `Quitting stops 1 chat.` (or `Quitting stops what is
+  running: 2 tasks and 1 chat.`) and no longer mentions the gateway, and **Sign In Again** is
+  left out of the menus until it helps: after four failed sign-in attempts in a row, while the
+  console shows its Locked screen, and always in developer mode (the page now carries `data-mode`
+  and `data-locked` on its root element for the app to read). Developer mode keeps every word it
+  shows today: **Chat backend**, **Chat API URL**, `Running on your backend`, the badge and the
+  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#NN])
 - The console and the app point the right way when the model server is down. In the console, a
   run that could not reach the server now says `Could not reach the model server` and asks
   `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the

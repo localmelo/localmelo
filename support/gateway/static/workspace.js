@@ -169,6 +169,8 @@ function lock(message = "") {
   $("app").inert = true;
   $("app").hidden = true;
   $("lock-screen").hidden = false;
+  // The macOS app reads this (and `data-mode`) to decide when its menu offers "Sign In Again".
+  document.documentElement.dataset.locked = "1";
   $("lock-status").textContent = message;
   $("lock-title").focus();
 }
@@ -366,6 +368,7 @@ function applyChrome() {
   $("tasks-link").hidden = !developerMode && !sections.tasks;
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
+  $("local-badge").hidden = !developerMode;
   setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
 }
 
@@ -442,7 +445,7 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  $("run-status").textContent = turn ? (held ? holdText(held) : "Running on your backend") : "";
+  $("run-status").textContent = turn ? (held ? holdText(held) : developerMode ? "Running on your backend" : "Working…") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -2235,6 +2238,8 @@ async function refreshMode(saved) {
   try {
     const settings = saved ?? await api("/settings");
     developerMode = settings.mode === "developer";
+    // The macOS app reads this to decide what its menu offers (an app has no other way to know the mode).
+    document.documentElement.dataset.mode = developerMode ? "developer" : "default";
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
   } catch { /* Keep the last known mode and folder. */ }
 }
@@ -2349,6 +2354,7 @@ async function init() {
   S.authenticated = true;
   await refreshMode();
   $("lock-screen").hidden = true;
+  delete document.documentElement.dataset.locked;
   $("app").hidden = false;
   $("app").inert = false;
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");

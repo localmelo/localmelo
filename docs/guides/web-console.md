@@ -30,8 +30,10 @@ the configured server stops answering, and it looks for a server only while it i
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
 
 The page opens in default mode, which leaves out what only a developer needs: the chat's
-level chip, **Details**, the GPU-lock line, the cache, phase and queue segments of the
-status row, and the scheduler priority in Tasks. The header shows the running chip and a
+level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
+status row, and the scheduler priority in Tasks. It says things plainly too: a running chat reads
+`Working…` beside **Stop**, and the settings call the server **Model server** and its address
+**Server address**. The header shows the running chip and a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
 **Workers** and **Tasks** join the sidebar once there is a run, a terminal chat or a task
 to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
@@ -49,8 +51,9 @@ developer mode adds it after the model). Three one-line starters under the compo
 the files in this folder**, **Plan a small project with me**, **Explain a piece of code**) fill it
 for you to send or change, and step aside once there is text.
 
-1. Use **Settings** (**Connection settings** in developer mode) to choose the chat
-   backend, model and workspace. With nothing saved the dialog opens on a blank **Choose a server…**, and its
+1. Use **Settings** (**Connection settings** in developer mode) to choose the model
+   server, its address, the model and the workspace (**Chat backend** and **Chat API URL**
+   in developer mode). Changes apply to your next message. With nothing saved the dialog opens on a blank **Choose a server…**, and its
    fields, **Discover models**, **Test connection** and **Save** wait until you
    choose one. Local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
@@ -72,7 +75,7 @@ for you to send or change, and step aside once there is text.
 4. A status row sits above the composer: the same segments as the terminal's
    status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
-   and step segments only. The cache
+   segment only. The cache
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow
@@ -206,8 +209,10 @@ page reads it. It changes what is shown, never what runs. When it is on:
 - the header shows the chat's level chip, **Details**, the GPU-lock line and a chip with
   the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
   **Workers** and **Tasks**;
-- the status row adds the cache, phase and queue segments, and Tasks names each task's
-  priority.
+- the status row adds the cache, step, phase and queue segments, and Tasks names each task's
+  priority;
+- the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the settings
+  keep their technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
 
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:

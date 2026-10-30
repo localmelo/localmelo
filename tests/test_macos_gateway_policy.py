@@ -75,16 +75,20 @@ precondition(runningCounts(health(#"{"chats":-1,"tasks":0,"runs":0,"terminal":0}
 precondition(runningCounts(health(#"{"chats":"1","tasks":0,"runs":0,"terminal":0}"#)) == nil)
 precondition(runningCounts(Data("not json".utf8)) == nil)
 precondition(menuTitle(.idle) == "" && menuTitle(.unknown) == "" && menuTitle(.running(7)) == "7")
+// What quitting stops, in plain words: one thing is named, several come as a list; nothing says "gateway".
+let chats = runningCounts(health(#"{"chats":3,"tasks":0,"runs":0,"terminal":0}"#))
 precondition(quitMessage(busy, statusKnown: true)
-    == "2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it. "
-    + "Not affected: 1 run and 3 terminal chats.")
-precondition(quitMessage(chat, statusKnown: true)
-    == "1 chat is running. Quitting stops the gateway and everything running in it.")
+    == "Quitting stops what is running: 2 tasks and 1 chat. Not affected: 1 run and 3 terminal chats.")
+precondition(quitMessage(chat, statusKnown: true) == "Quitting stops 1 chat.")
+precondition(quitMessage(chats, statusKnown: true) == "Quitting stops 3 chats.")
 precondition(quitMessage(runsOnly, statusKnown: true)
-    == "Quitting stops the gateway and any running tasks. Not affected: 1 run.")
-precondition(quitMessage(none, statusKnown: true) == "Quitting stops the gateway and any running tasks.")
-precondition(quitMessage(nil, statusKnown: true) == "Quitting stops the gateway and any running tasks.")
-precondition(quitMessage(nil, statusKnown: false).hasPrefix("The task status is unavailable."))
+    == "Quitting stops anything that is running. Not affected: 1 run.")
+precondition(quitMessage(none, statusKnown: true) == "Quitting stops anything that is running.")
+precondition(quitMessage(nil, statusKnown: true) == "Quitting stops anything that is running.")
+precondition(quitMessage(nil, statusKnown: false) == "Could not check what is running. Quitting stops anything that is running.")
+for counts in [none, busy, chat, chats, runsOnly, nil] {
+    precondition(!quitMessage(counts, statusKnown: false).lowercased().contains("gateway"))
+}
 """)
     binary = tmp_path / "test-running"
     subprocess.run(
@@ -183,6 +187,31 @@ precondition(early.reason == reason && late.reason == reason)
 // Every failure offers the same three actions, in the order of the buttons.
 precondition(early.actions.map { $0.title } == ["Try Again", "Open Log", "Quit"])
 precondition(late.actions == [.tryAgain, .openLog, .quit])
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_sign_in_again_is_offered_after_failed_sign_ins_a_locked_page_or_developer_mode(
+    tmp_path: Path,
+) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+let idle = PageState()
+precondition(!offersSignIn(failures: 0, page: idle), "a working app does not offer it")
+precondition(!offersSignIn(failures: signInFailureLimit - 1, page: idle), "a few retries while the gateway starts are not a failure")
+precondition(offersSignIn(failures: signInFailureLimit, page: idle))
+precondition(offersSignIn(failures: 0, page: PageState(developer: true, locked: false)), "a developer always has it")
+precondition(offersSignIn(failures: 0, page: PageState(developer: false, locked: true)), "a locked console needs it")
+
+// The page says its mode and whether it is locked; anything else reads as the default.
+precondition(pageState(#"{"mode":"developer","locked":false}"#) == PageState(developer: true, locked: false))
+precondition(pageState(#"{"mode":"default","locked":true}"#) == PageState(developer: false, locked: true))
+precondition(pageState(#"{"mode":"","locked":false}"#) == idle)
+for damaged in [nil, "", "not json", #"{"mode":7,"locked":"yes"}"#, "[]"] as [String?] {
+    precondition(pageState(damaged) == idle, damaged ?? "nil")
+}
 """,
     )
 

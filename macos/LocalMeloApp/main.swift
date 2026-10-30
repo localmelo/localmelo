@@ -36,6 +36,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var healthAuthenticated = false
     private var browserLoginCode: String?
     private var signInAttempts = 0
+    // What decides whether the menus offer "Sign In Again": attempts that failed in a row, and what the page says.
+    private var signInFailures = 0
+    private var page = PageState()
+    private var signInItems: [NSMenuItem] = []
     // Instance collision check, not authentication against another local process.
     private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     // The gateway picks its own port (`--port 0`) and prints it; 0 until then.
@@ -74,7 +78,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Open localmelo", action: #selector(openWindow), keyEquivalent: "")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
+        let signIn = appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let root = NSMenu()
@@ -92,6 +96,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         root.addItem(editEntry)
         NSApp.mainMenu = root
         menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting))
+        signInItems = [signIn] + (menuBar.statusItem.menu?.items.filter { $0.action == #selector(signInAgain) } ?? [])
+        updateSignInItems()
     }
 
     private func handle(_ action: FailureAction) {
@@ -140,6 +146,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         openWindow()
         guard let route = pendingRoute else { return }
         webView?.callAsyncJavaScript("location.hash = route", arguments: ["route": route], in: nil, in: .page)
+    }
+
+    // "Sign In Again" shows only after sign-ins failed or while the console is locked, and in developer mode.
+    private func updateSignInItems() {
+        let show = offersSignIn(failures: signInFailures, page: page)
+        for item in signInItems { item.isHidden = !show }
+    }
+
+    private func refreshPageState() {
+        webView?.evaluateJavaScript(pageStateScript) { [weak self] value, _ in
+            guard let self = self else { return }
+            self.page = pageState(value as? String)
+            self.updateSignInItems()
+        }
     }
 
     // A manual sign-in uses the same instance-checked flow as startup and
@@ -225,6 +245,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         healthAuthenticated = false
         browserLoginCode = nil
         nextLoginAttempt = Date()
+        signInFailures = 0
+        updateSignInItems()
         port = 0
         showStep()
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
@@ -429,6 +451,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func retryLogin() {
         checking = false
         nextLoginAttempt = Date().addingTimeInterval(0.5)
+        signInFailures += 1
+        updateSignInItems()
     }
 
     private func fetchHealth(child: Process, reload: Bool) {
@@ -444,12 +468,16 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 if status == 401 {
                     self.healthAuthenticated = false
                     self.nextLoginAttempt = Date().addingTimeInterval(0.5)
+                    self.signInFailures += 1
+                    self.updateSignInItems()
                     return
                 }
                 guard status == 200, let data = data, let health = gatewayHealth(data) else { return }
                 self.healthAuthenticated = true
+                self.signInFailures = 0
                 self.menuBar.show(menuBarState(data))
                 self.pendingRoute = waitingRoute(data)
+                self.refreshPageState()
                 guard health.store == "ok" else {
                     if !self.ready {
                         self.timer?.invalidate()
@@ -525,6 +553,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: FolderBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
+        page = PageState()
+        updateSignInItems()
     }
 
     // The folders the person picked in the panel: the page may ask to see them in Finder, and nothing else but a chat's folder.

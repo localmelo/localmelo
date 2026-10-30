@@ -2265,6 +2265,44 @@ test('the header pill and the composer follow a session hold', async () => {
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
 });
 
+test('a running chat says Working by default and keeps "Running on your backend" for a developer', async () => {
+  const working = (routes) => routes({
+    'GET /sessions': {sessions: [session('a', {busy: true})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {busy: true}),
+      pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0,
+    },
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_earlier: false, replay_from: 0},
+  });
+  const plain = harness(working(defaultMode));
+  await plain.run('init()');
+  assert.equal(plain.element('run-status').textContent, 'Working…');
+  const developer = harness(working(baseRoutes));
+  await developer.run('init()');
+  assert.equal(developer.element('run-status').textContent, 'Running on your backend');
+});
+
+test('the LOCAL badge and the page\'s mode for the app follow developer mode', async () => {
+  const plain = harness(defaultMode());
+  await plain.run('init()');
+  assert.equal(plain.element('local-badge').hidden, true, 'a new user has no use for the badge');
+  assert.equal(plain.root.dataset.mode, 'default');
+  const developer = harness(baseRoutes());
+  await developer.run('init()');
+  assert.equal(developer.element('local-badge').hidden, false);
+  assert.equal(developer.root.dataset.mode, 'developer', 'the macOS app reads this to decide what its menu offers');
+});
+
+test('a locked page says so on its root element, and unlocking removes it', async () => {
+  const locked = harness(baseRoutes({'GET /health': {status: 401}}));
+  await locked.run('init()');
+  assert.equal(locked.root.dataset.locked, '1', 'the macOS app reads this to offer Sign In Again');
+  const open = harness(baseRoutes());
+  open.root.dataset.locked = '1';
+  await open.run('init()');
+  assert.equal('locked' in open.root.dataset, false);
+});
+
 test('the 4 s poll redraws the work group when the hold changes', async () => {
   const running = turnRow({status: 'running', answer: null, finished_at: 0, running_here: true});
   const routes = baseRoutes({
@@ -3234,7 +3272,7 @@ test('default mode draws the plain status row and developer mode the whole one',
     await tick();
     return h.element('status-row').children.map((node) => node.textContent);
   };
-  assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k', 'step 3 attempt 2']);
+  assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k']);
   assert.deepEqual(await row(baseRoutes), segments);
   assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['tasks 0 running 0 queued 1 held'], 'A task held for the user is never hidden');
 });

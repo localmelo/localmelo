@@ -184,9 +184,18 @@ async def test_chat_url_placeholder_matches_the_omlx_hint(
     page = await client.get("/")
     parser = InputPlaceholders()
     parser.feed(page.text)
-    # The hint beside the field names oMLX, whose server listens on port 8000 by default.
-    assert "oMLX" in page.text
-    assert parser.placeholders["s-chat-url"] == "http://127.0.0.1:8000/v1"
+    # oMLX's server listens on port 8000 by default. The plain hint beside the field shows that address
+    # as its example, and the developer's wording (settings.mjs) still names oMLX.
+    placeholder = parser.placeholders["s-chat-url"]
+    assert placeholder == "http://127.0.0.1:8000/v1"
+    assert f"such as {placeholder}." in page.text
+    # A screen reader reads that instruction with the field.
+    assert (
+        _shell_attributes(page.text, "input", "s-chat-url")["aria-describedby"]
+        == "s-chat-url-hint"
+    )
+    settings = await client.get("/assets/settings.mjs")
+    assert "oMLX supports the OpenAI-compatible adapter." in settings.text
 
 
 @pytest.mark.parametrize(

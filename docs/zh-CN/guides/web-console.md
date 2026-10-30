@@ -14,14 +14,14 @@
 
 首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。启动服务器后，点按 **Check again** 重新寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 
-页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、状态行的缓存、阶段和队列段，以及任务里的调度优先级。页眉显示运行中标签和一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。当有运行、终端对话或任务可看时，**Workers** 和 **Tasks** 才会出现在侧边栏。[开发者模式](#developer-mode)显示全部内容。这些元素都保留在页面中，只是隐藏。
+页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段，以及任务里的调度优先级。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示运行中标签和一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。当有运行、终端对话或任务可看时，**Workers** 和 **Tasks** 才会出现在侧边栏。[开发者模式](#developer-mode)显示全部内容。这些元素都保留在页面中，只是隐藏。
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
-1. 使用 **Settings**（开发者模式下叫 **Connection settings**）选择对话后端、模型和工作区。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Appearance**（开发者模式下叫 **Theme**）会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。默认模式把 Model（含它的测试）、Appearance 和 **Developer mode** 开关叠在同一个对话框里；开发者模式保留 Model、Test、Theme 和 Developer 标签页，并显示设置文件及其修订版本。你也可以使用 `melo setup`。
+1. 使用 **Settings**（开发者模式下叫 **Connection settings**）选择模型服务器、它的地址、模型和工作区（开发者模式下叫 **Chat backend** 和 **Chat API URL**）。更改会在你的下一条消息生效。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Appearance**（开发者模式下叫 **Theme**）会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。默认模式把 Model（含它的测试）、Appearance 和 **Developer mode** 开关叠在同一个对话框里；开发者模式保留 Model、Test、Theme 和 Developer 标签页，并显示设置文件及其修订版本。你也可以使用 `melo setup`。
 2. 输入并发送消息。第一条消息会创建对话：页面以该对话的第一轮回答你的草稿，绝不会自行创建对话。回答以 Markdown 渲染，包含代码块。
 3. 一轮的呈现方式与终端类似：你的消息、包含已运行工具卡片的工作组、推理、通知和反思、运行时的实时行，以及带有 `Copy response` 的最终回答。工具输出中的转义序列会被清除，其图片（PNG、JPEG、GIF、WebP）会在页面内显示。
-4. 输入框上方有一行状态行：与终端状态栏相同的段，`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。默认模式只显示上下文和步骤段。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。
+4. 输入框上方有一行状态行：与终端状态栏相同的段，`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。默认模式只显示上下文段。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。
 5. 页眉中的 **N running** 标签统计当前正在运行的内容：本控制台中有轮次在进行的对话、任务、直接运行和终端对话（运行或终端对话只在其进程持有有效租约时才计入）。数量为 0 时隐藏，屏幕较窄时仍然保留。点按它会显示一个简短的列表，每一行写明类别和标题，并打开该对话、该任务的卡片或 Workers 详情；按 Esc 或点按别处即可关闭。数字来自 `GET /api/health` 的 `status`，随页面每 4 秒的轮询读取；列表最多显示 20 行，并说明还有多少在运行。
 
 侧边栏按从新到旧列出对话，支持搜索、切换和关闭对话。草稿在当前浏览器标签页中按对话保留。打开的对话通过事件流（SSE）接收轮次；页面重新加载后会恢复对话，读取最近十轮，并从那里重放已保存的事件，因此不会丢失内容或重复显示。**Show earlier turns** 加载更早的轮次，不会移动当前视图。浏览器放弃连接的事件流会在 1、2、4、8、16 秒后以及之后每 30 秒，从页面自己的游标处重新打开，但只会在重新读取对话之后进行：如果对话已不存在，页面会进入新对话，而不是无限重试。标签页可见时，对话列表每 4 秒重新读取一次，以获取其他浏览器的更改。**Reconnect now** 会先检查对话，再重新打开事件流。独立的横幅分别显示存储、模型和连接问题，不会替换其他通知。
@@ -64,7 +64,8 @@
 - **Details** 增加 **Events** 标签页，显示最近一轮保存的原始事件；**Memory** 标签页增加智能体状态和长期记忆后端；
 - **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字；
 - 页眉显示对话的级别标签、**Details**、GPU 锁状态行，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers** 和 **Tasks**；
-- 状态行增加缓存、阶段和队列段，Tasks 显示每个任务的优先级。
+- 状态行增加缓存、步骤、阶段和队列段，Tasks 显示每个任务的优先级；
+- 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，设置保留它们的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
 
 关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 和 Tasks 视图，以及设置所保存的内容，在两种模式下的行为相同。
 
