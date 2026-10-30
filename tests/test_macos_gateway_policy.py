@@ -162,6 +162,29 @@ precondition(silent.append(Data("\n  Gateway: http://127.0.0.1:777\n".utf8)) == 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_window_texts_and_actions(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+// The step line follows what the app knows: no port yet, a port, a signed-in console.
+precondition(startStepText(portKnown: false, ready: false) == "Starting the local server")
+precondition(startStepText(portKnown: true, ready: false) == "Signing in")
+precondition(startStepText(portKnown: true, ready: true) == "Opening your workspace")
+
+// A failure keeps the reason it is given; the title says whether the console had loaded.
+let reason = gatewayExitMessage(status: 9, signalled: true)
+let early = failureNotice(reason: reason, ready: false)
+let late = failureNotice(reason: reason, ready: true)
+precondition(early.title == "localmelo could not start" && late.title == "localmelo stopped")
+precondition(early.reason == reason && late.reason == reason)
+// Every failure offers the same three actions, in the order of the buttons.
+precondition(early.actions.map { $0.title } == ["Try Again", "Open Log", "Quit"])
+precondition(late.actions == [.tryAgain, .openLog, .quit])
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
     subprocess.run(
         [
@@ -169,6 +192,7 @@ def test_real_host_typechecks() -> None:
             "swiftc",
             "-typecheck",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/main.swift"),
         ],
         env={

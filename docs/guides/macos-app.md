@@ -16,6 +16,13 @@ extra into the bundle, compiles the Swift host with release Xcode, and includes 
 `Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and
 SHA-256 checked before extraction; wheel hashes are checked against the lock file.
 
+Until the console has loaded, the window shows a native starting view: Melo's picture, `Starting localmelo…` and a
+spinner beside a line that names the step (`Starting the local server`, `Signing in`, `Opening your workspace`). If the
+gateway cannot start within its 20-second deadline, or stops later, the same view says why, under `localmelo could not
+start` or `localmelo stopped`, and offers **Try Again**, which starts a new gateway, **Open Log**, which opens
+`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. A problem never shows a dialog and never closes the app. The
+window and the web view use the console's canvas colour, so a dark window does not flash white.
+
 Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
 startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
 20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work

@@ -954,6 +954,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app's window says what is happening. Until the console has loaded it
+  shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
+  `Signing in`, `Opening your workspace`) instead of an empty web view, and its
+  background matches the console's, so a dark window no longer flashes white. When
+  the gateway cannot start, does not start within 20 seconds or stops, the same
+  view gives the reason and offers Try Again (a new gateway), Open Log and Quit;
+  these problems no longer show a dialog and close the app ([#NN]).
+
 - The macOS app starts its gateway with `--port 0` and reads the port from the
   gateway's startup line (`Gateway: http://127.0.0.1:PORT`) instead of using a
   fixed port. It can no longer collide with another gateway, the background

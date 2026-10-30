@@ -39,6 +39,7 @@ func record(_ text: String) {
 }
 var quitPhase = 0
 var didSignInAgain = false
+var didRetry = false
 """
 
 FAKE_GATEWAY = r"""import http.server, json, os, pathlib, sys, threading, time
@@ -48,6 +49,13 @@ port = int(sys.argv[sys.argv.index("--port") + 1])
 home = pathlib.Path(os.environ["HOME"])
 mode = os.environ["TEST_MODE"]
 instance = os.environ["LOCALMELO_APP_INSTANCE"]
+if mode == "wrong-quit":
+    mode = "wrong"
+if mode == "retry":
+    starts = home / "starts"
+    mode = "correct" if starts.exists() else "wrong"
+    with starts.open("a") as stream:
+        stream.write("start\n")
 pidfile = home / "gateway-pid"
 pidfile.write_text(str(os.getpid()))
 auth = GatewayAuth()
@@ -213,7 +221,26 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         "        webView = nil": '        webView = nil\n        record("removed")',
-        "        tearDownWebView()\n        let alert = NSAlert()": '        tearDownWebView()\n        record("alert " + text)\n        let alert = NSAlert()',
+        "        tearDownWebView()\n        if let failed = child, failed.isRunning {": r"""        tearDownWebView()
+        record("alert " + text)
+        if ProcessInfo.processInfo.environment["TEST_MODE"] == "retry" && !didRetry {
+            didRetry = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                            timestamp: 0, windowNumber: self.window.windowNumber,
+                                            context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+                                            isARepeat: false, keyCode: 36)!
+                record("return " + String(self.window.performKeyEquivalent(with: event)))
+            }
+        }
+        if ProcessInfo.processInfo.environment["TEST_MODE"] == "wrong-quit" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.statusView.buttons[.quit]?.performClick(nil)
+            }
+        }
+        if let failed = child, failed.isRunning {""",
+        "    private func showStep() {": '    private func showStep() {\n        record("step " + startStepText(portKnown: port != 0, ready: ready))',
+        "        window.makeFirstResponder(webView)": '        window.makeFirstResponder(webView)\n        record("shown")',
         "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         record("loaded " + (webView.url?.absoluteString ?? ""))
         if let menu = NSApp.mainMenu?.items.last?.submenu {
@@ -317,6 +344,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "/usr/bin/xcrun",
             "swiftc",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(main),
             "-o",
             str(executable),
@@ -409,6 +437,8 @@ def test_wrong_or_absent_instance_header_sends_no_login_code(
         assert "removed" in events
         assert "loaded" not in events
         assert f"Port {port} is held by another process" in events
+        time.sleep(1)  # the failure is shown in the window: the app stays open
+        assert process.poll() is None
 
 
 def test_a_login_that_stores_no_cookie_is_retried(app: Path, tmp_path: Path) -> None:
@@ -525,6 +555,55 @@ def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
         assert "terminated by signal 9" in events
+        time.sleep(1)  # the failure is shown in the window: the app stays open
+        assert process.poll() is None
+
+
+def test_each_step_shows_until_the_console_has_loaded(
+    app: Path, tmp_path: Path
+) -> None:
+    with running(app, tmp_path, "correct") as (process, _):
+        events = wait_for(tmp_path / "events", "shown", process)
+        order = [
+            events.index(text)
+            for text in (
+                "step Starting the local server",
+                "step Signing in",
+                "step Opening your workspace",
+                "loaded ",
+                "shown",
+            )
+        ]
+        assert order == sorted(order), events
+
+
+def test_try_again_starts_a_new_gateway_after_a_collision(
+    app: Path, tmp_path: Path
+) -> None:
+    process = launch(app, tmp_path, "retry")  # the first start meets a wrong owner
+    try:
+        events = wait_for(tmp_path / "events", "alert ", process)
+        port = int((tmp_path / "port").read_text())
+        assert f"Port {port} is held by another process" in events
+        # The host presses Return, the default button's key; the second start is right.
+        wait_for(tmp_path / "events", "loaded ", process)
+        assert "return true" in (tmp_path / "events").read_text()
+        assert (tmp_path / "starts").read_text().count("start") == 2
+        assert process.poll() is None
+    finally:
+        stop(process, tmp_path)
+
+
+def test_quit_in_the_failure_view_ends_the_app_without_a_dialog(
+    app: Path, tmp_path: Path
+) -> None:
+    process = launch(app, tmp_path, "wrong-quit")
+    try:
+        wait_for(tmp_path / "events", "alert ", process)
+        assert process.wait(timeout=15) == 0  # the host clicks Quit by itself
+        assert "quit-prompt" not in (tmp_path / "events").read_text()
+    finally:
+        stop(process, tmp_path)
 
 
 def test_owned_store_stops_host_before_page_load(app: Path, tmp_path: Path) -> None:

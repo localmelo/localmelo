@@ -125,6 +125,37 @@ func storeFailureMessage(_ health: GatewayHealth) -> String {
     return "The gateway session store is unavailable: \(health.error).\(hint)"
 }
 
+/// The line under "Starting localmelo…", from what the app knows so far.
+func startStepText(portKnown: Bool, ready: Bool) -> String {
+    if ready { return "Opening your workspace" }
+    return portKnown ? "Signing in" : "Starting the local server"
+}
+
+/// What the window offers when the gateway cannot start or stops, in button order.
+enum FailureAction: CaseIterable {
+    case tryAgain, openLog, quit
+
+    var title: String {
+        switch self {
+        case .tryAgain: return "Try Again"
+        case .openLog: return "Open Log"
+        case .quit: return "Quit"
+        }
+    }
+}
+
+struct FailureNotice {
+    let title: String
+    let reason: String
+    let actions: [FailureAction]
+}
+
+/// The window's failure text. `ready` is true once the console had loaded.
+func failureNotice(reason: String, ready: Bool) -> FailureNotice {
+    FailureNotice(title: ready ? "localmelo stopped" : "localmelo could not start",
+                  reason: reason, actions: FailureAction.allCases)
+}
+
 func gatewayExitMessage(status: Int32, signalled: Bool) -> String {
     signalled ? "The gateway was terminated by signal \(status)." : "The gateway exited (status \(status))."
 }
