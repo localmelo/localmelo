@@ -162,6 +162,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web console connects the model server that already runs on this Mac in one
+  step. While no model is set up (or the configured server is down) and no chat
+  is open, the welcome shows a setup card in place of the banner and the starters:
+  "Found oMLX on this Mac" (or Ollama, or a model server) with its model and
+  **Use this model**, which saves it, tests it and makes the welcome ready without
+  opening settings; "A model server needs an API key"; or "No model server is
+  running on this Mac" with Check again, Enter a server address and a link to the
+  quickstart. With several chat models and none known to be loaded the card lists
+  them, marks the loaded one and waits for a pick. The composer reads "Connect a
+  model to start" meanwhile. `GET /api/setup/detect` is the route behind it: it asks
+  the servers the first run asks (`LOCALMELO_DETECT_URLS`) and answers `state`
+  (`found`, `needs_key`, `none`), the server's `name` and `backend`, its chat
+  `models`, the `loaded` ones, the `suggested` one (`null` when the user must
+  choose) and a `problem`. Saving from the console now writes an oMLX server as
+  `omlx`, as the first run does. The connection settings dialog opens on a blank
+  "Choose a server..." entry when nothing is saved, instead of a preset (MLC at
+  `http://localhost:8400/v1`), and no longer shows `melo --reconfigure` as advice.
+  ([#NN])
+
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,
   `not yet` or `no file named`) from the files `git status` shows edited since the

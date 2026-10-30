@@ -362,7 +362,9 @@ terminal, `melo` alone exits with code 2; start the gateway with
 
 The web workspace at `http://127.0.0.1:8401/` is the console's live page and
 talks only to `/api`: it uses the gateway's configured model, so
-`melo --reconfigure` changes it. It lists your chats newest first, with
+`melo --reconfigure` changes it. On a first run, with no model set up, its welcome
+shows a card that finds the model server already running on this Mac and connects
+it with **Use this model**, without opening settings. It lists your chats newest first, with
 search and a draft for each, and draws a turn as the terminal does: your
 message, a work card for each tool call, folded reasoning and reflections,
 notices, the live progress row and the answer with its facts and

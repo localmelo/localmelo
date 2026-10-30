@@ -401,7 +401,10 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           The web workspace at <code>http://127.0.0.1:8401/</code> is the
           console's live page and talks only to <code>/api</code>: it uses the
           gateway's configured model, which you can change in connection settings
-          or with <code>melo --reconfigure</code>. It lists your chats newest first, with search and a draft for
+          or with <code>melo --reconfigure</code>. On a first run, with no model set
+          up, its welcome shows a card that finds the model server already running
+          on this Mac and connects it with <strong>Use this model</strong>, without
+          opening settings. It lists your chats newest first, with search and a draft for
           each, and draws a turn as the terminal does: your message, a work
           card for each tool call, folded reasoning and reflections, notices,
           the live progress row and the answer with its facts and

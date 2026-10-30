@@ -16,8 +16,23 @@ must be running to serve it: `melo --serve`. Run `melo --gateway-login` in a
 terminal and open its single-use link within 60 seconds (add `--port PORT`
 for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
-1. Use **Connection settings** to choose the chat backend, model and workspace;
-   local model discovery lists models without starting one. A cloud backend
+On a first run, with no model set up, the welcome shows one card in place of the
+starters. It looks for a model server on this Mac, as the terminal's first run
+does, and shows what it found: **Found oMLX on this Mac** (or Ollama, or a model
+server) with its model, **A model server needs an API key**, or **No model server
+is running on this Mac**. **Use this model** saves the server, tests it and makes
+the welcome ready without opening settings. With several chat models and none
+known to be loaded, the card lists them, marks the loaded one and waits for you to
+choose; it never picks one for you. **Check again** looks again after you start a
+server, **Enter a server address…** opens connection settings, and the composer
+reads `Connect a model to start` until a model is set up. The card also shows when
+the configured server stops answering, and it looks for a server only while it is
+on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
+
+1. Use **Connection settings** to choose the chat backend, model and workspace.
+   With nothing saved the dialog opens on a blank **Choose a server…**, and its
+   fields, **Discover models**, **Test connection** and **Save** wait until you
+   choose one. Local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
    never the key. Saving uses the loaded settings revision; if the file changed,
    reload the dialog and retry. **Test connection** probes the unsaved model

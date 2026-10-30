@@ -179,6 +179,24 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 云端后端返回 400 `invalid_request`：`Listing models works for local backends only; type the model name.`
 - 无法连接的服务器或空的模型列表会返回 502 `backend_unreachable`。
 
+## GET /api/setup/detect
+
+像终端的首次运行一样，在本机寻找模型服务器。它向 `LOCALMELO_DETECT_URLS` 中的每个 URL 发送 `GET <url>/models`（超时 1 秒；默认是 `127.0.0.1` 的 8000、8400、11434 和 30000 端口；值为空则关闭检测），然后向找到的服务器发送 `GET <root>/api/version`，在多个对话模型之间还会读取它的状态路由。尚未配置时也能使用，不带参数，也不写入任何内容。网页控制台的设置卡片会调用它，并且只在卡片显示时才调用。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/setup/detect
+```
+
+```json
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+```
+
+- `state` 是 `found`（有可提供的对话模型）、`needs_key`（某个服务器返回 401 或 403；localmelo 不会向本地服务器发送密钥）或 `none`。
+- `name` 是 `Ollama`、`oMLX`（其模型列表把 oMLX 标为所有者）或 `""`。`backend` 是要保存的 `chat_backend`：`ollama`，或 `vllm`；当列表指明是 oMLX 时，`PUT /api/settings` 会把它写成 `omlx`。`state` 不是 `found` 时为 `""`。
+- `models` 是按列表顺序排列的对话模型（不含嵌入和重排序模型）。`loaded` 是服务器说已在内存中的模型；只有在多个对话模型之间才会询问，`[]` 也可能表示它没有回答。
+- `suggested` 是要提供的模型：唯一的对话模型，或一个已加载的模型。当提供了多个模型而且不知道哪个已加载时为 `null`，客户端必须让用户自己选择。
+- 没有任何服务器回应时 `url` 为空。`problem` 说明已回应的服务器为什么不能使用。URL 中的用户名或密码绝不会返回。
+
 ## Scheduler tasks (S3a.2)
 
 这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用网关内置工具（`file_read`、`file_write`、`python_exec`，不含 `shell_exec`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
