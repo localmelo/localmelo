@@ -143,11 +143,13 @@ def panel_text(
     target: edits.Target | None = None,
     width: int,
     minus: str = "−",
+    show_tier: bool = True,
 ) -> PanelText:
     """The panel's title, header and whole body for *request*, escaped.
 
     *target* is what a ``file_write`` path holds now; *width* is the width
-    the body is wrapped to; *minus* is the UI's minus sign, for a diff.
+    the body is wrapped to; *minus* is the UI's minus sign, for a diff;
+    *show_tier* puts the tool's permission tier in the header (developer mode).
     """
     arguments: Mapping[str, Any] = request.arguments
     root = request.workspace_root
@@ -163,7 +165,7 @@ def panel_text(
     tool = request.tool_name
     # A caller that built the request itself can leave the tier out; an
     # agent always fills it, and the header then shows one more word.
-    mark = "" if request.tier is None else f" · {shown(request.tier)}"
+    mark = "" if request.tier is None or not show_tier else f" · {shown(request.tier)}"
     if tool == "shell_exec":
         command = shown(_command_text(arguments.get("command")))
         body = [("", row) for row in _wrapped(command.split("\n"), width)]

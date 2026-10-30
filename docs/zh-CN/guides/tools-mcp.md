@@ -13,7 +13,7 @@ melo --builtins none "What is 6*7?"
 melo --builtins file_read,shell_exec "How many lines does notes.txt have?"
 ```
 
-- `--builtins` 接受 `all`（所有内置工具，包括 `shell_exec`）、`none` 或以逗号分隔的工具名称列表。未知名称属于用法错误。未指定该选项时由模式决定：直接运行、网关和 Python API 使用 `file_read`、`file_write` 和 `python_exec`；交互式界面使用全部四个工具。`--builtins all` 可以保留旧版直接运行的工具集合，而 `--builtins shell_exec` 只指定 Shell 工具。
+- `--builtins` 接受 `all`（所有内置工具，包括 `shell_exec`）、`none` 或以逗号分隔的工具名称列表。未知名称属于用法错误。未指定该选项时由模式决定：直接运行和 Python API 使用 `file_read`、`file_write` 和 `python_exec`；网关在这三个之外再加 `list_files`；交互式界面使用全部五个工具。`--builtins all` 指定所有内置工具，而 `--builtins shell_exec` 只指定 Shell 工具。
 - JSON 行中的 `config.builtins` 和 `config.tools` 显示已注册的工具。
 - 在 Python 中使用 `AgentOptions(builtins=...)`；见 [AgentOptions](../reference/python-api.md#agentoptions)。
 
@@ -132,9 +132,9 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 | `exec` | 以你的权限运行命令、代码或其他程序。 | 是。 |
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
-内置工具的级别按名称固定：`file_read` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
+内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 
-模式决定实际提供哪些内置工具。交互式界面以 `interactive` 模式运行，获得全部四个工具；除非使用 `--yolo`，它在 `exec` 调用前会询问。直接运行、网关或控制台会话以及 Python API 默认的 `python` 模式获得 `file_read`、`file_write` 和 `python_exec`：`shell_exec` 未注册，因此模型看不到它；即使注册了，检查器也会拒绝它，除非调用方在 `builtins` 中指定。模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。指定 `shell_exec`（`--builtins all`、`--builtins shell_exec`、`AgentOptions(builtins={"shell_exec"})`）表示调用方在 `direct` 和 `python` 模式中明确启用它，调用可以运行；`gateway` 即使在指定时也会拒绝。除了网关模式，`AgentOptions(builtins=…)` 或 `--builtins` 始终优先于模式的默认工具集合。
+模式决定实际提供哪些内置工具。交互式界面以 `interactive` 模式运行，获得全部五个工具；除非使用 `--yolo`，它在 `exec` 调用前会询问。网关或控制台会话在 `file_read`、`file_write` 和 `python_exec` 之外还获得 `list_files`；直接运行以及 Python API 默认的 `python` 模式只获得这三个。除交互式界面外，各模式都不注册 `shell_exec`，因此模型看不到它；即使注册了，检查器也会拒绝它，除非调用方在 `builtins` 中指定。模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。指定 `shell_exec`（`--builtins all`、`--builtins shell_exec`、`AgentOptions(builtins={"shell_exec"})`）表示调用方在 `direct` 和 `python` 模式中明确启用它，调用可以运行；`gateway` 即使在指定时也会拒绝。除了网关模式，`AgentOptions(builtins=…)` 或 `--builtins` 始终优先于模式的默认工具集合。
 
 所有其他工具的级别来自服务器列出工具时提供的 MCP `annotations` 对象，按保守原则解读：
 
@@ -152,8 +152,8 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 使用 `--workspace DIR` 的直接运行和通过 Python 使用 `AgentOptions(workspace_root=DIR)` 创建的智能体会改变内置工具（见[在目录中工作](python.md#work-in-a-directory)）。不带该选项的直接运行和网关从不设置工作区根目录。
 
-- **范围限制。** `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，空路径或包含 NUL 字符的路径会以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。`~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。
-- **打开文件。** 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。`file_read` 最多读取 200,000 字节。超过 200,000 字节或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。
+- **范围限制。** `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，空路径或包含 NUL 字符的路径会以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。`~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。`list_files` 受同样的限制，不带路径（或路径为空）时列出根目录。
+- **打开文件。** 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。`list_files` 打开文件夹时不跟随符号链接，也不会进入其中的链接，因此指向根目录之外的链接显示为 `name@`，其目标不会被列出。`file_read` 最多读取 200,000 字节。超过 200,000 字节或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。
 - **命令。** `shell_exec` 和 `python_exec` 始终在拥有独立进程组的子进程中运行，超时或取消会终止它及其启动的所有进程；根目录只决定它们的启动目录。Shell 命令的标准输入是 `/dev/null`；`python_exec` 通过管道接收代码（绝不通过 argv），随后将 fd 0 指向 `/dev/null`，因此 `input()` 得到 EOF，两者都不读取 melo 所在的终端。这两个工具不受范围限制：它们可以访问任何路径。
 - **环境。** `shell_exec` 和 `python_exec` 的子进程不继承 melo 的环境：它获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；使用 `--url` 的会话和运行会忽略该设置。Python API 可以在其映射中传入任何变量。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。
 - **退出状态。** `shell_exec` 命令以非零状态退出时，其文本以 `[exit code <n>]` 行开头（被信号终止的命令使用 `-<signal>`），调用仍然成功。该行位于开头，因此输出被截断时仍会保留。Python 代码以非零状态退出时，调用以 `Python exited with code <n>` 失败，后面附上输出的最后 4,000 个字符。

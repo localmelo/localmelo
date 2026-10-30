@@ -25,7 +25,9 @@ those tools can do.
 - **Tools run with your account's permissions.** `shell_exec` runs shell
   commands, and `python_exec` runs Python code inside the localmelo process.
   `file_read` and `file_write` reach any file you can: no directory
-  restriction is active. This holds in direct mode and the gateway, and in
+  restriction is active, and `list_files`, which lists a folder without
+  reading a file, reaches any folder you can wherever it is offered (the
+  interactive UI and the gateway). This holds in direct mode and the gateway, and in
   the Python API unless an agent sets the options below. The interactive UI
   (bare `melo`) keeps the file tools inside its workspace, the current
   folder or `--workspace DIR`.
@@ -38,8 +40,8 @@ those tools can do.
   its approval panel before each such call, unless it was started with
   `--yolo`.
 - **The fence applies only with a workspace root.**
-  `AgentOptions(workspace_root=DIR)` keeps `file_read` and `file_write`
-  inside that directory: paths are resolved before the check, a symlink
+  `AgentOptions(workspace_root=DIR)` keeps `file_read`, `file_write` and
+  `list_files` inside that directory: paths are resolved before the check, a symlink
   that points out is refused, and so is anything but a regular file.
   Without a workspace root there is no fence.
 - **`shell_exec` and `python_exec` are not fenced.** With a workspace root

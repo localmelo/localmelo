@@ -71,7 +71,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
 
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
+        assert term.read_until(lambda out: b"Use it? [Y/n]: " in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
         # No model is known to be loaded, so none is highlighted and Enter alone
@@ -158,7 +158,7 @@ def test_closing_the_model_list_cancels_the_first_run(
     chat_server.models = ["chat-a", "chat-b"]
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
+        assert term.read_until(lambda out: b"Use it? [Y/n]: " in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
         term.type(b"\x1b")

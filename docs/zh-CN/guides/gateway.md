@@ -14,15 +14,15 @@ melo serve
 
 旧写法（`melo --serve`、`--daemon`、`--gateway-login`、`--gateway-rotate-token`、`--enable-playground`、`--allow-unconfigured`）仍然可用，macOS 应用和启动脚本就在用；完整对照见[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)。
 
-- 如果还没有配置文件，`melo serve` 会先运行配置向导；参见[使用向导配置](configure.md#set-up-with-the-wizard)。如果没有终端，网关无法提问，因此会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
+- 如果还没有配置文件，`melo serve` 会像 `melo setup` 一样先提问：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`；只有回答 `n` 或使用 `--developer` 时，才出现完整的后端菜单，没有服务器在运行时则输出启动服务器的命令；参见[使用向导配置](configure.md#set-up-with-the-wizard)。如果没有终端，网关无法提问，因此会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
 - 即使没有配置后端或配置文件存在验证错误，`melo serve --force` 也会跳过向导并启动网关，让客户端或网页控制台通过 `GET /api/health` 检查状态，并通过 `PUT /api/settings` 保存配置。
 - `--url` 和 `--model` 与 `melo serve` 同时使用属于用法错误：网关使用配置文件。
 - 网关监听 `127.0.0.1:8401`，即配置文件中 `[gateway]` 的默认值。`--host` 和 `--port` 可以更改单次运行的地址和端口，例如 `melo serve --port 9401`。
-- 启动时会输出后端和地址：
+- 启动时会输出模型、嵌入和地址：
 
   ```text
     Starting localmelo gateway ...
-    Chat: ollama
+    Model: qwen3:8b on Ollama
     Embedding: none
     Gateway: http://127.0.0.1:8401
     Web UI:  http://127.0.0.1:8401/
@@ -77,7 +77,7 @@ bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway
 - 一个会话同一时间只运行一个任务。对忙碌会话发出的第二个请求会等待第一个任务完成。
 - 网关最多保留 50 个会话。再创建会话时，会关闭最近最少使用的空闲会话；如果没有空闲会话，仍会创建新会话。
 - 创建会话时，还会关闭空闲超过 1 小时的会话。
-- 每个会话的智能体使用配置文件中的后端和默认运行选项（三个内置工具 `file_read`、`file_write` 和 `python_exec`，没有 MCP 工具），但会保留回答（`AgentOptions(record_answers=True, mode="gateway")`）。会话不提供 `shell_exec`：旧版 `/v1` 没有审批策略，因此无法向任何人请求审批。
+- 每个会话的智能体使用配置文件中的后端和默认运行选项（四个内置工具 `file_read`、`file_write`、`list_files` 和 `python_exec`，没有 MCP 工具），但会保留回答（`AgentOptions(record_answers=True, mode="gateway")`）。会话不提供 `shell_exec`：旧版 `/v1` 没有审批策略，因此无法向任何人请求审批。
 - 为网关设置 `LOCALMELO_PERSIST_MEMORY` 时，所有会话都会保存到同一组 SQLite 文件；参见[跨运行保留记忆](memory.md#keep-memory-between-runs)。
 
 <a id="run-the-gateway-at-login-macos"></a>

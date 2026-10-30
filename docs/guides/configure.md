@@ -4,8 +4,8 @@ This guide covers the first run, the setup wizard, and how to update or uninstal
 
 ## First run
 
-In a terminal with no config file, `melo` asks for a model server's URL and
-a chat model, saves the answers and opens the interactive UI. When the
+In a terminal with no config file, `melo` offers the model server it finds,
+asks for a chat model, saves the answers and opens the interactive UI. When the
 server also lists an embedding model, it asks once whether to use it. Here
 oMLX runs on port 8000 with three models, and the first chat model is loaded:
 
@@ -13,7 +13,7 @@ oMLX runs on port 8000 with three models, and the first chat model is loaded:
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (3 models).
-Server URL [http://127.0.0.1:8000/v1]:
+Use it? [Y/n]:
  Choose a model · http://127.0.0.1:8000/v1
  Filter ›
  ❯ Qwen3-8B-4bit  (loaded)
@@ -25,7 +25,8 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
-  30000 fills in the URL; one with a chat model comes first. Listing a
+  30000 is the one offered (`Use it? [Y/n]:`; `n` asks for another URL); one
+  with a chat model comes first. Listing a
   server's models sends `GET /v1/models`. On a terminal the models are a list
   to choose from (type to filter, ↑ ↓ to move, Enter to choose, Esc to
   cancel; the list is erased once you choose) with the chat models only, as
@@ -89,6 +90,9 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   Ollama: its version endpoint is asked at the root, and chat requests drop
   a trailing `/v1`.
 
+- With no server running, it prints the commands that start one (oMLX on a Mac,
+  Ollama elsewhere) and looks again each time you press Enter; the web console's
+  setup card shows the same commands and looks again every three seconds.
 - A server that does not answer, refuses the request without an API key,
   or lists no models is named with the reason, and you can retry, start
   without saving or quit. localmelo never asks for an API key for a local
@@ -115,8 +119,9 @@ stop the gateway.
 
 In default mode, `melo setup` starts as the first
 run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
-full menu follows only after `n`, when no server is found, or with
-`--developer`.
+full menu follows only after `n`, with `--developer`, or when no server is found
+while a backend is saved. With nothing saved and no server running, it prints the
+commands that start one instead. `melo serve` before any setup does the same.
 
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers the saved backend; with

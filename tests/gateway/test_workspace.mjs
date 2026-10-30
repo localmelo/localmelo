@@ -1307,7 +1307,8 @@ test('status banners do not rewrite unchanged live text', async () => {
 // ── The setup card on the welcome ──
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const nothing = {state: 'none', name: '', backend: '', url: '', models: [], loaded: [], suggested: null, problem: ''};
+const start = {name: 'oMLX', commands: ['brew install jundot/omlx/omlx', 'omlx serve --model-dir ~/models --port 8000'], note: 'Put a model in its own folder of ~/models first.', guide: 'https://example.test/guides/model-servers.md'};
+const nothing = {state: 'none', name: '', backend: '', url: '', models: [], loaded: [], suggested: null, problem: '', start};
 const omlx = {...nothing, state: 'found', name: 'oMLX', backend: 'vllm', url: 'http://127.0.0.1:8000/v1', models: ['qwen3-8b'], loaded: ['qwen3-8b'], suggested: 'qwen3-8b'};
 const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
 const press = async (node, label) => { await findNode(node, (n) => n.textContent === label).click(); await tick(); };
@@ -1393,14 +1394,59 @@ test('a key, no server and a failed test are worded plainly, and Check again ask
   assert.match(h.text('setup-card'), /A model server needs an API key.*127\.0\.0\.1:8000 asks for a key.*Allow inference without API key/);
   answer = nothing;
   await press(h.element('setup-card'), 'Check again');
-  assert.match(h.text('setup-card'), /No model server is running on this Mac.*Start oMLX or Ollama, then check again/);
-  assert.equal(findNode(h.element('setup-card'), (node) => node.textContent === 'Read the quickstart').href, 'https://localmelo.github.io/localmelo/en/quickstart.html');
+  assert.match(h.text('setup-card'), /No model server is running on this Mac.*To start one with oMLX, run this in a terminal:.*brew install jundot\/omlx\/omlx omlx serve --model-dir ~\/models --port 8000 Put a model in its own folder of ~\/models first\. melo finds the server by itself\./);
+  assert.equal(findNode(h.element('setup-card'), (node) => node.textContent === 'Read the model servers guide').href, start.guide);
+  const block = findNode(h.element('setup-card'), (node) => node.tag === 'pre');
+  assert.deepEqual([block.tabIndex, block.getAttribute('role'), block.getAttribute('aria-label')], [0, 'group', 'Commands'], 'a scrolling block the keyboard can reach');
   await press(h.element('setup-card'), 'Enter a server address…');
   assert.equal(h.context.settingsOpened, 1);
   answer = omlx;
   await press(h.element('setup-card'), 'Check again');
   assert.equal(h.net.callsTo('/setup/detect').length, 3);
   assert.match(h.text('setup-card'), /Found oMLX/);
+});
+
+test('while no server runs the card looks again every three seconds, redraws only on a change, and stops when hidden', async () => {
+  let answer = nothing;
+  const h = await firstRun(() => answer);
+  const card = h.element('setup-card');
+  const looks = () => h.net.callsTo('/setup/detect').length;
+  const waiting = () => h.timers.filter((timer) => !timer.interval && timer.ms === 3000 && !timer.cleared);
+  const fire = async () => { const [timer] = waiting(); timer.cleared = true; await timer.handler(); await tick(); };
+  assert.equal(waiting().length, 1, 'one look is waiting');
+  const drawn = [...card.children];
+  await fire();
+  assert.equal(looks(), 2);
+  assert.deepEqual(card.children, drawn, 'the same answer redraws nothing');
+  h.context.document.hidden = true;
+  await fire();
+  assert.equal(looks(), 2, 'a hidden tab asks nothing');
+  h.context.document.hidden = false;
+  answer = omlx;
+  await fire();
+  assert.match(h.text('setup-card'), /Found oMLX on this Mac/, 'the server appears without a click');
+  assert.equal(waiting().length, 0, 'a found server ends the looking');
+});
+
+test('Copy commands copies the lines the card shows, and says when it cannot', async () => {
+  const h = await firstRun(nothing);
+  const card = h.element('setup-card');
+  await press(card, 'Copy commands');
+  assert.equal(h.context.copied, start.commands.join('\n'));
+  h.context.navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+  await press(card, 'Copied');
+  assert.ok(findNode(card, (node) => node.textContent === 'Copy failed: select the commands'));
+});
+
+test('hiding the card cancels the look that is waiting, and a late one asks nothing', async () => {
+  const h = await firstRun(nothing);
+  const [pending] = h.timers.filter((timer) => !timer.interval && timer.ms === 3000 && !timer.cleared);
+  h.state().health = {...health, configured: true};
+  h.run('syncUI()');
+  assert.equal(h.element('setup-card').hidden, true);
+  assert.equal(pending.cleared, true);
+  await pending.handler();
+  assert.equal(h.net.callsTo('/setup/detect').length, 1, 'a look that fires late asks nothing');
 });
 
 test('a detection that fails is shown, and the card goes once a model is set up', async () => {

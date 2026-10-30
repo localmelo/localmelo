@@ -43,11 +43,12 @@ def register_builtins(
 
     *names* selects the built-ins to register: ``None`` registers the
     default set of *mode* (``file_read``, ``file_write`` and ``python_exec``
-    for ``direct``, ``gateway`` and ``python``; ``shell_exec`` too for
-    ``interactive``, whose panel asks before an ``exec`` call runs), an
-    empty collection none. An explicit collection always wins, whatever the
-    mode, so ``--builtins all`` gives ``shell_exec`` in direct mode too. An
-    unknown name raises ``ValueError`` before anything is registered.
+    for ``direct`` and ``python``; ``list_files`` too for ``gateway``;
+    ``list_files`` and ``shell_exec`` for ``interactive``, whose panel asks
+    before an ``exec`` call runs), an empty collection none. An explicit
+    collection always wins, whatever the mode, so ``--builtins all`` gives
+    ``shell_exec`` in direct mode too. An unknown name raises ``ValueError``
+    before anything is registered.
 
     The tools whose tier is not read are registered as requiring approval
     (the names in :data:`APPROVAL_BUILTINS`): a call of one asks the
@@ -61,9 +62,10 @@ def register_builtins(
     root, the tools that :func:`rooted_builtins` gives for it take their
     place, with the timeouts it gives them: ``file_read`` and ``file_write``
     refuse a symlink that takes the checked file's place and anything but a
-    regular file, and ``file_read`` caps what it reads; ``shell_exec`` and
-    ``python_exec`` run in the root, in a child process, within
-    *tool_timeout_s* seconds when it is set, and the rooted ``shell_exec``
+    regular file, and ``file_read`` caps what it reads; ``list_files`` lists
+    one folder, never entering a link and never reading a file;
+    ``shell_exec`` and ``python_exec`` run in the root, in a child process,
+    within *tool_timeout_s* seconds when it is set, and the rooted ``shell_exec``
     starts the text of a non-zero exit with ``[exit code <n>]``. The
     executor fences the file tools' paths with its own root, so an executor
     built with the same ``workspace_root`` goes with them. ``shell_exec``
@@ -117,7 +119,7 @@ def register_builtins(
             fn,
             timeout_ms=timeout_ms,
             requires_approval=tier_requires_approval(tier),
-            process_free=tool_def.name in {"file_read", "file_write"},
+            process_free=tool_def.name in {"file_read", "file_write", "list_files"},
         )
 
 

@@ -118,6 +118,20 @@ embedding backend unless oMLX also serves an embedding model.
 table to add to turn off a Qwen3 model's thinking. The web workspace then
 uses that model; it reads the configuration file.
 
+## Serve a model with Ollama
+
+[Ollama](https://ollama.com) is the alternative on other systems. Install it
+from its site, then start the server and pull a model:
+
+```bash
+ollama serve
+ollama pull qwen3:8b
+```
+
+`ollama serve` keeps running, so run `ollama pull` in another terminal. If
+Ollama already runs as an app or a service, skip the first command.
+First-run setup finds Ollama on port 11434 and lists its models.
+
 ## Backends
 
 | Key | Type | Server or API | Default URL | Embeddings |

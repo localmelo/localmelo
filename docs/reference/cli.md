@@ -46,7 +46,8 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 | `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | Import a worker history. | `--title T` |
 
-`melo -h` is 20 lines, `melo -h all` lists every option, command and setting, and
+`melo -h` lists the everyday options and three commands with what they do (`setup`,
+`serve`, `console`), `melo -h all` lists every option, command and setting, and
 `melo COMMAND -h` explains one command. A letter takes its value apart (`-s 5` or
 `-s=5`); `--title T` names a task's worker session.
 
@@ -146,7 +147,7 @@ dot. `melo -h all` lists the keys with their defaults.
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model`, else the server's only chat model or the one it says is loaded. With several chat models and none known to be loaded it exits 2, lists them and asks for `--chat-model <id>`. |
 | `melo --base-url URL -- "<task>"` | Direct mode on that server, with `--chat-model`, else the model chosen the same way as in the row above, after a list request (see [General](#general)). With a list it cannot read, it asks for the model `default`. The same holds for `--brief` and `melo ""`. |
-| `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use it? [Y/n]:`) and shows the full backend menu only after `n`, with none found, or with `--developer`. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
+| `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use it? [Y/n]:`) and shows the full backend menu only after `n`, with `--developer`, or with none found while a backend is saved (with nothing saved and none found, it prints the commands that start one). Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
@@ -206,7 +207,7 @@ option does.
 
 | Mode | How to choose it | What `--help` shows |
 |---|---|---|
-| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The short help (20 lines): the everyday options and the command words, then where to look next. |
+| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The short help (23 lines): the everyday options, three commands with a line on what each does, then where to find the rest. |
 | Developer | `[ui] mode = "developer"`, or `--developer` for one run | Everything `melo -h all` prints: every option, command and setting; each experimental setting names the issue that decides it. |
 
 Every option parses and works in both modes, from the command line and from
@@ -378,7 +379,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
-| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` (the interactive UI keeps all four by default). |
+| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
@@ -421,7 +422,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`. A direct run's default set
+  `file_write`, `list_files`, `python_exec` and `shell_exec`. A direct run's default set
   leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
   it back on, and it then runs without an approval, because direct mode has
   no policy. `recall` is accepted only with `--recall-at tool`, which
@@ -595,7 +596,7 @@ These options apply to `melo` without a task.
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. With `--serve`, `0` asks the system for a free port: the startup lines print the real address, the sign-in line names the port for `melo --gateway-login --port PORT`, and `melo-task` needs `--gateway URL`. `0` is refused with `--daemon` and the gateway authentication commands, and in `[gateway] port`. |
 | `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
-| `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use it? [Y/n]:`; the full menu after `n`, with none found, or with `--developer`), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
+| `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use it? [Y/n]:`; the full menu after `n`, with `--developer`, or with none found while a backend is saved), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of

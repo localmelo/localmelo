@@ -58,12 +58,20 @@ def session_age(updated_at: float, now: float) -> str:
     return "just now"
 
 
-def resume_note(mode: str, turns: int, checkpoint_turns: int) -> str:
-    """Use the runner's post-eviction counts, not the number of stored turns."""
+def resume_note(
+    mode: str, turns: int, checkpoint_turns: int, *, detail: bool = True
+) -> str:
+    """Use the runner's post-eviction counts, not the number of stored turns.
+
+    Without *detail* it only says how many turns the model remembers; what became
+    of their tool calls and steps is for developer mode.
+    """
 
     def count(n: int) -> str:
         return f"{n} turn{' is' if n == 1 else 's are'} back in the model's memory"
 
+    if not detail:
+        return count(turns) + "."
     if mode != "window":
         return count(turns) + (
             "; its tool calls are not." if turns == 1 else "; their tool calls are not."

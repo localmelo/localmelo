@@ -308,7 +308,7 @@ setup card calls it, and only while the card is shown.
 ```
 
 ```json
-{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": "", "start": {"name": "oMLX", "commands": ["brew tap jundot/omlx https://github.com/jundot/omlx", "brew install jundot/omlx/omlx", "omlx serve --model-dir ~/models --port 8000"], "note": "Put a model in its own folder of ~/models first.", "guide": "https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md"}}
 ```
 
 - `state` is `found` (a chat model to offer), `needs_key` (a server answered 401
@@ -325,15 +325,20 @@ setup card calls it, and only while the card is shown.
   must let the user choose.
 - `url` is empty when nothing answered. `problem` says why a server that answered
   cannot be used. A user name or password in a URL is never returned.
+- `start` is in every answer: how to start a model server on this computer, from the
+  same place as the terminal's first run. `name` is `oMLX` on a Mac and `Ollama`
+  elsewhere, `commands` are the lines to run, `note` is the one thing to do besides
+  running them, and `guide` is the model servers guide. The card shows them while
+  `state` is `none`.
 
 ## Scheduler tasks (S3a.2)
 
 These routes create and control user-origin tasks in the gateway process.
 They are separate from chat turns but use the same scheduler gate. Each task
 has a `kind="task"` session with the same id; its session events and turns
-can be inspected through the existing session routes. A worker uses gateway
-built-ins (`file_read`, `file_write`, `python_exec`, not `shell_exec`) with
-memory off. Tools run with the user's permissions, not in a sandbox.
+can be inspected through the existing session routes. A worker uses the
+built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
+`list_files`) with memory off. Tools run with the user's permissions, not in a sandbox.
 
 - `POST /api/tasks` accepts `objective` (or its alias `prompt`), optional
   `title`, `workspace`, `level` and `request_key`. The objective must be
@@ -679,7 +684,8 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 The numbers the terminal's `/status` and status bar show for one chat, task or
 worker session, folded on the server from its stored events with the
-terminal's own code, so both agree. A worker run or terminal chat is read from
+terminal's own code, so both agree. The segments are the compact ones of the
+terminal's developer mode; its default mode says the same figures in words. A worker run or terminal chat is read from
 the CLI's file.
 
 ```bash
@@ -698,8 +704,8 @@ the CLI's file.
 }
 ```
 
-- `segments` is what the terminal's status bar draws, left to right: cache,
-  context, step, tasks. A segment with no data is left out.
+- `segments` is what the terminal's status bar draws in developer mode, left to
+  right: cache, context, step, tasks. A segment with no data is left out.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is
@@ -1051,8 +1057,8 @@ Every tool the session's Agent offers, with whether this session allows it.
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
   `requires_approval` says a call of it asks first; `granted` says this
   session allows it for the rest of the gateway run.
-- A console session is gateway mode: it lists `file_read`, `file_write` and
-  `python_exec`, never `shell_exec`.
+- A console session is gateway mode: it lists `file_read`, `file_write`,
+  `list_files` and `python_exec`, never `shell_exec`.
 - A task session returns 409 `task_session_read_only`; this route cannot open it as a chat.
 - This route opens the session, because a provider's tools appear only once
   its Agent started. It can take seconds, and a start that fails is 502

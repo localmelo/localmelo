@@ -188,6 +188,37 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   The terminal's file-edit helpers moved to `support/sessions/edits.py` for it, and
   `support/cli/edits.py` re-exports them. ([#NN])
 
+- A first question about the folder needs no approval. The interactive UI and the
+  gateway (the web console's chats included) have a read-only `list_files` tool: a
+  folder's folders (`name/`) and files with their sizes, 1 to 3 levels deep (`depth`),
+  200 entries and then `... and N more`, `.git` left out. It never reads a file and never
+  enters a symlink (shown as `name@`), its path is fenced to the workspace like
+  `file_read`'s, and it is a `read` tool, so "What is this project?" no longer opens an
+  approval for a shell command. A direct run, `melo --brief`, the Python API's default
+  mode and task workers keep the three built-ins they had, so their requests do not
+  change; `--builtins list_files` or `all` names it. `/status all` counts five built-ins
+  in the terminal. ([#259])
+
+- The terminal says which files a turn changed. A turn that wrote files with `file_write`
+  ends with one more quiet line under its footer, `Changed hello.py (+1), README.md (+3
+  −1)`: the paths relative to the folder melo works in, each with the lines the turn added
+  and removed in it, at most three names and then `and 2 more` (fewer on a narrow
+  terminal, never wrapped). A file written twice counts once, as the turn found it against
+  as it left it; a file written back as it was is left out; a new file shows its line
+  count. A file with no counts to show (a new empty file, a file too large or not text,
+  any file of a run with `--yolo`, where nothing read the old file first) shows its name
+  alone. Only the turn's own `file_write` calls count: a write that was denied or refused
+  (a path outside the folder) is not listed, and neither is a file that a shell command or
+  a script changed, since melo never scans the folder. A turn that changed no file prints
+  nothing, and developer mode shows the same line. Direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged ([#258]).
+
+- Developer mode shows the plan of a task melo has run before on every turn. The row of
+  past runs and the steps they took (`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`)
+  showed on the first turn of a session only; in developer mode it now shows on every turn
+  that has past runs to show, and the default mode keeps it on the first turn. Direct
+  mode's stderr line, JSON, exit codes and requests are unchanged ([#258]).
+
 - Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
   default and with no flag: `[agent] lean_output = true` in the config file, or
   `-X agent.lean_output=true` for one run (`melo config keys lean` lists it, and `melo -h all`
@@ -1067,6 +1098,82 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The first run and the first answer say only what helps. With a model server found, the
+  first run asks `Use it? [Y/n]:` (Enter says yes; `n` asks for a URL) where it said it had
+  found one and then asked for its URL. With no embedding model on the server it says
+  `Long-term memory is off; melo setup turns it on.`; the instruction to serve
+  Qwen3-Embedding-0.6B or run `ollama pull qwen3-embedding:0.6b` is now in `melo setup`.
+  Outside developer mode the dim `↳ partial reply (…)` line before text that was streamed
+  is gone (the text still prints once), the note after a model's first whole reply, `This
+  model's replies appear when complete until its reasoning format is set`, shows in
+  developer mode only, and the approval header names the tool and the folder
+  (`shell_exec · in ~/demo-project`); developer mode keeps the permission tier
+  (`shell_exec · exec · in ~/demo-project`). Direct mode's stdout and stderr, JSON, exit
+  codes and requests are unchanged ([#260]).
+- With no model server running, the first run says exactly how to start one. With nothing
+  saved and nothing answering on the usual ports, the first run of `melo` offered
+  `http://127.0.0.1:8000/v1` as the server URL, and Enter looped on `✗ …: connection
+  refused.` with `s starts without saving`, a chat that could not answer. It now prints
+  `No model server is running yet. To start one with oMLX:` and the commands of the model
+  servers guide (`brew tap jundot/omlx …`, `brew install jundot/omlx/omlx`, `omlx serve
+  --model-dir ~/models --port 8000`; on other systems `ollama serve` and `ollama pull
+  qwen3:8b`), then asks `Press Enter to check again, type an address, or q to quit:`.
+  Enter looks again at the same ports; an address typed instead is checked as a URL is,
+  and its failure still offers `s starts without saving`. `melo serve` and `melo setup`
+  with nothing saved do the same instead of opening the eight-way menu. The web console's
+  setup card shows the same commands in a block that one click selects, each command on
+  one line, with a Copy commands button, links the model servers guide in place of the
+  quickstart, and asks `GET /api/setup/detect` every three seconds while it says that no
+  server runs, so the model appears once the server starts (nothing is asked while the
+  card is hidden or the tab is). `GET /api/setup/detect` gains `start` in every answer.
+  The model servers guide gains a short Ollama section. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#260]).
+- `melo serve` before any setup asks what the first run asks. With no config file and
+  a terminal it printed `Welcome to localmelo.` and opened the eight-way backend menu with
+  MLC as the default, even while a model server ran on this computer. Outside developer
+  mode it now says `melo uses a model server on this computer (…)`, prints `Found a model
+  server at … (N models).` and asks `Use it? [Y/n]:`, as `melo setup` does; the full menu
+  follows only after `n`, with `--developer` or `[ui] mode = "developer"`, or with no
+  server found while a backend is saved. The startup lines name the model and its server
+  (`Model: Qwen3-8B-4bit on oMLX`) where they named a backend key (`Chat: vllm`); the
+  `Gateway:` line, which the macOS app reads, is unchanged. The gateway's API, direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#260]).
+- Coming back to a chat in the terminal reads plainly. The exit line says
+  `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
+  newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
+  otherwise. A resumed chat's recap shows each message and each answer with one
+  mark, the rows under it indented: the answer reads as plain text (its Markdown
+  markers off, no marked blank rows, at most four rows) where it was raw Markdown
+  with a `●` on every line, and the note below the title says `1 turn is back in the
+  model's memory.` Developer mode keeps the tool-call detail (`; its tool calls are
+  not.`). The picker's header reads `Resume a chat · ~/demo-project · tab: this
+  folder or all · esc close`, and a long folder is cut from its middle so the keys
+  stay on the row. The terminal says "chat" where it said "session": `New chat` in the
+  status bar and in the `/new` rule, the `chat` row of `/status`, the picker's footer,
+  the messages around resuming, and the descriptions of `/new`, `/sessions`, `/resume`
+  and `/title`. Command names (`/sessions`, `-c`, `-r`), developer mode's rows and
+  machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#258]).
+
+- `melo -h` says what its everyday commands do. It lists `setup` (choose the model
+  server again), `serve` (run the web console and API) and `console` (open the web
+  console), then `More commands and every setting: melo -h all`, where it listed seven
+  bare words (`setup · config · serve · console · task · worker · import`) that a new
+  user could not tell apart. `-s, --steps` reads `most model calls per task (default 30)`
+  where it said `planning-call limit`. The help is 23 lines instead of 20; `melo -h all`
+  still lists every command and setting, and `melo COMMAND -h` still explains one. Every
+  option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
+  exit codes and requests ([#258]).
+
+- The terminal's status bar says its figures in words in default mode: `context 8% used`
+  (`context 2.6k tokens` when the server's input limit is not known) where it said
+  `ctx 12k/32k`, and `83% cached` where it said `cache 83%`, with `, idle 3m` after it
+  for a local server. The cache shows once the server has reported a value, where it
+  showed `cache --` before. The last request's context figure drops whole on a narrow
+  terminal, like a measured one, before the folder is cut. The words are never cut
+  in the middle. Developer mode keeps the compact segments, and so do the web console's
+  status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#258]).
 - The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
   model chip while it only names the model, which the composer already shows, so a chat's
   title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
@@ -1107,7 +1214,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   folder `xcode-select -p` names when it has a Swift compiler. With none of them
   the build stops before it does any work and prints `xcode-select --install` as
   the fix. The build's summary says which tools built the app ([#254]).
-
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
@@ -1889,6 +1995,9 @@ earlier milestones.
 [#254]: https://github.com/localmelo/localmelo/pull/254
 [#255]: https://github.com/localmelo/localmelo/pull/255
 [#257]: https://github.com/localmelo/localmelo/pull/257
+[#258]: https://github.com/localmelo/localmelo/pull/258
+[#259]: https://github.com/localmelo/localmelo/pull/259
+[#260]: https://github.com/localmelo/localmelo/pull/260
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

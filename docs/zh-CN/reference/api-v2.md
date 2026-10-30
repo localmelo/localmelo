@@ -189,7 +189,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 ```json
-{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": "", "start": {"name": "oMLX", "commands": ["brew tap jundot/omlx https://github.com/jundot/omlx", "brew install jundot/omlx/omlx", "omlx serve --model-dir ~/models --port 8000"], "note": "Put a model in its own folder of ~/models first.", "guide": "https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md"}}
 ```
 
 - `state` 是 `found`（有可提供的对话模型）、`needs_key`（某个服务器返回 401 或 403；localmelo 不会向本地服务器发送密钥）或 `none`。
@@ -197,10 +197,11 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `models` 是按列表顺序排列的对话模型（不含嵌入和重排序模型）。`loaded` 是服务器说已在内存中的模型；只有在多个对话模型之间才会询问，`[]` 也可能表示它没有回答。
 - `suggested` 是要提供的模型：唯一的对话模型，或一个已加载的模型。当提供了多个模型而且不知道哪个已加载时为 `null`，客户端必须让用户自己选择。
 - 没有任何服务器回应时 `url` 为空。`problem` 说明已回应的服务器为什么不能使用。URL 中的用户名或密码绝不会返回。
+- 每个回答都带有 `start`：如何在这台电脑上启动模型服务器，来源与终端的首次运行相同。`name` 在 Mac 上是 `oMLX`，其他系统是 `Ollama`；`commands` 是要运行的命令，`note` 是运行命令之外要做的一件事，`guide` 是模型服务器指南。`state` 为 `none` 时，卡片会显示它们。
 
 ## Scheduler tasks (S3a.2)
 
-这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用网关内置工具（`file_read`、`file_write`、`python_exec`，不含 `shell_exec`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
+这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用内置工具 `file_read`、`file_write` 和 `python_exec`（不含 `shell_exec` 和 `list_files`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
 
 - `POST /api/tasks` 接受 `objective`（或其别名 `prompt`）、可选的 `title`、`workspace`、`level` 和 `request_key`。objective 必须非空，且不超过 100,000 个字符；title 不超过 200 个字符，默认为从 objective 派生的标题。level 为 0–5 的整数或 `P0`–`P5`；省略时为计算出的 P2。提供的 `deadline`（即使为 null）都会被拒绝；截止时间尚不支持。其他字段也会被拒绝。objective 缺失、为空白或过长、title 过长或 level 无效，都返回 400 `invalid_task`；模式或类型错误返回 400 `invalid_request`。创建新任务时返回 202 `{"task": ...}`。显式为空的 `request_key` 返回 400 `invalid_request`。非空的 `request_key` 使同一规范化请求的重复提交返回 200 `{"task": ..., "repeated": true}`；将其用于不同的请求会返回 409 `submission_conflict`。重复提交不会启动新的 worker。
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
@@ -339,7 +340,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 ## GET /api/sessions/{id}/status
 
-终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。worker 运行或终端对话从 CLI 的文件读取。
+终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。这些段是终端开发者模式的紧凑写法；终端的默认模式用文字表述同样的数字。worker 运行或终端对话从 CLI 的文件读取。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
@@ -357,7 +358,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 }
 ```
 
-- `segments` 是终端状态栏从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
+- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
 - 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
 - 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，以及其中最高的优先级（`top_level`，没有任务时为 `null`）。
 - 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。
@@ -599,7 +600,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 ```
 
 - `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示本会话在网关本次运行的剩余时间内允许它。
-- 控制台会话处于网关模式：它列出 `file_read`、`file_write` 和 `python_exec`，从不列出 `shell_exec`。
+- 控制台会话处于网关模式：它列出 `file_read`、`file_write`、`list_files` 和 `python_exec`，从不列出 `shell_exec`。
 - 任务会话返回 409 `task_session_read_only`；此路由不能把它作为对话打开。
 - 此路由会打开会话，因为提供方的工具只有在其智能体启动之后才会出现。它可能需要数秒，而启动失败则返回 502 `agent_start_failed`。
 - 控制台尚未实现 MCP，因此不加载任何 MCP 工具：`mcp_config_label` 始终为 `""`，`mcp_error` 始终为 `MCP is not built in the console yet`。

@@ -1,7 +1,7 @@
 """Inline pickers: a filter field, a few rows, ↑↓, enter and esc.
 
-:class:`ListPicker` is the one list. :class:`SessionPicker` fills it with chat
-sessions (``/sessions``, ``-r``) and :class:`ModelPicker` with the models of a
+:class:`ListPicker` is the one list. :class:`SessionPicker` fills it with saved
+chats (``/sessions``, ``-r``) and :class:`ModelPicker` with the models of a
 server (``/model``, and the first run's question, which :func:`run_inline` asks
 before melo's own UI exists).
 """
@@ -31,7 +31,7 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.output import ColorDepth
 
-from localmelo.support.cli.text import cells, cut_cells
+from localmelo.support.cli.text import cells, cut_cells, cut_middle
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
 from localmelo.support.sessions.display import clean_output, home_label, session_age
 from localmelo.support.sessions.store import SessionInfo, SessionStore
@@ -202,7 +202,7 @@ class ListPicker(Generic[T]):
 
 
 class SessionPicker(ListPicker[SessionInfo]):
-    """Query at most 50 eligible chat sessions, debounced by 150 ms."""
+    """Query at most 50 eligible chats, debounced by 150 ms."""
 
     def __init__(
         self,
@@ -244,18 +244,21 @@ class SessionPicker(ListPicker[SessionInfo]):
         return [s for s in rows if s.kind == "chat" and s.turns >= 1]
 
     def _header(self) -> str:
-        scope = (
-            "matching sessions"
-            if self.choices is not None
-            else "all folders" if self.all_folders else home_label(self.workspace)
-        )
+        head, keys = " Resume a chat · ", " · tab: this folder or all · esc close"
+        if self.choices is not None:
+            scope = "matching chats"
+        elif self.all_folders:
+            scope = "all folders"
+        else:
+            # A long folder is cut from its middle, so the keys stay on the row.
+            room = max(12, self.width() - cells(head) - cells(keys))
+            scope = cut_middle(
+                " ".join(clean_output(home_label(self.workspace)).split()),
+                room,
+                self.symbols.ellipsis,
+            )
         return cut_cells(
-            clean_output(
-                in_symbols(
-                    f" Resume a session · {scope} · tab scope · esc close", self.symbols
-                )
-            ),
-            self.width(),
+            clean_output(in_symbols(head + scope + keys, self.symbols)), self.width()
         )
 
     def _row(self, info: SessionInfo) -> str:
@@ -278,8 +281,8 @@ class SessionPicker(ListPicker[SessionInfo]):
         if self.loading:
             return "Loading…"
         if not self.rows:
-            return "No sessions yet."
-        return f"{len(self.rows)} session{'s' if len(self.rows) != 1 else ''}"
+            return "No chats yet."
+        return f"{len(self.rows)} chat{'s' if len(self.rows) != 1 else ''}"
 
 
 @dataclass(frozen=True)

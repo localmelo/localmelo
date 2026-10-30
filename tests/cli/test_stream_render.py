@@ -32,10 +32,17 @@ def _backend() -> BackendInfo:
 
 
 def _renderer(
-    tags: Mapping[str, str] | None = None, width: int = 80
+    tags: Mapping[str, str] | None = None, width: int = 80, developer: bool = True
 ) -> tuple[RecordingOut, TurnRenderer]:
+    """A renderer in developer mode, where the labels and notes under test are shown."""
     out = RecordingOut(width)
-    renderer = TurnRenderer(out, symbols=UNICODE, backend=_backend, reasoning_tags=tags)
+    renderer = TurnRenderer(
+        out,
+        symbols=UNICODE,
+        backend=_backend,
+        reasoning_tags=tags,
+        developer=developer,
+    )
     renderer.begin_turn("What is in this folder?")
     return out, renderer
 
@@ -291,6 +298,35 @@ def test_a_whole_reply_without_a_hint_is_noted_once_per_model() -> None:
     renderer.begin_turn("again")
     _reply(renderer, "Hello again\n")
     assert " ".join(out.text().split()).count(STREAM_BUFFERED) == 1
+
+
+def test_outside_developer_mode_the_reasoning_format_is_never_mentioned() -> None:
+    out, renderer = _renderer(developer=False)
+    _reply(renderer, "Hello there\n")  # a whole reply from a model with no hint
+    assert "Hello there" in out.text()
+    assert STREAM_BUFFERED not in " ".join(out.text().split())
+    assert "reasoning format" not in out.text()
+
+
+def test_outside_developer_mode_partial_text_prints_without_a_label() -> None:
+    out, renderer = _renderer({"stub-model": "none"}, developer=False)
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.content("Let me read it.\n")
+    feed.closed()
+    _event(
+        renderer,
+        "assistant.message",
+        content="Let me read it.",
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "app.py"}],
+    )
+    feed.opened()  # the next step starts, as a retry of a broken stream would
+    feed.content("First try\n")
+    feed.closed()
+    renderer.stream_opened()
+    text = out.text()
+    assert text.count("Let me read it.") == 1 and text.count("First try") == 1
+    assert "partial reply" not in text
 
 
 def test_a_reply_that_streamed_or_has_a_hint_is_not_noted() -> None:

@@ -18,6 +18,8 @@ def call_preview(tool_name: str, arguments: Mapping[str, Any]) -> str:
     - ``python_exec``: the first non-blank line of the code, followed by
       `` (+<n> more lines)`` when more lines follow it;
     - ``file_read``: the path;
+    - ``list_files``: the path (``.`` without one), then `` (<n> levels)``
+      for a depth above one;
     - ``file_write``: ``<path> (<n> chars)``, where ``n`` counts the content;
     - any other tool, or an argument above that is missing or not a ``str``:
       the arguments as compact JSON, keys sorted.
@@ -51,6 +53,10 @@ def _summary(tool_name: str, arguments: Mapping[str, Any]) -> str:
         path = arguments.get("path")
         if isinstance(path, str):
             return path
+    elif tool_name == "list_files":
+        path, depth = arguments.get("path") or ".", arguments.get("depth")
+        if isinstance(path, str) and (depth is None or isinstance(depth, int)):
+            return f"{path} ({depth} levels)" if depth and depth > 1 else path
     elif tool_name == "file_write":
         path, content = arguments.get("path"), arguments.get("content")
         if isinstance(path, str) and isinstance(content, str):
