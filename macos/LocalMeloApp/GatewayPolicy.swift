@@ -39,8 +39,8 @@ func runningCounts(_ data: Data) -> RunningCounts? {
 
 /// The menu-bar title: the plain name at 0 or when the count is unknown.
 func menuTitle(_ counts: RunningCounts?) -> String {
-    guard let counts = counts, counts.total > 0 else { return "Melo" }
-    return "Melo · \(counts.total)"
+    guard let counts = counts, counts.total > 0 else { return "localmelo" }
+    return "localmelo · \(counts.total)"
 }
 
 private func counted(_ n: Int, _ noun: String) -> String {

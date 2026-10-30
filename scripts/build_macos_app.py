@@ -267,8 +267,9 @@ def build(output: Path) -> None:
                 {
                     "CFBundleExecutable": "LocalMelo",
                     "CFBundleIdentifier": BUNDLE_ID,
-                    "CFBundleName": "LocalMelo",
-                    "CFBundleDisplayName": "LocalMelo",
+                    # What the Dock and the app menu call it; LocalMelo.app is only the file name.
+                    "CFBundleName": "localmelo",
+                    "CFBundleDisplayName": "localmelo",
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": version,
                     "CFBundleVersion": "1",

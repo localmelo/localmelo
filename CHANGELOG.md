@@ -995,6 +995,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   to `~/Library/Logs/LocalMelo/gateway.log`, and the 20-second start deadline now
   also covers the wait for that line ([#NN]).
 
+- The macOS app calls itself localmelo wherever it names itself: the window title, the
+  Dock and the app menu, the menu-bar item (`localmelo`, or `localmelo · 3` while three
+  things run, where it read `Melo`), the menu entries and the quit dialog, as its starting
+  view and failure view already did. `LocalMelo.app` stays the file name and the bundle
+  id stays `org.localmelo.app` ([#NN]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`

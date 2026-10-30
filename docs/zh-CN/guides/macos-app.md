@@ -10,7 +10,7 @@ arm64 开发应用是供构建它的这台 Mac 使用的本地原型，不是经
 uv run python scripts/build_macos_app.py --install
 ```
 
-命令会用平实的语言说明做了什么、下一步该做什么：从 Spotlight 或 `~/Applications` 打开 LocalMelo。应用被放进 `~/Applications/LocalMelo.app`，只有旧副本的 bundle id 是 `org.localmelo.app` 时才会替换它；同名的其他应用会被拒绝并保持原样。只有 `PATH` 上没有其他 `melo` 时，才会把 `~/.local/bin/melo` 链接到应用的启动器；已有的 `melo` 绝不会被替换，如果 `~/.local/bin` 不在 `PATH` 中，输出会给出需要添加的那一行。退出 LocalMelo 后再次运行同一命令即可原地升级。固定版本的 Python 归档缓存在 `~/Library/Caches/LocalMelo`，每次使用都会对照其 SHA-256 校验。若要移除应用和链接（仅此而已，设置和对话仍保留在 `~/.cache/localmelo`）：
+命令会用平实的语言说明做了什么、下一步该做什么：从 Spotlight 或 `~/Applications` 打开 LocalMelo。窗口、程序坞和菜单都称这个应用为 localmelo；`LocalMelo.app` 只是文件名。应用被放进 `~/Applications/LocalMelo.app`，只有旧副本的 bundle id 是 `org.localmelo.app` 时才会替换它；同名的其他应用会被拒绝并保持原样。只有 `PATH` 上没有其他 `melo` 时，才会把 `~/.local/bin/melo` 链接到应用的启动器；已有的 `melo` 绝不会被替换，如果 `~/.local/bin` 不在 `PATH` 中，输出会给出需要添加的那一行。退出 LocalMelo 后再次运行同一命令即可原地升级。固定版本的 Python 归档缓存在 `~/Library/Caches/LocalMelo`，每次使用都会对照其 SHA-256 校验。若要移除应用和链接（仅此而已，设置和对话仍保留在 `~/.cache/localmelo`）：
 
 ```bash
 uv run python scripts/build_macos_app.py --uninstall
@@ -26,7 +26,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 在控制台加载完成之前，窗口显示一个原生的启动视图：Melo 的画像、`Starting localmelo…`，以及在旋转指示器旁说明当前步骤的一行（`Starting the local server`、`Signing in`、`Opening your workspace`）。如果网关在 20 秒的期限内无法启动，或之后停止，同一个视图会在 `localmelo could not start` 或 `localmelo stopped` 之下说明原因，并提供 **Try Again**（启动一个新的网关）、**Open Log**（打开 `~/Library/Logs/LocalMelo/gateway.log`）和 **Quit**。问题不会弹出对话框，也不会关闭应用。窗口和网页视图使用控制台的画布颜色，因此深色窗口不会闪白。
 
-打开应用会用 `melo --serve --port 0` 启动它自己的网关。网关绑定一个空闲端口，并在启动信息的 `Gateway: http://127.0.0.1:PORT` 一行中打印它，应用从网关的输出中读取这一行；整个启动过程的期限为 20 秒。应用从不自己选择端口，因此不会与其他网关冲突，也不会占用其他工作保留的端口，并且不会接管已有的监听者。如果另一个网关占用了控制台存储，请先停止那个网关。做隔离的手工测试时，请使用临时 `HOME`。关闭窗口会让网关继续运行；退出时总会先询问，再停止网关和正在运行的任务。菜单栏项在没有任何内容运行时显示 `Melo`，有三项在运行时显示 `Melo · 3`，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同），随应用每 2 秒一次的健康检查读取。退出对话框会写明将被停止的内容，例如 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`；直接运行和终端对话属于其他进程，会继续运行，对话框会补充 `Not affected: 1 run and 1 terminal chat.`。如果另一个网关是 melo 后台服务，`melo --daemon status` 可以检查它，`melo --daemon uninstall` 会停止并移除它。子进程输出写入 `~/Library/Logs/LocalMelo/gateway.log`。这个原型没有日志轮转。
+打开应用会用 `melo --serve --port 0` 启动它自己的网关。网关绑定一个空闲端口，并在启动信息的 `Gateway: http://127.0.0.1:PORT` 一行中打印它，应用从网关的输出中读取这一行；整个启动过程的期限为 20 秒。应用从不自己选择端口，因此不会与其他网关冲突，也不会占用其他工作保留的端口，并且不会接管已有的监听者。如果另一个网关占用了控制台存储，请先停止那个网关。做隔离的手工测试时，请使用临时 `HOME`。关闭窗口会让网关继续运行；退出时总会先询问，再停止网关和正在运行的任务。菜单栏项在没有任何内容运行时显示 `localmelo`，有三项在运行时显示 `localmelo · 3`，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同），随应用每 2 秒一次的健康检查读取。退出对话框会写明将被停止的内容，例如 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`；直接运行和终端对话属于其他进程，会继续运行，对话框会补充 `Not affected: 1 run and 1 terminal chat.`。如果另一个网关是 melo 后台服务，`melo --daemon status` 可以检查它，`melo --daemon uninstall` 会停止并移除它。子进程输出写入 `~/Library/Logs/LocalMelo/gateway.log`。这个原型没有日志轮转。
 
 应用会向子进程发送一个随机的启动标识符，在 `GET /` 探测时检查它，并在主页面响应时再次检查，以发现意外的端口冲突。在发送每个登录码之前，它还会重新确认子进程仍然持有该端口，因此在探测之后才抢占端口的监听者收不到任何登录码；登录码与该标识符绑定，因此只有应用自己的网关会接受它。应用的登录请求携带该标识符，所以由应用启动的网关会拒绝标识符不匹配的交换。**这是实例检查，不是身份认证：**任何本地进程都可以读取响应头并重放它。网关另外要求身份认证：对于它自己的健康检查和网页视图，应用会获取短期有效、只能使用一次的登录码，既不记录这些码，也不把 bearer 令牌放进 URL。浏览器中的代码放在 URL 片段里，控制台登录后会移除该片段。应用会验证健康 cookie，并重试没有存下任何 cookie 的登录。令牌轮换之后，它会重新登录并刷新页面；应用菜单中的 **Sign In Again** 操作可按需做同样的事。这些登录码来自包内的一个私有代码片段；有文档的 `melo` 命令用于此事属于 A1b 的工作，目前尚不可用。同一用户的进程和其他本地主机服务不在身份认证边界之内，工具以用户身份运行。不要把它暴露到网络上，也不要用于不受信任的任务。
 

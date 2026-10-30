@@ -170,6 +170,9 @@ def test_build_assembles_locked_runtime_and_swift(
         plist = plistlib.load(f)
     assert plist["NSAppTransportSecurity"] == {"NSAllowsLocalNetworking": True}
     assert plist["CFBundleExecutable"] == "LocalMelo"
+    assert plist["CFBundleIdentifier"] == "org.localmelo.app"
+    # The Dock and the app menu say localmelo; only the file and the executable keep LocalMelo.
+    assert plist["CFBundleName"] == plist["CFBundleDisplayName"] == "localmelo"
     with pytest.raises(FileExistsError):
         build_app.build(output)
     shutil.rmtree(output)

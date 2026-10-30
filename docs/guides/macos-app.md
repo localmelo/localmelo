@@ -8,7 +8,7 @@ From a checkout named `localmelo`, one command builds the app and installs it fo
 uv run python scripts/build_macos_app.py --install
 ```
 
-It says in plain words what it did and what to do next: open LocalMelo from Spotlight or from `~/Applications`. The app goes to `~/Applications/LocalMelo.app`, replacing an earlier copy only when its bundle id is `org.localmelo.app`; any other app of that name is refused and left alone. `~/.local/bin/melo` is linked to the app's launcher only when no other `melo` is on `PATH`; an existing `melo` is never replaced, and if `~/.local/bin` is not on your `PATH` the output gives the line to add. Run the command again, after quitting LocalMelo, to upgrade in place. The pinned Python archive is cached in `~/Library/Caches/LocalMelo` and checked against its SHA-256 on every use. To remove the app and the link, and nothing else (your settings and chats stay in `~/.cache/localmelo`):
+It says in plain words what it did and what to do next: open LocalMelo from Spotlight or from `~/Applications`. The window, the Dock and the menus call the app localmelo; `LocalMelo.app` is only the file name. The app goes to `~/Applications/LocalMelo.app`, replacing an earlier copy only when its bundle id is `org.localmelo.app`; any other app of that name is refused and left alone. `~/.local/bin/melo` is linked to the app's launcher only when no other `melo` is on `PATH`; an existing `melo` is never replaced, and if `~/.local/bin` is not on your `PATH` the output gives the line to add. Run the command again, after quitting LocalMelo, to upgrade in place. The pinned Python archive is cached in `~/Library/Caches/LocalMelo` and checked against its SHA-256 on every use. To remove the app and the link, and nothing else (your settings and chats stay in `~/.cache/localmelo`):
 
 ```bash
 uv run python scripts/build_macos_app.py --uninstall
@@ -34,8 +34,8 @@ startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gat
 20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
 reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
 first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
-quitting always asks before stopping the gateway and any running tasks. The menu-bar item reads `Melo` when nothing runs
-and `Melo · 3` when three things run, counting the console's chats, tasks, direct runs and terminal chats (the count of the
+quitting always asks before stopping the gateway and any running tasks. The menu-bar item reads `localmelo` when nothing runs
+and `localmelo · 3` when three things run, counting the console's chats, tasks, direct runs and terminal chats (the count of the
 console's header chip), read with the app's 2-second health check. The quit dialog names what would stop, for example
 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`; direct runs and terminal chats
 belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background

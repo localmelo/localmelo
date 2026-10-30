@@ -243,6 +243,9 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "        window.makeFirstResponder(webView)": '        window.makeFirstResponder(webView)\n        record("shown")',
         "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         record("loaded " + (webView.url?.absoluteString ?? ""))
+        let items = NSApp.mainMenu?.items.first?.submenu?.items.map { $0.title }.filter { !$0.isEmpty } ?? []
+        record("names window=" + window.title + " status=" + (statusItem.button?.title ?? "")
+               + " menu=" + items.joined(separator: ","))
         if let menu = NSApp.mainMenu?.items.last?.submenu {
             record("edit " + menu.items.map { $0.title + ":" + $0.keyEquivalent }.joined(separator: ","))
         }
@@ -299,6 +302,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {": '    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {\n        record("quit-request")',
         '                    alert.addButton(withTitle: "Cancel")': """                    alert.addButton(withTitle: "Cancel")
                     record("quit-prompt")
+                    record("quit-title " + alert.messageText)
                     if ["quit", "idlequit"].contains(ProcessInfo.processInfo.environment["TEST_MODE"] ?? "") {
                         let timer = Timer(timeInterval: 0.1, repeats: false) { _ in
                             if quitPhase == 0 {
@@ -468,6 +472,18 @@ def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:
         wait_for(tmp_path / "events", "selection 5", process)
 
 
+def test_the_window_and_menus_call_the_app_localmelo(
+    app: Path, tmp_path: Path
+) -> None:
+    with running(app, tmp_path, "correct") as (process, _):
+        events = wait_for(tmp_path / "events", "names ", process)
+        line = next(x for x in events.splitlines() if x.startswith("names "))
+        assert line == (
+            "names window=localmelo status=localmelo"
+            " menu=Open localmelo,Sign In Again,Quit localmelo"
+        )
+
+
 def test_sign_in_again_menu_item_is_wired(app: Path, tmp_path: Path) -> None:
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "signin-menu ", process)
@@ -629,6 +645,7 @@ def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None
     with running(app, tmp_path, mode) as (process, _):
         events = wait_for(tmp_path / "events", "quit-resumed", process)
         assert "quit-cancel" in events
+        assert "quit-title Quit localmelo?" in events
         child_pid = int((tmp_path / "gateway-pid").read_text())
         process.wait(timeout=15)
         with pytest.raises(ProcessLookupError):

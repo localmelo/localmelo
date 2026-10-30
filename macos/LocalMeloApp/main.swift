@@ -51,7 +51,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "LocalMelo"
+        window.title = "localmelo"
         window.backgroundColor = Palette.canvas
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
@@ -70,10 +70,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createMenu() {
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Open LocalMelo", action: #selector(openWindow), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Open localmelo", action: #selector(openWindow), keyEquivalent: "")
         appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit LocalMelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let root = NSMenu()
         let entry = NSMenuItem()
         entry.submenu = appMenu
@@ -89,7 +89,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         root.addItem(editEntry)
         NSApp.mainMenu = root
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "Melo"
+        statusItem.button?.title = menuTitle(nil)
         statusItem.menu = appMenu.copy() as? NSMenu
     }
 
@@ -578,7 +578,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 // Always ask: a turn can start while the health request is in flight.
                 do {
                     let alert = NSAlert()
-                    alert.messageText = "Quit LocalMelo?"
+                    alert.messageText = "Quit localmelo?"
                     alert.informativeText = quitMessage(counts, statusKnown: running != nil)
                     alert.addButton(withTitle: "Quit and Stop")
                     alert.addButton(withTitle: "Cancel")
