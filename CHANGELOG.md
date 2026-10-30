@@ -23,6 +23,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   before its first command; other systems run unconfined and say so. Chats are
   unchanged; `-X agent.confine_writes=false` turns it off ([#274]).
 
+- A developer setting confines plain direct runs too. `[agent]
+  confine_direct_runs = true` (or `-X agent.confine_direct_runs=true` for one run;
+  off by default, listed by `melo config keys` and `melo -h all`) gives a task
+  given on the command line and the `melo ""` loop the same write confinement
+  that `--brief` runs have, in the workspace (`--workspace`, else the current
+  folder), and the run's JSON result carries `confinement`. `--brief` runs and
+  saved tasks keep `confine_writes`; chats are unchanged. A run that cannot be
+  confined stops before its first command with one line on stderr and exit
+  code 1 ([#NN]).
+
 - Gateway authentication is in progress: loopback-only binding, a private bearer
   token for API clients, and a one-use terminal sign-in link for browser sessions.
   Existing unauthenticated API clients must migrate; see the gateway guide.

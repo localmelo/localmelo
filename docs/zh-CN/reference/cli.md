@@ -462,7 +462,7 @@ worker 的 `shell_exec` 和 `python_exec` 子进程（包括检查）在一个 `
 melo: writing outside the workspace is not allowed in this run (refused: /Users/me/outside.txt); write in /Users/me/project, and put scratch files in $TMPDIR.
 ```
 
-结果中的 `run.confinement` 会统计这些写入：`{"writes": "confined", "refused_writes": 1}`。当配置文件无法应用时（缺少 `sandbox-exec`，或 melo 运行在一个拒绝再嵌套沙箱的沙箱中），worker 会在第一条命令之前以 `startup_error` 停止，并给出一行 `writes cannot be confined to the workspace: <why>; set agent.confine_writes to false to run without it (-X agent.confine_writes=false for one run)`。在其他系统上，运行会继续且不受限制，`run.confinement` 为 `{"writes": "not_confined", "reason": ...}`。`-X agent.confine_writes=false` 为一次运行关闭它；此时结果中没有 `confinement` 键。不带 `--brief` 的运行、交互式界面、网页控制台和应用都不受此限制。
+结果中的 `run.confinement` 会统计这些写入：`{"writes": "confined", "refused_writes": 1}`。当配置文件无法应用时（缺少 `sandbox-exec`，或 melo 运行在一个拒绝再嵌套沙箱的沙箱中），worker 会在第一条命令之前以 `startup_error` 停止，并给出一行 `writes cannot be confined to the workspace: <why>; set agent.confine_writes to false to run without it (-X agent.confine_writes=false for one run)`。在其他系统上，运行会继续且不受限制，`run.confinement` 为 `{"writes": "not_confined", "reason": ...}`。`-X agent.confine_writes=false` 为一次运行关闭它；此时结果中没有 `confinement` 键。不带 `--brief` 的运行、交互式界面、网页控制台和应用都不受此限制，除非打开开发者设置 `[agent] confine_direct_runs = true`（`-X agent.confine_direct_runs=true` 为一次运行打开；默认关闭）：命令行给出的任务和 `melo ""` 循环随后受到同样的限制，工作区的确定方式也相同；无法限制的运行会在第一条命令之前停止，在 stderr 上给出一行 `melo: error: writes cannot be confined to the workspace: <why>; set agent.confine_direct_runs to false to run without it (-X agent.confine_direct_runs=false for one run)`，退出码为 1。
 
 <a id="brief-items"></a>
 
