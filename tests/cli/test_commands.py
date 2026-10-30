@@ -26,7 +26,7 @@ from localmelo.support.cli.theme import ASCII
     [
         ("/help", ("help", "help", "")),
         ("/model  qwen3-8b ", ("model", "model", "qwen3-8b")),
-        ("/clear", ("new", "clear", "")),
+        ("/clear", ("clear", "clear", "")),
         ("/quit", ("exit", "quit", "")),
         ("/nope now", (None, "nope", "now")),
     ],
@@ -94,7 +94,7 @@ def test_slash_lists_the_everyday_commands_first_by_their_bare_names() -> None:
         "/retry",
     ]
     assert {n[1:] for n in names[:8]} == set(everyday)  # the menu shows 8 rows
-    assert names[8:11] == ["/backend", "/attach", "/attachments"]
+    assert names[8:12] == ["/clear", "/backend", "/attach", "/attachments"]
     assert names[-1] == "/mcp" and len(names) == len(COMMANDS)
     assert all(
         text == display for text, display, _ in shown
@@ -205,13 +205,26 @@ def test_help_keeps_ascii_in_ascii_mode() -> None:
 def test_the_bare_slash_lists_each_command_once() -> None:
     names = [text for text, _, _ in _complete("/")]
     assert len(names) == len(COMMANDS)
-    assert "/clear" not in names and "/quit" not in names
-    assert find("clear") is find("new") and find("quit") is find("exit")
+    assert "/quit" not in names and "/clear" in names
+    assert find("clear") is not find("new") and find("quit") is find("exit")
+
+
+def test_new_and_clear_are_two_commands_that_name_each_other() -> None:
+    assert _complete("/cl") == [
+        ("/clear", "/clear", "Start a new chat and clear the screen")
+    ]
+    assert _complete("/ne") == [
+        ("/new", "/new", "Start a new chat; /clear also clears the screen")
+    ]
+    new, clear = find("new"), find("clear")
+    assert new is not None and clear is not None and new.aliases == clear.aliases == ()
+    # The short /help already tells them apart; /help clear has its own details.
+    assert any("/clear also clears the screen" in row for row in _help())
+    assert _help("clear")[:2] == ["/clear", "  Start a new chat and clear the screen"]
+    assert not any(row.lstrip().startswith("/clear") for row in _help())
 
 
 def test_an_alias_row_names_the_other_spelling() -> None:
-    assert _complete("/cl") == [("/clear", "/clear", "Start a new chat (also /new)")]
-    assert _complete("/ne") == [("/new", "/new", "Start a new chat (also /clear)")]
     assert _complete("/q") == [("/quit", "/quit", "Quit (also /exit, ctrl+d)")]
     assert _complete("/exi") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
     assert _complete("/ex") == [

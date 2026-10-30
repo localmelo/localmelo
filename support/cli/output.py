@@ -12,14 +12,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import os
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Final, Protocol
 
 from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.output import Output
 from rich.console import Console, RenderableType
 
 from localmelo.support.cli.theme import active
+
+# Cursor home, erase the screen, erase the scrollback.
+CLEAR_SCREEN: Final = "\x1b[H\x1b[2J\x1b[3J"
 
 
 class Out(Protocol):
@@ -31,6 +35,8 @@ class Out(Protocol):
     def print(self, *renderables: RenderableType) -> None: ...
 
     def write_control(self, sequence: str) -> bool: ...
+
+    def clear_screen(self) -> bool: ...
 
 
 def _console(file: io.StringIO, width: int, *, no_color: bool) -> Console:
@@ -59,6 +65,11 @@ class TerminalOut:
         self._scheduled = False
         self._detached = False
         self._held = False
+        self._escapes = not no_color and os.environ.get("TERM") != "dumb"
+        try:
+            self._escapes = self._escapes and os.isatty(self._output.fileno())
+        except (OSError, ValueError, NotImplementedError):
+            self._escapes = False
 
     @property
     def width(self) -> int:
@@ -75,7 +86,23 @@ class TerminalOut:
     def print(self, *renderables: RenderableType) -> None:
         if self._detached:
             return
-        self._pending.append(self.render(*renderables))
+        self._enqueue(self.render(*renderables))
+
+    def clear_screen(self) -> bool:
+        """Wipe the screen and its scrollback before what is printed next.
+
+        Queued with the text, so the app is erased, the screen cleared and the
+        text written in one pass, then the app is drawn again from the top.
+        False, and nothing queued, where escape codes are not wanted: no
+        colour (``NO_COLOR``), ``TERM=dumb``, output that is not a terminal.
+        """
+        if self._detached or not self._escapes:
+            return False
+        self._enqueue(CLEAR_SCREEN)
+        return True
+
+    def _enqueue(self, text: str) -> None:
+        self._pending.append(text)
         app = get_app_or_none()
         if app is None or not app.is_running:
             self.flush()
@@ -151,6 +178,8 @@ class RecordingOut:
     def __init__(self, width: int = 80) -> None:
         self._width = width
         self.controls: list[str] = []
+        self.cleared = 0  # screen clears asked for
+        self.can_clear = True  # False: a terminal with no escape codes
         self.console = Console(
             file=io.StringIO(),
             record=True,
@@ -173,6 +202,14 @@ class RecordingOut:
 
     def write_control(self, sequence: str) -> bool:
         self.controls.append(sequence)
+        return True
+
+    def clear_screen(self) -> bool:
+        """What was printed before is gone from :meth:`text`, as from a screen."""
+        if not self.can_clear:
+            return False
+        self.cleared += 1
+        self.console.export_text(clear=True)
         return True
 
     def held(self) -> contextlib.AbstractContextManager[None]:
