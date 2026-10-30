@@ -119,6 +119,41 @@ model, since the composer shows it, and keeps the chip when it warns (`Model off
 `⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
 turn are buttons at least 44 px tall.
 
+## Melo in the page
+
+The page shows Melo, the Akita puppy, where it already had a picture, in the
+app and in a browser alike. Every picture is a still image: the page moves
+nothing, so Reduce Motion needs no special case.
+
+- **Empty chat.** Melo sits above *What would you like to work on?* with its calm
+  face.
+- **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
+  reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
+  while an approval waits, happy when it is done, and with a drooping ear when
+  it ended with a warning or an error. A turn you stopped is not a failure and
+  keeps the calm face, and so does every older reply.
+- **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
+  wide-eyed face.
+- **Brand and tab.** The sidebar and the sign-in screen show the calm face, and
+  the browser tab uses it at 16, 32 and 64 px.
+
+The faces are decoration where words already say the state (the live row, the
+work box, the failure card, the approval bar), so they have empty alt text. A
+finished answer with no work box above it has nothing else saying it is done, so
+its face reads `Done` to a screen reader. The portrait keeps the alt text
+`Melo, the localmelo Akita mascot`.
+
+The pictures are transparent PNGs with a thin cream rim. On the light canvas the
+navy outline sets Melo off (at least 12:1 against the console's light surfaces);
+on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
+bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
+`face-idle.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
+`face-error.png` and `favicon-16.png`, `-32` and `-64`): 150 KB in all, copies of
+the app's own pictures in `macos/art/akita` made by the same script (see the
+[macOS app guide](macos-app.md)), and net 70 KB more
+than before, because the two logos `melo.png` and `icon_small.png` (80 KB) left
+the page's assets.
+
 ## Inspect workers
 
 **Workers** (in default mode, in the sidebar once a run or a terminal chat exists) opens
