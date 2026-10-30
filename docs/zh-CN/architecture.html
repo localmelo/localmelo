@@ -46,14 +46,13 @@
     <article class="content">
       <header class="doc-hero" id="overview">
         <h1>架构</h1>
-        <p class="lead">localmelo 的各部分如何协同工作：<code>melo/</code> 中是智能体及其检查、记忆和工具，<code>support/</code> 中是后端、网关和配置。</p>
+        <p class="lead">localmelo 的各部分如何协同工作，以当前代码为准。</p>
       </header>
-
-      <p lang="en"><strong>Translation behind (2026-10-28):</strong> The What exists today section needs updating. English source revision (Git blob): <code>a8bef65083ef1ab7ba504183048267780943f6f3</code>. Owner: Docs-1 maintainers. Follow-up: <a href="https://github.com/localmelo/localmelo/issues/117">#117</a>. See the <a href="../en/architecture.html">English architecture page</a>.</p>
 
       <section class="section" id="diagram">
         <h2>架构图</h2>
-        <p>任务从命令行或网关进入，在智能体中运行。智能体把上下文保存在记忆中，通过执行器运行工具，并通过提供方访问模型服务器；提供方由后端根据配置文件创建。点击图中的组件，可以跳到它的说明。</p>
+        <h3 id="core">智能体的核心</h3>
+        <p>任务在智能体中运行：智能体把上下文保存在记忆中，通过执行器运行工具。后端根据配置文件创建提供方，由提供方访问模型服务器。</p>
 
         <div class="diagram-scroll">
           <div class="diagram" id="dia-overview" style="width:930px;height:440px">
@@ -87,7 +86,7 @@
             </a>
             <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">执行器</span>
-              <span class="node-sub">内置工具和 MCP 工具<br>时间限制</span>
+              <span class="node-sub">内置、MCP 和浏览器工具<br>时间限制</span>
             </a>
             <a class="node" id="n-memory" href="#c-memory" style="left:395px;top:250px;width:160px">
               <span class="node-title">记忆</span>
@@ -122,80 +121,197 @@
           <div class="legend-item"><div class="legend-box"></div>由检查器把关</div>
           <div class="legend-item"><div class="legend-line fail-l"></div>检查失败会结束运行</div>
         </div>
+
+        <h3 id="around">智能体周围</h3>
+        <p>消息从某个入口进来，在对话或 worker 中运行；每一个都运行同一个智能体，旁边是记忆。点击图中的方框，可以跳到它的卡片。</p>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-around" style="width:930px;height:460px">
+            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
+              <span class="node-title">终端</span>
+              <span class="node-sub">melo · 自己运行对话</span>
+            </a>
+            <a class="node" id="a-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
+              <span class="node-title">控制台和 App</span>
+              <span class="node-sub">浏览器页面 · macOS 窗口</span>
+            </a>
+            <a class="node" id="a-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
+              <span class="node-title">HTTP API</span>
+              <span class="node-sub">/v1 供脚本使用 · /api</span>
+            </a>
+            <a class="node" id="a-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+              <span class="node-title">网关</span>
+              <span class="node-sub">melo serve · 令牌登录 · 只监听回环地址</span>
+            </a>
+            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
+              <span class="node-title">对话</span>
+              <span class="node-sub">目前是旁支对话 · 主对话在计划中</span>
+            </a>
+            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
+              <span class="node-title">调度器</span>
+              <span class="node-sub">任务队列 · P0–P5 · GPU 锁闸门</span>
+            </a>
+            <a class="node" id="a-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
+              <span class="node-title">Worker</span>
+              <span class="node-sub">无界面的任务会话</span>
+            </a>
+            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:372px;width:220px">
+              <span class="node-title">记忆</span>
+              <span class="node-sub">笔记和所有对话的索引</span>
+            </a>
+            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:372px;width:280px">
+              <span class="node-title">智能体</span>
+              <span class="node-sub">即上面的核心 · 每个对话或任务一个</span>
+            </a>
+            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:372px;width:270px">
+              <span class="node-title">模型服务器</span>
+              <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · 云端 API</span>
+            </a>
+            <svg class="conns" id="svg-around" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
+          <div class="legend-item"><div class="legend-line dashed"></div>发往模型服务器的请求</div>
+          <div class="legend-item"><div class="legend-line dotted"></div>计划中</div>
+        </div>
       </section>
 
       <section class="section" id="components">
         <h2>组件</h2>
-        <p>每个组件目前做什么，以及代码在哪里。路径都相对于仓库根目录。</p>
-
-        <h3 id="c-cli">命令行</h3>
-        <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。在终端中不带任务时，它打开交互式界面：输入框和状态栏固定在底部，每一轮边运行边输出到终端的滚动区：模型的思考、每个工具调用一个块、重试、通知和反思，答案按 Markdown 输出，该轮写过文件时，页脚下还有一行点出这些文件；输入框上方的实时区域显示 melo 在做什么、用时、token 数和正在运行的工具，开发者模式下还显示步数、阶段和本次运行的进度事实；会话的第一轮（开发者模式下是每一轮）还会显示上次运行的步骤。界面在会话上运行每一轮（保存在 <code>~/.cache/localmelo/cli/sessions.db</code>），可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复工作区中已保存的对话（<code>/sessions</code> 和 <code>/resume</code> 打开同一个选择器），运行 <code>shell_exec</code>、<code>python_exec</code> 和 <code>file_write</code> 之前会在面板中询问，把文件工具限制在工作区内，并把 <code>/model</code> 和 <code>/backend</code> 选择的模型和服务器保存到配置文件（用 <code>-u</code> 打开的界面不保存）。它还可以用 <code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 命名、撤销、查看和复制对话。没有终端时，单独的 <code>melo</code> 以退出码 2 结束。任务为空字符串（<code>melo ""</code>）时，它打开简单的对话循环，每一轮都能看到之前的回答。<code>melo serve</code> 启动网关；<code>melo serve install</code>、<code>uninstall</code> 和 <code>status</code> 用来管理 macOS 后台服务。使用 <code>-u</code>（<code>--url</code>）时，智能体直接连接该服务器，不读取配置文件；不使用它时，使用配置中的后端。无论是否使用 <code>-u</code>，<code>-m</code>（<code>--model</code>）和 <code>--request-timeout</code> 都会设置对话模型和对话请求的超时，并且都不会修改配置文件。</p>
-        <p>关键文件：<code>__main__.py</code>；交互式界面在 <code>support/cli/</code> 中：<code>launch.py</code>（终端检查、工作区和模型服务器）、<code>app.py</code>（输入框和按键）、<code>session.py</code>（每一轮和命令）、<code>render.py</code>（思考、通知、反思、工具块、实时区域和答案）和 <code>approvals.py</code>；以及 <code>support/sessions/agents.py</code>。</p>
-
-        <h3 id="c-gateway">网关</h3>
-        <p><code>melo-task</code> 是独立的认证回环客户端，可管理网关任务及查看事件流，从不启动网关；它不改变直接运行。它可以从文本、任务说明文件或 stdin 创建任务，列出和查看任务，暂停、恢复、停止或调整任务优先级，并跟随事件流，每个事件输出一行可读文本，重连时使用持久事件 ID。<code>--json</code> 输出带版本的 JSON，私有令牌从令牌文件读取，不接受作为参数传入。</p>
-        <p><code>melo serve</code> 启动的 HTTP 服务器。它提供 HTTP API（<code>/v1/health</code>、<code>/v1/agent/run</code>、<code>/v1/sessions</code>），最多保留 50 个会话，每个会话都有一个根据配置文件创建的智能体。会话的智能体会保留自己的回答，所以每个请求都能看到之前的回答。每个请求在运行前都要通过检查：任务的长度和会话 ID。</p>
-        <p>在 <code>/api/</code> 上，它提供 API v2，也就是网页控制台的 API：health、会话列表和单个会话、会话的轮次及其事件、Server-Sent Events 流、图片 blob、提交查询，以及会话的工具、授权、记忆和运行记录；还有运行会话的写入接口——创建会话（可带或不带第一轮）、开始、重试和停止轮次、按 key 取消消息、回答审批、重命名或移动会话，以及删除会话。控制台轮次在网关进程中运行，每个会话同一时间只运行一个；它的模型调用和工作区聊天一样经过同一个调度器门。控制台按需打开会话的智能体，并在空闲清扫、打开数量上限或网关重启关闭它之后恢复对话。API v2 只在回环地址上提供，错误响应使用统一格式，所有响应带 <code>Cache-Control: no-store</code>，并且只增不改。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2（英文）</a>。</p>
-        <p>在 <code>/</code> 上，网页工作区使用控制台的 API v2 和持久会话库。它显示每轮的工作和答案、设置、较早的轮次、停止或失败状态，并在收到审批请求时显示审批卡片，覆盖已有文件的写入会显示一份带行号的 diff，说明它要替换什么；详情抽屉显示工具、会话授权、记忆和运行记录，设置包括连接测试和浏览器本地主题；控制台会话使用 <code>RememberingPolicy</code>，在 <code>file_write</code> 和 <code>python_exec</code> 前请求审批；旧版 <code>/v1</code> 没有审批策略。每个对话使用配置中的模型和四个内置工具 <code>file_read</code>、<code>file_write</code>、<code>list_files</code>、<code>python_exec</code>（没有 <code>shell_exec</code>）。模型调用共享调度器的门，标题栏显示 GPU 锁和电池状态。</p>
-        <p>页面按最新在前列出会话，支持搜索和每个对话的草稿，显示工具工作、折叠的推理、通知、进度和答案，并从最后保存的事件重开事件流。会话保存在 <code>~/.cache/localmelo/gateway/sessions.db</code>，重启后仍然保留；智能体按需打开（最多同时 8 个，空闲 15 分钟后关闭但保留对话）。</p>
-        <p>网页工作区也可筛选和分页查看 CLI 会话文件中的 worker 历史；每次运行以只读方式打开，未完成的运行先读取一次，再通过事件流实时跟随。</p>
-        <p>网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听。在这台电脑的终端里，<code>melo serve</code> 会在浏览器中打开已登录的控制台（用一次性登录链接），<code>melo console</code> 可再次打开；通过 SSH 时它会输出这个链接。持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</p>
-        <p>关键文件：<code>support/gateway/__init__.py</code>、<code>session.py</code>、<code>guard.py</code>（<code>Host</code> 和 <code>Origin</code> 检查）、<code>webapp.py</code> 和 <code>playground.py</code>（旧的 <code>/v1/playground</code> 路由及其背后的对话）、<code>console/</code>（控制台的会话库、API v2 路由和页面的数据）、<code>static/</code>（页面：<code>workspace.js</code>、<code>turns.mjs</code> 和 <code>markdown.mjs</code>），以及用于 macOS 后台服务的 <code>daemon.py</code>。</p>
-
-        <h3 id="c-mcp">MCP 服务器</h3>
-        <p>通过 stdio 使用 Model Context Protocol 通信的本地服务器，列在 <code>--mcp-config</code> 指定的 JSON 文件中。第一次运行开始时，<code>support/mcp</code> 会启动每个服务器，列出它的工具，并以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 的名称把这些工具注册到工具注册表和执行器中。MCP 工具可以在直接模式、Python API 和交互式界面中使用（<code>--mcp-config</code>，或配置文件顶层的 <code>mcp_config</code> 键）；网关会话暂时还不能使用。服务器的 <code>require_approval</code> 可以让它的全部工具（或其中列出的工具）在调用前先询问运行的审批策略；没有审批策略的运行（例如直接模式的运行）会直接运行这些工具，不经询问。每个服务器都以与工具子进程相同的最小环境启动，再加上它自己条目里的 <code>env</code>。</p>
-        <p>关键文件：<code>support/mcp/config.py</code>、<code>client.py</code>、<code>provider.py</code>，以及 <code>melo/contracts/tools.py</code> 中的工具提供方接口。</p>
-
-        <h3 id="c-agent">智能体</h3>
-        <p>运行循环。每一步都会根据任务、工作记忆、召回的长期记忆和最新的反思构建提示词，向模型提供一组工具（默认的 <code>retrieve</code> 模式下包括内置工具、它在这次对话中已经调用过的工具，以及与任务最接近的三个匹配），发送一次规划请求，然后运行回复中的工具调用。如果回复只有文本、没有工具调用，它就是最终答案，运行以 <code>completed</code> 结束，除非这条回复只是没写完的思考：此时会再问模型一次，第二次仍这样，运行就以 <code>failed</code> 结束（<a href="https://github.com/localmelo/localmelo/pull/288">#288</a>）。在默认的 <code>reflect</code> 策略下，步骤按尝试分组，每次尝试最多 10 步；一次尝试没有得到答案就结束时，由反思决定是否开始下一次尝试。每次运行都以十种状态之一结束（被停止的交互式运行以 <code>cancelled</code> 结束，见下文），并返回一个 <code>RunResult</code>。模型请求失败时，如果重试可能成功，最多重试两次。</p>
-        <p>调用 <code>run_task</code> 的 Python 代码可以跟踪和控制一次运行。传入 <code>on_event</code> 时，它会以事件的形式收到每一步、模型的每条回复、每次工具调用、每条通知和每次反思，模型文本中的密钥会被隐去。传入 <code>approval</code> 时，由审批策略决定每个需要审批的工具调用能否运行。带其中任意一个的运行是交互式运行：取消它时，运行以 <code>cancelled</code> 结束，被打断的那一步会被妥善收尾。设置 <code>AgentOptions(record_answers=True)</code> 时，工作记忆会保留每次运行的回答；<code>conversation()</code> 和 <code>load_conversation()</code> 可以把对话带到另一个智能体。直接模式和旧版 <code>/v1</code> 既不传入事件接收函数，也不传入审批策略。网页工作区会传入事件接收函数和审批策略，所以在网页工作区中点 Stop，运行会以 <code>cancelled</code> 结束。</p>
-        <p>关键文件：<code>melo/agent/agent.py</code>、<code>melo/agent/options.py</code>（<code>AgentOptions</code>）、<code>melo/agent/_chat.py</code>（规划和反思请求、重试）、<code>melo/agent/_events.py</code> 和 <code>melo/contracts/events.py</code>（事件）、<code>melo/contracts/approvals.py</code>（审批策略）、<code>melo/schema.py</code>（<code>RunResult</code> 和各项上限）。</p>
-
-        <h3 id="c-checker">检查器</h3>
-        <p>在一次运行的各个边界进行检查：</p>
-        <ul>
-          <li>规划请求之前：提示词最多 100,000 个字符，本步提供的工具列表必须有效；</li>
-          <li>规划请求之后：回复中的每个工具调用都要有名称和唯一的 ID；</li>
-          <li>工具运行之前：由工具的权限级别和模式决定。<code>interactive</code> 界面提供 <code>shell_exec</code>；<code>direct</code>、<code>python</code> 和 <code>gateway</code> 默认不提供它，若仍注册了 <code>exec</code> 工具，除非 <code>direct</code> 或 <code>python</code> 调用方在 <code>builtins</code> 中点名，否则会被拒绝；网关即使点名也会拒绝。带审批策略的运行会在每次权限级别不是 <code>read</code> 的调用前询问，并且不再按命令的写法拒绝任何命令；</li>
-          <li>审批策略决定之前：每一次 <code>shell_exec</code>、<code>python_exec</code> 和 <code>file_write</code> 调用都由固定的规则审查为常规、高影响或未定，会话放行只覆盖常规调用（<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>）；</li>
-          <li>工具运行之后：超过 50,000 个字符的输出会被截断；</li>
-          <li>写入记忆之前：限制写入的大小；</li>
-          <li>事件交给 Python 代码之前：模型回复文本中常见格式的 API 密钥、bearer 令牌和一次性验证码会被替换为 <code>[redacted]</code>；</li>
-          <li>在网关中：检查每个请求的任务和会话 ID。</li>
-        </ul>
-        <p>规划请求前后的检查一旦失败，运行就以 <code>failed</code> 结束。被拒绝的工具调用不会运行：模型会把这次拒绝当作工具返回的错误。</p>
-        <p>关键文件：<code>melo/checker/checker.py</code>、<code>validators.py</code>、<code>payloads.py</code>、<code>redaction.py</code>、<code>review/</code>（操作审查）。</p>
-
-        <h3 id="c-executor">执行器</h3>
-        <p>按顺序运行一步中的工具调用。以下调用会被拒绝：本步没有提供的工具、参数不是 JSON 对象的调用，以及内置工具参数类型不对的调用；剩下的每个调用再交给检查器检查。设置了工作区根目录时，工作区策略接着解析文件工具的路径，并拒绝根目录之外的路径。设置了审批策略时，权限级别不是 <code>read</code>、或被标记为需要审批的工具的调用接着等待审批策略的决定；获准之后，如果设置了工作区根目录，文件路径会被重新解析，路径在等待期间发生了变化的调用会被拒绝。每个工具都有时间限制，从审批之后开始计时：<code>shell_exec</code> 30 秒，<code>file_read</code> 和 <code>file_write</code> 60 秒，MCP 工具使用其服务器的 <code>timeout</code>。在交互式界面中，<code>shell_exec</code> 和 <code>python_exec</code> 的时间限制是 10 分钟。shell 命令的标准输入是 <code>/dev/null</code>，因此它不会读取终端。<code>python_exec</code> 的代码始终在子进程中运行，时间限制或取消会终止它：没有工作区根目录时在当前目录，有根目录时在根目录。<code>shell_exec</code> 或 <code>python_exec</code> 的子进程只拿到 <code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、所有 <code>LC_*</code> 变量和 <code>TMPDIR</code>，外加 <code>AgentOptions(tool_env=…)</code>：除 <code>tool_env</code> 点名之外，melo 环境里的 API 密钥不会到达任何工具，<code>VIRTUAL_ENV</code>、<code>PYTHONPATH</code>、<code>SSH_AUTH_SOCK</code> 和代理变量只能通过 <code>tool_env</code> 传入。拒绝、审批不通过、超时或出错都会作为工具的错误返回。</p>
-        <p>五个内置工具是 <code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code>、<code>file_write</code> 和 <code>list_files</code>。默认只有交互式界面拿到全部五个；网关和控制台会话拿到除 <code>shell_exec</code> 之外的四个；直接运行和库默认的 <code>python</code> 模式只拿到 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>。<code>list_files</code> 只读取名称和大小，所以从不询问。其他模式不提供 <code>shell_exec</code>（<code>direct</code> 和 <code>python</code> 模式没有审批策略，网关的 <code>/v1</code> 路由也不询问；控制台通过 API v2 询问，但运行在同一个 <code>gateway</code> 模式下，所以同样没有 shell，Python 代码仍然可以启动进程），<code>direct</code> 或 <code>python</code> 调用方用 <code>--builtins all</code> 或点名 <code>shell_exec</code> 才会启用；网关和控制台即使点名也会拒绝。直接运行和 <code>/v1</code> 网关会话不给它们设置工作区根目录，所以文件工具可以访问你能访问的任何文件；直接模式传入 <code>--workspace DIR</code> 时会设置下面 Python API 中的同一个根目录，控制台对话则以 <code>[gateway] workspace</code>（默认 <code>~/localmelo-workspace</code>）为根目录。在 Python API 中，<code>AgentOptions(workspace_root=…)</code> 会启用 <code>policy.py</code>：文件工具只能访问根目录内的文件；<code>shell_exec</code> 和 <code>python_exec</code> 在根目录中以子进程运行，但不受这个限制。只有带审批策略的运行才会审批。</p>
-        <p>在 macOS 上，worker 运行和保存的任务会让 <code>shell_exec</code> 和 <code>python_exec</code> 的命令在 <code>sandbox-exec</code> 配置下启动，这个配置只允许在工作区和一小份其他位置写入文件（<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>）；<code>[agent] confine_direct_runs</code> 让普通的直接运行也这样（<a href="https://github.com/localmelo/localmelo/pull/284">#284</a>）。提供方可以在每一步加入一组工具：开启 <code>[browser] driver</code> 为 <code>safari-automation</code> 时，终端聊天和控制台里的八个浏览工具（<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>）。</p>
-        <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>、<code>sandbox.py</code>、<code>melo/contracts/approvals.py</code>。</p>
-
-        <h3 id="c-memory">记忆</h3>
-        <p>在 compress 模式下，启发式笔记最多可提取 12 条事实，包括部分英文否定句和中文居住、取消陈述，保留原文。否定陈述只有在记录中完整出现才会匹配来源；事件时间冲突也会拒绝匹配。提取和匹配仍是启发式规则；相近陈述被识别为肯定与否定相反时会作为冲突保留，结构化的更新替代默认关闭，可通过 Python 选择启用实验性功能。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">推理笔记（英文）</a>。</p>
-        <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步；开启持久化后，还保存每次模型调用及其推理。在 <code>legacy</code> 中，长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。在 compress 模式下，长期记忆是带类型的存储：每条记录都有类型（<code>semantic</code>、<code>episodic</code>、<code>profile</code> 或 <code>reflection</code>）、来源、状态和允许它写入的信号，文本和向量旁还有来源信息，每条候选都有对应的决定（<code>NEW</code>、<code>UPDATE</code>、<code>RELATED</code>、<code>CONFLICT</code> 或 <code>IGNORE</code>）；只有排练、用户的请求或陈述，或作用于最终尝试摘要的 <code>--admit-on-outcome on</code> 才能让候选写入。程序记忆保存每次运行的步骤，并学习你反复运行的任务的步骤。历史记录、长期记忆和程序记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code>、<code>long_term.db</code> 和 <code>procedures.db</code>。新建的文件只有你能读取（权限 0600）。写入历史记录和长期记忆的文字会先脱敏：<code>sk-</code> 密钥、GitHub 令牌、AWS access key id、<code>Bearer</code> 后面的令牌，以及关键词旁边的一次性验证码，与事件和模型调用已有的规则相同；运行、它的请求和模型仍然看到原文。Python API 可以用 <code>Hippo.forget(task_id)</code> 忘掉一个任务的历史记录行和指明该任务的长期记忆反思，用 <code>forget_all()</code> 清空历史记录和长期记忆（包括步骤摘要）。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
-        <p>在 <code>compress</code> 和 <code>compress+replay</code> 推理模式下，每条回复都会变成一条简短的笔记（计划、发现、决定和尚未确定的事项，以及工具返回的内容）和它的代码草稿，保存在对话窗口旁的内存笔记库中；后来的笔记、调用和反思用到它时，笔记会被排练并汇总成该次尝试的摘要。每条笔记、草稿和摘要进入窗口或笔记库之前，都要经过 <code>check_memory_candidate</code> 边界（脱敏、清理、限长）。compress 模式会把这些内容召回：在起始、尝试和步骤，一个带分隔、被标记为数据的块携带本任务的笔记、草稿和思考片段，以及其他任务的长期记忆有效记录，由 <code>--retriever auto|off|bm25|llm|embedding</code> 选择检索器（配置了嵌入服务器时用 embedding，否则在起始和尝试用 <code>llm</code>、在步骤和工具用 <code>bm25</code>，任何失败都回退到 <code>bm25</code>），由 <code>--recall-at</code> 和 <code>--recall-placement</code> 决定位置，并经过检查和长度限制；思考片段只有产生它的轮次离开窗口之后才能被召回。<code>history.db</code> 版本 2 会把每个新块记录在 <code>recall_json</code> 中，<code>recall</code> 事件带有命中的内容。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">推理笔记（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#recall-in-the-loop">循环中的召回（英文）</a>。</p>
-        <p><code>melo/memory/retrieval/</code> 中有三种可切换的检索器：<code>bm25</code>、<code>llm</code> 和 <code>embedding</code>。它们检索由一次运行的模型调用构建的文档：<code>melo/memory/notes.py</code> 从模型回复中提取的推理笔记、代码草稿和思考片段，以及反思。compress 模式在循环中使用它们（见上）；<code>melo-retrieve</code> 命令（<code>support/retrieve.py</code>）在带标注的查询上离线比较这些检索器，并能把以 raw-call JSONL 记录的模型调用导出为语料。开启持久化后，<code>melo</code> 写入的 <code>history.db</code> 也记录每次模型调用，<code>melo-retrieve</code> 同样能导出它。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">离线检索（英文）</a>。</p>
-        <p>会话（实验性）把整段对话保存在 <code>sessions.db</code> 中：每一轮都是一行记录，只结束一次，带有状态和原因；会话的事件也一起保存；窗口检查点（window checkpoint）让新的智能体从上一个智能体停下的地方继续。用 <code>progress=True</code> 创建的 <code>SessionRunner</code> 会让每一轮运行报告 <code>run.progress</code> 事件，并把这些事件和该轮一起保存。网关的文件和终端的文件是分开的。交互式界面在会话上运行每一轮，并可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复已保存的对话；网页控制台在网关自己的会话库中运行并读取它的会话，而网关的 <code>/v1</code> 会话仍留在内存中（代码在 <code>support/sessions/</code> 和 <code>support/gateway/console/</code>）。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话</a>。</p>
-        <p>直接运行的 worker 可读取任务说明文件，并在规划边界读取可选的显式收件箱，输出版本化 JSON 结果或 NDJSON 事件流。<code>--inbox FILE</code> 是只追加的：完整的 UTF-8 行在每次运行中只插入一次，末尾不完整的行会等待换行符，指令必须先能放进规划请求才会被确认。文件必须位于工作区之外，否则 worker 会在首次模型调用前以 <code>setup_error</code> 拒绝它，因为默认的文件和 Python 工具可能改写它。<code>--inbox-fd N</code> 改为读取继承的管道；worker 会在启动工具前把它设为 close-on-exec，因此 python、shell 和 MCP 子进程拿不到副本，也无法写入，不受信任的任务应使用 fd。两种形式都是引导通道，不是信任边界；确认偏移表示指令已进入本次运行的上下文，不代表模型已收到。有效的任务说明之后，无法启动的 worker 会返回带脱敏原因的 <code>startup_error</code> 结果；事件输出失败会尝试返回 <code>transport_error</code>，输出管道损坏时退出码为 1，没有最终结果的记录是不完整的。</p>
-        <p>直接运行默认保存为单回合 worker 会话（<code>--no-save-session</code> 或 <code>[sessions] record_direct = false</code> 可退出），也可以导入其他 worker 工具的 JSONL 日志。网关从 CLI 文件只读查询这些历史，不支持修改；未完成的运行通过事件流实时跟随。</p>
-        <p>关键文件：<code>melo/memory/coordinator.py</code>、<code>short/</code>（工作记忆）、<code>history/</code>、<code>long/</code>、<code>tools/</code>（工具注册表）、<code>bm25.py</code>。</p>
-        <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
-
-        <h3 id="c-config">配置和向导</h3>
-        <p><code>~/.cache/localmelo/config.toml</code> 记录对话后端、嵌入后端及其设置。在终端中第一次运行时，<code>melo</code> 用 <code>GET /v1/models</code> 查找模型服务器，提供它找到的那个（<code>Use this model server?</code>，一个列表），询问模型并保存：Ollama 服务器保存为 <code>ollama</code> 后端，其他兼容 OpenAI 接口的服务器（包括 oMLX）保存为 <code>vllm</code>。没有服务器在运行时，它会打印这台电脑上启动服务器的命令，按回车后再找一遍。服务器列出嵌入模型时，它会为长期记忆提供一个；<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">嵌入模型指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。配置向导（<code>melo setup</code>）会询问所有后端设置，向每个服务器发送测试请求，保存文件，然后打开交互式界面；用 <code>melo --serve --reconfigure</code> 则启动网关。直接模式和网关都根据这个文件创建智能体。</p>
-        <p>关键文件：<code>support/config.py</code>、<code>support/onboard.py</code>、<code>support/onboard_probe.py</code>、<code>support/backends/discovery.py</code>。</p>
-
-        <h3 id="c-providers">提供方</h3>
-        <p>连接模型服务器的 HTTP 客户端：兼容 OpenAI 的对话接口（<code>/chat/completions</code>）、Ollama 自己的 <code>/api/chat</code>，以及兼容 OpenAI 的嵌入接口。它们实现 <code>melo/contracts/providers.py</code> 中的接口，应用对话请求超时，并把每个失败的请求报告为 <code>ProviderError</code>，同时说明重试是否可能成功。</p>
-        <p>关键文件：<code>melo/contracts/providers.py</code>、<code>support/providers/llm/</code>、<code>support/providers/embedding/</code>。</p>
-
-        <h3 id="c-backends">后端</h3>
-        <p>每个后端键对应一个适配器：<code>mlc</code>、<code>ollama</code>、<code>vllm</code> 和 <code>sglang</code> 用于你自己运行的服务器（oMLX 使用 <code>vllm</code>），<code>openai</code>、<code>anthropic</code>、<code>gemini</code> 和 <code>nvidia</code> 用于云端 API。每个适配器检查配置文件中属于自己的表，并创建提供方。后端只负责连接：模型服务器由你自己启动和停止。</p>
-        <p>关键文件：<code>support/backends/registry.py</code>、<code>base.py</code>、<code>local/</code>、<code>cloud/</code>。</p>
-
-        <p><code>melo/sleep/</code>、<code>melo/memory/personalized/</code> 和 <code>support/melo_serving/</code> 中的代码，智能体目前还没有使用。<code>melo/memory/retrieval/</code> 和 <code>melo/memory/notes.py</code> 供循环中的召回和 <code>melo-retrieve</code> 使用；<code>support/scheduler/</code> 是调度策略核心及其模拟器，网关的门用它来调度网页工作区的聊天和控制台的轮次，<code>support/gateway/machine_monitor.py</code> 为工作区读取 GPU 锁和电池。</p>
+        <p>每张卡片说明一个部分做什么；点击两张图中的方框可以打开卡片，卡片上的链接打开对应的参考页。</p>
+        <div class="comp-grid">
+          <div class="comp-card" id="c-cli">
+            <h3>终端</h3>
+            <p><code>melo</code> 打开对话；<code>melo "task"</code> 运行一个任务。</p>
+            <ul>
+              <li>打印答案或一行 JSON，并用退出码说明运行如何结束。</li>
+              <li>运行命令和写文件之前先询问；文件工具只在当前文件夹内工作。</li>
+              <li>自己运行对话，不经过网关。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a>
+          </div>
+          <div class="comp-card" id="c-gateway">
+            <h3>网关</h3>
+            <p><code>melo serve</code>：控制台、App 和 HTTP API 背后的本地服务器。</p>
+            <ul>
+              <li>在 <code>/api</code> 下提供控制台的 API v2，在 <code>/v1</code> 下提供 HTTP API。</li>
+              <li>网关要求 bearer 令牌或浏览器会话，并且只监听回环地址。</li>
+              <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/api-v2.md">API v2 参考</a>
+          </div>
+          <div class="comp-card" id="c-chats">
+            <h3>对话</h3>
+            <p>每个对话是一个会话，它的轮次在重启后仍然保留。</p>
+            <ul>
+              <li>每一轮在该对话自己的智能体上运行，一次一轮。</li>
+              <li>每一轮开始之前，记忆会附上为它召回的内容。</li>
+              <li>你正在使用的对话是调度器的焦点；能把工作交给任务的主对话在计划中。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
+          </div>
+          <div class="comp-card" id="c-scheduler">
+            <h3>调度器</h3>
+            <p>为任务排序；打开闸门后，也为模型调用排序。</p>
+            <ul>
+              <li>带 P0 到 P5 优先级的任务队列，保存在网关的会话文件中。</li>
+              <li>模型调用的闸门：默认关闭，可选先到先得或按类别。</li>
+              <li>读取共享的 GPU 锁和电池状态；可以在锁被占用时等待。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/scheduler.md">调度器指南</a>
+          </div>
+          <div class="comp-card" id="c-workers">
+            <h3>Worker</h3>
+            <p>没有对话窗口、在后台运行任务的会话。</p>
+            <ul>
+              <li>网关按优先级启动排队的任务，每次几个。</li>
+              <li><code>melo worker</code> 根据任务说明文件运行一个任务，返回 JSON 结果。</li>
+              <li>控制台的 Workers 视图列出每一次运行。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">Worker 参考</a>
+          </div>
+          <div class="comp-card" id="c-agent">
+            <h3>智能体</h3>
+            <p>运行循环：规划一步，运行它的工具，在两次尝试之间反思。</p>
+            <ul>
+              <li>每一步的请求包含任务、工作记忆、召回的记忆和最近一次反思。</li>
+              <li>模型只能调用这一步提供的工具。</li>
+              <li>由反思决定是否开始下一次尝试。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/how-it-works.md">工作原理</a>
+          </div>
+          <div class="comp-card" id="c-checker">
+            <h3>检查器</h3>
+            <p>在运行的每个边界做检查。</p>
+            <ul>
+              <li>检查每个计划、每个工具调用和每个工具结果。</li>
+              <li>被拒绝的调用不会运行；模型会看到原因。</li>
+              <li>发送、删除或发布之类的调用总会询问，并说明原因。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>
+          </div>
+          <div class="comp-card" id="c-executor">
+            <h3>执行器</h3>
+            <p>按顺序运行一步中的工具调用，并设有时限。</p>
+            <ul>
+              <li>内置工具：<code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code>、<code>file_write</code> 和 <code>list_files</code>。</li>
+              <li>按权限级别请求审批。</li>
+              <li>在 macOS 上，worker 运行和保存的任务只能在自己的工作区内写文件。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具参考</a>
+          </div>
+          <div class="comp-card" id="c-mcp">
+            <h3>工具：MCP 和浏览器</h3>
+            <p>内置工具之外的更多工具。</p>
+            <ul>
+              <li><code>--mcp PATH</code> 中列出的本地 MCP 服务器以 stdio 进程运行。</li>
+              <li>它们的工具名为 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>。</li>
+              <li>打开浏览功能后，melo 在 Safari 的自动化窗口里读网页。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md">工具和 MCP 指南</a>
+          </div>
+          <div class="comp-card" id="c-memory">
+            <h3>记忆</h3>
+            <p>melo 在一次运行内和跨对话保留的内容。</p>
+            <ul>
+              <li>工作记忆：一次运行最近的消息，保存在内存中。</li>
+              <li>关于你的笔记和所有对话的索引，召回时注明来源。</li>
+              <li>历史记录和长期记忆，开启持久化后保存在 SQLite 中。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md">记忆概念</a>
+          </div>
+          <div class="comp-card" id="c-config">
+            <h3>配置和设置</h3>
+            <p>一个配置文件，以及会自己找到服务器的首次运行。</p>
+            <ul>
+              <li><code>~/.cache/localmelo/config.toml</code> 指定对话和嵌入服务器。</li>
+              <li>首次运行会查找模型服务器，并推荐找到的那个。</li>
+              <li>之后用 <code>melo setup</code> 和 <code>melo config</code> 修改。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/configuration.md">配置参考</a>
+          </div>
+          <div class="comp-card" id="c-providers">
+            <h3>提供方</h3>
+            <p>与模型服务器通信的 HTTP 客户端。</p>
+            <ul>
+              <li>OpenAI 兼容的对话、Ollama 的 <code>/api/chat</code> 和 OpenAI 兼容的嵌入。</li>
+              <li>对每个请求应用对话请求超时。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md">模型服务器指南</a>
+          </div>
+          <div class="comp-card" id="c-backends">
+            <h3>模型服务器</h3>
+            <p>后端连接你自己运行的服务器或云端 API。</p>
+            <ul>
+              <li>oMLX（通过 <code>vllm</code>）、Ollama、MLC LLM、vLLM 和 SGLang。</li>
+              <li>OpenAI、Anthropic、Google 和 NVIDIA 的 API。</li>
+              <li>localmelo 从不下载、启动或提供模型。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">后端</a>
+          </div>
+        </div>
       </section>
 
       <section class="section" id="boundaries">
@@ -203,29 +319,13 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th scope="col">边界</th><th scope="col">规则</th><th scope="col">意义</th></tr>
+              <tr><th scope="col">边界</th><th scope="col">规则</th><th scope="col">为什么重要</th></tr>
             </thead>
             <tbody>
-              <tr>
-                <td><code>melo/</code> 和 <code>support/</code></td>
-                <td><code>melo/</code> 包含智能体以及提供方要实现的接口，不在模块级别导入 <code>support/</code>。唯一的桥梁是 <code>Agent(config=…)</code>：调用它时，它通过 <code>support/backends</code> 创建提供方。</td>
-                <td>智能体可以使用你自己创建的提供方运行（例如测试用的假提供方），新增后端也只需要修改 <code>support/</code>。</td>
-              </tr>
-              <tr>
-                <td>智能体和执行器</td>
-                <td>每一步只能运行本步提供的工具，每个调用都要先通过检查。这些检查只是防护措施，不是沙箱：工具以你的账户权限运行。</td>
-                <td>模型只能调用本步展示给它的工具，被拒绝的调用永远不会运行。</td>
-              </tr>
-              <tr>
-                <td>智能体和记忆</td>
-                <td>写入记忆要经过检查器的大小限制。记忆开启时，<code>legacy</code> 模式写入长期记忆需要嵌入后端；显式推理模式无需嵌入后端也可以接纳纯文本记录。</td>
-                <td>提示词和存储都不会无限增长。</td>
-              </tr>
-              <tr>
-                <td>后端和模型服务器</td>
-                <td>后端只连接一个地址。localmelo 不负责下载、启动或部署模型。</td>
-                <td>模型服务器始终由你掌控。</td>
-              </tr>
+              <tr><td><code>melo/</code> 和 <code>support/</code></td><td><code>melo/</code> 在模块级别从不导入 <code>support/</code>；<code>Agent(config=…)</code> 是唯一的桥。</td><td>智能体可以使用你自己构建的提供方运行，新增后端只改 <code>support/</code>。</td></tr>
+              <tr><td>智能体和执行器</td><td>一步只运行它提供的工具，每个调用都先通过检查。</td><td>被拒绝的调用从不运行。检查是护栏，不是沙箱。</td></tr>
+              <tr><td>智能体和记忆</td><td>记忆写入要通过检查器的大小限制。</td><td>提示和存储都保持在限定范围内。</td></tr>
+              <tr><td>后端和模型服务器</td><td>后端只连接一个 URL。</td><td>模型服务器始终由你掌控。</td></tr>
             </tbody>
           </table>
         </div>
@@ -233,67 +333,25 @@
 
       <section class="section" id="status">
         <h2>目前已有的功能</h2>
-        <ul>
-          <li>直接模式：运行选项（包括用 <code>--workspace DIR</code> 指定任务工作的文件夹，以及如何把回复的推理发回或保留：<code>legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）、十种运行状态、文本或 JSON 输出、固定的退出码，以及用 <code>--brief FILE</code> 让直接模式按任务说明运行一个 worker 并以带版本的 JSON 结果结束（<code>--output-format stream-json</code> 会在结果前输出脱敏事件）。有效的任务说明之后无法启动的 worker 会返回带脱敏原因的 <code>startup_error</code> 结果；显式的 <code>--inbox FILE</code> 或 <code>--inbox-fd N</code> 是引导通道，不是信任边界。</li>
-          <li><code>--brief FILE</code> 运行会在任务中附加一段固定的工作规则。若某次尝试开始时，工作区自运行开始以来没有变化，下一次尝试会被提示先写出已经能写的部分。<code>continue</code> 反思会在步数和尝试次数未用完时开始下一次尝试，不论三项标记如何（<a href="https://github.com/localmelo/localmelo/pull/193">#193</a>）。连续六个规划步骤没有改动工作区后，下一步会被要求写出任务中已经能写的部分，每次规划请求还会附一条说明，列出上下文窗口丢弃的工具输出（<a href="https://github.com/localmelo/localmelo/pull/197">#197</a>）。任务说明的 <code>Check:</code> 命令会在运行结束为 <code>completed</code> 之前运行，每种模式下都是如此；经过两次重试后仍然失败的检查，会使运行的 <code>tests</code> 为 <code>failed</code>，运行仍为 <code>completed</code>，但退出码为 4（<a href="https://github.com/localmelo/localmelo/pull/195">#195</a>、<a href="https://github.com/localmelo/localmelo/pull/205">#205</a>）。在最后一次尝试中，若预算还剩两步且工作区自上次检查后有变化，检查会再运行一次：失败则返回模型，并用掉两次重试中的一次。<code>brief_check</code> 通知和每个 <code>tests.items</code> 条目带有 <code>output_tail</code>，即检查输出的最后 20 行，已脱敏，最多 4,000 个字符（<a href="https://github.com/localmelo/localmelo/pull/214">#214</a>）。不带 <code>--brief</code> 的运行不变。</li>
-          <li>实验性的类型化陈述仅可通过 Python 的 <code>AgentOptions(typed_assertions=True)</code> 选择启用，可保留同一任务中来源时间有序的经核验变更，把被取代的记录作为带标签的历史保留，并标注历史召回；缺失、模糊或未关联的陈述不会自动关联，只有完全相同的重复内容会被忽略。</li>
-          <li>可选的上下文统计（<code>[agent] context_window</code>、<code>output_reserve</code> 和 <code>safety_margin</code>）估算规划和反思请求；必要时会裁剪请求副本，但不会强制限制输出预留。固定前缀（<code>fixed_prefix</code>，默认开启）在每次运行中固定本地日期和稳定指令；召回内容和反思仍是数据。分块窗口丢弃（<code>window_eviction = "chunk"</code>）和反思工具保护（<code>reflect_tool_guard</code>）也默认开启（<a href="https://github.com/localmelo/localmelo/pull/223">#223</a>），<code>--fixed-prefix off --window-eviction slide --reflect-tool-guard off</code> 会发送此前的请求。可选的工具捕获历史记录（<code>captured_history</code>）独立于模型预览，经过模式脱敏并设有上限。</li>
-          <li>供应商流式契约：兼容 OpenAI 的适配器解析 SSE，只在工具调用完整时才组装；显示文本经过脱敏后逐行释放，规则在每条流开始时固定。交互式终端会用它来实时显示回复（<a href="https://github.com/localmelo/localmelo/pull/175">#175</a> 中为可选，自 <a href="https://github.com/localmelo/localmelo/pull/245">#245</a> 起默认开启：<code>[cli] stream</code> 除非另行设置，否则为 true，<code>/stream off</code>、<code>melo -X cli.stream=false</code> 或 <code>melo config set cli.stream false</code> 可以关闭）；直接运行、worker 和网关从不流式输出。推理格式在 <code>[cli.reasoning_tags]</code> 中声明过的模型，或服务器用单独字段返回推理的模型，回复边写边显示；其他模型在回复完成后才显示（开发者模式下每个模型提示一次）。服务器对流式请求只返回一个 JSON 正文时，按普通补全读取；在送出任何内容之前就结束了流时，会不带流式再请求一次；适配器随后不再要求该服务器流式输出，终端会提示一次（<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>）。</li>
-          <li>在终端里读懂一个轮次（<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>）：开发者模式之外，记录是安静的。思考只占一行（<code>✻ Thought for 8.0s</code>；<code>/thinking on</code> 和开发者模式显示它的前三行，<code>/verbose</code> 显示四十行）；成功的调用在同一行显示输出的第一行和 <code>+N lines (/expand T.C)</code>，失败的调用，或退出码不是 0 的命令，最多显示三行；工具行只有标记带着状态的颜色；实时行保留活动、时间、token 数和停止键，步骤、尝试和阶段只在开发者模式下显示。主题读取 <code>COLORFGBG</code>，不查询终端：只有背景被报告为深色时，警告才是黄色，其他情况下是加粗；审批的警告和按键以及提示行用默认文字颜色；代码块在浅色背景上使用 rich 的浅色主题。</li>
-          <li>提示缓存遥测：<code>assistant.message</code> 和 <code>reflection</code> 事件在服务器返回时，在 <code>usage</code> 中携带 <code>cached_tokens</code> 和 <code>reasoning_tokens</code>，并附带 <code>prefix</code> 对象，把每次请求与同一次运行中最匹配的先前请求相比较（<a href="https://github.com/localmelo/localmelo/pull/190">#190</a>）。<code>scripts/cache_report.py LOG</code> 读取 stream-json 日志，并按请求输出一行。分块窗口丢弃（<a href="https://github.com/localmelo/localmelo/pull/191">#191</a>）、固定前缀（自 <a href="https://github.com/localmelo/localmelo/pull/142">#142</a> 起为可选功能）和反思工具保护（<a href="https://github.com/localmelo/localmelo/pull/210">#210</a>）原为可选功能，<a href="https://github.com/localmelo/localmelo/pull/223">#223</a> 将三者都设为默认。另有一项在 chunk 和 boundary 模式下保持窗口裁剪的实验默认关闭（<a href="https://github.com/localmelo/localmelo/pull/204">#204</a>）。</li>
-          <li>缓存布局和窗口选项，由 <code>melo --developer --help</code> 显示（<a href="https://github.com/localmelo/localmelo/pull/228">#228</a>）：固定前缀开启时，<code>--cache-layout v3</code>（<code>[agent] cache_layout</code>，现为默认值；<code>v2</code> 会发送此前的请求）在尝试边界把每条反思一次性追加到窗口中，并把反思请求及其回复保留在窗口里，因此每个请求都延续前一个请求。<code>--window-messages N</code>（<code>[agent] window_messages</code>，取值 8 到 256，本地服务器上默认 64，云厂商上默认 20）设置工作窗口的消息上限。同一次运行的第一个请求之后，每个请求的 <code>prefix</code> 对象还报告 <code>fresh_chars</code> 和 <code>request_chars</code>，<code>scripts/cache_report.py</code> 会为每次运行及汇总输出 <code>reusable</code> 份额。</li>
-          <li>实验性的未编辑任务说明项提醒，默认关闭，只在 <code>melo --developer --help</code> 中显示（<a href="https://github.com/localmelo/localmelo/pull/232">#232</a>）：使用 <code>--brief-items on</code>（<code>[agent] brief_items</code>）时，<code>--brief</code> 运行会根据运行开始以来 <code>git status</code> 列出的已编辑文件，把任务说明中每个顶层编号项标记为 <code>changed</code>、<code>not yet</code> 或 <code>no file named</code>；尚未编辑的项会在每次反思请求中，以及最后一次尝试结束前两步的检查中被点名，每次点名都会记录一条 <code>brief_items</code> 通知。</li>
-          <li>终端中的交互式界面（单独的 <code>melo</code>，<code>support/cli/</code>）：实时的工具块和旋转指示、审批（写文件时显示将要做出的改动）、带补全的 <code>/</code> 命令、<code>/model</code> 和 <code>/backend</code>、<code>/approvals</code>、<code>/status</code>、<code>/mcp</code>、<code>/retry</code>、<code>/clear</code>（在清空的屏幕上开始新聊天，<a href="https://github.com/localmelo/localmelo/pull/304">#304</a>）和 <code>/browser</code>、MCP 服务器文件（<code>--mcp-config</code> 或配置文件的 <code>mcp_config</code>）、可以用 <code>melo -c</code>、<code>melo -r</code>、<code>/sessions</code> 和 <code>/resume</code> 恢复的已保存对话，用 <code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 命名、撤销、查看和复制对话，以及为整段对话选择推理和召回模式（<code>--reasoning</code>、<code>--reasoning-field</code>、<code>--replay-turns</code>、<code>--note-writer</code>、<code>--retriever</code>、<code>--recall-*</code> 和 <code>--retrieval-extra-body</code>，来自旗标或已保存的默认值）、<code>/attach</code>、<code>/attachments</code> 和 <code>/detach N|all</code>（把工作区文本文件暂存到下一条消息，最多 8 个、每个 256 KiB、合计 512 KiB；轮次保存带版本的快照，<code>/retry</code> 复用它），以及简单的对话循环（<code>melo ""</code>）。</li>
-          <li>交互式界面中，<code>! 命令</code> 在用户的 shell（<code>$SHELL</code>，否则为 <code>/bin/sh</code>）中、在工作区里运行，并拥有自己的终端。它不是沙箱，输出不会发送给模型，除非用户用 <code>/attach !</code> 附加（<a href="https://github.com/localmelo/localmelo/pull/180">#180</a>）。<code>/status all</code>，以及开发者模式下的 <code>/status</code>，显示用量块：上一次请求和整个会话的缓存命中比例、上下文占用、当前或上一次运行的步骤，以及有任务库时的任务计数（<a href="https://github.com/localmelo/localmelo/pull/194">#194</a>）。</li>
-          <li><code>/status</code> 先给出答案（<a href="https://github.com/localmelo/localmelo/pull/250">#250</a>）：五行，即模型及其服务器（后面是 <code>✓ answers</code> 或 <code>✗ does not answer</code> 和该怎么做）、文件夹、会话、用文字说明的审批方式，以及上下文占用。<code>/status all</code>，以及开发者模式下的 <code>/status</code>，输出所有行（围栏、工具、带窗口及其原因的记忆、限制、用量、文件和版本），其他任何参数都会被拒绝。<code>/help</code> 分三组列出八个常用命令，<code>/help all</code> 和开发者模式列出所有命令和按键，<code>/help NAME</code> 说明一个命令，<code>/</code> 菜单从同样这八个开始，只显示命令名，80 列下没有被截断的说明。<code>melo config keys</code> 和 <code>melo config get</code> 对未设置的 <code>agent.window_messages</code> 会显示它实际采用的窗口，<code>64 (local server)</code> 或 <code>20 (cloud)</code>。</li>
-          <li>模型选择器（<a href="https://github.com/localmelo/localmelo/pull/247">#247</a>）：单独输入 <code>/model</code> 会在输入框下面打开一个列表（输入文字过滤，上下键移动，Enter 切换并保存，Esc 保留当前模型；<code>✓</code> 标出当前模型，<code>(loaded)</code> 标出服务器报告已在内存中的模型；嵌入和重排模型不在列表中），<code>/model NAME</code> 和 <code>/model N</code> 的用法不变，<code>/sessions</code>、<code>/model</code> 和终端上首次运行的模型问题共用一个列表组件（<code>support/cli/picker.py</code>）。提供多个聊天模型且没有任何模型被确认已加载时，不会高亮任何一项，Enter 也不起作用，直到按键移到某一行，Esc 会取消设置；回答通过管道传入时，带编号的问题不变。</li>
-          <li>交互式界面的状态栏（<a href="https://github.com/localmelo/localmelo/pull/293">#293</a>）分成三个位置固定的区，之间有一条分隔线：用量、聊天旁边的工作，以及这次运行（没有轮次在运行时是聊天的标题，而且只在有空间时显示）。模型和文件夹在欢迎页和 <code>/status</code> 里，不在状态栏里。在本地服务器上，用量是发送和接收的 token、带刻度条的上下文（从 70% 起琥珀色，从 90% 起红色）、上一次请求的缓存命中比例（两次请求都报告之后是会话的平均值）和空闲时间。在云端 API 上，它是这次会话的费用（按 <code>[pricing.&lt;model&gt;]</code> 里的价格计算；不自带任何价格，没有价格的模型改为显示 token），以及上一次响应通过 <code>x-ratelimit-*</code> 或 <code>anthropic-ratelimit-*</code> 响应头报告的最紧的速率限制。网关里有未完成的任务时，工作区按状态统计它们并给出最高优先级，Ctrl+T 列出它们和网关允许的操作（暂停、恢复、提高、降低、停止）；只要存在网关令牌，终端每 5 秒请求一次任务列表。一轮运行时，运行区简要给出步骤（<code>2/~4 · ctrl+o steps</code>），Ctrl+O 列出它们（<a href="https://github.com/localmelo/localmelo/pull/273">#273</a>）。没有数据的片段会被省略，窄终端按固定顺序省略片段，状态栏从不换行。状态栏只使用已收到的事件，自己不发送请求；<code>[cli] status_line = "off"</code> 只保留运行区和上一次请求的上下文（<a href="https://github.com/localmelo/localmelo/pull/201">#201</a>）。控制台的状态行保留自己的措辞：默认模式用文字，开发者模式用紧凑写法（<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>、<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>）。</li>
-          <li>帮助分为默认模式和开发者模式：<code>melo -h</code> 是 23 行：用户选项，以及三个日常命令，每个一行说明（<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>）；<code>melo -h all</code>、<code>melo --developer --help</code>，或配置文件中的 <code>[ui] mode = "developer"</code>，按层级显示全部选项、命令和设置（<code>support/option_tiers.py</code>）。网页控制台用设置对话框末尾的 Developer mode 开关保存同一个模式；开发者模式下，该对话框会变成带 Developer 标签页的连接设置，标签页以只读方式列出高级和实验性选项，详情抽屉还会增加事件标签页（<a href="https://github.com/localmelo/localmelo/pull/199">#199</a>、<a href="https://github.com/localmelo/localmelo/pull/209">#209</a>、<a href="https://github.com/localmelo/localmelo/pull/242">#242</a>、<a href="https://github.com/localmelo/localmelo/pull/246">#246</a>）。</li>
-          <li>短命令（<a href="https://github.com/localmelo/localmelo/pull/242">#242</a>）：七个命令词（<code>setup</code>、<code>config</code>、<code>serve</code>、<code>console</code>、<code>task</code>、<code>worker</code> 和 <code>import</code>）只在作为第一个参数且完全匹配时才算；常用选项有了字母和单词短名（<code>-m</code>/<code>--model</code>、<code>-u</code>/<code>--url</code>、<code>-s</code>/<code>--steps</code>、<code>-o</code>/<code>--output</code>、<code>-w</code>、<code>-t</code>、<code>-y</code>、<code>-V</code>）；<code>-X KEY=VALUE</code>（<code>--set</code>）只为这一次运行修改任何 <code>config.toml</code> 键，不写入文件，而 <code>melo config</code> 可以列出、读取和保存键。选项之后出现命令词，如 <code>melo -u URL serve</code>，会被拒绝，并告诉你应该放在哪里。所有旧写法仍然可用，解析结果相同。</li>
-          <li>终端中的上手体验（<a href="https://github.com/localmelo/localmelo/pull/240">#240</a>）：首次运行先说明 melo 需要什么，即本机上的一个模型服务器，并把聊天模型列在嵌入和重排模型之前，后两者会加标签，也绝不作为默认值；默认的欢迎页只有三行（版本和模型、文件夹、可以先试的一句话），开发者模式仍保留方框；失败的运行以一行平实的话和下一步结束，下一步用默认颜色显示，例如 <code>Could not reach the model server at URL.</code> 加 <code>Start it, then /retry.</code>，末尾有 <code>Stopped after 5.0s</code> 页脚。直接运行的 stdout、stderr 和退出码，以及 JSON 输出，都不变。</li>
-          <li>首次设置会询问本地模型服务器哪些模型已加载（oMLX 的 <code>/models/status</code> 和 Ollama 的 <code>/api/ps</code>，各自最多等待一秒），并把第一个已加载的聊天模型设为默认；<code>melo serve -p 0</code> 会绑定一个空闲的回环端口，并打印所选的地址（<a href="https://github.com/localmelo/localmelo/pull/219">#219</a>），它的启动行也会立即到达管道或文件（<a href="https://github.com/localmelo/localmelo/pull/236">#236</a>）。</li>
-          <li>模型选择没有盲目的默认值（<a href="https://github.com/localmelo/localmelo/pull/231">#231</a>）：本地服务器提供多个聊天模型，且没有任何模型被确认已加载时，首次设置、<code>melo setup</code> 和 <code>/backend</code> 会要求输入编号或模型 ID，不给出默认值；有已加载的模型时，它们会被标出，其中第一个是默认值。在终端中，<code>melo -u URL</code> 不带 <code>-m</code> 时，使用唯一已加载的模型；否则以退出码 2 结束，并列出模型。不带 <code>-m</code> 的直接运行用同样的方式选择：它先列出服务器的模型；提供了多个模型且不知道哪个已加载时，在第一个请求之前就以退出码 2 结束并给出列表（<code>--brief</code> 运行报告为 <code>startup_error</code> 结果）；无法列出模型的服务器得到模型 <code>default</code>，并在 stderr 收到一行警告（<a href="https://github.com/localmelo/localmelo/pull/236">#236</a>）。</li>
-          <li>产品会说出模型服务器的名字（<a href="https://github.com/localmelo/localmelo/pull/237">#237</a>）：设置菜单和网页设置显示 “oMLX or vLLM (OpenAI-compatible, local)”；当服务器的模型列表把 oMLX 标为所有者时，横幅、<code>/status</code>、<code>/model</code> 的消息、控制台的模型行和错误文字都说 oMLX，否则说 “OpenAI-compatible server”。首次设置会把这样的服务器保存为 <code>chat_backend = "omlx"</code>，它作为 <code>vllm</code> 后端加载；oMLX 以别名列出的模型，在两个名字下都会标为 <code>(loaded)</code>。只有标签、提示、错误文字和保存的写法变了：请求完全相同。</li>
-          <li>五个内置工具（其中 <code>python_exec</code> 在所有模式下都在子进程中运行；交互式界面拿到全部五个，网关会话和控制台会话拿到四个，没有 <code>shell_exec</code>；直接运行和 Python API 默认的 <code>python</code> 模式拿到三个，没有 <code>shell_exec</code> 和 <code>list_files</code>，<a href="https://github.com/localmelo/localmelo/pull/259">#259</a>）；开启 <code>[browser] driver</code> 时，终端聊天和控制台聊天还会得到八个只读的浏览工具（<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>）；以及本地 MCP 服务器提供的工具（在直接模式、Python API 和交互式界面中）。</li>
-          <li>工具子进程和 MCP 服务器只拿到最小环境（<code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、<code>LC_*</code>、<code>TMPDIR</code>），再加上 <code>AgentOptions(tool_env)</code> 或服务器条目里的 <code>env</code>；配置文件支持的直接运行、界面和控制台会话还会解析 <code>[agent] tool_env</code> 里的名称，其他变量都不继承。</li>
-          <li>每一步提供内置工具、模型在这次对话中已经调用过的工具，以及与任务最接近的三个匹配（默认的 <code>retrieve</code> 模式），其后还有提供方分组的每一个工具（例如浏览工具）；<code>all</code> 在每一步提供所有工具。</li>
-          <li>Python API（实验性）：运行事件、停止运行、工具调用的审批策略、限制文件工具的工作区根目录，以及可以在多次运行之间延续的对话。</li>
-          <li>会话（实验性）：保存在 SQLite 中的对话，每一轮只结束一次，重启后仍在，并能在新的智能体上恢复（<code>support/sessions/</code>）；runner 可以让每一轮报告进度事件。交互式界面把它的每一轮保存在会话中，网页控制台在网关自己的会话库中运行并读取会话；<code>/v1</code> HTTP API 目前还不使用会话。在智能体报告结果之前被取消的轮次，会在保存的历史中保留其状态、原因和取消理由（<a href="https://github.com/localmelo/localmelo/pull/168">#168</a>）。直接运行默认记录在 CLI 自己的存储中（<a href="https://github.com/localmelo/localmelo/pull/217">#217</a>），新主目录上并发的首次运行也不再丢失记录（<a href="https://github.com/localmelo/localmelo/pull/222">#222</a>）。</li>
-          <li>网关：HTTP API、<code>/api</code> 下控制台的 API v2（health、会话、轮次、事件流、blob、提交查询、工具、授权、记忆和运行记录，以及创建会话并开始、重试、停止和审批其轮次的写入接口），两者都需要私有 Bearer 令牌或由一次性链接换来的浏览器会话 cookie（拒绝非回环监听，并在读取请求体之前检查 Host、Origin 和 fetch-metadata），只在空闲时响应关闭请求的会话，以及 <code>/</code> 上控制台的实时页面（会话列表、对话的轮次和通过 SSE 保存的事件、每个工具调用一张工作卡片、实时进度行、Stop、输入心跳，以及开发者模式下的优先级标签；页面只访问 <code>/api</code>，使用配置的模型）。网页控制台的聊天和任务页面显示一行状态，数据来自 <code>GET /api/sessions/{id}/status</code>，包括缓存命中比例和空闲时间、上下文占用、步骤和任务计数，与终端显示相同的数字（<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>）。页面的对话和控制台轮次经过调度器的策略（默认 <code>off</code>）；开发者模式下标题栏显示 GPU 锁和电池，默认模式下聊天因另一个应用持有 GPU 锁而等待时会显示一条横幅。旧的 <code>/v1/playground</code> 路由默认关闭，可用 <code>melo serve --playground</code> 显式启用，仍受认证保护，并使用已保存的本地后端和模型。已认证的端点探测允许手动输入 HTTP/HTTPS 地址但不跟随重定向；显式关闭或删除忙碌会话返回 409。网关还支持 macOS 后台服务，以及一个 arm64 开发应用：它把控制台包进原生窗口和菜单栏宿主，用系统挑选的空闲端口启动自己的网关，并在发出任何登录码前检查每次启动的标识符（<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>）。一条命令 <code>uv run python scripts/build_macos_app.py --install</code> 就能构建并安装它，做临时签名（ad hoc）并放进 <code>~/Applications</code>；它不需要 Apple 开发者账号，只留在构建它的这台 Mac 上，所以它是原型，不是经过公证的发行版或 cask。构建会把 IDLE、tkinter、turtle、pip、setuptools、ensurepip 和 2to3 从内置 Python 中去掉（36 MB，<a href="https://github.com/localmelo/localmelo/pull/251">#251</a>），所以在它上面运行的代码，例如应用的 <code>melo</code> 下的 <code>python_exec</code>，不能导入它们。构建需要 Swift 编译器：正式版 Xcode，否则是 Command Line Tools（<a href="https://github.com/localmelo/localmelo/pull/254">#254</a>）。控制台加载之前，它的窗口显示启动画面；网关无法启动或中途停止时，原因连同 Try Again、Open Log 和 Quit 会显示在同一个窗口里（<a href="https://github.com/localmelo/localmelo/pull/238">#238</a>）；只有聊天或任务会停止、或有东西在等待审批时，退出才会询问（<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>）。</li>
-          <li>控制台实时跟随每一种会话：聊天的轮次、worker 运行（<a href="https://github.com/localmelo/localmelo/pull/221">#221</a>）、带有 Live 部分的任务卡片（<a href="https://github.com/localmelo/localmelo/pull/224">#224</a>），以及只读并已脱敏的终端对话（<a href="https://github.com/localmelo/localmelo/pull/226">#226</a>）。头部的运行数量，以及 macOS 应用的菜单栏数量和退出对话框，会列出聊天、任务、运行和终端对话中当前正在运行的内容（<a href="https://github.com/localmelo/localmelo/pull/227">#227</a>）。菜单栏图标是彩色的 localmelo 标志，旁边显示运行数量，有聊天或任务在等待工具审批时会加一个圆点，并能从它的菜单打开那个审批；<code>GET /api/health</code> 在 <code>status.waiting</code> 中列出正在等待的聊天和任务；应用的图标是 Melo，取自 README 里的徽章（<a href="https://github.com/localmelo/localmelo/pull/241">#241</a>、<a href="https://github.com/localmelo/localmelo/pull/263">#263</a>）。</li>
-          <li>控制台的首次运行（<a href="https://github.com/localmelo/localmelo/pull/243">#243</a>）：在没有模型能回答（未配置模型，或已配置的服务器没有响应）且没有打开的聊天时，欢迎页显示一张设置卡片，取代 <a href="https://github.com/localmelo/localmelo/pull/230">#230</a> 限定了出现条件的 “Connect a model” 按钮。卡片向 <code>GET /api/setup/detect</code> 询问这台 Mac 上的服务器，并像终端那样称呼它（oMLX、Ollama 或模型服务器）；“Use this model” 会保存该服务器、测试它，并让欢迎页就绪，无需打开设置；有多个聊天模型且没有任何模型被确认已加载时，它会等你选择。需要密钥的服务器有自己的文字和 “Check again”；没有服务器在运行时，卡片会打印这台电脑上的命令，带 Copy commands 按钮，并每三秒再找一次（<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>）。审批卡片对每个工具提一个问题，如 “Replace notes.txt?”，上方是这次写入所替换内容的带行号 diff（<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>），按钮是 “Allow once”、“Allow for this chat”（任务视图中是 “Allow for this task”）和 “Deny”，Deny 可以告诉 melo 改做什么；高影响的调用有自己的卡片，没有 “Allow for this chat”（见下面的操作审查）。没能正常结束的运行，以 ✗ 或 ⚠、错误的第一行和一条提示开头，并给出一个填充样式的第一步，如 “Open model settings”、“Continue” 或 “Try again”。控制台里没有小于 12px 的文字。终端中的 <code>/memory</code> 和 <code>/status all</code>，以及控制台的详情抽屉，显示会话自己的工作窗口上限 <code>window_messages</code>（<a href="https://github.com/localmelo/localmelo/pull/230">#230</a>）。</li>
-          <li>控制台的默认模式和开发者模式（<a href="https://github.com/localmelo/localmelo/pull/246">#246</a>）：页面打开时从 <code>GET /api/settings</code> 读取一次保存的 <code>[ui] mode</code>，除 <code>developer</code> 之外都是默认模式。默认模式隐藏聊天的级别标签和 Details、GPU 锁与电池一行、状态行里的缓存、阶段和队列片段、任务里的优先级，以及设置对话框的文件、修订号、Test、Theme 和 Developer 标签页；只有出现运行、终端对话或任务之后，侧边栏才显示 Workers 和 Tasks。标题栏的标签写出正在回答的模型，或写 <code>Model offline</code>、<code>No model</code>；Settings 是一个包含 Model、Appearance 和 Developer mode 开关的对话框；级别标签是一个支持方向键、Home 和 End 的菜单按钮。开发者模式改变的是显示什么，而不是运行什么。</li>
-          <li>第一个任务的文件夹（<a href="https://github.com/localmelo/localmelo/pull/248">#248</a>）：新聊天把 melo 工作的文件夹显示为输入框里的小标签（<code>In localmelo-workspace</code>），它的面板提供默认文件夹（<code>[gateway] workspace</code>，否则为 <code>~/localmelo-workspace</code>）、最近聊天用过的最多四个文件夹和 “Choose a folder…”；所选文件夹随第一条消息作为 <code>POST /api/sessions</code> 里的 <code>workspace</code> 发出，聊天的文件夹显示在它的标题栏里，三个起步选项会把文字填进消息框。浏览器里 “Choose a folder…” 会打开一个路径输入框；macOS 应用通过一个消息处理器 <code>localmeloFolder</code> 使用系统的文件夹面板和 Finder，它只接受来自网关自己页面的消息：<code>choose</code> 返回面板返回的路径，或 null，<code>reveal</code> 只在文件夹是某个聊天自己的文件夹，或是面板在本次运行期间返回过的文件夹时，才在 Finder 中显示它。聊天因另一个应用持有 GPU 锁而等待时，工作组、实时行、工具卡片、输入框，以及开发者模式下的标题栏标签，都写 “Waiting for this Mac's GPU”。</li>
-          <li>控制台和应用里的平实语言（<a href="https://github.com/localmelo/localmelo/pull/257">#257</a>）：模型服务器无法连接时，失败轮次的卡片给出一条点出地址的提示（<code>Is your model server still running at 127.0.0.1:18351? Start it, then try again.</code>），实心按钮是 “Try again”（用过工具时是 “Continue”），“Change the server address” 是一个链接；应用说 <code>Its background service quit unexpectedly.</code>，并把信号或退出状态写进 <code>gateway.log</code>。默认模式下，设置对话框写 “Model server” 和 “Server address”，运行中的聊天写 “Working…”，侧边栏显示聊天的文件夹，等待审批时标题前有一个圆点；开发者模式保留技术用语。页面在根元素上写 <code>data-mode</code> 和 <code>data-locked</code>，应用读取它们，只在连续四次登录失败之后、在登录页上，或在开发者模式下才提供 “Sign In Again”。在 700 px 或更窄的窗口和触摸屏上，页头会去掉只写模型名的模型标签，键盘提示隐藏，失败轮次的下一步是至少 44 px 高的按钮。</li>
-          <li>控制台里文件写入的审批（<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>）：覆盖已有文件的待审批 <code>file_write</code>，在 <code>GET /api/sessions/{id}</code> 和任务路由里带着 <code>target.diff</code>（<code>added</code>、<code>removed</code>、由 <code>kind</code>、<code>line</code> 和 <code>text</code> 组成的 <code>rows</code>，以及 <code>note</code>），由 <code>support/sessions/edits.py</code> 用终端面板的 diff 生成（两行上下文，两处改动之间有一行 <code>…</code>）。卡片问 “Replace notes.txt?”，给出改动的计数（“5 lines removed, 1 added”），显示前 20 行，其余用 “Show all N lines” 展开，每一行都用 − 或 + 标明，并像保存的事件那样隐去密钥。无法比较时（文件不是文本、无法读取、不是普通文件或超过 200 KB；新文本超过 200,000 个字符；改动超过 1,000 行；或其中一个文本里有私钥），它用一行话说明原因，并保留带文件大小的旧标题。diff 要么完整要么没有；新文件或没有文本的调用不带 diff。</li>
-          <li>回到一个聊天和一轮的结尾（<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>）：聊天是 melo 运行所在文件夹里最新的一个时，退出行是 <code>Continue it with: melo -c</code>，否则是 <code>Resume it with: melo -r ID</code>；恢复的聊天，其回顾把每条消息和每个答案只标一次，并把答案的 Markdown 显示成纯文本，最多四行；终端在原来写 session 的地方改称聊天。用 <code>file_write</code> 写过文件的一轮，在页脚下以 <code>Changed hello.py (+1), README.md (+3 −1)</code> 结束（<code>support/cli/render.py</code>）：整轮增加和删除的行数，来自每次调用的结果和审批时的快照，最多三个文件名，然后是 <code>and N more</code>；被拒绝、被否决或失败的写入，以及 shell 命令改动的文件都不列出，没有快照的文件只写名字、不带计数。开发者模式下，计划行每一轮都显示。</li>
-          <li>上手第二轮（<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>）：在开发者模式之外，没有保存配置时 <code>melo serve</code> 会就它找到的服务器提首次运行的那个问题 <code>Use this model server?</code>，启动行写成 <code>Model: stub-model on MLC-LLM</code>；<code>melo serve --reconfigure</code> 和开发者模式保留八选一菜单。没有保存配置、常用端口（8000、8400、11434 和 30000，或 <code>LOCALMELO_DETECT_URLS</code>）上也没有服务器应答时，首次运行、<code>melo serve</code> 和 <code>melo setup</code> 会从同一个地方 <code>discovery.how_to_start</code> 取出这台电脑上的命令并打印（Mac 上是 oMLX，其他系统是 Ollama；一个测试会把它们与模型服务器指南逐行比对），然后询问 <code>No model server found. What now?</code>，选项有 <code>Check again</code>、<code>Enter an address</code> 和 <code>Quit</code>（管道输入时为 <code>Press Enter to check again, type an address, or q to quit:</code>）。<code>GET /api/setup/detect</code> 在每个应答里用 <code>start</code> 携带它们。服务器上没有嵌入模型时，首次运行写 <code>Long-term memory is off; melo setup turns it on.</code>，在开发者模式之外，第一个答案里没有 <code>partial reply (…)</code> 这一行、没有推理格式的提示，审批标题里也没有权限级别。</li>
-          <li>控制台自己打开（<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>）：<code>melo serve</code> 的网关开始监听，且 stdin 和 stdout 都是这台电脑上的终端、没有设置 <code>SSH_CONNECTION</code>、<code>SSH_CLIENT</code>、<code>SSH_TTY</code> 和应用的实例变量时，控制台会用一次性链接登录并在默认浏览器中打开（<code>support/console_link.py</code>），<code>Web console: opened in your browser (melo console opens it again).</code> 取代 <code>Web UI:</code> 和 <code>Sign in:</code> 两行。<code>melo console</code> 用同样的方式打开它，没有浏览器能启动时输出链接，端口上没有监听者时以退出码 1 结束，没有终端时以退出码 2 结束。不带链接打开的页面写着 <code>Sign in to localmelo</code>。</li>
-          <li>每个问题都是一个列表（<a href="https://github.com/localmelo/localmelo/pull/266">#266</a>）：在终端上（stdin 和 stdout 都是终端，且 <code>TERM</code> 不是 <code>dumb</code>），答案固定的问题是一个 <code>ChoicePicker</code>（<code>support/cli/picker.py</code>），由标题和一行行文字组成，没有筛选框。方向键和 1 到 9 的数字键选择，回车确认，Esc 回答按键行末尾写明的那一行（或取消），Ctrl+C 和 Ctrl+D 结束设置。首次运行和向导把它画在光标下方，回答后擦除；<code>/attach !</code> 在界面自己的列表里打开它，<code>/model</code> 也在那里打开。推荐的一行默认选中，检查失败之后或附加输出的问题则默认选中 <code>Cancel setup</code> 或 <code>Don't attach it</code>。没有终端时，每个问题仍读取它一直读取的键入答案（<code>Use it? [Y/n]:</code>、<code>[r]etry, [s]ave anyway, [N]o [N]:</code>、后端的编号），文本问题仍是文本，直接运行从不提问。</li>
-          <li>终端里的颜色（<a href="https://github.com/localmelo/localmelo/pull/268">#268</a>、<a href="https://github.com/localmelo/localmelo/pull/273">#273</a>、<a href="https://github.com/localmelo/localmelo/pull/289">#289</a>）：每种样式都是同一张表里的一个角色（强调、答案、标题、调暗、成功、警告、错误、各类工具、路径、代码名称），按终端具备的颜色来画：设置了 <code>NO_COLOR</code> 或 <code>TERM=dumb</code> 时没有颜色，其次是 <code>[cli] colors</code>，再其次是 <code>COLORTERM=truecolor</code> 对应的 24 位、<code>TERM</code> 以 <code>256color</code> 结尾对应的 256 色，否则是 16 种命名颜色（<code>support/cli/termcolors.py</code>）。交互式界面会向终端询问背景（OSC 11 和 10，最多 100 毫秒，且标准输入和输出都是终端时才问），顺序在 <code>[cli] background</code> 之后、<code>COLORFGBG</code> 之前。工具行依次是标记、种类、名称和预览，按工具的权限级别区分（<code>→</code> 读取、<code>±</code> 写入、<code>$</code> 运行、<code>@</code> 网络）；退出码非零的命令显示红色的 <code>✗</code> 和 <code>exit N</code>；答案的标记、标题和项目符号是 Melo 的橙色；只有在文字保持 4.5:1 对比度的地方才铺底。审批面板、每个列表和实时行用同样的角色，输入框下面的命令列表没有背景。在 256 色及以上、80 列及以上的 Unicode 终端里，欢迎页旁边站着 Melo 的头（<code>support/cli/mark.py</code>）。直接模式、worker、JSON 和 stream-json 输出、事件和退出码逐字节相同。</li>
-          <li>操作审查（<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>、<a href="https://github.com/localmelo/localmelo/pull/294">#294</a>）：检查器在审批策略决定之前，先审查每一次 <code>shell_exec</code>、<code>python_exec</code> 和 <code>file_write</code> 调用（<code>melo/checker/review/</code>、<code>Checker.review_action</code>），固定的规则拆分 shell 命令或解析 Python 代码，什么都不运行。一次调用的结果是常规、高影响（安装、环境、下载、在工作区之外写入或删除、延后执行、凭据、系统设置、网络服务、把文件发出去、更改 localmelo 自己、运行时生成的代码）或未定。会话放行只覆盖常规调用（<code>melo/contracts/review.py</code> 里的 <code>covered_by_grant</code>）：高影响或未定的调用每次都询问，高影响的调用不提供整个聊天的放行，为聊天放行它只放行这一次。终端的 <code>auto</code> 模式运行常规调用，其余的先询问；会更改 localmelo 自己的调用不经询问直接拒绝。控制台和应用在自己的卡片上显示高影响的调用，带 “Why melo asks” 列表、开启这一轮的消息，以及只有 Allow once 和 Deny 两个回答；终端面板有同样的标题和理由，并停在 No 上。<code>pending_approvals</code> 的每一项都带有 <code>review</code>（<code>verdict</code>、<code>title</code>、<code>reasons</code>；其他工具为 <code>null</code>）。直接运行、<code>--brief</code> 运行和 <code>--yolo</code> 运行不审查。</li>
-          <li>浏览，第一部分（<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>）：设置 <code>[browser] driver = "safari-automation"</code>（默认 <code>off</code>；<code>/browser on</code> 或 <code>-X browser.driver=safari-automation</code>）后，终端聊天和控制台得到八个只读工具：<code>browser_open</code>、<code>browser_read</code>、<code>browser_find</code>、<code>browser_follow</code>、<code>browser_back</code>、<code>browser_tabs</code>、<code>browser_wait</code> 和 <code>browser_screenshot</code>（<code>support/browser/provider.py</code>），通过 Safari 自带的 <code>safaridriver --mcp</code> 在它的自动化窗口里工作，第一次调用时启动。Safari 里需要打开一次 “Allow remote automation”。每个网站在一个聊天里只问一次（“Open a website?”；唯一持续有效的回答只对这个聊天有效），只有 <code>http</code> 和 <code>https</code> 能打开，网页作为一个带标记的块交给模型并附一条说明它是数据，密码、一次性验证码和银行卡字段从不显示它们的值。这里没有点击、输入、登录或发布；直接运行、worker 和保存的任务从不得到这些工具。</li>
-          <li>工具图片（<a href="https://github.com/localmelo/localmelo/pull/295">#295</a>）：<code>[agent] tool_images</code>（默认 <code>auto</code>，还有 <code>on</code>、<code>off</code>；<code>-X agent.tool_images=on</code>）决定工具返回的图片是否以 <code>image_url</code> 数据的形式，放在工具结果之后的一条消息里送到模型（Ollama：<code>images</code> 字段）。<code>auto</code> 只在服务器说明模型能读图时发送（oMLX 的 <code>/v1/models/status</code> 给出 <code>vlm</code>，Ollama 的 <code>/api/show</code> 列出 <code>vision</code>）；其他服务器按关闭处理。像素放在内存存储里，历史和保存的聊天只留引用；最新的 <code>tool_images_keep</code>（3）张保留像素，最旧的 <code>tool_images_retire</code>（2）张一起丢掉像素；宽于 1,280 像素的图片在 macOS 上会先缩小一次，每张发送的图片计入提示词上限 4,500 个字符。</li>
-          <li>受限的写入（<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>、<a href="https://github.com/localmelo/localmelo/pull/284">#284</a>）：在 macOS 上，worker 运行（<code>--brief</code>、<code>melo worker</code>）和保存的任务，会让 <code>shell_exec</code> 和 <code>python_exec</code> 的命令（包括 brief 的 <code>Check:</code> 命令）在 melo 生成的 <code>sandbox-exec</code> 配置下启动（<code>melo/executor/sandbox.py</code>）：无论命令做什么，工作区之外的文件写入都会被拒绝，读取和网络不受限制。允许列表是工作区、它里面的 <code>.melo-tmp</code> 临时文件夹、用户的临时文件夹、uv、black 和 npm 的缓存、几个 <code>/dev</code> 设备，以及关联的 git 工作树自己的 git 目录和对象。被拒绝的写入会在工具文本前加一行，结果里的 <code>confinement</code> 统计它们。<code>[agent] confine_writes</code>（默认 <code>true</code>）可以关掉它，开发者设置 <code>[agent] confine_direct_runs</code>（默认 <code>false</code>）让普通的直接运行也受到限制。无法被限制的运行会在第一条命令之前停下；不在 macOS 上时运行继续，并说明这一点。</li>
-          <li>聊天如何介绍自己（<a href="https://github.com/localmelo/localmelo/pull/287">#287</a>、<a href="https://github.com/localmelo/localmelo/pull/305">#305</a>、<a href="https://github.com/localmelo/localmelo/pull/288">#288</a>）：终端聊天、控制台和应用在每次请求的基础系统文本之后加一段话（<code>support/sessions/identity.py</code>、<code>AgentOptions.identity</code>），在构建 Agent 时根据它的后端和记忆设置生成。它说明助手是 localmelo 里的 melo，说出模型和它的服务器（本地的还写上 “on this computer”），说出这个聊天记得什么（默认是这个聊天里最近的消息，不记得其他聊天的内容；有可以召回的持久化记忆时，还记得 localmelo 保存在这台电脑上的内容，按笔记的种类说明；自己不做笔记，文件夹里的文件不算记忆），并要求用用户书写的语言和文字回答。直接运行和 worker 不会得到这段话。没有工具调用的规划回复如果只是没写完的思考（思考块没有结束、没有答案但统计了推理 token，或流式内容重复了推理），绝不会成为答案：它被保留为思考，模型再被问一次，第二次仍这样就以 <code>failed</code> 结束这次运行，并给出 “melo did not finish an answer”（<code>melo/schema.py</code> 里的 <code>UNFINISHED_ANSWER_ERROR</code>）。</li>
-          <li>一轮生成的图片（<a href="https://github.com/localmelo/localmelo/pull/291">#291</a>）：控制台的一轮结束后，网关在它前后各看一次聊天的文件夹（只看图片后缀；不看隐藏文件夹、<code>node_modules</code>、<code>__pycache__</code> 或链接；最多三层深，最多 4,000 个条目），把新建或修改的图片，连同回答里在文件夹内提到的图片路径，存成一个 <code>turn.pictures</code> 事件（最多 24 张）。<code>GET /api/sessions/{id}/pictures?path=</code> 只在文件的真实路径在这个聊天的文件夹内、名称和开头几个字节表明它是图片，并且是不超过 20 MB 的普通文件时才提供它；每个响应都带 <code>nosniff</code>。控制台和应用在回答下面显示一排预览；直接运行和终端不会去找。</li>
-          <li>秋田犬 Melo（<a href="https://github.com/localmelo/localmelo/pull/271">#271</a>、<a href="https://github.com/localmelo/localmelo/pull/272">#272</a>、<a href="https://github.com/localmelo/localmelo/pull/275">#275</a>、<a href="https://github.com/localmelo/localmelo/pull/292">#292</a>、<a href="https://github.com/localmelo/localmelo/pull/296">#296</a>、<a href="https://github.com/localmelo/localmelo/pull/306">#306</a>）：<code>GET /api/health</code> 带有 <code>status.recent</code>，即最新结束的聊天轮次、任务、运行或终端轮次，以及它的结果（<code>done</code>、<code>failed</code> 或 <code>stopped</code>）和结束了多久。macOS 应用按固定顺序（已停止、等待、工作、刚完成、慵懒休息，安静一分钟后是睡姿）把健康检查回复变成宠物的神情；窗口收起时，宠物趴在主屏幕的右下角，在其他窗口之上、每个空间里都在，也不在 Dock 里，点击、拖动、Hide Melo 和 Show Melo 的作用见应用指南。同样的图片是应用第一个窗口和控制台的画像，控制台里每条回复的图标是 Melo 的脸，状态是最新一轮的状态。眨眼、摇尾巴、睡着时的 “z” 和抖耳朵，在应用里是 Core Animation，在控制台里是 CSS 关键帧，都不用计时器；在“减弱动态效果”下、低电量模式下、Mac 发热时、被隐藏或遮住时以及屏幕休眠时，它们都会停下。神情变化最多等 0.4 秒的静止点，并藏在一次压缩里，所以任何在动的东西都不会被截断。</li>
-          <li>实验性的 <code>lean_output</code>（<a href="https://github.com/localmelo/localmelo/pull/255">#255</a>；<code>[agent] lean_output</code> 或 <code>-X agent.lean_output=true</code>；默认关闭）：命令行给出的任务和 <code>--brief</code> 运行，把系统提示的最后一行 <code>Think step by step. Be concise.</code> 换成三短行（工具调用之间不写文字，最终答案至多三行；使用相对路径；先读任务点名的文件），在 <code>reflection_gate = "flags"</code> 下，还会要求反思不带没有人读取的键，并且只在 <code>done</code> 或 <code>stop</code> 时给出 <code>best_effort_result</code>。compress 模式保留原来的那一行，交互式界面、<code>melo ""</code> 和网关会忽略这个选项。关闭时，每个请求都和以前一样。</li>
-          <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端；oMLX 通过 <code>vllm</code> 后端使用。</li>
-          <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite，compress 模式下长期记忆是带类型的存储，记录带有类型、来源、状态、允许写入的信号和来源信息，每条候选都有对应的决定；保存的文字会先脱敏，保存的历史记录还包括每次模型调用及其推理，默认保留 30 天；Python API 还可以忘掉一个任务或全部记忆。compress 模式下，启发式笔记还会保留明确的英文否定句以及中文的居住或取消断言；检测到相反极性的相近断言会作为冲突保留，而不是被去重。</li>
-          <li>脱敏覆盖 PEM 私钥块（OpenSSH、RSA、EC、DSA、PKCS#8、加密私钥和 PGP armor）：BEGIN 和 END 行保留，正文变为一行 <code>[redacted]</code>，适用于工具输出、保存的事件、日志和流式显示文本（<a href="https://github.com/localmelo/localmelo/pull/188">#188</a>）。</li>
-          <li>推理笔记：<code>compress</code> 和 <code>compress+replay</code> 模式会在对话窗口旁的内存笔记库中，为每条回复及其代码草稿保留一条简短的笔记，并把它们排练成该次尝试的摘要（摘要写明成功的 <code>file_write</code> 路径、最后一次检查及其结果、它的决定和最终结果；Python 检查会使用可识别的运行器和安全的目标文件名，而不是引用代码的第一行，系统也不会推测 <code>python_exec</code> 写入的文件）；compress 模式还会在起始、尝试和步骤召回这些笔记、草稿和思考片段，以及其他任务的长期记忆有效记录（<code>--retriever</code>、<code>--recall-*</code> 和 <code>recall</code> 工具）。</li>
-          <li>情景性尝试摘要只有在包含文件或检查证据时才会写入长期记忆。在显式推理模式下，召回优先使用同一任务的摘要，以 1.1 倍的分数比限制跨任务摘要，并把没有键的旧记录按跨任务处理；普通记忆不受此限制，最后一次尝试没有证据时会保留最近一次有证据的摘要。</li>
-          <li>每次反思时，<code>reflection</code> 事件记录门的三个标记、所用的门和 <code>stop_reason</code> 代码；运行继续时它为 <code>null</code>，因此被门停止的运行会说明是哪项检查停止了它（<a href="https://github.com/localmelo/localmelo/pull/187">#187</a>）。第一条没有得到反思的回复，原因记录在 <code>unreadable_reason</code> 中（<a href="https://github.com/localmelo/localmelo/pull/210">#210</a>）。</li>
-          <li>没有可读反思的反思回复，会在对解码器拒绝的 <code>{...}</code> 做一次保守修复后再读一次：没有开括号与之匹配的 <code>]</code> 或 <code>}</code>（<code>unmatched_closer</code>）、闭合符号前的逗号（<code>trailing_comma</code>）、字符串里的原始换行和制表符（<code>control_char</code>）、JSON 没有对应转义的字符前面的反斜杠，它会被写成双反斜杠（<code>invalid_escape</code>），或者被下一个键截断的字符串数组，它会在该键前面的逗号之前补上一个 <code>]</code>（<code>unclosed_array</code>）。一次修复要么删掉一个字符，要么转义一些字符，要么插入一个反斜杠或一个 <code>]</code>；其他任何内容都不会被插入或补全。需要两处修复的回复仍然无法读取，被截断的回复也一样，<code>reflection</code> 事件的 <code>repaired</code> 键会写明用了哪种修复；重试提示会引用解析器的错误（<a href="https://github.com/localmelo/localmelo/pull/239">#239</a>、<a href="https://github.com/localmelo/localmelo/pull/249">#249</a>）。</li>
-          <li><code>melo-retrieve</code>：离线比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器，也可以导出带类型的存储或其决定，并为基准测试给候选文件打分。compress 模式在循环中使用同一组检索器；<code>legacy</code> 运行不使用它们。</li>
-          <li>程序记忆：每次运行都会记录自己的步骤，完成的运行还会更新所属任务的步骤模板；开启持久化后写入 <code>procedures.db</code>。Python 调用方传入 <code>progress=True</code> 就能收到 <code>run.progress</code> 事件，目前不带百分比进度条。在终端里，<code>melo &quot;&lt;task&gt;&quot;</code> 会把它们画成 stderr 上的一行进度（<code>support/progress_line.py</code>）。<code>melo-procedures</code> 可以离线重放进度规则。</li>
-          <li>调度器的策略核心，以及离线测试它的模拟器（<code>support/scheduler/</code>），以及网关共用的门（gate）、GPU 锁读取器和电池读取器（<code>support/gateway/chat_gate.py</code>、<code>machine_monitor.py</code>）。页面的对话和控制台会话的轮次都经过它；直接运行、<code>melo ""</code> 和 <code>/v1</code> HTTP API 不经过。</li>
-          <li>调度器的任务库（网关 <code>sessions.db</code> 中的组件版本 4）：带 P0-P5 的任务、依赖、优先级事件、问题、规则、日志、空闲窗口、停放优先级和恢复来源，与任务的 <code>kind="task"</code> 会话在同一个事务中创建，以 <code>(origin, request_key)</code> 幂等，工作区解析到用户主目录或 <code>[gateway] workspace</code> 下；<code>ChatGate.register_task()</code> 给 worker 一个生命周期，被暂停的挂起 worker 会在安全点停放。<code>/api/tasks</code> 提供任务创建、查看和控制，并带有进程内 worker。网关启动时会根据持久证据核对处于运行、挂起或停放状态的任务，已证明从未启动的任务在持久栅栏后启动。版本 4 还保存休眠的每次执行捕获状态，现在每次任务启动都经过捕获门：python 和 shell 调用在子进程释放前记录进程组、组长、boot ID 和启动时间，工具提供方或任意代码调用会把捕获标记为不完整。受控 Resume API（<code>POST /api/tasks/{task_id}/resume</code>，<a href="https://github.com/localmelo/localmelo/pull/177">#177</a>）读取这些证据：存储能证明从未启动的任务会排队为首次启动；已启动的任务只有在可信的完整捕获记录覆盖整个执行、且每个已记录的进程组都能确认已经不存在时，才无需确认即可恢复；其他情况需要用户的确认令牌。无法读取或不支持的检查按未知处理，绝不当作已停止；缺少任务卡片则会阻止恢复。控制台带 Resume 和 Stop 的任务卡片已落地（<a href="https://github.com/localmelo/localmelo/pull/189">#189</a>）；截止时间和 worker 记账随后实现。</li>
-          <li>等待工具审批的任务带有 <code>pending_approvals</code>。控制台的任务视图会显示审批卡片，状态为 "Waiting for your approval"；<code>melo-task show</code> 和 <code>list</code> 打印同样的等待信息；回答通过现有的审批接口提交（<a href="https://github.com/localmelo/localmelo/pull/208">#208</a>）。</li>
-          <li>文档清单登记每个英文页面及其已有的中文对应页，一致性测试检查两者的锚点和代码示例；起始指南、概念页、指南和参考页都有中文版本；<a href="https://github.com/localmelo/localmelo/pull/202">#202</a> 和 <a href="https://github.com/localmelo/localmelo/pull/203">#203</a> 新增了最后六个参考页。</li>
-        </ul>
-        <p>接下来的计划见<a href="./updates.html#roadmap">路线图</a>。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">部分</th><th scope="col">你能得到什么</th><th scope="col">状态</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>终端</td><td>对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>控制台和 App</td><td>实时对话、对话旁边的面板、Tasks 和 Workers 视图</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>跨对话记忆</td><td>笔记、所有对话的索引、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>浏览</td><td>在 Safari 里读网页、跟随链接；接下来是在网页上操作</td><td><span class="chip building">开发中</span></td></tr>
+              <tr><td>调度器和 worker</td><td>任务队列、优先级、worker、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
+              <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>
+              <tr><td>主对话和旁支对话</td><td>一个了解你、把工作交给任务的对话</td><td><span class="chip building">开发中</span></td></tr>
+              <tr><td>空闲时学习</td><td>离线回顾过去的工作</td><td>计划中</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="more-link">接下来的计划见<a href="./updates.html#roadmap">路线图</a>；计划中的记忆设计见<a href="./memory-design.html">记忆设计</a>页面。</p>
       </section>
     </article>
   </main>
@@ -317,20 +375,35 @@
     (() => {
       const SVG_NS = "http://www.w3.org/2000/svg";
 
-      // Connectors of the diagram. fs/ts: the side of each end; ff/tf: where
-      // along that side (0 to 1, default 0.5); dy: label offset in pixels.
-      const CONNS = [
-        { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "一个任务" },
-        { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "会话" },
-        { from: "n-mcp", fs: "right", to: "n-executor", ts: "left", label: "工具" },
-        { from: "n-agent", fs: "bottom", ff: 0.2, to: "n-executor", ts: "top", bidi: true, label: "工具调用", dy: 40 },
-        { from: "n-agent", fs: "bottom", ff: 0.8, to: "n-memory", ts: "top", bidi: true, label: "上下文", dy: 40 },
-        { from: "n-checker", fs: "top", to: "n-agent", ts: "bottom", type: "fail-line", mk: "arr-r", label: "检查失败：\n运行以 failed 结束" },
-        { from: "n-config", fs: "left", to: "n-agent", ts: "right", tf: 0.3, label: "配置文件" },
-        { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "对话" },
-        { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "嵌入" },
-        { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "创建" }
-      ];
+      // Connectors of each diagram, by its svg. fs/ts: the side of each end; ff/tf: where
+      // along that side (0 to 1, default 0.5); dx, dy: label offset in pixels.
+      const DIAGRAMS = {
+        "svg-overview": [
+          { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "一个任务" },
+          { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "会话", dy: -14 },
+          { from: "n-mcp", fs: "right", to: "n-executor", ts: "left", label: "工具" },
+          { from: "n-agent", fs: "bottom", ff: 0.2, to: "n-executor", ts: "top", bidi: true, label: "工具调用", dy: 40 },
+          { from: "n-agent", fs: "bottom", ff: 0.8, to: "n-memory", ts: "top", bidi: true, label: "上下文", dy: 40 },
+          { from: "n-checker", fs: "top", to: "n-agent", ts: "bottom", type: "fail-line", mk: "arr-r", label: "检查失败：\n运行以 failed 结束" },
+          { from: "n-config", fs: "left", to: "n-agent", ts: "right", tf: 0.3, label: "配置文件" },
+          { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "对话" },
+          { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "嵌入" },
+          { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "创建" }
+        ],
+        "svg-around": [
+          { from: "a-cli", fs: "bottom", to: "a-chats", ts: "top", tf: 0.2, label: "终端对话" },
+          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.2, label: "API v2" },
+          { from: "a-api", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.8, label: "HTTP" },
+          { from: "a-gateway", fs: "bottom", ff: 0.15, to: "a-chats", ts: "top", tf: 0.75, label: "控制台对话" },
+          { from: "a-gateway", fs: "bottom", ff: 0.7, to: "a-scheduler", ts: "top", label: "任务" },
+          { from: "a-scheduler", fs: "right", to: "a-workers", ts: "left" },
+          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", type: "planned" },
+          { from: "a-chats", fs: "bottom", ff: 0.75, to: "a-agent", ts: "top", tf: 0.2, label: "每一轮" },
+          { from: "a-workers", fs: "bottom", to: "a-agent", ts: "top", tf: 0.85, label: "同一个智能体" },
+          { from: "a-memory", fs: "right", to: "a-agent", ts: "left", bidi: true, label: "召回", dy: -16 },
+          { from: "a-agent", fs: "right", to: "a-models", ts: "left", type: "dashed" }
+        ]
+      };
 
       // A point on one side of el, relative to the diagram.
       function point(el, side, f) {
@@ -360,31 +433,33 @@
       }
 
       function draw() {
-        const svg = document.getElementById("svg-overview");
-        const dia = svg.closest(".diagram");
-        CONNS.forEach((c) => {
-          const fe = document.getElementById(c.from);
-          const te = document.getElementById(c.to);
-          if (!fe || !te) return;
-          const p1 = point(fe, c.fs, c.ff);
-          const p2 = point(te, c.ts, c.tf);
-          const c1 = control(p1, c.fs, p2);
-          const c2 = control(p2, c.ts, p1);
-          const path = document.createElementNS(SVG_NS, "path");
-          path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
-          path.setAttribute("class", `conn ${c.type || ""}`);
-          path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
-          if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
-          svg.appendChild(path);
-          if (c.label) {
-            const label = document.createElement("div");
-            label.className = "conn-label";
-            label.setAttribute("aria-hidden", "true");
-            label.textContent = c.label;
-            label.style.left = `${(p1.x + p2.x) / 2}px`;
-            label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
-            dia.appendChild(label);
-          }
+        Object.entries(DIAGRAMS).forEach(([id, conns]) => {
+          const svg = document.getElementById(id);
+          const dia = svg.closest(".diagram");
+          conns.forEach((c) => {
+            const fe = document.getElementById(c.from);
+            const te = document.getElementById(c.to);
+            if (!fe || !te) return;
+            const p1 = point(fe, c.fs, c.ff);
+            const p2 = point(te, c.ts, c.tf);
+            const c1 = control(p1, c.fs, p2);
+            const c2 = control(p2, c.ts, p1);
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
+            path.setAttribute("class", `conn ${c.type || ""}`);
+            path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
+            if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
+            svg.appendChild(path);
+            if (c.label) {
+              const label = document.createElement("div");
+              label.className = "conn-label";
+              label.setAttribute("aria-hidden", "true");
+              label.textContent = c.label;
+              label.style.left = `${(p1.x + p2.x) / 2 + (c.dx || 0)}px`;
+              label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
+              dia.appendChild(label);
+            }
+          });
         });
       }
 

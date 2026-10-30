@@ -46,22 +46,13 @@
     <article class="content">
       <header class="doc-hero" id="overview">
         <h1>Architecture</h1>
-        <p class="lead">
-          How localmelo's parts fit together: the agent and its checks, memory
-          and tools in <code>melo/</code>, and the backends, gateway and
-          configuration in <code>support/</code>.
-        </p>
+        <p class="lead">How localmelo's parts fit together, as the code is today.</p>
       </header>
 
       <section class="section" id="diagram">
         <h2>Diagram</h2>
-        <p>
-          A task comes in through the command line or the gateway and runs in
-          the agent. The agent keeps its context in memory, runs tools through
-          the executor, and reaches model servers through providers that the
-          backends build from the config file. Select a component to jump to
-          its description.
-        </p>
+        <h3 id="core">The agent's core</h3>
+        <p>A task runs in the agent, which keeps its context in memory and runs tools through the executor. Providers that the backends build from the config file reach the model servers.</p>
 
         <div class="diagram-scroll">
           <div class="diagram" id="dia-overview" style="width:930px;height:440px">
@@ -95,7 +86,7 @@
             </a>
             <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">Executor</span>
-              <span class="node-sub">built-in and MCP tools<br>time limits</span>
+              <span class="node-sub">built-in, MCP and browser tools<br>time limits</span>
             </a>
             <a class="node" id="n-memory" href="#c-memory" style="left:395px;top:250px;width:160px">
               <span class="node-title">Memory</span>
@@ -130,460 +121,197 @@
           <div class="legend-item"><div class="legend-box"></div>guarded by the checker</div>
           <div class="legend-item"><div class="legend-line fail-l"></div>a failed check ends the run</div>
         </div>
+
+        <h3 id="around">Around the agent</h3>
+        <p>Messages come in from a surface, run in a chat or a worker, and each one runs the same agent with memory beside it. Select a box to jump to its card.</p>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-around" style="width:930px;height:460px">
+            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
+              <span class="node-title">Terminal</span>
+              <span class="node-sub">melo · runs its own chats</span>
+            </a>
+            <a class="node" id="a-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
+              <span class="node-title">Console and app</span>
+              <span class="node-sub">browser page · macOS window</span>
+            </a>
+            <a class="node" id="a-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
+              <span class="node-title">HTTP API</span>
+              <span class="node-sub">/v1 for scripts · /api</span>
+            </a>
+            <a class="node" id="a-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+              <span class="node-title">Gateway</span>
+              <span class="node-sub">melo serve · token sign-in · loopback only</span>
+            </a>
+            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
+              <span class="node-title">Chats</span>
+              <span class="node-sub">side chats today · a main chat is planned</span>
+            </a>
+            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
+              <span class="node-title">Scheduler</span>
+              <span class="node-sub">task queue · P0–P5 · GPU lock gate</span>
+            </a>
+            <a class="node" id="a-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
+              <span class="node-title">Workers</span>
+              <span class="node-sub">headless task sessions</span>
+            </a>
+            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:372px;width:220px">
+              <span class="node-title">Memory</span>
+              <span class="node-sub">notes and the index of every chat</span>
+            </a>
+            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:372px;width:280px">
+              <span class="node-title">Agent</span>
+              <span class="node-sub">the core above · one per chat or task</span>
+            </a>
+            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:372px;width:270px">
+              <span class="node-title">Model servers</span>
+              <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · cloud APIs</span>
+            </a>
+            <svg class="conns" id="svg-around" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
+          <div class="legend-item"><div class="legend-line dashed"></div>requests to model servers</div>
+          <div class="legend-item"><div class="legend-line dotted"></div>planned</div>
+        </div>
       </section>
 
       <section class="section" id="components">
         <h2>Components</h2>
-        <p>What each component does today, and where its code lives. Paths are relative to the repository root.</p>
-
-        <h3 id="c-cli">Command line</h3>
-        <p>
-          The <code>melo</code> command. Given a task, it runs in direct mode:
-          it builds one agent, runs the task, prints the result as text or as
-          one JSON line, and exits with a code that tells how the run ended.
-          Without a task, in a terminal, it opens the interactive UI: an
-          input box and a status bar stay at the bottom, and each turn prints
-          into the scrollback as it runs: the model's thinking, a block for
-          each tool call, retries, notices and reflections, with the answer
-          as Markdown and, when the turn wrote files, a line under its footer
-          that names them. A live area above the input box shows what melo is
-          doing, the time, the tokens and the running tool; developer mode
-          adds the step, the phase and the run's progress facts. On a
-          session's first turn (every turn in developer mode) it shows the
-          past runs the progress line would show.
-          The
-          UI runs its turns on a session (stored in
-          <code>~/.cache/localmelo/cli/sessions.db</code>), resumes a saved
-          chat in its workspace with <code>melo -c</code> or
-          <code>melo -r</code> (<code>/sessions</code> and
-          <code>/resume</code> open the same picker), asks in a panel
-          before <code>shell_exec</code>, <code>python_exec</code> and
-          <code>file_write</code> run, keeps the file tools in its workspace,
-          and saves the model and server that <code>/model</code> and
-          <code>/backend</code> pick to the config file (a session opened
-          with <code>-u</code> saves nothing). It also names, undoes,
-          inspects and copies the conversation with <code>/title</code>,
-          <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and
-          <code>/copy</code>. Without a terminal,
-          bare <code>melo</code> exits with code 2. An empty task
-          (<code>melo ""</code>) opens the plain conversation loop, where each
-          turn sees the earlier answers. <code>melo serve</code> starts the
-          gateway; <code>melo serve install</code>, <code>uninstall</code> and
-          <code>status</code> manage the macOS background service.
-          With
-          <code>-u</code> (<code>--url</code>), the agent talks to that server and the
-          config file is not read; without it, the configured backends are
-          used. <code>-m</code> (<code>--model</code>) and <code>--request-timeout</code>
-          set the chat model and the chat request timeout in both cases, and
-          never change the config file.
-        </p>
-        <p>
-          Key files: <code>__main__.py</code>; the UI in
-          <code>support/cli/</code>: <code>launch.py</code> (the terminal
-          check, the workspace and the model server), <code>app.py</code> (the
-          input box and the keys), <code>session.py</code> (turns and
-          commands), <code>render.py</code> (thinking, notices, reflections, tool blocks, the live rows and
-          answers) and <code>approvals.py</code>; and
-          <code>support/sessions/agents.py</code>.
-        </p>
-
-        <p>Direct workers read a brief and an optional explicit inbox at planning boundaries, and report a versioned JSON result or NDJSON event stream. <code>--inbox FILE</code> is append-only; a complete UTF-8 line is inserted once per live run, a trailing partial line waits for its newline, and an instruction must fit the planning request before it is acknowledged. The file must sit outside the workspace, or the worker refuses it as <code>setup_error</code> before any model call, because the default file and Python tools could rewrite it. <code>--inbox-fd N</code> reads an inherited pipe instead; the worker makes it close-on-exec before tools start, so python, shell and MCP subprocesses get no copy and cannot write it, and the fd form is the one for untrusted tasks. Both forms are steering channels, not trust boundaries, and acknowledgement offsets mean live context insertion, not model receipt. After a valid brief, a worker that cannot start returns a <code>startup_error</code> result with the redacted cause; an event-output failure attempts <code>transport_error</code>, a broken output pipe exits 1, and a record without a final result is incomplete.</p>
-        <p>Direct runs are recorded as one-turn worker sessions by default (<code>--no-save-session</code> or <code>[sessions] record_direct = false</code> opts out); JSONL logs from another worker tool can be imported. The gateway reads worker history from the CLI file without allowing edits. The web workspace lists those runs with server-side filters and paging and opens each as a read-only view that reads an unfinished run once and then follows its event stream.</p>
-        <h3 id="c-gateway">Gateway</h3>
-        <p><code>melo-task</code> is a separate authenticated loopback client for gateway tasks and their event streams, and never starts the gateway; it does not change direct runs. It creates a task from text, a brief file or stdin, lists and shows tasks, pauses, resumes, stops or reprioritizes one, and follows its events as one readable line each with reconnects on durable event IDs. <code>--json</code> gives versioned JSON, and the private token is read from its file rather than accepted as an argument.</p>
-        <p>
-          The HTTP server that <code>melo serve</code> starts. It serves the
-          HTTP API (<code>/v1/health</code>, <code>/v1/agent/run</code>,
-          <code>/v1/sessions</code>) and keeps up to 50 sessions, each with its
-          own agent built from the config file. A session's agent keeps its
-          answers, so each request sees the earlier ones. It checks each
-          request, the task's length and the session id, before a run.
-        </p>
-        <p>
-          Under <code>/api/</code> it serves API v2, the web console's API:
-          health, the sessions list and one session, a session's turns with
-          their events, a Server-Sent Events stream, image blobs, submission
-          lookups, and a session's tools, grants, memory and runs; and the
-          writes that run a session — create it, with or without a first
-          turn, start, retry and stop its turns, cancel a message by its key,
-          answer an approval, rename or move it, and delete it. A console
-          turn runs in the gateway process, one at a time, and its model
-          calls pass the same scheduler gate a workspace chat's do. The
-          console opens a session's agent on demand and resumes its
-          conversation when an idle sweep or the open cap closed it, or when
-          the gateway restarted. API v2 is served only on a loopback
-          address, carries one error envelope and <code>Cache-Control:
-          no-store</code>, and only grows. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2</a>.
-        </p>
-        <p>
-          At <code>/</code> the web workspace uses the console's API v2 and
-          persistent session store. It shows the turn's work and answer,
-          settings, earlier turns, stopped or failed runs and
-          approval cards when requests are present; a file write over an existing
-          file shows a numbered diff of what it replaces. A details drawer shows tools,
-          session grants, memory and runs; settings include connection testing
-          and a browser-local theme. Console sessions use
-          <code>RememberingPolicy</code> to ask before <code>file_write</code>
-          and <code>python_exec</code>; legacy <code>/v1</code> has no approval
-          policy. Each chat uses the configured model and the
-          built-in <code>file_read</code>, <code>file_write</code>,
-          <code>list_files</code> and <code>python_exec</code> tools (no
-          <code>shell_exec</code>). Model
-          calls share the scheduler gate, and the header shows its GPU lock
-          and battery readings.
-          The page lists sessions newest first with search and per-chat drafts,
-          displays tool work, folded reasoning, notices, progress and answers,
-          and reopens its event stream from the last stored event. Sessions in
-          <code>~/.cache/localmelo/gateway/sessions.db</code> survive restart;
-          agents open on demand (at most eight, closed after 15 minutes idle
-          while their conversations are kept).
-        </p>
-        <p>
-          The gateway requires a bearer token or browser session and refuses non-loopback binds. At a terminal on this computer, <code>melo serve</code> opens the console in your browser, signed in with a one-use link, and <code>melo console</code> opens it again; over SSH it prints the link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
-        </p>
-        <p>
-          Key files: <code>support/gateway/__init__.py</code>,
-          <code>session.py</code>, <code>guard.py</code> (the
-          <code>Host</code> and <code>Origin</code> checks),
-          <code>webapp.py</code> and <code>playground.py</code> (the legacy
-          <code>/v1/playground</code> routes and the chats behind them),
-          <code>console/</code> (the console's session store, its API v2
-          routes and the page's data), <code>static/</code> (the page:
-          <code>workspace.js</code>, <code>turns.mjs</code> and
-          <code>markdown.mjs</code>), and <code>daemon.py</code> for the macOS
-          background service.
-        </p>
-
-        <h3 id="c-mcp">MCP servers</h3>
-        <p>
-          Local servers that speak the Model Context Protocol over stdio,
-          listed in the JSON file that <code>--mcp-config</code> names. At the
-          start of the first run, <code>support/mcp</code> starts each server,
-          lists its tools and registers them, as
-          <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, with the tool registry
-          and the executor. MCP tools work in direct mode, the Python API and
-          the interactive UI (<code>--mcp-config</code>, else the config's
-          <code>mcp_config</code> key); the gateway does not load them yet. A server's <code>require_approval</code>
-          makes calls of its tools, or of the tools it names, ask the run's
-          approval policy first; a run without a policy, such as a direct run,
-          runs them without asking. Each server starts with the same minimal
-          environment as a tool's child process, plus the <code>env</code> its
-          entry names.
-        </p>
-        <p>
-          Key files: <code>support/mcp/config.py</code>, <code>client.py</code>,
-          <code>provider.py</code>, and the tool provider interface in
-          <code>melo/contracts/tools.py</code>.
-        </p>
-
-        <h3 id="c-agent">Agent</h3>
-        <p>
-          The run loop. Each step builds a prompt from the task, working
-          memory, recalled long-term memory and the latest reflection, offers
-          the model a list of tools (in the default <code>retrieve</code>
-          mode, the built-ins, the ones it has already called in this
-          conversation and the three closest matches for the task), sends one
-          planning request, and runs the
-          tool calls of the reply. A reply with text and no tool call is the
-          answer, and the run ends as <code>completed</code>, unless the reply is only unfinished thinking: the model is then asked once more, and a second such reply ends the run as <code>failed</code> (<a href="https://github.com/localmelo/localmelo/pull/288">#288</a>). With the default
-          <code>reflect</code> policy, steps come in attempts of up to 10; after
-          an attempt that ends without an answer, a reflection decides whether
-          another attempt starts. Every run ends with one of ten statuses, or
-          as <code>cancelled</code> when an interactive run (below) is
-          stopped, and returns a <code>RunResult</code>. A failed model request
-          is retried up to twice when a retry may succeed.
-        </p>
-        <p>
-          Python code that calls <code>run_task</code> can follow and steer a
-          run. With <code>on_event</code>, it receives each step, model reply,
-          tool call, notice and reflection as an event, with secrets in the
-          model's text redacted. With <code>approval</code>, a policy decides
-          whether each call of a tool that requires approval may run. A run
-          with either one is interactive: cancelling it ends it as
-          <code>cancelled</code> and closes the interrupted step. With
-          <code>AgentOptions(record_answers=True)</code>, working memory keeps
-          each run's answer, and <code>conversation()</code> and
-          <code>load_conversation()</code> carry a conversation to another
-          agent. Direct mode and legacy <code>/v1</code> pass no event sink and no
-          policy. The web workspace passes an event sink and an approval policy, so its Stop ends a
-          run as <code>cancelled</code>.
-        </p>
-        <p>
-          Key files: <code>melo/agent/agent.py</code>,
-          <code>melo/agent/options.py</code> (<code>AgentOptions</code>),
-          <code>melo/agent/_chat.py</code> (planning and reflection requests,
-          retries), <code>melo/agent/_events.py</code> and
-          <code>melo/contracts/events.py</code> (events),
-          <code>melo/contracts/approvals.py</code> (approval policies),
-          <code>melo/schema.py</code> (<code>RunResult</code> and the
-          limits).
-        </p>
-
-        <h3 id="c-checker">Checker</h3>
-        <p>The checks at each boundary of a run:</p>
-        <ul>
-          <li>before a planning request: the prompt may hold at most 100,000 characters, and the list of offered tools must be valid;</li>
-          <li>after it: each tool call in the reply needs a name and an id of its own;</li>
-          <li>before a tool runs: the tool's tier and the mode decide. The <code>interactive</code> UI offers <code>shell_exec</code>; <code>direct</code>, <code>python</code> and <code>gateway</code> do not offer it by default, and refuse an <code>exec</code> call registered anyway unless a <code>direct</code> or <code>python</code> caller named it in <code>builtins</code>; the gateway refuses it even when named. A run with an approval policy asks before a call whose tier is not <code>read</code>, and no command is refused by its spelling;</li>
-          <li>before the approval policy decides: each <code>shell_exec</code>, <code>python_exec</code> and <code>file_write</code> call is reviewed by fixed rules as routine, high-impact or undecided, and a session grant covers routine calls only (<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>);</li>
-          <li>after a tool runs: output longer than 50,000 characters is cut;</li>
-          <li>before a memory write: its size is limited;</li>
-          <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>
-          <li>in the gateway: each request's task and session id.</li>
-        </ul>
-        <p>
-          A failed check before or after a planning request ends the run as
-          <code>failed</code>. A refused tool call does not run: the model sees
-          the refusal as the tool's error.
-        </p>
-        <p>
-          Key files: <code>melo/checker/checker.py</code>,
-          <code>validators.py</code>, <code>payloads.py</code>,
-          <code>redaction.py</code>, <code>review/</code> (the action review).
-        </p>
-
-        <h3 id="c-executor">Executor</h3>
-        <p>
-          Runs the tool calls of a step, in order. A call is refused when the
-          step did not offer the tool, when its arguments are not a JSON
-          object, or when an argument of a built-in tool has the wrong type;
-          the checker then sees every call that is left. With a workspace
-          root, the workspace policy then resolves the path of a file tool
-          and refuses one outside the root. With an approval policy, a call of
-          a tool whose permission tier is not <code>read</code>, or that is
-          marked as requiring approval, then waits for the policy's decision,
-          and once it is allowed, a file path under a workspace root is
-          resolved again and refused if it changed in the meantime. Each
-          tool runs with a time limit, which starts after the approval:
-          <code>shell_exec</code> 30 seconds, <code>file_read</code> and <code>file_write</code> 60 seconds, an
-          MCP tool its server's <code>timeout</code>. In the interactive UI,
-          <code>shell_exec</code> and <code>python_exec</code> get 10 minutes.
-          A shell command's standard input is <code>/dev/null</code>, so it
-          never reads the terminal. <code>python_exec</code> code always runs
-          in a child process, which a time limit or a cancellation kills: in
-          the current directory without a workspace root, in the root with
-          one. The child of <code>shell_exec</code> or
-          <code>python_exec</code> gets only <code>PATH</code>,
-          <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>,
-          <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every
-          <code>LC_*</code> variable and <code>TMPDIR</code>, plus
-          <code>AgentOptions(tool_env=…)</code>: an API key in melo's
-          environment reaches no tool unless explicitly named in <code>tool_env</code>, and <code>VIRTUAL_ENV</code>,
-          <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy
-          variables pass only through <code>tool_env</code>. A refusal, a
-          denial, a time-out or an error comes back as the
-          tool's error.
-        </p>
-        <p>
-          The five built-in tools are <code>shell_exec</code>,
-          <code>python_exec</code>, <code>file_read</code>,
-          <code>file_write</code> and <code>list_files</code>. Only the
-          interactive UI gets all five by default; the gateway and a console
-          session get all but <code>shell_exec</code>; a direct run and the
-          library's default <code>python</code> mode get
-          <code>file_read</code>, <code>file_write</code> and
-          <code>python_exec</code>. <code>list_files</code> only reads names
-          and sizes, so it never asks. The other modes leave
-          <code>shell_exec</code> out: <code>direct</code> and
-          <code>python</code> mode have no approval policy, and the gateway's
-          <code>/v1</code> routes do not ask either; the console asks over API
-          v2 and runs in the same <code>gateway</code> mode, so it gets no
-          shell either (Python code can still start a process).
-          <code>--builtins all</code> (or naming <code>shell_exec</code>) is a
-          <code>direct</code> or
-          <code>python</code> caller's opt-in; the gateway and console refuse it
-          even when named. Direct
-          mode and a <code>/v1</code> gateway session give the tools no
-          workspace root, so file tools reach any file you can; direct mode's
-          <code>--workspace DIR</code> sets the same root as the Python API
-          below, and a console chat gets <code>[gateway] workspace</code>
-          (default <code>~/localmelo-workspace</code>) as its root. In the Python
-          API, <code>AgentOptions(workspace_root=…)</code> turns
-          <code>policy.py</code> on: the file tools then reach only files
-          inside the root, and <code>shell_exec</code> and
-          <code>python_exec</code> run there in a child process, without that
-          limit. Approvals apply only to a run with an approval policy.
-        </p>
-        <p>
-          On macOS, a worker run and a saved task start the commands of <code>shell_exec</code> and <code>python_exec</code> under a <code>sandbox-exec</code> profile that allows file writes only in the workspace and a short list of other places (<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>); <code>[agent] confine_direct_runs</code> does the same for plain direct runs (<a href="https://github.com/localmelo/localmelo/pull/284">#284</a>). A provider can add a group of tools to every step: the eight browser tools, in the terminal chat and the console, while <code>[browser] driver</code> is <code>safari-automation</code> (<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>).
-        </p>
-        <p>
-          Key files: <code>melo/executor/executor.py</code>,
-          <code>builtins.py</code>, <code>policy.py</code>, <code>sandbox.py</code>,
-          <code>melo/contracts/approvals.py</code>.
-        </p>
-
-        <h3 id="c-memory">Memory</h3>
-        <p>In compress modes, heuristic notes can extract up to 12 facts, including a bounded set of English negative and Chinese residence or cancellation statements, kept verbatim. Matching a negative assertion requires its full text in the record, and conflicting event times reject a match. Extraction and attribution are heuristic; similar assertions of opposite detected polarity are kept as conflicts, while structured supersession is off by default and available experimentally through Python. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
-        <p>
-          Working memory holds the conversation of a run or a gateway session:
-          the last 20 messages, in RAM. History records every task and step
-          and, with persistence on, every model call and its reasoning.
-          In <code>legacy</code>, long-term memory needs an embedding
-          backend: it stores step summaries and reflections with their
-          embeddings, and recalls the 5 closest entries on each step. In the
-          compress modes it is a typed store instead: every entry has a kind
-          (<code>semantic</code>, <code>episodic</code>, <code>profile</code>
-          or <code>reflection</code>), a source, a status and the signal that
-          admitted it, with its provenance beside the text and the vector,
-          and one decision (<code>NEW</code>, <code>UPDATE</code>,
-          <code>RELATED</code>, <code>CONFLICT</code> or
-          <code>IGNORE</code>) is kept for each candidate; a candidate is
-          admitted only by a rehearsal, a user request or statement, or
-          <code>--admit-on-outcome on</code> for the final digest. Procedural
-          memory keeps the steps of each run
-          and learns the steps of tasks you repeat. History, long-term and
-          procedural memory stay in RAM, or go to <code>history.db</code>,
-          <code>long_term.db</code> and <code>procedures.db</code> when
-          persistence is on. New files are created readable only by you (mode
-          0600). The text history and long-term memory keep is redacted before
-          it is written: <code>sk-</code> keys, GitHub tokens, AWS access key
-          ids, the token after <code>Bearer</code> and a one-time code next to
-          its keyword, as events and model calls already were; the run, its
-          requests and the model keep the text. The Python API can forget a
-          task's history rows and the
-          long-term reflections that name it with
-          <code>Hippo.forget(task_id)</code>, and empty history and long-term
-          memory, step summaries included, with <code>forget_all()</code>. The
-          tool registry holds every registered tool,
-          with the BM25 index that retrieve mode searches.
-        </p>
-        <p>
-          In the <code>compress</code> and <code>compress+replay</code>
-          reasoning modes, each reply becomes a short note (its plan, what it
-          found, decided and left open, and what its tools returned) with its
-          code drafts, kept in a RAM-only note store beside the working window
-          and rehearsed into an attempt digest as later notes, calls and
-          reflections use it. Every note, draft and digest passes the
-          <code>check_memory_candidate</code> boundary (redact, sanitize, cap)
-          before it reaches the window or the store. The compress modes
-          recall them back: at start, attempt and step a delimited,
-          data-framed block carries this task's notes, drafts and thought
-          chunks and earlier tasks' long-term entries, chosen by
-          <code>--retriever auto|off|bm25|llm|embedding</code> (embedding when
-          configured, else <code>llm</code> at start and attempt and
-          <code>bm25</code> at step and tool, with <code>bm25</code> as the
-          fallback), placed by <code>--recall-at</code> and
-          <code>--recall-placement</code>, checked and bounded; a thought
-          chunk is recallable only after the turn that produced it left the
-          window. <code>history.db</code> version 2 records each new block in
-          <code>recall_json</code>, and the <code>recall</code> event carries
-          its hits. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">Reasoning notes</a>
-          and
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#recall-in-the-loop">Recall in the loop</a>.
-        </p>
-        <p>
-          <code>melo/memory/retrieval/</code> holds three switchable
-          retrievers, <code>bm25</code>, <code>llm</code> and
-          <code>embedding</code>. They search documents built from a run's
-          model calls: the notes on the model's reasoning, code drafts and
-          chunks of its thinking that <code>melo/memory/notes.py</code> builds
-          from a model reply, and reflections. The compress modes use them in
-          the loop (see above), and the
-          <code>melo-retrieve</code> command (<code>support/retrieve.py</code>)
-          compares them offline on labelled queries, and turns model calls
-          recorded as raw-call JSONL into a corpus. With persistence on, the
-          <code>history.db</code> that <code>melo</code> writes records model
-          calls too, and <code>melo-retrieve</code> exports it as well. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">Offline retrieval</a>.
-        </p>
-        <p>
-          Sessions (experimental) keep whole conversations in
-          <code>sessions.db</code>: each turn is a stored row that ends exactly
-          once with a status and a cause, the session's events are stored with
-          it, and a window checkpoint lets a fresh agent resume where the last
-          one stopped. A runner built with <code>progress=True</code> asks each
-          turn's run for its <code>run.progress</code> events and stores them
-          with the turn. The gateway's file and the terminal's file are separate.
-          The interactive UI runs its turns on sessions and resumes a saved
-          chat with <code>melo -c</code> or <code>melo -r</code>; the web
-          console runs and reads its sessions in the
-          gateway's own file, while its <code>/v1</code> sessions stay in RAM
-          (code: <code>support/sessions/</code>,
-          <code>support/gateway/console/</code>). See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions</a>.
-        </p>
-        <p>
-          Key files: <code>melo/memory/coordinator.py</code>,
-          <code>short/</code> (working memory), <code>history/</code>,
-          <code>long/</code>, <code>tools/</code> (the tool registry),
-          <code>bm25.py</code>.
-        </p>
-        <p>
-          Memory design (planned): the
-          <a href="./memory-design.html">memory design</a> page keeps the
-          maintainer's design for memory, parts of which are not built yet.
-        </p>
-
-        <h3 id="c-config">Config and setup</h3>
-        <p>
-          <code>~/.cache/localmelo/config.toml</code> names the chat and
-          embedding backends and their settings. On a first run in a
-          terminal, <code>melo</code> finds a model server with
-          <code>GET /v1/models</code>, offers the one it finds
-          (<code>Use this model server?</code>, a list), asks for a model and saves them, as the
-          <code>ollama</code> backend for an Ollama server and as
-          <code>vllm</code> for any other OpenAI-compatible server, oMLX
-          included. With no server running it prints this computer's commands
-          for starting one and looks again when you press Enter. When the
-          server lists an embedding model, it offers one for long-term
-          memory; the <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">embedding guide</a>
-          covers Ollama, oMLX, vLLM, SGLang and MLC. The setup
-          wizard (<code>melo setup</code>) asks for
-          every backend, sends a test request to each server, saves the file,
-          then opens the interactive UI, or with <code>melo --serve --reconfigure</code>
-          starts the gateway. Direct mode and the gateway build their agents
-          from this file.
-        </p>
-        <p>
-          Key files: <code>support/config.py</code>,
-          <code>support/onboard.py</code>, <code>support/onboard_probe.py</code>,
-          <code>support/backends/discovery.py</code>.
-        </p>
-
-        <h3 id="c-providers">Providers</h3>
-        <p>
-          The HTTP clients for model servers: OpenAI-compatible chat
-          (<code>/chat/completions</code>), Ollama's own <code>/api/chat</code>,
-          and OpenAI-compatible embeddings. They implement the interfaces in
-          <code>melo/contracts/providers.py</code>, apply the chat request
-          timeout, and report each failed request as a
-          <code>ProviderError</code> that says whether a retry may succeed.
-        </p>
-        <p>
-          Key files: <code>melo/contracts/providers.py</code>,
-          <code>support/providers/llm/</code>,
-          <code>support/providers/embedding/</code>.
-        </p>
-
-        <h3 id="c-backends">Backends</h3>
-        <p>
-          One adapter for each backend key: <code>mlc</code>,
-          <code>ollama</code>, <code>vllm</code> and <code>sglang</code> for
-          servers you run (oMLX uses <code>vllm</code>), and <code>openai</code>, <code>anthropic</code>,
-          <code>gemini</code> and <code>nvidia</code> for cloud APIs. Each
-          adapter checks its table of the config file and builds the
-          providers. Backends only connect: you start and stop the model
-          servers yourself.
-        </p>
-        <p>
-          Key files: <code>support/backends/registry.py</code>,
-          <code>base.py</code>, <code>local/</code>, <code>cloud/</code>.
-        </p>
-
-        <p>
-          <code>melo/sleep/</code>, <code>melo/memory/personalized/</code> and
-          <code>support/melo_serving/</code> hold code that the agent does not
-          use yet. <code>melo/memory/retrieval/</code> and
-          <code>melo/memory/notes.py</code> serve recall in the loop and
-          <code>melo-retrieve</code>; <code>support/scheduler/</code> is the
-          scheduling policy core and its simulator, which the gateway's gate
-          uses for the web workspace's chats and the console's turns, and
-          <code>support/gateway/machine_monitor.py</code> reads
-          the GPU lock and the battery.
-        </p>
+        <p>Each card says what a part does; the boxes of both diagrams open them, and each card links to its reference page.</p>
+        <div class="comp-grid">
+          <div class="comp-card" id="c-cli">
+            <h3>Terminal</h3>
+            <p><code>melo</code> opens a chat; <code>melo "task"</code> runs one task.</p>
+            <ul>
+              <li>Prints the answer, or one JSON line, and exits with a code that says how the run ended.</li>
+              <li>Asks before commands and file writes; file tools stay in the folder.</li>
+              <li>Runs its chats itself, without the gateway.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">Command-line reference</a>
+          </div>
+          <div class="comp-card" id="c-gateway">
+            <h3>Gateway</h3>
+            <p><code>melo serve</code>: the local server behind the console, the app and the HTTP API.</p>
+            <ul>
+              <li>Serves the console's API v2 under <code>/api</code> and the HTTP API under <code>/v1</code>.</li>
+              <li>Requires a bearer token or browser session, and listens on loopback only.</li>
+              <li>A token holder can act as you; same-user processes are not isolated.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2 reference</a>
+          </div>
+          <div class="comp-card" id="c-chats">
+            <h3>Chats</h3>
+            <p>Each chat is a session whose turns survive a restart.</p>
+            <ul>
+              <li>A turn runs on the chat's own agent, one turn at a time.</li>
+              <li>Before a turn, memory adds what it recalls for it.</li>
+              <li>The chat you are in is the scheduler's focus; a main chat that hands work to tasks is planned.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions reference</a>
+          </div>
+          <div class="comp-card" id="c-scheduler">
+            <h3>Scheduler</h3>
+            <p>Orders tasks, and model calls when you turn its gate on.</p>
+            <ul>
+              <li>A task queue with priorities P0 to P5, kept in the gateway's session file.</li>
+              <li>A gate on model calls: off by default, or first come first served, or by class.</li>
+              <li>Reads the shared GPU lock and the battery; can wait while the lock is held.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md">Scheduler guide</a>
+          </div>
+          <div class="comp-card" id="c-workers">
+            <h3>Workers</h3>
+            <p>Headless sessions that run tasks without a chat window.</p>
+            <ul>
+              <li>The gateway starts queued tasks by priority, a few at a time.</li>
+              <li><code>melo worker</code> runs one from a brief file and returns a JSON result.</li>
+              <li>The console's Workers view lists every run.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">Worker reference</a>
+          </div>
+          <div class="comp-card" id="c-agent">
+            <h3>Agent</h3>
+            <p>The run loop: plan a step, run its tools, reflect between attempts.</p>
+            <ul>
+              <li>Each step's request holds the task, working memory, recalled memory and the last reflection.</li>
+              <li>The model calls only the tools the step offers.</li>
+              <li>A reflection decides whether the next attempt starts.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/how-it-works.md">How it works</a>
+          </div>
+          <div class="comp-card" id="c-checker">
+            <h3>Checker</h3>
+            <p>Checks each boundary of a run.</p>
+            <ul>
+              <li>Checks each plan, tool call and tool result.</li>
+              <li>A refused call does not run; the model sees why.</li>
+              <li>Calls that send, delete or publish always ask, and say why.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">What the checks do</a>
+          </div>
+          <div class="comp-card" id="c-executor">
+            <h3>Executor</h3>
+            <p>Runs a step's tool calls in order, with time limits.</p>
+            <ul>
+              <li>Built-in tools: <code>shell_exec</code>, <code>python_exec</code>, <code>file_read</code>, <code>file_write</code> and <code>list_files</code>.</li>
+              <li>Asks for approval by permission tier.</li>
+              <li>On macOS, worker runs and saved tasks write only in their workspace.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">Tools reference</a>
+          </div>
+          <div class="comp-card" id="c-mcp">
+            <h3>Tools: MCP and browser</h3>
+            <p>More tools beside the built-ins.</p>
+            <ul>
+              <li>Local MCP servers from <code>--mcp PATH</code> run as stdio processes.</li>
+              <li>Their tools are named <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.</li>
+              <li>With browsing on, melo reads pages in Safari's automation windows.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md">Tools and MCP guide</a>
+          </div>
+          <div class="comp-card" id="c-memory">
+            <h3>Memory</h3>
+            <p>What melo keeps within a run and across chats.</p>
+            <ul>
+              <li>Working memory: a run's recent messages, in RAM.</li>
+              <li>Notes about you and an index of every chat, recalled with their source.</li>
+              <li>History and long-term memory, in SQLite when persistence is on.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md">Memory concepts</a>
+          </div>
+          <div class="comp-card" id="c-config">
+            <h3>Config and setup</h3>
+            <p>One config file, and a first run that finds your server.</p>
+            <ul>
+              <li><code>~/.cache/localmelo/config.toml</code> names the chat and embedding servers.</li>
+              <li>The first run looks for a model server and offers what it finds.</li>
+              <li><code>melo setup</code> and <code>melo config</code> change it later.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">Configuration reference</a>
+          </div>
+          <div class="comp-card" id="c-providers">
+            <h3>Providers</h3>
+            <p>The HTTP clients that talk to model servers.</p>
+            <ul>
+              <li>OpenAI-compatible chat, Ollama's <code>/api/chat</code> and OpenAI-compatible embeddings.</li>
+              <li>Apply the chat request timeout to every request.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">Model servers guide</a>
+          </div>
+          <div class="comp-card" id="c-backends">
+            <h3>Model servers</h3>
+            <p>Backends connect to servers you run or to cloud APIs.</p>
+            <ul>
+              <li>oMLX (through <code>vllm</code>), Ollama, MLC LLM, vLLM and SGLang.</li>
+              <li>The OpenAI, Anthropic, Google and NVIDIA APIs.</li>
+              <li>localmelo never downloads, starts or serves a model.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">Backends</a>
+          </div>
+        </div>
       </section>
 
       <section class="section" id="boundaries">
@@ -594,26 +322,10 @@
               <tr><th scope="col">Boundary</th><th scope="col">Rule</th><th scope="col">Why it matters</th></tr>
             </thead>
             <tbody>
-              <tr>
-                <td><code>melo/</code> and <code>support/</code></td>
-                <td><code>melo/</code> holds the agent and the interfaces that providers implement, and does not import <code>support/</code> at module level. The one bridge is <code>Agent(config=…)</code>, which builds its providers through <code>support/backends</code> when it is called.</td>
-                <td>The agent runs with providers you build yourself, such as test fakes, and a new backend changes only <code>support/</code>.</td>
-              </tr>
-              <tr>
-                <td>Agent and executor</td>
-                <td>A step runs only the tools it offered, and every call passes the checks first. The checks are guardrails, not a sandbox: tools run with your account's permissions.</td>
-                <td>The model can call only what the step showed it, and a refused call never runs.</td>
-              </tr>
-              <tr>
-                <td>Agent and memory</td>
-                <td>Memory writes pass the checker's size limits. With memory on, legacy long-term writes need an embedding backend; explicit reasoning modes can also admit text-only entries without one.</td>
-                <td>The prompt and the stores stay bounded.</td>
-              </tr>
-              <tr>
-                <td>Backends and model servers</td>
-                <td>Backends only connect to a URL. localmelo does not download, start or serve models.</td>
-                <td>You keep control of your model servers.</td>
-              </tr>
+              <tr><td><code>melo/</code> and <code>support/</code></td><td><code>melo/</code> never imports <code>support/</code> at module level; <code>Agent(config=…)</code> is the one bridge.</td><td>The agent runs with providers you build, and a new backend changes only <code>support/</code>.</td></tr>
+              <tr><td>Agent and executor</td><td>A step runs only the tools it offered, and every call passes the checks first.</td><td>A refused call never runs. The checks are guardrails, not a sandbox.</td></tr>
+              <tr><td>Agent and memory</td><td>Memory writes pass the checker's size limits.</td><td>The prompt and the stores stay bounded.</td></tr>
+              <tr><td>Backends and model servers</td><td>Backends only connect to a URL.</td><td>You keep control of your model servers.</td></tr>
             </tbody>
           </table>
         </div>
@@ -621,67 +333,25 @@
 
       <section class="section" id="status">
         <h2>What exists today</h2>
-        <ul>
-          <li>Direct mode with run options, including <code>--workspace DIR</code> for the folder a task works in and how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), ten run statuses, text or JSON output, fixed exit codes, and <code>--brief FILE</code> to run one direct task as a worker and end with a versioned JSON result (<code>--output-format stream-json</code> adds redacted events). A worker that cannot start after a valid brief returns a <code>startup_error</code> result with the redacted cause; its explicit <code>--inbox FILE</code> or <code>--inbox-fd N</code> is a steering channel, not a trust boundary.</li>
-          <li>Brief runs (<code>--brief FILE</code>) add a fixed paragraph of working rules to the task. At an attempt boundary where the workspace has not changed since the run began, the next attempt is told to write the part of the task it can already write. A <code>continue</code> reflection starts the next attempt while steps and attempts remain, whatever its three flags say (<a href="https://github.com/localmelo/localmelo/pull/193">#193</a>). After six planning steps in a row without a workspace change, the next step asks for the part of the task the model can already write, and each planning request ends with a note of the tool output that the window dropped (<a href="https://github.com/localmelo/localmelo/pull/197">#197</a>). The brief's <code>Check:</code> commands run before a run ends <code>completed</code>, in every mode; a check that still fails after its two retries leaves the run <code>completed</code> with <code>tests</code> set to <code>failed</code>, and the run exits 4 (<a href="https://github.com/localmelo/localmelo/pull/195">#195</a>, <a href="https://github.com/localmelo/localmelo/pull/205">#205</a>). In the last attempt, with two steps of the budget left and the workspace changed since the checks last ran, they run once more; a failure goes back to the model and uses one of the two retries. The <code>brief_check</code> notice and each <code>tests.items</code> entry carry <code>output_tail</code>, the last 20 lines of the output, redacted and at most 4,000 characters (<a href="https://github.com/localmelo/localmelo/pull/214">#214</a>). Runs without <code>--brief</code> are unchanged.</li>
-          <li>Experimental Python-only typed assertions, opted into with <code>AgentOptions(typed_assertions=True)</code>, can retain verified same-task changes with ordered source times, keep superseded rows as labelled history, and label historical recall; missing, ambiguous or unlinked assertions are not automatically linked, and only exact duplicates are ignored.</li>
-          <li>Opt-in context accounting (<code>[agent] context_window</code>, <code>output_reserve</code> and <code>safety_margin</code>) estimates planning and reflection requests; fitting shortens request copies when needed, but the output reserve is not enforced. A fixed prefix (<code>fixed_prefix</code>, on by default) freezes the local date and stable instructions per run; retrieved context and reflections remain data. Chunked window eviction (<code>window_eviction = "chunk"</code>) and the reflection tool guard (<code>reflect_tool_guard</code>) are also on by default (<a href="https://github.com/localmelo/localmelo/pull/223">#223</a>), and <code>--fixed-prefix off --window-eviction slide --reflect-tool-guard off</code> send the earlier requests. Optional captured tool history (<code>captured_history</code>) is bounded and pattern-redacted separately from the model preview.</li>
-          <li>A provider streaming contract: the OpenAI-compatible adapter parses SSE and assembles tool calls only when complete, and display text is released line by line after redaction with the rules frozen for each stream. The interactive terminal consumes it for live replies (opt-in in <a href="https://github.com/localmelo/localmelo/pull/175">#175</a>, on by default since <a href="https://github.com/localmelo/localmelo/pull/245">#245</a>: <code>[cli] stream</code> is true unless set, and <code>/stream off</code>, <code>melo -X cli.stream=false</code> or <code>melo config set cli.stream false</code> turn it off); direct runs, workers and the gateway never stream. A model whose reasoning format is declared in <code>[cli.reasoning_tags]</code>, or whose server sends reasoning in a field of its own, shows its reply as it is written; any other model shows it when complete (developer mode notes this once per model). A server that answers a stream request with one JSON body is read as the ordinary completion, and one that ends a stream before it delivered anything is asked once more without streaming; the adapter then stops asking that server to stream, and the terminal says so once (<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>).</li>
-          <li>Reading a turn in the terminal (<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>): outside developer mode the record is quiet. Thinking is one line (<code>✻ Thought for 8.0s</code>; <code>/thinking on</code> and developer mode show its first three rows, <code>/verbose</code> forty); a call that succeeded shows the first line of its output with <code>+N lines (/expand T.C)</code> on the same row, and a call that failed, or a command that exited with another code than 0, shows up to three lines; only the mark of a tool row carries the status color; and the live row keeps the activity, the time, the tokens and the stop key, with the step, the attempt and the phase in developer mode. The theme reads <code>COLORFGBG</code> and queries no terminal: a warning is yellow only on a background it reports as dark and bold otherwise, the approval's warning and keys and the hint row are default text, and code blocks use rich's light theme on a light background.</li>
-          <li>Prompt-cache telemetry: <code>assistant.message</code> and <code>reflection</code> events carry the server's <code>cached_tokens</code> and <code>reasoning_tokens</code> in <code>usage</code> when it sends them, and a <code>prefix</code> object that compares each request with the best earlier request of the run (<a href="https://github.com/localmelo/localmelo/pull/190">#190</a>). <code>scripts/cache_report.py LOG</code> reads a stream-json log and prints one row per request. Chunked window eviction (<a href="https://github.com/localmelo/localmelo/pull/191">#191</a>), the fixed prefix (opt-in since <a href="https://github.com/localmelo/localmelo/pull/142">#142</a>) and the reflection tool guard (<a href="https://github.com/localmelo/localmelo/pull/210">#210</a>) were opt-in until <a href="https://github.com/localmelo/localmelo/pull/223">#223</a> made them the defaults. A further experiment holds the window cut across requests in the chunk and boundary modes (<a href="https://github.com/localmelo/localmelo/pull/204">#204</a>, off by default).</li>
-          <li>Cache layout and window options, shown by <code>melo --developer --help</code> (<a href="https://github.com/localmelo/localmelo/pull/228">#228</a>): with the fixed prefix on, <code>--cache-layout v3</code> (<code>[agent] cache_layout</code>, now the default; <code>v2</code> sends the earlier requests) appends each reflection to the window once, at the attempt boundary, and keeps the reflection request and its reply there, so each request extends the one before. <code>--window-messages N</code> (<code>[agent] window_messages</code>, 8 to 256, default 64 on a local server and 20 on a cloud vendor) sets the working window's message cap. Each request after a run's first also reports <code>fresh_chars</code> and <code>request_chars</code> in its <code>prefix</code> object, and <code>scripts/cache_report.py</code> prints a <code>reusable</code> share for each run and pooled.</li>
-          <li>Experimental brief-items reminder, off by default and listed by <code>melo --developer --help</code> only (<a href="https://github.com/localmelo/localmelo/pull/232">#232</a>): with <code>--brief-items on</code> (<code>[agent] brief_items</code>), a <code>--brief</code> run marks each top-level numbered item of the brief as <code>changed</code>, <code>not yet</code> or <code>no file named</code>, from the files that <code>git status</code> lists as edited since the run started. The items with no edit yet are named in each reflection request and in the deadline check two steps before the last attempt ends, and each naming records a <code>brief_items</code> notice.</li>
-          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code>, <code>/retry</code>, <code>/clear</code> (a new chat on a cleared screen, <a href="https://github.com/localmelo/localmelo/pull/304">#304</a>) and <code>/browser</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume, <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> to name, undo, inspect and copy a conversation, a reasoning and recall mode for the whole chat (<code>--reasoning</code>, <code>--reasoning-field</code>, <code>--replay-turns</code>, <code>--note-writer</code>, <code>--retriever</code>, and <code>--recall-*</code>, from flags or saved defaults; <code>--retrieval-extra-body</code> is flag-only), <code>/attach</code>, <code>/attachments</code> and <code>/detach N|all</code> to stage workspace text files (at most 8, 256 KiB each, 512 KiB in total) into the next message, whose snapshot <code>/retry</code> reuses, and the plain conversation loop (<code>melo ""</code>).</li>
-          <li>In the interactive UI, <code>! COMMAND</code> runs a command in the user's shell (<code>$SHELL</code>, else <code>/bin/sh</code>), in the workspace, on a terminal of its own. It is not a sandbox, and its output is not sent to the model unless the user attaches it with <code>/attach !</code> (<a href="https://github.com/localmelo/localmelo/pull/180">#180</a>). <code>/status all</code>, and <code>/status</code> in developer mode, show a usage block: the cached share of the last request and of the session, the context fill, the steps of the current or last run, and the task counts when a task store is reachable (<a href="https://github.com/localmelo/localmelo/pull/194">#194</a>).</li>
-          <li><code>/status</code> answers first (<a href="https://github.com/localmelo/localmelo/pull/250">#250</a>): five rows, the model and its server with <code>✓ answers</code> or <code>✗ does not answer</code> and what to do, the folder, the session, what the approvals do in words, and how full the context is. <code>/status all</code>, and <code>/status</code> in developer mode, print every row (the fence, tools, memory with its window and the reason for it, limits, usage, files and version), and any other argument is refused. <code>/help</code> prints eight everyday commands in three groups, <code>/help all</code> and developer mode list every command and key, <code>/help NAME</code> explains one, and the <code>/</code> menu opens on the same eight with bare command names and no description cut at 80 columns. <code>melo config keys</code> and <code>melo config get</code> show an unset <code>agent.window_messages</code> as the window it falls back to, <code>64 (local server)</code> or <code>20 (cloud)</code>.</li>
-          <li>A model picker (<a href="https://github.com/localmelo/localmelo/pull/247">#247</a>): <code>/model</code> alone opens a list under the input box (type to filter, up and down to move, Enter to switch and save, Esc to keep the current model; <code>✓</code> marks the current model and <code>(loaded)</code> the ones the server reports in memory; embedding and reranking models are left out), <code>/model NAME</code> and <code>/model N</code> work as before, and <code>/sessions</code>, <code>/model</code> and the first run's model question on a terminal share one list component (<code>support/cli/picker.py</code>). When several chat models are served and none is known to be loaded, nothing is highlighted and Enter does nothing until a key moves to a row, and Esc cancels the setup; with answers piped in, the numbered question is unchanged.</li>
-          <li>The interactive status bar (<a href="https://github.com/localmelo/localmelo/pull/293">#293</a>) has three zones that keep their place, with a rule between them: usage, the work beside the chat, and the run (the chat's title when no turn runs, and only when there is room). The model and the folder are in the welcome and <code>/status</code>, not in the bar. On a local server, usage is the tokens sent and received, the context with a meter (amber from 70%, red from 90%), the last request's cached share (the session's average once two requests reported one) and the idle time. On a cloud API it is the session's cost, from <code>[pricing.&lt;model&gt;]</code> prices (none are bundled; a model without a price shows its tokens), and the tightest rate limit the last response reported, from its <code>x-ratelimit-*</code> or <code>anthropic-ratelimit-*</code> headers. When the gateway has unfinished tasks, the work zone counts them by state with the top priority, and Ctrl+T lists them with the actions the gateway allows (pause, resume, raise, lower, stop); the terminal asks for the list every 5 seconds while a gateway token exists. While a turn runs, its zone gives the steps in brief (<code>2/~4 · ctrl+o steps</code>) and Ctrl+O lists them (<a href="https://github.com/localmelo/localmelo/pull/273">#273</a>). A segment with no data is left out, a narrow terminal drops segments in a fixed order and the bar never wraps. The bar uses events already received and sends no request of its own; <code>[cli] status_line = "off"</code> keeps only the run zone and the last request's context (<a href="https://github.com/localmelo/localmelo/pull/201">#201</a>). The console's status row keeps its own wording, in words in default mode and compact in developer mode (<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>, <a href="https://github.com/localmelo/localmelo/pull/258">#258</a>).</li>
-          <li>Help has a default mode and a developer mode. <code>melo -h</code> is 23 lines: the user options and the three everyday commands, one line each (<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>); <code>melo -h all</code>, <code>melo --developer --help</code> or <code>[ui] mode = "developer"</code> in the config file shows every option, command and setting by tier (<code>support/option_tiers.py</code>). The web console saves the same mode with the Developer mode toggle that ends its Settings dialog; in developer mode the dialog becomes Connection settings with a Developer tab that lists the advanced and experimental options read-only, and the details drawer also gets an Events tab (<a href="https://github.com/localmelo/localmelo/pull/199">#199</a>, <a href="https://github.com/localmelo/localmelo/pull/209">#209</a>, <a href="https://github.com/localmelo/localmelo/pull/242">#242</a>, <a href="https://github.com/localmelo/localmelo/pull/246">#246</a>).</li>
-          <li>Short commands (<a href="https://github.com/localmelo/localmelo/pull/242">#242</a>): seven command words (<code>setup</code>, <code>config</code>, <code>serve</code>, <code>console</code>, <code>task</code>, <code>worker</code> and <code>import</code>) count only as the first argument and an exact match; the everyday options have letters and one-word names (<code>-m</code>/<code>--model</code>, <code>-u</code>/<code>--url</code>, <code>-s</code>/<code>--steps</code>, <code>-o</code>/<code>--output</code>, <code>-w</code>, <code>-t</code>, <code>-y</code>, <code>-V</code>); and <code>-X KEY=VALUE</code> (<code>--set</code>) changes any <code>config.toml</code> key for one run without writing the file, while <code>melo config</code> lists, reads and saves keys. A command word after options, as in <code>melo -u URL serve</code>, is refused with the place to put it. Every old spelling still works and parses to the same result.</li>
-          <li>Getting started in the terminal (<a href="https://github.com/localmelo/localmelo/pull/240">#240</a>): the first run says what melo needs, a model server on this computer, and lists chat models before embedding and reranking ones, which it tags and never defaults to; the default welcome is three rows (version and model, folder, a first thing to try), and developer mode keeps the box; a failed run ends with a line in plain words and the next step in the default color, such as <code>Could not reach the model server at URL.</code> and <code>Start it, then /retry.</code>, and a <code>Stopped after 5.0s</code> footer. The stdout, stderr and exit codes of direct runs, and JSON output, are unchanged.</li>
-          <li>First-run setup lists the models that a local server reports as loaded (oMLX's <code>/models/status</code> and Ollama's <code>/api/ps</code>, each lookup with a one-second timeout) and makes the first loaded chat model the default. <code>melo serve -p 0</code> binds a free loopback port and prints the address it chose (<a href="https://github.com/localmelo/localmelo/pull/219">#219</a>), and its startup lines reach a pipe or a file at once (<a href="https://github.com/localmelo/localmelo/pull/236">#236</a>).</li>
-          <li>Model choice has no blind default (<a href="https://github.com/localmelo/localmelo/pull/231">#231</a>): when a local server serves several chat models and none is known to be loaded, first-run setup, <code>melo setup</code> and <code>/backend</code> ask for a number or an id with no default; when a model is loaded, the first loaded one is marked and is the default. In the terminal, <code>melo -u URL</code> without <code>-m</code> uses the one loaded model, or exits 2 with the list. A direct run without <code>-m</code> chooses the same way, listing the server's models first and ending with exit code 2 and the list before its first request when several are served and none is known loaded (a <code>--brief</code> run reports a <code>startup_error</code> result); a server that cannot be listed gets the model <code>default</code> and a warning on stderr (<a href="https://github.com/localmelo/localmelo/pull/236">#236</a>).</li>
-          <li>The product names the model server (<a href="https://github.com/localmelo/localmelo/pull/237">#237</a>): the setup menus and the web settings say "oMLX or vLLM (OpenAI-compatible, local)", and the banner, <code>/status</code>, the <code>/model</code> messages, the console's model row and the error texts say oMLX when the server's model list names oMLX as the owner, else "OpenAI-compatible server". First-run setup saves such a server as <code>chat_backend = "omlx"</code>, which loads as the <code>vllm</code> backend; a model that oMLX lists under an alias is marked <code>(loaded)</code> under both names. Only labels, hints, errors and the saved spelling changed: the requests are the same.</li>
-          <li>Five built-in tools, with <code>python_exec</code> in a child process in every mode; the interactive UI gets all five, gateway sessions and console sessions four, without <code>shell_exec</code>, and a direct run and the Python API's default <code>python</code> mode three, without <code>shell_exec</code> and <code>list_files</code> (<a href="https://github.com/localmelo/localmelo/pull/259">#259</a>); the terminal chat and the console chats also get eight read-only browser tools while <code>[browser] driver</code> is on (<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>); and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
-          <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; config-backed direct runs, the UI and console sessions also resolve the names in <code>[agent] tool_env</code>, and nothing else is inherited.</li>
-          <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode), and every tool of a provider's group, such as the browser tools, after them; <code>all</code> offers every tool on every step.</li>
-          <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
-          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them, and the web console runs and reads its sessions in the gateway's own store; the <code>/v1</code> HTTP API does not use sessions yet. A turn cancelled before its agent reports a result keeps its status, cause and reason in the saved history (<a href="https://github.com/localmelo/localmelo/pull/168">#168</a>). Direct runs are recorded by default in the CLI's own store (<a href="https://github.com/localmelo/localmelo/pull/217">#217</a>), and concurrent first runs on a new home no longer lose a recording (<a href="https://github.com/localmelo/localmelo/pull/222">#222</a>).</li>
-          <li>The gateway: the HTTP API, the console's API v2 under <code>/api</code> (health, sessions, turns, an event stream, blobs, submissions, tools, grants, memory and runs, and the writes that create a session and start, retry, stop and approve its turns), both behind a private bearer token or a browser session cookie from a one-use link (non-loopback binds are refused, and Host, Origin and fetch-metadata checks run before a body is read), sessions that close on request only when idle, and the console's live page at <code>/</code> (the session list, a chat's turns and stored events over SSE, a work card for each tool call, the live progress row, Stop, the typing heartbeat and, in developer mode, the level chip; it talks only to <code>/api</code> and uses the configured model). Its chat and task pages show a status row, read from <code>GET /api/sessions/{id}/status</code>, with the cache share and idle time, the context fill, the step and the task counts, as the terminal shows them (<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>). The page's chats and console turns pass through the scheduler's policy (<code>off</code> by default); in developer mode the header shows the GPU lock and the battery, and in default mode a banner says so while a chat waits behind another app's GPU lock. The legacy <code>/v1/playground</code> routes are off by default and opt in with <code>melo serve --playground</code>, behind authentication and using the saved local backend and model. Authenticated endpoint probes accept typed HTTP/HTTPS URLs without following redirects, and explicit close/delete refuses busy sessions with 409. A macOS background service is also available, and an arm64 development app wraps the console in a native window and menu-bar host that starts its own gateway on a free port the system picks and checks a per-launch identifier before sending any login code (<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS development app</a>). One command, <code>uv run python scripts/build_macos_app.py --install</code>, builds it, signs it ad hoc and installs it in <code>~/Applications</code>; it needs no Apple developer account and stays on the Mac that builds it, so it is a prototype, not a notarized release or a cask. The build leaves IDLE, tkinter, turtle, pip, setuptools, ensurepip and 2to3 out of the bundled Python (36 MB, <a href="https://github.com/localmelo/localmelo/pull/251">#251</a>), so code that runs on it, such as <code>python_exec</code> under the app's <code>melo</code>, cannot import them. The build needs a Swift compiler, from the release Xcode or else the Command Line Tools (<a href="https://github.com/localmelo/localmelo/pull/254">#254</a>). Until the console loads, its window shows a starting view, and a gateway that cannot start or stops gives its reason there with Try Again, Open Log and Quit (<a href="https://github.com/localmelo/localmelo/pull/238">#238</a>); quitting asks only when a chat or a task would stop or something waits for an approval (<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>).</li>
-          <li>The console follows every kind of session live: a chat's turns, worker runs (<a href="https://github.com/localmelo/localmelo/pull/221">#221</a>), a task's card with its Live section (<a href="https://github.com/localmelo/localmelo/pull/224">#224</a>), and terminal chats, read-only and redacted (<a href="https://github.com/localmelo/localmelo/pull/226">#226</a>). The header's running count and the macOS app's menu-bar count and quit dialog list what runs now across chats, tasks, runs and terminal chats (<a href="https://github.com/localmelo/localmelo/pull/227">#227</a>). The menu-bar item, the localmelo logo in colour, shows the running count beside it and adds a dot while a chat or a task waits for a tool approval and opens it from its menu, and <code>GET /api/health</code> lists the waiting chats and tasks in <code>status.waiting</code>; the app's icon is Melo, the README's emblem (<a href="https://github.com/localmelo/localmelo/pull/241">#241</a>, <a href="https://github.com/localmelo/localmelo/pull/263">#263</a>).</li>
-          <li>The console's first run (<a href="https://github.com/localmelo/localmelo/pull/243">#243</a>): while no model can answer (nothing is configured, or the configured server is down) and no chat is open, the welcome shows one setup card in place of the "Connect a model" button that <a href="https://github.com/localmelo/localmelo/pull/230">#230</a> limited to that case. The card asks <code>GET /api/setup/detect</code> for a server on this Mac and names it as the terminal does (oMLX, Ollama or a model server); "Use this model" saves the server, tests it and makes the welcome ready without opening settings, and with several chat models and none known to be loaded it waits for a pick. A server that needs a key gets its own text and "Check again"; with none running, the card prints this computer's commands with a Copy commands button and looks again every three seconds (<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>). An approval card asks a question per tool, such as "Replace notes.txt?" above a numbered diff of what the write replaces (<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>), with "Allow once", "Allow for this chat" ("Allow for this task" in Tasks) and "Deny", which can tell melo what to do instead; a high-impact call has its own card without "Allow for this chat" (see action review below). A run that ends badly starts with a ✗ or ⚠, the first line of the error and a hint, with one filled first step such as "Open model settings", "Continue" or "Try again". No console text is smaller than 12px. In the terminal, <code>/memory</code> and <code>/status all</code>, and the console's details drawer, show the session's own working-window cap, <code>window_messages</code> (<a href="https://github.com/localmelo/localmelo/pull/230">#230</a>).</li>
-          <li>Default and developer mode in the console (<a href="https://github.com/localmelo/localmelo/pull/246">#246</a>): the page reads the saved <code>[ui] mode</code> once from <code>GET /api/settings</code> when it opens, and anything but <code>developer</code> is the default mode. Default mode hides the chat's level chip and Details, the GPU-lock and battery line, the status row's cache, phase and queue segments, the priority in Tasks, and the settings dialog's file, revision, Test, Theme and Developer tabs; Workers and Tasks show in the sidebar once a run, a terminal chat or a task exists. The header chip names the model that answers, or says <code>Model offline</code> or <code>No model</code>; Settings is one dialog with Model, Appearance and a Developer mode toggle; and the level chip is a menu button with arrow-key, Home and End navigation. Developer mode changes what is shown, never what runs.</li>
-          <li>The first task's folder (<a href="https://github.com/localmelo/localmelo/pull/248">#248</a>): a new chat shows the folder melo works in as a composer chip (<code>In localmelo-workspace</code>) whose panel offers the default folder (<code>[gateway] workspace</code>, else <code>~/localmelo-workspace</code>), up to four folders of recent chats and "Choose a folder…"; the pick goes out as <code>workspace</code> in <code>POST /api/sessions</code> with the first message, a chat's folder is in its header, and three starters fill the message box. A browser opens a path field for "Choose a folder…"; the macOS app reaches the system's folder panel and Finder through one message handler, <code>localmeloFolder</code>, which takes a message only from the gateway's own page: <code>choose</code> returns the path the panel returned, or null, and <code>reveal</code> shows a folder in Finder only if it is a chat's own folder or one that the panel returned during that run. A chat held behind another app's GPU lock reads "Waiting for this Mac's GPU" in the work group, the live row, the tool card, the composer and, in developer mode, the header chip.</li>
-          <li>Plain words in the console and the app (<a href="https://github.com/localmelo/localmelo/pull/257">#257</a>): when the model server cannot be reached, the failed turn's card gives one hint that names the address (<code>Is your model server still running at 127.0.0.1:18351? Start it, then try again.</code>), fills "Try again" (or "Continue" when tools ran) and offers "Change the server address" as a link, and the app says <code>Its background service quit unexpectedly.</code> and writes the signal or exit status to <code>gateway.log</code>. In default mode the settings dialog says "Model server" and "Server address", a running chat "Working…", and the sidebar shows a chat's folder, with a dot while it waits for an approval; developer mode keeps the technical words. The page puts <code>data-mode</code> and <code>data-locked</code> on its root element, and the app reads them to offer "Sign In Again" only after four failed attempts in a row, on the sign-in page, or in developer mode. At 700 px or less and on touch screens, the header drops a model chip that only names the model, the keyboard hints are hidden, and the next steps of a failed turn are buttons at least 44 px tall.</li>
-          <li>The console's approval for a file write (<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>): a pending <code>file_write</code> over an existing file carries <code>target.diff</code> (<code>added</code>, <code>removed</code>, <code>rows</code> of <code>kind</code>, <code>line</code> and <code>text</code>, and <code>note</code>) in <code>GET /api/sessions/{id}</code> and the task routes, built by <code>support/sessions/edits.py</code> with the terminal panel's diff (two lines of context, a <code>…</code> row between hunks). The card asks "Replace notes.txt?", counts the change ("5 lines removed, 1 added"), shows the first 20 rows with "Show all N lines" for the rest, signs every row with − or +, and redacts secrets as a stored event does. When it cannot compare (the file is not text, cannot be read, is not a regular file or is over 200 KB; the new text is over 200,000 characters; more than 1,000 rows change; or a private key is in either text) it says why in one line and keeps the old title with the file's size. The diff is whole or absent, and a new file or a call without text carries none.</li>
-          <li>Coming back to a chat and the end of a turn (<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>): the exit line is <code>Continue it with: melo -c</code> when the chat is the newest of the folder melo ran in and <code>Resume it with: melo -r ID</code> otherwise; a resumed chat's recap marks each message and each answer once and shows the answer's Markdown as plain text, four rows at most; the terminal calls a chat a chat where it said session. A turn that wrote files with <code>file_write</code> ends with <code>Changed hello.py (+1), README.md (+3 −1)</code> under its footer (<code>support/cli/render.py</code>): the lines added and removed over the whole turn, from each call's result and the approval's snapshot, three names at most and then <code>and N more</code>; a refused, denied or failed write and a file that a shell command changed are not listed, and a file with no snapshot is named without counts. In developer mode the plan row shows on every turn.</li>
-          <li>Getting started, round 2 (<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>): outside developer mode, <code>melo serve</code> with nothing saved asks the first run's question, <code>Use this model server?</code>, for the server it finds, and its startup line reads <code>Model: stub-model on MLC-LLM</code>; <code>melo serve --reconfigure</code> and developer mode keep the eight-way menu. When nothing is saved and no server answers on the usual ports (8000, 8400, 11434 and 30000, or <code>LOCALMELO_DETECT_URLS</code>), the first run, <code>melo serve</code> and <code>melo setup</code> print this computer's commands from one place, <code>discovery.how_to_start</code> (oMLX on a Mac, Ollama elsewhere; a test compares them with the model servers guide), and ask <code>No model server found. What now?</code> with <code>Check again</code>, <code>Enter an address</code> and <code>Quit</code> (piped: <code>Press Enter to check again, type an address, or q to quit:</code>). <code>GET /api/setup/detect</code> carries them as <code>start</code> in every answer. With no embedding model on the server the first run says <code>Long-term memory is off; melo setup turns it on.</code>, and outside developer mode the first answer has no <code>partial reply (…)</code> line, no reasoning-format note and no permission tier in the approval header.</li>
-          <li>The console opens by itself (<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>): when the gateway of <code>melo serve</code> listens and stdin and stdout are terminals on this computer, with none of <code>SSH_CONNECTION</code>, <code>SSH_CLIENT</code>, <code>SSH_TTY</code> and the app's instance variable set, the console opens in the default browser signed in with a one-use link (<code>support/console_link.py</code>), and <code>Web console: opened in your browser (melo console opens it again).</code> takes the place of the <code>Web UI:</code> and <code>Sign in:</code> lines. <code>melo console</code> opens it the same way, prints the link when no browser starts, exits 1 when nothing listens on the port and exits 2 with no terminal. The page opened without a link says <code>Sign in to localmelo</code>.</li>
-          <li>Every question is a list (<a href="https://github.com/localmelo/localmelo/pull/266">#266</a>): on a terminal (stdin and stdout are terminals and <code>TERM</code> is not <code>dumb</code>), a question with a fixed set of answers is a <code>ChoicePicker</code> (<code>support/cli/picker.py</code>), a title and rows of words with no filter field. The arrow keys and a number key from 1 to 9 choose, Enter confirms, Esc answers the row that the end of the key line names (or cancels), and Ctrl+C and Ctrl+D end the setup. The first run and the wizard draw it below the cursor and erase it when answered; <code>/attach !</code> opens it in the screen's own list, where <code>/model</code> opens. The recommended row is selected first, and <code>Cancel setup</code> or <code>Don't attach it</code> after a failed check or for the attach question. Without a terminal, every question reads the typed answer it always did (<code>Use it? [Y/n]:</code>, <code>[r]etry, [s]ave anyway, [N]o [N]:</code>, a number for a backend), text questions stay text, and a direct run never asks.</li>
-          <li>Colour in the terminal (<a href="https://github.com/localmelo/localmelo/pull/268">#268</a>, <a href="https://github.com/localmelo/localmelo/pull/273">#273</a>, <a href="https://github.com/localmelo/localmelo/pull/289">#289</a>): every style is a role of one table (accent, answer, heading, muted, ok, warn, error, the tool kinds, path, code names), drawn at the colours the terminal has: none with <code>NO_COLOR</code> or <code>TERM=dumb</code>, then <code>[cli] colors</code>, then 24-bit with <code>COLORTERM=truecolor</code>, 256 with a <code>TERM</code> that ends in <code>256color</code>, else the 16 named colours (<code>support/cli/termcolors.py</code>). The interactive UI asks the terminal for its background (OSC 11 and 10, at most 100 ms, only with a terminal on stdin and stdout), after <code>[cli] background</code> and before <code>COLORFGBG</code>. A tool row reads a mark, the kind, the name and a preview, by the tool's permission tier (<code>→</code> read, <code>±</code> write, <code>$</code> run, <code>@</code> network); a command that exits non-zero shows <code>✗</code> and <code>exit N</code> in red; the answer's marks, headings and bullets are Melo's orange; a fill is drawn only where the text keeps 4.5:1 on it. The approval panel, every list and the live row use the same roles, and the command list under the input box has no background. At 256 colours or more, in a Unicode terminal of 80 columns or more, the welcome stands beside Melo's head (<code>support/cli/mark.py</code>). Direct mode, workers, JSON and stream-json output, events and exit codes are byte for byte the same.</li>
-          <li>Action review (<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>, <a href="https://github.com/localmelo/localmelo/pull/294">#294</a>): the checker reviews each <code>shell_exec</code>, <code>python_exec</code> and <code>file_write</code> call before the approval policy decides (<code>melo/checker/review/</code>, <code>Checker.review_action</code>), with fixed rules that split the shell command or parse the Python code and run nothing. A call is routine, high-impact (installs, environments, downloads, writes or deletes outside the workspace, deferred execution, credentials, system settings, network services, sending files out, changing localmelo itself, code built at run time) or undecided. A session grant covers routine calls only (<code>covered_by_grant</code> in <code>melo/contracts/review.py</code>): a high-impact or undecided call asks every time, a high-impact call offers no chat-wide allow, and allowing it for the chat allows that one call. The terminal's <code>auto</code> mode runs routine calls and asks before the others; a call that would change localmelo itself is denied without asking. The console and the app show a high-impact call on a card of its own with a "Why melo asks" list, the message that started the turn, and only Allow once and Deny; the terminal panel has the same title and reasons and starts on No. Each entry of <code>pending_approvals</code> carries <code>review</code> (<code>verdict</code>, <code>title</code>, <code>reasons</code>; <code>null</code> for other tools). Direct, <code>--brief</code> and <code>--yolo</code> runs are not reviewed.</li>
-          <li>Browsing, part 1 (<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>): with <code>[browser] driver = "safari-automation"</code> (default <code>off</code>; <code>/browser on</code> or <code>-X browser.driver=safari-automation</code>) the terminal chat and the console get eight read-only tools, <code>browser_open</code>, <code>browser_read</code>, <code>browser_find</code>, <code>browser_follow</code>, <code>browser_back</code>, <code>browser_tabs</code>, <code>browser_wait</code> and <code>browser_screenshot</code> (<code>support/browser/provider.py</code>), over Safari's own <code>safaridriver --mcp</code> in its automation windows, started on the first call. Safari needs "Allow remote automation" once. Each site asks once per chat ("Open a website?"; the only lasting answer is for the chat), only <code>http</code> and <code>https</code> open, a page reaches the model as one fenced block with a note that it is data, and a password, one-time-code or card field never shows a value. Nothing clicks, types, signs in or posts; direct runs, workers and saved tasks never get the tools.</li>
-          <li>Tool images (<a href="https://github.com/localmelo/localmelo/pull/295">#295</a>): <code>[agent] tool_images</code> (<code>auto</code> by default, <code>on</code>, <code>off</code>; <code>-X agent.tool_images=on</code>) decides whether the pictures a tool returns reach the model as <code>image_url</code> data in a message after the tool results (Ollama: the <code>images</code> field). <code>auto</code> sends them only when the server says the model reads images (oMLX's <code>/v1/models/status</code> gives a <code>vlm</code>, Ollama's <code>/api/show</code> lists <code>vision</code>); other servers count as off. The pixels live in a RAM store and history and saved chats keep references; the newest <code>tool_images_keep</code> (3) keep their pixels and the oldest <code>tool_images_retire</code> (2) lose them together; a picture wider than 1,280 px is scaled once on macOS, and each picture sent counts 4,500 characters toward the prompt cap.</li>
-          <li>Confined writes (<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>, <a href="https://github.com/localmelo/localmelo/pull/284">#284</a>): on macOS, a worker run (<code>--brief</code>, <code>melo worker</code>) and a saved task start the commands of <code>shell_exec</code> and <code>python_exec</code>, the brief's <code>Check:</code> commands included, under a <code>sandbox-exec</code> profile that melo generates (<code>melo/executor/sandbox.py</code>): file writes outside the workspace are refused, whatever the command does, and reads and the network are not confined. The allowlist is the workspace, its <code>.melo-tmp</code> temporary folder, the user's temporary folder, the caches of uv, black and npm, a few <code>/dev</code> devices and a linked worktree's own git directory and objects. A refused write adds a first line to the tool's text, and the result's <code>confinement</code> counts them. <code>[agent] confine_writes</code> (default <code>true</code>) turns it off, and the developer setting <code>[agent] confine_direct_runs</code> (default <code>false</code>) confines plain direct runs too. A run that cannot be confined stops before its first command; off macOS it goes on and says so.</li>
-          <li>What a chat says about itself (<a href="https://github.com/localmelo/localmelo/pull/287">#287</a>, <a href="https://github.com/localmelo/localmelo/pull/305">#305</a>, <a href="https://github.com/localmelo/localmelo/pull/288">#288</a>): the terminal chat, the console and the app add one paragraph after the base system text of every request (<code>support/sessions/identity.py</code>, <code>AgentOptions.identity</code>), built when an Agent is built from its backend and memory settings. It says that the assistant is melo from localmelo, names the model and its server (and "on this computer" for a local one), says what the chat remembers (by default the recent messages of this chat and nothing from other chats; with persisted memory that can be recalled, also what localmelo keeps on this computer, by kind of note; no notes of its own, and the folder's files are not memory) and asks for a reply in the language and script the user writes in. Direct runs and workers do not get it. A planning reply without a tool call that holds only unfinished thinking (an unclosed think block, no answer but counted reasoning tokens, or streamed content that repeats the reasoning) is never the answer: it is kept as thinking, the model is asked once more, and a second such reply ends the run <code>failed</code> with "melo did not finish an answer" (<code>UNFINISHED_ANSWER_ERROR</code> in <code>melo/schema.py</code>).</li>
-          <li>Pictures a turn makes (<a href="https://github.com/localmelo/localmelo/pull/291">#291</a>): after a console turn, the gateway looks at the chat's folder before and after it (picture suffixes only; no hidden folders, <code>node_modules</code>, <code>__pycache__</code> or links; three levels deep, 4,000 entries at most) and stores what it created or changed, with picture paths the answer names inside the folder, as one <code>turn.pictures</code> event (at most 24). <code>GET /api/sessions/{id}/pictures?path=</code> serves a file only when its real path is inside that chat's folder, its name and first bytes say it is a picture, and it is a regular file of at most 20 MB; every answer has <code>nosniff</code>. The console and the app show the row of previews under the answer; direct runs and the terminal do not look.</li>
-          <li>Melo the Akita (<a href="https://github.com/localmelo/localmelo/pull/271">#271</a>, <a href="https://github.com/localmelo/localmelo/pull/272">#272</a>, <a href="https://github.com/localmelo/localmelo/pull/275">#275</a>, <a href="https://github.com/localmelo/localmelo/pull/292">#292</a>, <a href="https://github.com/localmelo/localmelo/pull/296">#296</a>, <a href="https://github.com/localmelo/localmelo/pull/306">#306</a>): <code>GET /api/health</code> carries <code>status.recent</code>, the newest finished chat turn, task, run or terminal turn, with its outcome (<code>done</code>, <code>failed</code> or <code>stopped</code>) and how long ago it ended. The macOS app turns the health reply into the pet's mood in a fixed order (stopped, waiting, working, just finished, lazy rest, then sleeping poses after a quiet minute); when the window is put away the pet lies at the bottom right of the main screen, above other windows and on every Space and not in the Dock, with click, drag, Hide Melo and Show Melo as the app guide says. The same pictures are the portrait of the app's first window and of the console, whose reply icon is Melo's face in the state of the newest turn. Blinks, a tail wag, a sleeping "z" and an ear flick are Core Animation in the app and CSS keyframes in the console, with no timer; they stop under Reduce Motion, in Low Power Mode, when the Mac runs hot, while hidden or covered and while the screen sleeps. A change of mood waits at most 0.4 s for a rest point and hides in a squash, so nothing that moves is cut.</li>
-          <li>Experimental <code>lean_output</code> (<a href="https://github.com/localmelo/localmelo/pull/255">#255</a>; <code>[agent] lean_output</code> or <code>-X agent.lean_output=true</code>; off by default): a task given on the command line and a <code>--brief</code> run replace the system prompt's last line, <code>Think step by step. Be concise.</code>, with three short lines (no text between tool calls and a final answer of three lines at most; relative paths; read the files a task names first), and with <code>reflection_gate = "flags"</code> they ask for the reflection without the keys that nothing reads, and for <code>best_effort_result</code> only with <code>done</code> or <code>stop</code>. The compress modes keep the old line, and the interactive UI, <code>melo ""</code> and the gateway ignore the option. With it off, every request is as it was.</li>
-          <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs; oMLX works through the <code>vllm</code> backend.</li>
-          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; in the compress modes long-term memory is a typed store whose entries carry a kind, a source, a status, the signal that admitted them and their provenance, with one decision per candidate; the saved text is redacted first, the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it. In the compress modes, heuristic notes also keep explicit English negative and Chinese residence or cancellation statements, and similar assertions with opposite detected polarity are kept as conflicts rather than deduplicated.</li>
-          <li>Redaction covers PEM private key blocks (OpenSSH, RSA, EC, DSA, PKCS#8, encrypted and PGP armor): the BEGIN and END lines stay and the body becomes one <code>[redacted]</code> line, in tool output, stored events, logs and streamed display text (<a href="https://github.com/localmelo/localmelo/pull/188">#188</a>).</li>
-          <li>Reasoning notes: the <code>compress</code> and <code>compress+replay</code> modes keep a short note of each reply and its code drafts in a RAM-only store beside the working window and rehearse them into an attempt digest that names successful <code>file_write</code> paths, its last check and result, its decisions and the outcome; Python checks name a recognizable runner and safe target basename instead of quoting the first line of code, and writes through <code>python_exec</code> are not inferred as files. They recall these notes, with the task's drafts and thought chunks and earlier tasks' long-term entries, at start, attempt and step (<code>--retriever</code>, <code>--recall-*</code> and the <code>recall</code> tool).</li>
-          <li>Episodic attempt digests are admitted only with file or check evidence. In the explicit reasoning modes, recall prefers the same task, gates cross-task digests with a 1.1 times score ratio, and treats keyless old entries as cross-task; general memories bypass the gate, and a final evidence-less attempt keeps the last evidence-bearing digest.</li>
-          <li>At each reflection, the <code>reflection</code> event records the gate's three flags, the gate that applied and a <code>stop_reason</code> code, which is <code>null</code> when the run continues, so a run the gate stopped says which check stopped it (<a href="https://github.com/localmelo/localmelo/pull/187">#187</a>). A first reply that held no reflection is explained by <code>unreadable_reason</code> (<a href="https://github.com/localmelo/localmelo/pull/210">#210</a>).</li>
-          <li>A reflection reply that holds no readable reflection gets one more reading after one conservative repair of a <code>{...}</code> the decoder rejects: a closing <code>]</code> or <code>}</code> that no opener matches (<code>unmatched_closer</code>), a comma before a closer (<code>trailing_comma</code>), raw line breaks and tabs inside a string (<code>control_char</code>), a backslash before a character that JSON has no escape for, which is doubled (<code>invalid_escape</code>), or an array of strings that the next key breaks off, which gets one <code>]</code> before the comma that precedes that key (<code>unclosed_array</code>). A repair deletes a character, escapes some, or inserts one backslash or one <code>]</code>; nothing else is inserted or closed. A reply that needs two repairs stays unreadable, a truncated reply included, and the <code>reflection</code> event's <code>repaired</code> key names the repair; the retry note quotes the parser's error (<a href="https://github.com/localmelo/localmelo/pull/239">#239</a>, <a href="https://github.com/localmelo/localmelo/pull/249">#249</a>).</li>
-          <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline, exports a typed store or its decisions, and scores candidate files for the bench. The compress modes use the same retrievers in the loop; <code>legacy</code> runs do not.</li>
-          <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
-          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's shared gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). The page's chats and a console session's turns go through it; direct runs, <code>melo ""</code> and the <code>/v1</code> HTTP API do not.</li>
-          <li>The scheduler's task store (component version 4 in the gateway's <code>sessions.db</code>): tasks with P0-P5, dependencies, priority events, questions, rules, the log, idle windows, park priority and recovery provenance, created in one transaction with a task's <code>kind="task"</code> session, idempotent on <code>(origin, request_key)</code>, with workspaces under the user's home or <code>[gateway] workspace</code>; <code>ChatGate.register_task()</code> gives a worker its lifecycle, and a paused held worker parks at a safe point. <code>/api/tasks</code> provides task creation, inspection and control, with in-process workers. At startup, tasks left running, held or parked are reconciled from durable evidence, and a task proved never started launches behind a durable fence. Version 4 also holds dormant per-execution capture state, and every task launch now starts through the capture gate: python and shell calls record the process group, leader, boot ID and start time before the child is released, while a tool provider or arbitrary-code call marks capture incomplete. The controlled Resume API (<code>POST /api/tasks/{task_id}/resume</code>, <a href="https://github.com/localmelo/localmelo/pull/177">#177</a>) reads this evidence: a task the store proves never started is queued as its first start, a started task resumes without a confirmation only with a trusted complete capture and every recorded process group verifiably gone, and anything else needs the user's confirmation token. An unreadable or unsupported check counts as unknown, never as stopped, and a missing card blocks. The console's task card with Resume and Stop landed (<a href="https://github.com/localmelo/localmelo/pull/189">#189</a>); deadlines and worker accounting follow later.</li>
-          <li>A task that waits for a tool approval carries <code>pending_approvals</code>. The console's Tasks view shows the approval card with the state "Waiting for your approval", <code>melo-task show</code> and <code>list</code> print the same wait, and answers go to the existing approval endpoint (<a href="https://github.com/localmelo/localmelo/pull/208">#208</a>).</li>
-          <li>The documentation manifest registers each English page and its Chinese twin where one exists, and a parity test checks their anchors and code examples; the start guides, concept pages, guides and reference pages have Chinese twins, and <a href="https://github.com/localmelo/localmelo/pull/202">#202</a> and <a href="https://github.com/localmelo/localmelo/pull/203">#203</a> added the last six reference pages.</li>
-        </ul>
-        <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Part</th><th scope="col">What you get</th><th scope="col">Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Terminal</td><td>Chats, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Console and app</td><td>Live chats, the panel beside a chat, Tasks and Workers views</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Memory across chats</td><td>Notes, an index of every chat, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Browsing</td><td>Read and follow pages in Safari; acting on pages next</td><td><span class="chip building">building</span></td></tr>
+              <tr><td>Scheduler and workers</td><td>Task queue, priorities, workers, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
+              <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>
+              <tr><td>Main chat and side chats</td><td>One chat that knows you and hands work to tasks</td><td><span class="chip building">building</span></td></tr>
+              <tr><td>Learning while idle</td><td>Offline review of past work</td><td>planned</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="more-link">What comes next is on the <a href="./updates.html#roadmap">roadmap</a>; the planned memory design is on the <a href="./memory-design.html">memory design</a> page.</p>
       </section>
     </article>
   </main>
@@ -705,20 +375,35 @@
     (() => {
       const SVG_NS = "http://www.w3.org/2000/svg";
 
-      // Connectors of the diagram. fs/ts: the side of each end; ff/tf: where
-      // along that side (0 to 1, default 0.5); dy: label offset in pixels.
-      const CONNS = [
-        { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "one task" },
-        { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "sessions" },
-        { from: "n-mcp", fs: "right", to: "n-executor", ts: "left", label: "tools" },
-        { from: "n-agent", fs: "bottom", ff: 0.2, to: "n-executor", ts: "top", bidi: true, label: "tool calls", dy: 40 },
-        { from: "n-agent", fs: "bottom", ff: 0.8, to: "n-memory", ts: "top", bidi: true, label: "context", dy: 40 },
-        { from: "n-checker", fs: "top", to: "n-agent", ts: "bottom", type: "fail-line", mk: "arr-r", label: "failed check:\nrun ends as failed" },
-        { from: "n-config", fs: "left", to: "n-agent", ts: "right", tf: 0.3, label: "config file" },
-        { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "chat" },
-        { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "embeddings" },
-        { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "builds" }
-      ];
+      // Connectors of each diagram, by its svg. fs/ts: the side of each end; ff/tf: where
+      // along that side (0 to 1, default 0.5); dx, dy: label offset in pixels.
+      const DIAGRAMS = {
+        "svg-overview": [
+          { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "one task" },
+          { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "sessions", dy: -14 },
+          { from: "n-mcp", fs: "right", to: "n-executor", ts: "left", label: "tools" },
+          { from: "n-agent", fs: "bottom", ff: 0.2, to: "n-executor", ts: "top", bidi: true, label: "tool calls", dy: 40 },
+          { from: "n-agent", fs: "bottom", ff: 0.8, to: "n-memory", ts: "top", bidi: true, label: "context", dy: 40 },
+          { from: "n-checker", fs: "top", to: "n-agent", ts: "bottom", type: "fail-line", mk: "arr-r", label: "failed check:\nrun ends as failed" },
+          { from: "n-config", fs: "left", to: "n-agent", ts: "right", tf: 0.3, label: "config file" },
+          { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "chat" },
+          { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "embeddings" },
+          { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "builds" }
+        ],
+        "svg-around": [
+          { from: "a-cli", fs: "bottom", to: "a-chats", ts: "top", tf: 0.2, label: "terminal chats" },
+          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.2, label: "API v2" },
+          { from: "a-api", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.8, label: "HTTP" },
+          { from: "a-gateway", fs: "bottom", ff: 0.15, to: "a-chats", ts: "top", tf: 0.75, label: "console chats" },
+          { from: "a-gateway", fs: "bottom", ff: 0.7, to: "a-scheduler", ts: "top", label: "tasks" },
+          { from: "a-scheduler", fs: "right", to: "a-workers", ts: "left" },
+          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", type: "planned" },
+          { from: "a-chats", fs: "bottom", ff: 0.75, to: "a-agent", ts: "top", tf: 0.2, label: "each turn" },
+          { from: "a-workers", fs: "bottom", to: "a-agent", ts: "top", tf: 0.85, label: "same agent" },
+          { from: "a-memory", fs: "right", to: "a-agent", ts: "left", bidi: true, label: "recall", dy: -16 },
+          { from: "a-agent", fs: "right", to: "a-models", ts: "left", type: "dashed" }
+        ]
+      };
 
       // A point on one side of el, relative to the diagram.
       function point(el, side, f) {
@@ -748,31 +433,33 @@
       }
 
       function draw() {
-        const svg = document.getElementById("svg-overview");
-        const dia = svg.closest(".diagram");
-        CONNS.forEach((c) => {
-          const fe = document.getElementById(c.from);
-          const te = document.getElementById(c.to);
-          if (!fe || !te) return;
-          const p1 = point(fe, c.fs, c.ff);
-          const p2 = point(te, c.ts, c.tf);
-          const c1 = control(p1, c.fs, p2);
-          const c2 = control(p2, c.ts, p1);
-          const path = document.createElementNS(SVG_NS, "path");
-          path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
-          path.setAttribute("class", `conn ${c.type || ""}`);
-          path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
-          if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
-          svg.appendChild(path);
-          if (c.label) {
-            const label = document.createElement("div");
-            label.className = "conn-label";
-            label.setAttribute("aria-hidden", "true");
-            label.textContent = c.label;
-            label.style.left = `${(p1.x + p2.x) / 2}px`;
-            label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
-            dia.appendChild(label);
-          }
+        Object.entries(DIAGRAMS).forEach(([id, conns]) => {
+          const svg = document.getElementById(id);
+          const dia = svg.closest(".diagram");
+          conns.forEach((c) => {
+            const fe = document.getElementById(c.from);
+            const te = document.getElementById(c.to);
+            if (!fe || !te) return;
+            const p1 = point(fe, c.fs, c.ff);
+            const p2 = point(te, c.ts, c.tf);
+            const c1 = control(p1, c.fs, p2);
+            const c2 = control(p2, c.ts, p1);
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d", `M${p1.x} ${p1.y} C${c1.x} ${c1.y},${c2.x} ${c2.y},${p2.x} ${p2.y}`);
+            path.setAttribute("class", `conn ${c.type || ""}`);
+            path.setAttribute("marker-end", `url(#${c.mk || "arr"})`);
+            if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk || "arr"})`);
+            svg.appendChild(path);
+            if (c.label) {
+              const label = document.createElement("div");
+              label.className = "conn-label";
+              label.setAttribute("aria-hidden", "true");
+              label.textContent = c.label;
+              label.style.left = `${(p1.x + p2.x) / 2 + (c.dx || 0)}px`;
+              label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
+              dia.appendChild(label);
+            }
+          });
         });
       }
 
