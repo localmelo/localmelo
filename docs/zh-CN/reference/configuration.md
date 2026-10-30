@@ -45,6 +45,7 @@ chat_model = "qwen3:8b"
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
 | `brief_items` | `[agent]` | `false` | 实验性。`true` 让 `--brief` 运行指出简报中尚未被任何编辑触及的编号条目；见 [`--brief-items`](cli.md#brief-items)。 |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
+| `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
@@ -180,6 +181,8 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 `fixed_prefix`、`window_eviction` 和 `reflect_tool_guard` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，这三个和上面两个都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这五个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
 
 用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。历史记录为每个结果保存一份独立的、按模式脱敏的副本，最多 200,000 个字符（错误优先），并给出相对于脱敏后捕获的精确略去计数。计数保存在 `capture_metadata` 中，而不是已存文本里的带内标记。`acquisition_omitted_chars` 为 null，因为工具可能已经限制了自己的输出。捕获不是完整的文件或无限制的标准输出；脱敏基于模式，可能漏掉密钥。模型看到的经过检查的预览仍可能包含原始文本；`Message.tool_result`、`tool.finished` 事件和 trace 使用脱敏后的副本。既有的历史记录保留和权限仍然适用。`Agent.run_tool()` 不写入捕获的历史，并保留其现有的结果检查。该选项默认关闭。
+
+用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。在默认的 `reflection_gate = "flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
 
 <a id="embedding-and-long-term-memory"></a>
 
