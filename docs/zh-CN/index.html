@@ -73,9 +73,13 @@ uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         </figure>
         <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。</p>
-        <p>启动一个模型服务器，例如 <a href="https://ollama.com">Ollama</a>，并用 <code>ollama pull qwen3:8b</code> 下载一个模型，然后运行一个任务。答案会输出到 stdout。</p>
+        <p>启动一个模型服务器，然后运行一个任务。在搭载 Apple 芯片的 Mac 上，推荐使用本地服务器 <a href="https://github.com/jundot/omlx">oMLX</a>：用 <code>omlx serve --model-dir ~/models --port 8000</code> 提供一个模型文件夹（<a href="./quickstart.html#serve-a-model-with-omlx">快速开始</a>给出了完整步骤）。在其他系统上，使用 <a href="https://ollama.com">Ollama</a>，并用 <code>ollama pull qwen3:8b</code> 下载一个模型。答案会输出到 stdout。</p>
         <figure class="terminal">
-          <figcaption class="terminal-title">运行任务</figcaption>
+          <figcaption class="terminal-title">用 oMLX 运行任务</figcaption>
+          <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        </figure>
+        <figure class="terminal">
+          <figcaption class="terminal-title">用 Ollama 运行任务</figcaption>
           <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
         </figure>
         <div class="masthead-actions">
@@ -97,7 +101,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">
             <strong>模型服务器</strong>
-            <span>连接你自己运行的 Ollama、oMLX、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
+            <span>连接你自己运行的 oMLX（Apple 芯片的 Mac 上推荐）、Ollama、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>网关和网页工作区</strong>

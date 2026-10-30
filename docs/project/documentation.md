@@ -249,8 +249,9 @@ These always stay in English, in code font: config keys (`chat_backend`,
 (`LOCALMELO_PERSIST_MEMORY`, `LOCALMELO_MEMORY_DIR`), backend keys and
 `none`, tool names, `RunResult` field names, HTTP routes, file names and
 paths. Backend display names: MLC LLM (`mlc`), Ollama (`ollama`), vLLM
-(`vllm`), SGLang (`sglang`), OpenAI (`openai`), Anthropic (`anthropic`),
-Google Gemini (`gemini`), NVIDIA (`nvidia`).
+(`vllm`), oMLX (`vllm`, also spelled `omlx`), SGLang (`sglang`), OpenAI
+(`openai`), Anthropic (`anthropic`), Google Gemini (`gemini`), NVIDIA
+(`nvidia`).
 
 **Website labels**
 

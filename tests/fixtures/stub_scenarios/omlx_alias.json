@@ -1,0 +1,8 @@
+{
+  "omlx": [
+    {"id": "Qwen3-32B-4bit", "loaded": false},
+    {"id": "Qwen3-8B-4bit", "model_alias": "qwen3", "loaded": true},
+    {"id": "gemma-3-4b-it-4bit", "loaded": false}
+  ],
+  "replies": [{"content": "Hello from a stub that answers as oMLX does."}]
+}

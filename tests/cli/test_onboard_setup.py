@@ -7,6 +7,7 @@ temporary directory.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import tomllib
 from collections.abc import Iterator
@@ -31,6 +32,8 @@ URL = "http://127.0.0.1:8500/v1"
 # The real function, kept for tests that answer over an httpx.MockTransport.
 _REAL_IS_OLLAMA = discovery.is_ollama
 _REAL_LOADED_MODELS = discovery.loaded_models
+_REAL_LIST_MODELS = discovery.list_models
+_REAL_DETECT = discovery.detect_local_server
 
 
 @pytest.fixture(autouse=True)
@@ -434,8 +437,11 @@ def test_a_failed_embedding_probe_saves_with_embedding_off(
 
 
 def test_without_a_found_server_the_typed_url_is_listed(
-    config_path: Path, capsys: pytest.CaptureFixture[str]
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(onboard.sys, "platform", "linux")
     answers = _Answers(URL)
     result, _, list_models = _first_setup(answers, lists={URL: ["only"]})
     assert result == FirstSetup(url=URL, model="only", saved=True)
@@ -447,6 +453,29 @@ def test_without_a_found_server_the_typed_url_is_listed(
         "No model server found on this computer (looked at ports 8000, 11434). "
         "Start one (for example ollama serve), or enter its URL.\n"
         f"✓ {URL} lists 1 model; using only.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("platform", "servers"),
+    [
+        ("darwin", "omlx serve or ollama serve"),
+        ("linux", "ollama serve"),
+        ("win32", "ollama serve"),
+    ],
+)
+def test_the_no_server_hint_names_omlx_first_on_a_mac(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    servers: str,
+) -> None:
+    monkeypatch.setattr(onboard.sys, "platform", platform)
+    _first_setup(_Answers(URL), lists={URL: ["only"]})
+    assert capsys.readouterr().out.startswith(
+        "No model server found on this computer (looked at ports 8000, 11434). "
+        f"Start one (for example {servers}), or enter its URL.\n"
     )
 
 
@@ -1214,3 +1243,206 @@ def test_a_declined_server_is_the_menus_default_unless_a_backend_is_saved(
     with mock.patch.object(discovery, "is_ollama", is_ollama):
         _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
     assert answers.prompts[1] == f"  Chat backend [{default}]: "
+
+
+# ── oMLX in the menus and the saved file ──
+
+_VLLM_ENTRY = "oMLX or vLLM (OpenAI-compatible, local)"
+
+
+def test_the_backend_menus_name_omlx_with_vllm() -> None:
+    assert dict(onboard.CHAT_BACKENDS)["vllm"] == _VLLM_ENTRY
+    assert dict(onboard.EMBEDDING_BACKENDS)["vllm"] == _VLLM_ENTRY
+    assert dict(onboard.CHAT_BACKENDS)["ollama"] == "Ollama (local endpoint)"
+    assert dict(onboard.EMBEDDING_BACKENDS)["mlc"] == "MLC (local endpoint)"
+
+
+def test_the_wizard_shows_the_vllm_entry_as_omlx_or_vllm(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    answers = _Answers("3", "", "m", "", "")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+    ):
+        run_backend_setup()
+    out = capsys.readouterr().out
+    # The chat menu and the embedding menu both list it as entry 3.
+    assert out.count(f"    [3] {_VLLM_ENTRY}\n") == 2
+    assert "  -- oMLX or vLLM (local endpoint) --\n" in out
+    assert "[3] vLLM (local endpoint)" not in out
+    assert "-- vllm (local endpoint) --" not in out
+
+
+def test_the_other_local_backends_keep_their_wizard_heading(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    answers = _Answers("1", "", "m", "", "")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+    ):
+        run_backend_setup()
+    assert "  -- mlc (local endpoint) --\n" in capsys.readouterr().out
+
+
+_OMLX_FILE = (
+    f'chat_backend = "omlx"\nembedding_backend = "none"\n\n'
+    f'[vllm]\nchat_url = "{URL}"\nchat_model = "Qwen3-8B-4bit"\n'
+)
+
+
+async def test_the_same_server_is_saved_under_the_spelling_the_file_used(
+    config_path: Path,
+) -> None:
+    config_path.write_text(_OMLX_FILE, encoding="utf-8")
+    assert await onboard.save_chat_server(URL, "Qwen3-32B-4bit", keep_embedding=True)
+    assert config_path.read_text(encoding="utf-8").startswith(
+        'chat_backend = "omlx"\nembedding_backend = "none"\n'
+    )
+    assert config.load().vllm.chat_model == "Qwen3-32B-4bit"
+
+
+@pytest.mark.parametrize(
+    ("url", "ollama"),
+    [("http://127.0.0.1:9000/v1", False), (URL, True)],
+    ids=["another-server", "an-ollama-server"],
+)
+async def test_another_server_is_not_saved_as_omlx(
+    config_path: Path, url: str, ollama: bool
+) -> None:
+    config_path.write_text(_OMLX_FILE, encoding="utf-8")
+    assert await onboard.save_chat_server(url, "m", ollama=ollama)
+    text = config_path.read_text(encoding="utf-8")
+    assert text.startswith(f'chat_backend = "{"ollama" if ollama else "vllm"}"\n')
+    assert "omlx" not in text
+
+
+def test_a_first_run_that_chooses_an_embedding_model_chooses_its_spelling_again(
+    config_path: Path,
+) -> None:
+    cfg = config.Config(chat_backend="vllm", embedding_backend="vllm")
+    cfg.chat_alias = cfg.embedding_alias = "omlx"
+    cfg.vllm.chat_url = URL
+    onboard._with_chat_server(cfg, URL, "m", ollama=False, embedding_model="e")
+    assert (cfg.chat_alias, cfg.embedding_alias) == ("omlx", "")
+
+
+def test_the_first_run_saves_omlx_for_a_server_that_names_itself_omlx(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first run lists the server to find it; the file then says oMLX."""
+    from localmelo.support.cli.agents import config_backend
+
+    reply = {"data": [{"id": "Qwen3-8B-4bit", "owned_by": "omlx"}]}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+
+    async def detect(urls: Any, **kwargs: Any) -> FoundServer | None:
+        return await _REAL_DETECT(urls, transport=transport)
+
+    monkeypatch.setattr(discovery, "list_models", _REAL_LIST_MODELS)
+    monkeypatch.setattr(discovery, "detect_local_server", detect)
+    monkeypatch.setattr(discovery, "detect_urls", lambda: (URL,))
+    monkeypatch.setattr("builtins.input", _Answers(""))
+    result = run_first_setup()
+    assert result == FirstSetup(url=URL, model="Qwen3-8B-4bit", saved=True)
+    assert config_path.read_text(encoding="utf-8").startswith(
+        'chat_backend = "omlx"\nembedding_backend = "none"\n'
+    )
+    saved = config.load()
+    assert (saved.chat_backend, saved.vllm.chat_model) == ("vllm", "Qwen3-8B-4bit")
+    # A later process has listed nothing yet; the file alone names the server.
+    discovery.forget_servers()
+    assert config_backend(saved, None).label == "oMLX"
+
+
+# ── A listing that names oMLX decides how a server is saved ──
+
+
+def _list_as_omlx(url: str) -> None:
+    """List the models of *url*, which answers as oMLX does (no network)."""
+    reply = {"data": [{"id": "Qwen3-8B-4bit", "owned_by": "omlx"}]}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+    asyncio.run(_REAL_LIST_MODELS("vllm", url, transport=transport))
+
+
+def test_a_listed_omlx_server_is_saved_as_omlx(config_path: Path) -> None:
+    _list_as_omlx(URL)
+    assert asyncio.run(onboard.save_chat_server(URL, "Qwen3-8B-4bit"))
+    assert config_path.read_text(encoding="utf-8").startswith(
+        'chat_backend = "omlx"\nembedding_backend = "none"\n'
+    )
+    saved = config.load()
+    assert (saved.chat_backend, saved.vllm.chat_url) == ("vllm", URL)
+    assert saved.validate() == []
+
+
+def test_its_embedding_model_is_saved_as_omlx_too(config_path: Path) -> None:
+    _list_as_omlx(URL)
+    assert asyncio.run(
+        onboard.save_chat_server(
+            URL, "Qwen3-8B-4bit", embedding_model="Qwen3-Embedding-0.6B"
+        )
+    )
+    assert config_path.read_text(encoding="utf-8").startswith(
+        'chat_backend = "omlx"\nembedding_backend = "omlx"\n'
+    )
+    saved = config.load()
+    assert saved.has_embedding and saved.vllm.embedding_url == URL
+    assert saved.validate() == []
+
+
+@pytest.mark.parametrize(
+    ("listed", "url", "ollama", "key"),
+    [
+        (None, URL, False, "vllm"),  # nothing listed: unknown is not oMLX
+        (URL, "http://127.0.0.1:9000/v1", False, "vllm"),  # another server
+        (URL, URL, True, "ollama"),  # it answered like Ollama
+    ],
+    ids=["not-listed", "another-server", "ollama"],
+)
+def test_any_other_server_is_saved_under_its_own_key(
+    config_path: Path, listed: str | None, url: str, ollama: bool, key: str
+) -> None:
+    if listed:
+        _list_as_omlx(listed)
+    assert asyncio.run(onboard.save_chat_server(url, "m", ollama=ollama))
+    text = config_path.read_text(encoding="utf-8")
+    assert text.startswith(f'chat_backend = "{key}"\n') and "omlx" not in text
+
+
+def test_a_server_that_names_another_owner_is_saved_as_vllm(config_path: Path) -> None:
+    reply = {"data": [{"id": "m", "owned_by": "vllm"}]}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+    asyncio.run(_REAL_LIST_MODELS("vllm", URL, transport=transport))
+    assert asyncio.run(onboard.save_chat_server(URL, "m"))
+    assert config_path.read_text(encoding="utf-8").startswith('chat_backend = "vllm"\n')
+
+
+def test_a_switch_that_keeps_the_embedding_leaves_its_spelling(
+    config_path: Path,
+) -> None:
+    config_path.write_text(
+        'chat_backend = "vllm"\nembedding_backend = "omlx"\n\n[vllm]\n'
+        f'chat_url = "http://127.0.0.1:9000/v1"\nchat_model = "a"\n'
+        f'embedding_url = "{URL}"\nembedding_model = "e"\n',
+        encoding="utf-8",
+    )
+    assert asyncio.run(
+        onboard.save_chat_server("http://127.0.0.1:9001/v1", "b", keep_embedding=True)
+    )
+    text = config_path.read_text(encoding="utf-8")
+    assert text.startswith('chat_backend = "vllm"\nembedding_backend = "omlx"\n')
+
+
+def test_the_wizard_spells_a_listed_omlx_server_omlx(config_path: Path) -> None:
+    _list_as_omlx(URL)
+    answers = _Answers("3", URL, "Qwen3-8B-4bit", "", "")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+    ):
+        assert run_backend_setup() is not None
+    assert config_path.read_text(encoding="utf-8").startswith(
+        'chat_backend = "omlx"\nembedding_backend = "none"\n'
+    )

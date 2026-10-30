@@ -5,6 +5,8 @@ to tell an Ollama server apart. A first run also asks which models are in
 memory: ``GET <url>/models/status`` (oMLX) and ``GET <root>/api/ps``
 (Ollama). Nothing is generated, so listing neither waits for a server to
 load a model nor competes with runs on it. Cloud vendors are not listed.
+The same listing tells an oMLX server (see :func:`is_omlx`), so no request is
+added to name one.
 """
 
 from __future__ import annotations
@@ -44,6 +46,14 @@ NO_API_KEY_HINT: Final = (
     "the server requires an API key; localmelo sends none to local servers "
     '(oMLX: "Allow inference without API key")'
 )
+
+# What a label or an error calls a server of the OpenAI-compatible kind.
+OMLX_NAME: Final = "oMLX"
+OPENAI_COMPATIBLE_NAME: Final = "OpenAI-compatible server"
+
+# The servers whose last model listing named oMLX as its owner, by their
+# normalized URL. A listing is asked for anyway, so this costs no request.
+_OMLX_URLS: Final[set[str]] = set()
 
 
 class DiscoveryError(Exception):
@@ -105,6 +115,39 @@ def parse_model_ids(payload: Any) -> list[str]:
             seen.add(model_id)
             names.append(model_id)
     return names
+
+
+def says_omlx(payload: Any) -> bool:
+    """Whether a ``/models`` reply names oMLX as the owner of a model.
+
+    oMLX sets ``owned_by`` to ``omlx`` on every model it lists, also while
+    its status route refuses a request without a key.
+    """
+    items = payload.get("data") if isinstance(payload, dict) else None
+    return isinstance(items, list) and any(
+        isinstance(item, dict) and str(item.get("owned_by", "")).lower() == "omlx"
+        for item in items
+    )
+
+
+def is_omlx(url: str) -> bool:
+    """Whether the last model listing of the server at *url* said it is oMLX."""
+    return normalize_url(url) in _OMLX_URLS if url else False
+
+
+def server_name(url: str = "", *, declared: bool = False) -> str:
+    """What to call the OpenAI-compatible server at *url*: ``oMLX`` or not.
+
+    *declared* is a config file saying so (``chat_backend = "omlx"``);
+    otherwise a model listing of *url* must have said so. Anything else is
+    an ``OpenAI-compatible server``.
+    """
+    return OMLX_NAME if declared or is_omlx(url) else OPENAI_COMPATIBLE_NAME
+
+
+def forget_servers() -> None:
+    """Drop what the model listings said about servers (for tests)."""
+    _OMLX_URLS.clear()
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -188,6 +231,10 @@ async def list_models(
         raise DiscoveryError(
             "the reply is not a model list", reachable=True, status_code=status
         ) from exc
+    if says_omlx(payload):
+        _OMLX_URLS.add(base_url)
+    else:
+        _OMLX_URLS.discard(base_url)
     return parse_model_ids(payload)
 
 
@@ -246,7 +293,9 @@ def parse_loaded_ids(payload: Any) -> set[str] | None:
 
     Reads oMLX's ``{"models": [{"id": …, "loaded": true}]}`` and Ollama's
     ``/api/ps`` list, whose items are all running models (``name`` or
-    ``model``). An item with ``loaded`` false is not counted.
+    ``model``). An item with ``loaded`` false is not counted. oMLX reports a
+    model under its folder name (``id``) but lists it under its alias
+    (``model_alias``), so a loaded model counts under both.
     """
     items = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(items, list):
@@ -256,6 +305,9 @@ def parse_loaded_ids(payload: Any) -> set[str] | None:
         if isinstance(item, dict) and item.get("loaded") is False:
             continue
         ids.update(parse_model_ids({"models": [item]}))
+        alias = item.get("model_alias") if isinstance(item, dict) else None
+        if isinstance(alias, str) and alias.strip():
+            ids.add(alias.strip())
     return ids
 
 
