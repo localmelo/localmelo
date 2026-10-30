@@ -208,19 +208,18 @@ from-the-child
 
 ### 流式回复
 
-流式默认关闭。在 `config.toml` 中开启：
+交互式界面会在模型写出回复的同时把它流式显示出来，而且这是默认行为：它向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。`/stream off` 为之后的轮次关闭流式，`melo -X cli.stream=false` 只关闭这一次运行，`melo config set cli.stream false` 则永久关闭。无法响应流式请求的模型服务器会让每一轮都失败，并显示 `Could not get an answer from the model server: Streaming response ended before completion`；请为它关闭流式。
+
+回复能否边写边显示，取决于模型如何标记推理，这由 `config.toml` 中按模型设置的提示声明：
 
 ```toml
-[cli]
-stream = true
-
 [cli.reasoning_tags]
 "Qwen3-8B" = "closing_only"
 ```
 
-开启后，交互式界面会向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。按模型的提示说明该模型如何标记推理：`explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。服务器单独返回的推理字段始终按推理处理，绝不会作为正文绘制；`/thinking off` 仍像以前一样只隐藏思考摘录。
+提示是 `explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本，并且在它的第一条完整回复之后，melo 会说明一次：`This model's replies appear when complete until its reasoning format is set (see Streamed replies).` 把推理放在单独字段里发送的服务器无需提示就能流式显示，该字段绝不会作为正文绘制；`/thinking on` 会显示它的摘录。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。
 
-流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。提供方一次性发送完整回复（或不支持流式）时会静默回退到普通完整回复。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
+流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。不支持流式的提供方会发送完整回复，照常打印。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
 
 <a id="approvals"></a>
 

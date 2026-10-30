@@ -1161,10 +1161,17 @@ async def test_verbose_and_thinking_toggle(setup: Setup) -> None:
     await _until(lambda: "✗ Use /thinking on or /thinking off." in out.text())
     assert session.renderer.thinking
     session.enter("/stream on")
-    await _until(lambda: "Live streaming on" in out.text())
+    await _until(lambda: "Streaming on." in out.text())
     assert session.stream
+    # Without a declared reasoning format the copy says where replies wait.
+    assert "appear when complete until its reasoning format is set" in " ".join(
+        out.text().split()
+    )
+    session.renderer.reasoning_tags = {session.factory.backend.model: "none"}
+    session.enter("/stream on")
+    await _until(lambda: "Replies appear as the model writes them." in out.text())
     session.enter("/stream off")
-    await _until(lambda: "Live streaming off." in out.text())
+    await _until(lambda: "Streaming off. Replies appear when complete." in out.text())
     assert not session.stream
     session.enter("/stream maybe")
     await _until(lambda: "✗ Use /stream on or /stream off." in out.text())

@@ -8,6 +8,7 @@ from typing import Any
 from localmelo.melo.schema import RunResult
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.render import (
+    STREAM_BUFFERED,
     STREAM_LIVE_LINES,
     LiveState,
     TurnRenderer,
@@ -267,3 +268,34 @@ def test_a_late_retry_notice_does_not_cut_the_next_attempt() -> None:
     assert text.count("partial reply (retrying)") == 1
     assert "First try" in text and "Second try" not in text
     assert "Second try" in _rows(renderer.live)  # type: ignore[arg-type]
+
+
+def _reply(renderer: TurnRenderer, *chunks: str) -> None:
+    """One planning stream that releases *chunks*, then the turn's end."""
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.held()
+    for chunk in chunks:
+        feed.content(chunk)
+    feed.closed()
+    text = "".join(chunks).strip()
+    _event(renderer, "assistant.message", content=text, tool_calls=[])
+    _finish(renderer, result=text)
+
+
+def test_a_whole_reply_without_a_hint_is_noted_once_per_model() -> None:
+    out, renderer = _renderer()
+    _reply(renderer, "Hello there\n")
+    assert " ".join(out.text().split()).count(STREAM_BUFFERED) == 1
+    renderer.begin_turn("again")
+    _reply(renderer, "Hello again\n")
+    assert " ".join(out.text().split()).count(STREAM_BUFFERED) == 1
+
+
+def test_a_reply_that_streamed_or_has_a_hint_is_not_noted() -> None:
+    out, renderer = _renderer()
+    _reply(renderer, "line one\n", "line two\n")  # released in two parts
+    assert STREAM_BUFFERED not in " ".join(out.text().split())
+    out, renderer = _renderer({"stub-model": "none"})
+    _reply(renderer, "Hello there\n")
+    assert STREAM_BUFFERED not in " ".join(out.text().split())

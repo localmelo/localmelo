@@ -127,14 +127,15 @@ class SessionsConfig:
 
 @dataclass
 class CliConfig:
-    """The terminal UI's opt-in live streaming, per model.
+    """The terminal UI's live streaming (on unless turned off), per model.
 
     ``reasoning_tags`` maps a model id to its trusted framing declaration
     (``explicit``, ``closing_only`` or ``none``). An undeclared model keeps the
-    conservative rule: streamed content is held until the reply ends.
+    conservative rule: streamed content is held until the reply ends. Only the
+    interactive UI reads ``stream``: direct runs and the gateway never stream.
     """
 
-    stream: bool = False
+    stream: bool = True
     reasoning_tags: dict[str, str] = field(default_factory=dict)
     # "auto" adds cache, context, step and task segments to the status bar;
     # "off" keeps the bar as it was before #176.
@@ -1216,7 +1217,8 @@ def save(cfg: Config) -> None:
         lines.append("")
     if cfg.cli != CliConfig():
         lines.append("[cli]")
-        lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
+        if cfg.cli.stream != CliConfig().stream:  # the default is not pinned
+            lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
         if cfg.cli.status_line != CliConfig().status_line:
             lines.append(f"status_line = {_toml_value(cfg.cli.status_line)}")
         if cfg.cli.reasoning_tags:

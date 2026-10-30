@@ -547,12 +547,14 @@ These options apply to `melo` without a task.
   `window` can replay the checkpoint's retained, redacted thinking. The
   current process's mode wins over the mode recorded on old turns. Neither
   path reconstructs the RAM-only note store. See [Resume](../guides/sessions.md#resume).
-- Live reply streaming is opt-in with `[cli] stream = true` and a per-model
-  `[cli.reasoning_tags]` hint; `/stream on|off` flips it for later turns. The
-  UI draws only redacted released text in the live area, labels provisional
-  text that did not become the final answer, and prints the final answer once.
-  A provider without streaming silently falls back to a complete reply. Direct
-  mode and stdin-closed runs never stream. See
+- Live reply streaming is on by default in the interactive UI: `/stream off`
+  turns it off for later turns, `-X cli.stream=false` for one run and
+  `melo config set cli.stream false` for good. A per-model `[cli.reasoning_tags]`
+  hint tells the UI how the model frames reasoning; a model with no hint shows
+  its reply when complete. The UI draws only redacted released text in the live
+  area, labels provisional text that did not become the final answer, and prints
+  the final answer once. A provider without streaming sends a complete reply.
+  Direct mode and stdin-closed runs never stream. See
   [Streamed replies](../guides/terminal.md#streamed-replies).
 - Text attachments in the interactive UI: `/attach PATH` stages one file
   (quote paths with spaces), `/attachments` lists staged files, and `/detach N`

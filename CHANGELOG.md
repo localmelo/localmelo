@@ -1039,15 +1039,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   line, JSON, exit codes and requests are unchanged ([#240]).
 - A turn's record is quiet and the answer is the loudest thing on screen. A turn of three
   tool calls printed 27 rows of thinking excerpts and output before its answer; it now
-  prints 11. Thinking is one line (`✻ Thought for 8.0s`; `/thinking on` shows the
-  excerpt). A call that succeeded shows the first line of its output with
-  `+N lines (/expand 1.1)` on the same row; a call that failed, or a command that exited
-  with another code than 0, still shows three lines, the first of a failure in red. Only
-  the mark of a tool row is colored (the whole row was green). The live row says what melo
-  does and for how long, without `step N` and the phase, and the status bar leaves out
-  `step` (`cache`, `ctx` and `tasks` stay). `--developer` (or `[ui] mode = "developer"`) and
-  `/verbose` keep the detail. Direct mode's stdout and stderr, JSON, exit codes and
-  requests are unchanged ([#NN]).
+  prints 12 (11 without the label of text streamed before a call). Thinking is one line
+  (`✻ Thought for 8.0s`; `/thinking on` shows the excerpt). A call that succeeded shows
+  the first line of its output with `+N lines (/expand 1.1)` on the same row; a call that
+  failed, or a command that exited with another code than 0, still shows three lines, the
+  first of a failure in red. Only the mark of a tool row is colored (the whole row was
+  green). The live row says what melo does and for how long, without `step N` and the
+  phase, and the status bar leaves out `step` (`cache`, `ctx` and `tasks` stay).
+  `--developer` (or `[ui] mode = "developer"`) and `/verbose` keep the detail. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
 - The terminal UI is readable on a light terminal. The sentences a person must read or
   act on were dim, which a light background draws at about 2.4:1: the approval's warning
   and key line, and the hint row under the input box are now default text, dim stays for
@@ -1056,6 +1056,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   answer uses rich's `ansi_light` theme on a light background. The terminal is never
   queried; start melo with `COLORFGBG='0;15' melo` where the variable is not set. Direct mode's
   stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+- Replies stream by default in the terminal UI. `[cli] stream` is `true` unless set (it
+  was `false`), so the interactive UI's requests carry `stream: true` and a model whose
+  reasoning format is declared in `[cli.reasoning_tags]`, or that sends its reasoning in
+  a field of its own, shows its reply as it is written. A model with no hint still shows
+  its reply when complete, and says so once after its first whole reply (`This model's
+  replies appear when complete until its reasoning format is set (see Streamed
+  replies).`). `/stream on` and `/stream off` answer `Streaming on.` and `Streaming off.`
+  with that sentence (they said `Live streaming on · conservative until declared.`).
+  `/stream off`, `melo -X cli.stream=false` and `melo config set cli.stream false` turn
+  it off. Direct mode, workers and the gateway never stream: their requests, output and
+  exit codes are unchanged ([#NN]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being

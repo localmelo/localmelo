@@ -89,6 +89,12 @@ LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
 
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
 
+# What a model with no declared reasoning format means for a streamed reply.
+STREAM_BUFFERED: Final = (
+    "This model's replies appear when complete until its reasoning format is set "
+    "(see Streamed replies)."
+)
+
 _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
 _POST_FAILED: Final = re.compile(r"^POST \S+ failed (?:with )?")
 # The longest reason a run's end shows after its title.
@@ -388,6 +394,11 @@ class TurnRenderer:
         self._stream_texts: dict[int, str] = {}
         self._stream_step = 0
         self._stream_open = False
+        # How many parts the open stream released, whether this turn's reply
+        # arrived whole, and the models already told why.
+        self._stream_chunks = 0
+        self._buffered = False
+        self._noted: set[str] = set()
         self._backend = backend
         self._clock = clock
         self.live: LiveState | None = None
@@ -458,6 +469,7 @@ class TurnRenderer:
         self._stream_texts = {}
         self._stream_step = 0
         self._stream_open = False
+        self._buffered = False
         self._turn += 1
         self._call_number = 0
 
@@ -492,6 +504,7 @@ class TurnRenderer:
             "retrying", since=self._stream_step, upto=self._stream_step + 1
         )
         self._stream_open = True
+        self._stream_chunks = 0
         if self.live is not None:
             self.live.stream_text = ""
             self.live.stream_held = True
@@ -505,6 +518,7 @@ class TurnRenderer:
     def stream_content(self, delta: str) -> None:
         """Keep and show a released, already-redacted content delta."""
         step = self._stream_step
+        self._stream_chunks += 1
         self._stream_texts[step] = self._stream_texts.get(step, "") + delta
         if self.live is not None:
             self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
@@ -513,6 +527,9 @@ class TurnRenderer:
 
     def stream_closed(self) -> None:
         self._stream_open = False
+        # No hint and one released part: the filter held the reply to its end.
+        if self._stream_chunks == 1 and self.stream_hint() is None:
+            self._buffered = True
         if self.live is not None:
             self.live.stream_held = False
 
@@ -1261,6 +1278,14 @@ class TurnRenderer:
             self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
+            model = self._backend().model
+            if (
+                self._buffered
+                and result.status == "completed"
+                and model not in self._noted
+            ):
+                self._noted.add(model)  # once per model, after its first whole reply
+                self.out.print(_marked(symbols.dot, "muted", Text(STREAM_BUFFERED)))
 
     def _print_run_end(self, status: str, error: str, cause: str = "") -> None:
         """What happened to a run that did not complete, then what to do."""

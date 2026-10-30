@@ -24,15 +24,16 @@ SCENARIOS = Path(__file__).resolve().parents[1] / "fixtures" / "stub_scenarios"
 
 
 def _configure(
-    home: Path, url: str, *, hint: str | None = "none", stream: bool = True
+    home: Path, url: str, *, hint: str | None = "none", stream: bool | None = True
 ) -> None:
+    """Write the config; ``stream=None`` leaves ``[cli] stream`` unset (its default)."""
     folder = home / ".cache" / "localmelo"
     folder.mkdir(parents=True, exist_ok=True)
     tags = f'\n[cli.reasoning_tags]\n"stub-model" = "{hint}"\n' if hint else ""
+    key = "" if stream is None else f"[cli]\nstream = {'true' if stream else 'false'}\n"
     (folder / "config.toml").write_text(
         f'chat_backend = "vllm"\nembedding_backend = "none"\n\n[vllm]\n'
-        f'chat_url = "{url}"\nchat_model = "stub-model"\n\n'
-        f"[cli]\nstream = {'true' if stream else 'false'}\n{tags}",
+        f'chat_url = "{url}"\nchat_model = "stub-model"\n\n{key}{tags}',
         encoding="utf-8",
     )
 
@@ -65,11 +66,17 @@ def streamed(
 ) -> Iterator[Callable[..., Melo]]:
     terms: list[Melo] = []
 
-    def start(scenario: str, *, hint: str | None = "none", stream: bool = True) -> Melo:
+    def start(
+        scenario: str,
+        *,
+        hint: str | None = "none",
+        stream: bool | None = True,
+        argv: list[str] | None = None,
+    ) -> Melo:
         server = StubServer(load_scenarios([SCENARIOS]), default=scenario).start()
         servers.append(server)
         _configure(tmp_path, server.base_url, hint=hint, stream=stream)
-        term = Melo(tmp_path, [])
+        term = Melo(tmp_path, argv or [])
         terms.append(term)
         return term
 
@@ -189,6 +196,39 @@ def test_opted_out_turns_send_no_stream_and_print_the_answer_once(
     assert text.count("● Hello! I am melo, running on a stub model.") == 1
     assert "partial reply" not in text
     assert not servers[0].requests[-1].get("stream")
+    assert term.quit() == 0
+
+
+def test_with_no_config_for_it_the_reply_streams_and_a_whole_one_is_noted_once(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    """Streaming is on by default; a model with no hint says why its reply waited."""
+    term = streamed("answer", hint=None, stream=None)
+    term.see("Ask melo")
+    term.type("hello\r")
+    term.see("Worked for")
+    assert servers[0].requests[-1].get("stream") is True
+    term.type("hello again\r")
+    term.see("Worked for", timeout_s=30)
+    term.read_until(lambda out: out.count(b"Worked for") >= 2)
+    text = " ".join(screen(term).split())
+    assert (
+        text.count("replies appear when complete until its reasoning format is set")
+        == 1
+    )
+    assert text.count("● Hello! I am melo, running on a stub model.") == 2
+    assert term.quit() == 0
+
+
+def test_x_cli_stream_false_turns_streaming_off_for_one_run(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    term = streamed("answer", hint=None, stream=None, argv=["-X", "cli.stream=false"])
+    term.see("Ask melo")
+    term.type("hello\r")
+    term.see("Worked for")
+    assert not servers[0].requests[-1].get("stream")
+    assert "reasoning format" not in term.text()
     assert term.quit() == 0
 
 

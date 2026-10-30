@@ -1357,10 +1357,24 @@ class TestCliStatusLineConfig:
 
 
 class TestCliStreamConfig:
-    def test_the_default_is_off_and_not_written(self, config_path: Path) -> None:
+    def test_the_default_is_on_and_not_written(self, config_path: Path) -> None:
+        assert CliConfig().stream is True
         save(_timeout_cfg())
         assert "[cli]" not in config_path.read_text(encoding="utf-8")
         assert load().cli == CliConfig()
+
+    def test_off_is_written_and_another_key_does_not_pin_the_default(
+        self, config_path: Path
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.cli = CliConfig(stream=False)
+        save(cfg)
+        assert "stream = false" in config_path.read_text(encoding="utf-8")
+        assert load().cli.stream is False
+        cfg.cli = CliConfig(status_line="off")
+        save(cfg)
+        assert "stream" not in config_path.read_text(encoding="utf-8")
+        assert load().cli.stream is True
 
     def test_stream_and_hints_round_trip(self, config_path: Path) -> None:
         cfg = _timeout_cfg()
@@ -1565,18 +1579,18 @@ class TestSettingOverrides:
         )
         saved.retrieval.k = 5
         save(saved)
-        config.set_overrides({"cli.stream": True, "retrieval.k": 9})
+        config.set_overrides({"cli.stream": False, "retrieval.k": 9})
         cfg = load()
-        assert (cfg.cli.stream, cfg.retrieval.k) == (True, 9)
+        assert (cfg.cli.stream, cfg.retrieval.k) == (False, 9)
         cfg.ollama.chat_model = "m2"
         save(cfg)
         text = _file.read_text(encoding="utf-8")
         assert 'chat_model = "m2"' in text and "k = 5" in text
         assert "stream" not in text and "[cli]" not in text and "k = 9" not in text
         assert cfg.retrieval.k == 9  # the caller's config is not touched
-        assert load().cli.stream is True  # and the next load applies them again
+        assert load().cli.stream is False  # and the next load applies them again
         config.set_overrides({})
-        assert (load().cli.stream, load().retrieval.k) == (False, 5)
+        assert (load().cli.stream, load().retrieval.k) == (True, 5)
 
     def test_a_value_the_caller_changed_is_theirs(self, _file: Path) -> None:
         save(Config(chat_backend="ollama"))
@@ -1597,9 +1611,9 @@ class TestSettingOverrides:
         }
 
     def test_set_overrides_replaces_the_last_ones(self) -> None:
-        config.set_overrides({"cli.stream": True})
+        config.set_overrides({"cli.stream": False})
         config.set_overrides({"scheduler.n_srv": 2})
-        assert (load().cli.stream, load().scheduler.n_srv) == (False, 2)
+        assert (load().cli.stream, load().scheduler.n_srv) == (True, 2)
 
     def test_setting_errors_need_no_backend(self) -> None:
         cfg = Config()

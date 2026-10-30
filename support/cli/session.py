@@ -51,7 +51,12 @@ from localmelo.support.cli.attachments import (
     load as load_attachment,
 )
 from localmelo.support.cli.output import Out
-from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
+from localmelo.support.cli.render import (
+    EXPAND_LINES,
+    STREAM_BUFFERED,
+    ToolOutput,
+    TurnRenderer,
+)
 from localmelo.support.cli.session_tools import SessionTools
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
@@ -872,14 +877,16 @@ class CliSession:
             )
             return
         self.stream = state
-        hint = self.renderer.stream_hint()
-        footer = f" · {hint} framing" if hint else " · conservative until declared"
-        self.out.print(
-            self._text(
-                f"Live streaming {'on' if state else 'off'}{footer if state else ''}.",
+        if not state:
+            words, style = "Streaming off. Replies appear when complete.", "muted"
+        elif self.renderer.stream_hint():
+            words, style = (
+                "Streaming on. Replies appear as the model writes them.",
                 "muted",
             )
-        )
+        else:  # the advice is default text; a confirmation is dim
+            words, style = f"Streaming on. {STREAM_BUFFERED}", None
+        self.out.print(self._text(words, style))
 
     async def expand(self, arguments: str) -> None:
         """``/expand [turn.call]``: a tool call's whole output or error."""

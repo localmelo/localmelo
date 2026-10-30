@@ -407,41 +407,45 @@ and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
-Streaming is off by default. Turn it on in `config.toml`:
+The interactive UI streams a model's reply as it is written, and does so by
+default: it asks the provider for a streamed planning reply and draws only text
+the release filter has already redacted, in the live area, at the app's redraw
+rate; it never writes raw deltas to the terminal. `/stream off` turns it off
+for later turns, `melo -X cli.stream=false` for one run, and
+`melo config set cli.stream false` for good. A model server that cannot answer
+a streamed request fails each turn with `Could not get an answer from the model
+server: Streaming response ended before completion`; turn streaming off for it.
+
+Whether a reply shows as it is written depends on how its model frames
+reasoning, which a per-model hint in `config.toml` declares:
 
 ```toml
-[cli]
-stream = true
-
 [cli.reasoning_tags]
 "Qwen3-8B" = "closing_only"
 ```
 
-With it on, the interactive UI asks the provider for a streamed planning
-reply and draws only text the release filter has already redacted, in the
-live area, at the app's redraw rate; it never writes raw deltas to the
-terminal. The per-model hint says how that model frames reasoning:
-`explicit` (a leading `<think>` starts it), `closing_only` (everything
-before `</think>` is reasoning) or `none` (tags are literal text). A model
-with no hint keeps the conservative rule: content is held until the reply
-ends, so the live area shows `✻ thinking…` rather than text. The same hint
-splits the completed reply, so the stream and the stored answer do not
-disagree. A model field the server sends separately is always treated as
-reasoning and is never drawn as content; `/thinking off` hides its excerpt
-as before.
+The hint is `explicit` (a leading `<think>` starts reasoning), `closing_only`
+(everything before `</think>` is reasoning) or `none` (tags are literal text).
+A model with no hint keeps the conservative rule: content is held until the
+reply ends, so the live area shows `✻ thinking…` rather than text, and after
+its first whole reply melo says so once: `This model's replies appear when
+complete until its reasoning format is set (see Streamed replies).` A server
+that sends reasoning in a field of its own streams without a hint, and that
+field is never drawn as content; `/thinking on` shows its excerpt. The same
+hint splits the completed reply, so the stream and the stored answer do not
+disagree.
 
 Streamed text is provisional. If the reply becomes a tool call, a retry,
 a run that fails, or a stop, melo closes the live text and prints it once
 as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
-`(stopped)`; the completed final answer prints once after `●`. A reply a
-provider sends in one piece (or a provider without streaming) silently
-falls back to the ordinary complete reply. `/stream on|off` flips the
-setting for later turns without saving it, and `/new` puts it back to
-`[cli] stream`. Runs without the interactive UI (direct mode, workers,
-the gateway) never stream, so their output and request bodies are unchanged.
-An invalid `[cli]` value never
-fails a run: the interactive UI warns and uses the defaults, and direct
-mode and the gateway do not read it.
+`(stopped)`; the completed final answer prints once after `●`. A provider
+without streaming sends the complete reply, which prints as usual.
+`/stream on|off` flips the setting for later turns without saving it, and
+`/new` puts it back to `[cli] stream`. Runs without the interactive UI
+(direct mode, workers, the gateway) never stream, so their output and request
+bodies are unchanged. An invalid `[cli]` value never fails a run: the
+interactive UI warns and uses the defaults, and direct mode and the gateway do
+not read it.
 
 ### Approvals
 
