@@ -2,7 +2,9 @@
 
 :class:`TerminalApprover` holds the request the panel shows and resolves
 it from the panel's keys: allow once (1), allow the tool for the session
-(2), or deny with a reason (3). :class:`Approvals` is the session's policy:
+(2), or deny with a reason (3). A high-impact call (#279) offers no session
+choice: its options are allow once (1) and deny (2), and the panel starts
+on deny. :class:`Approvals` is the session's policy:
 in ``ask`` mode a :class:`RememberingPolicy` that asks through the panel
 and keeps session grants, in ``auto`` mode the same behind a
 :class:`RoutineOnlyPolicy`, so that only high-impact and undecided calls
@@ -15,6 +17,7 @@ control before a shell command or Python code runs, so every byte shows.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import time
@@ -28,6 +31,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     DenyAllPolicy,
 )
+from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.sessions.approvals import (
@@ -35,7 +39,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
     RoutineOnlyPolicy,
 )
-from localmelo.support.sessions.display import display_path, home_label
+from localmelo.support.sessions.display import display_path, folder_name, home_label
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
 # so a draft being typed cannot answer it.
@@ -90,6 +94,8 @@ class PanelText:
     header: str
     body: list[tuple[str, str]]  # style and text per row
     escaped: bool
+    # Why melo asks, for a high-impact call: one sentence per entry.
+    notes: tuple[str, ...] = ()
 
 
 def _command_text(command: object) -> str:
@@ -156,7 +162,27 @@ def panel_text(
     *target* is what a ``file_write`` path holds now; *width* is the width
     the body is wrapped to; *minus* is the UI's minus sign, for a diff;
     *show_tier* puts the tool's permission tier in the header (developer mode).
+    A high-impact call (#279) gets the review's title and a note that says
+    why melo asks.
     """
+    text = _tool_panel(request, target, width, minus, show_tier)
+    review = request.review
+    title = review_title(review, folder_name(request.workspace_root))
+    if review is None or not title:
+        return text
+    note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
+    return dataclasses.replace(
+        text, title=title, notes=(note,), escaped=text.escaped or changed
+    )
+
+
+def _tool_panel(
+    request: ApprovalRequest,
+    target: edits.Target | None,
+    width: int,
+    minus: str,
+    show_tier: bool,
+) -> PanelText:
     arguments: Mapping[str, Any] = request.arguments
     root = request.workspace_root
     workspace = home_label(root) if root else "no workspace"
@@ -236,15 +262,22 @@ def session_option(request: ApprovalRequest) -> str:
 def session_warning(tool: str, workspace: str) -> list[str]:
     """The lines under option 2 for a tool whose grant reaches past the workspace."""
     if tool == "shell_exec":
-        what, who = "any shell command", "Commands"
+        what = "shell commands"
     elif tool == "python_exec":
-        what, who = "any Python code", "Python"
+        what = "Python code"
     else:
         return []
     return [
-        f'"Allow every" lets {what} run without asking for the rest of this session.',
-        f"{who} can reach files outside {workspace}.",
+        f'"Allow every" lets routine {what} run without asking for the rest of '
+        "this session.",
+        f"Installs, downloads and changes outside {workspace} still ask.",
     ]
+
+
+# Under the options of a high-impact call, which has no session choice.
+NO_GRANT_RULE: Final = (
+    "Session grants never cover installs, downloads or changes outside the folder."
+)
 
 
 class TerminalApprover:
@@ -263,12 +296,14 @@ class TerminalApprover:
         self.pending: PendingApproval | None = None
 
     async def ask(
-        self, request: ApprovalRequest, *, offer_session: bool = True
+        self, request: ApprovalRequest, *, offer_session: bool | None = None
     ) -> ApprovalDecision:
         """Show the panel for *request* and wait for the answer.
 
-        A cancellation (a stop, a shutdown) withdraws the panel and
-        propagates: a withdrawn prompt is not a denial.
+        The session choice is offered unless *offer_session* says no or the
+        request is a high-impact call, which a grant never covers; that
+        panel starts on No. A cancellation (a stop, a shutdown) withdraws
+        the panel and propagates: a withdrawn prompt is not a denial.
         """
         target: edits.Target | None = None
         if request.tool_name == "file_write":
@@ -279,12 +314,15 @@ class TerminalApprover:
         future: asyncio.Future[ApprovalDecision] = (
             asyncio.get_running_loop().create_future()
         )
+        # A grant never covers a high-impact call, whatever the caller says.
+        offered = offers_grant(request.review)
         self.pending = PendingApproval(
             request=request,
-            offer_session=offer_session,
+            offer_session=offered and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,
+            selected=0 if offered else 2,
         )
         self.on_change()
         try:

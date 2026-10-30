@@ -48,6 +48,8 @@ chat_model = "qwen3:8b"
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行从不受此限制。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
+| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
+| `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
@@ -66,7 +68,7 @@ chat_model = "qwen3:8b"
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
-| `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏的资源区根据已收到的事件显示 `cache`、`ctx` 和 `tasks` 数字，没有数据的隐藏。`"off"`：状态栏保留各区但不显示这些数字（模型、工作区、运行区：标题或运行中轮次的步骤，以及上一次请求的 `ctx`）。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
+| `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件显示用量区（词元数或费用、`ctx`、缓存和空闲时间或速率限制），网关有任务时还显示任务。`"off"`：只保留运行区（标题或运行中轮次的步骤）和上一次请求的 `ctx`。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
 | `colors` | `[cli]` | `"auto"` | 交互式界面的颜色数量：`"auto"`（根据 `COLORTERM` 和 `TERM`）、`"16"`、`"256"` 或 `"truecolor"`。`NO_COLOR` 仍会关闭颜色。开发者设置：`-X cli.colors=256` 只用于本次运行。其他值会警告并回退。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `background` | `[cli]` | `"auto"` | 交互式界面所用的终端背景：`"auto"`（先询问终端，再看 `COLORFGBG`），什么都不回答的终端（tmux、screen、ssh）可设为 `"dark"` 或 `"light"`。开发者设置：`-X cli.background=light`。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `reasoning_tags` | `[cli]` | 未设置 | 一张 `MODEL = "explicit" \| "closing_only" \| "none"` 表：某模型回复的可信分帧声明；`stream = false` 时也会用它切分完整回复。没有条目的模型使用保守规则（内容一直保留到回复结束）。目前需要手工设置，引导流程还不会询问它。 |
@@ -217,6 +219,21 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 - `--base-url` 不发送 API 密钥，因此云端 API 请使用配置文件。
 - macOS 后台服务拿不到你 shell 的变量；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。
+
+<a id="pricing"></a>
+
+## 价格
+
+交互式界面的状态栏只根据你设置的价格显示云端 API 会话的费用；melo 不内置任何价格，因为价格会变。每个模型 ID 一张表，单位为每百万词元的美元数：
+
+```toml
+[pricing."your-model-id"]   # the chat_model, as /status names it; example numbers
+input = 2.0        # prompt tokens
+output = 8.0       # completion tokens
+cache_read = 0.5   # prompt tokens the server reported cached; input when absent
+```
+
+`input` 和 `output` 必填，每个值都是不小于 0 的数字，其他键不会被读取。会话用过的模型没有价格表时，状态栏显示词元数（`↑ 100k ↓ 5`）而不是费用。本地服务器从不计价。无效的价格表会给出警告，状态栏改为显示词元数；其他功能不读取它，保存配置时按原样保留。见[状态栏](../guides/terminal.md#the-status-bar)。
 
 <a id="extra-request-fields-extra_body"></a>
 

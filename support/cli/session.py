@@ -70,6 +70,7 @@ from localmelo.support.cli.steps import STEPS_KEY, learned_total, step_figure
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
+from localmelo.support.cli.work import WorkBeside, work_parts
 from localmelo.support.progress_line import run_elapsed, wall_range
 from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.display import (
@@ -91,9 +92,10 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.sync import SessionMark
 from localmelo.support.usage_snapshot import (
+    BarPart,
+    bar_usage,
+    clock_running,
     context_summary,
-    context_words,
-    status_segments,
     usage_lines,
 )
 
@@ -230,8 +232,14 @@ class CliSession:
         status_line: str = "auto",
         clock: Callable[[], float] = time.monotonic,
         developer: bool = False,
+        pricing: Mapping[str, Mapping[str, float]] | None = None,
+        work: WorkBeside | None = None,
     ) -> None:
         self.developer = developer
+        # [pricing.<model>] for a cloud backend's session cost.
+        self.pricing = dict(pricing or {})
+        # The gateway's tasks beside the chat (none: the bar has no work zone).
+        self.work = work
         self.store = store
         self.factory = factory
         self.agent = agent
@@ -286,7 +294,6 @@ class CliSession:
 
     def status_bar(self) -> StatusBar:
         backend = self.factory.backend
-        context = self.renderer.context_tokens
         mode = self.approvals.mode
         yolo = mode == "yolo"
         shown: str = mode
@@ -294,42 +301,57 @@ class CliSession:
             shown = f"{self.renderer.symbols.warn} YOLO: no approvals"
         elif mode == "ask" and not self.developer:
             shown = ""  # what everyone expects needs no word
-        segments: tuple[str, ...] = ()
-        # Default mode says the figures in words; developer mode keeps them compact.
-        words = not self.developer
+        # The model and the folder are in the welcome and /status, not here.
+        last = self.renderer.context_tokens
+        usage: tuple[BarPart, ...] = ()
+        work: tuple[BarPart, ...] = ()
         if self.status_line == "auto":
-            # The run zone carries the steps, in both modes.
-            segments = tuple(
-                status_segments(
+            usage = tuple(
+                bar_usage(
                     self.renderer.usage,
                     local=backend.local,
                     now=time.time(),
-                    steps=False,
-                    words=words,
+                    prices=self.pricing,
+                    limits=self._limits(),
+                    last_prompt=last,
+                    ascii=self.renderer.symbols is ASCII,
                 )
             )
-            # The context segment shows the measured tokens and the limit; without
-            # a measurement the bar keeps its last request's figure.
-            if any(segment.startswith(("ctx ", "context ")) for segment in segments):
-                context = 0
-            elif words and context:
-                # Like a measured one, it drops whole when the bar is narrow,
-                # before the folder is cut.
-                segments += (context_words(context),)
-                context = 0
-        last = ""
-        if context:
-            last = context_words(context) if words else f"ctx {format_tokens(context)}"
+            if self.work is not None:
+                work = tuple(work_parts(self.work.summary))
+        elif last:
+            usage = (BarPart(f"ctx {format_tokens(last)}"),)
         return StatusBar(
-            model=backend.model,
-            workspace=home_label(self.agent.workspace_root or ""),
-            context=last,
-            segments=segments,
             title=self.title or "New chat",
             mode=shown,
             mode_style="class:yolo" if yolo else "class:muted",
+            usage=usage,
+            work=work,
             run=self._run_zone(),
         )
+
+    def _limits(self) -> tuple[int, float | None] | None:
+        """The rate limit the chat provider's last response reported, if any."""
+        limits = getattr(getattr(self.agent, "_llm", None), "last_limits", None)
+        return limits if isinstance(limits, tuple) and len(limits) == 2 else None
+
+    def clock_visible(self) -> bool:
+        """Whether the bar shows a clock (idle time, a limit's reset) that moves."""
+        return self.status_line == "auto" and clock_running(
+            self.renderer.usage,
+            local=self.factory.backend.local,
+            now=time.time(),
+            limits=self._limits(),
+        )
+
+    async def open_work(self) -> None:
+        """ctrl+t: the tasks beside the chat, and what can be done to one."""
+        if self.app is None:
+            return
+        if self.work is None:
+            self.app.hint("No tasks beside this chat: melo task new adds one", 3.0)
+            return
+        await self.work.open(self.app)
 
     def _run_zone(self) -> str:
         """While a turn runs: ``2/~8 · ctrl+o steps``, its steps in brief and the key."""
@@ -346,6 +368,8 @@ class CliSession:
 
     def on_event(self, stored: StoredEvent) -> None:
         """Render one event of a turn, and redraw the bar its usage may change."""
+        # Its requests went to the session's model: their cost uses its price.
+        self.renderer.usage.model = self.factory.backend.model
         self.renderer.on_event(stored)
         if self.status_line == "auto" and self.app is not None:
             self.app.invalidate()

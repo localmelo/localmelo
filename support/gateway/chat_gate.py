@@ -1692,6 +1692,10 @@ class GatedLLM(BaseLLMProvider):
         )
         self.last_usage = _int_usage(self.inner.last_usage)
 
+    async def takes_images(self) -> bool | None:
+        """The inner provider's answer: a question about the model, not a chat call."""
+        return await self.inner.takes_images()
+
     async def close(self) -> None:
         await self.inner.close()
 

@@ -13,7 +13,7 @@ import tempfile
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
@@ -62,6 +62,7 @@ REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
 CACHE_LAYOUTS = ("v2", "v3")
+TOOL_IMAGES = ("auto", "on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -183,12 +184,35 @@ class AgentConfig:
     # Developer setting: plain direct runs (melo "TASK", melo "") are confined too
     # (AgentOptions.confine_writes); worker runs and saved tasks follow confine_writes.
     confine_direct_runs: bool = False
+    # Pictures tools return reach the model: auto (when the server says the model
+    # reads images) | on | off; the newest keep, retired retire at a time.
+    tool_images: str = "auto"
+    tool_images_keep: int = 3
+    tool_images_retire: int = 2
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
         if self.window_messages is not None:
             return self.window_messages
         return default_window_messages(backend)
+
+
+IMAGE_KEYS = ("tool_images", "tool_images_keep", "tool_images_retire")
+
+
+def tool_images_errors(agent: AgentConfig) -> list[str]:
+    """What is wrong with ``[agent] tool_images`` and its two counts."""
+    errors: list[str] = []
+    if agent.tool_images not in TOOL_IMAGES:
+        errors.append(
+            f"[agent] tool_images {agent.tool_images!r} is not recognised. "
+            f"Must be one of {TOOL_IMAGES}."
+        )
+    for name in IMAGE_KEYS[1:]:
+        value = getattr(agent, name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            errors.append(f"[agent] {name} must be an int >= 1, got {value!r}")
+    return errors
 
 
 def default_window_messages(backend: str) -> int:
@@ -316,6 +340,10 @@ class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    # [pricing.<model>]: dollars per million tokens (input, output, and
+    # cache_read for cached prompt tokens), for the terminal's session cost.
+    # Configuration only: no price is bundled.
+    pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     _enable_playground: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
@@ -539,6 +567,7 @@ class Config:
             errors.append("[agent] confine_writes must be a boolean")
         if not isinstance(self.agent.confine_direct_runs, bool):
             errors.append("[agent] confine_direct_runs must be a boolean")
+        errors.extend(tool_images_errors(self.agent))
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -759,6 +788,31 @@ class Config:
     def ui_errors(self) -> list[str]:
         """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
         return self._validate_ui()
+
+    def pricing_errors(self) -> list[str]:
+        """What is wrong in ``[pricing]``; display only, so a bad table warns.
+
+        Each model's table needs ``input`` and ``output`` and may have
+        ``cache_read``: numbers of at least 0, dollars per million tokens.
+        """
+        if not isinstance(self.pricing, dict):
+            return [f"[pricing] must be a table, got {self.pricing!r}"]
+        errors = []
+        for model, price in self.pricing.items():
+            if not isinstance(price, dict) or not {"input", "output"} <= set(price):
+                errors.append(f"[pricing.{model!r}] needs input and output")
+                continue
+            for key, value in price.items():
+                if key not in PRICE_KEYS:
+                    errors.append(f"[pricing.{model!r}] has an unknown key {key!r}")
+                elif isinstance(value, bool) or not isinstance(value, int | float):
+                    errors.append(f"[pricing.{model!r}] {key} must be a number")
+                elif not 0 <= value < float("inf"):
+                    errors.append(f"[pricing.{model!r}] {key} must be 0 or more")
+        return errors
+
+
+PRICE_KEYS: Final = ("input", "output", "cache_read")
 
 
 def has_control_or_surrogate(text: str) -> bool:
@@ -997,6 +1051,10 @@ def _load_file() -> Config:
             tags = section["reasoning_tags"]
             # Keep a malformed value so Config.validate can report it.
             cfg.cli.reasoning_tags = dict(tags) if isinstance(tags, dict) else tags
+
+    if "pricing" in data:  # a bad table is kept for Config.pricing_errors
+        pricing = data["pricing"]
+        cfg.pricing = dict(pricing) if isinstance(pricing, dict) else pricing
 
     # A bad mode is kept so Config.ui_errors can report it.
     if isinstance(data.get("ui"), dict):
@@ -1240,6 +1298,9 @@ def save(cfg: Config) -> None:
         or cfg.agent.lean_output
         or cfg.agent.confine_writes != defaults.confine_writes
         or cfg.agent.confine_direct_runs
+        or any(
+            getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
+        )
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -1272,6 +1333,9 @@ def save(cfg: Config) -> None:
             lines.append(f"confine_writes = {_toml_value(cfg.agent.confine_writes)}")
         if cfg.agent.confine_direct_runs:
             lines.append("confine_direct_runs = true")
+        for name in IMAGE_KEYS:
+            if getattr(cfg.agent, name) != getattr(defaults, name):
+                lines.append(f"{name} = {_toml_value(getattr(cfg.agent, name))}")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
@@ -1342,6 +1406,15 @@ def save(cfg: Config) -> None:
         lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
         lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
         lines.append("")
+
+    # Kept as written, even when invalid (it only warns), so a save loses nothing.
+    for model, price in (cfg.pricing if isinstance(cfg.pricing, dict) else {}).items():
+        if isinstance(price, dict):
+            lines.append(f"[pricing.{_toml_string(str(model))}]")
+            lines += [
+                f"{_toml_string(str(k))} = {_toml_value(v)}" for k, v in price.items()
+            ]
+            lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that
     # cannot be encoded (a str holding a lone surrogate) fails the save

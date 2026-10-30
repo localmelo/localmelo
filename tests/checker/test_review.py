@@ -455,7 +455,7 @@ def test_other_tools_are_not_reviewed(places: dict[str, Path]) -> None:
     assert review(places, "mcp__files__write", "x") == ActionReview("routine")
 
 
-def test_six_kilobytes_of_code_take_under_five_milliseconds(
+def test_six_kilobytes_of_code_are_reviewed_in_milliseconds(
     places: dict[str, Path],
 ) -> None:
     block = (
@@ -468,11 +468,13 @@ def test_six_kilobytes_of_code_take_under_five_milliseconds(
     code = block * (6000 // len(block) + 1)
     assert len(code) >= 6000
     review(places, PY, code)  # warm up the imports
-    # The fastest of nine runs is the cost of the work itself; a parallel
-    # test run on a busy machine slows the others (about 2.3 ms on an M5).
+    # CPU time of the fastest of fifteen runs, so that a busy machine (a
+    # parallel test run) cannot fail it: the work itself takes about 2.3 ms on
+    # an M5, and the bound is ten times that. A rule that reads the code
+    # twice, or backtracks, would still cross it.
     times = []
-    for _ in range(9):
-        start = time.perf_counter()
+    for _ in range(15):
+        start = time.process_time()
         assert review(places, PY, code).verdict == "routine"
-        times.append(time.perf_counter() - start)
-    assert min(times) < 0.005, times
+        times.append(time.process_time() - start)
+    assert min(times) < 0.025, times

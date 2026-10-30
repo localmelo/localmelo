@@ -23,11 +23,17 @@ enum Palette {
 
 /// Melo's sitting portrait in the mood the window is in. The pictures are transparent with a thin cream rim, so
 /// they stand on the console's canvas in light and dark with no frame or tile. It is decoration: the title below
-/// says the same in words, so VoiceOver skips it.
+/// says the same in words, so VoiceOver skips it. The calm portrait blinks, as the pet does: an eyes-closed patch
+/// on a layer over the picture, run by Core Animation, and still whenever `shouldAnimate` says so.
 final class PortraitView: NSImageView {
     private let pictures: URL?
     private var images: [PetState: NSImage] = [:]
+    private let blink = CALayer()
+    private var gate: MotionGate!
     private(set) var state: PetState = .sitWorking
+
+    /// The blink's animation while it runs, for the tests.
+    var isBlinking: Bool { blink.animation(forKey: "blink") != nil }
 
     /// `pictures` is the `akita` folder of the bundle's resources.
     init(pictures: URL?) {
@@ -35,10 +41,30 @@ final class PortraitView: NSImageView {
         super.init(frame: .zero)
         imageScaling = .scaleProportionallyUpOrDown
         setAccessibilityElement(false)
+        wantsLayer = true
+        blink.contentsGravity = .resizeAspect
+        blink.contentsScale = 2
+        blink.opacity = 0
+        blink.actions = ["contents": NSNull(), "opacity": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(blink)
+        gate = MotionGate(window: { [weak self] in self?.window }, visible: { [weak self] in
+            guard let self = self, let window = self.window else { return false }
+            return window.isVisible && window.occlusionState.contains(.visible) && !self.isHiddenOrHasHiddenAncestor
+        })
+        gate.changed = { [weak self] environment in self?.loops(environment) }
         show(.sitWorking)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        blink.frame = bounds
+    }
+
+    override func viewDidMoveToWindow() { gate.refresh() }
+    override func viewDidHide() { gate.refresh() }
+    override func viewDidUnhide() { gate.refresh() }
 
     /// The 2x file at the canvas's size; with no picture (a run outside the bundle) the portrait takes no room.
     func show(_ next: PetState) {
@@ -51,6 +77,17 @@ final class PortraitView: NSImageView {
         }
         image = images[next]
         isHidden = image == nil
+        blink.contents = next.blinkPatch.flatMap { name in
+            pictures.flatMap { NSImage(contentsOf: $0.appendingPathComponent("\(next.folder)/\(next.pieceFile(name, scale: 2))")) }?
+                .cgImage(forProposedRect: nil, context: nil, hints: nil)
+        }
+        loops(gate.environment)
+    }
+
+    /// Runs the blink when `environment` lets loops run and the picture has a patch; else leaves the still picture.
+    func loops(_ environment: PetEnvironment) {
+        blink.removeAllAnimations()
+        if blink.contents != nil && shouldAnimate(environment) { blink.add(PetMotion.blinking(), forKey: "blink") }
     }
 }
 

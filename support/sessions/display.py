@@ -143,6 +143,12 @@ def home_label(path: str) -> str:
     return path
 
 
+def folder_name(root: str | None) -> str:
+    """The last part of the workspace *root*, for a question that names the folder."""
+    name = (root or "").rstrip(os.sep).rsplit(os.sep, 1)[-1]
+    return name or "the workspace"
+
+
 def display_path(path: str, root: str | None) -> str:
     """*path* relative to *root* when it is inside it, else :func:`home_label`."""
     if root:

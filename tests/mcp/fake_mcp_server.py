@@ -149,16 +149,12 @@ def call_tool(request_id: Any, name: str, args: dict[str, Any]) -> None:
     if name == "echo":
         result = text_result(str(args.get("text", "")))
     elif name == "screenshot":
-        result = {
-            "content": [
-                {"type": "text", "text": "screen captured"},
-                {
-                    "type": "image",
-                    "data": base64.b64encode(PNG_1X1).decode(),
-                    "mimeType": "image/png",
-                },
-            ]
-        }
+        shot = base64.b64encode(PNG_1X1).decode()
+        image = {"type": "image", "data": shot, "mimeType": "image/png"}
+        result = {"content": [{"type": "text", "text": "screen captured"}, image]}
+        if args.get("structured"):
+            # As browser servers do: no text, the base64 again in structuredContent.
+            result = {"content": [image], "structuredContent": {"screenshot": shot}}
     elif name == "fail":
         result = {
             "content": [{"type": "text", "text": "element not found"}],

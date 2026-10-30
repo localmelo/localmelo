@@ -19,6 +19,7 @@ from localmelo.support.providers.llm._protocol import (
     prepare_extra_body,
     raw_tool_arguments,
 )
+from localmelo.support.providers.llm._vision import server_takes_images
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -255,6 +256,12 @@ class OllamaNativeChat(BaseLLMProvider):
             tool_calls=parse_tool_calls(msg.get("tool_calls")),
             usage=_normalize_usage(data),
             thinking=thinking,
+        )
+
+    async def takes_images(self) -> bool | None:
+        """Whether ``/api/show`` lists ``vision`` among the model's capabilities."""
+        return await server_takes_images(
+            self._http, self.model, status=None, show="/api/show"
         )
 
     async def close(self) -> None:

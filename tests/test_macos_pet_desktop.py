@@ -189,17 +189,26 @@ def test_each_mood_gets_its_breath_and_its_beat_and_nothing_moves_when_it_may_no
         tmp_path,
         ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
         r"""
-// The plan: unknown and stopped lie still; sleeping breathes slow and deep; the rest breathe awake.
+// The plan: stopped lies still; unknown does not breathe but blinks (its picture has the patch); sleeping breathes
+// slow and deep and has its "z"; the rest breathe awake; only a finished run wags the tail.
 let still = PetMotionPlan(breath: nil, beat: nil)
-precondition(petMotionPlan(.unknown) == still && petMotionPlan(.stopped) == still)
+precondition(petMotionPlan(.stopped) == still)
+precondition(petMotionPlan(.unknown) == PetMotionPlan(breath: nil, beat: nil, blinks: true))
 let asleep = PetBreath(amount: 1.03, seconds: 4.4), awake = PetBreath(amount: 1.02, seconds: 3.2)
-for pose in PetState.sleepPoses { precondition(petMotionPlan(.sleeping(pose)) == PetMotionPlan(breath: asleep, beat: nil)) }
-precondition(petMotionPlan(.resting) == PetMotionPlan(breath: awake, beat: nil))
+for pose in PetState.sleepPoses {
+    precondition(petMotionPlan(.sleeping(pose)) == PetMotionPlan(breath: asleep, beat: nil, blinks: false, drifts: true))
+}
+precondition(petMotionPlan(.resting) == PetMotionPlan(breath: awake, beat: nil))  // rest-lazy has no blink patch
 precondition(petMotionPlan(.failed) == PetMotionPlan(breath: awake, beat: nil))
 precondition(petMotionPlan(.working(1)) == PetMotionPlan(breath: awake, beat: .bob))
 precondition(petMotionPlan(.working(1)) == petMotionPlan(.working(7)))  // a changed count is not a new beat
 precondition(petMotionPlan(.waiting) == PetMotionPlan(breath: awake, beat: .hop))
-precondition(petMotionPlan(.done) == PetMotionPlan(breath: awake, beat: .wiggle))
+precondition(petMotionPlan(.done) == PetMotionPlan(breath: awake, beat: .wag))
+// Which moods get which loop: the blink follows the picture, the "z" the sleeping poses, the wag the finished run.
+let moods: [PetMood] = [.unknown, .resting, .working(1), .waiting, .done, .failed, .stopped, .sleeping(.sleepSide)]
+precondition(moods.filter { petMotionPlan($0).blinks } == [.unknown])
+precondition(moods.filter { petMotionPlan($0).drifts } == [.sleeping(.sleepSide)])
+precondition(moods.filter { petMotionPlan($0).beat == .wag } == [.done])
 
 // The layers: both turn about the middle of the ground line, 3 pt above the bottom of the 132 x 97 canvas.
 let motion = PetMotion(size: petPanelSize, anchor: CGPoint(x: 66, y: 3))
@@ -209,6 +218,13 @@ for layer in [motion.moving, motion.picture] {
     precondition(layer.frame.size == CGSize(width: 132, height: 97))
 }
 precondition(motion.picture.superlayer === motion.moving)
+// The blink patch and the tail lie over the picture, canvas-sized; the tail turns about its base, 101.8 pt from the
+// left and 53 pt from the top, so 44 pt up from the bottom of the layer.
+precondition(motion.blink.superlayer === motion.picture && motion.tail.superlayer === motion.picture)
+for layer in [motion.blink, motion.tail] { precondition(layer.bounds.size == CGSize(width: 132, height: 97)) }
+precondition(abs(motion.tail.anchorPoint.x - 101.8 / 132) < 1e-9 && abs(motion.tail.anchorPoint.y - 44.0 / 97.0) < 1e-9)
+precondition(motion.tail.position == CGPoint(x: 101.8, y: 44) && motion.blink.opacity == 0 && motion.tail.isHidden)
+precondition(motion.drift.superlayer === motion.moving && motion.drift.opacity == 0)  // the "z" is not on a still picture
 
 // A picture: a swap has no transition; a fade has one of its length; the layer reads the bitmap at its scale.
 func bitmap(_ width: Int, _ height: Int) -> CGImage {
@@ -217,9 +233,11 @@ func bitmap(_ width: Int, _ height: Int) -> CGImage {
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     return context.makeImage()!
 }
-motion.show(bitmap(264, 194), fade: 0)
+let picture = bitmap(264, 194), patch = bitmap(264, 194), body = bitmap(264, 194), tailPiece = bitmap(264, 194)
+func same(_ contents: Any?, _ image: CGImage) -> Bool { (contents as AnyObject?) === (image as AnyObject) }
+motion.show(picture, fade: 0)
 precondition(motion.picture.animation(forKey: kCATransition) == nil && motion.picture.contentsScale == 2)
-precondition(motion.picture.contents != nil)
+precondition(same(motion.picture.contents, picture))
 motion.show(bitmap(132, 97), fade: 0.9)
 let fade = motion.picture.animation(forKey: kCATransition) as? CATransition
 precondition(fade?.type == .fade && fade?.duration == 0.9 && motion.picture.contentsScale == 1)
@@ -227,16 +245,29 @@ precondition(fade?.type == .fade && fade?.duration == 0.9 && motion.picture.cont
 func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
 
 // Playing: a breath that goes on for ever, in and out, about the ground line; the beat only on entering.
+let finished = PetParts(blink: nil, body: body, tail: tailPiece, zStart: nil)
+motion.show(picture, parts: finished, fade: 0)
 motion.play(petMotionPlan(.done), entering: true, animate: true)
 let breath = motion.picture.animation(forKey: "breath") as? CABasicAnimation
 precondition(breath?.keyPath == "transform.scale.y" && number(breath?.toValue) == 1.02 && number(breath?.fromValue) == 1)
 precondition(breath?.duration == 1.6 && breath?.autoreverses == true && breath?.repeatCount == .infinity)  // 3.2 s a breath
-let wag = motion.moving.animation(forKey: "beat") as? CAKeyframeAnimation
+// The wag: the tail layer (not the whole picture) turns 16 degrees both ways, four cycles, and settles: 1.6 s, once.
+// The picture is the body without its tail while it plays, and the tail lies over it.
+let wag = motion.tail.animation(forKey: "beat") as? CAKeyframeAnimation
 precondition(wag?.keyPath == "transform.rotation.z" && wag?.duration == 1.6 && wag?.repeatCount == 0)
 precondition(wag?.values?.count == 11 && wag?.keyTimes?.count == 11 && wag?.timingFunctions?.count == 10)
 precondition(number(wag?.values?.first) == 0 && number(wag?.values?.last) == 0)  // from rest, back to rest
+precondition(abs(number(wag?.values?[1])! - 16 * Double.pi / 180) < 1e-9 && abs(number(wag?.values?[2])! + 16 * Double.pi / 180) < 1e-9)
+precondition(motion.moving.animation(forKey: "beat") == nil)
+precondition(!motion.tail.isHidden && same(motion.picture.contents, body) && same(motion.tail.contents, tailPiece))
+// Without the pieces there is nothing to wag; the still picture shows.
+motion.show(picture, fade: 0)
+motion.play(petMotionPlan(.done), entering: true, animate: true)
+precondition(motion.tail.animation(forKey: "beat") == nil && motion.tail.isHidden && same(motion.picture.contents, picture))
+motion.show(picture, parts: finished, fade: 0)
 motion.play(petMotionPlan(.done), entering: false, animate: true)
 precondition(motion.moving.animation(forKey: "beat") == nil && motion.picture.animation(forKey: "breath") != nil)
+precondition(motion.tail.animation(forKey: "beat") == nil && motion.tail.isHidden && same(motion.picture.contents, picture))
 motion.play(petMotionPlan(.working(1)), entering: true, animate: true)
 let bob = motion.moving.animation(forKey: "beat") as? CAKeyframeAnimation
 precondition(bob?.keyPath == "transform.translation.y" && bob?.duration == 0.35 && bob?.values?.count == 3)
@@ -249,16 +280,102 @@ motion.play(petMotionPlan(.sleeping(.sleepBack)), entering: true, animate: true)
 let deep = motion.picture.animation(forKey: "breath") as? CABasicAnimation
 precondition(deep?.duration == 2.2 && number(deep?.toValue) == 1.03 && motion.moving.animation(forKey: "beat") == nil)
 
-// When the pet may not move, nothing runs and the still picture stays (Reduce Motion, Low Power, covered).
-motion.play(petMotionPlan(.done), entering: true, animate: false)
-precondition(motion.picture.animation(forKey: "breath") == nil && motion.moving.animationKeys() == nil)
-precondition(motion.picture.contents != nil)
-motion.play(petMotionPlan(.done), entering: true, animate: true)
-motion.stop()
-precondition(motion.picture.animation(forKey: "breath") == nil && motion.moving.animationKeys() == nil)
+// The blink: two in an 11 s loop, at 4.2 s and 9.6 s, each 60 ms in, 30 ms held and 70 ms out; only with a patch.
+let idle = PetParts(blink: patch, body: nil, tail: nil, zStart: nil)
+motion.show(picture, parts: idle, fade: 0)
+precondition(same(motion.blink.contents, patch) && motion.blink.opacity == 0)
+motion.play(petMotionPlan(.unknown), entering: true, animate: true)
+let blinking = motion.blink.animation(forKey: "blink") as? CAKeyframeAnimation
+precondition(blinking?.keyPath == "opacity" && blinking?.duration == 11 && blinking?.repeatCount == .infinity)
+let at = (blinking?.keyTimes ?? []).map { number($0)! * 11 }, level = (blinking?.values ?? []).map { number($0)! }
+precondition(at.count == 10 && level == [0, 0, 1, 1, 0, 0, 1, 1, 0, 0])
+for (start, begins) in [(1, 4.2), (5, 9.6)] {
+    precondition(abs(at[start] - begins) < 1e-9)
+    for (step, expected) in [60.0, 30, 70].enumerated() {
+        precondition(abs((at[start + step + 1] - at[start + step]) * 1000 - expected) < 1e-6)
+    }
+}
+motion.play(petMotionPlan(.resting), entering: true, animate: true)  // a mood whose picture has no patch does not blink
+precondition(motion.blink.animation(forKey: "blink") == nil)
+motion.show(picture, fade: 0)  // a picture with no patch has nothing to fade in
+motion.play(petMotionPlan(.unknown), entering: true, animate: true)
+precondition(motion.blink.contents == nil && motion.blink.animation(forKey: "blink") == nil)
+
+// The "z": only on a sleeping pose, 3 s, up 4 pt while fading in and out, starting where the pose says (y-up layers).
+let asleepParts = PetParts(blink: nil, body: nil, tail: nil, zStart: CGPoint(x: 86, y: 24))
+motion.show(picture, parts: asleepParts, fade: 0)
+motion.play(petMotionPlan(.sleeping(.sleepFront)), entering: true, animate: true)
+let zed = motion.drift.animation(forKey: "drift") as? CAAnimationGroup
+precondition(zed?.duration == 3 && zed?.repeatCount == .infinity && zed?.animations?.count == 2)
+let rise = zed?.animations?.first as? CABasicAnimation, zfade = zed?.animations?.last as? CAKeyframeAnimation
+precondition(rise?.keyPath == "transform.translation.y" && number(rise?.toValue) == 4 && rise?.duration == 3)
+precondition(zfade?.keyPath == "opacity" && zfade?.duration == 3 && number(zfade?.values?.first) == 0 && number(zfade?.values?.last) == 0)
+precondition(motion.drift.position == CGPoint(x: 86, y: 73) && motion.drift.opacity == 0)
+motion.play(petMotionPlan(.resting), entering: true, animate: true)
+precondition(motion.drift.animation(forKey: "drift") == nil)
+
+// When the pet may not move, no loop runs and the still picture stays (Reduce Motion, Low Power, heat, covered, asleep).
+for (mood, parts) in [(PetMood.done, finished), (.unknown, idle), (.sleeping(.sleepFront), asleepParts)] {
+    motion.show(picture, parts: parts, fade: 0)
+    motion.play(petMotionPlan(mood), entering: true, animate: true)
+    precondition(motion.picture.animation(forKey: "breath") != nil || mood == .unknown)
+    precondition([motion.moving, motion.blink, motion.tail, motion.drift].contains { $0.animationKeys() != nil })
+    motion.play(petMotionPlan(mood), entering: true, animate: false)
+    precondition(motion.picture.animation(forKey: "breath") == nil)
+    for layer in [motion.moving, motion.blink, motion.tail, motion.drift] { precondition(layer.animationKeys() == nil) }
+    precondition(motion.tail.isHidden && motion.blink.opacity == 0 && motion.drift.opacity == 0)
+    precondition(same(motion.picture.contents, picture))  // the whole still picture, tail and all
+    motion.play(petMotionPlan(mood), entering: true, animate: true)
+    motion.stop()
+    for layer in [motion.moving, motion.blink, motion.tail, motion.drift] { precondition(layer.animationKeys() == nil) }
+    precondition(motion.picture.animation(forKey: "breath") == nil && same(motion.picture.contents, picture))
+}
 // A fade in progress is not a loop: stopping the loops leaves it alone.
-motion.show(bitmap(264, 194), fade: 0.15)
+motion.show(picture, fade: 0.15)
 motion.stop()
 precondition(motion.picture.animation(forKey: kCATransition) != nil)
+""",
+    )
+
+
+@darwin
+def test_the_calm_portrait_blinks_only_while_loops_may_run(tmp_path: Path) -> None:
+    # No window is shown: the portrait is built off screen, so it is not visible and the gate keeps it still; the
+    # test then gives it each environment by hand, as the gate would.
+    pictures = ROOT / "macos/art/akita"
+    run_swift(
+        tmp_path,
+        [
+            "GatewayPolicy.swift",
+            "PetPolicy.swift",
+            "PetMotion.swift",
+            "MotionGate.swift",
+            "StatusView.swift",
+        ],
+        rf"""
+import AppKit
+_ = NSApplication.shared
+let portrait = PortraitView(pictures: URL(fileURLWithPath: "{pictures}"))
+precondition(portrait.state == .sitWorking && !portrait.isBlinking)  // the working puppy has no patch
+portrait.show(.sitIdle)
+precondition(!portrait.isBlinking)  // built off screen: not visible, so it stays still
+portrait.loops(PetEnvironment())
+precondition(portrait.isBlinking)  // the calm puppy blinks when loops may run
+for stop in [{{ (e: inout PetEnvironment) in e.reduceMotion = true }}, {{ e in e.lowPower = true }},
+             {{ e in e.thermal = .serious }}, {{ e in e.thermal = .critical }}, {{ e in e.visible = false }},
+             {{ e in e.screenAwake = false }}] {{
+    var environment = PetEnvironment()
+    stop(&environment)
+    portrait.loops(environment)
+    precondition(!portrait.isBlinking)  // each stop leaves the still picture
+}}
+portrait.loops(PetEnvironment())
+portrait.show(.sitError)
+precondition(!portrait.isBlinking)  // a picture with no patch does not blink
+portrait.loops(PetEnvironment())
+precondition(!portrait.isBlinking)
+portrait.show(.sitIdle)
+portrait.loops(PetEnvironment())
+precondition(portrait.isBlinking)
 """,
     )

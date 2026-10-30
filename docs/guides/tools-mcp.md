@@ -116,6 +116,63 @@ Every key of a server entry:
 - MCP servers work in direct mode and in the
   [Python API](../reference/python-api.md#tool-providers-and-mcp). Gateway sessions have
   no MCP tools.
+- A result's `structuredContent` is sent as text only when the result has no
+  text and no picture: a screenshot server that repeats the base64 there sends
+  the picture, not its base64.
+
+### Pictures that tools return
+
+A tool can return pictures, such as an MCP server's screenshot. Each one is
+checked (at most 8 per result, 20 MiB each; PNG, JPEG, GIF or WebP) and named
+at the end of the tool's message, for example
+`[1 image: sha256:3f2a9c0d1b7e image/png]`. Whether its pixels reach the model
+is the setting `[agent] tool_images`:
+
+| Value | What the model gets |
+|---|---|
+| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
+| `on` | The pixels, without asking. |
+| `off` | Only the line that names each picture, as before this setting. |
+
+Set it for one run with `-X`:
+
+```bash
+melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page that is open"
+```
+
+With pixels on, the tool's text stays in its `role: "tool"` message, and the
+pictures follow the run of tool results, one `user` message per call, as
+`image_url` data URLs (Ollama: the `images` field), labelled with the call. The
+second request of `tests/cli/test_tool_images_e2e.py` ends:
+
+```json
+{"role": "tool", "tool_call_id": "call_1", "content": "[1 image: sha256:497790947d46 image/png]"},
+{"role": "user", "content": [
+  {"type": "text", "text": "Output of tool call call_1 (mcp__fake__screenshot): [1 image: sha256:497790947d46 image/png]"},
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoA..."}}
+]}
+```
+
+- The newest `tool_images_keep` pictures (default 3) keep their pixels. When
+  one more arrives past `tool_images_keep + tool_images_retire - 1`, the
+  oldest `tool_images_retire` (default 2) lose them together: a request carries
+  3 to 4 pictures, and the prompt prefix a server caches changes once every
+  two pictures, not on every step.
+- A picture with the digest of one already sent is not sent again; its tool
+  message ends with
+  `[same image as an earlier tool result; its pixels are above]`.
+- A picture wider than 1,280 pixels is scaled to 1,280 wide as a JPEG once,
+  when it is kept (with macOS `sips`; elsewhere it is sent as it is). The label
+  then names the JPEG.
+- Each picture sent counts 4,500 characters toward the 100,000-character
+  prompt cap, and its pixel size toward a context budget
+  ([Context accounting](../reference/configuration.md#context-accounting));
+  older turns leave the window to make room.
+- The copy the model gets lives in memory only: history and the working window
+  keep the line that names the picture (a session still stores the picture for
+  the console, as before). After a session is reopened, no picture is sent
+  until a tool returns a new one.
+- A run whose tools return no picture sends the same requests in every mode.
 
 ## What the checks do
 
@@ -358,6 +415,14 @@ the call runs is read once. A call is **routine**, **high-impact** or
 A call is undecided when the rules cannot read what it does: a command,
 program or path built at run time, a POST that sends data, `git push`.
 
+- **The card says why.** A high-impact call gets its own card in the web
+  console and its own panel in the terminal. Each names what the call does as
+  a question ("Install software?", "Change files outside demo-project?"), lists
+  up to three reasons, offers no session choice, starts on No in the
+  terminal, and says in one line that a session grant never covers installs,
+  downloads or changes outside the folder. The console card also shows the
+  message that started the turn. See [the web console](web-console.md#approvals-and-failures)
+  and [the terminal](terminal.md#approvals).
 - **A session grant covers routine calls only.** "Allow for this chat" (in
   the terminal, "Yes, and allow every … call in this session") lets routine
   calls of that tool run without asking. A high-impact or undecided call of
@@ -374,5 +439,4 @@ program or path built at run time, a POST that sends data, `git push`.
 - **Limits.** The rules read the literal text of a call; code that builds
   what it runs at run time is undecided, and a call the rules miss still runs
   under a grant. Direct runs, `--brief` runs and `--yolo` have no policy, so
-  nothing is reviewed there. The approval card and the terminal panel do not
-  show the reasons yet.
+  nothing is reviewed there.

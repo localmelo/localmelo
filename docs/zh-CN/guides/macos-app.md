@@ -30,7 +30,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 在控制台加载完成之前，窗口显示一个原生的启动视图：Melo 的坐姿画像、`Starting localmelo…`，以及在旋转指示器旁说明当前步骤的一行（`Starting the local server`、`Signing in`、`Opening your workspace`）。如果网关在 20 秒的期限内无法启动，或之后停止，同一个视图会在 `localmelo could not start` 或 `localmelo stopped` 之下说明原因，并提供 **Try Again**（启动一个新的网关）、**Open Log**（打开 `~/Library/Logs/LocalMelo/gateway.log`）和 **Quit**。网关自行退出时，视图用平实的话说明（`Its background service quit unexpectedly. Try Again starts it again; Open Log shows what happened.`）；说明原因的信号或退出状态写入日志。问题不会弹出对话框，也不会关闭应用。窗口和网页视图使用控制台的画布颜色，因此深色窗口不会闪白。
 
-画像是五张坐姿图片之一，108 x 140 点，没有边框，透明的图片直接站在浅色和深色的画布上。它的神情随步骤变化：服务器启动和应用登录时在工作（吐着舌头），网关就绪、控制台正在加载时安静地等着，失败视图里则耷拉着一只耳朵。VoiceOver 会跳过它，因为标题和步骤行已经用文字说了同样的内容。
+画像是五张坐姿图片之一，108 x 140 点，没有边框，透明的图片直接站在浅色和深色的画布上。它的神情随步骤变化：服务器启动和应用登录时在工作（吐着舌头），网关就绪、控制台正在加载时安静地等着，失败视图里则耷拉着一只耳朵。平静的画像每 11 秒眨两次眼：一张闭眼的补丁图在眼睛上淡入十分之一秒。在“减弱动态效果”下、低电量模式下、Mac 发热时、窗口被隐藏或遮住时，以及屏幕休眠时，它保持静止。VoiceOver 会跳过它，因为标题和步骤行已经用文字说了同样的内容。
 
 菜单栏项是 localmelo 的标志，即 Melo 的圆形图像（`docs/assets/icon_small.png`），以彩色显示。它不是模板图像，系统不会给它着色，所以在浅色和深色菜单栏上看起来一样。空闲时只显示标志。有内容运行时，标志旁边显示正在运行的数量，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同）。当某个对话或任务在等你回答工具审批时，标志旁边会出现一个带圈的红点；深色菜单栏上的红色更亮，所以红点在两种菜单栏上都醒目。这些全部来自应用每 2 秒一次的健康检查，因此审批会在一次轮询之内显示出来。VoiceOver 和悬停提示用文字说出状态（`localmelo, nothing running`、`localmelo, 3 running` 或 `localmelo, waiting for your approval`），等待开始时还会朗读出来。菜单以正在运行的内容（`Nothing running`、`3 running`）开头；有审批在等待时，还有 **Waiting for your approval**，它会让窗口打开到那个对话或任务。其后是 **Open localmelo**、**Settings…**（应用菜单中也是 Command-逗号，打开控制台的设置）和 **Quit localmelo**。**Sign In Again** 只在它能帮上忙时才出现：连续四次登录尝试失败之后、控制台显示锁定画面时，以及开发者模式下始终出现（应用会询问页面，页面会说明自己的模式和是否被锁定）。如果应用包中缺少这个标志，菜单栏项改为显示文字 `localmelo`。
 
@@ -53,21 +53,21 @@ Melo 的样子说明 localmelo 在做什么，来自菜单栏图标用的同一�
 | 瘫在肚皮上，眼睛半闭 | 休息：没有任何东西在运行。这是默认状态。 |
 | 抬眼望着，吐着舌头，开始工作时轻轻颠一下 | 工作中：有对话、任务、运行或终端对话在运行。 |
 | 睁大闪亮的眼睛，嘴巴圆圆的，开始时轻轻跳一下 | 在等你批准。 |
-| 开心地闭着眼睛、笑得张开了嘴，摇一小会儿 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
+| 开心地闭着眼睛、笑得张开了嘴，尾巴摇起来 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
 | 眉毛耷拉着，一脸愁容 | 上一次运行没有完成（持续 10 秒），或 localmelo 已停止。 |
-| 侧着、趴着或仰着睡 | 一分钟内什么都没发生；睡姿每 3 分钟换一次，碰一下 Melo 就会醒。 |
+| 侧着、趴着或仰着睡，头顶飘起一个小小的 “z” | 一分钟内什么都没发生；睡姿每 3 分钟换一次，碰一下 Melo 就会醒。 |
 
 点击 Melo 会打开窗口；它在等你批准时，则打开需要你回答的那个对话或任务。可以把它拖到任何地方；它会为每块屏幕记住自己的位置，放在靠近底边处时会吸附到底边，屏幕变化时会回到屏幕内。右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo** 和 **Quit localmelo**。**Hide Melo** 会让它一直隐藏，重启应用后也一样，此时菜单栏菜单里会出现 **Show Melo**，这是唯一的回来方式（下次窗口被收起时，Melo 就会再出现）。它记住的内容保存在 `~/Library/Application Support/LocalMelo/pet.json`：是否隐藏、上次所在的屏幕，以及它在每块屏幕上的位置。
 
-Melo 趴着时会慢慢呼吸，开始工作时颠一下，等待时跳一下，运行完成时摇一摇，换图片时有短暂的淡入淡出（睡姿之间更慢）。这些全部由 Core Animation 完成，应用自己不做任何绘制：没有为 Melo 运行的定时器，它的状态在收到健康检查回复、被触碰或窗口变化时重新计算。在“减弱动态效果”下（此时图片直接切换，没有淡入淡出）、低电量模式下、Mac 发热时、Melo 被遮住或隐藏时，以及屏幕休眠时，Melo 会停止动作，每种状态只显示它的静态图片。VoiceOver 会把 Melo 读作一个按钮，并说出它的状态（`Melo, resting. Nothing running.`、`Melo, working. 2 running.`、`Melo, waiting for your approval.`、`Melo, done.`、`Melo, the last run did not finish.`、`Melo, localmelo stopped.`），开始等待时它不会自己出声播报：菜单栏图标已经播报了，因此 VoiceOver 不会读两遍。
+Melo 趴着时会慢慢呼吸，开始工作时颠一下，等待时跳一下，运行完成时摇尾巴（摇的是尾巴本身，围绕尾根摆动四次后停住，身体不动），睡着时飘起一个小小的 “z”，换图片时有短暂的淡入淡出（睡姿之间更慢）。它在平静的趴姿图片上会眨眼，也就是第一次收到健康检查回复之前宠物显示的那张；慵懒的休息图和各种睡姿本来就闭着或半闭着眼，所以不眨眼。这些全部由 Core Animation 完成，应用自己不做任何绘制：没有为 Melo 运行的定时器，它的状态在收到健康检查回复、被触碰或窗口变化时重新计算。在“减弱动态效果”下（此时图片直接切换，没有淡入淡出）、低电量模式下、Mac 发热时、Melo 被遮住或隐藏时，以及屏幕休眠时，Melo 会停止所有动作（眨眼、摇尾巴、“z” 和呼吸），每种状态只显示它的静态图片。VoiceOver 会把 Melo 读作一个按钮，并说出它的状态（`Melo, resting. Nothing running.`、`Melo, working. 2 running.`、`Melo, waiting for your approval.`、`Melo, done.`、`Melo, the last run did not finish.`、`Melo, localmelo stopped.`），开始等待时它不会自己出声播报：菜单栏图标已经播报了，因此 VoiceOver 不会读两遍。
 
-图片在应用包的 `Contents/Resources/akita` 下：九张给桌面宠物用（趴着、慵懒地趴着，以及三种睡姿），五张坐姿的用于第一个窗口和网页控制台的空对话，另有小头像和网站图标的各种尺寸，每张都有 1x 和 `@2x`。和图标一样，它们是提交进仓库的文件，位于 `macos/art/akita`（1.17 MB，透明 PNG，带一圈很细的奶油色外沿，让轮廓在深色桌面上依然看得见），构建会原样复制这个文件夹。`anchors.json` 以点为单位给出每张图片的画布、地面线和中心，因此换姿势时不会跳动。美术母版留在仓库之外；要在 Mac 上根据它们重新生成这些图片：
+图片在应用包的 `Contents/Resources/akita` 下：九张给桌面宠物用（趴着、慵懒地趴着，以及三种睡姿），五张坐姿的用于第一个窗口和网页控制台的空对话，另有小头像和网站图标的各种尺寸，以及这些动作用到的部件（平静的趴姿、坐姿图片和小头像各有一张闭眼的补丁图，完成时的图片则被切成没有尾巴的身体和单独的尾巴），每张都有 1x 和 `@2x`。和图标一样，它们是提交进仓库的文件，位于 `macos/art/akita`（1.29 MB，透明 PNG，带一圈很细的奶油色外沿，让轮廓在深色桌面上依然看得见），构建会原样复制这个文件夹。`anchors.json` 以点为单位给出每张图片的画布、地面线和中心，因此换姿势时不会跳动，还给出这些动作的标记：每张补丁图的眼睛区域、尾巴的范围和它摆动所围绕的尾根，以及每种睡姿的 “z” 从哪里升起。补丁图取自模型重画的闭眼版本，并且只保留与原图不同的地方，所以眨眼除了眼睛什么都不会变；如果重画的图片没有对齐原图，构建会停下并给出提示。美术母版留在仓库之外；要在 Mac 上根据它们重新生成这些图片：
 
 ```bash
 uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
 ```
 
-网页控制台显示同样的图片，所以同一个脚本会把它需要的几张复制到 `support/gateway/static/akita`：平静的画像、五张脸和三种网站图标尺寸，共 150 KB（见[网页控制台指南](web-console.md#melo-in-the-page)）。`uv run --with pillow python scripts/build_pet_assets.py --console-only` 不需要母版，直接从 `macos/art/akita` 再复制一次，并且有一个测试保证副本与来源一致。
+网页控制台显示同样的图片，所以同一个脚本会把它需要的几张复制到 `support/gateway/static/akita`：平静的画像及其眨眼补丁图、五张脸、平静的脸的补丁图和三种网站图标尺寸，共 155 KB（见[网页控制台指南](web-console.md#melo-in-the-page)）。`uv run --with pillow python scripts/build_pet_assets.py --console-only` 不需要母版，直接从 `macos/art/akita` 再复制一次，并且有一个测试保证副本与来源一致。
 
 `picks.json` 的形式是 `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}`，列出脚本中的 14 个状态。Pillow 只在这一次运行中获取，两次运行得到的字节完全相同。`GET /api/health` 现在还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；Melo 会读取它，用来显示刚结束的运行。
 

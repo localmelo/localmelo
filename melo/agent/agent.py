@@ -72,6 +72,7 @@ from localmelo.melo.agent._chat import (
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._tool_images import ToolImageStore
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
@@ -740,10 +741,11 @@ def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
     *text* is the result's text (see :func:`_tool_result_text`), cut to
-    fit or not, or the notice that replaced it. The images of a result
-    are not sent to the model, so a result with images ends with a line
-    that names them (see :func:`describe_images`), whether its text is
-    kept, cut or withheld.
+    fit or not, or the notice that replaced it. The message keeps only
+    references to a result's images (their pixels reach the model only
+    with ``tool_images`` on, see :class:`ToolImageStore`), so a result
+    with images ends with a line that names them (see
+    :func:`describe_images`), whether its text is kept, cut or withheld.
     """
     return "\n".join(part for part in (text, describe_images(images)) if part)
 
@@ -1800,6 +1802,14 @@ class Agent:
         self._reflection_in_window = (
             self.options.fixed_prefix and self.options.cache_layout == "v3"
         )
+        # Pictures tools return (AgentOptions.tool_images): the store whose
+        # payloads planning requests carry; "auto" asks the provider once.
+        self._tool_images = ToolImageStore(
+            self.options.tool_images_keep, self.options.tool_images_retire
+        )
+        self._images_on: bool | None = {"on": True, "off": False}.get(
+            self.options.tool_images
+        )
         self.hippo = Hippo(
             short_term_max=self.options.window_messages,
             embedding=self._embedding if self.options.memory else None,
@@ -1948,6 +1958,17 @@ class Agent:
     def _requires_replay(self) -> bool:
         """Whether the provider refuses a request that omits its reasoning."""
         return bool(getattr(self._llm, "requires_reasoning_replay", False))
+
+    async def _sends_images(self) -> bool:
+        """Whether tool images reach the model; ``"auto"`` asks the provider once."""
+        if self._images_on is None:
+            ask = getattr(self._llm, "takes_images", None)
+            try:
+                self._images_on = callable(ask) and await ask() is True
+            except Exception:  # a failed question is an unknown answer
+                logger.info("Could not ask whether the model reads images")
+                self._images_on = False
+        return self._images_on
 
     async def start(self) -> None:
         """Start the tool providers and register their tools now.
@@ -3594,6 +3615,7 @@ class Agent:
                 task_query=task_query,
                 requires_replay=self._requires_replay,
             )
+            sent = self._tool_images.hydrate(sent)
             planned = _as_planned(sent, query, query_block)
             if run is not None and (run.inbox is not None or run.brief):
                 planned = coalesce_user_messages(planned)
@@ -3793,6 +3815,7 @@ class Agent:
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
+        sent = self._tool_images.hydrate(sent)
         planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
         if run is not None and (run.inbox is not None or run.brief):
             planned = coalesce_user_messages(planned)
@@ -3844,6 +3867,7 @@ class Agent:
                 len(msg.thinking) for msg in sent if msg.role == "assistant"
             )
             run.replay_skipped += len(skipped)
+        sent = self._tool_images.hydrate(sent)
         recalls = []
         recall_records: list[RecallRecord] = []
         query_block = ""
@@ -4057,7 +4081,9 @@ class Agent:
 
         History and working memory get the same copies of the results,
         whose images are references without the base64 payload (see
-        :func:`_image_references`), so no payload outlives the step.
+        :func:`_image_references`), so no payload outlives the step,
+        except in the RAM store of the pictures that planning requests
+        carry when ``tool_images`` is on (see :class:`ToolImageStore`).
 
         Each record joins ``step.records`` before it is written, and
         ``step.stored`` counts it once ``store_step`` has returned, so a
@@ -4071,6 +4097,10 @@ class Agent:
         """
         response = step.response
         calls = response.tool_calls
+        if any(image.data for r in step.results for image in r.images) and (
+            await self._sends_images()
+        ):
+            await self._tool_images.prepare(step.results)
         kept = [_image_references(result) for result in step.results]
         for index, (call, result) in enumerate(zip(calls, kept, strict=True)):
             captured = step.captured[index] if index < len(step.captured) else None
@@ -4163,6 +4193,7 @@ class Agent:
                 else:
                     tool_msgs.append(Message(role="user", content=block))
                 recall_aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+            self._tool_images.keep(tool_msgs)
             self.hippo.working.append_turn(
                 assistant_msg, tool_msgs, aliases=recall_aliases
             )
@@ -4189,6 +4220,7 @@ class Agent:
                 tool_msgs.append(Message(role="user", content=block))
             recall_aliases.update(hit.alias for hit in _hits if hit.kind != "long")
         run.pending_shown.clear()
+        self._tool_images.keep(tool_msgs)
         self.hippo.working.append_turn(assistant_msg, tool_msgs, aliases=recall_aliases)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:

@@ -88,6 +88,42 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 - 工具的 `annotations` 对象按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。
 - 服务器在运行开始时启动。无法启动的服务器会使运行以 `setup_error` 状态结束，例如 `MCP server 'notes' exited (code 1)`。
 - MCP 服务器适用于直接模式和 [Python API](../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。
+- 结果的 `structuredContent` 只在结果既没有文本也没有图片时才作为文本发送：截图服务器若在其中重复图片的 base64，发送的是图片本身，而不是它的 base64。
+
+<a id="pictures-that-tools-return"></a>
+
+### 工具返回的图片
+
+工具可以返回图片，例如 MCP 服务器的截图。每张图片都会经过检查（每个结果最多 8 张，每张最多 20 MiB；PNG、JPEG、GIF 或 WebP），并在工具消息末尾注明，例如 `[1 image: sha256:3f2a9c0d1b7e image/png]`。像素是否发给模型由设置 `[agent] tool_images` 决定：
+
+| 值 | 模型得到的内容 |
+|---|---|
+| `auto`（默认） | 服务器表明模型能读图时发送像素：oMLX 的 `GET /v1/models/status` 给出该模型的 `model_type` 为 `vlm`，或 Ollama 的 `POST /api/show` 在 `capabilities` 中列出 `vision`。localmelo 在工具第一次返回图片时询问一次。其他回答或没有回答（vLLM、SGLang 和 MLC 不提供此信息）都按 `off` 处理。 |
+| `on` | 不询问，直接发送像素。 |
+| `off` | 只发送注明每张图片的那一行，与引入此设置之前相同。 |
+
+用 `-X` 为一次运行设置：
+
+```bash
+melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page that is open"
+```
+
+开启像素后，工具的文本仍留在它的 `role: "tool"` 消息中；图片跟在这一组工具结果之后，每次调用一条 `user` 消息，以 `image_url` data URL 发送（Ollama 使用 `images` 字段），并标明对应的调用。`tests/cli/test_tool_images_e2e.py` 的第二个请求以如下内容结尾：
+
+```json
+{"role": "tool", "tool_call_id": "call_1", "content": "[1 image: sha256:497790947d46 image/png]"},
+{"role": "user", "content": [
+  {"type": "text", "text": "Output of tool call call_1 (mcp__fake__screenshot): [1 image: sha256:497790947d46 image/png]"},
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoA..."}}
+]}
+```
+
+- 最新的 `tool_images_keep` 张图片（默认 3）保留像素。当图片数超过 `tool_images_keep + tool_images_retire - 1` 时，最旧的 `tool_images_retire` 张（默认 2）一起失去像素：每个请求带 3 到 4 张图片，服务器缓存的提示前缀每两张图片才变化一次，而不是每一步都变。
+- 与已发送图片摘要相同的图片不会再次发送；它的工具消息以 `[same image as an earlier tool result; its pixels are above]` 结尾。
+- 宽于 1,280 像素的图片在保存时一次性缩放为 1,280 像素宽的 JPEG（使用 macOS 的 `sips`；其他系统按原样发送）。此时标签注明的是该 JPEG。
+- 每张发送的图片在 100,000 字符的提示上限中计 4,500 字符，并按像素尺寸计入上下文预算（[上下文记账](../reference/configuration.md#context-accounting)）；较早的轮次会移出窗口以腾出空间。
+- 发给模型的副本只保存在内存中：历史记录和工作窗口只保留注明图片的那一行（会话仍像以前一样为控制台保存图片）。会话重新打开后，在工具返回新图片之前不会发送任何图片。
+- 工具不返回图片的运行，在每种模式下发送的请求都完全相同。
 
 <a id="what-the-checks-do"></a>
 
@@ -186,7 +222,8 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。
 
+- **卡片会说明原因。** 高影响调用在网页控制台有专门的卡片，在终端有专门的面板。它们都用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”），列出最多三条原因，不提供会话授权的选项，在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改。控制台卡片还会显示发起本轮的那条消息。参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)。
 - **会话授权只覆盖常规调用。** “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）让该工具的常规调用无需询问即可运行。同一工具的高影响或无法判定的调用每次都会询问；对它选择会话授权只允许这一次调用，不会授权该工具。终端的 `auto` 模式运行常规调用，其余调用会先询问。
 - **永不更改 localmelo 本身。** 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …`
 - **模型会读到原因。** 拒绝高影响调用时，文本会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.`
-- **限制。** 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。审批卡片和终端面板暂时还不显示原因。
+- **限制。** 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。

@@ -1028,7 +1028,13 @@ function assistantNode(turn, newest = false) {
   // The live row, the work box and the failure card word every state, so the face is decoration there. A
   // finished answer with no work box above it has nothing else saying the turn is done.
   icon.alt = face === "done" && shownItems(turn).length === 0 ? "Done" : "";
-  label.append(icon, el("span", "", "localmelo"));
+  // The idle face blinks (CSS only: an eyes-closed patch fades in over it); the other faces have no patch.
+  let mark = icon;
+  if (face === "idle") {
+    mark = el("span", "blinks face");
+    mark.append(icon);
+  }
+  label.append(mark, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
@@ -1234,7 +1240,7 @@ function workGroup(turn) {
   for (const item of shownItems(turn)) {
     group.append(itemNode(item, turn, { inline }));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
-    if (request) group.append(approvalCard(request));
+    if (request) group.append(approvalCard(request, chatApproval, turn.userText));
   }
   if (!turn.finishedAt) group.append(liveRow(turn));
   return group;
@@ -1335,7 +1341,9 @@ function diffBox(rows) {
   return box;
 }
 
-function approvalCard(request, view = chatApproval) {
+// *asked* is the request that started the turn: a high-impact card shows it, so the
+// person can compare what they asked for with what melo is about to do.
+function approvalCard(request, view = chatApproval, asked = "") {
   const id = String(request.request_id);
   let state = approvalStates.get(id);
   if (!state) {
@@ -1390,7 +1398,26 @@ function approvalCard(request, view = chatApproval) {
     covers = `opening ${site}`;
     content = `melo wants to open ${site} in Safari and read it. Safari opens it in its own window; your sign-ins are not used.`;
   }
+  // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
+  // card says why, offers no chat-wide allow, and starts on Deny.
+  const review = request.review;
+  const high = review?.verdict === "high";
+  if (high) {
+    card.dataset.impact = "high";
+    title = review.title || title;
+    caption = `${tool} · asks every time`;
+  }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
+  if (high && review.reasons?.length) {
+    card.append(el("p", "approval-why", "Why melo asks"));
+    const reasons = el("ul", "approval-reasons");
+    for (const reason of review.reasons) reasons.append(el("li", "", reason));
+    card.append(reasons);
+  }
+  if (high && asked) {
+    const text = asked.length > 200 ? `${asked.slice(0, 200).trimEnd()}…` : asked;
+    card.append(el("p", "approval-asked", `You asked: “${text}”`));
+  }
   if (why) card.append(el("p", "approval-note", why));
   const lines = diff ? diff.rows : content.split("\n");
   const canFold = tool === "python_exec" || tool === "file_write";
@@ -1410,12 +1437,13 @@ function approvalCard(request, view = chatApproval) {
   }
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
-  const once = button("primary-button", "Allow once", () => view.answer(request, state, "once"));
+  // On a high-impact card the safe answer is the filled one.
+  const once = button(high ? "outline-button" : "primary-button", "Allow once", () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
   const session = button("outline-button", `Allow for this ${scope}`, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
-  const deny = button("quiet-button", "Deny", () => {
+  const deny = button(high ? "primary-button" : "quiet-button", "Deny", () => {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
@@ -1424,14 +1452,16 @@ function approvalCard(request, view = chatApproval) {
   });
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
-  actions.append(once, session, deny);
+  if (high) actions.append(once, deny);
+  else actions.append(once, session, deny);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";
-  const grant = el("p", "approval-warning", command
-    ? `“Allow for this ${scope}” lets any ${tool === "shell_exec" ? "shell command" : "Python code"} run without asking for the rest of this ${scope}. It can reach files outside ${workspace}.`
-    : `melo will not ask again before ${covers} in this ${scope}.`);
+  let rule = `melo will not ask again before ${covers} in this ${scope}.`;
+  if (high) rule = `A ${scope}-wide allow never covers installs, downloads or changes outside ${workspace}.`;
+  else if (command) rule = `“Allow for this ${scope}” lets routine ${tool === "shell_exec" ? "shell commands" : "Python code"} run without asking for the rest of this ${scope}. Installs, downloads and changes outside ${workspace} still ask.`;
+  const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
-  session.setAttribute("aria-describedby", grant.id);
+  if (!high) session.setAttribute("aria-describedby", grant.id);
   card.append(grant);
   const note = "Tell melo what to do instead (optional)";
   const label = el("label", "", note);
@@ -1486,7 +1516,7 @@ function approvalCard(request, view = chatApproval) {
   if (request.arguments_complete !== true || (tool === "file_write" && !request.target)) {
     card.append(button("link-button", "Reload approval details", () => view.reload(id)));
   }
-  const controls = [once, session, deny, confirm];
+  const controls = [once, ...(high ? [] : [session]), deny, confirm];
   const enable = () => {
     const waiting = approvalNow() - state.mountedAt < 500;
     const unavailable = request.arguments_complete !== true || (tool === "file_write" && !request.target);
@@ -1540,7 +1570,8 @@ function goToApproval() {
   const group = card.closest(".work-group");
   if (group) group.open = true;
   card.scrollIntoView?.({block: "center"});
-  const once = card.querySelector("[data-approval-once]");
+  // Review moves to the first answer: Allow once, or Deny on a high-impact card.
+  const once = card.querySelector(card.dataset.impact === "high" ? "[data-approval-deny]" : "[data-approval-once]");
   if (once && !once.disabled) once.focus();
   else if (once) {
     const state = approvalStates.get(String(request.request_id));

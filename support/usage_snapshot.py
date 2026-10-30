@@ -15,7 +15,7 @@ time since the last request and no countdown.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from localmelo.support.progress_line import run_elapsed
@@ -55,6 +55,14 @@ class UsageSnapshot:
     context: Mapping[str, Any] | None = None
     progress: Mapping[str, Any] | None = None
     run_active: bool = False
+    # The session's tokens sent (prompt) and received (completion).
+    sent: int = 0
+    received: int = 0
+    # The model the next requests go to (the session sets it), and per model
+    # the prompt, cached and completion tokens, which configured prices turn
+    # into a cost.
+    model: str = ""
+    by_model: dict[str, list[int]] = field(default_factory=dict)
 
     def observe(self, event: Mapping[str, Any]) -> None:
         """Take one stored event (``{"type", "ts", "data", ...}``) into account."""
@@ -81,7 +89,14 @@ class UsageSnapshot:
         if prompt is None or prompt <= 0:
             return
         cached = _count(usage.get("cached_tokens"))
+        completion = max(_count(usage.get("completion_tokens")) or 0, 0)
         self.requests += 1
+        self.sent += prompt
+        self.received += completion
+        tally = self.by_model.setdefault(self.model, [0, 0, 0])
+        tally[0] += prompt
+        tally[1] += min(max(cached or 0, 0), prompt)
+        tally[2] += completion
         self.last_prompt = prompt
         self.last_cached = None if cached is None else min(max(cached, 0), prompt)
         if isinstance(ts, int | float) and not isinstance(ts, bool):
@@ -336,3 +351,137 @@ def context_words(measured: int, limit: int | None = None) -> str:
     if limit:
         return f"context {_percent(measured, limit)} used"
     return f"context {format_tokens(measured)} tokens"
+
+
+@dataclass(frozen=True)
+class BarPart:
+    """One piece of the terminal's status bar.
+
+    *role* says how it is drawn: ``""`` muted like the bar, ``figure`` in the
+    body's ink, or ``ok``, ``warn``, ``error``, ``live`` and ``key``. A
+    *detail* gives way before any figure on a narrow terminal; a *glued*
+    piece follows the one before it after a space instead of a dot.
+    """
+
+    text: str
+    role: str = ""
+    detail: bool = False
+    glued: bool = False
+
+
+def session_cost(
+    snap: UsageSnapshot, prices: Mapping[str, Mapping[str, float]]
+) -> float | None:
+    """The session's cost in dollars from ``[pricing.<model>]``; None unpriced.
+
+    Prices are per million tokens: ``input``, ``output`` and ``cache_read``
+    (``input`` when absent) for the prompt tokens the server reported cached.
+    A model used without a price makes the whole cost unknown.
+    """
+    total = 0.0
+    for model, (prompt, cached, completion) in snap.by_model.items():
+        price = prices.get(model)
+        if price is None:
+            return None
+        read = price.get("cache_read", price["input"])
+        total += (prompt - cached) * price["input"] + cached * read
+        total += completion * price["output"]
+    return total / 1e6 if snap.by_model else None
+
+
+def meter(percent: int, ascii: bool = False) -> str:
+    """``▮▮▯▯▯``: *percent* in five cells; any use shows at least one."""
+    full = min(5, max(1 if percent > 0 else 0, round(percent / 20)))
+    on, off = ("#", "-") if ascii else ("▮", "▯")
+    return on * full + off * (5 - full)
+
+
+def fill_role(percent: int) -> str:
+    """How a filling figure is drawn: muted, then ``warn`` at 70%, ``error`` at 90%."""
+    return "error" if percent >= 90 else "warn" if percent >= 70 else ""
+
+
+def _clock(seconds: float) -> str:
+    """``45s``, ``3m`` or ``1h02m``: a time left, cut."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    return _idle_text(seconds)
+
+
+def clock_running(
+    snap: UsageSnapshot,
+    *,
+    local: bool,
+    now: float,
+    limits: tuple[int, float | None] | None = None,
+) -> bool:
+    """Whether the bar shows a clock: the idle time (from a minute on) or a reset."""
+    if local:
+        # A second early, so the idle time appears on time.
+        return snap.last_request_ts is not None and now - snap.last_request_ts >= 59
+    return limits is not None and limits[1] is not None and limits[1] > now
+
+
+def bar_usage(
+    snap: UsageSnapshot,
+    *,
+    local: bool,
+    now: float,
+    prices: Mapping[str, Mapping[str, float]] | None = None,
+    limits: tuple[int, float | None] | None = None,
+    last_prompt: int = 0,
+    ascii: bool = False,
+) -> list[BarPart]:
+    """The status bar's usage zone (#282), from what the session already received.
+
+    A cloud backend says the session's cost from configured prices (its
+    tokens when a model has none), the context and the tightest rate limit
+    the last response reported, with its reset; a local one says the tokens
+    sent and received, the context, the prompt cache's share of the last
+    request (the session's average after it) and the idle time since the
+    last request. A percentage gets a meter only where it is real.
+    """
+    parts: list[BarPart] = []
+    cost = None if local or not snap.requests else session_cost(snap, prices or {})
+    if cost is not None:
+        parts.append(
+            BarPart("<$0.01" if 0 < cost < 0.005 else f"${cost:,.2f}", "figure")
+        )
+    elif snap.requests:
+        up, down = ("in ", "out ") if ascii else ("↑ ", "↓ ")
+        sent, received = format_tokens(snap.sent), format_tokens(snap.received)
+        parts.append(BarPart(f"{up}{sent} {down}{received}"))
+    measured = _measured(snap) or 0
+    limit = _count((snap.context or {}).get("input_limit")) if measured else None
+    if measured and limit:
+        share = int(_percent(measured, limit)[:-1])
+        used = f"ctx {format_tokens(measured)}/{format_tokens(limit)}"
+        parts.append(BarPart(used, fill_role(share)))
+        parts.append(BarPart(meter(share, ascii), fill_role(share), True, True))
+    elif measured or last_prompt:
+        parts.append(BarPart(f"ctx {format_tokens(measured or last_prompt)}"))
+    if local:
+        share_now = _share(snap.last_cached, snap.last_prompt)
+        if share_now is not None:
+            poor = share_now < 20 and snap.reported_requests >= 2
+            parts.append(
+                BarPart(
+                    f"cache {share_now}%",
+                    "ok" if share_now >= 50 else "warn" if poor else "",
+                )
+            )
+            if snap.reported_requests >= 2:
+                avg = _share(snap.reported_cached, snap.reported_prompt)
+                parts.append(BarPart(f"(avg {avg}%)", detail=True, glued=True))
+        if snap.last_request_ts is not None and now - snap.last_request_ts >= 60:
+            idle = _idle_text(now - snap.last_request_ts)
+            parts.append(BarPart(f"idle {idle}", detail=True))
+    elif limits is not None:
+        percent, reset = limits
+        role = fill_role(percent)
+        parts.append(BarPart(f"limit {percent}%", role))
+        parts.append(BarPart(meter(percent, ascii), role, True, True))
+        if reset is not None and reset > now:
+            left = _clock(reset - now)
+            parts.append(BarPart(f"reset {left}" if ascii else f"↻{left}", glued=True))
+    return parts

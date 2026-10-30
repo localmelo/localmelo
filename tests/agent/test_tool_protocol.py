@@ -807,10 +807,16 @@ def _image_agent(llm: BaseLLMProvider, **overrides: ToolOutput) -> Agent:
 def _recording_transport(
     replies: list[dict[str, Any]], bodies: list[dict[str, Any]]
 ) -> httpx.MockTransport:
-    """Answer with *replies* in order and record every request body."""
+    """Answer chat requests with *replies* in order and record their bodies.
+
+    Any other request, such as ``tool_images = "auto"``'s question whether the
+    model reads images, gets a 404: the server does not say.
+    """
     queue = deque(replies)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if not request.url.path.endswith(("/chat/completions", "/api/chat")):
+            return httpx.Response(404)
         bodies.append(json.loads(request.content))
         return httpx.Response(200, json=queue.popleft())
 

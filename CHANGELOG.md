@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The approval card says why melo asks, and never offers a chat-wide allow for
+  a high-impact call. In the web console and the macOS app, a call that
+  installs software, downloads files, changes files outside the workspace or
+  does anything else high-impact gets a card with a question that names it
+  ("Install software?"), "Why melo asks" with up to three reasons, "You
+  asked:" with the message that started the turn, and only **Allow once** and
+  **Deny** (the filled button, the one **Review** moves to). The terminal's
+  panel shows the same title and reasons before the code, has no session
+  choice, starts on No, and numbers its options by position. Both say in one
+  line that a session grant never covers installs, downloads or changes
+  outside the folder; the routine grant line now says it covers routine calls
+  and that installs, downloads and changes outside the workspace still ask.
+  Answering "for this chat" to a high-impact request over the API allows that
+  one call, replies `"remember": false` and no longer starts the grant's
+  clock ([#294]).
+
 - High-impact calls ask even inside a session grant. Before an approval
   policy decides, each `shell_exec`, `python_exec` and `file_write` call is
   reviewed by fixed rules (the shell command split, the Python code parsed;
@@ -279,6 +295,51 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `tool_exposure = "retrieve"` offers on every step, add a note to the system prompt, and
   ask the run's approval policy about something it finds while a tool runs. See [Browsing
   with melo](docs/guides/browsing.md) ([#NN]).
+
+- Pictures that tools return reach a model that can see. A screenshot from an MCP server used to
+  reach the model only as a line such as `[1 image: sha256:... image/jpeg]`. With
+  `[agent] tool_images = "on"` (or `-X agent.tool_images=on` for one run) each planning request
+  now carries the newest three to four pictures as `image_url` data URLs, in a `user` message
+  after the tool results that names the call (Ollama: its `images` field). The oldest two lose
+  their pixels together, so the prompt prefix a server caches changes once every two pictures; a
+  picture already sent is not sent again; one wider than 1,280 pixels is scaled to a 1,280-wide
+  JPEG once (macOS `sips`); each counts 4,500 characters toward the prompt cap (pictures a user
+  attaches now count too). The default, `auto`, sends pixels only when the server says the model
+  reads images (oMLX's `model_type` `vlm`, Ollama's `vision` capability), asked once at the first
+  picture. `tool_images_keep` and `tool_images_retire` set the counts. A run whose tools return no
+  picture sends the same requests as before. An MCP result's `structuredContent` is no longer
+  sent as text beside a picture, so a server that repeats a screenshot's base64 there sends the
+  picture, not the base64 ([#295]).
+
+- The terminal's status bar says what the session uses and what runs beside
+  it, not the model and folder again (the welcome and `/status` keep those).
+  On a local server it shows the tokens sent and received, the context with a
+  small meter, the prompt cache's share of the last request (the session's
+  average after it) and the idle time since the last request: `↑ 3.0k ↓ 15 ·
+  ctx 2.6k/32k ▮▯▯▯▯ · cache 61% (avg 72%) · idle 2m`. On a cloud API it shows
+  the session's cost from prices you configure in `[pricing.<model>]` (no
+  prices are bundled; tokens without one) and the tightest rate limit the
+  last response's headers reported, with its reset: `$0.13 · ctx 100k · limit
+  42% ▮▮▯▯▯ ↻3m`. When the gateway has tasks, a zone counts them
+  (`2 running · 1 queued · P1 · ctrl+t tasks`), and Ctrl+T lists them: Enter on
+  one offers pause or resume, a higher or lower priority, and stop (asked
+  first), each sent as `melo task` sends it. The figures are coloured by kind
+  (a good cache teal, a filling context amber then red, held work amber), a
+  narrow terminal drops the title, then details, before any figure, and the
+  bar redraws once a second only while it shows a clock. A list open above the
+  bar now ends with a blank row ([#293]).
+
+- Melo moves. It blinks, wags its tail and sleeps with a "z". The calm portrait of the app's
+  first window, the console's calm portrait and its calm face beside older replies blink twice
+  every 11 seconds (an eyes-closed patch fades in over the eyes for a tenth of a second); the
+  pet blinks on its calm lying picture too. When a run is done the pet's tail swings about its
+  base, four times, instead of the whole picture swaying; and a sleeping Melo sends up a small
+  "z". The patches and the tail are cut from pictures the art model redrew, only where they
+  differ from the originals, and `scripts/build_pet_assets.py` stops with a message if a redrawn
+  picture does not lie on its original. All of it is Core Animation in the app (no timer) and
+  CSS in the console (no script), and stops under Reduce Motion (`prefers-reduced-motion` in the
+  console), in Low Power Mode, when the Mac runs hot, while the window or Melo is hidden or
+  covered and while the screen sleeps. ([#292])
 
 - Chats say who they are. A model that is told nothing answers "who are you?" with the
   assistant it was trained as. The terminal chat, the web console and the macOS app now tell
@@ -2289,6 +2350,10 @@ earlier milestones.
 [#289]: https://github.com/localmelo/localmelo/pull/289
 [#290]: https://github.com/localmelo/localmelo/pull/290
 [#291]: https://github.com/localmelo/localmelo/pull/291
+[#292]: https://github.com/localmelo/localmelo/pull/292
+[#293]: https://github.com/localmelo/localmelo/pull/293
+[#294]: https://github.com/localmelo/localmelo/pull/294
+[#295]: https://github.com/localmelo/localmelo/pull/295
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

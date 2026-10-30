@@ -39,16 +39,16 @@
 <a id="melo-in-the-page"></a>
 ## 页面里的 Melo
 
-页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。所有图片都是静止的：页面不让任何东西动，所以不需要为“减弱动态效果”单独处理。
+页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。图片都是静止的，只有平静的画像和平静（idle）的脸会眨眼：一张闭眼的补丁图盖在图片上，每 11 秒淡入两次。这只用 CSS，没有脚本；在 `prefers-reduced-motion: reduce` 下页面显示静态图片。
 
-- **空对话。** Melo 坐在 *What would you like to work on?* 上方，神情平静。
-- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在工作（吐着舌头），等待批准时睁大眼睛，完成时开心，以带警告或错误结束时耷拉着一只耳朵。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸。
+- **空对话。** Melo 坐在 *What would you like to work on?* 上方，神情平静，会眨眼。
+- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在工作（吐着舌头），等待批准时睁大眼睛，完成时开心，以带警告或错误结束时耷拉着一只耳朵。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸；平静的脸会眨眼。
 - **批准栏。** 写着 “melo is waiting for your answer” 的栏显示睁大眼睛的脸。
 - **品牌和标签页。** 侧边栏和登录页显示平静的脸，浏览器标签页以 16、32 和 64 px 使用它。
 
 在文字已经说明状态的地方（实时行、工作组、失败卡片、批准栏），这些脸只是装饰，替代文字为空。上方没有工作组的已完成回答，没有别的东西说明它完成了，所以它的脸对屏幕阅读器读作 `Done`。画像保留替代文字 `Melo, the localmelo Akita mascot`。
 
-图片是带一圈很细奶油色外沿的透明 PNG。在浅色画布上，深蓝轮廓让 Melo 显现出来（对控制台的浅色表面至少 12:1）；在深色画布上靠的是外沿（对深色表面至少 5.6:1，图片的要求是 3:1）。它们由 `/assets/akita/` 提供（`sit-idle.png`、`face-idle.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`，以及 `favicon-16.png`、`-32`、`-64`），共 150 KB，是应用自己在 `macos/art/akita` 的图片的副本，由同一个脚本生成（见 [macOS 应用指南](macos-app.md)）；因为 `melo.png` 和 `icon_small.png`（80 KB）已从页面资源中移除，净增约 70 KB。
+图片是带一圈很细奶油色外沿的透明 PNG。在浅色画布上，深蓝轮廓让 Melo 显现出来（对控制台的浅色表面至少 12:1）；在深色画布上靠的是外沿（对深色表面至少 5.6:1，图片的要求是 3:1）。它们由 `/assets/akita/` 提供（`sit-idle.png`、`sit-idle-blink.png`、`face-idle.png`、`face-idle-blink.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`，以及 `favicon-16.png`、`-32`、`-64`），共 155 KB，是应用自己在 `macos/art/akita` 的图片的副本，由同一个脚本生成（见 [macOS 应用指南](macos-app.md)）；因为 `melo.png` 和 `icon_small.png`（80 KB）已从页面资源中移除，净增约 70 KB。
 
 <a id="inspect-workers"></a>
 
@@ -115,7 +115,9 @@
 
 需要审批的工具调用会在其 `Needs approval` 工具下方显示卡片。控制台会话使用 `RememberingPolicy`，在执行 `file_write` 和 `python_exec` 前请求审批；旧版 `/v1` 没有审批策略。审批不是针对持有 bearer 令牌的人或同一操作系统账户下恶意进程的安全边界，他们可以响应审批请求。
 
-卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在 Tasks 中为 **Allow for this task**）让该工具在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会警告它可以访问工作区之外的文件。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
+卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在 Tasks 中为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
+
+安装软件、下载文件、更改工作区之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用每次都会询问，并使用不同的卡片。它的问题说出调用要做什么（“Install software?”），问题下方一行写着 `python_exec · asks every time`，**Why melo asks** 列出最多三条原因（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”）。**You asked:** 重复发起本轮的那条消息，方便你把它和 melo 将要做的事对照。卡片只有 **Allow once** 和 **Deny**，其中 **Deny** 是实心按钮：没有对整个对话的授权，按钮下方的一行会这样说明（“A chat-wide allow never covers installs, downloads or changes outside ~/demo-project.”）。melo 无法读懂的调用，或出于其他原因询问的调用，显示普通卡片。
 
 失败的轮次会显示一张卡片：符号（错误为 ✗，警告为 ⚠）、简明的标题、错误的第一行和一条提示。最近的轮次用实心按钮给出一个下一步，其余操作以链接显示：模型服务器给出了错误回答（密钥被拒绝、模型不存在）时为 **Open model settings**，步数用尽或超时后为 **Continue**（没有运行过工具时为 **Try again**），卡住、失败或反思后停止时为 **Try again**，工具无法启动时为 **Show tools**，localmelo 内部崩溃后为 **Copy details**。**Try again** 和 **Continue** 只在最近完成的轮次上提供，Continue 还要求该轮次已运行工具。**Copy error** 复制一行文字和运行 ID，便于提交错误报告；技术字段仍放在 **Details** 中。已停止或中断的轮次使用中性提示行（■）。页面连不上网关时，提示条带有 **Try again**。
 
