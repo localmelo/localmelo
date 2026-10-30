@@ -338,6 +338,26 @@ def test_a_foreign_app_is_refused(
     assert not BUILDS and not (home / ".local").exists()  # refused before the build
 
 
+@pytest.mark.parametrize("on_path", [True, False])
+def test_the_checkouts_own_melo_is_not_the_persons_command(
+    home: Path, tmp_path: Path, monkeypatch: MP, on_path: bool
+) -> None:
+    # `uv run` puts the checkout's .venv/bin first on PATH; its melo exists only inside it.
+    clone = tmp_path / "clone"
+    monkeypatch.setattr(build_app, "ROOT", clone)
+    own = clone / ".venv/bin/melo"
+    own.parent.mkdir(parents=True)
+    own.write_text("#!/bin/sh\necho dev\n")
+    own.chmod(0o755)
+    folders = [str(own.parent), "/usr/bin", "/bin"]
+    monkeypatch.setenv("PATH", ":".join(folders + ([f"{home}/.local/bin"] * on_path)))
+    last = build_app.install().splitlines()[-1]
+    launcher = home / "Applications/LocalMelo.app" / build_app.LAUNCHER_PATH
+    assert (home / ".local/bin/melo").resolve() == launcher.resolve()
+    assert ("melo --version" in last) == on_path and ("export PATH" in last) != on_path
+    assert own.read_text().endswith("echo dev\n")
+
+
 @pytest.mark.parametrize("where", ["PATH", "~/.local/bin"])
 def test_a_foreign_melo_is_never_replaced(
     home: Path, tmp_path: Path, where: str

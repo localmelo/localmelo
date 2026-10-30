@@ -303,6 +303,21 @@ def check_target(target: Path) -> bool:
     return True
 
 
+def melo_on_path() -> str | None:
+    """The melo command a new Terminal would find, not counting this checkout's own.
+
+    `uv run` puts the checkout's .venv/bin first on PATH, and the melo there exists only
+    inside `uv run`: it is not a command the person has.
+    """
+    own = ROOT.resolve()
+    folders = [
+        folder
+        for folder in os.environ.get("PATH", "").split(os.pathsep)
+        if not Path(folder).resolve().is_relative_to(own)
+    ]
+    return shutil.which("melo", path=os.pathsep.join(folders))
+
+
 def links_to(link: Path, launcher: Path) -> bool:
     return link.is_symlink() and os.path.realpath(link) == os.path.realpath(launcher)
 
@@ -331,7 +346,7 @@ def install() -> str:
     link, launcher = Path.home() / ".local/bin/melo", target / LAUNCHER_PATH
     other = None  # a melo command that is not ours, left alone
     if not links_to(link, launcher):
-        other = link if os.path.lexists(link) else shutil.which("melo")
+        other = link if os.path.lexists(link) else melo_on_path()
         if not other:
             link.parent.mkdir(parents=True, exist_ok=True)
             link.symlink_to(launcher)
@@ -340,7 +355,7 @@ def install() -> str:
             f"Your own melo command ({str(other).replace(str(Path.home()), '~')}) was left "
             "alone. To use LocalMelo's instead, remove it and run this command again."
         )
-    elif shutil.which("melo"):
+    elif melo_on_path():
         command = "The melo command is ready in Terminal: melo --version"
     else:
         command = (
