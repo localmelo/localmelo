@@ -1333,16 +1333,26 @@ class CliSession:
         chat = [model for model in models if discovery.is_chat_model(model)]
         if len(models) == 1 and chat:
             return models[0]
+        loaded = (
+            await discovery.loaded_models(url)
+            if len(chat) > 1
+            else discovery.LoadedModels()
+        )
         lines = self._text(f"Models on {url}:\n")
         for number, model in enumerate(models, 1):
-            lines.append(clean_output(f"  {number}. {model}") + "\n")
+            mark = "  (loaded)" if model in loaded.ids else ""
+            lines.append(clean_output(f"  {number}. {model}{mark}") + "\n")
         self.out.print(lines)
-        default = models.index(discovery.pick_model(models) or models[0]) + 1
+        pick = discovery.pick_model(models, loaded)
+        default = str(models.index(pick) + 1) if pick else ""
         assert self.app is not None
         while True:
-            answer = await self.app.ask("Model", str(default))
+            answer = await self.app.ask("Model", default)
             if answer is None:
                 return None
+            if not answer.strip():
+                self.out.print(self._text(discovery.NO_DEFAULT_HINT, style="muted"))
+                continue
             if answer in models:
                 return answer
             if answer.isdigit() and 1 <= int(answer) <= len(models):

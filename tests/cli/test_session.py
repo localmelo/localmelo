@@ -20,6 +20,7 @@ from prompt_toolkit.buffer import Buffer
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.schema import Message
+from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DiscoveryError
 from localmelo.support.cli import commands
 from localmelo.support.cli.agents import AgentFactory, url_backend
@@ -419,6 +420,32 @@ async def test_backend_asks_checks_switches_and_saves(setup: Setup) -> None:
     assert session.factory.backend.model == "m2"
     assert setup.factory.saved == [(URL, "m2")]
     assert f"Backend: {URL} · m2. Saved as the default." in setup.out.text()
+
+
+async def test_backend_with_several_models_and_none_known_loaded_has_no_default(
+    setup: Setup,
+) -> None:
+    setup.app.answers = ["http://127.0.0.1:9", "", "1"]
+    setup.factory.listed = ["big", "small"]
+    await setup.session.backend("")
+    text = setup.out.text()
+    assert "1. big\n" in text and "(loaded)" not in text
+    assert discovery.NO_DEFAULT_HINT in " ".join(text.split())
+    assert setup.factory.saved == [(URL, "big")]
+
+
+async def test_backend_marks_the_loaded_model_and_defaults_to_it(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels(frozenset({"small"}), True)
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    setup.app.answers = ["http://127.0.0.1:9", ""]
+    setup.factory.listed = ["big", "small"]
+    await setup.session.backend("")
+    assert "2. small  (loaded)\n" in setup.out.text()
+    assert setup.factory.saved == [(URL, "small")]
 
 
 async def test_backend_that_cannot_be_reached_changes_nothing(setup: Setup) -> None:

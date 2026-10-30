@@ -14,6 +14,7 @@ import pytest
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import (
     DiscoveryError,
+    LoadedModels,
     detect_local_server,
     list_models,
     parse_model_ids,
@@ -220,7 +221,7 @@ async def test_a_server_that_does_not_answer_like_ollama_is_not_one(
 @pytest.mark.parametrize(
     ("models", "picked"),
     [
-        (["a", "b"], "a"),
+        (["a"], "a"),
         (["text-embedding-3", "Qwen3-Reranker", "chat"], "chat"),
         (["bge-m3-EMBED", "x-rerank"], "bge-m3-EMBED"),
         ([], None),
@@ -477,7 +478,9 @@ _OMLX_STATUS = httpx.Response(
 
 async def test_omlx_status_names_the_loaded_models() -> None:
     transport = _server({"/v1/models/status": _OMLX_STATUS})
-    assert await discovery.loaded_models(URL, transport=transport) == {"small"}
+    assert await discovery.loaded_models(URL, transport=transport) == LoadedModels(
+        frozenset({"small"}), True
+    )
 
 
 async def test_ollama_ps_names_the_running_models() -> None:
@@ -485,36 +488,47 @@ async def test_ollama_ps_names_the_running_models() -> None:
         200, json={"models": [{"name": "qwen3:8b", "model": "qwen3:8b"}]}
     )
     transport = _server({"/api/ps": ps})
-    assert await discovery.loaded_models(URL, transport=transport) == {"qwen3:8b"}
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(frozenset({"qwen3:8b"}), True)
     assert transport.asked == [  # type: ignore[attr-defined]
         "http://127.0.0.1:8500/v1/models/status",
         "http://127.0.0.1:8500/api/ps",
     ]
 
 
-async def test_a_server_without_a_status_route_has_nothing_loaded() -> None:
-    assert await discovery.loaded_models(URL, transport=_server({})) == set()
+async def test_a_server_without_a_status_route_does_not_say() -> None:
+    found = await discovery.loaded_models(URL, transport=_server({}))
+    assert found == LoadedModels()
+
+
+async def test_a_status_that_lists_none_loaded_is_known_to_be_empty() -> None:
+    status = httpx.Response(200, json={"models": [{"id": "big", "loaded": False}]})
+    transport = _server({"/v1/models/status": status})
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(frozenset(), True)
 
 
 @pytest.mark.parametrize(
-    "answer",
+    ("answer", "needs_key"),
     [
-        httpx.Response(401, json={"detail": "Not authenticated"}),
-        httpx.Response(500),
-        httpx.Response(302, headers={"location": "http://elsewhere/"}),
-        httpx.Response(200, content=b"not json"),
-        httpx.Response(200, json=["small"]),
-        httpx.Response(200, json={"models": "small"}),
-        httpx.ReadTimeout("slow"),
-        httpx.ConnectError("refused"),
-        RuntimeError("anything"),
+        (httpx.Response(401, json={"detail": "Not authenticated"}), True),
+        (httpx.Response(403), True),
+        (httpx.Response(500), False),
+        (httpx.Response(302, headers={"location": "http://elsewhere/"}), False),
+        (httpx.Response(200, content=b"not json"), False),
+        (httpx.Response(200, json=["small"]), False),
+        (httpx.Response(200, json={"models": "small"}), False),
+        (httpx.ReadTimeout("slow"), False),
+        (httpx.ConnectError("refused"), False),
+        (RuntimeError("anything"), False),
     ],
 )
-async def test_a_failed_status_request_is_ignored(
-    answer: httpx.Response | Exception,
+async def test_a_failed_status_request_is_not_an_answer(
+    answer: httpx.Response | Exception, needs_key: bool
 ) -> None:
     transport = _server({"/v1/models/status": answer, "/api/ps": answer})
-    assert await discovery.loaded_models(URL, transport=transport) == set()
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(frozenset(), False, needs_key)
 
 
 async def test_one_failed_source_does_not_hide_the_other() -> None:
@@ -524,19 +538,37 @@ async def test_one_failed_source_does_not_hide_the_other() -> None:
             "/api/ps": httpx.Response(200, json={"models": [{"name": "small"}]}),
         }
     )
-    assert await discovery.loaded_models(URL, transport=transport) == {"small"}
+    found = await discovery.loaded_models(URL, transport=transport)
+    assert found == LoadedModels(frozenset({"small"}), True)
 
 
 async def test_a_url_without_v1_is_asked_at_both_places() -> None:
     transport = _server({"/v1/models/status": _OMLX_STATUS})
     found = await discovery.loaded_models("http://127.0.0.1:8500/", transport=transport)
-    assert found == {"small"}
+    assert found == LoadedModels(frozenset({"small"}), True)
+
+
+def _loaded(*ids: str, known: bool = True) -> LoadedModels:
+    return LoadedModels(frozenset(ids), known)
 
 
 def test_pick_model_prefers_a_loaded_chat_model_in_server_order() -> None:
     models = ["big", "embed-x", "small", "tiny"]
-    assert pick_model(models, {"tiny", "small"}) == "small"
-    assert pick_model(models, {"embed-x"}) == "big"  # not a chat model
-    assert pick_model(models, set()) == "big"
-    assert pick_model(models, {"gone"}) == "big"
-    assert pick_model(["embed-x"], {"embed-x"}) == "embed-x"
+    assert pick_model(models, _loaded("tiny", "small")) == "small"
+    assert pick_model(models, _loaded("tiny", "small"), unique=True) is None
+    assert pick_model(models, _loaded("tiny"), unique=True) == "tiny"
+
+
+@pytest.mark.parametrize(
+    "loaded",
+    [None, LoadedModels(), _loaded(), _loaded("gone"), _loaded("embed-x")],
+)
+def test_pick_model_has_no_default_between_chat_models_without_a_loaded_one(
+    loaded: LoadedModels | None,
+) -> None:
+    assert pick_model(["big", "embed-x", "small"], loaded) is None
+
+
+def test_pick_model_keeps_the_only_chat_model_and_the_first_of_no_chat_model() -> None:
+    assert pick_model(["embed-x", "only"]) == "only"
+    assert pick_model(["embed-x", "rerank-y"], _loaded("rerank-y")) == "embed-x"

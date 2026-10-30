@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -490,28 +491,51 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
+class ModelChoiceError(Exception):
+    """Several models are served, none is known to be loaded, and none was named."""
+
+
 def _choose_model(url: str, models: list[str]) -> str:
-    """The model to use: asked from *models*, unless it is the one chat model."""
+    """The model to use: asked from *models*, unless it is the one chat model.
+
+    With several chat models the default is the one the server says is
+    loaded; if it does not say, there is no default and Enter asks again.
+    Without a terminal an empty answer then raises :class:`ModelChoiceError`.
+    """
     chat = [model for model in models if discovery.is_chat_model(model)]
     if len(models) == 1 and chat:
         return models[0]
     # Only a choice between chat models needs to know which are in memory.
-    loaded = asyncio.run(discovery.loaded_models(url)) if len(chat) > 1 else set()
+    loaded = (
+        asyncio.run(discovery.loaded_models(url))
+        if len(chat) > 1
+        else discovery.LoadedModels()
+    )
     print(f"Models on {url}:")
     for i, model in enumerate(models, 1):
-        print(f"  [{i}] {model}{'  (loaded)' if model in loaded else ''}")
+        print(f"  [{i}] {model}{'  (loaded)' if model in loaded.ids else ''}")
     if not chat:
         print(
             "  These look like embedding or reranking models; chat needs a chat model."
         )
-    default = models.index(discovery.pick_model(models, loaded) or models[0]) + 1
+    pick = discovery.pick_model(models, loaded)
+    default = str(models.index(pick) + 1) if pick else ""
+    if len(chat) > 1 and not default and loaded.needs_key:
+        print(
+            "  The server did not say which models are loaded (it needs a key for that)."
+        )
     while True:
-        raw = _question("Model", str(default))
-        if raw.isdigit() and 1 <= int(raw) <= len(models):
+        raw = _question("Model", default)
+        if not raw:
+            if not sys.stdin.isatty():
+                raise ModelChoiceError(discovery.NO_DEFAULT_MODEL)
+            print(f"  {discovery.NO_DEFAULT_HINT}")
+        elif raw.isdigit() and 1 <= int(raw) <= len(models):
             return models[int(raw) - 1]
-        if raw in models:
+        elif raw in models:
             return raw
-        print(f"  Type a number from 1 to {len(models)}, or a model id.")
+        else:
+            print(f"  Type a number from 1 to {len(models)}, or a model id.")
 
 
 def _with_chat_server(

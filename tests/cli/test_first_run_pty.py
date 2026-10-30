@@ -63,7 +63,11 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
             lambda out: b"Model server URL [" in out, 30
         ), term.output
         term.type(b"\r")
-        assert term.read_until(lambda out: b"Model [2]: " in out, 30), term.output
+        assert term.read_until(lambda out: b"Model: " in out, 30), term.output
+        term.type(b"\r")  # no model is known to be loaded: Enter alone asks again
+        assert term.read_until(
+            lambda out: b"Type the number of the model to use." in out, 30
+        ), term.output
         term.type(b"3\r")
         assert term.read_until(
             lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
@@ -102,3 +106,24 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     assert f"chat-b · vLLM · {url}" in text
     assert "long-term memory · vLLM · nomic-embed-text" in text
     assert "Model server URL" not in text
+
+
+def test_a_base_url_with_several_models_and_none_known_loaded_exits_2(
+    chat_server: FakeChatServer, tmp_path: Path  # noqa: F811
+) -> None:
+    chat_server.models = ["chat-a", "chat-b"]
+    url = chat_server.base_url
+    env = _env(tmp_path)
+    env["TERM"] = "xterm-256color"
+    term = Terminal(
+        [sys.executable, "-I", "-m", "localmelo", "--base-url", url], env, tmp_path
+    )
+    try:
+        assert _exit_code(term) == 2, term.output
+    finally:
+        term.close()
+    text = _text(term)
+    assert f"melo: error: {url} serves several models" in text
+    assert "\n  chat-a\n  chat-b\n" in text
+    assert "Pass --chat-model <id>." in text
+    assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()

@@ -32,7 +32,7 @@ melo --developer --help                      # every option, grouped by tier
 |---|---|
 | `melo -- "<task>"` | 直接模式：运行一个任务，打印结果后退出。 |
 | `melo`（无任务） | 在终端中打开[交互式界面](../guides/terminal.md#the-interactive-ui)，使用已保存的后端。若没有已保存的后端，会先询问并保存一个模型服务器和一个模型；见[首次运行](../guides/terminal.md#first-run)。没有终端时以退出码 2 退出，并说明应改为运行什么。 |
-| `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，或服务器列出的第一个对话模型。 |
+| `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
 | `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use it? [Y/n]:`），只有回答 `n`、没有找到服务器或使用 `--developer` 时才显示完整的后端菜单。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
 | `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
@@ -159,7 +159,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--version` | | 打印 `melo <version>`（包版本号；在 git 检出中其后附上短提交号，例如 `melo 0.1.0 (baab21e)`）并以 0 退出。 |
 | `--developer` | 关闭 | 本次运行时，在 `--help` 中按层级分组显示全部选项；与 `[ui] mode = "developer"` 效果相同。它只改变帮助。 |
 | `--base-url URL` | 未设置 | 把对话请求发送到这个兼容 OpenAI 的服务器，而不是已配置的后端。 |
-| `--chat-model NAME` | 与 `--base-url` 同用时，任务默认为 `default`，无任务时为服务器列出的第一个模型；否则为已配置的模型 | 向 `--base-url` 服务器请求的模型，或代替已配置的对话模型。 |
+| `--chat-model NAME` | 与 `--base-url` 同用时，任务默认为 `default`，无任务时为服务器唯一的对话模型或它已加载的模型（见[模式](#modes)）；否则为已配置的模型 | 向 `--base-url` 服务器请求的模型，或代替已配置的对话模型。 |
 
 - `--base-url` 按原样使用，因此要包含 `/v1`，例如 `http://127.0.0.1:11434/v1`。
 - `--base-url` 不发送 API 密钥，也不读取配置文件，因此 `extra_body` 和 `request_timeout_s` 不适用。
@@ -403,7 +403,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | 运行以状态 `completed` 结束。 |
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
-| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹。 |
+| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
 | 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |

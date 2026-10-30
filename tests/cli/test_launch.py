@@ -15,7 +15,7 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import AgentOptions
-from localmelo.support.backends.discovery import DiscoveryError
+from localmelo.support.backends.discovery import DiscoveryError, LoadedModels
 from localmelo.support.cli import launch
 from localmelo.support.cli.launch import Choice, choose_backend, run_interactive
 from localmelo.support.config import Config, LocalBackendConfig
@@ -73,8 +73,12 @@ class Faked:
         self.wizard = mock.MagicMock(return_value=wizard)
         self.cfg = cfg or Config()
 
-    def choose(self, **fields: Any) -> Choice | int:
+    def choose(self, loaded: LoadedModels | None = None, **fields: Any) -> Choice | int:
+        self.status = mock.AsyncMock(return_value=loaded or LoadedModels())
         with (
+            mock.patch(
+                "localmelo.support.backends.discovery.loaded_models", self.status
+            ),
             mock.patch("localmelo.support.config.load", return_value=self.cfg),
             mock.patch(
                 "localmelo.support.backends.discovery.list_models", self.listing
@@ -94,8 +98,8 @@ def _choice(value: Choice | int) -> Choice:
 # ── --base-url ──
 
 
-def test_a_base_url_takes_the_first_chat_model_it_lists() -> None:
-    faked = Faked(cfg=_configured(), listed=["bge-embed", "Qwen3-8B", "Qwen3-32B"])
+def test_a_base_url_takes_the_only_chat_model_it_lists() -> None:
+    faked = Faked(cfg=_configured(), listed=["bge-embed", "Qwen3-8B", "nomic-embed"])
     choice = _choice(faked.choose(base_url=URL))
     faked.listing.assert_awaited_once_with("openai-compatible", URL)
     assert (choice.backend.base_url, choice.backend.model) == (URL, "Qwen3-8B")
@@ -106,7 +110,10 @@ def test_a_base_url_takes_the_first_chat_model_it_lists() -> None:
 
 def test_a_base_url_keeps_the_models_it_listed_for_model_n() -> None:
     faked = Faked(cfg=_configured(), listed=["embed-x", "chat-a", "chat-b"])
-    assert _choice(faked.choose(base_url=URL)).models == ("embed-x", "chat-a", "chat-b")
+    loaded = LoadedModels(frozenset({"chat-b"}), True)
+    choice = _choice(faked.choose(base_url=URL, loaded=loaded))
+    assert choice.models == ("embed-x", "chat-a", "chat-b")
+    assert choice.backend.model == "chat-b" and choice.backend.listed == 3
 
 
 def test_a_base_url_with_a_model_sends_no_listing_when_a_config_exists() -> None:
@@ -134,10 +141,44 @@ def test_a_server_that_lists_no_models_says_so() -> None:
 
 
 def test_with_no_config_the_listed_model_is_offered_and_saved() -> None:
-    faked = Faked(listed=["m1", "m2"], offer=True)
+    faked = Faked(listed=["m1"], offer=True)
     choice = _choice(faked.choose(base_url=URL))
     faked.offer.assert_called_once_with(URL, "m1")
     assert (choice.backend.source, choice.saves) == ("saved", True)
+
+
+def test_a_base_url_takes_the_one_loaded_chat_model_of_several() -> None:
+    faked = Faked(cfg=_configured(), listed=["big", "small"])
+    loaded = LoadedModels(frozenset({"small"}), True)
+    choice = _choice(faked.choose(base_url=URL, loaded=loaded))
+    faked.status.assert_awaited_once_with(URL)
+    assert choice.backend.model == "small"
+
+
+@pytest.mark.parametrize(
+    "loaded",
+    [
+        LoadedModels(),  # no status route, or a 401
+        LoadedModels(frozenset(), True, False),  # none in memory
+        LoadedModels(frozenset({"big", "small"}), True),  # more than one
+    ],
+)
+def test_a_base_url_with_several_models_and_no_loaded_one_exits_2(
+    loaded: LoadedModels, capsys: pytest.CaptureFixture[str]
+) -> None:
+    faked = Faked(cfg=_configured(), listed=["big", "small"], offer=True)
+    assert faked.choose(base_url=URL, loaded=loaded) == 2
+    err = capsys.readouterr().err
+    assert err.startswith(f"melo: error: {URL} serves several models")
+    assert "\n  big" in err and "\n  small" in err
+    assert err.endswith("Pass --chat-model <id>.\n")
+    faked.offer.assert_not_called()
+
+
+def test_a_named_model_skips_the_loaded_lookup() -> None:
+    faked = Faked(cfg=_configured(), listed=["big", "small"])
+    assert _choice(faked.choose(base_url=URL, chat_model="big")).backend.model == "big"
+    faked.status.assert_not_called()
 
 
 def test_a_declined_offer_saves_nothing_and_later_switches_do_not_save() -> None:

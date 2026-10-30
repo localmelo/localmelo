@@ -59,7 +59,7 @@ class BackendInfo:
     *key* is the config's backend key, or ``openai-compatible`` for a URL
     that is not the config's; *source* is ``config`` or a key of
     :data:`SOURCE_TEXT`. *listed* is the number of models the server
-    listed when melo chose the first of them, else 0. *key_env* names a
+    listed when melo chose the one it says is loaded, else 0. *key_env* names a
     cloud vendor's key variable.
     """
 
@@ -114,7 +114,7 @@ def model_rows(backend: BackendInfo) -> list[str]:
         return [first or where]
     second = SOURCE_TEXT.get(backend.source, backend.source)
     if backend.listed > 1:
-        second += f" · first of {backend.listed}; /model lists them"
+        second += f" · the loaded one of {backend.listed}; /model lists them"
     return [first, second]
 
 

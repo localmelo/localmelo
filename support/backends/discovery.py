@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -227,16 +227,32 @@ async def is_ollama(
 LOADED_TIMEOUT_S: Final = 1.0
 
 
-def parse_loaded_ids(payload: Any) -> set[str]:
-    """The ids a status reply says are in memory.
+@dataclass(frozen=True)
+class LoadedModels:
+    """Which models a server says are in memory, and whether it said anything.
+
+    ``known`` is False when no source answered (an HTTP error such as a 401,
+    no route, a timeout); ``ids`` is then empty. An answer that lists none
+    in memory is known, with ``ids`` empty.
+    """
+
+    ids: frozenset[str] = frozenset()
+    known: bool = False
+    needs_key: bool = False
+
+
+def parse_loaded_ids(payload: Any) -> set[str] | None:
+    """The ids a status reply says are in memory; None if it is no status reply.
 
     Reads oMLX's ``{"models": [{"id": …, "loaded": true}]}`` and Ollama's
     ``/api/ps`` list, whose items are all running models (``name`` or
     ``model``). An item with ``loaded`` false is not counted.
     """
     items = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return None
     ids: set[str] = set()
-    for item in items if isinstance(items, list) else []:
+    for item in items:
         if isinstance(item, dict) and item.get("loaded") is False:
             continue
         ids.update(parse_model_ids({"models": [item]}))
@@ -248,24 +264,29 @@ async def loaded_models(
     *,
     timeout_s: float = LOADED_TIMEOUT_S,
     transport: httpx.AsyncBaseTransport | None = None,
-) -> set[str]:
-    """The ids the server at *url* says are in memory; empty when unknown.
+) -> LoadedModels:
+    """The models the server at *url* says are in memory, if it says.
 
     Asks oMLX (``GET <url>/models/status``) and Ollama (``GET <root>/api/ps``)
     at once. Each source is optional: a server without the route, an HTTP
     error (a server with an API key answers 401, as it does to the listing,
-    since no key is sent), a timeout or a body that is not JSON adds nothing.
-    *transport* replaces the network in tests.
+    since no key is sent), a timeout or a body that is not a status list
+    adds nothing, and when every source is like that the result is not
+    ``known``. *transport* replaces the network in tests.
     """
 
-    async def ask(client: httpx.AsyncClient, target: str) -> set[str]:
+    async def ask(
+        client: httpx.AsyncClient, target: str
+    ) -> tuple[set[str] | None, bool]:
         try:
             response = await client.get(target)
+            if response.status_code in (401, 403):
+                return None, True
             if response.status_code >= 300:  # not followed, as chat requests are not
-                return set()
-            return parse_loaded_ids(response.json())
+                return None, False
+            return parse_loaded_ids(response.json()), False
         except Exception:  # no answer, a malformed URL, a body that is not JSON
-            return set()
+            return None, False
 
     try:
         status_url = f"{normalize_url(url).rstrip('/')}/models/status"
@@ -274,8 +295,23 @@ async def loaded_models(
                 ask(client, status_url), ask(client, f"{_ollama_root(url)}/api/ps")
             )
     except Exception:
-        return set()
-    return found[0] | found[1]
+        return LoadedModels()
+    answers = [ids for ids, _ in found if ids is not None]
+    return LoadedModels(
+        ids=frozenset().union(*answers),
+        known=bool(answers),
+        needs_key=not answers and any(refused for _, refused in found),
+    )
+
+
+NO_DEFAULT_HINT: Final = (
+    "Type the number of the model to use. A model that is not loaded yet can "
+    "take minutes and a lot of memory to load."
+)
+NO_DEFAULT_MODEL: Final = (
+    "several models are served and none is known to be loaded, so there is "
+    "no default; answer with a number or a model id"
+)
 
 
 def is_chat_model(model: str) -> bool:
@@ -284,20 +320,24 @@ def is_chat_model(model: str) -> bool:
     return "embed" not in lowered and "rerank" not in lowered
 
 
-def pick_model(models: Sequence[str], loaded: Collection[str] = ()) -> str | None:
-    """The model to default to.
+def pick_model(
+    models: Sequence[str], loaded: LoadedModels | None = None, *, unique: bool = False
+) -> str | None:
+    """The model to default to; None when there is no safe default.
 
-    The first id that is not an embedding or reranking model and is in
-    *loaded*, else the first chat id, else the first id. With nothing
-    loaded this is the first chat model.
+    The only chat model, if there is one. Among several, the first one in
+    *loaded* (with *unique*, only when exactly one is). Loading a model
+    that is not in memory can take minutes and tens of GB, so without a
+    known loaded model there is no default. With no chat model, the first
+    id.
     """
-    for model in models:
-        if model in loaded and is_chat_model(model):
-            return model
-    for model in models:
-        if is_chat_model(model):
-            return model
-    return models[0] if models else None
+    chat = [model for model in models if is_chat_model(model)]
+    if len(chat) <= 1:
+        return chat[0] if chat else (models[0] if models else None)
+    running = [model for model in chat if loaded and model in loaded.ids]
+    if running and (len(running) == 1 or not unique):
+        return running[0]
+    return None
 
 
 # Families that serve embeddings but whose ids do not say "embed".
