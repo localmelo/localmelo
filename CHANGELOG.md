@@ -294,7 +294,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the benchmark never get the tools. A provider can now mark its tools as a group that
   `tool_exposure = "retrieve"` offers on every step, add a note to the system prompt, and
   ask the run's approval policy about something it finds while a tool runs. See [Browsing
-  with melo](docs/guides/browsing.md) ([#NN]).
+  with melo](docs/guides/browsing.md) ([#297]).
 - Melo moves, part 2: the resting pet blinks and flicks an ear. The lazy picture the
   pet rests in (the default when nothing runs) blinks twice every 11 seconds, as the
   calm pictures do, and the calm lying picture also flicks its right ear every 13
@@ -2363,6 +2363,7 @@ earlier milestones.
 [#294]: https://github.com/localmelo/localmelo/pull/294
 [#295]: https://github.com/localmelo/localmelo/pull/295
 [#296]: https://github.com/localmelo/localmelo/pull/296
+[#297]: https://github.com/localmelo/localmelo/pull/297
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
