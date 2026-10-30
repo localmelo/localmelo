@@ -175,6 +175,18 @@ def test_a_base_url_with_several_models_and_no_loaded_one_exits_2(
     faked.offer.assert_not_called()
 
 
+def test_a_refusal_says_when_the_status_route_needs_a_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    faked = Faked(cfg=_configured(), listed=["big", "small"])
+    loaded = LoadedModels(frozenset(), False, True)  # answered 401
+    assert faked.choose(base_url=URL, loaded=loaded) == 2
+    note = "The server did not say which models are loaded (it needs a key for that)."
+    assert capsys.readouterr().err.endswith(
+        f"\n  big\n  small\n{note}\nPass --chat-model <id>.\n"
+    )
+
+
 def test_a_named_model_skips_the_loaded_lookup() -> None:
     faked = Faked(cfg=_configured(), listed=["big", "small"])
     assert _choice(faked.choose(base_url=URL, chat_model="big")).backend.model == "big"

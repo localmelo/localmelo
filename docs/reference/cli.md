@@ -32,6 +32,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 | `melo -- "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model`, else the server's only chat model or the one it says is loaded. With several chat models and none known to be loaded it exits 2, lists them and asks for `--chat-model <id>`. |
+| `melo --base-url URL -- "<task>"` | Direct mode on that server, with `--chat-model`, else the model chosen the same way as in the row above, after a list request (see [General](#general)). With a list it cannot read, it asks for the model `default`. The same holds for `--brief` and `melo ""`. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use it? [Y/n]:`) and shows the full backend menu only after `n`, with none found, or with `--developer`. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
@@ -198,12 +199,38 @@ deliberate change: a test pins the number of options default-mode help shows.
 | `--version` | | Print `melo <version>` (the package version, then the short commit on a git checkout, e.g. `melo 0.1.0 (baab21e)`) and exit 0. |
 | `--developer` | off | Show every option in `--help`, grouped by tier, for this run; the same as `[ui] mode = "developer"`. It changes only the help. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
-| `--chat-model NAME` | with `--base-url`, `default` for a task and the server's only chat model or its loaded one without one (see [Modes](#modes)); else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
+| `--chat-model NAME` | with `--base-url`, the server's only chat model or its loaded one (see [Modes](#modes)); else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
 
 - `--base-url` is used exactly as given, so include `/v1`, as in
   `http://127.0.0.1:11434/v1`.
 - `--base-url` sends no API key, and it does not read the config file, so
   `extra_body` and `request_timeout_s` do not apply.
+- Without `--chat-model`, `--base-url` asks the server for its models before the
+  first chat request, in every mode (a task, `--brief`, `melo ""` and the
+  interactive UI): `GET URL/models`, and between several chat models
+  `GET URL/models/status` (oMLX) and `GET <root>/api/ps` (Ollama), none sending
+  a key. The model is the only chat model (an id with `embed` or `rerank` is
+  not one) or the one the server says is loaded. With several chat models and
+  none known to be loaded (the status route is missing, answers 401, or names
+  none or more than one), the model `default` could make the server load any of
+  them, so a direct run ends before its first chat request with exit code 2:
+
+  ```text
+  melo: error: http://127.0.0.1:8000/v1 serves several models and it is not known which one is loaded:
+    big-27B
+    small-8B
+  Pass --chat-model <id>.
+  ```
+
+  When the status route answered 401 (it needs a key), one more line comes before
+  the hint: `The server did not say which models are loaded (it needs a key for that).`
+  With `--brief` the same text, on one line, is the `error` of a `startup_error`
+  result with `exit_code` 2 (see [Output](#output)). Plain `--output-format json`
+  prints no record, as for any refusal before the run. A server whose list cannot
+  be read (no answer, an HTTP error, no model listed) is asked for the model
+  `default`, as before, and text output adds one line on stderr, such as
+  `melo: warning: Could not list the models at URL (connection refused); asking for the model 'default'.`
+  The JSON formats print no warning. With `--chat-model` nothing is listed.
 - Without `--base-url`, `--chat-model` replaces the configured chat model for
   this run; the config file is not changed.
 - Without a task, either option opens the interactive UI; see
@@ -587,7 +614,10 @@ finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
 both the final record and the exit code. Agent construction failures after a
 valid brief, including config-file values the agent would refuse and an
-invalid TOML file, produce `startup_error` with `run: null` and exit 1. For
+invalid TOML file, produce `startup_error` with `run: null` and exit 1. A
+`--base-url` brief with no `--chat-model`, on a server that serves several chat
+models and does not say which one is loaded, produces it too, with `exit_code` 2
+and the list in `error` (see [General](#general)). For
 event output failures the worker attempts a `transport_error` result with
 `run: null` and exits 1; a failed or blocked output may prevent that record
 from arriving. A broken pipe while the startup record is written still exits
@@ -825,7 +855,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | The run ended with status `completed`. |
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
-| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode; or `melo --base-url URL` (no task) served several chat models with no `--chat-model` and none known to be loaded. |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode; or `melo --base-url URL`, with or without a task, served several chat models with no `--chat-model` and none known to be loaded (a `--brief` run reports it as a `startup_error` result whose `exit_code` is 2). |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 4 | A `--brief` run ended `completed`, but its brief's check failed for good: `tests.state` is `failed`, a refused check included. `status` stays `completed` and the record's `exit_code` is 4. A brief without a `Check:` line never exits 4. |
 | 129 | SIGHUP ended the run. |
