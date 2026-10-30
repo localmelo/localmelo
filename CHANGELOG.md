@@ -1042,7 +1042,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is now a menu button: it opens on the chat's level, the arrow keys move between
   levels and Escape returns to the button. Escape closes what is open in Tasks and
   Workers too, and send, stop, the menu button and the chips are 44px on touch
-  screens and phones. ([#NN])
+  screens and phones. ([#246])
 
 - The web console is easier to read, in light and dark: no text under 12px, text
   at 4.5:1 contrast or better, field, composer and focus edges at 3:1 or better,
@@ -1731,6 +1731,7 @@ earlier milestones.
 [#242]: https://github.com/localmelo/localmelo/pull/242
 [#243]: https://github.com/localmelo/localmelo/pull/243
 [#245]: https://github.com/localmelo/localmelo/pull/245
+[#246]: https://github.com/localmelo/localmelo/pull/246
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
