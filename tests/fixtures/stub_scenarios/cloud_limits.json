@@ -1,0 +1,13 @@
+{
+  "match": ["What did this cost?"],
+  "replies": [
+    {
+      "content": "A few cents.",
+      "usage": {"prompt_tokens": 12000, "completion_tokens": 800,
+                "prompt_tokens_details": {"cached_tokens": 9000}},
+      "headers": {"x-ratelimit-limit-requests": "50",
+                  "x-ratelimit-remaining-requests": "29",
+                  "x-ratelimit-reset-requests": "6m0s"}
+    }
+  ]
+}

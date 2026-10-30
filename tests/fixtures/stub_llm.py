@@ -24,7 +24,8 @@ message, so a retried request gets the same reply; the last one repeats.
 With ``"sequential": true`` the scenario counts its requests instead.
 
 A reply has ``content``, ``reasoning`` (sent as ``reasoning_content``),
-``tool_calls`` (``[{"name", "arguments"}]``), ``usage`` and ``delay_s``;
+``tool_calls`` (``[{"name", "arguments"}]``), ``usage``, ``delay_s`` and
+``headers`` (more response headers, such as a rate limit's);
 or ``status`` and ``body``, an HTTP error; or ``{"hold": true, "then":
 {...}}``, which sends its headers at once, then a space every 20 s until
 ``POST /__release`` (at most 600 s), then the ``then`` reply.
@@ -163,11 +164,15 @@ class StubServer:
             def log_message(self, format: str, *args: Any) -> None:
                 pass
 
-            def _json(self, status: int, payload: Any) -> None:
+            def _json(
+                self, status: int, payload: Any, headers: dict[str, str] | None = None
+            ) -> None:
                 data = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -234,7 +239,7 @@ class StubServer:
                     self.end_headers()
                     self.wfile.write(data)
                     return
-                self._json(200, _completion(reply, body))
+                self._json(200, _completion(reply, body), reply.get("headers"))
 
             def _stream(self, reply: dict[str, Any]) -> None:
                 stream = reply["stream"]
@@ -250,6 +255,8 @@ class StubServer:
                 )
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
+                for name, value in (reply.get("headers") or {}).items():
+                    self.send_header(name, value)
                 self.end_headers()
                 try:
                     for piece in pieces:

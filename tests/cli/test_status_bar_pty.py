@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 import pyte
 import pytest
+
+from localmelo.tests.fixtures.stub_llm import StubServer
 
 from .test_e2e_pty import Melo
 from .test_e2e_pty import melo as melo
@@ -58,4 +61,29 @@ def test_a_narrow_bar_drops_the_title_and_keeps_the_figures_whole(
     assert len(bar) <= 28 and USAGE.search(bar), bar
     assert "hello" not in bar
     assert "…" not in bar and "..." not in bar, bar  # a figure is never cut
+    assert term.quit() == 0
+
+
+def test_a_cloud_bar_says_the_cost_and_the_limit_its_response_reported(
+    melo: Callable[..., Melo], stub: StubServer, tmp_path: Path
+) -> None:
+    folder = tmp_path / ".cache" / "localmelo"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "config.toml").write_text(
+        'chat_backend = "openai"\nembedding_backend = "none"\n\n[openai]\n'
+        f'api_key_env = "STUB_KEY"\nchat_model = "stub-model"\n'
+        f'base_url = "{stub.base_url}"\n\n'
+        '[pricing."stub-model"]\ninput = 3.0\noutput = 15.0\ncache_read = 0.3\n',
+        encoding="utf-8",
+    )
+    term = melo(configured=False, env={"STUB_KEY": "stub", "NO_COLOR": ""})
+    term.see("Ask melo")
+    term.type("What did this cost?\r")
+    term.see("Worked for")
+    term.see("limit ")
+    bar = _bar(term, 100)
+    # 3k uncached at $3, 9k cached at $0.30, 800 out at $15, per million tokens.
+    assert bar.startswith("  $0.02 · ctx 12k"), bar
+    assert re.search(r"limit 42% ▮▮▯▯▯ ↻[56]m", bar), bar
+    assert "↑" not in bar  # priced: the cost, not the tokens
     assert term.quit() == 0
