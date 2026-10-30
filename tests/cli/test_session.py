@@ -393,7 +393,10 @@ async def test_model_lists_then_switches_and_saves(setup: Setup) -> None:
     # The conversation moved to the new Agent.
     assert [m.content for m in session.agent.conversation()] == ["one", "Paris."]
     assert setup.factory.saved == [(URL, "m2")]
-    assert "Model: m2 (OpenAI-compatible). Saved as the default." in setup.out.text()
+    assert (
+        "Model: m2 (OpenAI-compatible server). Saved as the default."
+        in setup.out.text()
+    )
     sessions = await setup.store.list_sessions()
     assert sessions[0].model == "m2"
 
@@ -626,7 +629,10 @@ async def test_a_switch_stays_switching_until_it_is_complete(
     gate.set()
     await switching
     assert session.state == "idle" and session.factory.backend.model == "m2"
-    assert "Model: m2 (OpenAI-compatible). Saved as the default." in setup.out.text()
+    assert (
+        "Model: m2 (OpenAI-compatible server). Saved as the default."
+        in setup.out.text()
+    )
 
 
 async def test_a_late_check_of_the_old_server_does_not_replace_the_new_list(
@@ -1064,7 +1070,8 @@ async def test_a_command_that_runs_is_echoed_before_its_output(setup: Setup) -> 
     assert "› /model\nModel: m1 · " in text
     assert "/model NAME or /model N switches and saves.\n\n› /model m2\n" in text
     assert (
-        "› /model m2\nModel: m2 (OpenAI-compatible). Saved as the default.\n\n" in text
+        "› /model m2\nModel: m2 (OpenAI-compatible server). Saved as the default.\n\n"
+        in text
     )
 
 
@@ -1329,6 +1336,32 @@ async def test_status_shows_the_facts(
     assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text
     assert "version    melo " in text
+
+
+@pytest.mark.parametrize(
+    ("owned_by", "label"), [("omlx", "oMLX"), ("vllm", "OpenAI-compatible server")]
+)
+async def test_status_names_the_server_by_what_its_listing_says(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, owned_by: str, label: str
+) -> None:
+    import httpx
+
+    from localmelo.support.backends import discovery
+
+    real = discovery.list_models
+
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        reply = {"data": [{"id": "m1", "owned_by": owned_by}]}
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+        return await real(key, url, transport=transport)
+
+    monkeypatch.setattr(discovery, "list_models", list_models)
+    session, out = setup.session, setup.out
+    assert setup.factory.backend.label == "OpenAI-compatible server"
+    session.enter("/status")
+    await _until(lambda: "version    melo " in out.text())
+    assert f"model      m1 · {label} · {URL} · reachable" in out.text()
+    assert setup.factory.backend.label == label
 
 
 @pytest.mark.parametrize("cap", [20, 64])

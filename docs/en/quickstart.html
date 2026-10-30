@@ -64,12 +64,14 @@
           <li>macOS (developed and tested) or Linux (should work, untested). Windows is not supported.</li>
           <li>Python 3.11 or later, Git, and <a href="https://docs.astral.sh/uv/">uv</a> (or pip, see <a href="#install-with-pip">Install with pip</a>).</li>
           <li>
-            A model server. This tutorial uses <a href="https://ollama.com">Ollama</a>:
+            A model server. The commands below use <a href="https://ollama.com">Ollama</a>:
             install it, start it, and pull a model with <code>ollama pull qwen3:8b</code>.
-            Any server with an OpenAI-compatible API works too: use its
-            <code>/v1</code> URL and its model name in the commands below.
-            On a Mac with Apple silicon, you can
-            <a href="#serve-a-model-with-omlx">serve a model with oMLX</a> instead.
+            On a Mac with Apple silicon,
+            <a href="#serve-a-model-with-omlx">oMLX</a> is the recommended
+            server: use <code>http://127.0.0.1:8000/v1</code> and your model's
+            folder name in the commands instead. Any server with an
+            OpenAI-compatible API works too: use its <code>/v1</code> URL and
+            its model name.
           </li>
         </ul>
       </section>
@@ -139,6 +141,11 @@ pip install -e ".[gateway]"</code></pre>
           local servers; for a cloud API, save a configuration (below).
         </p>
         <p>
+          With <a href="#serve-a-model-with-omlx">oMLX</a>, use its URL and the
+          name of a model folder:
+        </p>
+        <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        <p>
           For every option, see the
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">command-line reference</a>.
         </p>
@@ -175,9 +182,10 @@ pip install -e ".[gateway]"</code></pre>
         </p>
         <p>
           For a local server, run <code>melo</code> in a terminal. With no
-          configuration yet, it looks for a model server on this computer,
-          asks for its URL (press Enter to accept the one it found) and for a
-          model from the server's list, saves
+          configuration yet, it looks for a model server on this computer
+          (oMLX on port 8000, Ollama on 11434), asks for its URL (press Enter
+          to accept the one it found) and for a model from the server's list,
+          saves
           <code>~/.cache/localmelo/config.toml</code> and opens the
           interactive UI:
         </p>
@@ -206,8 +214,9 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
           then on, <code>melo</code> goes straight in and
           <code>melo "&lt;task&gt;"</code> uses the saved server. The server
           here is Ollama, so it is saved as the <code>ollama</code> backend;
-          any other OpenAI-compatible server is saved as
-          <code>vllm</code>, the key for those. When the server lists an
+          an oMLX server is saved as <code>omlx</code> and any other
+          OpenAI-compatible server as <code>vllm</code>, the key for those.
+          When the server lists an
           embedding model, the first run asks one more question,
           <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>. See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
@@ -230,7 +239,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
               <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default is the saved backend, else <code>[1]</code>, MLC. For another OpenAI-compatible server, choose vLLM (<code>3</code>).</td></tr>
+              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default is the saved backend, else <code>[1]</code>, MLC. For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (<code>3</code>).</td></tr>
               <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
               <tr><td><code>Save and continue?</code></td><td>Press Enter (yes) to save and continue.</td></tr>
@@ -413,7 +422,12 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <p>
           <a href="https://github.com/jundot/omlx">oMLX</a> serves MLX models
           through an OpenAI-compatible API on a Mac with Apple silicon and
-          macOS 15 or later. To use it instead of Ollama:
+          macOS 15 or later. localmelo supports it as a local server: first-run
+          setup finds it on port 8000 and asks it which models are loaded. In
+          the config file it is the <code>vllm</code> backend, also spelled
+          <code>omlx</code>; the
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">guide</a>
+          explains why. To use it instead of Ollama:
         </p>
         <ol>
           <li>
@@ -424,7 +438,10 @@ brew install jundot/omlx/omlx</code></pre>
               The oMLX macOS app also installs the command, as
               <code>~/.omlx/bin/omlx</code>. Its
               <a href="https://github.com/jundot/omlx#install">README</a> has
-              the other ways to install it.
+              the other ways to install it. The Homebrew command above installs
+              oMLX without its optional native kernels, which a few model
+              families (Qwen3.5, for example) need to run at full speed; the app
+              ships them, and the README explains the Homebrew option.
             </p>
           </li>
           <li>
@@ -446,13 +463,22 @@ brew install jundot/omlx/omlx</code></pre>
               <code>settings.json</code> (under <code>~/.omlx</code> by
               default) and uses them when you leave the flags out, so a port
               saved earlier wins over the default 8000; giving
-              <code>--port</code> avoids that. Keep the
-              default host and do not set <code>--api-key</code>: localmelo
-              sends no API key to a local server. If requests fail with HTTP
-              401 (<code>API key required</code>), a key was set earlier, in
-              oMLX's admin page or with <code>OMLX_API_KEY</code>: turn on
-              <strong>Allow inference without API key</strong> in the admin
-              page's settings, or unset <code>OMLX_API_KEY</code>.
+              <code>--port</code> avoids that. The oMLX app and
+              <code>omlx start</code> run the server in the background instead,
+              with the folder and port saved in oMLX (the Homebrew service
+              starts with <code>~/.omlx/models</code> and port 8000): then skip
+              the command above.
+            </p>
+            <p>
+              Keep the default host and do not set <code>--api-key</code>:
+              localmelo sends no API key to a local server. If requests fail
+              with HTTP 401 (<code>API key required</code>), a key was set
+              earlier, in oMLX's admin page or with <code>OMLX_API_KEY</code>:
+              turn on <strong>Allow inference without API key</strong> in the
+              admin page's settings, or unset <code>OMLX_API_KEY</code>. With
+              that setting on, listing models and chat work, but oMLX still asks
+              for the key on the route that says which models are loaded, so
+              setup cannot mark them (see below).
             </p>
           </li>
           <li>
@@ -473,19 +499,39 @@ brew install jundot/omlx/omlx</code></pre>
             <p>
               oMLX loads the model on its first request, which can take a
               minute for a large model. If that request times out, add
-              <code>--request-timeout 600</code>.
-              <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
-              task opens the interactive UI on the server's only chat model or its one loaded model; with several chat models and not exactly one loaded, it exits 2 and lists them.
+              <code>--request-timeout 600</code>. Without
+              <code>--chat-model</code>, melo asks oMLX which models it has and
+              uses the only chat model or the one that is loaded, for a task and
+              for <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
+              task (the interactive UI); with several chat models and not exactly
+              one loaded, it exits 2, lists them and asks for
+              <code>--chat-model &lt;id&gt;</code>. Name the model with
+              <code>--chat-model</code> to skip that lookup.
             </p>
           </li>
         </ol>
         <p>
           To make oMLX your default, run <code>melo</code> in a terminal before
           any configuration is saved: it finds oMLX on port 8000, lists its
-          models and saves the one you pick. With a configuration saved
-          already, run step 5 first, so that the model is loaded, then the
-          wizard (<code>melo --reconfigure</code>): choose vLLM
-          (<code>3</code>) as the chat backend, enter
+          models and saves the one you pick;
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
+          shows the exchange. oMLX loads a model when the first request for it
+          arrives, so a listed model is not always in memory, and loading a
+          large one can take minutes. Setup therefore chooses like this, and
+          with several chat models it asks oMLX which are loaded
+          (<code>GET /v1/models/status</code>, one second at most):
+        </p>
+        <ul>
+          <li>One chat model: it is the default.</li>
+          <li>Several, and oMLX says which are loaded: setup marks them <code>(loaded)</code> and makes the first of them the default.</li>
+          <li>Several, and none is loaded or oMLX does not say: there is no default. Type the number of the model to use; Enter alone asks again, because choosing for you could start a long load of a large model. While a key is set, oMLX does not say, even with <strong>Allow inference without API key</strong> on, and setup prints <code>The server did not say which models are loaded (it needs a key for that).</code> A model that has an alias in oMLX is listed under the alias, and the status reply names the alias beside the folder name (<code>model_alias</code>, as oMLX 0.7.1rc1 sends it), so the model is marked and can be the default under the alias. A server whose reply has no alias cannot mark such a model.</li>
+        </ul>
+        <p>
+          With a configuration saved already, run step 5 first, so that the
+          model is loaded, then <code>melo --reconfigure</code>: in default mode
+          it offers the server it finds with the first run's questions. In the
+          full menu (after <code>n</code>, or with <code>--developer</code>),
+          choose oMLX or vLLM (<code>3</code>) as the chat backend, enter
           <code>http://127.0.0.1:8000/v1</code> and the model id, and choose
           <code>5</code> (None) as the embedding backend unless oMLX also
           serves an embedding model.

@@ -108,7 +108,9 @@ output or log the header; same-user processes can still read the token file.
   checkout.
 - `configured` is whether the config file names a chat backend;
   `config_errors` is `Config.validate()` on the settings in use.
-- `model.backend_label` is the backend registry's label. `model.embedding`
+- `model.backend_label` is the backend registry's label; for the `vllm` backend it
+  is `oMLX` when the config file says `omlx` or a model listing of the server
+  did, else `OpenAI-compatible server`. `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the

@@ -5,8 +5,14 @@ Only loopback sockets on ports the system picks are bound; nothing listens.
 
 from __future__ import annotations
 
+import os
+import re
 import socket
+import subprocess
 import sys
+import threading
+from pathlib import Path
+from typing import IO
 from unittest import mock
 
 import pytest
@@ -173,3 +179,41 @@ def test_port_zero_is_refused_where_a_fixed_port_is_needed(
     start.assert_not_called()
     install.assert_not_called()
     assert "--port 0 picks a free port for --serve only" in capsys.readouterr().err
+
+
+def _pump(stream: IO[str], lines: list[str], found: threading.Event) -> None:
+    for line in stream:
+        lines.append(line)
+        if "Gateway: http://" in line:
+            found.set()
+
+
+def test_piped_serve_prints_the_port_before_exit(tmp_path: Path) -> None:
+    """A pipe is block-buffered: the startup lines must not wait for the exit."""
+    env = {**os.environ, "HOME": str(tmp_path)}
+    env.pop("LOCALMELO_DETECT_URLS", None)
+    env.pop("PYTHONUNBUFFERED", None)  # unbuffered output would hide the bug
+    argv = [sys.executable, "-m", "localmelo", "--serve", "--port", "0"]
+    with subprocess.Popen(
+        [*argv, "--allow-unconfigured"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    ) as serve:
+        assert serve.stdout is not None
+        lines: list[str] = []
+        found = threading.Event()
+        reader = threading.Thread(
+            target=_pump, args=(serve.stdout, lines, found), daemon=True
+        )
+        reader.start()
+        try:
+            assert found.wait(20), "".join(lines) or "no output within 20 s"
+            match = re.search(r"Gateway: http://\S+:(\d+)", "".join(lines))
+            assert match is not None and int(match.group(1)) != 0
+        finally:
+            serve.terminate()
+            serve.wait(timeout=20)
+            reader.join(timeout=20)

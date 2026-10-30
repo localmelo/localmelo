@@ -33,6 +33,7 @@ melo --developer --help                      # every option, grouped by tier
 | `melo -- "<task>"` | 直接模式：运行一个任务，打印结果后退出。 |
 | `melo`（无任务） | 在终端中打开[交互式界面](../guides/terminal.md#the-interactive-ui)，使用已保存的后端。若没有已保存的后端，会先询问并保存一个模型服务器和一个模型；见[首次运行](../guides/terminal.md#first-run)。没有终端时以退出码 2 退出，并说明应改为运行什么。 |
 | `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
+| `melo --base-url URL -- "<task>"` | 在该服务器上以直接模式运行，模型为 `--chat-model`，否则在一次模型列表请求之后，按上一行的方式选定（见[通用](#general)）。读不到列表时请求模型 `default`。`--brief` 和 `melo ""` 同样如此。 |
 | `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use it? [Y/n]:`），只有回答 `n`、没有找到服务器或使用 `--developer` 时才显示完整的后端菜单。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
 | `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
@@ -160,10 +161,21 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--version` | | 打印 `melo <version>`（包版本号；在 git 检出中其后附上短提交号，例如 `melo 0.1.0 (baab21e)`）并以 0 退出。 |
 | `--developer` | 关闭 | 本次运行时，在 `--help` 中按层级分组显示全部选项；与 `[ui] mode = "developer"` 效果相同。它只改变帮助。 |
 | `--base-url URL` | 未设置 | 把对话请求发送到这个兼容 OpenAI 的服务器，而不是已配置的后端。 |
-| `--chat-model NAME` | 与 `--base-url` 同用时，任务默认为 `default`，无任务时为服务器唯一的对话模型或它已加载的模型（见[模式](#modes)）；否则为已配置的模型 | 向 `--base-url` 服务器请求的模型，或代替已配置的对话模型。 |
+| `--chat-model NAME` | 与 `--base-url` 同用时，为服务器唯一的对话模型或它已加载的模型（见[模式](#modes)）；否则为已配置的模型 | 向 `--base-url` 服务器请求的模型，或代替已配置的对话模型。 |
 
 - `--base-url` 按原样使用，因此要包含 `/v1`，例如 `http://127.0.0.1:11434/v1`。
 - `--base-url` 不发送 API 密钥，也不读取配置文件，因此 `extra_body` 和 `request_timeout_s` 不适用。
+- 不带 `--chat-model` 时，`--base-url` 会在第一个对话请求之前向服务器询问它的模型，所有模式都是如此（任务、`--brief`、`melo ""` 和交互式界面）：`GET URL/models`；在多个对话模型之间选择时，还有 `GET URL/models/status`（oMLX）和 `GET <root>/api/ps`（Ollama），都不发送密钥。模型为唯一的对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型）或服务器说明已加载的那一个。有多个对话模型且不知道哪个已加载时（没有状态路由、返回 401，或者说明零个或多个已加载），模型 `default` 可能让服务器加载其中任意一个，因此直接运行会在第一个对话请求之前以退出码 2 结束：
+
+  ```text
+  melo: error: http://127.0.0.1:8000/v1 serves several models and it is not known which one is loaded:
+    big-27B
+    small-8B
+  Pass --chat-model <id>.
+  ```
+
+  状态路由返回 401（需要密钥）时，提示之前会多一行：`The server did not say which models are loaded (it needs a key for that).`
+  带 `--brief` 时，同样的文本（合并为一行）是 `exit_code` 为 2 的 `startup_error` 结果的 `error`（见[输出](#output)）。普通的 `--output-format json` 不输出记录，与运行前的其他拒绝相同。读不到列表的服务器（没有响应、HTTP 错误、没有列出模型）仍像以前一样被请求模型 `default`，文本输出会在 stderr 上多一行，例如 `melo: warning: Could not list the models at URL (connection refused); asking for the model 'default'.` JSON 格式不输出警告。带 `--chat-model` 时不会列出任何模型。
 - 不带 `--base-url` 时，`--chat-model` 只替换本次运行的已配置对话模型，配置文件不会改变。
 - 没有任务时，两个选项都会打开交互式界面；见[使用哪个模型服务器](../guides/terminal.md#which-model-server)。与 `--serve` 或 `--daemon` 一起使用时，两者都是用法错误：网关使用配置文件。
 
@@ -340,7 +352,7 @@ melo: error: argument --max-steps: must be at least 1, got 0
 
 **带 `--brief`**：JSON 是一个带版本的 worker 结果：`v`、`status`、`run_id`、`exit_code`、`head_sha`、`git_dirty`、`tests`、`run` 和 `error`。HEAD 和脏状态取自工作区，不可用时为 null。`run` 是去掉 `config` 的运行记录；启动或传输错误时为 null。如果简报中没有 `Check:` 行，`tests` 只有在最后一次运行中最后一个通过的、可识别的测试检查时才会被记录为 `recorded`，否则为 `not_recorded`。已记录的项目包含原始命令或 Python 代码，经过脱敏并限制在 2,000 个字符之内（超出时带 `command_truncated`），其可为 null 的退出码，以及 `tool_event` 来源。它只是工具输出的证据，并不保证任务正确。若有 `Check:` 行，则 `tests` 改为由工具自身的结果给出（见下文）：`passed` 或 `failed`，每个命令一项，取自门禁最后一次运行，每项包含 `command`、`command_truncated`、`exit_code`、`duration_s` 以及来源 `brief_check`；`output_tail`（检查输出的最后 20 行，经过脱敏，最多 4,000 个字符；旧版本的记录中没有该字段）；若策略不允许某个命令运行，则还包含 `refused`（原因）。
 
-带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。直接运行（包括这一次）默认都会被记录（见上文）。
+带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。不带 `--chat-model` 的 `--base-url` 简报，如果服务器有多个对话模型且没有说明哪个已加载，也会产生它，其 `exit_code` 为 2，`error` 中带有模型列表（见[通用](#general)）。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。直接运行（包括这一次）默认都会被记录（见上文）。
 
 带 `--brief` 的运行与普通任务在四个方面有所不同。查询内容是简报，后面附加一段固定的段落，每次请求都相同：一旦知道改动该放在哪里，就做出满足任务的最小改动；每次改动之后运行任务的检查命令；修复你破坏的内容（包括断言旧行为的测试）；先读取即将编辑的行，因为较早的工具输出大约在十个步骤之后会离开上下文；并在最终回答中说明运行了哪些检查以及结果。若反思的动作是 `continue`，那么只要还有步骤和尝试，就会开始下一次尝试，不论其三个标志如何（`reflection` 事件仍会记录它们）。当某次尝试边界发现工作区自运行开始以来没有变化时，下一次尝试的第一个请求会带上这样一行：“Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.”，并发出一条 `no_change` 通知；不是 git 工作树的工作区两者都不会得到。不带 `--brief` 的运行不变。
 
@@ -409,7 +421,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | 运行以状态 `completed` 结束。 |
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
-| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载。 |
+| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
 | 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |

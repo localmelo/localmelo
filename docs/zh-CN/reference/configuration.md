@@ -26,8 +26,8 @@ chat_model = "qwen3:8b"
 
 | 键 | 表 | 默认值 | 说明 |
 |---|---|---|---|
-| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。必需。 |
-| `embedding_backend` | 顶层 | 未设置 | `mlc`、`ollama`、`vllm`、`sglang` 或 `none`。必需。 |
+| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。必需。 |
+| `embedding_backend` | 顶层 | 未设置 | `mlc`、`ollama`、`vllm`、`sglang` 或 `none`；`omlx` 会被当作 `vllm`。必需。 |
 | `request_timeout_s` | 顶层 | 未设置 | 对话请求超时，以秒计；见[对话请求超时](#chat-request-timeout)。 |
 | `chat_url` | 本地后端 | 未设置 | 模型服务器的 URL。 |
 | `chat_model` | 本地或云端后端 | 未设置 | 要使用的模型。 |
@@ -84,7 +84,7 @@ chat_model = "qwen3:8b"
 
 顶层键必须位于第一个 `[table]` 行之前。URL 的用法如下：
 
-- `mlc`、`vllm` 和 `sglang`：`chat_url` 和 `embedding_url` 缺少 `/v1` 时会补上。
+- `mlc`、`vllm`（oMLX 也用它）和 `sglang`：`chat_url` 和 `embedding_url` 缺少 `/v1` 时会补上。
 - `ollama`：对话使用 Ollama 自己的 `/api/chat`，因此 `chat_url` 不带 `/v1` 使用（结尾的 `/v1` 会被去掉）。`embedding_url` 会补上 `/v1`。
 - 云端后端：`base_url` 按原样使用。
 
@@ -260,6 +260,7 @@ chat_model = "Qwen/Qwen3-8B"
 - 在 `[table]` 行之下，该键属于那张表，localmelo 不会在那里读取它。
 - 该值是一个大于 0 的秒数，例如 `600` 或 `90.5`。其他任何值都会让 `melo` 以退出码 1 停止，例如带引号的值会得到 `request_timeout_s must be a finite number of seconds > 0, got '600'`。
 - `--request-timeout SECONDS` 为一次直接运行覆盖它，且不更改文件。
+- 在第一个请求到达时才加载模型的服务器（如 oMLX），处理这个请求可能需要超过 120 秒；上面的 `600` 为它留出了余地。
 - 它只适用于对话请求。嵌入请求始终最多等待 120 秒。
 - 每当服务器发送数据，计时器都会重置，因此生成过程中发送保活字节的服务器永远不会超时。
 - 超时的请求会重试两次，每次都使用完整的超时时间；见[提供方错误与重试](run-results.md#provider-errors-and-retries)。

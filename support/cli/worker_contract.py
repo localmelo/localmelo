@@ -202,7 +202,9 @@ async def run_brief_check(executor: Executor, command: str) -> BriefCheckResult:
     )
 
 
-def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:
+def failure_record(
+    status: str, workspace: str, error: str, *, exit_code: int = 1
+) -> dict[str, Any]:
     """Build a redacted report when there is no completed run result."""
     head, dirty = workspace_head(workspace)
     return cast(
@@ -212,7 +214,7 @@ def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:
                 "v": 1,
                 "status": status,
                 "run_id": None,
-                "exit_code": 1,
+                "exit_code": exit_code,
                 "head_sha": head,
                 "git_dirty": dirty,
                 "tests": {"state": "not_recorded", "items": []},

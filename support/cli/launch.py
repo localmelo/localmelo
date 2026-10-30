@@ -29,7 +29,6 @@ from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
-from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
     configured_cache_options,
@@ -109,41 +108,24 @@ def _with_url(args: argparse.Namespace) -> Choice | int:
     """``--base-url``: the model from the flag or the server's list; maybe saved."""
     from localmelo.support.cli.agents import url_backend, url_embedding
 
-    url: str = args.base_url
     offer = not config.load().is_configured
-    models: list[str] = []
-    reason = ""
     listed = not args.chat_model or offer
-    if listed:
-        try:
-            models = asyncio.run(
-                discovery.list_models(discovery.OPENAI_COMPATIBLE, url)
-            )
-        except discovery.DiscoveryError as exc:
-            reason = str(exc)
-        else:
-            url, reason = normalize_url(url), "" if models else "it lists no models"
-    loaded = discovery.LoadedModels()
-    if not args.chat_model and sum(map(discovery.is_chat_model, models)) > 1:
-        loaded = asyncio.run(discovery.loaded_models(url))
-    model = args.chat_model or discovery.pick_model(models, loaded, unique=True)
+    found = asyncio.run(
+        discovery.choose_model(args.base_url, args.chat_model, list_anyway=offer)
+    )
+    url, model, models = found.url, found.model, found.models
     if model is None and models:
-        listing = "".join(
-            f"\n  {name}{'  (loaded)' if name in loaded.ids else ''}" for name in models
-        )
-        print(
-            f"melo: error: {url} serves several models and it is not known which "
-            f"one is loaded:{listing}\nPass --chat-model <id>.",
-            file=sys.stderr,
-        )
+        print(f"melo: error: {found.refusal()}", file=sys.stderr)
         return 2
-    saved = offer and model in models and onboard.offer_to_save(url, model)
+    saved = (
+        offer
+        and model is not None
+        and model in models
+        and onboard.offer_to_save(url, model)
+    )
     warning = ""
-    if reason and not args.chat_model:
-        warning = (
-            f"Could not list the models at {url} ({reason}); asking for the model "
-            "'default' (/model picks one)."
-        )
+    if found.reason and not args.chat_model:
+        warning = found.warning(" (/model picks one)")
     picked = len(models) if not args.chat_model and len(models) > 1 else 0
     backend = url_backend(
         url,
