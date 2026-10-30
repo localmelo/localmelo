@@ -30,7 +30,15 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 菜单栏项是 localmelo 的标志，即 Melo 的圆形图像（`docs/assets/icon_small.png`；网页控制台显示的是同一个标志），以彩色显示。它不是模板图像，系统不会给它着色，所以在浅色和深色菜单栏上看起来一样。空闲时只显示标志。有内容运行时，标志旁边显示正在运行的数量，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同）。当某个对话或任务在等你回答工具审批时，标志旁边会出现一个带圈的红点；深色菜单栏上的红色更亮，所以红点在两种菜单栏上都醒目。这些全部来自应用每 2 秒一次的健康检查，因此审批会在一次轮询之内显示出来。VoiceOver 和悬停提示用文字说出状态（`localmelo, nothing running`、`localmelo, 3 running` 或 `localmelo, waiting for your approval`），等待开始时还会朗读出来。菜单以正在运行的内容（`Nothing running`、`3 running`）开头；有审批在等待时，还有 **Waiting for your approval**，它会让窗口打开到那个对话或任务。其后是 **Open localmelo**、**Settings…**（应用菜单中也是 Command-逗号，打开控制台的设置）和 **Quit localmelo**。**Sign In Again** 只在它能帮上忙时才出现：连续四次登录尝试失败之后、控制台显示锁定画面时，以及开发者模式下始终出现（应用会询问页面，页面会说明自己的模式和是否被锁定）。如果应用包中缺少这个标志，菜单栏项改为显示文字 `localmelo`。
 
-应用图标是 Melo，即 localmelo 的吉祥物，和 README 中展示的一样。在给应用包签名之前，构建会用 `docs/assets/melo.png`（一张 400 x 534 的图片）渲染出 `LocalMelo.icns`：整张图片缩放到 macOS 图标网格中圆角底板（1024 px 中的 824 px）的高度，并在边缘渐隐进一块与图片纸张同色的底板，底板颜色取自图片的四个角，因此看不到图片的边缘。从 16 到 1024 px 的每个尺寸都用 Lanczos 滤波器直接由这张图片制作；构建只需要 macOS 自带的 `iconutil` 和 localmelo 本来就使用的 `numpy`。1024 px 的尺寸把图片放大约 1.5 倍，在有更大的原图之前会略显柔和。构建还会把 `docs/assets/icon_small.png` 复制进应用包，供菜单栏项使用。plist 中的 `CFBundleIconFile` 指向这个图标，因此程序坞、Spotlight 和所有对话框（包括退出对话框）显示的都是它，而不是通用图标。
+应用图标是 Melo，即 localmelo 的吉祥物，和 README 中展示的一样。它是一个提交进仓库的文件 `macos/assets/AppIcon.icns`，构建只是把它作为 `LocalMelo.icns` 复制进应用包。plist 中的 `CFBundleIconFile` 指向它，因此程序坞、Spotlight 和所有对话框（包括退出对话框）显示的都是它，而不是通用图标。菜单栏项的标志以同样的方式提交为 `macos/assets/MenuBarLogo.png` 和 `MenuBarLogo@2x.png`（18 和 36 px，圆角），同样被复制；构建中没有任何图像处理代码。
+
+这三个文件由 `docs/assets` 中的图片生成。图标来自 `docs/assets/melo.png`（一张 400 x 534 的图片）：整张图片缩放到 macOS 图标网格中圆角底板（1024 px 中的 824 px）的高度，并在边缘渐隐进一块与图片纸张同色的底板，底板颜色取自图片的四个角，因此看不到图片的边缘。从 16 到 1024 px 的每个尺寸都用 Lanczos 滤波器直接由这张图片制作。1024 px 的尺寸把图片放大约 1.5 倍，在有更大的原图之前会略显柔和。标志来自 `docs/assets/icon_small.png`。图片改动后，在 Mac 上重新生成这些文件并提交：
+
+```bash
+uv run --with pillow python scripts/make_app_icons.py
+```
+
+Pillow 只在这一次运行中获取；它不是 localmelo 的依赖，由 macOS 自带的 `iconutil` 打包图标。
 
 打开应用会用 `melo --serve --port 0` 启动它自己的网关。网关绑定一个空闲端口，并在启动信息的 `Gateway: http://127.0.0.1:PORT` 一行中打印它，应用从网关的输出中读取这一行；整个启动过程的期限为 20 秒。应用从不自己选择端口，因此不会与其他网关冲突，也不会占用其他工作保留的端口，并且不会接管已有的监听者。如果另一个网关占用了控制台存储，请先停止那个网关。做隔离的手工测试时，请使用临时 `HOME`。关闭窗口会让网关继续运行；退出时总会先询问，再停止网关和正在运行的任务。退出对话框会写明将被停止的内容，例如 `Quitting stops what is running: 2 tasks and 1 chat.`（只有一项时是 `Quitting stops 1 chat.`）；直接运行和终端对话属于其他进程，会继续运行，对话框会补充 `Not affected: 1 run and 1 terminal chat.`。如果另一个网关是 melo 后台服务，`melo serve status` 可以检查它，`melo serve uninstall` 会停止并移除它。子进程输出写入 `~/Library/Logs/LocalMelo/gateway.log`。这个原型没有日志轮转。
 

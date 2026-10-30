@@ -1096,8 +1096,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in colour instead of a template image, with the states it had: the logo alone while
   idle, the count beside it while something runs, and a red dot with a ring while an
   approval waits (a lighter red on a dark bar). VoiceOver, the tooltip and the
-  announcement of a wait are unchanged. `macos/mark.svg` is gone, and the build needs
-  `numpy`, which localmelo already uses, and `iconutil` instead of `sips` ([#NN]).
+  announcement of a wait are unchanged. The icon and the logo are committed files in
+  `macos/assets`, made by `uv run --with pillow python scripts/make_app_icons.py`
+  (Pillow is fetched for that run; it is not a dependency), and the build only copies
+  them, so replacing the art is regenerate and commit. `macos/mark.svg` is gone
+  ([#NN]).
 
 - Coming back to a chat in the terminal reads plainly. The exit line says
   `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
