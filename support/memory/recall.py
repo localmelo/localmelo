@@ -14,6 +14,7 @@ an equal score, and at most :data:`PER_SESSION` documents come from one chat.
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -124,10 +125,33 @@ def snippet(text: str) -> str:
     return flat if len(flat) <= _LINE_CHARS else flat[: _LINE_CHARS - 1] + "…"
 
 
+def stem(word: str) -> str:
+    """A lowercase ASCII word without a plural, ``-ing`` or ``-ed`` ending.
+
+    So "meets" and "meeting" find "meet" and "Tuesdays" finds "tuesday"; both
+    sides of a match are stemmed, so a stem need not be a word.
+    """
+    if len(word) >= 6 and word.endswith("ing"):
+        return word[:-3]
+    if len(word) >= 5 and word.endswith("ed"):
+        return word[:-2]
+    if len(word) >= 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+_WORD = re.compile(r"[A-Za-z0-9_]+")
+
+
+def stemmed(text: str) -> str:
+    """*text* with each ASCII word stemmed; CJK runs stay whole for the tokenizer."""
+    return _WORD.sub(lambda match: stem(match.group(0).lower()), text)
+
+
 def gate_terms(text: str) -> set[str]:
-    """The content terms of a question: no stopwords, asking words or CJK fillers."""
+    """The stemmed content terms of a question: no stopwords, asking words or CJK fillers."""
     return {
-        term
+        stem(term)
         for term in tokenize(normalise(text))
         if term not in STOPWORDS
         and term not in _ASKING
@@ -145,8 +169,9 @@ class Corpus:
 
     def add(self, item: Item) -> None:
         self.items[item.key] = item
-        self.terms[item.key] = frozenset(tokenize(normalise(item.text)))
-        self.index.add(item.key, item.text)
+        words = stemmed(normalise(item.text))
+        self.terms[item.key] = frozenset(tokenize(words))
+        self.index.add(item.key, words)
 
     def remove(self, key: str) -> None:
         self.items.pop(key, None)
@@ -176,7 +201,7 @@ def ranked(
     lists: list[list[str]] = []
     if wanted:
         need = max(1, math.ceil(coverage * len(wanted)))
-        hits = corpus.index.search(query, len(corpus.items))
+        hits = corpus.index.search(stemmed(query), len(corpus.items))
         lists.append([k for k, _ in hits if len(wanted & corpus.terms[k]) >= need])
     if query_vector is not None:
         scored = [

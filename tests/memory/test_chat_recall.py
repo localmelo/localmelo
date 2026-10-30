@@ -328,3 +328,57 @@ def test_a_document_keeps_no_sentence_a_note_would_refuse() -> None:
     )
     assert "hunter2" not in text and "4111" not in text
     assert text == "User: [not kept] Plan the garden.\nmelo: [not kept] Water daily."
+
+
+async def test_a_question_finds_a_turn_that_says_it_in_other_word_forms(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    try:
+        _, index = memory.stores()
+        turn = await _turn(store, "Reading group")
+        await index.add(
+            Document(
+                session_id=turn.session_id,
+                turn=1,
+                surface="gateway",
+                kind="chat",
+                title="Reading group",
+                text=document_text("My reading group meets on Tuesdays.", "Noted."),
+                created_at=time.time(),
+            )
+        )
+        # "meet" is "meets", and "day" shares nothing with "Tuesdays": 3 of 4.
+        found = await memory.search("which day does my reading group meet?")
+        assert [item.where.split(",")[0] for item in found] == ["chat “Reading group”"]
+        assert await memory.search("which day does my reading group sleep?") == []
+        assert await memory.search("what is my reading list?") == []
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("said", "note", "asked"),
+    [
+        (
+            "My reading group meets on Tuesdays.",
+            "Your reading group meets on Tuesdays.",
+            "which day does my reading group meet?",
+        ),
+        ("我的猫叫团子。", "你的猫叫团子。", "我的猫叫什么？"),
+    ],
+)
+async def test_a_statement_is_kept_and_a_new_chat_finds_it_by_words(
+    tmp_path: Path, store: SessionStore, said: str, note: str, asked: str
+) -> None:
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    try:
+        first = await _turn(store, "Teaching")
+        kept = await memory.before_turn(store, first, said)
+        assert [n.text for n in kept.remembered] == [note]
+        memory.after_turn(store, first, said, "Noted.")
+        await memory.drain()
+        found = await memory.before_turn(store, await _turn(store, "Asking"), asked)
+        assert [item.text for item in found.used] == [note]
+    finally:
+        await memory.aclose()
