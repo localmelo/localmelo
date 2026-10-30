@@ -1,8 +1,8 @@
 import AppKit
 
-/// The menu-bar item. Melo's head is a template image, the count of what runs sits beside it, and a
-/// dot appears beside the head while something waits for the person. The menu starts with what runs
-/// and with the way to what waits, so the chat that needs an answer is one click away.
+/// The menu-bar item. The localmelo logo is shown in colour, the count of what runs sits beside it, and
+/// a red dot appears beside the logo while something waits for the person. The menu starts with what
+/// runs and with the way to what waits, so the chat that needs an answer is one click away.
 final class MenuBar {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     /// The first two lines of the menu, which the integration tests read and click: what runs, and the
@@ -16,10 +16,10 @@ final class MenuBar {
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
     init(menu: NSMenu, waiting: Selector) {
-        let mark = Bundle.main.url(forResource: "mark", withExtension: "svg").flatMap { NSImage(contentsOf: $0) }
+        let logo = Bundle.main.url(forResource: "icon_small", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
         waitingLine = NSMenuItem(title: "Waiting for your approval", action: waiting, keyEquivalent: "")
-        plain = MenuBar.image(mark, badge: false)
-        badged = MenuBar.image(mark, badge: true)
+        plain = MenuBar.image(logo, badge: false)
+        badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }
         statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeft
@@ -35,7 +35,7 @@ final class MenuBar {
                 button.image = image
                 button.title = count
             } else {
-                // Without the mark the item must still be there: its name stands in for it.
+                // Without the logo the item must still be there: its name stands in for it.
                 button.image = nil
                 button.title = count.isEmpty ? "localmelo" : "localmelo · \(count)"
             }
@@ -58,20 +58,27 @@ final class MenuBar {
         wasWaiting = waiting
     }
 
-    /// The mark, 18 points tall. The badged image is wider and holds a dot beside the right ear, so
-    /// the head itself is never cut. Both are templates: the system tints them for light, dark and
-    /// the open menu.
-    private static func image(_ mark: NSImage?, badge: Bool) -> NSImage? {
-        guard let mark = mark else { return nil }
+    /// The logo, 18 points square with rounded corners as the web console shows it, in colour. The badged
+    /// image is wider and holds a red dot beside the logo's top-right corner, so the logo itself is never
+    /// covered. Neither image is a template, so the system leaves their colours alone: the dot and its
+    /// ring come in a light and a dark variant, drawn for the appearance of the bar they are on.
+    private static func image(_ logo: NSImage?, badge: Bool) -> NSImage? {
+        guard let logo = logo else { return nil }
         let image = NSImage(size: NSSize(width: badge ? 23 : 18, height: 18), flipped: false) { _ in
-            mark.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
+            NSGraphicsContext.current?.imageInterpolation = .high
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 18, height: 18), xRadius: 4, yRadius: 4).addClip()
+            logo.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
+            NSGraphicsContext.restoreGraphicsState()
             if badge {
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 17, y: 11.6, width: 5.6, height: 5.6)).fill()
+                Palette.badgeRing.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 15, y: 10, width: 8, height: 8)).fill()
+                Palette.badge.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 16, y: 11, width: 6, height: 6)).fill()
             }
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = false
         return image
     }
 }

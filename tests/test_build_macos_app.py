@@ -7,11 +7,13 @@ import io
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 MP = pytest.MonkeyPatch
@@ -300,9 +302,11 @@ def test_build_assembles_locked_runtime_and_swift(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     (root / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
-    (root / "macos/mark.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L1 1 Z"/></svg>'
+    (root / "docs/assets").mkdir(parents=True)
+    build_app.write_png(
+        root / "docs/assets/melo.png", np.full((16, 12, 3), 200, np.uint8)
     )
+    (root / "docs/assets/icon_small.png").touch()
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
@@ -333,8 +337,8 @@ def test_build_assembles_locked_runtime_and_swift(
         elif args[0] == "/usr/bin/xcrun":
             assert env and env["DEVELOPER_DIR"] == developer
             Path(args[-1]).touch()
-        elif args[0] in ("/usr/bin/sips", "/usr/bin/iconutil"):
-            Path(args[-1]).touch()  # both end with the file they write
+        elif args[0] == "/usr/bin/iconutil":
+            Path(args[-1]).touch()  # it ends with the file it writes
 
     monkeypatch.setattr(build_app, "run", fake_run)
     output = tmp_path / "app with spaces/LocalMelo.app"
@@ -342,7 +346,7 @@ def test_build_assembles_locked_runtime_and_swift(
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
     assert (output / "Contents/Resources/melo.png").is_file()  # the starting view
-    assert (output / "Contents/Resources/mark.svg").is_file()  # the menu-bar item
+    assert (output / "Contents/Resources/icon_small.png").is_file()  # the menu-bar item
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()
@@ -419,8 +423,72 @@ def test_no_swift_compiler_refuses_in_one_line_before_any_work(
     assert not (tmp_path / "home/Applications").exists()  # nothing was made
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="needs macOS sips and iconutil")
-def test_the_icon_is_rendered_from_the_mark(tmp_path: Path) -> None:
+def png_size(path: Path) -> tuple[int, int]:
+    width, height = struct.unpack(">II", path.read_bytes()[16:24])  # from the header
+    return width, height
+
+
+def dark_box(rgb: np.ndarray, below: int) -> tuple[int, int, int, int]:
+    """Where the pixels darker than `below` are: (top, left, bottom, right)."""
+    rows, cols = np.nonzero(rgb.sum(axis=2) < below)
+    return int(np.min(rows)), int(np.min(cols)), int(np.max(rows)), int(np.max(cols))
+
+
+def corner_papers() -> np.ndarray:
+    """A 40 x 60 emblem: a paper that differs a little in each corner, a dark block in the middle."""
+    pixels = np.full((60, 40, 3), (200, 100, 50), np.uint8)
+    pixels[:8, :8], pixels[:8, -8:] = (196, 96, 46), (204, 104, 54)
+    pixels[-8:, :8], pixels[-8:, -8:] = (198, 98, 48), (202, 102, 52)
+    pixels[20:40, 10:30] = (10, 20, 30)
+    return pixels
+
+
+def test_the_icon_is_the_emblem_on_a_tile_of_its_own_paper(
+    tmp_path: Path, monkeypatch: MP
+) -> None:
+    root = tmp_path / "source"
+    (root / "docs/assets").mkdir(parents=True)
+    build_app.write_png(root / "docs/assets/melo.png", corner_papers())
+    monkeypatch.setattr(build_app, "ROOT", root)  # the icon comes from this file only
+    iconset = tmp_path / "LocalMelo.iconset"
+    build_app.make_iconset(iconset)
+    assert sorted(p.name for p in iconset.iterdir()) == sorted(build_app.ICONSET)
+    for name, size in build_app.ICONSET.items():
+        assert png_size(iconset / name) == (size, size), name
+    icon = build_app.read_png(iconset / "icon_512x512@2x.png")
+    alpha, rgb = icon[..., 3], icon[..., :3]
+    # The macOS grid: a tile of 824 of 1024 px, 100 px in from each edge, corners rounded.
+    assert not (alpha[:99].any() or alpha[925:].any())
+    assert not (alpha[:, :99].any() or alpha[:, 925:].any())
+    assert (
+        alpha[512, 101] == alpha[101, 512] == alpha[512, 922] == alpha[512, 512] == 255
+    )
+    assert alpha[110, 110] == 0
+    # The tile is the emblem's own paper, the mean of its four corners, so no edge shows.
+    assert rgb[512, 150].tolist() == [200, 100, 50]
+    # The whole emblem is scaled into the tile: its dark block lands inside, centred.
+    top, left, bottom, right = dark_box(rgb, 150)
+    assert min(top, left) > 100 and max(bottom, right) < 924
+    assert abs(top + bottom - 1024) < 4 and abs(left + right - 1024) < 4
+    small = build_app.read_png(iconset / "icon_16x16.png")  # made from the source too
+    assert small[8, 8, :3].sum() < 150
+
+
+def test_the_real_emblem_sits_inside_the_tile(tmp_path: Path) -> None:
+    build_app.make_iconset(tmp_path / "LocalMelo.iconset")
+    icon = build_app.read_png(tmp_path / "LocalMelo.iconset/icon_512x512@2x.png")
+    source = build_app.read_png(build_app.ROOT / "docs/assets/melo.png")
+    corners = [source[:8, :8], source[:8, -8:], source[-8:, :8], source[-8:, -8:]]
+    paper = np.rint(np.mean(corners, axis=(0, 1, 2)))
+    assert icon[512, 150, :3].tolist() == paper.tolist()
+    top, left, bottom, right = dark_box(
+        icon[..., :3], 200
+    )  # frame, outlines, lettering
+    assert min(top, left) > 100 and max(bottom, right) < 924
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="needs macOS iconutil")
+def test_the_icns_holds_every_size(tmp_path: Path) -> None:
     resources, stage = tmp_path / "Resources", tmp_path / "stage"
     resources.mkdir()
     stage.mkdir()
@@ -433,6 +501,25 @@ def test_the_icon_is_rendered_from_the_mark(tmp_path: Path) -> None:
         offset += int.from_bytes(data[offset + 4 : offset + 8], "big")
     # 16 to 1024 px: ic04 and ic05 are the two small sizes, ic07 to ic14 the others.
     assert {b"ic04", b"ic05", *(b"ic%02d" % n for n in range(7, 15))} <= kinds
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="needs the macOS sips encoder")
+def test_png_rows_filtered_by_the_system_encoder_read_back_exactly(
+    tmp_path: Path,
+) -> None:
+    # sips picks Sub, Up, Average and Paeth rows for a smooth, noisy picture.
+    y, x = np.mgrid[:48, :64]
+    wave = (np.sin(x / 7.0) * 60 + np.cos(y / 5.0) * 50 + 128)[..., None]
+    noise = np.random.default_rng(1).normal(0, 3, (48, 64, 3))
+    pixels = np.clip(wave * (1.0, 0.8, 0.6) + noise, 0, 255).astype(np.uint8)
+    build_app.write_png(tmp_path / "plain.png", pixels)
+    subprocess.run(
+        ["/usr/bin/sips", "-s", "format", "png", str(tmp_path / "plain.png")]
+        + ["--out", str(tmp_path / "system.png")],
+        check=True,
+        capture_output=True,
+    )
+    assert (build_app.read_png(tmp_path / "system.png") == pixels).all()
 
 
 def test_bundled_python_is_precompiled_and_nothing_writes_bytecode(

@@ -14,15 +14,18 @@ import hashlib
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 import tomllib
 import urllib.request
-import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
 from xml.parsers.expat import ExpatError
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = "3.11.16"
@@ -76,8 +79,12 @@ NO_SWIFT = (
     "The app needs Apple's Swift compiler. Install it with: xcode-select --install"
 )
 LAUNCHER_PATH = "Contents/Resources/runtime/bin/melo"
-# The app icon: the mark in paper white on a deep sage tile, in the macOS icon grid (824 of 1024 px).
-ICON_TILE, ICON_INK = "#2f4a2b", "#fbfbf9"
+# The app icon is Melo, the localmelo mascot, as the README shows the emblem (docs/assets/melo.png),
+# on a rounded tile of the macOS icon grid: 824 of 1024 px, with 185 px corners. The emblem is scaled
+# to the tile's height and fades into the tile over ICON_FEATHER px at its edges. The source is 534 px
+# tall, so the 1024-px size shows it about 1.5 times larger than it is: those pixels are upscaled until
+# larger artwork arrives, and every other size is made from the source by shrinking it.
+ICON_GRID, ICON_TILE, ICON_RADIUS, ICON_FEATHER = 1024, 824, 185, 40
 # The iconset names iconutil expects, with their pixel sizes.
 ICONSET = {
     f"icon_{n}x{n}{suffix}.png": n * scale
@@ -230,27 +237,134 @@ def sign(app: Path) -> None:
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
 
 
-def make_icon(resources: Path, stage: Path) -> None:
-    """Render LocalMelo.icns from macos/mark.svg with the tools macOS ships (sips, iconutil).
+def read_png(path: Path) -> np.ndarray:
+    """The pixels of an 8-bit PNG that is not interlaced: (height, width, 3), or 4 with alpha.
 
-    The mark is the only drawing: the icon is its path, scaled, on a tile. The menu-bar item draws
-    the same file as a template image, so the app has no other artwork to keep in step.
+    Palette, RGB and RGBA files are read and the filters of their rows undone here, so the
+    build needs no imaging library.
     """
-    mark = ET.parse(ROOT / "macos/mark.svg").getroot()
-    path = mark.find("{http://www.w3.org/2000/svg}path")
-    assert path is not None
-    iconset = stage / "LocalMelo.iconset"
+    data, offset = path.read_bytes(), 8
+    chunks: dict[bytes, bytes] = {}
+    while offset < len(data):
+        size, kind = struct.unpack(">I4s", data[offset : offset + 8])
+        chunks[kind] = chunks.get(kind, b"") + data[offset + 8 : offset + 8 + size]
+        offset += size + 12
+    width, height, depth, color, _, _, interlace = struct.unpack(
+        ">IIBBBBB", chunks[b"IHDR"]
+    )
+    if depth != 8 or interlace or color not in (2, 3, 6):
+        raise ValueError(f"{path.name} must be an 8-bit RGB, RGBA or palette PNG")
+    step = {2: 3, 3: 1, 6: 4}[color]  # bytes per pixel
+    stride, raw = width * step, zlib.decompress(chunks[b"IDAT"])
+    rows, above = [], bytes(stride)
+    for y in range(height):
+        mode = raw[y * (stride + 1)]
+        row = bytearray(raw[y * (stride + 1) + 1 : (y + 1) * (stride + 1)])
+        for i in range(stride if mode else 0):
+            left = row[i - step] if i >= step else 0
+            corner = above[i - step] if i >= step else 0
+            if mode == 1:
+                guess = left
+            elif mode == 2:
+                guess = above[i]
+            elif mode == 3:
+                guess = (left + above[i]) // 2
+            else:  # Paeth: the neighbour nearest to left + above - corner, ties in this order
+                near = left + above[i] - corner
+                guess = min((left, above[i], corner), key=lambda c: abs(near - c))
+            row[i] = (row[i] + guess) & 255
+        rows.append(row)
+        above = bytes(row)
+    pixels = np.frombuffer(b"".join(rows), np.uint8).reshape(height, width, step)
+    if color == 3:
+        return np.frombuffer(chunks[b"PLTE"], np.uint8).reshape(-1, 3)[pixels[..., 0]]
+    return pixels
+
+
+def write_png(path: Path, pixels: np.ndarray) -> None:
+    """Write (height, width, 3 or 4) pixels as a PNG that says it is sRGB."""
+    height, width, channels = pixels.shape
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        crc = zlib.crc32(kind + body)
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
+
+    color = 2 if channels == 3 else 6
+    header = struct.pack(">IIBBBBB", width, height, 8, color, 0, 0, 0)
+    rows = b"".join(
+        b"\0" + row.tobytes() for row in pixels
+    )  # filter 0: rows as they are
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"sRGB", b"\0")
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
+def resize(pixels: np.ndarray, height: int, width: int) -> np.ndarray:
+    """(h, w, 3) pixels resampled to (height, width, 3) with a Lanczos filter, wider when shrinking."""
+
+    def weights(n_in: int, n_out: int) -> np.ndarray:
+        scale = n_in / n_out
+        centers = (np.arange(n_out)[:, None] + 0.5) * scale
+        x = (np.arange(n_in) + 0.5 - centers) / max(scale, 1)
+        w = np.where(abs(x) < 3, np.sinc(x) * np.sinc(x / 3), 0)
+        return w / w.sum(axis=1, keepdims=True)
+
+    rows = np.tensordot(weights(len(pixels), height), pixels.astype(float), axes=1)
+    return np.tensordot(rows, weights(pixels.shape[1], width), (1, 1)).transpose(
+        0, 2, 1
+    )
+
+
+def icon_pixels(emblem: np.ndarray, size: int) -> np.ndarray:
+    """The app icon at one size, (size, size, 4): the emblem on a rounded tile of its own paper.
+
+    The tile's colour is the mean of the emblem's four corners. The emblem's paper differs a
+    little along each of its edges, so a flat tile would show a rectangle: the emblem fades into
+    the tile instead. Every size is resampled from the source itself, never from a larger size.
+    """
+    scale = size / ICON_GRID
+    side, radius = ICON_TILE * scale, ICON_RADIUS * scale
+    # The tile's coverage of each pixel, from its distance to a rounded square: smooth at any size.
+    inset = np.abs(np.mgrid[:size, :size] + 0.5 - size / 2) - (side / 2 - radius)
+    outside = (
+        np.hypot(*np.maximum(inset, 0)) + np.minimum(inset.max(axis=0), 0) - radius
+    )
+    coverage = np.clip(0.5 - outside, 0, 1)
+    corners = [emblem[:8, :8], emblem[:8, -8:], emblem[-8:, :8], emblem[-8:, -8:]]
+    paper = np.mean(corners, axis=(0, 1, 2))
+    height = round(side)
+    width = round(height * emblem.shape[1] / emblem.shape[0])
+    # The fade: 0 at the emblem's edges, rising smoothly to 1 ICON_FEATHER px inside them.
+    ys, xs = np.arange(height) + 0.5, np.arange(width) + 0.5
+    near = np.minimum(np.minimum(ys, height - ys)[:, None], np.minimum(xs, width - xs))
+    fade = np.clip(near / (ICON_FEATHER * scale), 0, 1)
+    fade = (fade * fade * (3 - 2 * fade))[..., None]
+    top, left = (size - height) // 2, (size - width) // 2
+    canvas = np.tile(paper, (size, size, 1))
+    canvas[top : top + height, left : left + width] += (
+        resize(emblem, height, width) - paper
+    ) * fade
+    return np.rint(np.dstack([canvas, coverage * 255]).clip(0, 255)).astype(np.uint8)
+
+
+def make_iconset(iconset: Path) -> None:
+    """Write the PNGs that iconutil reads, each made from docs/assets/melo.png."""
+    emblem = read_png(ROOT / "docs/assets/melo.png")
+    if emblem.shape[2] != 3:
+        raise ValueError("docs/assets/melo.png must be a PNG without an alpha channel")
     iconset.mkdir()
     for name, size in ICONSET.items():
-        svg = stage / f"icon-{size}.svg"
-        svg.write_text(
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="{size}" height="{size}">'
-            f'<rect x="100" y="100" width="824" height="824" rx="185" fill="{ICON_TILE}"/>'
-            f'<path transform="translate(217.6 208.4) scale(9.2)" fill="{ICON_INK}" fill-rule="evenodd" '
-            f'd="{path.get("d")}"/></svg>'
-        )
-        png = iconset / name
-        run(["/usr/bin/sips", "-s", "format", "png", str(svg), "--out", str(png)])
+        write_png(iconset / name, icon_pixels(emblem, size))
+
+
+def make_icon(resources: Path, stage: Path) -> None:
+    """Render LocalMelo.icns from docs/assets/melo.png: the iconset, then iconutil, which ships with macOS."""
+    iconset = stage / "LocalMelo.iconset"
+    make_iconset(iconset)
     icns = resources / "LocalMelo.icns"
     run(["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o", str(icns)])
 
@@ -373,8 +487,10 @@ def build(output: Path) -> None:
         shutil.copy2(
             ROOT / "support/gateway/static/melo.png", contents / "Resources/melo.png"
         )
-        # The menu-bar item draws Melo's head from this file, as a template image.
-        shutil.copy2(ROOT / "macos/mark.svg", contents / "Resources/mark.svg")
+        # The menu-bar item shows this logo, in colour.
+        shutil.copy2(
+            ROOT / "docs/assets/icon_small.png", contents / "Resources/icon_small.png"
+        )
         verify_links(python)
         run(
             [
