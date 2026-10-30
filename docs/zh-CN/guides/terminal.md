@@ -326,15 +326,7 @@ melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文�
 
 不知道确切背景时色带去掉，选中的行为苔绿色粗体；设置 `NO_COLOR` 时为反色。
 
-在 256 色或更多、Unicode、60 列或更宽的终端中，欢迎信息旁边会有 Melo 的脸，由三行半格方块组成，`melo` 为橙色（下面去掉了颜色；颜色画出毛色、奶油色的口鼻部，以及眼睛、鼻子和嘴）：
-
-```text
- ▄▄████▄▄    melo 0.1.0 · qwen3-8b (/model to change)
-▀▀▀▀▀▀▀▀▀▀   ~/demo-project
- ▀█▀▀▀▀█▀    Try: What is this project? · / commands · ctrl+d quit
-```
-
-这张脸由标志（`docs/assets/icon_small.png`）计算得出，不是手绘的；标志改变时，`scripts/make_terminal_mark.py` 会重新生成它。不足 60 列、16 色、设置 `NO_COLOR` 或 `LOCALMELO_ASCII=1` 时，欢迎信息只有那三行。
+在 256 色或更多、Unicode、80 列或更宽的终端中，欢迎信息的几行旁边会有 Melo 的头像：五行半格方块，画出两只竖起的耳朵、眼睛、鼻子和奶油色的口鼻部，`melo` 为橙色（README 的截图里能看到）。头像由宠物的脸部图片（`macos/art/akita/face/idle@2x.png`）计算得出，不是手绘的；图片改变时，`scripts/make_terminal_mark.py` 会重新生成它。不足 80 列、16 色、设置 `NO_COLOR` 或 `LOCALMELO_ASCII=1` 时，欢迎信息只有那三行：行数更少的半格方块画不出耳朵。
 
 melo 如何选择：
 

@@ -204,7 +204,8 @@ def welcome(
     (:mod:`~localmelo.support.cli.mark`), and the rows take the rest.
     """
     marked = palette is not None and mark.shows(palette, symbols, width)
-    width -= mark.CELLS + mark.GAP if marked else 0
+    art = mark.rows(palette.polarity) if marked and palette is not None else []
+    width -= mark.CELLS + mark.GAP if art else 0
     dot, ellipsis = symbols.dot, symbols.ellipsis
     model = clean_output(backend.model)
     change: Parts = [(" (", "muted"), ("/model", "accent"), (" to change)", "muted")]
@@ -239,13 +240,16 @@ def welcome(
     lines.append(
         _fitting([[*try_it, *commands, *quit_it], [*try_it, *quit_it], try_it], width)
     )
-    if marked and palette is not None:
-        art = mark.rows(palette.polarity)
-        blank = Text(" " * mark.CELLS)
+    if art:
+        # The rows stand beside the middle of the head, five rows tall: the
+        # art's rows above and below them stand alone.
+        top = max(0, (len(art) - len(lines)) // 2)
+        blank = Text(" " * art[0].cell_len)
+        lines = [Text("")] * top + lines
         lines = [
             Text.assemble(
                 art[number] if number < len(art) else blank,
-                " " * mark.GAP,
+                " " * mark.GAP if line.plain else "",
                 line,
                 no_wrap=True,
                 overflow="ellipsis",

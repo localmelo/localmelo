@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Make the terminal welcome's mark, Melo's face in 10 x 6 pixels, from the logo. Run it when the logo changes:
+"""Make the terminal welcome's mark, Melo's head in half-block pixels, from the pet's face picture. Run it when the
+picture changes:
 
     uv run python scripts/make_terminal_mark.py
 
-It reads docs/assets/icon_small.png and rewrites the PIXELS block of support/cli/mark.py; nothing is drawn by hand.
-tests/cli/test_mark.py runs the same downsampling and fails when the committed block and the logo disagree.
-Only the standard library is used (zlib for the PNG), so the test needs nothing more.
+It reads macos/art/akita/face/idle@2x.png (Melo's idle face, ears up) and rewrites the PIXELS block of
+support/cli/mark.py; nothing is drawn by hand. tests/cli/test_mark.py runs the same downsampling and fails when the
+committed block and the picture disagree. Only the standard library is used (zlib for the PNG), so the test needs
+nothing more.
 
-How the face is found and sampled:
-- Each pixel is sorted in OKLab: dark (L < 0.5: the eyes, nose, mouth and outlines), cream (L > 0.86, chroma
-  < 0.07: the muzzle), fur (chroma > 0.11, hue 35-85 degrees: the orange coat), or other (the ring, the paper).
-- The face is the region of fur and cream connected (4-neighbour) to the face-coloured pixel nearest the logo's
-  centre, with the holes inside it (eyes, nose, mouth) filled. The mark covers its bounding box.
-- The box is cut into 10 x 6 cells (a cell's share of each pixel is its overlap). The logo is symmetric, so each
-  cell's counts are averaged with its mirror cell, which cancels the antialiasing's left-right noise.
-- A cell is empty when under 40% of it is face; dark when 20% or more of its face is dark (thin eyes would vanish
-  in a plain average); else fur or cream, whichever covers more.
+How the head is found and sampled:
+- Each pixel is sorted in OKLab: empty (alpha under half), dark (L < 0.45: the outline, eyes, nose and mouth),
+  cream (L > 0.8, or chroma < 0.05: the muzzle, the brows and the halo), shade (L < 0.58: the inner ears) or fur.
+- Outside is what the picture's edge reaches without crossing a dark pixel; the outline is the dark pixels joined to
+  it. Inside is the rest above the collar (HEAD_BOTTOM of the picture's height), so the halo and the body drop out;
+  the dark pixels inside are the eyes, nose and mouth. The mark covers the inside's bounding box.
+- The box is cut into 12 x 10 cells, five rows of text (a cell's share of each pixel is its overlap); fewer rows
+  lose the ears. The picture is symmetric, so each cell's counts are averaged with its mirror cell, which cancels
+  the antialiasing's left-right noise.
+- A cell is empty when under 40% of it is head (inside or outline); dark when 30% or more of its inside is dark
+  (thin eyes would vanish in a plain average); else fur, cream or shade, whichever covers more.
 """
 
 from __future__ import annotations
@@ -28,16 +32,21 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ICON = ROOT / "docs/assets/icon_small.png"
+FACE = ROOT / "macos/art/akita/face/idle@2x.png"
 MODULE = ROOT / "support/cli/mark.py"
-WIDTH, HEIGHT = 10, 6  # pixels: 10 columns, 3 rows of half blocks
-FACE_SHARE, DARK_SHARE = 0.4, 0.2
+# Pixels (columns, rows): two rows of pixels make one row of text.
+COLUMNS, LINES = 12, 10
+HEAD_SHARE, DARK_SHARE = 0.4, 0.3
+# Where the collar begins, as a share of the picture's height.
+HEAD_BOTTOM = 0.86
 
 RGB = tuple[int, int, int]
+RGBA = tuple[int, int, int, int]
+Point = tuple[int, int]
 
 
-def read_png(path: Path) -> list[list[RGB]]:
-    """The pixels of an 8-bit, non-interlaced RGB or RGBA PNG, row by row."""
+def read_png(path: Path) -> list[list[RGBA]]:
+    """The pixels of an 8-bit, non-interlaced RGB or RGBA PNG, row by row (RGB is opaque)."""
     data = path.read_bytes()
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError(f"{path} is not a PNG")
@@ -82,7 +91,10 @@ def read_png(path: Path) -> list[list[RGB]]:
         rows.append(line)
         previous = line
     return [
-        [(row[x], row[x + 1], row[x + 2]) for x in range(0, stride, channels)]
+        [
+            (row[x], row[x + 1], row[x + 2], row[x + 3] if channels == 4 else 255)
+            for x in range(0, stride, channels)
+        ]
         for row in rows
     ]
 
@@ -103,80 +115,82 @@ def _oklab(colour: RGB) -> tuple[float, float, float]:
     )
 
 
-def classify(colour: RGB) -> str:
-    """``k`` dark, ``c`` cream, ``o`` fur, ``x`` anything else."""
-    lightness, a, b = _oklab(colour)
-    chroma, hue = math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360
-    if lightness < 0.5:
+def classify(colour: RGBA) -> str:
+    """`` `` empty, ``k`` dark, ``c`` cream, ``b`` shade, ``o`` fur."""
+    if colour[3] < 128:
+        return " "
+    lightness, a, b = _oklab(colour[:3])
+    if lightness < 0.45:
         return "k"
-    if lightness > 0.86 and chroma < 0.07:
+    if lightness > 0.8 or math.hypot(a, b) < 0.05:
         return "c"
-    return "o" if chroma > 0.11 and 35 < hue < 85 else "x"
+    return "b" if lightness < 0.58 else "o"
 
 
-def _flood(
-    start: tuple[int, int], keep: set[tuple[int, int]], size: tuple[int, int]
-) -> set[tuple[int, int]]:
-    """The 4-connected region of *keep* that holds *start*."""
-    width, height = size
-    seen: set[tuple[int, int]] = set()
-    todo = [start]
+def _flood(starts: list[Point], keep: set[Point]) -> set[Point]:
+    """The points of *keep* 4-connected to *starts*."""
+    seen: set[Point] = set()
+    todo = list(starts)
     while todo:
-        x, y = todo.pop()
-        if (
-            (x, y) in seen
-            or (x, y) not in keep
-            or not (0 <= x < width and 0 <= y < height)
-        ):
+        x, y = point = todo.pop()
+        if point in seen or point not in keep:
             continue
-        seen.add((x, y))
+        seen.add(point)
         todo += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
     return seen
 
 
-def pixels(path: Path = ICON) -> tuple[str, ...]:
-    """The mark's rows of ``.`` (empty), ``o`` (fur), ``c`` (cream) and ``k`` (dark)."""
+def _near(point: Point) -> list[Point]:
+    x, y = point
+    return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+
+
+def pixels(path: Path = FACE) -> tuple[str, ...]:
+    """The mark's rows of ``.`` (empty), ``o`` fur, ``c`` cream, ``b`` shade, ``k`` dark."""
     image = read_png(path)
     height, width = len(image), len(image[0])
     kinds = {(x, y): classify(image[y][x]) for y in range(height) for x in range(width)}
-    coat = {point for point, kind in kinds.items() if kind in "oc"}
-    middle = (width // 2, height // 2)
-    seed = min(coat, key=lambda p: (abs(p[0] - middle[0]) + abs(p[1] - middle[1]), p))
-    face = _flood(seed, coat, (width, height))
-    outside = _flood((0, 0), set(kinds) - face, (width, height))
-    inside = set(kinds) - outside
-    x0, x1 = min(x for x, _ in inside), max(x for x, _ in inside) + 1
-    y0, y1 = min(y for _, y in inside), max(y for _, y in inside) + 1
+    edge = [p for p in kinds if p[0] in (0, width - 1) or p[1] in (0, height - 1)]
+    outside = _flood(edge, {p for p, kind in kinds.items() if kind != "k"})
+    dark = {p for p, kind in kinds.items() if kind == "k"}
+    touching = [p for p in dark if any(q in outside for q in _near(p))]
+    bottom = HEAD_BOTTOM * height
+    outline = {p for p in _flood(touching, dark) if p[1] < bottom}
+    inside = {p for p in kinds if p not in outside and p not in outline}
+    inside = {p for p in inside if p[1] < bottom}
+    x0, x1 = min(x for x, _ in inside) - 1, max(x for x, _ in inside) + 2
+    y0, y1 = min(y for _, y in inside) - 1, max(y for _, y in inside) + 2
     counts: list[list[dict[str, float]]] = []
-    for j in range(HEIGHT):
+    for j in range(LINES):
         row: list[dict[str, float]] = []
-        for i in range(WIDTH):
-            xa, xb = x0 + (x1 - x0) * i / WIDTH, x0 + (x1 - x0) * (i + 1) / WIDTH
-            ya, yb = y0 + (y1 - y0) * j / HEIGHT, y0 + (y1 - y0) * (j + 1) / HEIGHT
-            cell = {"all": 0.0, "face": 0.0, "k": 0.0, "o": 0.0, "c": 0.0}
+        for i in range(COLUMNS):
+            xa, xb = x0 + (x1 - x0) * i / COLUMNS, x0 + (x1 - x0) * (i + 1) / COLUMNS
+            ya, yb = y0 + (y1 - y0) * j / LINES, y0 + (y1 - y0) * (j + 1) / LINES
+            cell = dict.fromkeys(("all", "head", "in", "k", "o", "c", "b"), 0.0)
             for y in range(math.floor(ya), math.ceil(yb)):
                 for x in range(math.floor(xa), math.ceil(xb)):
                     share = (min(xb, x + 1) - max(xa, x)) * (
                         min(yb, y + 1) - max(ya, y)
                     )
                     cell["all"] += share
+                    if (x, y) in inside or (x, y) in outline:
+                        cell["head"] += share
                     if (x, y) in inside:
-                        cell["face"] += share
-                        if kinds[x, y] in "koc":
-                            cell[kinds[x, y]] += share
+                        cell["in"] += share
+                        cell[kinds[x, y]] += share
             row.append(cell)
         counts.append(row)
     rows: list[str] = []
     for row in counts:
         line = ""
         for i, cell in enumerate(row):
-            both = {key: (cell[key] + row[WIDTH - 1 - i][key]) / 2 for key in cell}
-            if both["face"] < FACE_SHARE * both["all"]:
+            both = {k: (cell[k] + row[COLUMNS - 1 - i][k]) / 2 for k in cell}
+            if both["head"] < HEAD_SHARE * both["all"]:
                 line += "."
-            elif both["k"] >= DARK_SHARE * both["face"]:
+            elif both["in"] and both["k"] >= DARK_SHARE * both["in"]:
                 line += "k"
             else:
-                line += "o" if both["o"] >= both["c"] else "c"
+                line += max("ocb", key=lambda k: both[k])
         rows.append(line)
     return tuple(rows)
 
@@ -189,12 +203,13 @@ def block(rows: tuple[str, ...]) -> str:
 
 def main() -> int:
     source = MODULE.read_text(encoding="utf-8")
-    pattern = re.compile(r"PIXELS: Final = \(\n(?:    \"[.ock]+\",\n)+\)\n")
+    pattern = re.compile(r"PIXELS: Final = \(\n(?:    \"[.ockb]+\",\n)+\)\n")
     if not pattern.search(source):
         print(f"no PIXELS block in {MODULE}", file=sys.stderr)
         return 1
-    MODULE.write_text(pattern.sub(block(pixels()), source), encoding="utf-8")
-    print("\n".join(pixels()))
+    rows = pixels()
+    MODULE.write_text(pattern.sub(lambda _: block(rows), source), encoding="utf-8")
+    print(*rows, sep="\n")
     return 0
 
 

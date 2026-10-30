@@ -631,21 +631,14 @@ Panels, lists and bars use the same colours:
 Without the exact background the bands go and the chosen row is moss and bold;
 with `NO_COLOR` it is in reverse video.
 
-At 256 colours or more, in a Unicode terminal of 60 columns or more, the
-welcome stands beside Melo's face, three rows of half blocks, and `melo` is
-orange (here without its colours, which carry the fur, the cream muzzle and the
-eyes, nose and mouth):
-
-```text
- ▄▄████▄▄    melo 0.1.0 · qwen3-8b (/model to change)
-▀▀▀▀▀▀▀▀▀▀   ~/demo-project
- ▀█▀▀▀▀█▀    Try: What is this project? · / commands · ctrl+d quit
-```
-
-The face is computed from the logo (`docs/assets/icon_small.png`), not drawn by
-hand; `scripts/make_terminal_mark.py` makes it again when the logo changes.
-Under 60 columns, at 16 colours, with `NO_COLOR` or with `LOCALMELO_ASCII=1`,
-the welcome is its three rows alone.
+At 256 colours or more, in a Unicode terminal of 80 columns or more, the
+welcome's rows stand beside Melo's head, five rows of half blocks with its two
+upright ears, eyes, nose and cream muzzle, and `melo` is orange (the README's
+screenshot shows it). The head is computed from the pet's face picture
+(`macos/art/akita/face/idle@2x.png`), not drawn by hand;
+`scripts/make_terminal_mark.py` makes it again when the picture changes. Under
+80 columns, at 16 colours, with `NO_COLOR` or with `LOCALMELO_ASCII=1`, the
+welcome is its three rows alone: fewer rows of half blocks lose the ears.
 
 How melo chooses:
 
