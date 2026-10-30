@@ -60,7 +60,9 @@ The first of these that applies:
    `--chat-model`, else the only chat model that `GET URL/models` lists
    (ids containing `embed` or `rerank` are not chat models), else the one
    chat model the server says is loaded; with several and none known to be
-   loaded it exits 2, lists them and asks for `--chat-model <id>`. A URL without `/v1` is listed at `URL/v1/models`, and when that
+   loaded it exits 2, lists them and asks for `--chat-model <id>`. A task,
+   `--brief` and `melo ""` choose the model the same way before their first request
+   (see the [command-line reference](../reference/cli.md#general)). A URL without `/v1` is listed at `URL/v1/models`, and when that
    answers the UI uses `URL/v1` too. When the server does not answer the
    list, or lists no model, the model is `default` and a warning under the
    banner says why. With no config file it asks once

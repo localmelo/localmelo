@@ -186,6 +186,14 @@ class _StartupConfigError(Exception):
     """
 
 
+class _ModelChoiceError(Exception):
+    """No model can be chosen for a ``--brief`` worker: see :func:`_direct_model`.
+
+    It reaches the worker's ``startup_error`` result whole, with exit code 2
+    like the same refusal without ``--brief``.
+    """
+
+
 def _home_relative(text: str) -> str:
     """Show paths under the user's home directory as ``~/...``."""
     home = os.path.expanduser("~")
@@ -2041,15 +2049,19 @@ def main() -> None:
                 raise
             from localmelo.support.cli.worker_contract import failure_record
 
-            error = (
-                "Worker startup failed"
-                if isinstance(exc, SystemExit)
-                else _one_line(_home_relative(str(exc)))
-            )
+            # A refused model choice keeps its whole list and its hint.
+            refused = isinstance(exc, _ModelChoiceError)
+            code = EXIT_NOT_COMPLETED if refused else EXIT_CRASHED
+            if isinstance(exc, SystemExit):
+                error = "Worker startup failed"
+            elif refused:
+                error = " ".join(_home_relative(str(exc)).split())
+            else:
+                error = _one_line(_home_relative(str(exc)))
             workspace = os.path.realpath(
                 os.path.expanduser(args.workspace or os.getcwd())
             )
-            record = failure_record("startup_error", workspace, error)
+            record = failure_record("startup_error", workspace, error, exit_code=code)
             print(f"melo: worker startup failed: {record['error']}", file=sys.stderr)
             if args.output_format == "stream-json":
                 record = {"v": 1, "type": "result", "result": record}
@@ -2060,7 +2072,8 @@ def main() -> None:
             except BrokenPipeError:
                 print("melo: worker output failed: broken pipe", file=sys.stderr)
                 _discard_stdout()
-            raise SystemExit(EXIT_CRASHED) from None
+                code = EXIT_CRASHED
+            raise SystemExit(code) from None
         worker_args: dict[str, Any] = (
             {"worker_brief": True} if args.brief is not None else {}
         )
@@ -2243,6 +2256,31 @@ def _direct_embedding(args: argparse.Namespace) -> BaseEmbeddingProvider | None:
     return OpenAICompatEmbedding(base_url=base_url, model=model)
 
 
+def _direct_model(args: argparse.Namespace) -> str:
+    """The chat model for ``--base-url`` without ``--chat-model``.
+
+    The one the server's list gives, as the interactive UI chooses it (see
+    :func:`~localmelo.support.backends.discovery.choose_model`): its only chat
+    model, or the one it says is loaded. A server that serves several and does
+    not say which is in memory could load any of them for the model
+    ``default``, so the run ends with the list and exit code 2: on stderr, or
+    for ``--brief`` as a ``startup_error`` result (see
+    :class:`_ModelChoiceError`). A server that cannot be listed keeps
+    ``default``, with one warning line on stderr in text output only.
+    """
+    from localmelo.support.backends import discovery
+
+    found = asyncio.run(discovery.choose_model(args.base_url, None))
+    if found.model is None and found.models:
+        if getattr(args, "brief", None) is not None:
+            raise _ModelChoiceError(found.refusal())
+        print(f"melo: error: {found.refusal()}", file=sys.stderr)
+        raise SystemExit(EXIT_NOT_COMPLETED)
+    if found.reason and getattr(args, "output_format", None) in (None, "text"):
+        print(f"melo: warning: {found.warning()}", file=sys.stderr)
+    return found.model or "default"
+
+
 def _build_direct_mode_agent(
     args: argparse.Namespace,
     *,
@@ -2257,6 +2295,8 @@ def _build_direct_mode_agent(
        (preserves the exact URL as given). There is no embedding unless
        --embedding-base-url names an OpenAI-compatible embedding endpoint.
        --request-timeout, when given, is the chat provider's HTTP timeout.
+       The model is --chat-model, else the server's choice (see
+       :func:`_direct_model`); with --chat-model the server is not asked.
     2. No --base-url: use configured backends from the config file. The
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
@@ -2354,7 +2394,6 @@ def _build_direct_mode_agent(
         # Generic OpenAI-compatible endpoint
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
-        model = args.chat_model or "default"
         # Without --request-timeout the provider keeps its default (120 s);
         # httpx would read timeout=None as no timeout at all.
         llm_options: dict[str, Any] = (
@@ -2378,6 +2417,8 @@ def _build_direct_mode_agent(
                 )
             if options.retriever == "embedding" and not options.memory:
                 parser.error("argument --retriever: embedding needs --memory on")
+        # Asked last, so a usage error never costs a request.
+        model = args.chat_model or _direct_model(args)
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         if options is not None and options.memory_dir is not None:
             _make_memory_dir(options.memory_dir)

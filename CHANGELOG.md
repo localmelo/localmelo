@@ -40,6 +40,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   alone asks again (an empty answer with no terminal is an error).
   `melo --base-url URL` without `--chat-model` picks the one loaded model, or
   exits 2 with the list and `Pass --chat-model <id>`. ([#231])
+- A direct run with `--base-url` and no `--chat-model` (`melo --base-url URL -- "task"`,
+  `--brief` and `melo ""`) no longer asks a server for the model `default`, which a
+  server that loads models on demand can read as any model, a large one that is not
+  in memory included. It lists the server's models first and chooses as the interactive
+  UI does: the only chat model, or the one the server says is loaded. With several and
+  none known to be loaded it exits 2 with the list and `Pass --chat-model <id>`; with
+  `--brief` that is a `startup_error` result whose `exit_code` is 2. A server that cannot
+  be listed still gets `default`, with one warning line on stderr in text output. With
+  `--chat-model` nothing changes: no list request, the same requests. ([#NN])
 - The welcome screen's "Connect a model" button shows only when no model is configured or the configured server cannot be reached. With a reachable model, the welcome screen shows just the suggestions ([#230]).
 
 - `/memory` and `/status` in the terminal, and the console's details drawer, show the session's own working-window cap (`window_messages`) instead of always 20 ([#230]).
