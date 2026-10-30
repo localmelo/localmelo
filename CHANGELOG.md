@@ -235,6 +235,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo moves. It blinks, wags its tail and sleeps with a "z". The calm portrait of the app's
+  first window, the console's calm portrait and its calm face beside older replies blink twice
+  every 11 seconds (an eyes-closed patch fades in over the eyes for a tenth of a second); the
+  pet blinks on its calm lying picture too. When a run is done the pet's tail swings about its
+  base, four times, instead of the whole picture swaying; and a sleeping Melo sends up a small
+  "z". The patches and the tail are cut from pictures the art model redrew, only where they
+  differ from the originals, and `scripts/build_pet_assets.py` stops with a message if a redrawn
+  picture does not lie on its original. All of it is Core Animation in the app (no timer) and
+  CSS in the console (no script), and stops under Reduce Motion (`prefers-reduced-motion` in the
+  console), in Low Power Mode, when the Mac runs hot, while the window or Melo is hidden or
+  covered and while the screen sleeps. ([#NN])
+
 - Chats say who they are. A model that is told nothing answers "who are you?" with the
   assistant it was trained as. The terminal chat, the web console and the macOS app now tell
   the model one short paragraph first: it is melo, the assistant built into localmelo, an

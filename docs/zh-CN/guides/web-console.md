@@ -29,16 +29,16 @@
 <a id="melo-in-the-page"></a>
 ## 页面里的 Melo
 
-页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。所有图片都是静止的：页面不让任何东西动，所以不需要为“减弱动态效果”单独处理。
+页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。图片都是静止的，只有平静的画像和平静（idle）的脸会眨眼：一张闭眼的补丁图盖在图片上，每 11 秒淡入两次。这只用 CSS，没有脚本；在 `prefers-reduced-motion: reduce` 下页面显示静态图片。
 
-- **空对话。** Melo 坐在 *What would you like to work on?* 上方，神情平静。
-- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在工作（吐着舌头），等待批准时睁大眼睛，完成时开心，以带警告或错误结束时耷拉着一只耳朵。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸。
+- **空对话。** Melo 坐在 *What would you like to work on?* 上方，神情平静，会眨眼。
+- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在工作（吐着舌头），等待批准时睁大眼睛，完成时开心，以带警告或错误结束时耷拉着一只耳朵。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸；平静的脸会眨眼。
 - **批准栏。** 写着 “melo is waiting for your answer” 的栏显示睁大眼睛的脸。
 - **品牌和标签页。** 侧边栏和登录页显示平静的脸，浏览器标签页以 16、32 和 64 px 使用它。
 
 在文字已经说明状态的地方（实时行、工作组、失败卡片、批准栏），这些脸只是装饰，替代文字为空。上方没有工作组的已完成回答，没有别的东西说明它完成了，所以它的脸对屏幕阅读器读作 `Done`。画像保留替代文字 `Melo, the localmelo Akita mascot`。
 
-图片是带一圈很细奶油色外沿的透明 PNG。在浅色画布上，深蓝轮廓让 Melo 显现出来（对控制台的浅色表面至少 12:1）；在深色画布上靠的是外沿（对深色表面至少 5.6:1，图片的要求是 3:1）。它们由 `/assets/akita/` 提供（`sit-idle.png`、`face-idle.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`，以及 `favicon-16.png`、`-32`、`-64`），共 150 KB，是应用自己在 `macos/art/akita` 的图片的副本，由同一个脚本生成（见 [macOS 应用指南](macos-app.md)）；因为 `melo.png` 和 `icon_small.png`（80 KB）已从页面资源中移除，净增约 70 KB。
+图片是带一圈很细奶油色外沿的透明 PNG。在浅色画布上，深蓝轮廓让 Melo 显现出来（对控制台的浅色表面至少 12:1）；在深色画布上靠的是外沿（对深色表面至少 5.6:1，图片的要求是 3:1）。它们由 `/assets/akita/` 提供（`sit-idle.png`、`sit-idle-blink.png`、`face-idle.png`、`face-idle-blink.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`，以及 `favicon-16.png`、`-32`、`-64`），共 155 KB，是应用自己在 `macos/art/akita` 的图片的副本，由同一个脚本生成（见 [macOS 应用指南](macos-app.md)）；因为 `melo.png` 和 `icon_small.png`（80 KB）已从页面资源中移除，净增约 70 KB。
 
 <a id="inspect-workers"></a>
 

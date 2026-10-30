@@ -1025,7 +1025,13 @@ function assistantNode(turn, newest = false) {
   // The live row, the work box and the failure card word every state, so the face is decoration there. A
   // finished answer with no work box above it has nothing else saying the turn is done.
   icon.alt = face === "done" && shownItems(turn).length === 0 ? "Done" : "";
-  label.append(icon, el("span", "", "localmelo"));
+  // The idle face blinks (CSS only: an eyes-closed patch fades in over it); the other faces have no patch.
+  let mark = icon;
+  if (face === "idle") {
+    mark = el("span", "blinks face");
+    mark.append(icon);
+  }
+  label.append(mark, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
