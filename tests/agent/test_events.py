@@ -574,6 +574,7 @@ class TestFields:
                 "requests",
                 "readable",
                 "unreadable_reason",
+                "repaired",
                 "usage",
                 "prefix",
                 "duration_s",
@@ -1508,6 +1509,7 @@ class TestReflections:
             "requests": 1,
             "readable": True,
             "unreadable_reason": None,
+            "repaired": None,
             "usage": _usage(50, 5),
         }
         index = recorder.types.index("reflection")
@@ -1547,6 +1549,7 @@ class TestReflections:
             "requests": 2,
             "readable": False,
             "unreadable_reason": "no_json",
+            "repaired": None,
             "usage": _usage(70, 7),
         }
         # The next attempt starts.

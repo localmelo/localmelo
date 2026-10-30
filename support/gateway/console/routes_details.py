@@ -128,7 +128,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
         # Open sessions show their agent's cap; closed ones, the setting's cap.
-        window_max = console.cfg.agent.window_messages
+        window_max = console.cfg.agent.window_for(console.cfg.chat_backend)
         if entry is not None:
             if entry.agent is not None:
                 messages = entry.agent.conversation()

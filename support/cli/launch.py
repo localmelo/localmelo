@@ -309,7 +309,9 @@ def run_interactive(
     try:
         if choice.cfg is None:
             loaded = config.load()
-            options = configured_cache_options(loaded, options, keep=explicit)
+            options = configured_cache_options(
+                loaded, options, keep=explicit, backend=choice.backend.key
+            )
             if "captured_history" not in explicit and loaded.agent.captured_history:
                 options = replace(options, captured_history=True)
             options = configured_context_options(

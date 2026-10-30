@@ -31,6 +31,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A reflection reply with one common slip in its JSON no longer costs a retry.
+  A reply with a stray `]` after a string value (a `]` that no `[` opened) could
+  not be decoded, so it was asked for again, and a second failure lost the
+  reflection. With the default `reflection_gate flags`, a reply that holds no
+  reflection now gets one repair of the `{...}` the decoder rejects, at the
+  decoder's error and nowhere else: a `]` or `}` that no opener matches is
+  dropped, a comma before a closer is dropped, or raw newline, carriage return
+  and tab characters inside strings are escaped. The repaired text must still
+  hold an object with a valid `recommended_action`, nothing is closed or
+  inserted, and a reply that needs two repairs stays unreadable. The
+  `reflection` event gains `repaired` (`unmatched_closer`, `trailing_comma`,
+  `control_char` or `null`). When a reply with JSON that the decoder rejected
+  is asked for again, the retry adds one line after its note that quotes the
+  decoder's error and up to 60 characters around it. The repair changes no
+  request whose first reply reads. ([#239])
 - `melo --serve` writes its startup lines, the port that `--port 0` picked
   included, as soon as they are printed when stdout is a pipe or a file. They
   used to wait in the buffer until the server exited, so a script or a log
@@ -1008,6 +1023,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
   and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
   line, JSON, exit codes and requests are unchanged ([#NN]).
+- The measured cache layout is now the default (part of #183 and #185).
+  `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
+  a reflection is appended to the window once, at the attempt boundary, instead of being
+  rebuilt as the last message of every planning request, and an unreadable reflection is
+  asked again on the same prefix. `[agent] window_messages` is 64 (was 20) on a local
+  server and for a `--base-url` server; a cloud backend keeps 20 for now, because without
+  prompt caching a longer window costs input tokens. A key you set keeps its value on any
+  backend, and a file without the key has the default. Two benchmark rounds on 12 coding
+  tasks, two runs each, with a Qwen model on oMLX compared the earlier defaults with these
+  two. With the new defaults 46 of 48 runs passed (earlier: 44 of 48); 86.8% of the prompt
+  tokens were served from the cache (78.9%); the share of tokens that an earlier request of
+  the same run already held and the cache reused rose from 92.9% to 99.7%, and in the worst
+  run from 79.4% to 93.7%; the uncached tokens per run fell from 9,865 to 6,059; a run took
+  8.3 steps (8.7) and 32 s (35 s). `--cache-layout v2 --window-messages 20`, or the same
+  keys in `[agent]`, send the earlier requests. Both flags moved from the experimental to
+  the advanced tier of `melo --developer --help`. A default run's JSON result now carries
+  `config.cache_layout`, and `config.window_messages` on a local server. ([#239])
 
 - The macOS app's window says what is happening. Until the console has loaded it
   shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
@@ -1567,6 +1599,7 @@ earlier milestones.
 [#236]: https://github.com/localmelo/localmelo/pull/236
 [#237]: https://github.com/localmelo/localmelo/pull/237
 [#238]: https://github.com/localmelo/localmelo/pull/238
+[#239]: https://github.com/localmelo/localmelo/pull/239
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -31,6 +31,7 @@ from localmelo.melo.memory.recall import (
     parse_triggers,
 )
 from localmelo.melo.schema import (
+    LOCAL_WINDOW_MESSAGES,
     SHORT_TERM_MAX,
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
@@ -1621,16 +1622,17 @@ def _build_parser(
     direct.add_argument(
         "--cache-layout",
         choices=["v2", "v3"],
-        help="With the fixed prefix, v3 appends a reflection once at the attempt "
-        "boundary, keeps the reflection request in the window and retries an "
-        "unreadable reflection on the same prefix (default v2: today's requests)",
+        help="With the fixed prefix, v3 (default) appends a reflection once at the "
+        "attempt boundary, keeps the reflection request in the window and retries "
+        "an unreadable reflection on the same prefix; v2 sends the earlier requests",
     )
     direct.add_argument(
         "--window-messages",
         type=_window_messages,
         metavar="N",
         help=f"The working window's message cap, {WINDOW_MESSAGES_MIN}-"
-        f"{WINDOW_MESSAGES_MAX} (default {SHORT_TERM_MAX})",
+        f"{WINDOW_MESSAGES_MAX} (default {LOCAL_WINDOW_MESSAGES} on a local "
+        f"server or a URL, {SHORT_TERM_MAX} on a cloud vendor)",
     )
     direct.add_argument(
         "--tool-exposure",
@@ -2314,6 +2316,7 @@ def _build_direct_mode_agent(
     base_url = args.base_url
     request_timeout = getattr(args, "request_timeout", None)
     from localmelo.support import config
+    from localmelo.support.backends.discovery import OPENAI_COMPATIBLE
     from localmelo.support.sessions.agents import (
         CACHE_SETTINGS,
         configured_cache_options,
@@ -2363,7 +2366,7 @@ def _build_direct_mode_agent(
             f"recognised. Must be one of {config.CACHE_LAYOUTS}."
         )
     window = budget_cfg.agent.window_messages
-    if (
+    if window is not None and (
         isinstance(window, bool)
         or not isinstance(window, int)
         or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
@@ -2375,7 +2378,12 @@ def _build_direct_mode_agent(
     # A flag keeps its value; the others come from the config file, whose
     # absent keys are the defaults.
     flagged = {name for name in CACHE_SETTINGS if getattr(args, name, None) is not None}
-    options = configured_cache_options(budget_cfg, options, keep=flagged)
+    options = configured_cache_options(
+        budget_cfg,
+        options,
+        keep=flagged,
+        backend=OPENAI_COMPATIBLE if base_url else None,
+    )
 
     if not isinstance(budget_cfg.agent.captured_history, bool):
         config_value_error("[agent] captured_history must be a boolean")

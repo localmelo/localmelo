@@ -224,6 +224,12 @@ REFLECT_TOOL_GUARD_NOTE = "Answer with the JSON object only; do not call any too
 # the retry has no tool turns for the model to continue.
 REFLECTION_TRANSCRIPT_INTRO = "The end of this attempt, written out as text:"
 
+
+def _with_hint(note: str, hint: str) -> str:
+    """*note* with *hint*, when there is one, on the line after it."""
+    return f"{note}\n{hint}" if hint else note
+
+
 _MEMORY_PREFIX = "[memory] "
 
 # Most recent working-memory messages shown to the reflection call. The
@@ -1061,13 +1067,16 @@ class Chat:
     async def _retry_on_prefix(
         self,
         fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None,
+        hint: str = "",
     ) -> Message | None:
         """Ask a reflection again on the prefix of the request that went unread."""
         assert self._reflect_sent is not None
         offered = self._reflect_tools
         note = Message(
             role="user",
-            content=REFLECTION_RETRY_GUARD_NOTE if offered else REFLECTION_RETRY_NOTE,
+            content=_with_hint(
+                REFLECTION_RETRY_GUARD_NOTE if offered else REFLECTION_RETRY_NOTE, hint
+            ),
         )
         messages = [*self._reflect_sent, self.reflect_exchange[-1], note]
         if fit is not None:
@@ -1089,6 +1098,7 @@ class Chat:
         *,
         final: bool = False,
         retry: bool = False,
+        retry_hint: str = "",
         fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
         notes: Sequence[str] = (),
         draft_titles: Sequence[str] = (),
@@ -1103,7 +1113,9 @@ class Chat:
         the same system message, then one user message that holds the
         window's turns written out as text (:func:`render_transcript`),
         the same request and :data:`REFLECTION_RETRY_NOTE`. With no tool
-        turns left, a model has no tool call to continue.
+        turns left, a model has no tool call to continue. *retry_hint*,
+        when given, is one more line after that note, on the prefix retry
+        too: the decoder's complaint about the reply that went unread.
 
         In the compress modes, *notes* and *draft_titles* are the
         already-rendered entry lines of this attempt's notes and pending
@@ -1129,7 +1141,7 @@ class Chat:
         if not retry:
             self.reflect_exchange, self._reflect_sent = [], None
         elif self._reflect_sent is not None and self.reflect_exchange:
-            return await self._retry_on_prefix(fit)
+            return await self._retry_on_prefix(fit, retry_hint)
         # Build system prompt with prior reflection context
         system_parts = (
             [self._fixed_system(), REFLECTION_PROMPT]
@@ -1228,7 +1240,7 @@ class Chat:
         messages = [Message(role="system", content="\n\n".join(system_parts))]
         if retry:
             transcript = render_transcript(tail)
-            parts = [request, REFLECTION_RETRY_NOTE]
+            parts = [request, _with_hint(REFLECTION_RETRY_NOTE, retry_hint)]
             if transcript:
                 parts.insert(0, f"{REFLECTION_TRANSCRIPT_INTRO}\n\n{transcript}")
             messages.append(Message(role="user", content="\n\n".join(parts)))
