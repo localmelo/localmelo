@@ -81,6 +81,7 @@
 | `prefix_cache` | 启用固定前缀时（默认值；使用 `--fixed-prefix off` 时不出现）：版本、观察到的规划 schema 变化，以及可选的、服务器报告的、在规划和反思回复上求和的缓存 token 数；schema 变化是预期内的失效，不是实测到的缓存未命中。 |
 | `context_budget` | 已配置时，是每次尝试的规划/反思记账记录列表；关闭时不存在。见[上下文记账](configuration.md#context-accounting)。 |
 | `memory_stats` | 在 `legacy` 之外，是回放计数和笔记计数；`legacy` 行中没有此字段。 |
+| `confinement` | 只出现在限制写入的运行中（`--brief` worker 或保存的任务，见[写入留在工作区内](cli.md#confined-writes)）：`{"writes": "confined", "refused_writes": N}`，N 是本次运行的 `shell_exec` 和 `python_exec` 报告被拒绝的工作区外写入次数；在 macOS 之外为 `{"writes": "not_confined", "reason": "..."}`。其他情况下没有此字段。 |
 
 `config` 包含：
 

@@ -1416,6 +1416,7 @@ class TaskWorkers:
                         memory=False,
                         timeout_s=None,
                         builtins=worker_tool_allowlist("user").builtins,
+                        confine_writes=self.settings().agent.confine_writes,
                     ),
                 ),
                 wrap_llm=lambda inner: _WorkerLLM(

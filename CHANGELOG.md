@@ -9,6 +9,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A worker's shell and Python write only inside its workspace on macOS. In a
+  `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
+  `python_exec`, the brief's checks included, start under a `sandbox-exec`
+  profile that refuses file writes outside the workspace, whatever the command
+  does; uv's, black's and npm's caches, the user's own temporary folder (where
+  macOS's `mktemp` writes), a few devices and, in a linked git
+  worktree, its own git directory and the object store stay writable, so
+  `uv run`, `pytest`, `ruff`, `black`, `mypy`, `npm` and `git status`/`diff`/`add`
+  work. `TMPDIR`, `TMP` and `TEMP` point at `.melo-tmp` in the workspace. Reads
+  and the network are not confined. A refused write gains a line that says so,
+  and `run.confinement` counts them. A run whose writes cannot be confined stops
+  before its first command; other systems run unconfined and say so. Chats are
+  unchanged; `-X agent.confine_writes=false` turns it off ([#274]).
+
 - Gateway authentication is in progress: loopback-only binding, a private bearer
   token for API clients, and a one-use terminal sign-in link for browser sessions.
   Existing unauthenticated API clients must migrate; see the gateway guide.
@@ -2134,6 +2148,7 @@ earlier milestones.
 [#271]: https://github.com/localmelo/localmelo/pull/271
 [#272]: https://github.com/localmelo/localmelo/pull/272
 [#273]: https://github.com/localmelo/localmelo/pull/273
+[#274]: https://github.com/localmelo/localmelo/pull/274
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

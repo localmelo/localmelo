@@ -52,9 +52,15 @@ SPEC_FIELDS = [
     "config",
 ]
 
-# Optional memory, context accounting and prefix telemetry are omitted while None,
-# so SPEC_FIELDS stays the legacy JSON line's shape.
-DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats", "context_budget", "prefix_cache"]
+# Optional memory, context accounting, prefix telemetry and write confinement are
+# omitted while None, so SPEC_FIELDS stays the legacy JSON line's shape.
+DATACLASS_FIELDS = [
+    *SPEC_FIELDS,
+    "memory_stats",
+    "context_budget",
+    "prefix_cache",
+    "confinement",
+]
 
 
 class TestRunResult:
