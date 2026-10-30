@@ -472,6 +472,21 @@ def test_red_marks_an_error_and_nothing_milder_in_a_status_card() -> None:
     assert re.search(r'\.status-mark\[data-severity="error"\]\s*\{[^}]*--error', css)
 
 
+def test_the_task_view_buttons_skip_the_answer_classes() -> None:
+    # `.task-panel button` (0,1,1) would out-rank `.primary-button`, `.outline-button` and
+    # `.quiet-button` (0,1,0), so every rule that paints a task button must leave those out.
+    answers = ("primary-button", "outline-button", "quiet-button")
+    paint = re.compile(r"(?:^|;)\s*(?:color|background[\w-]*|border[\w-]*)\s*:")
+    for group, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _stylesheet()):
+        if not paint.search(body):
+            continue
+        for selector in re.split(r",\s*(?![^()]*\))", group):
+            selector = selector.strip()
+            if re.match(r"\.task-panel button(?![\w-])", selector):
+                missing = [name for name in answers if f".{name}" not in selector]
+                assert not missing, f"{selector} restyles {missing} in the Tasks view"
+
+
 async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> None:
     page = (await client.get("/")).text
     bar = re.search(r'<div id="approval-bar".*?</div>', page, re.S)

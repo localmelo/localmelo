@@ -1550,15 +1550,15 @@ dialog::backdrop {
   color: var(--muted);
 }
 
-/* Task card, Resume and Stop */
-.task-panel button {
+/* Task card, Resume and Stop. The approval answers keep their own button styles, so these skip them. */
+.task-panel button:not(.primary-button, .outline-button, .quiet-button) {
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   padding: 8px 14px;
   background: var(--soft);
   color: var(--ink);
 }
-.task-panel button:disabled {
+.task-panel button:disabled:not(.primary-button, .outline-button, .quiet-button) {
   opacity: 0.55;
   cursor: default;
 }
