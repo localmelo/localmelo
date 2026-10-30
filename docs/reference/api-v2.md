@@ -98,12 +98,13 @@ output or log the header; same-user processes can still read the token file.
     "running": {"chats": 0, "tasks": 1, "runs": 1, "terminal": 1},
     "tasks": {"running": 1, "queued": 1, "held": 0, "top_level": 2},
     "items": [
-      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo"},
-      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog"},
-      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test"}
+      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo", "activity": "Reading notes.md", "icon": "read"},
+      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog", "activity": "Thinking", "icon": "think"},
+      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
     ],
     "waiting": [],
-    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2}
+    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2},
+    "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
   },
   "uptime_s": 132.4
 }
@@ -143,11 +144,25 @@ output or log the header; same-user processes can still read the token file.
   `status.tasks` is the scheduler's queue as the status row shows it:
   `running`, `queued`, `held` and `top_level` (the best level among them, or
   `null`). `status.items` lists what runs, chats first, then tasks, runs and
-  terminal chats, at most 20, each `{"kind", "id", "title"}` (`kind` is `chat`,
-  `task`, `run` or `terminal`; a terminal chat's title is redacted). The counts
-  are not capped. A store that cannot be read counts as nothing running; one
-  call reads the task states by their index and the running turns of the CLI
-  file by theirs.
+  terminal chats, at most 20, each `{"kind", "id", "title", "activity", "icon"}`
+  (`kind` is `chat`, `task`, `run` or `terminal`; a terminal chat's title is
+  redacted). The counts are not capped. A store that cannot be read counts as
+  nothing running; one call reads the task states by their index and the
+  running turns of the CLI file by theirs.
+- `activity` says what the item is doing in plain words, and `icon` its kind:
+  `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
+  scheduler holds its model call), `Reading notes.md` and `Looking through
+  ~/talk` (`read`), `Writing slides.md` (`write`), `Running the tests` (for a
+  command that runs a test suite), `Running a command` and `Running Python`
+  (`run`), `Reading example.com`, `Reading the page` and `Following a link`
+  (`web`), `Remembering` (`memory`), `Checking its work` and `Thinking`
+  (`think`), and `Using a tool` (`tool`) for any other tool. They come from the
+  item's newest 40 events; only a file's name, a folder and a page's host are
+  shown, never a command line, code or text. A store that cannot be read
+  reads `Thinking`.
+- `status.focus` is the one item a glance shows (the item as in
+  `status.items`): one that waits for an approval first, else the one whose
+  newest event is the latest; `null` when nothing runs.
 - `status.waiting` lists the chats and tasks with a tool-approval request that
   waits for an answer, chats first, at most 20, each `{"kind", "id"}` (`kind` is
   `chat` or `task`). The console opens them at `#/s/<id>` and `#/tasks/<id>`, and
@@ -166,6 +181,49 @@ output or log the header; same-user processes can still read the token file.
   run went: the macOS app's policy for Melo reads it, and the app does not draw
   Melo yet. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
+
+## GET /api/activity
+
+What ran today, for the panel beside a chat: the console's chats, the
+scheduler's tasks, and the worker runs and terminal chats of the CLI file
+(read-only, a terminal chat redacted), one row per session.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- "http://127.0.0.1:8401/api/activity?since=$(date -v0H -v0M -v0S +%s)"
+```
+
+```json
+{
+  "since": 1793332800.0,
+  "rows": [
+    {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Slides for the 3 pm meeting", "state": "running",
+     "activity": "Writing slides.md", "icon": "write", "result": "", "at": 1793376000.2, "level": 2},
+    {"kind": "run", "id": "c44733ec77e5", "title": "Check the build", "state": "done",
+     "activity": "", "icon": "run", "result": "All 412 tests passed.", "at": 1793370000.5, "turns": 1}
+  ],
+  "more": false,
+  "unavailable": []
+}
+```
+
+- `since` (seconds since the epoch) starts the day; it defaults to the
+  gateway's local midnight, must not be in the future (`400 invalid_request`),
+  and reaches back a week at most.
+- A row is a session's newest turn that runs or ended at or after `since` (a
+  turn that still runs is in, however early it began), or a task changed since
+  then or not finished. `state` is `running`, `waiting` (an approval waits),
+  `held` (the scheduler holds its model call), `queued` or `paused` while it is
+  live, else `done`, `failed` or `stopped`. A live row says what it does
+  (`activity` and `icon`, as in [`status.items`](#get-apihealth)); a finished one
+  says how in `result`, one line of at most 140 characters (the turn's digest,
+  else the answer's first sentence, else for a failure why), and its `icon` is
+  the kind of its last tool call (`done` without one, `failed` or `stopped`).
+  `at` is when it ended (a live row: when it started; a task: its last change),
+  `turns` how many of a chat's turns started that day, `level` a task's
+  priority (0 to 5).
+- Live rows come first, then the rest newest first, at most 100; `more` is
+  `true` when some were left out. A source that cannot be read adds no rows and
+  is named in `unavailable` (`chats`, `tasks`, `runs`).
 
 ## GET /api/settings
 

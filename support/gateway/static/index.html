@@ -38,7 +38,7 @@
           <a href="#/tasks" id="tasks-link">Tasks</a>
         </nav>
         <button class="nav-button new-chat" id="new-btn">
-          <span aria-hidden="true">＋</span> New chat <kbd>⌘ K</kbd>
+          <span aria-hidden="true">＋</span> <span class="nav-label">New chat</span> <kbd>⌘ K</kbd>
         </button>
         <label class="search"
           ><span aria-hidden="true">⌕</span
@@ -115,6 +115,7 @@
             ></div>
           </div>
           <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled>Details</button>
+          <button type="button" class="panel-chip" id="panel-chip" aria-controls="panel" aria-expanded="false" hidden></button>
           <button class="connection-chip" id="connection-btn">
             <span class="status-dot" id="connection-dot"></span
             ><span id="connection-label">Set up model</span>
@@ -225,8 +226,11 @@
             <span id="composer-note">Runs through your configured backend</span>
           </p>
         </div>
-        <section class="details-drawer" id="details-drawer" hidden></section>
       </main>
+      <aside class="panel" id="panel" aria-label="Melo">
+        <section class="details-drawer" id="details-drawer" hidden></section>
+      </aside>
+      <button type="button" class="panel-backdrop" id="panel-backdrop" tabindex="-1" aria-label="Close activity" hidden></button>
     </div>
     <dialog id="picture-box" class="picture-box" aria-label="Picture"></dialog>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
