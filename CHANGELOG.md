@@ -1054,7 +1054,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `reflection` event's `repaired` can now also be `invalid_escape` or `unclosed_array`.
   In a replay of 72 reflection replies from a benchmark run, 4 stayed unreadable after
   the earlier repair and 2 do now (a tool call, and a list written without its opening
-  bracket). Fewer reflections are asked for again; request bodies are unchanged. ([#NN])
+  bracket). Fewer reflections are asked for again; request bodies are unchanged. ([#249])
 - A chat that waits on a foreign GPU lock says so in plain words in both modes of the
   web console: its work group, live row, tool card, header chip and composer read
   "Waiting for this Mac's GPU" where they read "Waiting: Reservation". Other waits keep
@@ -1777,6 +1777,7 @@ earlier milestones.
 [#246]: https://github.com/localmelo/localmelo/pull/246
 [#247]: https://github.com/localmelo/localmelo/pull/247
 [#248]: https://github.com/localmelo/localmelo/pull/248
+[#249]: https://github.com/localmelo/localmelo/pull/249
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
