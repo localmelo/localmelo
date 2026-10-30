@@ -3338,11 +3338,12 @@ test('in a browser "Choose a folder…" asks for a path, takes a full one and ne
   assert.deepEqual([h.element('folder-finder').hidden, h.element('folder-path-row').hidden, h.context.document.activeElement], [true, false, field], 'A path field, and no Finder');
   assert.equal(enter('Documents/notes'), true, 'Enter in the field never reaches the composer\'s form');
   assert.deepEqual([field.attributes['aria-invalid'], h.state().newWorkspace], ['true', null], 'A path that is not full is refused');
+  assert.match(h.text('folder-path-hint'), /^That is not a full path\./, 'and the refusal is said in words');
   enter('  ~/Documents/notes  ');
   assert.deepEqual([h.state().newWorkspace, h.text('folder-text'), h.element('folder-menu').hidden], ['~/Documents/notes', 'In notes', true]);
   assert.deepEqual([h.element('input').value, posts(h).length], ['draft', 0], 'The message is still a draft');
   h.element('folder-btn').click();
-  assert.deepEqual([h.element('folder-path-row').hidden, field.value, field.attributes['aria-invalid']], [true, '', undefined], 'The field starts closed and clean each time');
+  assert.deepEqual([h.element('folder-path-row').hidden, field.value, field.attributes['aria-invalid'], h.text('folder-path-hint')], [true, '', undefined, ''], 'The field starts closed and clean each time');
   assert.equal(h.text('folder-list').split(' notes ')[0].includes('✓'), true, 'The pick is offered, checked');
   h.element('folder-choose').click();
   enter('~/localmelo-workspace');

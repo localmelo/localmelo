@@ -46,6 +46,8 @@ export function folderChoices({sessions, fallback, current, limit = 4}) {
 export function setupFolderPicker({doc, state, pick, notify, bridge}) {
   const $ = (id) => doc.getElementById(id);
   const put = (id, text) => { if ($(id).textContent !== text) $(id).textContent = text; };
+  const hint = $("folder-path-hint");
+  const plain = hint.textContent;
   let open = false;
 
   function node(tag, className, text) {
@@ -62,7 +64,9 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
     if (choice.current) button.setAttribute("aria-current", "true");
     const text = node("span", "folder-item-text");
     text.append(node("span", "folder-item-name", folderName(choice.label)), node("span", "folder-item-where", choice.label));
-    button.append(node("span", "folder-mark", choice.current ? "✓" : ""), text);
+    const mark = node("span", "folder-mark", choice.current ? "✓" : "");
+    mark.setAttribute("aria-hidden", "true");
+    button.append(mark, text);
     if (choice.kind === "default") button.append(node("span", "folder-tag", "Default"));
     button.addEventListener("click", () => select(choice.path));
     return button;
@@ -87,6 +91,7 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
     $("folder-path-row").hidden = true;
     $("folder-path").value = "";
     $("folder-path").removeAttribute("aria-invalid");
+    hint.textContent = plain;
   }
 
   /** The app's panel when there is one; else the path field. */
@@ -105,7 +110,10 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
   function usePath() {
     const text = $("folder-path").value.trim();
     if (/^(\/|~\/)\S/.test(text)) select(text);
-    else $("folder-path").setAttribute("aria-invalid", "true");
+    else {
+      $("folder-path").setAttribute("aria-invalid", "true");
+      hint.textContent = `That is not a full path. ${plain}`;
+    }
   }
 
   async function reveal() {

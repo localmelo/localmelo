@@ -804,7 +804,7 @@ button:hover:not(:disabled) {
 }
 /* The folder a new chat works in: a chip in the toolbar, the panel it opens above it, and the starters under the composer. */
 .folder-picker { position: relative; min-width: 0; }
-.folder-chip { display: flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 3px var(--space-2); background: none; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
+.folder-chip { display: flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 3px var(--space-2); background: none; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
 .folder-chip > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .folder-chip:hover, .folder-chip[aria-expanded="true"] { background: var(--soft); }
 .folder-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: 20; width: min(360px, 80vw); max-height: 60dvh; overflow-y: auto; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
@@ -812,6 +812,7 @@ button:hover:not(:disabled) {
 #folder-list { margin-bottom: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); }
 .folder-item, .folder-action { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 7px var(--space-2); background: none; border: 0; border-radius: var(--radius-control); font-size: var(--text-small); text-align: left; }
 .folder-item:hover, .folder-action:hover { background: var(--soft); }
+.folder-item:focus-visible, .folder-action:focus-visible { outline-offset: -2px; }
 .folder-mark { flex: 0 0 var(--space-4); color: var(--accent); }
 .folder-item-text { display: grid; min-width: 0; }
 .folder-item-name, .folder-item-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1173,7 +1174,7 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 @media (pointer: coarse), (max-width: 700px) {
   .send-button { width: 44px; height: 44px; }
   .stop-button, .connection-chip, .running-chip, .level-chip, .level-item, .icon-button { min-height: 44px; }
-  .folder-chip, .folder-item, .folder-action, .starters button { min-height: 44px; }
+  .folder-chip, .folder-item, .folder-action, #folder-use, .folder-path input, .starters button { min-height: 44px; }
   .icon-button { min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
