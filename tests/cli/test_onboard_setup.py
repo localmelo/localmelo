@@ -1327,7 +1327,9 @@ def test_urls_from_the_environment_are_the_ones_looked_at_again(
         _Answers("", ""), found=[None, found], urls=(other,)
     )
     assert result == FirstSetup(url=other, model="m", saved=True)
-    assert "(looked at ports" not in capsys.readouterr().out  # the first look found it
+    assert (
+        "(looked at ports" not in capsys.readouterr().out
+    )  # the look after Enter found it
     detect.assert_awaited_with((other,))
 
 
