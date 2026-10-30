@@ -1041,6 +1041,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `melo serve` before any setup asks what the first run asks. With no config file and
+  a terminal it printed `Welcome to localmelo.` and opened the eight-way backend menu with
+  MLC as the default, even while a model server ran on this computer. Outside developer
+  mode it now says `melo uses a model server on this computer (…)`, prints `Found a model
+  server at … (N models).` and asks `Use it? [Y/n]:`, as `melo setup` does; the full menu
+  follows only after `n`, with no server found, or with `--developer` or `[ui] mode =
+  "developer"`. The startup lines name the model and its server (`Model: Qwen3-8B-4bit on
+  oMLX`) where they named a backend key (`Chat: vllm`); the `Gateway:` line, which the
+  macOS app reads, is unchanged. The gateway's API, direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged ([#NN]).
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A

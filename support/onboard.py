@@ -782,7 +782,9 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     raises :class:`_FullMenuError` before anything is saved.
     """
     urls = discovery.detect_urls()
-    if not ask_keep:
+    # A reconfigure knows what melo needs; a first run says it, also when it
+    # reaches this question through `melo serve`.
+    if not ask_keep or not config.load().is_configured:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     if ask_keep and (found is None or not found.models):

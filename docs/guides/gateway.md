@@ -16,8 +16,10 @@ The old spellings (`melo --serve`, `--daemon`, `--gateway-login`,
 work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new)
 lists them.
 
-- When there is no config file yet, `melo serve` runs the setup wizard
-  first; see [Configuration](configure.md#set-up-with-the-wizard).
+- When there is no config file yet, `melo serve` asks first, as `melo setup`
+  does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`, and
+  the full backend menu follows only after `n`, when no server is found, or
+  with `--developer`; see [Configuration](configure.md#set-up-with-the-wizard).
   Without a terminal it cannot ask, so it prints
   `melo: no backend is configured; run melo setup in a terminal`
   and exits with code 1.
@@ -30,11 +32,11 @@ lists them.
 - It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
   file. `--host` and `--port` change them for one run, as in
   `melo serve --port 9401`.
-- It prints the backends and its addresses:
+- It prints the model, the embedding and its addresses:
 
   ```text
     Starting localmelo gateway ...
-    Chat: ollama
+    Model: qwen3:8b on Ollama
     Embedding: none
     Gateway: http://127.0.0.1:8401
     Web UI:  http://127.0.0.1:8401/

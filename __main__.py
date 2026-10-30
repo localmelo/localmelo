@@ -2203,8 +2203,15 @@ def main() -> None:
     if args.reconfigure or (not cfg.is_configured and not allow_unconfigured):
         if not args.reconfigure and not _on_a_terminal():
             _exit_without_setup()
+        # `melo serve` before any setup asks as the first run does: outside
+        # developer mode, a server found on this computer is offered before the
+        # full backend menu. --reconfigure keeps the menu, as its docs say.
+        developer = bool(getattr(args, "developer", False)) or (
+            cfg.ui.mode == "developer"
+        )
+        guided = {} if developer or args.reconfigure else {"guided": True}
         with _setup_questions():
-            setup_cfg = run_backend_setup()
+            setup_cfg = run_backend_setup(**guided)
         if setup_cfg is None:
             return
         cfg = setup_cfg
@@ -2682,6 +2689,21 @@ def _set_retrieval_extra_body(
     provider.extra_body_by_kind = {"retrieve": prepare_extra_body(body)}
 
 
+def _model_line(cfg: Config) -> str:
+    """The startup line's model: ``Qwen3-8B-4bit on oMLX``, as the banner names it."""
+    key = cfg.chat_backend
+    if not key:
+        return "none yet (the web console sets one up)"
+    from localmelo.support.backends.registry import get_backend
+
+    try:
+        label = get_backend(key).label(cfg)
+    except KeyError:  # a backend nothing registered: say its key
+        label = key
+    model = getattr(getattr(cfg, key, None), "chat_model", "")
+    return f"{model} on {label}" if model else label
+
+
 def _start_gateway(cfg: Config) -> None:
     """Thin seam for gateway startup — keeps the lazy import local."""
     from localmelo.support.gateway import bind_free_port, start_gateway
@@ -2692,7 +2714,7 @@ def _start_gateway(cfg: Config) -> None:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
     print("\n  Starting localmelo gateway ...")
-    print(f"  Chat: {cfg.chat_backend}")
+    print(f"  Model: {_model_line(cfg)}")
     print(f"  Embedding: {cfg.embedding_backend}")
     print(f"  Gateway: http://{host}:{cfg.gateway.port}")
     print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")

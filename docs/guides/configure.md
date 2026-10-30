@@ -116,7 +116,7 @@ stop the gateway.
 In default mode, `melo setup` starts as the first
 run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
 full menu follows only after `n`, when no server is found, or with
-`--developer`.
+`--developer`. `melo serve` before any setup asks the same first.
 
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers the saved backend; with

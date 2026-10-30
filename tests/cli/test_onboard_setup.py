@@ -272,6 +272,25 @@ def test_a_guided_reconfigure_does_not_repeat_the_first_line(
     assert "melo uses a model server" not in capsys.readouterr().out
 
 
+def test_a_guided_first_run_says_what_melo_needs_then_offers_the_server(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`melo serve` before any setup asks what a first run asks, not the full menu."""
+    answers = _Answers("")
+    cfg = _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
+    assert cfg is not None
+    assert (cfg.chat_backend, cfg.vllm.chat_url, cfg.vllm.chat_model) == (
+        "vllm",
+        URL,
+        "Qwen3-8B",
+    )
+    assert answers.prompts == ["Use it? [Y/n]: "]
+    lines = capsys.readouterr().out.split("\n")
+    assert lines[0].startswith("melo uses a model server on this computer (")
+    assert lines[1] == f"Found a model server at {URL} (1 model)."
+    assert not any("Welcome" in line for line in lines)
+
+
 def test_hints_are_wrapped_at_word_boundaries_to_the_terminal_width(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
