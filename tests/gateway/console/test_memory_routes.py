@@ -86,7 +86,10 @@ async def test_records_list_undo_and_a_second_chat_recalls_them(
 ) -> None:
     console, client, llms = setup
     first = await say(
-        client, tmp_path, "I prefer short answers; my group meeting is on Thursdays"
+        client,
+        tmp_path,
+        "Remember that I prefer short answers; remember that my group meeting is "
+        "on Thursdays",
     )
     said = await memory_event(console, first)
     assert [r["text"] for r in said["remembered"]] == [
@@ -97,7 +100,7 @@ async def test_records_list_undo_and_a_second_chat_recalls_them(
     assert listed["on"] is True
     assert [r["topic"] for r in listed["records"]] == ["about", "preferences"]
     assert listed["records"][0]["source"].startswith(
-        "you said it · chat “I prefer short"
+        "you said it · chat “Remember that I prefer short"
     )
 
     second = await say(client, tmp_path, "when is my group meeting?")

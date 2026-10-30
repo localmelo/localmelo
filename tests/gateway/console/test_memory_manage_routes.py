@@ -42,11 +42,11 @@ async def test_a_note_says_where_it_came_from_and_whether_it_was_reworded(
     setup: Setup, tmp_path: Path  # noqa: F811
 ) -> None:
     console, client, _ = setup
-    session_id = await say(client, tmp_path, "I prefer short answers")
+    session_id = await say(client, tmp_path, "Remember that I prefer short answers")
     await console.memory.drain()
     body = await notes(client)
     (row,) = body["records"]
-    assert row["from"].startswith("from chat “I prefer short answers”, ")
+    assert row["from"].startswith("from chat “Remember that I prefer short answers”, ")
     assert (row["chat_gone"], row["edited"], row["session_id"]) == (
         False,
         False,
@@ -61,7 +61,7 @@ async def test_rewording_a_note_returns_it_and_refuses_what_cannot_be_kept(
     setup: Setup, tmp_path: Path  # noqa: F811
 ) -> None:
     _, client, _ = setup
-    await say(client, tmp_path, "My dentist is Lee Park")
+    await say(client, tmp_path, "Remember that my dentist is Lee Park")
     (row,) = (await notes(client))["records"]
     url = f"/api/memory/records/{row['id']}"
     done = await client.patch(url, json={"text": "Your dentist is Kim Soo."})
@@ -86,7 +86,7 @@ async def test_a_deleted_chat_keeps_its_notes_and_says_so(
     setup: Setup, tmp_path: Path  # noqa: F811
 ) -> None:
     console, client, _ = setup
-    session_id = await say(client, tmp_path, "My dentist is Lee Park")
+    session_id = await say(client, tmp_path, "Remember that my dentist is Lee Park")
     await console.memory.drain()
     assert (await client.delete(f"/api/sessions/{session_id}")).status_code == 204
     body = await notes(client)
@@ -99,8 +99,8 @@ async def test_a_deleted_chat_can_forget_its_notes_too(
     setup: Setup, tmp_path: Path  # noqa: F811
 ) -> None:
     console, client, _ = setup
-    keep = await say(client, tmp_path, "I live in Pittsburgh")
-    forget = await say(client, tmp_path, "My dentist is Lee Park")
+    keep = await say(client, tmp_path, "Remember that I live in Pittsburgh")
+    forget = await say(client, tmp_path, "Remember that my dentist is Lee Park")
     await console.memory.drain()
     assert (
         await client.delete(f"/api/sessions/{forget}?notes=forget")
@@ -115,7 +115,11 @@ async def test_forget_everything_needs_its_flag_and_reports_what_went(
     setup: Setup, tmp_path: Path  # noqa: F811
 ) -> None:
     console, client, _ = setup
-    await say(client, tmp_path, "I prefer short answers; my dentist is Lee Park")
+    await say(
+        client,
+        tmp_path,
+        "Remember that I prefer short answers; remember that my dentist is Lee Park",
+    )
     await console.memory.drain()
     assert (await client.delete("/api/memory/records")).status_code == 400
     assert len((await notes(client))["records"]) == 2
@@ -138,7 +142,7 @@ async def test_the_switch_is_saved_and_a_chat_with_memory_off_remembers_nothing(
     off = await client.put("/api/memory", json={"on": False})
     assert (off.status_code, off.json()) == (200, {"on": False})
     assert config.load().memory.across_chats is False
-    await say(client, tmp_path, "I prefer short answers")
+    await say(client, tmp_path, "Remember that I prefer short answers")
     body = await notes(client)
     assert (body["on"], body["records"]) == (False, [])
     assert (await client.put("/api/memory", json={"on": True})).json() == {"on": True}
@@ -168,7 +172,9 @@ async def test_an_open_chat_is_rebuilt_when_a_note_its_instructions_pin_changes(
     """A chat's instructions list About-you and Preferences notes; one that changed must not stay."""
     console, client, _ = setup
     await say(
-        client, tmp_path, "I prefer short answers; Remember that Sam has the lab keys"
+        client,
+        tmp_path,
+        "Remember that I prefer short answers; Remember that Sam has the lab keys",
     )
     by_topic = {r["topic"]: r["id"] for r in (await notes(client))["records"]}
     assert set(by_topic) == {"preferences", "people"}

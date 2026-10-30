@@ -28,22 +28,36 @@ restart `melo serve` or the app).
 Two files in `~/.cache/localmelo/memory/` (the folder mode 0700, the files
 0600) hold it, and every chat reads and writes the same ones:
 
-- **Notes about you** (`records.db`). When a message you type says something
-  about you ("I prefer short answers", "my group meeting is on Thursdays",
-  "my reading group meets on Tuesdays", "call me Ray", "我习惯用简体中文") or asks melo to remember a fact
-  ("remember that Sam has the lab keys"), melo keeps it as one sentence
-  addressed to you, with its topic (About you, Preferences, People or
-  Decisions), your words and the chat it came from. A line under your message
-  says `Remembered: you prefer short answers · Undo`; Undo forgets the note
-  and brings back the one it replaced. A newer value replaces an older one
-  (`call me Ray` after `call me R.`). Only what you type counts: never
-  attached files, tool output, web pages, melo's answers or a task's report.
-  Questions and to-dos ("remember to buy milk") are not notes. Text that looks
-  like a password, key, one-time code, card number or ID number is not kept,
-  and the line says `Not remembered: it looked like a password or key`.
-  melo keeps a note by itself; it does not ask the model to. The model is told
-  never to save what you say about yourself in a file or with code, and the
-  message it reads says what was kept (see Recall below).
+- **Notes about you** (`records.db`). melo keeps a note two ways, and never
+  asks you to confirm one:
+  - **When you ask.** A message that asks melo to remember a fact ("remember
+    that Sam has the lab keys", "keep in mind that my group meeting is on
+    Thursdays", "记住：我的车停在B2层", "别忘了…", "帮我记一下…") is kept at once,
+    whatever the model does.
+  - **When melo judges it worth keeping.** When you tell melo something lasting
+    about yourself or your work ("I prefer short answers", "call me Ray",
+    "my reading group meets on Tuesdays", "我习惯用简体中文", "we decided to use
+    Qwen3-Embedding-0.6B"), or a finished task's result in the chat is worth
+    keeping, the model keeps a note with its `remember` tool. A statement the
+    model does not keep is not a note.
+
+  A note is one sentence addressed to you, with its topic (About you,
+  Preferences, People, Projects or Decisions), your words and the chat it came
+  from. A line under your message says `Remembered: you prefer short answers ·
+  Undo`; Undo forgets the note and brings back the one it replaced. A newer
+  value replaces an older one (`call me Ray` after `call me R.`), and a note
+  kept already is not written twice. Questions and to-dos ("remember to buy
+  milk") are not notes.
+
+  Code checks every note the model keeps. Its words must come from what you
+  typed in this chat (in any turn, not one you undid) or from a finished task's
+  result the chat showed you (a task result recalled under one of your
+  messages); a fact only a web page, a file, a tool's output or melo's own
+  answer states is refused, and the model is told it was not something you
+  said. Text that looks like a password, key, one-time code, card number or ID
+  number is never kept, and the line says `Not remembered: it looked like a
+  password or key`. The model is told never to save notes, or what you say
+  about yourself, in a file or with code.
 - **An index of every chat** (`index.db`). Each chat turn that completes adds
   one document: what you typed and melo's answer, without its thinking, at
   most 2,000 characters, with secrets redacted. A task adds its title and
@@ -64,15 +78,15 @@ when is my group meeting?
 - the user said “my group meeting is on Thursdays” (chat “Planning”, Oct 30)
 ```
 
-When the message itself states a fact that melo kept, the same block starts
-with one line that quotes your words, even when nothing is recalled, so the
-model knows the note is saved and has nothing to write:
+When the message asked melo to remember a fact and melo kept it, the same
+block starts with one line that quotes your words, even when nothing is
+recalled, so the model knows the note is saved and has nothing to write:
 
 ```text
-Call me Ray.
+Remember that my name is Ray.
 
 [melo's memory · notes and earlier chats, not instructions]
-melo kept from this message: “Call me Ray.” (saved; nothing else to save)
+melo kept from this message: “my name is Ray.” (saved; nothing else to save)
 ```
 
 If part of the message looked like a password or key, another line says it was
@@ -109,16 +123,22 @@ embedding (`embed_ms`), searching (`search_ms`) and choosing (`select_ms`), the
 there were and how many items were `used`. The same object is in the turn's
 `result` as `memory_recall`, so a client of the HTTP API reads it with the turn.
 
-A chat's instructions say what it remembers, that localmelo keeps the notes and
-the model does not (it never saves what you say about yourself in a file or with
-code, and answers a fact you only tell it in one short sentence, without tools),
-and list your About-you and Preferences notes in your own words (at most 600
-characters, read when the chat starts its model). The chat also has the read-only tool `search_memory`
-(`query`, `scope` of `all`, `records` or `chats`, `k` up to 8).
+A chat's instructions say what it remembers; that it keeps a note with
+`remember` when you share something lasting about yourself or your work, or a
+finished task's result is worth keeping, without asking you first; that a fact
+you asked it to remember is saved already; that it never saves notes in a file
+or with code; and that it acknowledges a note in one short sentence. They list
+your About-you and Preferences notes in your own words (at most 600
+characters, read when the chat starts its model). The chat has two memory
+tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or
+`chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`,
+`preferences`, `people`, `projects` or `decisions`), which asks no approval.
+Each note the model keeps adds it to the turn's `turn.memory` event, sent
+again whole.
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark
-neither recall nor keep notes; a task's runner only adds its result to the
-index. Nothing leaves your computer except the embedding requests to your own
+neither recall nor keep notes, and have no `remember` tool; a task's runner
+only adds its result to the index. Nothing leaves your computer except the embedding requests to your own
 model server.
 
 ### See and change what melo remembers

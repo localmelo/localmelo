@@ -25,7 +25,7 @@ from localmelo.support.backends import discovery
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.cli.test_choice_lists import DOWN, ENTER, ESC, seen, typed
-from localmelo.tests.memory.chat_memory_helpers import vector
+from localmelo.tests.memory.chat_memory_helpers import teach, vector
 
 HOLDER = "test-host:1:command"
 
@@ -47,7 +47,7 @@ async def _seed(home: Path) -> None:
             turn = await store.begin_turn(
                 None, text, holder=HOLDER, new_session=NewSession()
             )
-            await memory.before_turn(store, turn, text)
+            await teach(memory, store, turn, text)
     finally:
         await memory.aclose()
         await store.aclose()

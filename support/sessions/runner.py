@@ -231,7 +231,8 @@ class SessionRunner:
     run and stores the picture files it made or changed, and those its answer
     names, as one ``turn.pictures`` event (:mod:`~.pictures`). With *memory*,
     each turn of a chat recalls what matches its typed text and keeps what it
-    states (one ``turn.memory`` event), and a completed turn is indexed;
+    asks to remember (a ``turn.memory`` event, queued again whole when the
+    model keeps a note with ``remember``), and a completed turn is indexed;
     *index_only* (a task's runner) only indexes.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
@@ -707,20 +708,28 @@ class SessionRunner:
         return self._outcome(turn, task, run_exc, returned)
 
     async def _recall(self, turn: _Turn) -> str:
-        """The turn's text with what memory recalls for it; queues ``turn.memory``."""
+        """The turn's text with what memory recalls for it; queues ``turn.memory``.
+
+        A note the model keeps during the run queues the event again, whole.
+        """
         assert self._memory is not None
+        info = turn.turn
+
+        def emit(data: Mapping[str, Any]) -> None:
+            ids = {"turn": info.turn, "turn_id": info.id}
+            self._enqueue(turn, MEMORY_EVENT_TYPE, {**ids, **data})
+
         try:
-            found = await self._memory.before_turn(self._store, turn.turn, turn.typed)
+            found = await self._memory.before_turn(
+                self._store, info, turn.typed, emit=emit
+            )
         except Exception:
             logger.warning("Memory across chats failed for this turn", exc_info=True)
             return turn.text
         data = found.event()
         if data is not None:
             turn.recall = data["recall"]
-            info = turn.turn
-            self._enqueue(
-                turn, MEMORY_EVENT_TYPE, {"turn": info.turn, "turn_id": info.id, **data}
-            )
+            emit(data)
         if found.block and len(turn.text) + len(found.block) <= MAX_QUERY_LEN:
             return turn.text + found.block
         return turn.text

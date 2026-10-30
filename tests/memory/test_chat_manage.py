@@ -17,7 +17,7 @@ import pytest
 
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions.store import NewSession, SessionStore
-from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
+from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding, teach
 
 HOLDER = "test-host:1:manage"
 
@@ -58,7 +58,7 @@ async def _chat(store: SessionStore, title: str, text: str, answer: str = "") ->
 
 async def _say(memory: ChatMemory, store: SessionStore, sid: str, text: str):  # type: ignore[no-untyped-def]
     turn = (await store.list_turns(sid))[-1]
-    return await memory.before_turn(store, turn, text)
+    return await teach(memory, store, turn, text)
 
 
 async def _recalled(memory: ChatMemory, query: str) -> list[str]:
