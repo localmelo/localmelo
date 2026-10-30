@@ -195,7 +195,7 @@ uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SI
 | `--daemon install\|uninstall\|status` | background service (macOS) | 后台服务（macOS） |
 | `-h`, `--help` | help | 帮助 |
 
-以下内容始终保持英文，并使用代码字体：配置键（`chat_backend`、`request_timeout_s`、`extra_body`、…）、环境变量（`LOCALMELO_PERSIST_MEMORY`、`LOCALMELO_MEMORY_DIR`）、后端键和 `none`、工具名、`RunResult` 字段名、HTTP 路由、文件名和路径。后端显示名：MLC LLM（`mlc`）、Ollama（`ollama`）、vLLM（`vllm`）、SGLang（`sglang`）、OpenAI（`openai`）、Anthropic（`anthropic`）、Google Gemini（`gemini`）、NVIDIA（`nvidia`）。
+以下内容始终保持英文，并使用代码字体：配置键（`chat_backend`、`request_timeout_s`、`extra_body`、…）、环境变量（`LOCALMELO_PERSIST_MEMORY`、`LOCALMELO_MEMORY_DIR`）、后端键和 `none`、工具名、`RunResult` 字段名、HTTP 路由、文件名和路径。后端显示名：MLC LLM（`mlc`）、Ollama（`ollama`）、vLLM（`vllm`）、oMLX（`vllm`，也可写作 `omlx`）、SGLang（`sglang`）、OpenAI（`openai`）、Anthropic（`anthropic`）、Google Gemini（`gemini`）、NVIDIA（`nvidia`）。
 
 **网站标签**
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from unittest import mock
 
+import httpx
+
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.support.backends import discovery
 from localmelo.support.backends.cloud.anthropic_api import AnthropicBackend
 from localmelo.support.backends.cloud.gemini_api import GeminiBackend
 from localmelo.support.backends.cloud.nvidia_api import NvidiaBackend
@@ -44,6 +47,13 @@ def _local_cfg(
         ),
     )
     return cfg
+
+
+async def _list_an_omlx_server(url: str) -> None:
+    """List the models of *url*, which answers as oMLX does (no network)."""
+    reply = {"data": [{"id": "Qwen3-8B-4bit", "owned_by": "omlx"}]}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+    await discovery.list_models("vllm", url, transport=transport)
 
 
 def _cloud_cfg(
@@ -247,7 +257,39 @@ class TestVllmBackendProperties:
         assert VllmBackend().key == "vllm"
 
     def test_display_name(self) -> None:
-        assert VllmBackend().display_name == "vLLM"
+        # The key stands for oMLX, vLLM and any other OpenAI-compatible server.
+        assert VllmBackend().display_name == "OpenAI-compatible server"
+
+
+class TestVllmLabel:
+    def test_an_unknown_server_is_an_openai_compatible_server(self) -> None:
+        cfg = _local_cfg("vllm", chat_url="http://localhost:8000")
+        assert VllmBackend().label(cfg) == "OpenAI-compatible server"
+        assert VllmBackend().label(cfg, embedding=True) == "OpenAI-compatible server"
+
+    def test_a_config_that_says_omlx_is_omlx(self) -> None:
+        cfg = _local_cfg("vllm", chat_url="http://localhost:8000")
+        cfg.chat_alias = "omlx"
+        assert VllmBackend().label(cfg) == "oMLX"
+        # The embedding backend is named on its own.
+        assert VllmBackend().label(cfg, embedding=True) == "OpenAI-compatible server"
+        cfg.embedding_alias = "omlx"
+        assert VllmBackend().label(cfg, embedding=True) == "oMLX"
+
+    async def test_a_listing_that_named_omlx_makes_it_omlx(self) -> None:
+        cfg = _local_cfg("vllm", chat_url="http://localhost:8000")
+        cfg.vllm.embedding_url = "http://localhost:8001/v1"
+        await _list_an_omlx_server(cfg.vllm.chat_url)
+        assert VllmBackend().label(cfg) == "oMLX"
+        # The embedding label follows the embedding URL, else the chat URL.
+        assert VllmBackend().label(cfg, embedding=True) == "OpenAI-compatible server"
+        cfg.vllm.embedding_url = ""
+        assert VllmBackend().label(cfg, embedding=True) == "oMLX"
+
+    def test_other_backends_keep_their_display_name(self) -> None:
+        cfg = _local_cfg("ollama")
+        assert OllamaBackend().label(cfg) == "Ollama"
+        assert OllamaBackend().label(cfg, embedding=True) == "Ollama"
 
 
 class TestVllmValidation:
@@ -266,6 +308,35 @@ class TestVllmValidation:
         cfg = _local_cfg("vllm", chat_url="http://localhost:8000", chat_model="")
         errors = VllmBackend().validate(cfg)
         assert any("chat_model" in e for e in errors)
+
+    def test_the_errors_name_the_server_as_the_labels_do(self) -> None:
+        cfg = _local_cfg("vllm", chat_url="", chat_model="")
+        assert VllmBackend().validate(cfg) == [
+            "[vllm] chat_url is empty. "
+            "Set it to your OpenAI-compatible server URL (e.g. http://localhost:8000).",
+            "[vllm] chat_model is empty. "
+            "Specify the OpenAI-compatible server model name.",
+        ]
+        cfg.chat_alias = "omlx"
+        assert VllmBackend().validate(cfg) == [
+            "[vllm] chat_url is empty. "
+            "Set it to your oMLX URL (e.g. http://localhost:8000).",
+            "[vllm] chat_model is empty. Specify the oMLX model name.",
+        ]
+
+    def test_the_embedding_errors_name_the_server_too(self) -> None:
+        cfg = _local_cfg("vllm")
+        assert VllmBackend().validate_embedding(cfg) == [
+            "[vllm] embedding_url is empty. "
+            "Set it to your OpenAI-compatible server URL for embedding.",
+            "[vllm] embedding_model is empty. "
+            "Set an OpenAI-compatible server embedding model name.",
+        ]
+        cfg.embedding_alias = "omlx"
+        assert VllmBackend().validate_embedding(cfg) == [
+            "[vllm] embedding_url is empty. Set it to your oMLX URL for embedding.",
+            "[vllm] embedding_model is empty. Set an oMLX embedding model name.",
+        ]
 
 
 class TestVllmBuildChatProvider:

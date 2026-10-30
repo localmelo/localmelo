@@ -43,6 +43,19 @@ def _no_env_retention(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _forget_servers() -> None:
+    """Start every test knowing nothing about which server is oMLX.
+
+    A model listing remembers, per URL, whether the server named oMLX as its
+    owner; the label of a later banner reads it. Without this a test that
+    lists an oMLX server would rename the same URL in another test.
+    """
+    from localmelo.support.backends import discovery
+
+    discovery.forget_servers()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_home(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:

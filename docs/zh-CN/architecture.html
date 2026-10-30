@@ -182,7 +182,7 @@
         <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
 
         <h3 id="c-config">配置和向导</h3>
-        <p><code>~/.cache/localmelo/config.toml</code> 记录对话后端、嵌入后端及其设置。在终端中第一次运行时，<code>melo</code> 用 <code>GET /v1/models</code> 查找模型服务器，询问地址和模型并保存：Ollama 服务器保存为 <code>ollama</code> 后端，其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>。服务器列出嵌入模型时，它会为长期记忆提供一个；<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">嵌入模型指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。配置向导（<code>melo --reconfigure</code>）会询问所有后端设置，向每个服务器发送测试请求，保存文件，然后打开交互式界面；加上 <code>--serve</code> 时则启动网关。直接模式和网关都根据这个文件创建智能体。</p>
+        <p><code>~/.cache/localmelo/config.toml</code> 记录对话后端、嵌入后端及其设置。在终端中第一次运行时，<code>melo</code> 用 <code>GET /v1/models</code> 查找模型服务器，询问地址和模型并保存：Ollama 服务器保存为 <code>ollama</code> 后端，其他兼容 OpenAI 接口的服务器（包括 oMLX）保存为 <code>vllm</code>。服务器列出嵌入模型时，它会为长期记忆提供一个；<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">嵌入模型指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。配置向导（<code>melo --reconfigure</code>）会询问所有后端设置，向每个服务器发送测试请求，保存文件，然后打开交互式界面；加上 <code>--serve</code> 时则启动网关。直接模式和网关都根据这个文件创建智能体。</p>
         <p>关键文件：<code>support/config.py</code>、<code>support/onboard.py</code>、<code>support/onboard_probe.py</code>、<code>support/backends/discovery.py</code>。</p>
 
         <h3 id="c-providers">提供方</h3>
@@ -190,7 +190,7 @@
         <p>关键文件：<code>melo/contracts/providers.py</code>、<code>support/providers/llm/</code>、<code>support/providers/embedding/</code>。</p>
 
         <h3 id="c-backends">后端</h3>
-        <p>每个后端键对应一个适配器：<code>mlc</code>、<code>ollama</code>、<code>vllm</code> 和 <code>sglang</code> 用于你自己运行的服务器，<code>openai</code>、<code>anthropic</code>、<code>gemini</code> 和 <code>nvidia</code> 用于云端 API。每个适配器检查配置文件中属于自己的表，并创建提供方。后端只负责连接：模型服务器由你自己启动和停止。</p>
+        <p>每个后端键对应一个适配器：<code>mlc</code>、<code>ollama</code>、<code>vllm</code> 和 <code>sglang</code> 用于你自己运行的服务器（oMLX 使用 <code>vllm</code>），<code>openai</code>、<code>anthropic</code>、<code>gemini</code> 和 <code>nvidia</code> 用于云端 API。每个适配器检查配置文件中属于自己的表，并创建提供方。后端只负责连接：模型服务器由你自己启动和停止。</p>
         <p>关键文件：<code>support/backends/registry.py</code>、<code>base.py</code>、<code>local/</code>、<code>cloud/</code>。</p>
 
         <p><code>melo/sleep/</code>、<code>melo/memory/personalized/</code> 和 <code>support/melo_serving/</code> 中的代码，智能体目前还没有使用。<code>melo/memory/retrieval/</code> 和 <code>melo/memory/notes.py</code> 供循环中的召回和 <code>melo-retrieve</code> 使用；<code>support/scheduler/</code> 是调度策略核心及其模拟器，网关的门用它来调度网页工作区的聊天和控制台的轮次，<code>support/gateway/machine_monitor.py</code> 为工作区读取 GPU 锁和电池。</p>
@@ -254,7 +254,7 @@
           <li>网关：HTTP API、<code>/api</code> 下控制台的 API v2（health、会话、轮次、事件流、blob、提交查询、工具、授权、记忆和运行记录，以及创建会话并开始、重试、停止和审批其轮次的写入接口），两者都需要私有 Bearer 令牌或由 <code>melo --gateway-login</code> 一次性链接换来的浏览器会话 cookie（拒绝非回环监听，并在读取请求体之前检查 Host、Origin 和 fetch-metadata），只在空闲时响应关闭请求的会话，以及 <code>/</code> 上控制台的实时页面（会话列表、对话的轮次和通过 SSE 保存的事件、每个工具调用一张工作卡片、实时进度行、Stop、优先级标签和输入心跳；页面只访问 <code>/api</code>，使用配置的模型）。网页控制台的聊天和任务页面显示一行状态，数据来自 <code>GET /api/sessions/{id}/status</code>，包括缓存命中比例和空闲时间、上下文占用、步骤和任务计数，与终端显示相同的数字（<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>）。页面的对话和控制台轮次经过调度器的策略（默认 <code>off</code>），标题栏显示 GPU 锁和电池。旧的 <code>/v1/playground</code> 路由默认关闭，可用 <code>melo --serve --enable-playground</code> 显式启用，仍受认证保护，并使用已保存的本地后端和模型。已认证的端点探测允许手动输入 HTTP/HTTPS 地址但不跟随重定向；显式关闭或删除忙碌会话返回 409。网关还支持 macOS 后台服务，以及一个未签名的 arm64 开发应用：它把控制台包进原生窗口和菜单栏宿主，在自己的 <code>127.0.0.1:8401</code> 上启动网关，并在发出任何登录码前检查每次启动的标识符（<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 开发应用</a>）；它是原型，不是经过公证的发行版或 cask。</li>
           <li>控制台实时跟随每一种会话：聊天的轮次、worker 运行（<a href="https://github.com/localmelo/localmelo/pull/221">#221</a>）、带有 Live 部分的任务卡片（<a href="https://github.com/localmelo/localmelo/pull/224">#224</a>），以及只读并已脱敏的终端对话（<a href="https://github.com/localmelo/localmelo/pull/226">#226</a>）。头部的运行数量，以及 macOS 应用的菜单栏数量和退出对话框，会列出聊天、任务、运行和终端对话中当前正在运行的内容（<a href="https://github.com/localmelo/localmelo/pull/227">#227</a>）。</li>
           <li>网页控制台的欢迎页只在未配置模型或已配置的服务器无法连接时显示 “Connect a model”；终端中的 <code>/memory</code>、<code>/status</code> 和控制台的详情抽屉显示会话自己的工作窗口上限 <code>window_messages</code>（<a href="https://github.com/localmelo/localmelo/pull/230">#230</a>）。</li>
-          <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端。</li>
+          <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端；oMLX 通过 <code>vllm</code> 后端使用。</li>
           <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite，compress 模式下长期记忆是带类型的存储，记录带有类型、来源、状态、允许写入的信号和来源信息，每条候选都有对应的决定；保存的文字会先脱敏，保存的历史记录还包括每次模型调用及其推理，默认保留 30 天；Python API 还可以忘掉一个任务或全部记忆。compress 模式下，启发式笔记还会保留明确的英文否定句以及中文的居住或取消断言；检测到相反极性的相近断言会作为冲突保留，而不是被去重。</li>
           <li>脱敏覆盖 PEM 私钥块（OpenSSH、RSA、EC、DSA、PKCS#8、加密私钥和 PGP armor）：BEGIN 和 END 行保留，正文变为一行 <code>[redacted]</code>，适用于工具输出、保存的事件、日志和流式显示文本（<a href="https://github.com/localmelo/localmelo/pull/188">#188</a>）。</li>
           <li>推理笔记：<code>compress</code> 和 <code>compress+replay</code> 模式会在对话窗口旁的内存笔记库中，为每条回复及其代码草稿保留一条简短的笔记，并把它们排练成该次尝试的摘要（摘要写明成功的 <code>file_write</code> 路径、最后一次检查及其结果、它的决定和最终结果；Python 检查会使用可识别的运行器和安全的目标文件名，而不是引用代码的第一行，系统也不会推测 <code>python_exec</code> 写入的文件）；compress 模式还会在起始、尝试和步骤召回这些笔记、草稿和思考片段，以及其他任务的长期记忆有效记录（<code>--retriever</code>、<code>--recall-*</code> 和 <code>recall</code> 工具）。</li>

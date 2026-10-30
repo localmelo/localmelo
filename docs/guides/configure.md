@@ -6,25 +6,30 @@ This guide covers the first run, the setup wizard, and how to update or uninstal
 
 In a terminal with no config file, `melo` asks for a model server's URL and
 a chat model, saves the answers and opens the interactive UI. When the
-server also lists an embedding model, it asks once whether to use it:
+server also lists an embedding model, it asks once whether to use it. Here
+oMLX runs on port 8000 with three models, and the second is loaded:
 
 ```text
 $ melo
-No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example ollama serve), or enter its URL.
-Model server URL [http://127.0.0.1:8000/v1]: http://127.0.0.1:8080/v1
-Models on http://127.0.0.1:8080/v1:
-  [1] nomic-embed-text
-  [2] Qwen3-8B-4bit
+Found a model server at http://127.0.0.1:8000/v1 (3 models).
+Model server URL [http://127.0.0.1:8000/v1]:
+Models on http://127.0.0.1:8000/v1:
+  [1] Qwen3-Embedding-0.6B
+  [2] Qwen3-8B-4bit  (loaded)
   [3] Qwen3-32B-4bit
 Model [2]:
-✓ http://127.0.0.1:8080/v1 lists 3 models; using Qwen3-8B-4bit.
-Use nomic-embed-text for long-term memory? [Y/n]:
+✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
+Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
   30000 fills in the URL; one with a chat model comes first. Listing a
-  server's models sends `GET /v1/models` only. Saving the choice asks
+  server's models sends `GET /v1/models`. With several chat models, setup
+  also asks which are in memory, with `GET /v1/models/status` (oMLX) and
+  `GET /api/ps` (Ollama), one second each and without a key: it marks the
+  loaded ones `(loaded)` and makes the first the default, and with none
+  loaded there is no default, so type a number. Saving the choice asks
   `GET /api/version` once, to tell an Ollama server apart, and a `y` sends
   one `POST /v1/embeddings` probe of the offered model.
 - The embedding question is asked only when the list holds an embedding
@@ -32,8 +37,11 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   chat backend's key, its URL and the offered model. A failed probe, `n`, or
   no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
-  `ollama` backend, and any other OpenAI-compatible server as `vllm`, and
-  keeps the file's other settings. With no embedding it writes:
+  `ollama` backend, an oMLX server (its model listing names oMLX as the owner
+  of every model) as `omlx`, and any other OpenAI-compatible server as
+  `vllm`, and keeps the file's other settings. `omlx` is another name for the
+  `vllm` backend, so the settings stay in the `[vllm]` table. With no
+  embedding it writes:
 
   ```toml
   # an Ollama server
@@ -46,30 +54,30 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   ```
 
   ```toml
-  # any other OpenAI-compatible server
-  chat_backend = "vllm"
+  # an oMLX server (another OpenAI-compatible server: "vllm")
+  chat_backend = "omlx"
   embedding_backend = "none"
 
   [vllm]
-  chat_url = "http://127.0.0.1:8080/v1"
+  chat_url = "http://127.0.0.1:8000/v1"
   chat_model = "Qwen3-8B-4bit"
   ```
 
   A `y` writes the chat backend's embedding fields instead of `"none"`:
 
   ```toml
-  chat_backend = "vllm"
-  embedding_backend = "vllm"
+  chat_backend = "omlx"
+  embedding_backend = "omlx"
 
   [vllm]
-  chat_url = "http://127.0.0.1:8080/v1"
+  chat_url = "http://127.0.0.1:8000/v1"
   chat_model = "Qwen3-8B-4bit"
-  embedding_url = "http://127.0.0.1:8080/v1"
-  embedding_model = "nomic-embed-text"
+  embedding_url = "http://127.0.0.1:8000/v1"
+  embedding_model = "Qwen3-Embedding-0.6B"
   ```
 
   The `ollama` backend chats on Ollama's native API with a 300 s request
-  timeout; `vllm` uses 120 s. A `chat_url` with or without `/v1` works for
+  timeout; `vllm` and `omlx` use 120 s. A `chat_url` with or without `/v1` works for
   Ollama: its version endpoint is asked at the root, and chat requests drop
   a trailing `/v1`.
 

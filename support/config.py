@@ -54,6 +54,8 @@ VALID_CHAT_BACKENDS = (
     "nvidia",
 )
 VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
+# Another spelling of "vllm" that a config file may use for either backend.
+OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
@@ -219,6 +221,10 @@ class Config:
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
     )
     embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
+    # The file spelled the backend "omlx", an alias of "vllm": the backend
+    # field says "vllm" and this says how save() writes it back (see load()).
+    chat_alias: str = field(default="", repr=False, compare=False)
+    embedding_alias: str = field(default="", repr=False, compare=False)
 
     # A path to an MCP servers JSON file the CLI and the gateway both read.
     mcp_config: str = ""
@@ -744,6 +750,10 @@ def load() -> Config:
     raw_emb = data.get("embedding_backend", "")
     cfg.chat_backend = _migrate_backend_key(raw_chat, data)
     cfg.embedding_backend = _migrate_embedding_key(raw_emb)
+    # "omlx" is another spelling of "vllm" (one backend, one [vllm] table):
+    # everything reads "vllm", and save() writes the spelling back.
+    cfg.chat_alias = raw_chat if raw_chat == OMLX_ALIAS else ""
+    cfg.embedding_alias = raw_emb if raw_emb == OMLX_ALIAS else ""
 
     # -- Load local backend sections --
     for section in _LOCAL_SECTIONS:
@@ -833,6 +843,8 @@ def _migrate_backend_key(raw: str, data: dict) -> str:
     """Migrate old chat_backend keys to new ones."""
     if raw == "mlc-llm":
         return "mlc"
+    if raw == OMLX_ALIAS:
+        return "vllm"
     if raw == "cloud_api":
         provider = data.get("cloud_api", {}).get("provider", "")
         return _CLOUD_API_PROVIDER_MIGRATION.get(provider, raw)
@@ -843,6 +855,8 @@ def _migrate_embedding_key(raw: str) -> str:
     """Migrate old embedding_backend keys to new ones."""
     if raw == "mlc-llm":
         return "mlc"
+    if raw == OMLX_ALIAS:
+        return "vllm"
     return raw
 
 
@@ -981,12 +995,19 @@ def _toml_value(value: Any) -> str:
     raise ConfigError(f"Cannot write {type(value).__name__} value {value!r} to TOML")
 
 
+def _spelling(backend: str, alias: str) -> str:
+    """The backend key as the file spells it: the alias stands for ``vllm``."""
+    return alias if backend == "vllm" and alias else backend
+
+
 def save(cfg: Config) -> None:
     os.makedirs(config_dir(), exist_ok=True)
 
     lines: list[str] = []
-    lines.append(f"chat_backend = {_toml_string(cfg.chat_backend)}")
-    lines.append(f"embedding_backend = {_toml_string(cfg.embedding_backend)}")
+    chat = _spelling(cfg.chat_backend, cfg.chat_alias)
+    embedding = _spelling(cfg.embedding_backend, cfg.embedding_alias)
+    lines.append(f"chat_backend = {_toml_string(chat)}")
+    lines.append(f"embedding_backend = {_toml_string(embedding)}")
     # Top-level keys go before the first table. Only a value that is set
     # is written, so a config without one is saved as it was before.
     if cfg.request_timeout_s is not None:

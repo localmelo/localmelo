@@ -45,7 +45,9 @@ class FakeChatServer:
 
     Once ``replies`` is empty, every reply is the final answer ``done``.
     ``bodies`` keeps the body of every chat request, in order. ``GET /models``
-    lists ``models``; ``POST /embeddings`` answers a two-value vector.
+    lists ``models``, each with ``owned_by`` when that is set (``"omlx"`` makes
+    this server answer as oMLX does); ``POST /embeddings`` answers a two-value
+    vector.
     """
 
     def __init__(self) -> None:
@@ -53,6 +55,7 @@ class FakeChatServer:
         self.requests = 0
         self.bodies: list[dict[str, Any]] = []
         self.models = ["fake-model"]
+        self.owned_by = ""
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -60,8 +63,12 @@ class FakeChatServer:
                 if not self.path.endswith("/models"):
                     self.send_error(404)
                     return
+                owner = {"owned_by": server.owned_by} if server.owned_by else {}
                 body = json.dumps(
-                    {"object": "list", "data": [{"id": m} for m in server.models]}
+                    {
+                        "object": "list",
+                        "data": [{"id": m, **owner} for m in server.models],
+                    }
                 ).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

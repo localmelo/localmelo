@@ -35,6 +35,14 @@ class BaseBackend(abc.ABC):
     def display_name(self) -> str:
         """Human-readable label for UI / onboarding."""
 
+    def label(self, cfg: Config, *, embedding: bool = False) -> str:
+        """What a banner or a status row calls the server *cfg* names.
+
+        :attr:`display_name` unless the backend can tell more from *cfg*;
+        *embedding* asks for the embedding server's label.
+        """
+        return self.display_name
+
     # ── Shared tokenizer (non-abstract) ────────────────────────
 
     @staticmethod

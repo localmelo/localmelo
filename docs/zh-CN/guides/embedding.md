@@ -60,7 +60,7 @@ Ollama 的 `embedding_url` 不带 `/v1`，与它的 `chat_url` 一样；后端�
 
 ## oMLX
 
-oMLX 在同一个端点提供嵌入和对话服务。将模型放入其模型目录，保持对话服务器不变，并检查 oMLX 列出的 ID：
+oMLX 在同一个端点提供嵌入和对话服务。将模型放入其模型目录，保持对话服务器不变。请在 Qwen3-Embedding 模型的文件夹名中保留 `embed`，如 `Qwen3-Embedding-0.6B`：oMLX 通过名称识别这个模型。然后检查 oMLX 列出的 ID：
 
 ```bash
 curl -sS http://127.0.0.1:8000/v1/models
@@ -69,11 +69,11 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
 ```
 
-`GET /v1/models` 返回 ID 但不返回类型，因此无法告诉你哪些 ID 是嵌入模型：上面的嵌入请求才是检查。模型 ID 由 oMLX 决定，通常是文件夹名称。然后将 `vllm` 后端指向 oMLX，并添加嵌入字段：
+`GET /v1/models` 返回 ID 但不返回类型，因此无法告诉你哪些 ID 是嵌入模型：上面的嵌入请求才是检查。模型 ID 由 oMLX 决定，通常是文件夹名称。然后把嵌入字段添加到保存 oMLX 对话设置的 `[vllm]` 表中：
 
 ```toml
-chat_backend = "vllm"
-embedding_backend = "vllm"
+chat_backend = "omlx"
+embedding_backend = "omlx"
 
 [vllm]
 chat_url = "http://127.0.0.1:8000/v1"
@@ -156,7 +156,7 @@ embedding_model = "nomic-embed-text"
 
 ## 会有哪些变化
 
-- 交互式界面横幅的记忆行会显示后端和模型，例如 `long-term memory · vLLM · Qwen3-Embedding-0.6B`；没有嵌入后端时显示 `no long-term memory · melo --reconfigure adds one`（在 `--base-url` 会话中则显示 `--embedding-base-url adds one`）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
+- 交互式界面横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）；没有嵌入后端时显示 `no long-term memory · melo --reconfigure adds one`（在 `--base-url` 会话中则显示 `--embedding-base-url adds one`）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
 - 新建的长期记忆存储初始为空。运行结束和步骤完成时，符合条件的条目可能被接纳；已有的纯文本条目不会重新生成嵌入。
 - 更换模型会改变向量空间。已存向量的维度与新模型不同时，该向量会被跳过，因此旧条目不再参与排序，而不会破坏召回。要回收空间，请停止 localmelo 并删除 `~/.cache/localmelo/memory/long_term.db*`；见[重置记忆](memory.md#reset-memory)。
 - 网页工作区也有连接设置。见[网页工作区](web-console.md#web-workspace)。

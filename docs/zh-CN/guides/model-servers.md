@@ -2,13 +2,13 @@
 
 # 模型服务器指南
 
-本指南说明如何自行运行模型服务器并让 localmelo 连接到它，涵盖 oMLX、Ollama、MLC LLM、vLLM、SGLang 和云端 API。选择后端时请阅读本指南；设置名称和默认值见[配置参考](../reference/configuration.md)。
+本指南说明如何自行运行模型服务器并让 localmelo 连接到它，涵盖 oMLX、Ollama、MLC LLM、vLLM、SGLang 和云端 API。选择后端时请阅读本指南；设置名称和默认值见[配置参考](../reference/configuration.md)。在搭载 Apple silicon 的 Mac 上，推荐使用本地服务器 oMLX；在其他系统上，可以用 Ollama 作为替代。
 
 <a id="serve-a-model-with-omlx"></a>
 
 ## 使用 oMLX 提供模型服务
 
-[oMLX](https://github.com/jundot/omlx) 在搭载 Apple silicon 且运行 macOS 15 或更新版本的 Mac 上，通过 OpenAI 兼容 API 提供 MLX 模型服务。要用它替代 Ollama：
+[oMLX](https://github.com/jundot/omlx) 在搭载 Apple silicon 且运行 macOS 15 或更新版本的 Mac 上，通过 OpenAI 兼容 API 提供 MLX 模型服务。localmelo 支持把它作为本地服务器：首次运行时的设置会在 8000 端口找到它，并询问它哪些模型已加载。在配置文件中它是 `vllm` 后端，也可写作 `omlx`；原因见 [oMLX](model-servers.md#omlx)。要用它替代 Ollama：
 
 1. 使用 Homebrew 安装 oMLX：
 
@@ -17,7 +17,7 @@
    brew install jundot/omlx/omlx
    ```
 
-   oMLX macOS 应用也会安装该命令，路径为 `~/.omlx/bin/omlx`。其他安装方式见其 [README](https://github.com/jundot/omlx#install)（英文）。
+   oMLX macOS 应用也会安装该命令，路径为 `~/.omlx/bin/omlx`。其他安装方式见其 [README](https://github.com/jundot/omlx#install)（英文）。上面的 Homebrew 命令安装的 oMLX 不带可选的原生内核；少数模型系列（例如 Qwen3.5）需要这些内核才能全速运行。应用已内置这些内核，README 说明了 Homebrew 的相关选项。
 
 2. 在一个模型目录中，为每个模型分别建立文件夹。oMLX 会提供每个包含模型的子文件夹（其中有 `config.json` 和权重），子文件夹名就是模型 ID。例如，使用 Hugging Face 命令行（`hf`，通过 `uv tool install huggingface_hub` 安装）：
 
@@ -31,7 +31,7 @@
    omlx serve --model-dir ~/models --port 8000
    ```
 
-   它监听 `http://127.0.0.1:8000`。oMLX 会将 `--model-dir` 和 `--port` 保存在 `settings.json` 中（默认为 `~/.omlx` 下），省略选项时会使用这些值。因此，先前保存的端口会覆盖默认的 8000；显式指定 `--port` 可以避免这个问题。保持默认主机地址，不要设置 `--api-key`：localmelo 不向本地服务器发送 API 密钥。如果请求返回 HTTP 401（`API key required`），说明之前在 oMLX 管理页面或通过 `OMLX_API_KEY` 设置过密钥：请在管理页面的设置中开启 **Allow inference without API key**，或取消设置 `OMLX_API_KEY`。
+   它监听 `http://127.0.0.1:8000`。oMLX 会将 `--model-dir` 和 `--port` 保存在 `settings.json` 中（默认为 `~/.omlx` 下），省略选项时会使用这些值。因此，先前保存的端口会覆盖默认的 8000；显式指定 `--port` 可以避免这个问题。oMLX 应用和 `omlx start` 会改在后台运行服务器，使用 oMLX 中保存的文件夹和端口（Homebrew 服务默认使用 `~/.omlx/models` 和 8000 端口）：此时可以跳过上面的命令。保持默认主机地址，不要设置 `--api-key`：localmelo 不向本地服务器发送 API 密钥。如果请求返回 HTTP 401（`API key required`），说明之前在 oMLX 管理页面或通过 `OMLX_API_KEY` 设置过密钥：请在管理页面的设置中开启 **Allow inference without API key**，或取消设置 `OMLX_API_KEY`。开启该设置后，列出模型和对话都可以使用，但 oMLX 仍要求用密钥访问报告哪些模型已加载的路由，因此设置无法标出已加载的模型（见下文）。
 
 4. 检查服务器是否列出模型：
 
@@ -47,9 +47,15 @@
    melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
    ```
 
-   oMLX 在首次请求时加载模型，大模型可能需要一分钟。如果该请求超时，添加 `--request-timeout 600`。不带任务运行 `melo --base-url http://127.0.0.1:8000/v1` 会使用 oMLX 列出的第一个模型打开交互式界面。
+   oMLX 在首次请求时加载模型，大模型可能需要一分钟。如果该请求超时，添加 `--request-timeout 600`。不指定 `--chat-model` 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 `melo --base-url http://127.0.0.1:8000/v1`（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，会以退出码 2 退出，列出这些模型，并要求使用 `--chat-model <id>`。用 `--chat-model` 指定模型可以跳过这次查询。
 
-要将 oMLX 设为默认值，在保存任何配置之前在终端运行 `melo`：它会在端口 8000 找到 oMLX，列出模型并保存你的选择。已有配置时，先运行第 5 步以加载模型，再运行向导（`melo --reconfigure`）：选择 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
+要将 oMLX 设为默认值，在保存任何配置之前在终端运行 `melo`：它会在端口 8000 找到 oMLX，列出模型并保存你的选择；[首次运行](configure.md#first-run)展示了整个过程。oMLX 在第一个请求到达时才加载模型，因此列出的模型不一定在内存中，加载大模型可能要几分钟。所以设置按下面的方式选择；列出多个对话模型时，它会向 oMLX 询问哪些模型已加载（`GET /v1/models/status`，最多等一秒）：
+
+- 只有一个对话模型：它就是默认值。
+- 有多个，且 oMLX 说明了哪些已加载：设置会给已加载的模型标上 `(loaded)`，并以其中第一个作为默认值。
+- 有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 **Allow inference without API key**，oMLX 也不会说明，此时设置会输出 `The server did not say which models are loaded (it needs a key for that).` 在 oMLX 中设置了别名的模型会以别名列出，状态回复会在文件夹名旁边给出该别名（`model_alias`，oMLX 0.7.1rc1 就是这样发送的），所以该模型会被标出，并且可以在别名下成为默认值。状态回复中没有别名的服务器无法标出这样的模型。
+
+已有配置时，先运行第 5 步以加载模型，再运行 `melo --reconfigure`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 oMLX 或 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
 
 <a id="backends"></a>
 
@@ -59,21 +65,21 @@
 |---|---|---|---|---|
 | `ollama` | 本地 | [Ollama](https://ollama.com) | `http://localhost:11434`（向导） | 支持 |
 | `mlc` | 本地 | [MLC LLM](https://llm.mlc.ai) | `http://localhost:8400/v1`（向导） | 支持 |
-| `vllm` | 本地 | [vLLM](https://docs.vllm.ai) | `http://localhost:8000/v1`（向导） | 支持 |
+| `vllm` | 本地 | [oMLX](https://github.com/jundot/omlx)、[vLLM](https://docs.vllm.ai) 或其他 OpenAI 兼容服务器 | `http://localhost:8000/v1`（向导） | 支持 |
 | `sglang` | 本地 | [SGLang](https://docs.sglang.ai) | `http://localhost:30000/v1`（向导） | 支持 |
 | `openai` | 云端 | OpenAI API | `https://api.openai.com/v1` | 不支持 |
 | `anthropic` | 云端 | Anthropic API | `https://api.anthropic.com/v1` | 不支持 |
 | `gemini` | 云端 | Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai` | 不支持 |
 | `nvidia` | 云端 | NVIDIA API | `https://integrate.api.nvidia.com/v1` | 不支持 |
 
-向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只负责连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。
+向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只负责连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。在配置文件中，`omlx` 是 `vllm` 的另一种写法（[详情](model-servers.md#omlx)）。
 
 ### oMLX
 
-[oMLX](https://github.com/jundot/omlx) 提供 OpenAI 兼容 API，因此使用 `vllm` 后端。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
+[oMLX](https://github.com/jundot/omlx) 是受支持的本地服务器。它的 API 与 OpenAI 兼容，而 `vllm` 键代表任何 OpenAI 兼容服务器（包括 vLLM 自己的）。所以 oMLX 没有自己的后端：它就是 `vllm` 后端，配置文件里写作 `omlx`。服务器的模型列表把 oMLX 标为所列模型的所有者时（oMLX 对它列出的每个模型都这样做），首次运行的设置会保存 `chat_backend = "omlx"`，使用该服务器的嵌入模型时还会保存 `embedding_backend = "omlx"`；其他服务器保存为 `vllm`。两种写法按同一个后端加载，设置在 `[vllm]` 表中，并按原样保存回去。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，横幅、`/status` 和网页控制台把这台服务器称为 oMLX，否则称为 OpenAI 兼容服务器。写着 `vllm` 的文件要等第一次列出模型才会改称 oMLX，这由横幅之后的检查完成；横幅本身显示的是配置文件所写的名称，本次运行已经列出过该服务器时除外。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
 
 ```toml
-chat_backend = "vllm"
+chat_backend = "omlx"
 embedding_backend = "none"
 request_timeout_s = 600
 
@@ -85,11 +91,11 @@ chat_model = "Qwen3-8B-4bit"
 enable_thinking = false
 ```
 
-- `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。
-- [首次运行](configure.md#first-run)会写入 `chat_backend`、`chat_url` 和 `chat_model` 行：在没有配置文件的终端中运行 `melo`，同时让 oMLX 运行。当它提供嵌入模型时，还会写入 `embedding_backend = "vllm"`，以及该表的 `embedding_url` 和 `embedding_model`。其他行请手动添加。
+- `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。`--chat-model ID` 可在一次运行中替换它。
+- [首次运行](configure.md#first-run)会写入 `chat_backend`、`chat_url` 和 `chat_model` 行：在没有配置文件的终端中运行 `melo`，同时让 oMLX 运行。当它提供嵌入模型时，还会写入 `embedding_backend = "omlx"`，以及该表的 `embedding_url` 和 `embedding_model`。其他行请手动添加。
 - `request_timeout_s = 600` 为 oMLX 留出时间，以便在请求遇到未加载的模型时加载它；见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
 - `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快。省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用上述表中的设置。
-- 要使用长期记忆，oMLX 也可以从同一目录提供嵌入模型：设置 `embedding_backend = "vllm"`，并在 `[vllm]` 中添加 `embedding_url = "http://127.0.0.1:8000/v1"` 和 `embedding_model = "<its id>"`。oMLX 的 `GET /v1/models` 返回 ID 但不返回类型，因此无法区分嵌入模型和对话模型：需要使用 ID 发送一次 `POST /v1/embeddings` 进行检查。见[配置嵌入模型](embedding.md#omlx)。
+- 要使用长期记忆，oMLX 也可以从同一目录提供嵌入模型：设置 `embedding_backend = "omlx"`，并在 `[vllm]` 中添加 `embedding_url = "http://127.0.0.1:8000/v1"` 和 `embedding_model = "<its id>"`。oMLX 的 `GET /v1/models` 返回 ID 但不返回类型，因此无法区分嵌入模型和对话模型：需要使用 ID 发送一次 `POST /v1/embeddings` 进行检查。见[配置嵌入模型](embedding.md#omlx)。
 
 <a id="ollama-with-embeddings"></a>
 

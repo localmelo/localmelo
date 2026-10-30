@@ -260,7 +260,9 @@ melo: run ended with status provider_error: POST /chat/completions failed: ReadT
 ```
 
 - **Cause:** the server sent nothing within the chat request timeout, three
-  times in a row. This takes about 3 × the timeout + 5 seconds.
+  times in a row. This takes about 3 × the timeout + 5 seconds. A server
+  that loads the model when the first request arrives, as oMLX does, may
+  still be loading it.
 - **Fix:** give a slow model more time: `--request-timeout 600`, or
   `request_timeout_s = 600` at the top of the config file.
 
