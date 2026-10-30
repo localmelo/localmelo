@@ -1041,6 +1041,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
+  model chip while it only names the model, which the composer already shows, so a chat's
+  title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
+  model`). `Enter to send · Shift + Enter for a new line` and `⌘ K` are hidden there, and the
+  next steps of a failed turn (Try again, Change the server address, Copy error) are outlined
+  buttons at least 44 px tall instead of text links. In the sidebar, a chat's second line is its
+  folder (`localmelo-workspace`) instead of the model, which every chat shared, and an accent
+  dot before the title marks a chat that waits for an approval; developer mode shows the model
+  first and the folder after it. Direct mode's stdout and stderr, JSON, exit codes and requests
+  are unchanged. ([#NN])
 - The console and the app use plain words by default. The settings call the server **Model
   server** and its address **Server address**, with `The address your model server prints when
   it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the

@@ -91,7 +91,9 @@ for you to send or change, and step aside once there is text.
    list shows 20 rows at most and says how many more run.
 
 The sidebar lists chats newest first, with search and switching, and closes a
-chat. Drafts stay with each chat in the current browser tab. The open chat's
+chat. Under each title it names the chat's folder (developer mode puts the model
+first), and a dot in the accent colour before the title marks a chat that waits
+for your approval. Drafts stay with each chat in the current browser tab. The open chat's
 turns arrive on its event stream (SSE); after a page reload the page restores
 the chat, reads its last ten turns, and replays the stored events from there,
 so nothing is lost or drawn twice. **Show earlier turns** loads older turns
@@ -102,6 +104,13 @@ rather than retrying for ever. The list is re-read every 4 seconds while the
 tab is visible, for changes from another browser. **Reconnect now** checks the
 chat before reopening its stream. Independent banners show store, model and
 connection problems without replacing other notices.
+
+On a phone, or in a window 700 px wide or less, the page leaves out what a small
+touch screen does not need. The header drops the model chip while it only names the
+model, since the composer shows it, and keeps the chip when it warns (`Model offline`,
+`No model`). The keyboard hints (`Enter to send · Shift + Enter for a new line` and
+`⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
+turn are buttons at least 44 px tall.
 
 ## Inspect workers
 

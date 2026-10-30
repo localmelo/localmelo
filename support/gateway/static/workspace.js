@@ -20,7 +20,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
-import { setupFolderPicker } from "./folder.mjs";
+import { folderName, setupFolderPicker } from "./folder.mjs";
 import {
   activity,
   applyEvent,
@@ -378,6 +378,12 @@ function chatSubtitle(model, folder) {
   return developerMode ? `${model} · ${folder}` : `In ${folder}`;
 }
 
+/** A chat's second line in the sidebar: its folder, which tells chats apart; a developer sees the model first. */
+function chatMeta(session) {
+  const folder = session.workspace_label ? folderName(session.workspace_label) : "";
+  return developerMode ? [session.model, folder].filter(Boolean).join(" · ") : folder || session.model || "";
+}
+
 function syncUI() {
   const view = S.activeId ? S.view : null;
   const session = activeSession();
@@ -425,6 +431,8 @@ function syncUI() {
   const connection = connectionState({ turn, held, pending, session });
   $("connection-label").textContent = connection.text;
   $("connection-dot").classList.toggle("offline", connection.offline);
+  // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
+  $("connection-btn").classList.toggle("names-model", !developerMode && !connection.offline);
   if (developerMode) $("connection-btn").removeAttribute("aria-label");
   else $("connection-btn").setAttribute("aria-label", `Model: ${connection.text}. Open settings.`);
   // Unhide before the text write, so a screen reader announces the wait.
@@ -483,6 +491,8 @@ function renderSessions() {
       session.id,
       session.title,
       session.model,
+      session.workspace_label,
+      developerMode,
       session.busy,
       session.held || "",
       session.pending_approvals || 0,
@@ -510,15 +520,10 @@ function renderSessions() {
     const info = el("button", "session-info");
     info.type = "button";
     if (session.id === active) info.setAttribute("aria-current", "page");
-    const marker =
-      session.pending_approvals > 0
-        ? "● Approval needed · "
-        : session.busy
-          ? session.held
-            ? "● Waiting · "
-            : "● Working · "
-          : "";
-    info.innerHTML = `<div class="session-title">${esc(title(session))}</div><div class="session-meta">${marker}${esc(session.model || "")}</div>`;
+    const asking = session.pending_approvals > 0;
+    const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
+    const dot = asking ? '<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"></span>' : "";
+    info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${marker}${esc(chatMeta(session))}</div>`;
     info.addEventListener("click", () => {
       openSession(session.id);
     });

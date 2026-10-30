@@ -411,7 +411,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
-  .replace(/^import \{ setupFolderPicker \} from "\.\/folder\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -600,6 +600,7 @@ function harness(routes, {mobile = false} = {}) {
     setupStatusRow,
     setupRunning,
     setupModelCard,
+    folderName,
     setupFolderPicker,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
@@ -1749,6 +1750,38 @@ test('the sidebar escapes a server title and model', async () => {
   assert.match(info.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(info.innerHTML, /a&amp;&quot;b/);
   assert.doesNotMatch(info.innerHTML, /<img/);
+});
+
+test('the sidebar names each chat\'s folder, and an accent dot marks the one that waits for an approval', async () => {
+  const rows = [
+    session('a', {title: 'Notes', workspace_label: '~/Documents/notes', model: 'Qwen-27B', updated_at: 3}),
+    session('b', {title: 'Code', workspace_label: '~/code/app', pending_approvals: 1, busy: true, updated_at: 2}),
+    session('c', {title: 'Old', workspace_label: '', model: 'Qwen-27B', busy: true, updated_at: 1}),
+  ];
+  const lines = async (make) => {
+    const h = harness(make({'GET /sessions': {sessions: rows, machine: null, has_more: false}}));
+    await h.run('init()');
+    return h.element('session-list').children.map((row) => row.children[0].innerHTML);
+  };
+  const [notes, code, old] = await lines(defaultMode);
+  assert.equal(notes, '<div class="session-title">Notes</div><div class="session-meta">notes</div>', 'the folder tells chats apart, the model does not');
+  assert.match(code, /<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"><\/span>Code</);
+  assert.match(code, /<div class="session-meta">app<\/div>/, 'a chat that asks is not also called Working');
+  assert.equal(old, '<div class="session-title">Old</div><div class="session-meta">Working · Qwen-27B</div>', 'with no folder known it falls back to the model');
+  const [devNotes] = await lines(baseRoutes);
+  assert.match(devNotes, /<div class="session-meta">Qwen-27B · notes<\/div>/, 'a developer keeps the model, then the folder');
+});
+
+test('the header chip is dropped on a phone only while it names the model', async () => {
+  const chip = async (make, patch = {}) => {
+    const h = harness(make({'GET /health': {...health, ...patch}}));
+    await h.run('init()');
+    return h.element('connection-btn').classList.contains('names-model');
+  };
+  assert.equal(await chip(defaultMode), true, 'the composer shows the model');
+  assert.equal(await chip(defaultMode, {model_server: server(false)}), false, 'Model offline stays, it warns');
+  assert.equal(await chip(defaultMode, {configured: false}), false, 'No model stays');
+  assert.equal(await chip(baseRoutes), false, 'a developer\'s chip is the page state, not the model');
 });
 
 test('a send in an open chat posts a keyed turn and waits for its event', async () => {
