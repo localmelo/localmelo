@@ -24,7 +24,7 @@
 
 ## 跨对话记忆
 
-在网页控制台和 App 中，melo 会跨对话记忆。除非设置 `[memory] across_chats = false`（`melo config set memory.across_chats false`），否则它是开启的。`~/.cache/localmelo/memory/` 中的两个文件保存它（文件夹权限 0700，文件 0600），每个对话读写的都是同一组文件：
+在网页控制台和 App 中，melo 会跨对话记忆。除非设置 `[memory] across_chats = false`（`melo config set memory.across_chats false`，然后重启 `melo serve` 或 App），否则它是开启的。`~/.cache/localmelo/memory/` 中的两个文件保存它（文件夹权限 0700，文件 0600），每个对话读写的都是同一组文件：
 
 - **关于你的笔记**（`records.db`）。当你输入的消息说到关于你的事（"I prefer short answers"、"my group meeting is on Thursdays"、"call me Ray"、"我习惯用简体中文"），或请 melo 记住一个事实（"remember that Sam has the lab keys"）时，melo 把它记成一句对你说的话，带上主题（About you、Preferences、People 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`）。只有你输入的文字才算：附加的文件、工具输出、网页、melo 的回答和任务报告都不算。问题和待办（"remember to buy milk"）不是笔记。看起来像密码、密钥、一次性验证码、卡号或证件号的文字不会被保存，那一行会写 `Not remembered: it looked like a password or key`。
 - **每个对话的索引**（`index.db`）。每个完成的对话轮次添加一个文档：你输入的内容和 melo 的回答（不含思考），最多 2,000 个字符，密钥会被遮盖。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。

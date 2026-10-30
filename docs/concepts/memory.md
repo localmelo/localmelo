@@ -23,7 +23,8 @@ every chat, kept on disk and shared by every chat.
 ## Memory across chats
 
 In the web console and the app, melo remembers across chats. It is on unless
-`[memory] across_chats = false` (`melo config set memory.across_chats false`).
+`[memory] across_chats = false` (`melo config set memory.across_chats false`, then
+restart `melo serve` or the app).
 Two files in `~/.cache/localmelo/memory/` (the folder mode 0700, the files
 0600) hold it, and every chat reads and writes the same ones:
 
