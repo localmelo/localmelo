@@ -1112,6 +1112,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   cli.background=light`) cover terminals that answer nothing. `NO_COLOR` and
   `LOCALMELO_ASCII=1` keep every glyph. Direct mode, workers, JSON, stream-json, events and
   exit codes are unchanged. ([#NN])
+- Every terminal question with a fixed set of answers is a list you move through and
+  confirm with Enter, not a letter to type. On a terminal, the first run's questions
+  (`Use this model server?`, `Use <model> for long-term memory?`, `What now?` after a
+  URL that cannot be used, the no-server screen's `Check again`, `Enter an address` and
+  `Quit`, and `Save URL · MODEL as the default backend?`), the setup wizard's backend
+  lists, `Save these settings?` and `The check failed. What now?`, and `/attach !`'s
+  `Attach this output?` show their answers as rows of words, as the tool approval and
+  `/model` do: ↑ ↓ move, a number key (1 to 9) chooses that row at once, Enter confirms,
+  and Esc takes the safe answer named in the key line (cancel the setup, decline, do not
+  attach). The recommended answer is selected first, and a failed check and the attach
+  question start on `Cancel setup` and `Don't attach it`, as `[N]` and `[y/N]` did. A
+  list has no filter field. With answers piped in (stdin is not a terminal), nothing
+  is drawn and every question reads the typed answer it always did (`Use it? [Y/n]:`,
+  `[r]etry, [s]ave anyway, [N]o [N]:`, a number for a backend, Enter for the default),
+  so scripts keep working; a direct run, `--output-format json` and workers never ask.
+  In the UI, `/backend`'s model question is the list `/model` shows (it was numbered
+  rows and a typed number). The inline list the first run's model question uses now
+  serves them all ([#266]).
+
 - Quitting the macOS app asks only when something would stop. With no chat or task running and
   nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task
   runs, something waits for an approval, or the app cannot tell what runs, the dialog is the
@@ -2048,6 +2067,7 @@ earlier milestones.
 [#263]: https://github.com/localmelo/localmelo/pull/263
 [#264]: https://github.com/localmelo/localmelo/pull/264
 [#265]: https://github.com/localmelo/localmelo/pull/265
+[#266]: https://github.com/localmelo/localmelo/pull/266
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

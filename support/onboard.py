@@ -33,12 +33,18 @@ def _ask_int(prompt: str, default: int, lo: int = 0, hi: int = 999999) -> int:
 
 
 def _ask_choice(prompt: str, options: list[str], default: int = 1) -> int:
+    """The option chosen, numbered from 1: from a list on a terminal, else by number."""
+    if _arrow_keys():
+        return _choose_from(prompt, options, default - 1) + 1
     for i, opt in enumerate(options, 1):
         print(f"    [{i}] {opt}")
     return _ask_int(prompt, default, lo=1, hi=len(options))
 
 
 def _confirm(prompt: str = "Save and continue?") -> bool:
+    if _arrow_keys():
+        rows = ["Save and continue", "Cancel setup"]
+        return _choose_from("Save these settings?", rows, 0, 1) == 0
     val = _ask(prompt, "Y").lower()
     return val in ("y", "yes", "")
 
@@ -422,10 +428,25 @@ def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> 
             print(f"\n  Probe failed: {exc}")
             if _wants_a_key(cfg, exc):
                 print(f"  Note: {discovery.NO_API_KEY_HINT}.")
+            rows = ["Try again", "Save anyway", "Cancel setup"]
             if retry is not None:
-                choice = _choose("  [r]etry, [s]ave anyway, [N]o [N]: ", "rsn", "n")
+                choice = _choose(
+                    "  [r]etry, [s]ave anyway, [N]o [N]: ",
+                    "rsn",
+                    "n",
+                    title="The check failed. What now?",
+                    rows=rows,
+                    escape="n",
+                )
             else:
-                choice = _choose("  [s]ave anyway, [N]o [N]: ", "sn", "n")
+                choice = _choose(
+                    "  [s]ave anyway, [N]o [N]: ",
+                    "sn",
+                    "n",
+                    title="The check failed. What now?",
+                    rows=rows[1:],
+                    escape="n",
+                )
             if choice == "r" and retry is not None:
                 if not retry():
                     print("  Setup cancelled — config not saved.")
@@ -474,13 +495,41 @@ def _question(prompt: str, default: str = "") -> str:
     return input(f"{prompt}{suffix}: ").strip() or default
 
 
-def _choose(prompt: str, letters: str, default: str, *, invalid: str = "") -> str:
+def _choose_from(
+    title: str, rows: Sequence[str], default: int, escape: int | None = None
+) -> int:
+    """The row chosen from an arrow-key list; esc answers *escape*, or cancels."""
+    from localmelo.support.cli.picker import choose_inline
+
+    return choose_inline(title, rows, default=default, escape=escape)
+
+
+def _choose(
+    prompt: str,
+    letters: str,
+    default: str,
+    *,
+    invalid: str = "",
+    title: str = "",
+    rows: Sequence[str] = (),
+    escape: str | None = None,
+) -> str:
     """Ask *prompt* until the answer's first letter is one of *letters*.
 
     Enter chooses *default*; a whole word (``retry``, ``save anyway``)
     counts by its first letter. *invalid* is what an unknown answer is told,
-    where the prompt names its keys otherwise than by their letters.
+    where the prompt names its keys otherwise than by their letters. On a
+    terminal, *rows* (one per letter) are asked as the list *title* instead,
+    and esc answers the letter *escape*, or cancels when it is None.
     """
+    if rows and _arrow_keys():
+        chosen = _choose_from(
+            title,
+            rows,
+            letters.index(default),
+            None if escape is None else letters.index(escape),
+        )
+        return letters[chosen]
     while True:
         answer = input(prompt).strip().lower() or default
         if answer[0] in letters:
@@ -549,9 +598,20 @@ def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | Non
     _say(f"{how.note} The guide shows how:")
     print(discovery.GUIDE_URL)
     while True:
-        answer = input(
-            "Press Enter to check again, type an address, or q to quit: "
-        ).strip()
+        if _arrow_keys():
+            choice = _choose_from(
+                "No model server found. What now?",
+                ["Check again", "Enter an address", "Quit"],
+                0,
+                2,
+            )
+            if choice == 2:
+                return None
+            answer = _question("Server URL", _FIRST_RUN_URL) if choice == 1 else ""
+        else:
+            answer = input(
+                "Press Enter to check again, type an address, or q to quit: "
+            ).strip()
         if answer.lower() in ("q", "quit"):
             return None
         if answer:
@@ -779,7 +839,14 @@ def _offer_embedding(
         return None, ollama
     candidate = discovery.recommend_embedding(candidates)
     assert candidate is not None  # candidates is not empty
-    answer = _choose(f"Use {candidate} for long-term memory? [Y/n]: ", "yn", "y")
+    answer = _choose(
+        f"Use {candidate} for long-term memory? [Y/n]: ",
+        "yn",
+        "y",
+        title=f"Use {candidate} for long-term memory?",
+        rows=["Use it", "Leave it off"],
+        escape="n",
+    )
     if answer == "n":
         _say(_EMBEDDING_OFF)
         return None, ollama
@@ -840,7 +907,16 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
             f"({count} model{'' if count == 1 else 's'})."
         )
         default_url = found.url
-        if _choose("Use it? [Y/n]: ", "yn", "y") == "y":
+        if (
+            _choose(
+                "Use it? [Y/n]: ",
+                "yn",
+                "y",
+                title="Use this model server?",
+                rows=["Use it", "Use another server"],
+            )
+            == "y"
+        ):
             keep = True
         elif ask_keep:
             raise _FullMenuError(found)  # a first run asks for another URL below
@@ -871,6 +947,9 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
             "rsq",
             "r",
             invalid="  Press Enter, s or q.",
+            title="What now?",
+            rows=["Try again", "Start without saving", "Quit"],
+            escape="q",
         )
         if choice == "q":
             return None
@@ -902,9 +981,14 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
 
 def offer_to_save(url: str, model: str) -> bool:
     """Ask once whether to save *url* and *model* as the default backend."""
-    if (
-        _choose(f"Save {url} · {model} as the default backend? [Y/n] ", "yn", "y")
-        == "n"
-    ):
+    answer = _choose(
+        f"Save {url} · {model} as the default backend? [Y/n] ",
+        "yn",
+        "y",
+        title=f"Save {url} · {model} as the default backend?",
+        rows=["Save it", "Not now"],
+        escape="n",
+    )
+    if answer == "n":
         return False
     return asyncio.run(save_chat_server(url, model))

@@ -833,16 +833,21 @@ class CliSession:
                 )
             )
             self.out.print(Text(item.content))
-            answer = (
-                await self.app.ask(
-                    "Attach this redacted snapshot? [y/N]"
-                    if item.changed
-                    else "Attach this output? [y/N]"
+            yes = (
+                self.app is not None
+                and await self.app.pick(
+                    (
+                        "Attach this redacted snapshot?"
+                        if item.changed
+                        else "Attach this output?"
+                    ),
+                    ["Attach it", "Don't attach it"],
+                    default=1,
+                    escape=1,
                 )
-                if self.app is not None
-                else None
+                == 0
             )
-            if (answer or "").strip().lower() not in ("y", "yes"):
+            if not yes:
                 raise ValueError("Attachment not added.")
         self._attachments = updated
         self.out.print(
@@ -1454,7 +1459,9 @@ class CliSession:
             self.models = models
 
     async def _pick_model(self, url: str, models: list[str]) -> str | None:
-        chat = [model for model in models if discovery.is_chat_model(model)]
+        """The model to use on *url*, from the list the first run shows; None on Esc."""
+        kinds = {model: discovery.model_kind(model) for model in models}
+        chat = [model for model in models if kinds[model] == "chat"]
         if len(models) == 1 and chat:
             return models[0]
         loaded = (
@@ -1462,31 +1469,18 @@ class CliSession:
             if len(chat) > 1
             else discovery.LoadedModels()
         )
-        lines = self._text(f"Models on {url}:\n")
-        for number, model in enumerate(models, 1):
-            mark = "  (loaded)" if model in loaded.ids else ""
-            lines.append(clean_output(f"  {number}. {model}{mark}") + "\n")
-        self.out.print(lines)
-        pick = discovery.pick_model(models, loaded)
-        default = str(models.index(pick) + 1) if pick else ""
+        shown = chat or models
+        pick = discovery.pick_model(shown, loaded)
+        if len(chat) > 1 and pick is None:  # nothing is highlighted: say why
+            self.out.print(self._text(discovery.LOAD_COST_NOTE, style="muted"))
         assert self.app is not None
-        while True:
-            answer = await self.app.ask("Model", default)
-            if answer is None:
-                return None
-            if not answer.strip():
-                self.out.print(self._text(discovery.NO_DEFAULT_HINT, style="muted"))
-                continue
-            if answer in models:
-                return answer
-            if answer.isdigit() and 1 <= int(answer) <= len(models):
-                return models[int(answer) - 1]
-            self.out.print(
-                self._text(
-                    f"Type a number from 1 to {len(models)}, or a model id.",
-                    style="muted",
-                )
-            )
+        return await self.app.choose_model(
+            [ModelRow(model, model in loaded.ids, kinds[model]) for model in shown],
+            where=redact_secrets(url)[0],
+            current="",
+            start=pick,
+            title="Choose a model",
+        )
 
     async def _switch(self, model: str, *, url: str | None) -> bool:
         """Move the conversation to a new Agent on *model*, then save it.

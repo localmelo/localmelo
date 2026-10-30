@@ -357,12 +357,27 @@ def _terminal(monkeypatch: pytest.MonkeyPatch, tty: bool) -> None:
 # ── On a terminal the model is chosen with the arrow keys ──
 
 
-def _arrow_keys(monkeypatch: pytest.MonkeyPatch, choose: int | None) -> list[Any]:
+def _arrow_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    choose: int | None,
+    lists: list[int] | None = None,
+) -> list[Any]:
     """The first run on a terminal; the list is built, then *choose* picks a row.
 
     Returns the pickers it built, so a test can read what the list offered.
+    The other questions are lists too: each takes the next row of *lists*, or
+    its default row when that is used up.
     """
     from localmelo.support.cli import picker as pickers
+
+    script = [] if lists is None else lists
+
+    def choose_from(
+        title: str, rows: Any, default: int, escape: int | None = None
+    ) -> int:
+        return script.pop(0) if script else default
+
+    monkeypatch.setattr(onboard, "_choose_from", choose_from)
 
     built: list[Any] = []
 
@@ -423,8 +438,9 @@ def test_on_a_terminal_the_models_are_a_list_to_choose_from(
         return discovery.LoadedModels(frozenset(loaded), bool(loaded))
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
-    built = _arrow_keys(monkeypatch, choose=len(offered) - 1)
-    answers = _Answers("", "n")  # the URL; then, with embedding models, memory
+    # Use it; then, with embedding models, "Leave it off" for memory.
+    built = _arrow_keys(monkeypatch, choose=len(offered) - 1, lists=[0, 1])
+    answers = _Answers()
     result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
     [asked] = built
     assert [(m.id, m.loaded, m.kind) for m in asked.models] == offered
@@ -442,7 +458,7 @@ def test_closing_the_model_list_cancels_the_first_run(
     _arrow_keys(monkeypatch, choose=None)
     with pytest.raises(KeyboardInterrupt):
         _first_setup(
-            _Answers(""), found=FoundServer(url=URL, models=["chat-a", "chat-b"])
+            _Answers(), found=FoundServer(url=URL, models=["chat-a", "chat-b"])
         )
     assert not config_path.exists()
 
@@ -451,7 +467,7 @@ def test_a_server_with_one_model_needs_no_list_even_on_a_terminal(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     built = _arrow_keys(monkeypatch, choose=None)
-    answers = _Answers("")
+    answers = _Answers()
     result, _, _ = _first_setup(
         answers, found=FoundServer(url=URL, models=["only-model"])
     )

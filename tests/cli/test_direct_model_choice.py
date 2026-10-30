@@ -357,3 +357,25 @@ def test_plain_json_output_stays_resultless_on_a_refusal(melo: Melo) -> None:
     )
     assert run.code == 2 and run.out == ""
     assert run.err.endswith(HINT + "\n")
+
+
+@pytest.mark.parametrize(
+    "flags", [[], ["--output-format", "json"]], ids=["text", "json"]
+)
+def test_a_direct_run_never_asks_even_on_a_terminal(
+    melo: Melo, monkeypatch: pytest.MonkeyPatch, flags: list[str]
+) -> None:
+    """No list and no typed question: the run's flags are the answers."""
+    from localmelo.support import onboard
+    from localmelo.support.cli import picker
+
+    def asked(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a direct run asked a question")
+
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(picker, "run_inline", asked)
+    monkeypatch.setattr("builtins.input", asked)
+    server = FakeServer(["bge-embed", "Qwen3-8B"])
+    run = melo(server, "--base-url", URL, *flags, "--", "task")
+    assert (run.code, run.err) == (0, "")
+    assert server.models_sent == {"Qwen3-8B"}

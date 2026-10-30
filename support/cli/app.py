@@ -71,6 +71,7 @@ from localmelo.support.cli.approvals import (
 )
 from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
 from localmelo.support.cli.picker import (
+    ChoicePicker,
     ListPicker,
     ModelPicker,
     ModelRow,
@@ -573,21 +574,48 @@ class InteractiveApp:
         )
 
     async def choose_model(
-        self, models: Sequence[ModelRow], *, where: str, current: str
+        self,
+        models: Sequence[ModelRow],
+        *,
+        where: str,
+        current: str,
+        start: str | None = "",
+        title: str = "Switch model",
     ) -> str | None:
-        """The model picked from *models*, with *current* marked; None when closed."""
+        """The model picked from *models*, with *current* marked; None when closed.
+
+        The highlight starts on *start* (None: on no row); by default on *current*.
+        """
         row = await self.choose(
             ModelPicker(
                 models,
                 where=where,
                 current=current,
-                start=current,
+                start=current if start == "" else start,
+                title=title,
                 width=self._width,
                 invalidate=self.invalidate,
                 symbols=self.symbols,
             )
         )
         return None if row is None else row.id
+
+    async def pick(
+        self, title: str, options: Sequence[str], *, default: int, escape: int
+    ) -> int:
+        """Ask *title* as a list of *options*; the chosen index, *escape* on Esc."""
+        row = await self.choose(
+            ChoicePicker(
+                title,
+                options,
+                default=default,
+                escape=escape,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+        return escape if row is None else row
 
     async def ask(self, prompt: str, default: str = "") -> str | None:
         """Ask *prompt* in the input box; the answer, *default* on Enter, None on Esc."""

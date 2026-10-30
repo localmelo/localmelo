@@ -71,7 +71,9 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
 
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(lambda out: b"Use it? [Y/n]: " in out, 30), term.output
+        assert term.read_until(
+            lambda out: b"Use this model server?" in out, 30
+        ), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
         # No model is known to be loaded, so none is highlighted and Enter alone
@@ -84,7 +86,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         assert term.read_until(lambda out: b"1 model " in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(
-            lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
+            lambda out: b"Use nomic-embed-text for long-term memory?" in out,
             30,
         ), term.output
         term.type(b"\r")
@@ -158,7 +160,9 @@ def test_closing_the_model_list_cancels_the_first_run(
     chat_server.models = ["chat-a", "chat-b"]
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(lambda out: b"Use it? [Y/n]: " in out, 30), term.output
+        assert term.read_until(
+            lambda out: b"Use this model server?" in out, 30
+        ), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
         term.type(b"\x1b")
@@ -168,3 +172,41 @@ def test_closing_the_model_list_cancels_the_first_run(
     assert "Setup cancelled." in _text(term)
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
     assert chat_server.requests == 0  # no chat request: nothing was loaded
+
+
+@pytest.mark.parametrize(
+    ("keys", "code"),
+    [(b"\x1b", 130), (b"\x03", 130), (b"\x04", 0)],
+    ids=["esc", "ctrl-c", "ctrl-d"],
+)
+def test_closing_the_found_server_list_ends_the_first_run_like_a_typed_question(
+    chat_server: FakeChatServer, tmp_path: Path, keys: bytes, code: int  # noqa: F811
+) -> None:
+    chat_server.models = ["chat-a"]
+    term = _melo(tmp_path, chat_server)
+    try:
+        assert term.read_until(lambda out: b"Use this model server?" in out, 30)
+        term.type(keys)
+        assert _exit_code(term) == code, term.output
+    finally:
+        term.close()
+    assert "Setup cancelled." in _text(term)
+    assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
+    assert chat_server.requests == 0
+
+
+def test_a_number_key_answers_the_found_server_list_at_once(
+    chat_server: FakeChatServer, tmp_path: Path  # noqa: F811
+) -> None:
+    """`2` is "Use another server": the text question follows, with the found URL."""
+    chat_server.models = ["chat-a"]
+    term = _melo(tmp_path, chat_server)
+    try:
+        assert term.read_until(lambda out: b"Use this model server?" in out, 30)
+        term.type(b"2")
+        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
+        term.type(b"\x04")  # end of input at the text question
+        assert _exit_code(term) == 0, term.output
+    finally:
+        term.close()
+    assert f"Server URL [{chat_server.base_url}]" in _text(term)

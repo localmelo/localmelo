@@ -3,7 +3,9 @@
 :class:`ListPicker` is the one list. :class:`SessionPicker` fills it with saved
 chats (``/sessions``, ``-r``) and :class:`ModelPicker` with the models of a
 server (``/model``, and the first run's question, which :func:`run_inline` asks
-before melo's own UI exists).
+before melo's own UI exists). :class:`ChoicePicker` is a question and its few
+answers, with no filter field: the first run's and the wizard's questions
+(:func:`choose_inline`) and the attach question in melo's own screen.
 """
 
 from __future__ import annotations
@@ -27,11 +29,19 @@ from prompt_toolkit.layout import (
     FormattedTextControl,
     HSplit,
     Layout,
+    UIControl,
     Window,
 )
 
 from localmelo.support.cli.text import cells, cut_cells, cut_middle
-from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols, pt_color_depth
+from localmelo.support.cli.theme import (
+    PT_STYLE,
+    Symbols,
+    in_symbols,
+    pt_color_depth,
+    symbols_for,
+    wants_no_color,
+)
 from localmelo.support.sessions.display import clean_output, home_label, session_age
 from localmelo.support.sessions.store import SessionInfo, SessionStore
 
@@ -52,6 +62,8 @@ class ListPicker(Generic[T]):
 
     # How long typing waits before the rows are loaded again.
     debounce_s = 0.15
+    # Whether the list has a filter field; a short list of answers has none.
+    filterable = True
 
     def __init__(
         self,
@@ -82,18 +94,27 @@ class ListPicker(Generic[T]):
         keys.add("tab")(lambda event: self.on_tab())
         keys.add("up")(lambda event: self.move(-1))
         keys.add("down")(lambda event: self.move(1))
-        self.control = BufferControl(self.buffer, key_bindings=keys)
-        self.container = HSplit(
-            [
-                Window(FormattedTextControl(self._header), height=1),
+        self.add_keys(keys)
+        self.control: UIControl
+        rows = FormattedTextControl(
+            self._fragments,
+            focusable=not self.filterable,
+            show_cursor=False,
+            key_bindings=None if self.filterable else keys,
+        )
+        parts = [self._header_window()]
+        if self.filterable:
+            self.control = BufferControl(self.buffer, key_bindings=keys)
+            parts.append(
                 Window(
                     self.control,
                     height=1,
                     get_line_prefix=lambda line, wrap: f" Filter {symbols.prompt} ",
-                ),
-                Window(FormattedTextControl(self._fragments), dont_extend_height=True),
-            ]
-        )
+                )
+            )
+        else:
+            self.control = rows
+        self.container = HSplit([*parts, Window(rows, dont_extend_height=True)])
 
     # ── What a subclass gives ──
 
@@ -117,6 +138,12 @@ class ListPicker(Generic[T]):
 
     def on_tab(self) -> None:
         """Tab: nothing, unless the list has a scope to switch."""
+
+    def add_keys(self, keys: KeyBindings) -> None:
+        """More keys for the list; a later binding of a key wins."""
+
+    def _header_window(self) -> Window:
+        return Window(FormattedTextControl(self._header), height=1)
 
     # ── Running ──
 
@@ -364,6 +391,118 @@ class ModelPicker(ListPicker[ModelRow]):
         ]
         room = self.width() - 1
         return next((o for o in options if cells(o) <= room), options[-1])
+
+
+class ChoicePicker(ListPicker[int]):
+    """A question and its few answers, in words: ↑↓ move, enter confirms.
+
+    The rows are the indexes of *options*, and *default* is selected first.
+    A number key chooses that answer at once, as it does in the tool
+    approval. Esc answers *escape* (None: no answer, and the caller cancels).
+    ctrl+c and ctrl+d close it too, with ``interrupt`` set for the caller.
+    With a handful of answers there is no filter field.
+    """
+
+    debounce_s = 0.0
+    filterable = False
+
+    def __init__(
+        self,
+        title: str,
+        options: Sequence[str],
+        *,
+        default: int = 0,
+        escape: int | None = None,
+        width: Callable[[], int],
+        invalidate: Callable[[], None],
+        symbols: Symbols,
+    ) -> None:
+        self.title, self.options, self.escape = title, list(options), escape
+        self.interrupt: BaseException | None = None
+        super().__init__(width=width, invalidate=invalidate, symbols=symbols)
+        self.rows, self.selected, self.loading = (
+            list(range(len(options))),
+            default,
+            False,
+        )
+
+    def add_keys(self, keys: KeyBindings) -> None:
+        for number in range(1, 10):
+            keys.add(str(number))(lambda event, i=number - 1: self.choose(i))
+        keys.add("c-c")(lambda event: self.stop(KeyboardInterrupt()))
+        keys.add("c-d")(lambda event: self.stop(EOFError()))
+
+    def choose(self, index: int) -> None:
+        if index < len(self.rows) and not self.answer.done():
+            self.selected = index
+            self.answer.set_result(index)
+
+    def stop(self, interrupt: BaseException) -> None:
+        self.interrupt = interrupt
+        self.close()
+
+    def close(self) -> None:
+        if not self.answer.done():
+            self.answer.set_result(self.escape)
+
+    def refresh(self, delay: float | None = None) -> None:
+        """The rows are fixed: there is nothing to load."""
+
+    def _header_window(self) -> Window:
+        return Window(
+            FormattedTextControl(self._header), wrap_lines=True, dont_extend_height=True
+        )
+
+    def _header(self) -> str:
+        return clean_output(in_symbols(f" {self.title}", self.symbols))
+
+    def _row(self, index: int) -> str:
+        return f"{index + 1}. {self.options[index]}"
+
+    def _footer(self) -> str:
+        if self.escape is None:
+            esc = "cancel"
+        else:
+            label = self.options[self.escape]
+            esc = label[:1].lower() + label[1:]
+        return f"{self.symbols.arrows} select · enter confirm · esc {esc}"
+
+
+def choose_inline(
+    title: str,
+    options: Sequence[str],
+    *,
+    default: int = 0,
+    escape: int | None = None,
+) -> int:
+    """Ask a question with a :class:`ChoicePicker` of its own; the chosen index.
+
+    For the first run's questions, before melo's UI exists. Esc answers
+    *escape*, or raises KeyboardInterrupt when it is None, as ctrl+c does;
+    ctrl+d raises EOFError, as ``input()`` does.
+    """
+    built: list[ChoicePicker] = []
+
+    def build(width: Callable[[], int], invalidate: Callable[[], None]) -> ChoicePicker:
+        built.append(
+            ChoicePicker(
+                title,
+                options,
+                default=default,
+                escape=escape,
+                width=width,
+                invalidate=invalidate,
+                symbols=symbols_for(sys.stdout.encoding),
+            )
+        )
+        return built[0]
+
+    chosen = run_inline(build, no_color=wants_no_color())
+    if built[0].interrupt is not None:
+        raise built[0].interrupt
+    if chosen is None:
+        raise KeyboardInterrupt
+    return chosen
 
 
 def run_inline(
