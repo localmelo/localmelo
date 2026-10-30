@@ -186,7 +186,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   same request as before), and a chat's folder shows in its header ("In ~/notes";
   developer mode adds it after the model). Three one-line starters under the composer
   ("Summarize the files in this folder", "Plan a small project with me", "Explain a piece
-  of code") replace the three cards. ([#NN])
+  of code") replace the three cards. The app answers the page through one message handler
+  that accepts only the gateway's own page, returns only a path picked in the panel and
+  shows in Finder only a folder of the gateway's chats or one picked there. ([#NN])
 
 - The web console connects the model server that already runs on this Mac in one
   step. While no model is set up (or the configured server is down) and no chat

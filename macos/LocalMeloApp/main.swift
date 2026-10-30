@@ -484,7 +484,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func loadConsole(_ url: URL) {
         if webView != nil { tearDownWebView() }
         guard let content = window.contentView else { return }
-        let view = ConsoleWebView(frame: content.bounds)
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addScriptMessageHandler(
+            FolderBridge(gatewayPort: { [weak self] in self?.port ?? 0 },
+                         choose: { [weak self] reply in self?.chooseFolder(reply) ?? reply(nil) },
+                         reveal: { [weak self] path, reply in self?.revealFolder(path, reply) ?? reply(false) }),
+            contentWorld: .page, name: FolderBridge.name)
+        let view = ConsoleWebView(frame: content.bounds, configuration: configuration)
         view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
         view.underPageBackgroundColor = Palette.canvas
@@ -515,8 +521,45 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func tearDownWebView() {
         webView?.stopLoading()
         webView?.navigationDelegate = nil
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: FolderBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
+    }
+
+    // The folders the person picked in the panel: the page may ask to see them in Finder, and nothing else but a chat's folder.
+    private var pickedFolders: [String] = []
+
+    // The system's folder panel, as a sheet on the window; the reply is the path it returns, or nil.
+    private func chooseFolder(_ reply: @escaping (String?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose the folder melo works in"
+        panel.prompt = "Choose"
+        panel.beginSheetModal(for: window) { response in
+            let path = response == .OK ? panel.url?.path : nil
+            if let path = path { self.pickedFolders.append(path) }
+            reply(path)
+        }
+    }
+
+    // Shows a folder in Finder if it exists and is a chat's folder, as the gateway lists them, or one picked in the panel.
+    private func revealFolder(_ requested: String, _ reply: @escaping (Bool) -> Void) {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/sessions")!)
+        request.timeoutInterval = 2
+        healthSession.dataTask(with: request) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                let listed = (response as? HTTPURLResponse)?.statusCode == 200 ? data.map(chatFolders) ?? [] : []
+                guard let self = self, let url = revealTarget(requested, allowed: listed + self.pickedFolders) else {
+                    reply(false)
+                    return
+                }
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                reply(true)
+            }
+        }.resume()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,

@@ -228,6 +228,41 @@ precondition(waitingItems(health(none, waiting: odd)) == [WaitingItem(kind: "cha
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_folder_bridge_takes_known_requests_from_the_gateway_page_and_shows_only_chat_folders(
+    tmp_path: Path,
+) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+precondition(folderRequest(["action": "choose"]) == .choose)
+precondition(folderRequest(["action": "reveal", "path": "~/b"]) == .reveal("~/b"))
+let refused: [Any] = [["action": "bogus"], ["action": "reveal"], ["action": "reveal", "path": "b"], ["action": 1], "choose", 7,
+                      ["action": "reveal", "path": "/a\u{0}b"], ["action": "reveal", "path": "/" + String(repeating: "a", count: 4096)]]
+precondition(refused.allSatisfy { folderRequest($0) == nil })
+func accepts(scheme: String = "http", host: String = "127.0.0.1", port: Int = 9, main: Bool = true, gateway: Int = 9) -> Bool {
+    acceptsBridgeMessage(scheme: scheme, host: host, port: port, isMainFrame: main, gatewayPort: gateway)
+}
+precondition(accepts())
+precondition(!accepts(main: false) && !accepts(scheme: "https") && !accepts(host: "localhost") && !accepts(port: 10))
+precondition(!accepts(gateway: 0) && !accepts(scheme: "", host: "", port: 0, gateway: 0))
+let fm = FileManager.default
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+let mine = root.appendingPathComponent("mine"), other = root.appendingPathComponent("other")
+let file = root.appendingPathComponent("file").path, gone = root.appendingPathComponent("gone").path
+try! fm.createDirectory(at: mine, withIntermediateDirectories: true)
+try! fm.createDirectory(at: other, withIntermediateDirectories: true)
+fm.createFile(atPath: file, contents: nil)
+let known = chatFolders(Data(#"{"sessions":[{"workspace":"\#(mine.path)"},{"workspace":null},{"title":"x"}]}"#.utf8))
+precondition(known == [mine.path] && chatFolders(Data("nope".utf8)).isEmpty)
+precondition(revealTarget(mine.path, allowed: known)?.resolvingSymlinksInPath().path == mine.resolvingSymlinksInPath().path)
+precondition(revealTarget(other.path, allowed: known) == nil, "a folder that is no chat's")
+precondition(revealTarget(mine.path + "/../other", allowed: known) == nil)
+precondition(revealTarget(file, allowed: [file]) == nil && revealTarget(gone, allowed: [gone]) == nil)
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
     subprocess.run(
         [
@@ -235,6 +270,7 @@ def test_real_host_typechecks() -> None:
             "swiftc",
             "-typecheck",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(ROOT / "macos/LocalMeloApp/main.swift"),
