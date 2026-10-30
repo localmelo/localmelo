@@ -148,9 +148,8 @@ class Executor:
         the root (see :meth:`WorkspacePolicy.resolve`); a ``list_files`` call
         without a path, or with an empty one, lists the root. A path that is
         empty, missing or holds a NUL character is refused with
-        ``INVALID_ARGUMENTS``, and
-        one whose real path is outside the root with
-        ``PATH_POLICY_VIOLATION``. Otherwise the call goes on with the real
+        ``INVALID_ARGUMENTS``, and one whose real path is outside the root
+        with ``PATH_POLICY_VIOLATION``. Otherwise the call goes on with the real
         path in place of the given one, in a new request: the approval
         gate, the tool and the outcome's artifacts get the path that was
         checked, and the caller's request is not changed.
