@@ -35,6 +35,7 @@ x file_read  notes.md - 0.2s
    notes.md   missing
 
 * Worked for 0.3s - 5 tool calls - 240 tokens out
+  Changed summary.md
 
 > Run the check again.
 

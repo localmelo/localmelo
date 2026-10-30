@@ -231,6 +231,8 @@ def test_a_file_write_waits_for_the_answer(
         tmp_path / "demo-project" / "notes.txt"
     ).read_text() == "remember the milk\n"
     assert "file_write  notes.txt" in term.text() and "allowed" in term.text()
+    # The line under the footer, from the real result and the approval's snapshot.
+    term.see("Changed notes.txt (+1)")
     assert term.quit() == 0
 
 
@@ -420,6 +422,23 @@ def test_yolo_runs_tools_without_asking(
     assert term.quit() == 0
 
 
+def test_a_yolo_file_write_is_named_without_counts(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo("--yolo")
+    term.see("⚠ YOLO: no approval")
+    term.type("write the notes\r")
+    term.see("I wrote notes.txt.")
+    assert term.quit() == 0
+    assert (
+        tmp_path / "demo-project" / "notes.txt"
+    ).read_text() == "remember the milk\n"
+    # Nobody was asked, so nothing read the file first: its name stands alone.
+    rows = [row.rstrip() for row in term.text().splitlines()]
+    assert "  Changed notes.txt" in rows
+    assert "Changed notes.txt (" not in term.text()
+
+
 def test_a_history_file_that_cannot_be_opened_is_not_fatal(
     melo: Callable[..., Melo], tmp_path: Path
 ) -> None:
@@ -450,7 +469,7 @@ def test_ascii_mode_prints_only_ascii(
     term.type("\x1b")
     term.see("Cancelled. Still using")
     term.type("/new\r")
-    term.see("New session -")
+    term.see("New chat -")
     term.type("hello\r")
     term.see("Hello! I am melo")
     assert term.quit() == 0
@@ -498,11 +517,11 @@ def test_tab_then_enter_switches_to_the_completed_model(
 def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/")
-    listed.see("Start a new session")
+    listed.see("Start a new chat")
     listed.type("\x1b[B" * 2)  # /model, then /new
     time.sleep(0.3)
     listed.type("\r")
-    listed.see("─ New session ─")
+    listed.see("─ New chat ─")
     assert "Unknown command" not in listed.text()
     assert listed.quit() == 0
 

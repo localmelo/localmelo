@@ -11,4 +11,5 @@
 ● summary.md now holds what notes.txt
   says: buy milk.
 ✻ Worked for 0.2s · 3 tool calls
+  Changed summary.md
 
