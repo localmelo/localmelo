@@ -354,8 +354,9 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
           facts. The answer prints as Markdown:
         </p>
         <pre><code>melo
-# Or talk to an OpenAI-compatible server that is not saved, with its first
-# model or the one you name:
+# Or talk to an OpenAI-compatible server that is not saved. Without
+# --chat-model it uses the server's only chat model or its one loaded model;
+# with several chat models and not exactly one loaded, it exits 2 and lists them:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <ul>
@@ -474,7 +475,7 @@ brew install jundot/omlx/omlx</code></pre>
               minute for a large model. If that request times out, add
               <code>--request-timeout 600</code>.
               <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
-              task opens the interactive UI on the first model oMLX lists.
+              task opens the interactive UI on the server's only chat model or its one loaded model; with several chat models and not exactly one loaded, it exits 2 and lists them.
             </p>
           </li>
         </ol>

@@ -191,8 +191,9 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <h2>交互式对话</h2>
         <p>不带任务运行 <code>melo</code>，即可在终端里对话。轮次运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本次运行的进度事实。答案按 Markdown 输出：</p>
         <pre><code>melo
-# Or talk to an OpenAI-compatible server that is not saved, with its first
-# model or the one you name:
+# Or talk to an OpenAI-compatible server that is not saved. Without
+# --chat-model it uses the server's only chat model or its one loaded model;
+# with several chat models and not exactly one loaded, it exits 2 and lists them:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <ul>
@@ -231,7 +232,7 @@ brew install jundot/omlx/omlx</code></pre>
           <li>
             <p>用这个 ID 运行一个任务：</p>
             <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
-            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。不带任务运行 <code>melo --base-url http://127.0.0.1:8000/v1</code>，会用 oMLX 列出的第一个模型打开交互式界面。</p>
+            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。不带任务运行 <code>melo --base-url http://127.0.0.1:8000/v1</code>，会使用 oMLX 唯一的聊天模型或唯一已加载的模型打开交互式界面；有多个聊天模型、且不是恰好一个已加载时，以退出码 2 结束并列出模型。</p>
           </li>
         </ol>
         <p>要把 oMLX 设为默认：在还没有任何配置时，在终端里运行 <code>melo</code>，它会在 8000 端口找到 oMLX，列出模型并保存你选的那个。已经有配置时，先完成第 5 步，让模型加载好，再运行向导（<code>melo --reconfigure</code>）：对话后端选 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">配置（英文）</a>。网页工作区随后会使用这个模型；它读取配置文件。</p>
