@@ -1037,7 +1037,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   are served and none is known to be loaded, so Enter does nothing until a key moves
   to one; Esc cancels the setup); with the answers piped in, the numbered
   `Model [N]:` question is unchanged. `/model NAME` and `/model N` work as before.
-  ([#NN])
+  ([#247])
 
 - The web console starts with fewer choices. In default mode the header shows the
   running chip and a model chip (the model's name, "Model offline" or "No model")
@@ -1743,6 +1743,7 @@ earlier milestones.
 [#243]: https://github.com/localmelo/localmelo/pull/243
 [#245]: https://github.com/localmelo/localmelo/pull/245
 [#246]: https://github.com/localmelo/localmelo/pull/246
+[#247]: https://github.com/localmelo/localmelo/pull/247
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
