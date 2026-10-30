@@ -24,6 +24,7 @@ import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
+import { askAboutNotes } from "./memory-tab.mjs";
 import {
   activity,
   applyEvent,
@@ -1975,8 +1976,15 @@ async function deleteSession(id) {
   if (workerMode) return;
   const session = S.sessions.find((item) => item.id === id);
   if (!session || session.busy || (session.pending_approvals || 0) > 0) return;
+  // Notes outlive their chat unless the person says otherwise.
+  let notes = "keep";
   try {
-    await api(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const kept = (await api(`/memory/records?session_id=${encodeURIComponent(id)}`)).records?.length ?? 0;
+    if (kept > 0) notes = await askAboutNotes({ doc: document, count: kept, title: title(session) });
+  } catch { /* Without the count, the notes stay. */ }
+  if (notes === "cancel") return;
+  try {
+    await api(`/sessions/${encodeURIComponent(id)}${notes === "forget" ? "?notes=forget" : ""}`, { method: "DELETE" });
     delete S.drafts[id];
     delete S.outbox[id];
     persist(KEY + "-drafts", S.drafts, "sessionStorage");

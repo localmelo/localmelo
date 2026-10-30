@@ -86,7 +86,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         assert term.read_until(lambda out: b"1 model " in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(
-            lambda out: b"Use nomic-embed-text for long-term memory?" in out,
+            lambda out: b"Remember across chats with nomic-embed-text?" in out,
             30,
         ), term.output
         term.type(b"\r")

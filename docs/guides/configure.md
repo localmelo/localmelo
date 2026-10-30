@@ -43,10 +43,10 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   `GET /api/version` once, to tell an Ollama server apart, and `Use it` for
   the embedding question sends one `POST /v1/embeddings` probe of the offered
   model.
-- The embedding question (`Use <model> for long-term memory?`) is asked only
-  when the list holds an embedding model other than the chat model. `Use it`
+- The embedding question (`Remember across chats with <model>?`) is asked only
+  when the list holds an embedding model other than the chat model. `Yes, with it`
   saves three embedding values: the chat backend's key, its URL and the
-  offered model. A failed probe, `Leave it off` (or Esc), or
+  offered model. A failed probe, `No, by words only` (or Esc), or
   no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
   `ollama` backend, an oMLX server (its model listing names oMLX as the owner
@@ -75,7 +75,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   chat_model = "Qwen3-8B-4bit"
   ```
 
-  `Use it` writes the chat backend's embedding fields instead of `"none"`:
+  `Yes, with it` writes the chat backend's embedding fields instead of `"none"`:
 
   ```toml
   chat_backend = "omlx"

@@ -1656,7 +1656,7 @@ class CliSession:
             if candidate:
                 self.out.print(
                     self._text(
-                        f"This server lists {candidate}; melo setup adds it for long-term memory.",
+                        f"This server lists {candidate}; melo setup uses it to remember across chats by meaning.",
                         style="muted",
                     )
                 )

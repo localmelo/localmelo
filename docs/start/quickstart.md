@@ -195,7 +195,7 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -213,7 +213,7 @@ Start the server in another terminal, then choose `Check again`; melo installs
 and starts nothing itself.
 
 If the server also lists an embedding model, the first run adds one question,
-`Use <model> for long-term memory?`, and `Use it` (selected first) saves it
+`Remember across chats with <model>?`, and `Yes, with it` (selected first) saves it
 after one embeddings probe.
 
 Every question with a fixed set of answers is a list on a terminal: ↑ ↓ or a

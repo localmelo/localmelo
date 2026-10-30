@@ -140,7 +140,7 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -151,7 +151,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 没有模型服务器在运行时，`melo` 会打印这台电脑上启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，都出自[模型服务器指南](../guides/model-servers.md)），并询问 `No model server found. What now?`，选项有 `Check again`、`Enter an address` 和 `Quit`（管道输入时为 `Press Enter to check again, type an address, or q to quit:`）。在另一个终端里启动服务器，然后选择 `Check again`；melo 自己不安装、不启动任何东西。
 
-如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory?`；选择默认选中的 `Use it` 后，会在一次嵌入探测通过后保存。
+如果服务器还列出嵌入模型，首次运行会多问一个问题 `Remember across chats with <model>?`；选择默认选中的 `Yes, with it` 后，会在一次嵌入探测通过后保存。
 
 在终端里，每个答案固定的问题都是列表：↑ ↓ 或数字键移动，Enter 确认，Esc 取安全答案，回答后列表会被擦除（见[问题都是列表](../guides/terminal.md#questions-are-lists)）。管道输入的答案和脚本仍使用键入的问题（`Use it? [Y/n]:`）。
 

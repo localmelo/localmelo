@@ -391,16 +391,21 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
 
 
 _SAVING_EMBEDDING_OFF = (
-    "Saving with embedding off: no long-term memory " "(melo setup sets it again)."
+    "Saving without the embedding model: melo remembers across chats by words "
+    "only (melo setup sets it again)."
 )
-_EMBEDDING_OFF = "Long-term memory is off; melo setup turns it on."
+_EMBEDDING_OFF = (
+    "melo remembers across chats by words only; melo setup adds search by meaning."
+)
 _NO_EMBEDDING_OLLAMA = (
-    "No embedding model on this server. ollama pull qwen3-embedding:0.6b, "
-    "then melo setup."
+    "This server lists no embedding model, so melo remembers across chats by "
+    "words only. For search by meaning: ollama pull qwen3-embedding:0.6b, then "
+    "melo setup."
 )
 _NO_EMBEDDING_LOCAL = (
-    "No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, "
-    "then melo setup."
+    "This server lists no embedding model, so melo remembers across chats by "
+    "words only. For search by meaning, serve Qwen3-Embedding-0.6B on it, then "
+    "melo setup."
 )
 
 
@@ -840,11 +845,11 @@ def _offer_embedding(
     candidate = discovery.recommend_embedding(candidates)
     assert candidate is not None  # candidates is not empty
     answer = _choose(
-        f"Use {candidate} for long-term memory? [Y/n]: ",
+        f"Remember across chats with {candidate}? [Y/n]: ",
         "yn",
         "y",
-        title=f"Use {candidate} for long-term memory?",
-        rows=["Use it", "Leave it off"],
+        title=f"Remember across chats with {candidate}?",
+        rows=["Yes, with it", "No, by words only"],
         escape="n",
     )
     if answer == "n":

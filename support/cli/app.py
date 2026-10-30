@@ -86,6 +86,8 @@ from localmelo.support.cli.picker import (
     ListPicker,
     ModelPicker,
     ModelRow,
+    NotePicker,
+    NoteRow,
     SessionPicker,
     fit_row,
     key_line,
@@ -680,6 +682,17 @@ class InteractiveApp:
                 workspace,
                 query=query,
                 choices=choices,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+
+    async def choose_note(self, notes: Sequence[NoteRow]) -> NoteRow | None:
+        """The note picked from *notes* (or the "Forget everything" row); None when closed."""
+        return await self.choose(
+            NotePicker(
+                notes,
                 width=self._width,
                 invalidate=self.invalidate,
                 symbols=self.symbols,

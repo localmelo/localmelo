@@ -101,7 +101,8 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/title [text]` | 显示或设置 1–200 个字符的标题。首条消息之前设置的标题会保留到聊天被保存时。 |
 | `/undo` | 忘记最近一个已完成轮次，并将其输入的消息放入 ↑ 历史记录。工具更改的文件不会回滚。 |
 | `/usage` | 显示每轮记录的步骤、工具调用、token 和耗时，以及总计；包含已撤销的工作。`?` 表示未记录。 |
-| `/memory` | 查看模型工作窗口的副本及其计数、长期记忆后端和恢复限制；不调用模型，也不写入记忆。 |
+| `/memory` | 以列表显示 melo 保存的关于你的笔记（输入即筛选）：对一条笔记按 Enter 可选 `Back`、`Edit it`、`Delete it`；最后一行 `Forget everything…` 写明将删除什么，第一个答案是 `Keep everything`。没有轮次在运行时才会打开。文件与网页控制台相同。 |
+| `/memory window` | 查看模型工作窗口的副本及其计数、长期记忆后端和恢复限制；不调用模型，也不写入记忆。 |
 | `/copy [turn]` | 复制已存储回答的 Markdown，而不是终端中换行后的显示内容。不带编号时使用最近已完成且未撤销的轮次。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用参数、20 行输出、反思摘要及完整理由；不带参数时切换开关。 |
 | `/thinking [on\|off]` | 开启或关闭思考摘录（默认关闭，开发者模式除外）；关闭时只保留 `Thought for 1.2s`；不带参数时切换开关。 |
@@ -181,7 +182,7 @@ from-the-child
 
 `/retry` 重新运行最近一个已完成轮次。如果 `/undo` 已经移除该轮，重试会保留前一个仍有效的轮次；否则先撤销目标轮次。它发送存储的完整消息，同时保留原始输入文本。
 
-`/usage` 包含已撤销的记录，因为这些工作确实执行过。运行中的轮次或缺失的计数显示为 `?`，而非零；不完整的总计以 `+?` 结尾。终端宽度不足 72 列时，用带标签的换行记录显示用量，而不是截断表格中的数字单元格。`/memory` 读取窗口副本，因此它和 `/usage` 都可在轮次运行期间使用。记忆记录显示用户、助手和工具消息，不显示隐藏的思考；页脚说明恢复时使用的是配对，还是检查点加后续配对。它不会读取所有持久化记忆，也不会让模型对其进行总结。
+`/usage` 包含已撤销的记录，因为这些工作确实执行过。运行中的轮次或缺失的计数显示为 `?`，而非零；不完整的总计以 `+?` 结尾。终端宽度不足 72 列时，用带标签的换行记录显示用量，而不是截断表格中的数字单元格。`/memory window` 读取窗口副本，因此它和 `/usage` 都可在轮次运行期间使用（单独的 `/memory`，即笔记列表，要等轮次结束）。记忆记录显示用户、助手和工具消息，不显示隐藏的思考；页脚说明恢复时使用的是配对，还是检查点加后续配对。它不会读取所有持久化记忆，也不会让模型对其进行总结。
 
 `/copy` 读取移除思考后的**已存储脱敏回答**，因此 Markdown 和代码不是从终端换行后的显示内容中复制的；代码行首缩进和末尾换行都会保留。显式指定轮次编号时仅读取该轮；默认选择则按有限大小的分页向前查找。显式编号可以选中已撤销的回答。空回答、运行中的轮次和仅含状态的标签不能复制。在非 SSH 的 macOS 环境中，它使用 `/usr/bin/pbcopy`，超时为两秒；通过 SSH、在其他平台或该工具失败时，它发送 base64 编码的 OSC 52 请求。后者会显示 `Sent the answer …`，而不会声称复制成功：终端必须支持并允许剪贴板请求。只有显式使用 `/copy` 命令才会执行剪贴板操作。
 
@@ -402,11 +403,11 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
-在第二行和第三行之间，melo 会以列表询问 `Use this model server?`（见[问题都是列表](#questions-are-lists)）；回答后列表会被擦除。如果服务器也列出了嵌入模型，还会多一个列表询问 `Use nomic-embed-text for long-term memory?`（`Use it`、`Leave it off`）。
+在第二行和第三行之间，melo 会以列表询问 `Use this model server?`（见[问题都是列表](#questions-are-lists)）；回答后列表会被擦除。如果服务器也列出了嵌入模型，还会多一个列表询问 `Remember across chats with nomic-embed-text?`（`Yes, with it`、`No, by words only`）。
 
 <a id="questions-are-lists"></a>
 
@@ -421,7 +422,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
  ↑↓ select · enter confirm · esc cancel
 ```
 
-↑ ↓ 移动，Enter 确认选中的行，数字键（1 到 9）直接选择对应的行。安全或推荐的答案默认选中，Esc 给出按键行末尾写明的答案（`esc cancel` 结束设置，与 Ctrl+C 相同；`esc not now`、`esc leave it off` 和 `esc don't attach it` 表示拒绝）。列表没有筛选框：列表很短，在其中输入字母不起作用。Ctrl+C 输出 `Setup cancelled.` 并以 130 退出，Ctrl+D 以 0 退出，与文字问题相同。这些问题是：`Use this model server?`；`Use <model> for long-term memory?`；URL 无法使用后的 `What now?`（`Try again`、`Start without saving`、`Quit`；Esc 退出）；`No model server found. What now?`（`Check again`、`Enter an address`，之后询问 `Server URL […]:`，以及 `Quit`；Esc 退出）；`Save URL · MODEL as the default backend?`；向导的后端列表、`Save these settings?`（`Save and continue`、`Cancel setup`）和 `The check failed. What now?`（`Try again`、`Save anyway`、`Cancel setup`，默认选中最后一项，与以前的 `[N]` 一样）；以及界面中的 `Attach this output?`。文字问题（`Server URL`、`Model name`、`Base URL`）仍是文字。没有终端时（答案通过管道输入、脚本、测试）不画列表，每个问题照旧读取键入的答案（`Use it? [Y/n]:`、`Enter tries again · s starts without saving · q quits:`、`[r]etry, [s]ave anyway, [N]o [N]:`、后端用编号、默认值按 Enter）。直接运行（`melo "task"`、`--output-format json`）从不提问。
+↑ ↓ 移动，Enter 确认选中的行，数字键（1 到 9）直接选择对应的行。安全或推荐的答案默认选中，Esc 给出按键行末尾写明的答案（`esc cancel` 结束设置，与 Ctrl+C 相同；`esc not now`、`esc no, by words only` 和 `esc don't attach it` 表示拒绝）。列表没有筛选框：列表很短，在其中输入字母不起作用。Ctrl+C 输出 `Setup cancelled.` 并以 130 退出，Ctrl+D 以 0 退出，与文字问题相同。这些问题是：`Use this model server?`；`Remember across chats with <model>?`；URL 无法使用后的 `What now?`（`Try again`、`Start without saving`、`Quit`；Esc 退出）；`No model server found. What now?`（`Check again`、`Enter an address`，之后询问 `Server URL […]:`，以及 `Quit`；Esc 退出）；`Save URL · MODEL as the default backend?`；向导的后端列表、`Save these settings?`（`Save and continue`、`Cancel setup`）和 `The check failed. What now?`（`Try again`、`Save anyway`、`Cancel setup`，默认选中最后一项，与以前的 `[N]` 一样）；以及界面中的 `Attach this output?`。文字问题（`Server URL`、`Model name`、`Base URL`）仍是文字。没有终端时（答案通过管道输入、脚本、测试）不画列表，每个问题照旧读取键入的答案（`Use it? [Y/n]:`、`Enter tries again · s starts without saving · q quits:`、`[r]etry, [s]ave anyway, [N]o [N]:`、后端用编号、默认值按 Enter）。直接运行（`melo "task"`、`--output-format json`）从不提问。
 
 - melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器：对 `Use this model server?` 按 Enter 即选中 `Use it`；选择 `Use another server` 会询问 `Server URL […]:`（预填该 URL），可改填另一个。探测时请求模型列表；有多个对话模型时，还会请求 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），了解哪些模型已加载；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致）并等待：
 
@@ -439,7 +440,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   随后出现列表 `No model server found. What now?`。`Check again`（默认选中）会再次检查同样的端口，有服务器响应时按上面的方式继续（仍然没有时输出 `✗ No model server found yet (looked at ports …).`）；`Enter an address` 询问 `Server URL [http://127.0.0.1:8000/v1]:`，并像 URL 一样检查你输入的内容（见下）；`Quit`（或 Esc）以退出码 0 退出。答案通过管道输入时，这一行是 `Press Enter to check again, type an address, or q to quit:`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，按 Enter 时检查的就是这些 URL；空值会关闭搜索，此时 melo 询问 `Server URL [http://127.0.0.1:8000/v1]:`。
 - 列出多个模型的服务器会以列表供你选择。在终端里（标准输入和输出都是终端，且 `TERM` 不是 `dumb`），它和 `/model` 是同一个列表：输入即可筛选，↑ ↓ 移动，Enter 选择，Esc 或 Ctrl+C 取消设置（`Setup cancelled.`）。列表只含对话模型（嵌入和重排模型不在其中，除非服务器只列出这些）。有多个对话模型时，已加载的会标上 `(loaded)` 并高亮；服务器没有说明哪些已加载时，不高亮任何一项，在按键移到某一行之前 Enter 不起作用，并且会先用一行说明：尚未加载的模型可能要花几分钟和大量内存来加载。没有终端时（答案通过管道输入），模型以编号列表显示，对话模型在前，并询问 `Model [N]:`；输入编号或 ID。嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。有多个对话模型时，已加载的会标上 `(loaded)` 并作为默认值；服务器没有说明哪些已加载时，提示符是没有默认值的 `Model:`，只按 Enter 会再次询问（`Type the number of the model to use. …`）；没有终端时，空答案会以错误退出，退出码为 2。`/backend` 显示同样的列表（`Choose a model`；按 Esc 不做任何更改）。只列出嵌入或重排模型的服务器也会以相同方式显示，并提示对话需要对话模型。提示文字会按终端宽度在词边界处换行。
 - 对 `GET /api/version` 返回 `{"version": "…"}` 的 Ollama 服务器会保存为 `chat_backend = "ollama"`，并在其 `[ollama]` 表中保存 `chat_url` 和 `chat_model`；横幅随后显示 Ollama，对话请求使用 Ollama 原生 API 及其 300 秒超时。oMLX 服务器（它的模型列表把 oMLX 标为每个模型的所有者）保存为 `chat_backend = "omlx"`，其他任何兼容 OpenAI 的服务器保存为 `chat_backend = "vllm"`（适用于所有兼容 OpenAI 服务器的键）；两者都在 `[vllm]` 表中保存 `chat_url` 和 `chat_model`。文件中的其他设置保持不变。
-- 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Use <model> for long-term memory?`（管道输入时是 `[Y/n]:`），优先推荐 Qwen3-Embedding。`Use it` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `Leave it off`（或按 Esc）、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明记忆已关闭（`Long-term memory is off; melo setup turns it on.`）；`melo setup` 还会说明如何添加模型：Ollama 服务器是 `ollama pull qwen3-embedding:0.6b`，否则是 `Serve Qwen3-Embedding-0.6B on it`。参见[设置嵌入模型](embedding.md)。
+- 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Remember across chats with <model>?`（管道输入时是 `[Y/n]:`），优先推荐 Qwen3-Embedding。`Yes, with it` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `No, by words only`（或按 Esc）、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明 melo 只按词在对话之间记忆（`melo remembers across chats by words only; melo setup adds search by meaning.`）；`melo setup` 还会说明如何添加模型：Ollama 服务器是 `ollama pull qwen3-embedding:0.6b`，否则是在服务器上提供 Qwen3-Embedding-0.6B。参见[设置嵌入模型](embedding.md)。
 - 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `What now?`（管道输入时是 `Enter tries again · s starts without saving · q quits:`）。`Try again`（默认选中）再次询问 URL，默认值为你输入的地址；`Start without saving` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`Quit`（或 Esc）以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
 - 管道输入时，选项按首字母选择，因此 `s`、`start` 和 `start without saving` 是同一回答（`r` 或 `retry` 等同于 Enter）；其他回答会重新询问。
 - 在问题处按 Ctrl-D 会输出 `Setup cancelled.` 并以退出码 0 退出；Ctrl+C 输出相同内容并以 130 退出。

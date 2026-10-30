@@ -21,6 +21,7 @@ import numpy as np
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.memory._sqlite import (
+    checkpoint_wal,
     create_private_file,
     prepare_connection,
     secure_deletes,
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS documents (
     UNIQUE (session_id, turn)
 );
 CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL NOT NULL);
 """
 _COLUMNS: Final = (
     "id, session_id, turn, surface, kind, title, text, created_at, vector, embed_model"
@@ -184,11 +186,29 @@ class ConversationIndex:
             await conn.commit()
         return int(cur.rowcount or 0)
 
-    async def forget_all(self) -> None:
+    async def forget_all(self, *, mark: bool = True) -> int:
+        """Delete every document; returns how many. With *mark*, a turn that ended
+        before now is not indexed again (:meth:`forgotten_at`)."""
         conn = await self._ready()
         async with secure_deletes(conn):
-            await conn.execute("DELETE FROM documents")
+            cur = await conn.execute("DELETE FROM documents")
+            if mark:
+                await conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('forgotten_at', ?)",
+                    (time.time(),),
+                )
             await conn.commit()
+        await checkpoint_wal(conn)
+        return int(cur.rowcount or 0)
+
+    async def forgotten_at(self) -> float:
+        """When the user last forgot everything; 0 for never."""
+        conn = await self._ready()
+        async with conn.execute(
+            "SELECT value FROM meta WHERE key = 'forgotten_at'"
+        ) as cur:
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
 
     async def aclose(self) -> None:
         if self._conn is not None:

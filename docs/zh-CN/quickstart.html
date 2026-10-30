@@ -115,13 +115,13 @@ pip install -e ".[gateway]"</code></pre>
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
 Try: What is this project? · / commands · ctrl+d quit</code></pre>
         <p>第一行显示软件包版本；在 git 检出中还会显示短提交号，如 <code>melo 0.1.0 (baab21e)</code>。<code>melo --version</code> 输出同一行并以退出码 0 退出。<code>/status</code> 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；<code>/status all</code> 还会显示工具、记忆、限制和文件。</p>
-        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。这里用的是 Ollama，所以它被保存为 <code>ollama</code> 后端；oMLX 服务器保存为 <code>omlx</code>，其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>。如果服务器还列出了嵌入模型，首次运行会多问一句 <code>Use &lt;model&gt; for long-term memory?</code>，这是一个列表，默认选中的 <code>Use it</code> 会保存它。在终端里，每个答案固定的问题都是列表（↑ ↓ 或数字键移动，回车确认，Esc 取安全答案）；管道输入的答案仍使用键入的问题。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">首次运行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">设置嵌入模型（英文）</a>。</p>
+        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。这里用的是 Ollama，所以它被保存为 <code>ollama</code> 后端；oMLX 服务器保存为 <code>omlx</code>，其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>。如果服务器还列出了嵌入模型，首次运行会多问一句 <code>Remember across chats with &lt;model&gt;?</code>，这是一个列表，默认选中的 <code>Use it</code> 会保存它。在终端里，每个答案固定的问题都是列表（↑ ↓ 或数字键移动，回车确认，Esc 取安全答案）；管道输入的答案仍使用键入的问题。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">首次运行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">设置嵌入模型（英文）</a>。</p>
         <p>没有模型服务器在运行时，<code>melo</code> 会打印这台电脑上启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，都出自<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">模型服务器指南（英文）</a>），并询问 <code>No model server found. What now?</code>，选项有 <code>Check again</code>、<code>Enter an address</code> 和 <code>Quit</code>（管道输入时为 <code>Press Enter to check again, type an address, or q to quit:</code>）。在另一个终端里启动服务器，然后选择 <code>Check again</code>；melo 自己不安装、不启动任何东西。</p>
         <h3 id="with-the-setup-wizard">使用配置向导</h3>
         <p>配置向导还可以设置嵌入服务器或云端 API。使用云端 API 时，请先在这个终端中运行 <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。先运行向导，再启动网关：</p>

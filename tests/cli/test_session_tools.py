@@ -107,7 +107,7 @@ async def test_memory_reads_a_copy_with_correct_turn_and_tool_counts(
     ]
     setup.session.agent.load_conversation(messages)
     original = setup.session.agent.conversation()
-    setup.session.enter("/memory")
+    setup.session.enter("/memory window")
     await wait_for(lambda: "Long-term memory:" in setup.out.text())
     text = " ".join(setup.out.text().split())
     assert "4 of 64 messages" in text

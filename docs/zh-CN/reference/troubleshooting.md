@@ -158,7 +158,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: embedding probe failed: …
-  Saving with embedding off: no long-term memory (melo setup sets it again).
+  Saving without the embedding model: melo remembers across chats by words only (melo setup sets it again).
 ```
 
 - **原因：** `POST /v1/embeddings` 探测失败。**HTTP 404** 表示服务器不提供该模型 id；**HTTP 400** 表示该 id 是对话模型，而不是嵌入模型；**connection refused** 表示该 URL 上没有进程在监听。

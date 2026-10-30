@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
@@ -96,6 +96,8 @@ class SettingsPutBody(_SettingsBaseBody):
     revision: StrictStr
     # ``[ui] mode``; absent leaves the saved mode as it is.
     mode: StrictStr | None = None
+    # ``[memory] across_chats``; absent leaves it as it is.
+    across_chats: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -305,6 +307,7 @@ def settings_json() -> dict[str, Any]:
             ],
         },
         "mode": _ui_mode(cfg),
+        "across_chats": cfg.memory.across_chats,
         "advanced_options": _advanced_options(),
         "file_label": display.home_label(config.config_path()),
         "revision": revision,
@@ -388,6 +391,9 @@ def _build_candidate(
     candidate.embedding_backend = body.embedding_backend
     candidate.gateway.workspace = body.workspace
     candidate.ui.mode = mode or _ui_mode(candidate)
+    across = getattr(body, "across_chats", None)
+    if across is not None:
+        candidate.memory.across_chats = across
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -449,6 +455,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("workspace")
     if _ui_mode(before) != _ui_mode(after):
         changed.append("mode")
+    if before.memory.across_chats != after.memory.across_chats:
+        changed.append("across_chats")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
@@ -594,4 +602,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "backend_unreachable",
                 f"No models found at {shown_url}.",
             )
-        return JSONResponse(content={"models": models})
+        embedding = discovery.embedding_models(models)
+        return JSONResponse(
+            content={
+                "models": models,
+                "embedding_models": embedding,
+                "suggested_embedding": discovery.recommend_embedding(embedding),
+            }
+        )

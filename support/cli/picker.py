@@ -483,6 +483,77 @@ class ModelPicker(ListPicker[ModelRow]):
         return next((o for o in options if cells(o) <= room), options[-1])
 
 
+@dataclass(frozen=True)
+class NoteRow:
+    """A note melo keeps, as ``/memory`` lists it; id 0 is the "Forget everything" row."""
+
+    id: int
+    text: str
+    topic: str = ""
+    origin: str = ""
+
+
+FORGET_ROW: Final = NoteRow(0, "Forget everything…")
+
+
+class NotePicker(ListPicker[NoteRow]):
+    """The notes melo keeps, newest first, filtered by what is typed.
+
+    With *forget*, the last row (shown while nothing is typed) is "Forget
+    everything…". The caller asks what to do with the chosen note.
+    """
+
+    debounce_s = 0.0
+
+    def __init__(
+        self,
+        notes: Sequence[NoteRow],
+        *,
+        forget: bool = True,
+        width: Callable[[], int],
+        invalidate: Callable[[], None],
+        symbols: Symbols,
+    ) -> None:
+        self.notes, self.forget = list(notes), forget
+        super().__init__(width=width, invalidate=invalidate, symbols=symbols)
+
+    async def load(self, query: str) -> list[NoteRow]:
+        needle = query.strip().casefold()
+        found = [n for n in self.notes if needle in f"{n.text} {n.topic}".casefold()]
+        return found + ([FORGET_ROW] if self.forget and not needle else [])
+
+    def _header(self) -> str:
+        count = f"{len(self.notes)} note{'s' if len(self.notes) != 1 else ''}"
+        return cut_cells(
+            clean_output(in_symbols(f" What melo remembers · {count}", self.symbols)),
+            self.width(),
+            self.symbols.ellipsis,
+        )
+
+    def _row_fragments(self, note: NoteRow) -> StyleAndTextTuples:
+        """``You prefer short answers.  (Preferences · from chat “Plans”, Oct 30)``."""
+        if note is FORGET_ROW:
+            return [("class:muted", note.text)]
+        text = cut_cells(
+            " ".join(clean_output(note.text).split()), max(1, self.width() - 5)
+        )
+        where = " · ".join(part for part in (note.topic, note.origin) if part)
+        # The note comes first; where it came from takes what room is left.
+        left = self.width() - 5 - cells(text) - 2
+        tail = cut_cells(f"({where})", left) if where and left >= 12 else ""
+        return [("", text), ("class:muted", f"  {tail}" if tail else "")]
+
+    def _row(self, note: NoteRow) -> str:
+        return "".join(part[1] for part in self._row_fragments(note))
+
+    def _footer(self) -> str:
+        if self.loading:
+            return "Loading…"
+        if not self.rows:
+            return f"No note matches '{self.buffer.text.strip()}'."
+        return f"{self.symbols.arrows} select · enter open · esc close"
+
+
 class ChoicePicker(ListPicker[int]):
     """A question and its few answers, in words: ↑↓ move, enter confirms.
 
