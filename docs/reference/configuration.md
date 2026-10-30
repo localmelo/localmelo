@@ -64,6 +64,7 @@ tables of the chosen backends.
 | `cross_task_cap` | `[retrieval]` | `1` | Maximum cross-task digests per recall, 0–2; the existing total long-hit limit remains two. |
 | `cross_task_cold` | `[retrieval]` | `0` | Without a matching same-task digest, permit 0 or 1 cross-task digest; still subject to the cap and backend floor. General memories bypass this gate. |
 | `across_chats` | `[memory]` | `true` | Memory across chats in the web console and the app: melo keeps a note of what you tell it about yourself, indexes every finished chat turn and task result, and brings back what matches each new message, with where it came from. `false` turns all of it off. Direct runs and workers never use it. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
+| `retriever` | `[memory]` | `"auto"` | How a console or app chat finds notes for a message: `"auto"` (words, and meaning too when an embedding model is set up), `"bm25"` (words only, no model request), `"embedding"` (the same as `auto` with a model; `melo serve` refuses to start without one) or `"llm"` (words pick up to 20 candidates and the chat model chooses among them within 4 s, falling back to words alone on a timeout, an error or an unreadable reply; no embedding calls). A developer setting for comparing the ways: `-X memory.retriever=llm` for one run, listed by `melo -h all`. Every recall's timings are in the `recall` object of `turn.memory`. See [How recall finds notes](../concepts/memory.md#memory-across-chats). |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
@@ -90,8 +91,8 @@ tables of the chosen backends.
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[memory]` table that is all defaults is not written. Its keys,
-`across_chats` and `admit_on_outcome`, must be bools; any other value is a
-configuration error (exit 1). `admit_on_outcome` is accepted and inert in
+`across_chats` and `admit_on_outcome`, must be bools, and `retriever` one of
+the four values above; any other value is a configuration error (exit 1). `admit_on_outcome` is accepted and inert in
 `legacy`. The `--keep-decision-text`
 switch is flag-only, because it writes potentially personal text to the
 store and a saved default would be a privacy footgun.

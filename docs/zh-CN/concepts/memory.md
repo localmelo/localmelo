@@ -26,7 +26,7 @@
 
 在网页控制台和 App 中，melo 会跨对话记忆。除非设置 `[memory] across_chats = false`（`melo config set memory.across_chats false`，然后重启 `melo serve` 或 App），否则它是开启的。`~/.cache/localmelo/memory/` 中的两个文件保存它（文件夹权限 0700，文件 0600），每个对话读写的都是同一组文件：
 
-- **关于你的笔记**（`records.db`）。当你输入的消息说到关于你的事（"I prefer short answers"、"my group meeting is on Thursdays"、"call me Ray"、"我习惯用简体中文"），或请 melo 记住一个事实（"remember that Sam has the lab keys"）时，melo 把它记成一句对你说的话，带上主题（About you、Preferences、People 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`）。只有你输入的文字才算：附加的文件、工具输出、网页、melo 的回答和任务报告都不算。问题和待办（"remember to buy milk"）不是笔记。看起来像密码、密钥、一次性验证码、卡号或证件号的文字不会被保存，那一行会写 `Not remembered: it looked like a password or key`。
+- **关于你的笔记**（`records.db`）。当你输入的消息说到关于你的事（"I prefer short answers"、"my group meeting is on Thursdays"、"my reading group meets on Tuesdays"、"我的猫叫团子"、"call me Ray"、"我习惯用简体中文"），或请 melo 记住一个事实（"remember that Sam has the lab keys"）时，melo 把它记成一句对你说的话，带上主题（About you、Preferences、People 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`）。只有你输入的文字才算：附加的文件、工具输出、网页、melo 的回答和任务报告都不算。问题和待办（"remember to buy milk"）不是笔记。看起来像密码、密钥、一次性验证码、卡号或证件号的文字不会被保存，那一行会写 `Not remembered: it looked like a password or key`。
 - **每个对话的索引**（`index.db`）。每个完成的对话轮次添加一个文档：你输入的内容和 melo 的回答（不含思考），最多 2,000 个字符，密钥会被遮盖。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。
 
 **召回。** 一条消息发给模型之前，melo 会搜索这两个文件：总是按词搜索（对单词和汉字的 BM25），配置了嵌入模型时也按语义搜索（见[设置嵌入模型](../guides/embedding.md)；例如与对话模型同在一个 oMLX 服务器上的 Qwen3-Embedding-0.6B）。最多 3 条笔记和其他对话的 2 个早先轮次（总共不超过 900 个字符）会一次性加在你的消息末尾，以引用形式出现，并各自注明出处：
@@ -38,7 +38,18 @@ when is my group meeting?
 - the user said “my group meeting is on Thursdays” (chat “Planning”, Oct 30)
 ```
 
-页面在你的消息下方显示 `Used 1 memory ▾`；展开即可看到每一项及其出处，例如 `you said it · chat “Planning”, Oct 30`。大多数消息什么也不召回：一项内容必须包含消息中大部分实词，或按嵌入模型在语义上足够接近。嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+页面在你的消息下方显示 `Used 1 memory ▾`；展开即可看到每一项及其出处，例如 `you said it · chat “Planning”, Oct 30`。大多数消息什么也不召回：一项内容必须包含消息中大部分实词（英文单词的复数、`-ing`、`-ed` 词尾不影响匹配："meet" 能找到 "meets"），或按嵌入模型在语义上足够接近。嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+
+**召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
+
+| 值 | 如何找到笔记 | 代价 |
+|---|---|---|
+| `auto`（默认） | 按词搜索；设置了嵌入模型时也按语义搜索。 | 每条消息一个很小的嵌入请求，带上面说的 1.5 秒限制。没有嵌入模型时没有任何额外开销。 |
+| `bm25` | 只按词搜索。 | 没有代价：完全不向模型发请求。与笔记没有共同词的问题会找不到。 |
+| `embedding` | 有模型时与 `auto` 相同；没有嵌入模型时 `melo serve` 拒绝启动。 | 与 `auto` 相同。 |
+| `llm` | 先按词挑出最多 20 条与消息有共同词的笔记和轮次，再由对话模型（你正在对话的那个，同一台服务器）选出相关的。不使用嵌入模型。 | 每条有候选项的消息多一个对话请求，最多等待 4 秒；它读约 20 行短文字，回答几个编号。超时、出错或回复无法读取时，这条消息只按词搜索。与笔记没有共同词的问题什么也找不到。 |
+
+每次召回都会计时。页面上不会多出任何内容，但每个轮次的 `turn.memory` 事件带有 `recall` 对象：回答的 `retriever`、`fallback`（`none`、`timeout`、`error`、`unreadable` 或 `no-embedding`）、嵌入（`embed_ms`）、搜索（`search_ms`）和选择（`select_ms`）各花的毫秒数、选择用掉的 `select_tokens`（`prompt`、`completion`）、`candidates` 的数量和实际 `used` 的条数。同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 
 对话的指令会说明它记得什么，并用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取）。对话还有只读工具 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）。
 

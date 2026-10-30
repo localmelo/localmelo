@@ -126,6 +126,7 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.tool_images": "#280",
     "agent.tool_images_keep": "#280",
     "agent.tool_images_retire": "#280",
+    "memory.retriever": "#299",
 }
 
 # Long option name -> tier, for every option the parser has.
