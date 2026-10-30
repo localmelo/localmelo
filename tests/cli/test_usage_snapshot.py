@@ -220,6 +220,62 @@ def test_tasks_segment_only_with_a_task_store() -> None:
     ]
 
 
+# ── The same row in words, for default mode ──
+
+
+def words(
+    events: list[dict[str, Any]], *, local: bool = True, now: float = T0 + 30
+) -> list[str]:
+    snap = UsageSnapshot()
+    for event in events:
+        snap.observe(event)
+    return status_segments(snap, local=local, now=now, words=True)
+
+
+def test_the_context_in_words_is_a_share_when_the_limit_is_known() -> None:
+    assert words([budget(2600, 32000)]) == ["context 8% used"]
+    assert words([budget(2600, None)]) == ["context 2.6k tokens"]
+    assert words([budget(900, None)]) == ["context 900 tokens"]
+    assert words([budget(None, 32768)]) == []
+
+
+def test_the_cache_in_words_waits_until_the_server_has_reported_a_value() -> None:
+    assert words([message(1000, None)]) == []  # the compact row says `cache --`
+    events = [message(1000, 100), message(2000, 1660)]
+    assert words(events) == ["83% cached"]
+    assert words(events, now=T0 + 190) == ["83% cached, idle 3m"]
+    assert words(events, local=False, now=T0 + 190) == ["83% cached"]
+
+
+def test_the_words_keep_the_order_and_leave_steps_and_tasks_as_they_are() -> None:
+    started = {"type": "run.started", "ts": T0, "data": {}}
+    events = [message(1000, 830), budget(2600, 32000), started, progress(step=4)]
+    snap = UsageSnapshot()
+    for event in events:
+        snap.observe(event)
+    counts = TaskCounts(running=1, queued=2, held=0)
+    assert status_segments(snap, local=True, now=T0, tasks=counts, words=True) == [
+        "83% cached",
+        "context 8% used",
+        "step 4",
+        "tasks 1 running 2 queued",
+    ]
+    assert status_segments(snap, local=True, now=T0, tasks=counts) == [
+        "cache 83%",
+        "ctx 2.6k/32k",
+        "step 4",
+        "tasks 1 running 2 queued",
+    ]
+
+
+def test_the_status_route_keeps_the_compact_segments() -> None:
+    snap = UsageSnapshot()
+    for event in (message(1000, None), budget(2600, 32000)):
+        snap.observe(event)
+    segments = snap.to_dict(local=True, now=T0 + 30)["segments"]
+    assert segments == ["cache --", "ctx 2.6k/32k"]
+
+
 def test_the_context_summary_says_how_full_the_context_is_in_words() -> None:
     def summary(events: list[dict[str, Any]], last: int = 0) -> str:
         snap = UsageSnapshot()

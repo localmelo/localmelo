@@ -1068,6 +1068,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
   exit codes and requests ([#NN]).
 
+- The terminal's status bar says its figures in words in default mode: `context 8% used`
+  (`context 2.6k tokens` when the server's input limit is not known) where it said
+  `ctx 12k/32k`, and `83% cached` where it said `cache 83%`, with `, idle 3m` after it
+  for a local server. The cache shows once the server has reported a value, where it
+  showed `cache --` before. The last request's context figure drops whole on a narrow
+  terminal, like a measured one, before the folder is cut. The words are never cut
+  in the middle. Developer mode keeps the compact segments, and so do the web console's
+  status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A

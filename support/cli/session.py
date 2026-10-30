@@ -91,6 +91,7 @@ from localmelo.support.sessions.store import (
 from localmelo.support.sessions.sync import SessionMark
 from localmelo.support.usage_snapshot import (
     context_summary,
+    context_words,
     status_segments,
     usage_lines,
 )
@@ -289,6 +290,8 @@ class CliSession:
         elif mode == "ask" and not self.developer:
             shown = ""  # what everyone expects needs no word
         segments: tuple[str, ...] = ()
+        # Default mode says the figures in words; developer mode keeps them compact.
+        words = not self.developer
         if self.status_line == "auto":
             segments = tuple(
                 status_segments(
@@ -296,16 +299,25 @@ class CliSession:
                     local=backend.local,
                     now=time.time(),
                     steps=self.developer,
+                    words=words,
                 )
             )
-            # The ctx segment shows the measured tokens and the limit; without
-            # a measurement the bar keeps its last-request ctx.
-            if any(segment.startswith("ctx ") for segment in segments):
+            # The context segment shows the measured tokens and the limit; without
+            # a measurement the bar keeps its last request's figure.
+            if any(segment.startswith(("ctx ", "context ")) for segment in segments):
                 context = 0
+            elif words and context:
+                # Like a measured one, it drops whole when the bar is narrow,
+                # before the folder is cut.
+                segments += (context_words(context),)
+                context = 0
+        last = ""
+        if context:
+            last = context_words(context) if words else f"ctx {format_tokens(context)}"
         return StatusBar(
             model=backend.model,
             workspace=home_label(self.agent.workspace_root or ""),
-            context=f"ctx {format_tokens(context)}" if context else "",
+            context=last,
             segments=segments,
             title=self.title or "New chat",
             mode=shown,

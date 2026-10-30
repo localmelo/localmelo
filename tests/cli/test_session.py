@@ -1944,9 +1944,39 @@ async def test_status_bar_redraws_after_an_assistant_message(setup: Setup) -> No
     before = setup.app.invalidated
     session.on_event(_request_event(1000, 830))
     assert setup.app.invalidated == before + 1
-    assert session.status_bar().segments == ("cache 83%",)
-    # Without a context_budget event the bar keeps its own ctx, as before.
-    assert session.status_bar().context == "ctx 1.0k"
+    # Without a context_budget event the bar keeps its last request's figure.
+    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
+    assert session.status_bar().context == ""
+    session.developer = True  # developer mode keeps the compact figures
+    bar = session.status_bar()
+    assert bar.segments == ("cache 83%",) and bar.context == "ctx 1.0k"
+
+
+def _context_budget(measured: int, limit: int | None) -> dict[str, Any]:
+    data = {"measured_prompt_tokens": measured, "input_limit": limit}
+    return {"type": "context_budget", "ts": time.time(), "data": data}
+
+
+async def test_the_status_bar_says_its_figures_in_words_until_developer_mode(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    session.renderer.usage.observe(_context_budget(2600, 32000))
+    session.on_event(_request_event(1000, None))  # the server reports no cache
+    bar = session.status_bar()
+    # The cache waits for a value; the context says how full it is.
+    assert bar.segments == ("context 8% used",) and bar.context == ""
+    session.on_event(_request_event(1000, 830))
+    assert session.status_bar().segments == ("83% cached", "context 8% used")
+    session.developer = True
+    assert session.status_bar().segments == ("cache 83%", "ctx 2.6k/32k")
+    session.developer = False
+    session.renderer.usage.observe(_context_budget(2600, None))
+    assert session.status_bar().segments[-1] == "context 2.6k tokens"
+
+
+async def test_a_new_chat_is_named_in_the_status_bar(setup: Setup) -> None:
+    assert setup.session.status_bar().title == "New chat"
 
 
 async def test_the_status_bar_shows_the_step_only_in_developer_mode(
@@ -1960,7 +1990,7 @@ async def test_the_status_bar_shows_the_step_only_in_developer_mode(
     for event in running:
         session.renderer.usage.observe(event)
     session.on_event(_request_event(1000, 830))
-    assert session.status_bar().segments == ("cache 83%",)
+    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
     session.developer = True
     assert session.status_bar().segments == ("cache 83%", "step 4")
 
@@ -1978,7 +2008,9 @@ async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
     assert (off.model, off.workspace, off.context, off.title, off.mode) == (
         auto.model,
         auto.workspace,
-        "ctx 1.0k",
+        "context 1.0k tokens",
         auto.title,
         auto.mode,
     )
+    session.developer = True
+    assert session.status_bar().context == "ctx 1.0k"

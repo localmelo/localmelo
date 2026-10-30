@@ -70,7 +70,7 @@ for you to send or change, and step aside once there is text.
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline.
 4. A status row sits above the composer: the same segments as the terminal's
-   status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
+   developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
    and step segments only. The cache
    share reads `cache --` when the model server reports no cached tokens, never

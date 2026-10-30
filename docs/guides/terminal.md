@@ -28,7 +28,7 @@ Try: What is this project? · / commands · ctrl+d quit
 ────────────────────────────────────────────────────────────────────────────
 › Ask melo · / for commands
 ────────────────────────────────────────────────────────────────────────────
-  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?
+  Qwen3-8B · ~/demo-project · context 2.1k tokens · What is in this folder?
 ```
 
 The welcome is three rows: the version and the model, with how to change it;
@@ -383,32 +383,44 @@ happens without the explicit `/copy` command.
 The bar under the input box carries the usage figures of the session, taken
 from events melo has already received: no request, no polling, no timer.
 Left to right, after the model and the workspace, each segment appears only
-when it has data:
+when it has data. The default mode says them in words:
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.
+  stub-model · ~/demo-project · 83% cached · context 8% used · List the files.
 ```
 
-- `cache 83%` is the share of the last request's prompt tokens the server
-  reported as cached (`cache --` when the server reports none, never 0%). For
-  a local server, `idle 3m` follows once a minute has passed since the last
-  request; a local server evicts its prefix cache by memory, not by time, so
-  there is no countdown.
+- `context 8% used` is the last measured prompt over the input limit; when no
+  limit is known it says the tokens instead (`context 2.6k tokens`).
+- `83% cached` is the share of the last request's prompt tokens the server
+  reported as cached. It shows once the server has reported a value: a server
+  that reports none shows nothing, never 0%. For a local server, `, idle 3m`
+  follows once a minute has passed since the last request; a local server
+  evicts its prefix cache by memory, not by time, so there is no countdown.
+- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
+
+Developer mode (`--developer`, or `[ui] mode = "developer"`) keeps the compact
+figures, which are also what the web console's status row draws:
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k/32k · step 4 · List the files.  ask
+```
+
+- `cache 83%` is the cached share (`cache --` when the server reports none,
+  never 0%), with `idle 3m` after it for a local server.
 - `ctx 12k/32k` is the last measured prompt over the input limit, or just
   `ctx 12k` when no limit is known.
 - `step 4 attempt 2 phase fix` are the run's progress facts while a run is
-  active, never a percent or `n/max`. Developer mode shows them; the default
-  mode leaves them out.
-- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
+  active, never a percent or `n/max`; the default mode leaves them out.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
 the last redraw. The approval mode shows at the right edge only when it is not
 `ask` (`auto`, `deny`, or the `⚠ YOLO: no approvals` warning); developer mode
 always shows it. On a narrow terminal the title goes first, then the segments
-right to left, then the workspace is cut, and the bar never wraps. `/status all`
-prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
-it was before these segments: the model, workspace, `ctx` of the last request
-and the title. There is no command-line flag for it.
+right to left, whole (the words are never cut), then the workspace is cut, and
+the bar never wraps. `/status` prints the figures in full. `[cli] status_line =
+"off"` keeps the bar as it was before these segments: the model, workspace, the
+context of the last request (`context 1.0k tokens`, or `ctx 1.0k` in developer
+mode) and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
