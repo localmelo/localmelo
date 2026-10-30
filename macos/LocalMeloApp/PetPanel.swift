@@ -212,21 +212,25 @@ final class PetController: NSObject {
         if shownState == nil || mood != old { view.describe(mood) }
         // A beat plays when the mood begins: when the pet appears, and when what it does changes.
         let beginning = shownState == nil || petMotionPlan(old) != petMotionPlan(mood)
+        // A change of picture waits (0.4 s at most) until the pet is at rest and, while it may move, hides in a squash.
+        var begin = PetBegin()
         if mood.picture != shownState, let image = picture(for: mood.picture) {
+            begin = PetBegin(wait: shownState != nil && shouldAnimate(environment) ? motion.restWait() : 0,
+                             dip: petDips(from: shownState, to: mood.picture, environment: environment))
             motion.show(image, parts: parts(for: mood.picture),
-                        fade: petFade(from: shownState, to: mood.picture, environment: environment))
+                        fade: petFade(from: shownState, to: mood.picture, environment: environment), begin: begin)
             shownState = mood.picture
         }
-        applyMotion(beginning: beginning)
+        applyMotion(beginning: beginning, begin: begin)
     }
 
     // The animations run on their own; they are started again only when what they should be doing changed, so a
     // breath is not cut short by each health reply.
-    private func applyMotion(beginning: Bool) {
+    private func applyMotion(beginning: Bool, begin: PetBegin = PetBegin()) {
         let plan = petMotionPlan(mood), animate = shouldAnimate(environment)
         if !beginning, let done = applied, done.plan == plan, done.animate == animate { return }
         applied = (plan, animate)
-        motion.play(plan, entering: beginning, animate: animate)
+        motion.play(plan, entering: beginning, animate: animate, begin: begin)
     }
 
     /// The picture for the panel's screen scale, decoded once; nil when the file is missing.

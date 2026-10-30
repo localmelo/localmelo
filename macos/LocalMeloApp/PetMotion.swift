@@ -6,8 +6,9 @@ import QuartzCore
 /// transforms of the whole picture, cross-fades between pictures, an eyes-closed patch that fades in over the eyes
 /// (the blink), the tail and the ear as layers of their own that swing about their base, and the "z" the app draws
 /// itself. All of
-/// them stop (the state's still picture stays) when `shouldAnimate` says so; a change of picture still cross-fades
-/// unless Reduce Motion asks for a plain swap (`petFade`).
+/// them stop (the state's still picture stays) when `shouldAnimate` says so; a change of picture still cross-fades,
+/// plainly (`petFade`). While the pet may move, nothing that is running is cut: a loop that goes on keeps running, one
+/// that ends eases to rest, and a change of picture waits for a rest point and hides in a squash and rise.
 
 /// The slow scale of a lying body: `amount` is the scale on the vertical axis at the top of a breath, about the
 /// ground line, and `seconds` the whole breath, in and out.
@@ -35,6 +36,28 @@ struct PetMotionPlan: Equatable {
     var drifts = false
     /// The ear twitches now and then (the mood's picture has an ear piece).
     var twitches = false
+}
+
+/// When a change of picture begins and how: `wait` seconds from now (`PetMotion.restWait`), and, for a change of pose, a
+/// `dip` (a squash and rise of 0.35 s) that the cross-fade is centred on, so the pose changes at its low point.
+struct PetBegin: Equatable {
+    var wait: TimeInterval = 0
+    var dip = false
+}
+
+/// The longest a change waits for the pet to be at rest.
+let petWaitMost: TimeInterval = 0.4
+
+/// Seconds a change waits for the pet to be at rest, never more than `petWaitMost`: until a squash or lift in the air
+/// has landed (`landsIn`), until a breath that ends within that time has ended (`breathAge` seconds into a breath of
+/// `breath`; a breath that ends later is eased to rest instead), and until a shut eye has opened (`opensIn`).
+func petRestWait(landsIn: TimeInterval, breath: PetBreath?, breathAge: TimeInterval, opensIn: TimeInterval) -> TimeInterval {
+    var wait = max(landsIn, opensIn)
+    if let breath = breath, breathAge >= 0 {
+        let left = breath.seconds - breathAge.truncatingRemainder(dividingBy: breath.seconds)
+        if left <= petWaitMost { wait = max(wait, left) }
+    }
+    return min(max(wait, 0), petWaitMost)
 }
 
 /// The pieces of a picture's family that move over it; each is nil where the picture has none.
@@ -83,6 +106,18 @@ final class PetMotion {
     private var earBody: CGImage?
     private var zStart: CGPoint?
     private let size: CGSize
+    /// What `play` last started, when the breath began (layer time) and when the loop of blinks did, and when the
+    /// squash or lift last started will have landed.
+    private var running: PetMotionPlan?
+    private(set) var breathAt: CFTimeInterval = 0
+    private var blinkAt: CFTimeInterval = 0
+    private var busyUntil: CFTimeInterval = 0
+    /// The value of `path` on `layer` as the eye sees it now; nil where the layer is not on a screen (it has no
+    /// presentation layer, so there is nothing to ease from). Tests give it values.
+    var shown: (CALayer, String) -> Double? = { layer, path in
+        (layer.presentation()?.value(forKeyPath: path) as? NSNumber)?.doubleValue
+    }
+    private var now: CFTimeInterval { moving.convertTime(CACurrentMediaTime(), from: nil) }
 
     /// `size` is the panel's canvas and `anchor` the point the motions turn about, in points from the canvas's
     /// bottom-left (the centre of the ground line).
@@ -132,14 +167,26 @@ final class PetMotion {
     }
 
     /// Shows `image` (as many pixels as `points` times its scale) with the `parts` that move over it; `fade` seconds of
-    /// cross-fade, 0 for a swap. The tail stays hidden until its wag plays, and the ear until its twitch.
-    func show(_ image: CGImage, parts: PetParts = PetParts(), fade: TimeInterval) {
+    /// cross-fade, 0 for a swap, from `begin.wait` seconds from now, with the squash of `begin.dip` if it has one (the
+    /// old picture, pieces and all, stays until the fade begins). The tail stays hidden until its wag plays, and the
+    /// ear until its twitch.
+    func show(_ image: CGImage, parts: PetParts = PetParts(), fade: TimeInterval, begin: PetBegin = PetBegin()) {
         picture.contentsScale = CGFloat(image.width) / picture.bounds.width
         if fade > 0 {
+            let start = now + begin.wait
+            if begin.dip {
+                moving.add(Self.squash(from: start), forKey: "dip")
+                busyUntil = max(busyUntil, start + Self.dipSeconds)
+            }
             let transition = CATransition()
             transition.type = .fade
             transition.duration = fade
             transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            let at = start + (begin.dip ? (Self.dipSeconds - fade) / 2 : 0)
+            if at > now {
+                transition.beginTime = at
+                transition.fillMode = .backwards
+            }
             picture.add(transition, forKey: kCATransition)
         }
         still = image
@@ -156,39 +203,131 @@ final class PetMotion {
     }
 
     /// Starts what the plan says, or stops everything and leaves the still picture. `entering` is true on the
-    /// change of mood, the only time a beat plays.
-    func play(_ plan: PetMotionPlan, entering: Bool, animate: Bool) {
-        stop()
-        guard animate else { return }
-        if let breath = plan.breath { picture.add(Self.breathing(breath), forKey: "breath") }
-        if plan.blinks && blink.contents != nil { blink.add(Self.blinking(), forKey: "blink") }
-        if plan.drifts && zStart != nil { drift.add(Self.drifting(), forKey: "drift") }
+    /// change of mood, the only time a beat plays; `begin` is the one `show` was given. Nothing a person sees is cut:
+    /// a breath the plan keeps goes on, one it changes eases to rest first, the "z" fades out, and a squash or lift in
+    /// the air lands. What belongs to the picture (blink, tail, ear) starts again with the pieces `show` put in.
+    func play(_ plan: PetMotionPlan, entering: Bool, animate: Bool, begin: PetBegin = PetBegin()) {
+        guard animate else { return stop() }
+        let start = now + begin.wait
+        for layer in [blink, tail, ear] { layer.removeAllAnimations() }
+        picture.removeAnimation(forKey: "twitch")
+        tail.isHidden = true
+        if let still = still { picture.contents = still }
+        if running?.breath != plan.breath {
+            let eased = release(picture, key: "breath", paths: ["transform.scale.y"], over: Self.settleSeconds)
+            if eased { busyUntil = max(busyUntil, now + Self.settleSeconds) }
+            if let breath = plan.breath {
+                breathAt = max(start, now + (eased ? Self.settleSeconds : 0))
+                let animation = Self.breathing(breath)
+                animation.beginTime = breathAt
+                picture.add(animation, forKey: "breath")
+            }
+        }
+        if plan.blinks && blink.contents != nil {
+            blink.add(Self.blinking(), forKey: "blink")
+            blinkAt = now
+        }
+        if plan.drifts && zStart != nil {
+            if drift.animation(forKey: "drift") == nil { drift.add(Self.drifting(), forKey: "drift") }
+        } else {
+            release(drift, key: "drift", paths: ["opacity", "transform.translation.y"], over: Self.fadeOutSeconds)
+        }
         if plan.twitches, let still = still, let earBody = earBody, ear.contents != nil {
             // The picture shows its ear-less body for the twitch only, and the ear turns over it; the rest of the
             // 13 s the still picture shows, so nothing is cut at rest.
             picture.add(Self.swapping(to: earBody, from: still), forKey: "twitch")
             ear.add(Self.twitching(), forKey: "twitch")
         }
+        running = plan
         guard entering, let beat = plan.beat else { return }
+        // The beat springs up from the low point of the squash, with the new pose.
+        let at = start + (begin.dip ? Self.dipSeconds / 2 : 0)
         switch beat {
-        case .bob: moving.add(Self.lift(points: 3), forKey: "beat")
-        case .hop: moving.add(Self.lift(points: 6), forKey: "beat")
+        case .bob, .hop:
+            let lift = Self.lift(points: beat == .bob ? 3 : 6)
+            lift.beginTime = at
+            moving.add(lift, forKey: "beat")
+            busyUntil = max(busyUntil, at + lift.duration)
         case .wag:
             // The picture without its tail, and the tail over it: laid together they are the still picture.
             guard let body = body, tail.contents != nil else { return }
             picture.contents = body
             tail.isHidden = false
-            tail.add(Self.wag(), forKey: "beat")
+            let wag = Self.wag()
+            wag.beginTime = at
+            tail.add(wag, forKey: "beat")
         }
     }
 
     func stop() {
         moving.removeAllAnimations()
         for layer in [blink, tail, ear, drift] { layer.removeAllAnimations() }
-        picture.removeAnimation(forKey: "breath")
-        picture.removeAnimation(forKey: "twitch")
+        for key in ["breath", "twitch", "release.transform.scale.y"] { picture.removeAnimation(forKey: key) }
         tail.isHidden = true
         if let still = still { picture.contents = still }
+        running = nil
+        busyUntil = 0
+    }
+
+    /// Seconds a change should wait for the pet to be at rest (`petRestWait`).
+    func restWait() -> TimeInterval {
+        let time = now
+        return petRestWait(landsIn: busyUntil - time, breath: running?.breath, breathAge: time - breathAt,
+                           opensIn: running?.blinks == true ? Self.opensIn(blinkAge: time - blinkAt) : 0)
+    }
+
+    /// Takes `key` off `layer` and eases each of the `paths` that is off its rest as the eye sees it from there to rest
+    /// over `seconds`, so removing a running loop never snaps. True when something was eased.
+    @discardableResult
+    private func release(_ layer: CALayer, key: String, paths: [String], over seconds: TimeInterval) -> Bool {
+        var eased = false
+        if layer.animation(forKey: key) != nil {
+            for path in paths {
+                guard let from = shown(layer, path), let rest = (layer.value(forKeyPath: path) as? NSNumber)?.doubleValue,
+                      abs(from - rest) > 0.002 else { continue }
+                let animation = CABasicAnimation(keyPath: path)
+                animation.fromValue = from
+                animation.toValue = rest
+                animation.duration = seconds
+                animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                layer.add(animation, forKey: "release." + path)
+                eased = true
+            }
+        }
+        layer.removeAnimation(forKey: key)
+        return eased
+    }
+
+    /// The seconds a squash and rise takes, an ease to rest, and a fade out of the "z".
+    static let dipSeconds: TimeInterval = 0.35
+    static let settleSeconds: TimeInterval = 0.25
+    static let fadeOutSeconds: TimeInterval = 0.18
+
+    /// A squash and rise of the whole pet about its ground line, from `start` (layer time): a little lower and wider at
+    /// the low point, which is half way, 0.35 s, each way eased in and out.
+    static func squash(from start: CFTimeInterval) -> CAAnimationGroup {
+        let ease = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: 2)
+        let down = CAKeyframeAnimation(keyPath: "transform.scale.y")
+        down.values = [1, 0.95, 1]
+        let wide = CAKeyframeAnimation(keyPath: "transform.scale.x")
+        wide.values = [1, 1.025, 1]
+        for animation in [down, wide] {
+            animation.keyTimes = [0, 0.5, 1]
+            animation.timingFunctions = ease
+            animation.duration = dipSeconds
+        }
+        let group = CAAnimationGroup()
+        group.animations = [down, wide]
+        group.duration = dipSeconds
+        group.beginTime = start
+        return group
+    }
+
+    /// Seconds until the eyes are open, `blinkAge` seconds into the loop of blinks: 0 between blinks.
+    static func opensIn(blinkAge age: TimeInterval) -> TimeInterval {
+        let phase = max(age, 0).truncatingRemainder(dividingBy: 11)
+        for begins in [4.2, 9.6] where phase >= begins && phase < begins + 0.16 { return begins + 0.16 - phase }
+        return 0
     }
 
     /// A breath: the vertical scale rises to `amount` and returns, `seconds` in all, forever. The easing is the

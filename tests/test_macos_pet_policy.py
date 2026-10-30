@@ -190,11 +190,11 @@ def test_the_pet_moves_only_when_it_may_and_its_panel_stays_on_screen(
         tmp_path,
         r"""
 var env = PetEnvironment()
-precondition(shouldAnimate(env) && petCrossfade(env) == 0.15)
+precondition(shouldAnimate(env) && petCrossfade == 0.2)
 env.reduceMotion = true
-precondition(!shouldAnimate(env) && petCrossfade(env) == 0)  // the picture swaps, nothing fades
+precondition(!shouldAnimate(env))  // no motion; a change is the plain 0.2 s cross-fade
 env = PetEnvironment(); env.lowPower = true
-precondition(!shouldAnimate(env) && petCrossfade(env) == 0.15)  // loops stop, a change still fades
+precondition(!shouldAnimate(env))  // loops stop, a change still fades
 env = PetEnvironment(); env.thermal = .fair
 precondition(shouldAnimate(env))
 env.thermal = .serious
