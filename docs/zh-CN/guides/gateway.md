@@ -14,7 +14,7 @@ melo serve
 
 旧写法（`melo --serve`、`--daemon`、`--gateway-login`、`--gateway-rotate-token`、`--enable-playground`、`--allow-unconfigured`）仍然可用，macOS 应用和启动脚本就在用；完整对照见[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)。
 
-- 如果还没有配置文件，`melo serve` 会像 `melo setup` 一样先提问：显示 `Found a model server at …` 并询问 `Use this model server?`；只有选择 `Use another server` 或使用 `--developer` 时，才出现完整的后端菜单，没有服务器在运行时则输出启动服务器的命令；参见[使用向导配置](configure.md#set-up-with-the-wizard)。如果没有终端，网关无法提问，因此会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
+- 如果还没有配置文件，`melo serve` 会像 `melo setup` 一样先提问：显示 `Found a model server at …` 并询问 `Use this model server?`；只有选择 `Use another server` 或处于开发者模式时，才出现完整的后端菜单，没有服务器在运行时则输出启动服务器的命令；参见[使用向导配置](configure.md#set-up-with-the-wizard)。如果没有终端，网关无法提问，因此会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
 - 即使没有配置后端或配置文件存在验证错误，`melo serve --force` 也会跳过向导并启动网关，让客户端或网页控制台通过 `GET /api/health` 检查状态，并通过 `PUT /api/settings` 保存配置。
 - `--url` 和 `--model` 与 `melo serve` 同时使用属于用法错误：网关使用配置文件。
 - 网关监听 `127.0.0.1:8401`，即配置文件中 `[gateway]` 的默认值。`--host` 和 `--port` 可以更改单次运行的地址和端口，例如 `melo serve --port 9401`。

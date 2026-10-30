@@ -56,7 +56,7 @@ The first of these that applies:
 1. `melo setup`: the setup wizard, then the backend it saved. In default
    mode it first offers the model server it finds on this computer (`Found a
    model server at …`, `Use this model server?`) with the first run's questions; the
-   full backend menu follows only after `Use another server`, with `--developer`, or when none is
+   full backend menu follows only after `Use another server`, in developer mode, or when none is
    found while a backend is saved (with nothing saved, it prints the commands
    that start a server). Without a task it cannot be combined with `--url`.
 2. `--url URL`: that server, without the config file. The model is

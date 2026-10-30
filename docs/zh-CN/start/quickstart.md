@@ -147,6 +147,8 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
+没有模型服务器在运行时，`melo` 会打印这台电脑上启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，都出自[模型服务器指南](../guides/model-servers.md)），并询问 `No model server found. What now?`，选项有 `Check again`、`Enter an address` 和 `Quit`（管道输入时为 `Press Enter to check again, type an address, or q to quit:`）。在另一个终端里启动服务器，然后选择 `Check again`；melo 自己不安装、不启动任何东西。
+
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory?`；选择默认选中的 `Use it` 后，会在一次嵌入探测通过后保存。
 
 在终端里，每个答案固定的问题都是列表：↑ ↓ 或数字键移动，Enter 确认，Esc 取安全答案，回答后列表会被擦除（见[问题都是列表](../guides/terminal.md#questions-are-lists)）。管道输入的答案和脚本仍使用键入的问题（`Use it? [Y/n]:`）。
@@ -157,11 +159,14 @@ Try: What is this project? · / commands · ctrl+d quit
 
 ### 使用配置向导
 
-配置向导还可以配置嵌入服务器或云端 API，并在完成后启动网关。对于云端 API，先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。
+配置向导还可以配置嵌入服务器或云端 API。对于云端 API，先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
 
 ```bash
-melo --serve --reconfigure
+melo setup
+melo serve
 ```
+
+在默认模式下，`melo setup` 先提供它找到的服务器（`Use this model server?`）；选择 `Use another server` 才会出现完整菜单，开发者模式（`melo config set ui.mode developer`）则直接显示它。向导会询问：
 
 向导会询问：
 
@@ -178,13 +183,13 @@ melo --serve --reconfigure
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `The check failed. What now?`，选项有 `Try again`、`Save anyway` 和 `Cancel setup`（管道输入时为 `[r]etry, [s]ave anyway, [N]o [N]:`）；`Try again` 会重新询问 URL 和模型，按 Enter 会选中默认的 `Cancel setup`，不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use this model server?`。只有选择 `Use another server`、使用 `--developer`，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `The check failed. What now?`，选项有 `Try again`、`Save anyway` 和 `Cancel setup`（管道输入时为 `[r]etry, [s]ave anyway, [N]o [N]:`）；`Try again` 会重新询问 URL 和模型，按 Enter 会选中默认的 `Cancel setup`，不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后打开交互式界面；用 Ctrl+D 离开它。接着运行 `melo serve`，它会在 `http://127.0.0.1:8401` 启动网关，并在此终端持续运行。在默认模式下，`melo setup` 先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use this model server?`。只有选择 `Use another server`、处于开发者模式，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
 
 <a id="start-the-gateway"></a>
 
 ## 启动网关
 
-如果配置是用 `melo` 保存的，就用 `melo serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
+配置保存之后（无论是用 `melo` 还是用上面的向导保存的），用 `melo serve` 启动网关。在第二个终端中，检查网关并通过它运行任务：
 
 示例把网关的 bearer token 从其私有文件通过管道传给 curl，使它不出现在命令行参数和 shell 历史中。不要开启 curl 的详细输出，也不要记录这个请求头；同一用户的其他进程仍能读取 token 文件。
 
@@ -250,7 +255,7 @@ c5b2d38ceecc  done
 
 ## 交互式对话
 
-不带任务运行 `melo`，即可在终端中对话。每次工具调用完成时都会显示，模型工作时会以旋转指示器显示步骤和用时，答案以 Markdown 输出：
+不带任务运行 `melo`，即可在终端中对话。每次工具调用完成时都会显示，模型工作时会以旋转指示器显示 melo 在做什么和用时，答案以 Markdown 输出，该轮改动的文件会在页脚下点出：
 
 ```bash
 melo

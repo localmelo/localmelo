@@ -294,9 +294,7 @@ def test_the_console_reads_an_unreachable_server_as_the_provider_words_it() -> N
 def test_quickstart_describes_available_workspace_controls() -> None:
     quickstart = Path(__file__).parents[2] / "docs" / "start" / "quickstart.md"
     text = quickstart.read_text(encoding="utf-8")
-    assert (
-        "Approval cards, connection settings and the session details drawer are" in text
-    )
+    assert "Approval cards, settings and the session details drawer are" in text
     assert (
         "The approval cards and the settings dialog arrive in a later update"
         not in text

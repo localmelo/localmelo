@@ -1,4 +1,6 @@
-# macOS development app
+<a id="macos-development-app"></a>
+
+# The macOS app (development build)
 
 The arm64 development app is a local prototype for the Mac that builds it, not a notarized release or a Homebrew cask. It is signed ad hoc, so no Apple developer account is needed. It needs macOS, a Swift compiler, `uv`, and network access to obtain the pinned standalone Python and locked dependencies at build time. The Swift compiler is the release Xcode at `/Applications/Xcode.app` when that is installed, and otherwise the Command Line Tools that `xcode-select -p` names (`xcode-select --install` installs them). With neither, the build stops before it does any work and prints one line that says so. A `DEVELOPER_DIR` set in the environment chooses another developer folder. It does not install, start or download a model server. No signing identities or Xcode settings are changed.
 
