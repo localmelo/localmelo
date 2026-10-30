@@ -205,6 +205,12 @@ def test_the_renderer_lists_the_turns_calls_and_the_items_to_come() -> None:
         ("failed", "shell_exec", "run"),
         ("next", "Run the tests", ""),
     ]
+    # An item that is not a mapping is skipped; after the turn none is to come.
+    turn.event("run.progress", step=3, items=["odd", {"state": "pending"}])
+    assert [row.status for row in turn.renderer.steps()] == ["ok", "failed"]
+    turn.renderer.live = None
+    turn.event("run.progress", step=3, items=[{"label": "x", "state": "pending"}])
+    assert [row.status for row in turn.renderer.steps()] == ["ok", "failed"]
     # The next turn starts its own list.
     turn.renderer.begin_turn("again")
     assert [row.status for row in turn.renderer.steps()] == []
@@ -231,3 +237,12 @@ async def test_ctrl_o_with_no_steps_says_so() -> None:
         app.type(CTRL_O)
         await app.wait(lambda: "No steps yet" in app.text())
         assert app.ui.picker is None
+
+
+@pytest.mark.parametrize("width", range(10, 40))
+def test_a_control_character_in_the_model_is_never_drawn_raw(width: int) -> None:
+    bar = StatusBar(
+        "evil\x1b]0;x\x07model", "~/p", "", "", "", run="2/~8 · ctrl+o steps"
+    )
+    line = "".join(part[1] for part in status_fragments(bar, width, "…"))
+    assert "\x1b" not in line and "\x07" not in line and cells(line) == width

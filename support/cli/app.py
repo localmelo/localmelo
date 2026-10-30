@@ -221,9 +221,9 @@ def status_fragments(
         if cells(model) <= cells(ellipsis) + 1 and ellipsis in model:
             model = ""  # no room for even a cut model
     if used(workspace) > room and shorter:
-        run = shorter.pop(0)
-        model = cut_cells(bar.model, max(0, room - used("") + cells(model)), ellipsis)
-        if cells(model) <= cells(ellipsis) + 1:
+        run, model = shorter.pop(0), shown(bar.model)
+        model = cut_cells(model, max(0, room - used("") + cells(model)), ellipsis)
+        if cells(model) <= cells(ellipsis) + 1 and ellipsis in model:
             model = ""
     if used(workspace) > room:
         run = cut_cells(run, room, ellipsis) if running else ""

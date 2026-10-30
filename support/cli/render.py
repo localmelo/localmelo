@@ -1006,7 +1006,7 @@ class TurnRenderer:
         """The running or last turn's calls, then the steps still to come.
 
         A step to come is one of the steps the task took last time that this
-        run has not reached (the progress's pending items).
+        run has not reached (the progress's pending items), while it runs.
         """
         rows = [
             StepRow(
@@ -1027,10 +1027,13 @@ class TurnRenderer:
                     "running", live.tool, live.preview, seconds, self.kind(live.tool)
                 )
             )
-        items = (self.progress or {}).get("items")
+        # Steps to come only while the turn runs: after it, none is coming.
+        items = (self.progress or {}).get("items") if live is not None else None
         for item in items if isinstance(items, list) else []:
+            if not isinstance(item, Mapping) or item.get("state") != "pending":
+                continue
             label = " ".join(str(item.get("label") or "").split())
-            if isinstance(item, Mapping) and item.get("state") == "pending" and label:
+            if label:
                 rows.append(StepRow("next", label))
         return rows
 
