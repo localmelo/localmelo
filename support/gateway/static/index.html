@@ -30,7 +30,7 @@
             alt=""
           /><strong>localmelo</strong><span class="local-badge">LOCAL</span>
         </div>
-        <nav class="worker-navigation" aria-label="History sections">
+        <nav class="worker-navigation" id="section-nav" aria-label="History sections">
           <a href="#/new" id="chats-link">Chats</a>
           <a href="#/workers" id="workers-link">Workers</a>
           <a href="#/tasks" id="tasks-link">Tasks</a>
@@ -46,7 +46,7 @@
         <nav class="session-list" id="session-list" aria-label="Chats"></nav>
         <div class="sidebar-bottom">
           <button class="nav-button" id="settings-btn">
-            <span aria-hidden="true">⚙</span> Connection settings
+            <span aria-hidden="true">⚙</span> <span id="settings-label">Connection settings</span>
           </button>
           <div class="local-caption">
             <span class="status-dot"></span> Your models. Your workspace.
@@ -98,7 +98,7 @@
               class="level-chip"
               id="level-btn"
               type="button"
-              aria-haspopup="listbox"
+              aria-haspopup="menu"
               aria-expanded="false"
               aria-label="Chat level"
             >
@@ -107,7 +107,7 @@
             <div
               class="level-menu"
               id="level-menu"
-              role="listbox"
+              role="menu"
               aria-label="Chat level"
               hidden
             ></div>
@@ -120,6 +120,7 @@
         </header>
         <div class="banner" id="store-banner" role="status" hidden></div>
         <div class="banner" id="model-banner" role="status" hidden></div>
+        <div class="banner" id="lock-banner" role="status" hidden></div>
         <div class="banner" id="offline-banner" role="status" hidden>
           <span>Could not reach the gateway. Check that the gateway is running.</span>
           <button type="button" class="link-button" id="offline-retry">Try again</button>
@@ -213,7 +214,7 @@
           </form>
           <p class="composer-hint" id="composer-hint">
             Enter to send · Shift + Enter for a new line
-            <span>Runs through your configured backend</span>
+            <span id="composer-note">Runs through your configured backend</span>
           </p>
         </div>
         <section class="details-drawer" id="details-drawer" hidden></section>
@@ -229,12 +230,13 @@
       </div>
       <p class="settings-description">Settings apply to subsequent turns. Current turns finish with their existing connection.</p>
       <p id="settings-status" class="field-hint" role="status" aria-live="polite"></p>
-      <nav class="settings-tabs" aria-label="Settings sections">
+      <nav class="settings-tabs" id="settings-tabs" aria-label="Settings sections">
         <button type="button" id="settings-tab-model" aria-pressed="true">Model</button>
         <button type="button" id="settings-tab-test" aria-pressed="false">Test</button>
         <button type="button" id="settings-tab-theme" aria-pressed="false">Theme</button>
         <button type="button" id="settings-tab-developer" aria-pressed="false">Developer</button>
       </nav>
+      <h3 class="settings-section" id="settings-head-model" hidden>Model</h3>
       <section id="settings-panel-model" aria-label="Model settings">
       <div class="field">
         <label for="s-adapter">Chat backend</label>
@@ -295,7 +297,7 @@
       </section>
       <section id="settings-panel-theme" aria-label="Theme settings" hidden>
       <fieldset class="theme-options">
-        <legend>Theme</legend>
+        <legend id="settings-theme-legend">Theme</legend>
         <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" /> System</label>
         <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /> Light</label>
         <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" /> Dark</label>
@@ -312,7 +314,7 @@
       <p id="create-error" class="error" role="alert" hidden></p>
       <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
       <div class="settings-footer">
-        <span><span id="settings-file"></span><br /><span id="settings-revision"></span></span>
+        <span id="settings-meta"><span id="settings-file"></span><br /><span id="settings-revision"></span></span>
         <button type="button" class="secondary-button" id="cancel-settings">Cancel</button>
         <button type="button" class="primary-button" id="create-btn" disabled>Save</button>
       </div>

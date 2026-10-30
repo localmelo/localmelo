@@ -1028,6 +1028,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The web console starts with fewer choices. In default mode the header shows the
+  running chip and a model chip (the model's name, "Model offline" or "No model")
+  that opens settings. The chat's level (P2), Details and the GPU-lock line are for
+  developer mode; a chat that waits on a foreign GPU lock gets a banner instead,
+  "Waiting for this Mac's GPU, your chat starts when it is free." The status row
+  drops the cache, phase and queue segments, Tasks stops naming priorities, and
+  Workers and Tasks join the sidebar once there is a run, a terminal chat or a task
+  to see. Settings stacks Model with its test, Appearance and one Developer mode
+  toggle, and shows the settings file and its revision in developer mode only.
+  Developer mode shows everything as before, and nothing here changes what runs.
+  The page reads `[ui] mode` from `GET /api/settings` when it opens. The level chip
+  is now a menu button: it opens on the chat's level, the arrow keys move between
+  levels and Escape returns to the button. Escape closes what is open in Tasks and
+  Workers too, and send, stop, the menu button and the chips are 44px on touch
+  screens and phones. ([#246])
+
 - The web console is easier to read, in light and dark: no text under 12px, text
   at 4.5:1 contrast or better, field, composer and focus edges at 3:1 or better,
   a 2px focus ring on the composer, muted lines in Tasks and Workers drawn muted,
@@ -1715,6 +1731,7 @@ earlier milestones.
 [#242]: https://github.com/localmelo/localmelo/pull/242
 [#243]: https://github.com/localmelo/localmelo/pull/243
 [#245]: https://github.com/localmelo/localmelo/pull/245
+[#246]: https://github.com/localmelo/localmelo/pull/246
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

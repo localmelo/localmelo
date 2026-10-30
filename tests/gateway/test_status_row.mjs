@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
+import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 
-function rig(answers) {
+function rig(answers, options = {}) {
   const calls = [];
   const timers = [];
   const root = {
@@ -22,6 +22,7 @@ function rig(answers) {
     schedule: (fn, ms) => { timers.push({fn, ms}); return timers.length; },
     cancel: (id) => { timers[id - 1].cancelled = true; },
     clock: () => now,
+    ...options,
   });
   const text = () => root.children.map((child) => child.textContent);
   const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -97,4 +98,22 @@ test('a failed fetch keeps the row, and clear cancels a waiting fetch', async ()
   assert.equal(t.timers.length, 1);
   t.row.clear();
   assert.equal(t.timers[0].cancelled, true);
+});
+
+test('the plain row keeps the context and the step, and leaves out the cache, the phase and the queue', () => {
+  assert.deepEqual(
+    plainSegments(['cache 67% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify (cycle 1)', 'tasks 1 running 2 queued']),
+    ['ctx 1.0k/8.0k', 'step 3 attempt 2'],
+  );
+  assert.deepEqual(plainSegments(['cache --', 'step 1']), ['step 1']);
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), ['tasks 0 running 0 queued 2 held'], 'A task held for the user stays');
+  assert.deepEqual(plainSegments([]), []);
+});
+
+test('a filter picks what the row draws, and the row hides when nothing is left', async () => {
+  const t = rig([{segments: ['cache 50%', 'tasks 0 running 0 queued']}], {filter: plainSegments});
+  t.row.follow('a');
+  await t.tick();
+  assert.deepEqual(t.text(), []);
+  assert.equal(t.root.hidden, true);
 });

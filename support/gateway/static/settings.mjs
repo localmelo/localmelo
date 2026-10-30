@@ -2,8 +2,12 @@
 // terminal. This dialog is where the user fixes it, so the advice is left out.
 const terminalAdvice = (message) => /\brun 'melo /i.test(message);
 
-/** Wire the connection dialog. The caller owns entry buttons and health refresh. */
-export function setupSettings({ api, onSaved }) {
+/**
+ * Wire the connection dialog. The caller owns entry buttons and health refresh. `developer()` says whether
+ * developer mode is on: default mode stacks Model (with its test), Appearance and one Developer toggle;
+ * developer mode keeps the tabs, the file and its revision.
+ */
+export function setupSettings({ api, onSaved, developer = () => false }) {
   const $ = (id) => document.getElementById(id);
   const dialog = $("settings-dialog");
   const chat = $("s-adapter");
@@ -37,14 +41,23 @@ export function setupSettings({ api, onSaved }) {
     });
   }
   const tabNames = ["model", "test", "theme", "developer"];
-  for (const name of tabNames) {
-    $(`settings-tab-${name}`).addEventListener("click", () => {
-      for (const item of tabNames) {
-        $(`settings-panel-${item}`).hidden = item !== name;
-        $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
-      }
-    });
+  // `name` shows one panel; null shows them all, one under the other.
+  function select(name) {
+    for (const item of tabNames) {
+      $(`settings-panel-${item}`).hidden = name !== null && item !== name;
+      $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
+    }
   }
+  function layout(isDeveloper) {
+    dialog.dataset.layout = isDeveloper ? "tabs" : "plain";
+    $("settings-tabs").hidden = !isDeveloper;
+    $("settings-head-model").hidden = isDeveloper;
+    $("settings-meta").hidden = !isDeveloper;
+    $("settings-title").textContent = isDeveloper ? "Connection settings" : "Settings";
+    $("settings-theme-legend").textContent = isDeveloper ? "Theme" : "Appearance";
+    select(isDeveloper ? "model" : null);
+  }
+  for (const name of tabNames) $(`settings-tab-${name}`).addEventListener("click", () => select(name));
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model",
     "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace", "s-developer"];
   let settings = null;
@@ -159,6 +172,7 @@ export function setupSettings({ api, onSaved }) {
     status.textContent = "Loading settings…";
     modelStatus.textContent = "";
     keyStatus.textContent = "";
+    layout(developer());
     if (!dialog.open) dialog.showModal();
     try {
       const loaded = await api("/settings");
@@ -180,6 +194,7 @@ export function setupSettings({ api, onSaved }) {
       options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
       $("s-workspace").value = loaded.workspace;
       $("s-developer").checked = loaded.mode === "developer";
+      layout(loaded.mode === "developer");
       const list = $("s-developer-list");
       list.replaceChildren();
       for (const item of loaded.advanced_options || []) {

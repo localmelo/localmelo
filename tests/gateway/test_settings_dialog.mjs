@@ -25,7 +25,7 @@ function fixture(overrides = {}) {
   };
 }
 
-function harness(routes, storage = new Map()) {
+function harness(routes, storage = new Map(), developer = () => false) {
   const nodes = new Map();
   const calls = [];
   const element = (id) => {
@@ -57,7 +57,7 @@ function harness(routes, storage = new Map()) {
     return typeof handler === 'function' ? await handler(options.body) : handler;
   };
   let saved = [];
-  const open = setupSettings({api, onSaved: (value) => { saved.push(value); }});
+  const open = setupSettings({api, onSaved: (value) => { saved.push(value); }, developer});
   return {element, calls, open, saved};
 }
 
@@ -343,4 +343,42 @@ test('the developer toggle loads the saved mode, lists options read-only and sav
   await h.element('create-btn').emit('click');
   assert.equal(h.calls.at(-1).options.body.mode, 'developer');
   assert.equal(h.saved[0].mode, 'developer');
+});
+
+const PANELS = ['model', 'test', 'theme', 'developer'];
+
+test('default mode stacks Model with its test, Appearance and the Developer toggle, without the file', async () => {
+  const h = harness({'GET /settings': fixture({mode: 'default'})});
+  await h.open();
+  assert.equal(h.element('settings-dialog').dataset.layout, 'plain');
+  assert.equal(h.element('settings-tabs').hidden, true);
+  assert.deepEqual(PANELS.map((name) => h.element(`settings-panel-${name}`).hidden), [false, false, false, false]);
+  assert.equal(h.element('settings-head-model').hidden, false);
+  assert.equal(h.element('settings-meta').hidden, true);
+  assert.equal(h.element('settings-title').textContent, 'Settings');
+  assert.equal(h.element('settings-theme-legend').textContent, 'Appearance');
+  assert.equal(h.element('settings-file').textContent, 'File: ~/.cache/localmelo/config.toml', 'The ids stay in the page');
+});
+
+test('developer mode keeps the tabs, the file and its revision, and the layout is chosen before the settings load', async () => {
+  const slow = deferred();
+  const h = harness({'GET /settings': () => slow.promise}, new Map(), () => true);
+  const opening = h.open();
+  assert.equal(h.element('settings-dialog').dataset.layout, 'tabs', 'No frame draws the other layout first');
+  slow.resolve(fixture({mode: 'developer'}));
+  await opening;
+  assert.equal(h.element('settings-tabs').hidden, false);
+  assert.deepEqual(PANELS.map((name) => h.element(`settings-panel-${name}`).hidden), [false, true, true, true]);
+  assert.equal(h.element('settings-tab-model').attributes['aria-pressed'], 'true');
+  assert.equal(h.element('settings-head-model').hidden, true);
+  assert.equal(h.element('settings-meta').hidden, false);
+  assert.equal(h.element('settings-title').textContent, 'Connection settings');
+  assert.equal(h.element('settings-theme-legend').textContent, 'Theme');
+});
+
+test('a mode written in the file by hand wins over what the page believed', async () => {
+  const h = harness({'GET /settings': fixture({mode: 'developer'})});
+  await h.open();
+  assert.equal(h.element('settings-dialog').dataset.layout, 'tabs');
+  assert.equal(h.element('settings-tabs').hidden, false);
 });

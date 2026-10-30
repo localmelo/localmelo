@@ -29,15 +29,26 @@ reads `Connect a model to start` until a model is set up. The card also shows wh
 the configured server stops answering, and it looks for a server only while it is
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
 
-1. Use **Connection settings** to choose the chat backend, model and workspace.
-   With nothing saved the dialog opens on a blank **Choose a server…**, and its
+The page opens in default mode, which leaves out what only a developer needs: the chat's
+level chip, **Details**, the GPU-lock line, the cache, phase and queue segments of the
+status row, and the scheduler priority in Tasks. The header shows the running chip and a
+model chip (the model's name, `Model offline` or `No model`) that opens settings.
+**Workers** and **Tasks** join the sidebar once there is a run, a terminal chat or a task
+to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
+page, hidden.
+
+1. Use **Settings** (**Connection settings** in developer mode) to choose the chat
+   backend, model and workspace. With nothing saved the dialog opens on a blank **Choose a server…**, and its
    fields, **Discover models**, **Test connection** and **Save** wait until you
    choose one. Local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
    never the key. Saving uses the loaded settings revision; if the file changed,
    reload the dialog and retry. **Test connection** probes the unsaved model
-   settings; **Theme** applies System, Light or Dark immediately and remembers
-   it in this browser. You can also use `melo setup`.
+   settings; **Appearance** (**Theme** in developer mode) applies System, Light or Dark
+   immediately and remembers it in this browser. Default mode stacks Model, with its test,
+   Appearance and the **Developer mode** toggle in one dialog; developer mode keeps the
+   Model, Test, Theme and Developer tabs and shows the settings file and its revision.
+   You can also use `melo setup`.
 2. Type a message and send. The first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
    its own. Answers are rendered as Markdown, with code blocks.
@@ -48,7 +59,8 @@ on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect))
    GIF, WebP) show inline.
 4. A status row sits above the composer: the same segments as the terminal's
    status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
-   2 queued`, read from `GET /api/sessions/{id}/status` so both agree. The cache
+   2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
+   and step segments only. The cache
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow
@@ -78,7 +90,8 @@ connection problems without replacing other notices.
 
 ## Inspect workers
 
-**Workers** opens read-only worker history from the CLI sessions file. Filter
+**Workers** (in default mode, in the sidebar once a run or a terminal chat exists) opens
+read-only worker history from the CLI sessions file. Filter
 by status, source or exact parent run, load more with the server's cursor, and
 open a run to inspect its recorded brief, metadata, work and answer. Every
 direct `melo` run is recorded there by default (`--no-save-session` or
@@ -109,8 +122,9 @@ redacted.
 
 ## Tasks
 
-**Tasks** (`#/tasks`) lists the scheduler's tasks, newest update first, with
-state, priority and title. Open one (`#/tasks/<id>`) to see its state, the saved
+**Tasks** (`#/tasks`; in default mode, in the sidebar once a task exists) lists the
+scheduler's tasks, newest update first, with state, priority (developer mode only) and
+title. Open one (`#/tasks/<id>`) to see its state, the saved
 recovery card (shown as plain text), the evidence status and the actions its
 state allows, and the same status row as a chat (a task has no row until it has
 run). Like Workers, the view replaces the chat while it is open.
@@ -156,7 +170,7 @@ confirmation, a finished task, Stop winning the race) shows the server's text.
 
 ## Inspect a chat
 
-**Details** opens a session drawer with its tools and session grants, working
+In developer mode, **Details** opens a session drawer with its tools and session grants, working
 and long-term memory status, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. On narrow screens the
@@ -164,8 +178,8 @@ drawer stacks below the composer.
 
 ## Developer mode
 
-**Connection settings → Developer** has one toggle, "Developer mode: show
-advanced settings and debug views". It is saved as `[ui] mode` in
+**Connection settings → Developer** (in default mode **Settings**, where the toggle is
+last) has one toggle, "Developer mode: show advanced settings and debug views". It is saved as `[ui] mode` in
 `config.toml`, the setting `melo --help` reads, with the same revision check as
 the other settings; a mode written in the file by hand wins the next time the
 page reads it. It changes what is shown, never what runs. When it is on:
@@ -176,10 +190,17 @@ page reads it. It changes what is shown, never what runs. When it is on:
 - **Details** gains an **Events** tab with the stored raw events of the latest
   turn, and its **Memory** tab adds the agent state and the long-term backend;
 - the **Runs** tab adds each run's recorded counters: requests, tool calls,
-  token usage and cache numbers.
+  token usage and cache numbers;
+- the header shows the chat's level chip, **Details**, the GPU-lock line and a chip with
+  the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
+  **Workers** and **Tasks**;
+- the status row adds the cache, phase and queue segments, and Tasks names each task's
+  priority.
 
-When it is off these are hidden, not removed: turn it on again to see them.
-Chats, workers, tasks and connection settings look the same in both modes.
+When it is off these are hidden, not removed: turn it on again to see them. While a chat
+waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:
+"Waiting for this Mac's GPU, your chat starts when it is free." Chats, approvals, the
+Workers and Tasks views and what the settings save work the same in both modes.
 
 ## Recover a send
 
@@ -194,13 +215,15 @@ was in flight at reload is checked against the store before a retry. It says
 
 ## Scheduling and stopping
 
-A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
+In developer mode a chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
 memory and is not saved. Next to the title and the level chip, a machine line
 shows a foreign GPU lock (`GPU lock: <holder> · <purpose>`, with
 `(recorded)` or `(chats wait)`), `GPU lock: yours`, `GPU lock unreadable`,
 `· ETA passed`, and the battery (`Battery 55% · discharging`). AC power with
-no lock shows nothing. While a call waits (for a slot, the background cap or
+no lock shows nothing. The level chip is a menu button: Enter or the Down arrow opens its
+menu with focus on the chat's level, the arrow keys, Home and End move between the levels,
+and Escape closes it and returns to the button. While a call waits (for a slot, the background cap or
 a foreign lock), the header's status pill and the status label say
 `Waiting: <reason>`, the sidebar says `● Waiting` and the live row says the
 same; the reason is the scheduler's own code (`Resources`, `Priority`,
@@ -210,7 +233,7 @@ written to the one gate the gateway shares:
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
 Stop cancels the run, and so does Escape while the cursor is in the message
-box; Escape anywhere else only closes what is open. A model request in flight is abandoned, although the
+box; Escape anywhere else only closes what is open, in Tasks and Workers as in a chat. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `python_exec` child is
 killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
