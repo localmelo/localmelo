@@ -28,9 +28,12 @@ from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinkin
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     LEASE_S,
+    OUTCOME_CAUSES,
+    RECENT_SESSIONS,
     RESERVED_EVENT_PREFIXES,
     SESSION_EVENT_FIELDS,
     WRITER_BATCH_MAX,
+    FinishedTurn,
     NewSession,
     SessionBusyError,
     SessionStore,
@@ -48,6 +51,7 @@ from localmelo.support.sessions.window import decode_window
 
 from .helpers import (
     DAY,
+    T0,
     Clock,
     approval_event,
     check_invariants,
@@ -2333,3 +2337,92 @@ def test_split_thinking_rule_matches_the_store() -> None:
     assert without_think_block("no block <think> in the middle") == (
         "no block <think> in the middle"
     )
+
+
+async def test_latest_finished_turn_is_the_newest_outcome_of_the_kinds_asked(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    store = gateway(tmp_path / "s.db", clock)
+    assert await store.latest_finished_turn(("chat",)) is None
+    chat, _ = await finished_turn(store)
+    clock.advance(10)
+    worker = await store.begin_turn(
+        None, "run", holder=HOLDER, new_session=NewSession(kind="worker")
+    )
+    # A turn that still runs is no outcome.
+    assert await store.latest_finished_turn(("worker",)) is None
+    await store.finish_turn(
+        worker.session_id,
+        worker.turn,
+        holder=HOLDER,
+        status="provider_error",
+        cause="run",
+        result=run_result(),
+        answer="",
+    )
+    assert await store.latest_finished_turn(("chat",)) == FinishedTurn(
+        chat, "chat", "completed", "run", T0
+    )
+    assert await store.latest_finished_turn(("worker", "chat")) == FinishedTurn(
+        worker.session_id, "worker", "provider_error", "run", T0 + 10
+    )
+    assert await store.latest_finished_turn(()) is None
+    with pytest.raises(ValueError, match="unknown session kind"):
+        await store.latest_finished_turn(("nope",))
+
+
+async def test_latest_finished_turn_skips_what_a_shutdown_or_an_undo_ended(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    store = gateway(tmp_path / "s.db", clock)
+    session, first = await finished_turn(store)
+    for cause in sorted(set(store_mod.CAUSES) - set(OUTCOME_CAUSES)):
+        clock.advance(5)
+        turn = await store.begin_turn(session, "again", holder=HOLDER)
+        await store.finish_turn(
+            turn.session_id,
+            turn.turn,
+            holder=HOLDER,
+            status="cancelled",
+            cause=cause,  # type: ignore[arg-type]
+            result=None,
+            answer="",
+        )
+        found = await store.latest_finished_turn(("chat",))
+        assert found == FinishedTurn(session, "chat", "completed", "run", T0), cause
+    clock.advance(5)
+    turn = await store.begin_turn(session, "stop", holder=HOLDER)
+    await store.finish_turn(
+        turn.session_id,
+        turn.turn,
+        holder=HOLDER,
+        status="cancelled",
+        cause="user_stop",
+        result=None,
+        answer="",
+    )
+    found = await store.latest_finished_turn(("chat",))
+    assert found is not None and (found.status, found.cause) == (
+        "cancelled",
+        "user_stop",
+    )
+    assert await store.undo_last_turn(session) is not None
+    found = await store.latest_finished_turn(("chat",))
+    assert found is not None and (found.status, found.cause) == ("completed", "run")
+    assert first == 1
+
+
+async def test_latest_finished_turn_finds_the_newest_among_many_sessions(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    store = gateway(tmp_path / "s.db", clock)
+    newest = ""
+    for _ in range(RECENT_SESSIONS * 2):
+        clock.advance(1)
+        newest, _ = await finished_turn(store)
+    found = await store.latest_finished_turn(("chat",))
+    assert found is not None and found.session_id == newest
+    assert found.finished_at == clock.now

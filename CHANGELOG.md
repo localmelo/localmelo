@@ -177,6 +177,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo the Akita puppy gets pictures, a mood policy and a place in `GET /api/health`, the
+  first step towards a desktop pet. `macos/art/akita` holds 14 transparent pictures, each at
+  1x and `@2x` (1.17 MB): nine for a pet (lying, resting lazily, three sleeping poses), five
+  sitting ones for the starting view, small faces and favicon sizes, with a thin cream rim so
+  the outline shows on a dark desktop and an `anchors.json` that lets one pose replace
+  another without a jump. `scripts/build_pet_assets.py` makes them from the art masters
+  (`uv run --with pillow python scripts/build_pet_assets.py --picks picks.json`, the same
+  bytes every run), and the macOS build copies them into the app's `Contents/Resources/akita`.
+  `PetPolicy.swift` decides what the pet will do: a failure beats a wait, a wait beats work,
+  a run that just finished shows as done for 6 seconds or as a problem for 10, then Melo
+  rests, and after a quiet minute it sleeps in a pose that turns every 3 minutes; it also
+  says when the pet may move (not under Reduce Motion, Low Power or heat, not hidden) and
+  where its panel goes on the screen. `GET /api/health` gains `status.recent`: how the
+  newest finished chat turn, task, run or terminal turn ended (`done`, `failed` or
+  `stopped`) and how many seconds ago, or `null`. The app does not draw the pet yet.
+  ([#NN])
+
 - The web console shows what a file write replaces before you allow it. The approval card
   for a write of text over an existing file now asks "Replace notes.txt?", counts the lines
   ("5 lines removed, 1 added") and lists them as numbered − and + rows with two lines of

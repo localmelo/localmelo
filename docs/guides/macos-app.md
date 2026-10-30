@@ -45,6 +45,14 @@ uv run --with pillow python scripts/make_app_icons.py
 
 Pillow is fetched for that one run; it is not a dependency of localmelo, and `iconutil`, which ships with macOS, packs the icon.
 
+Melo, the localmelo mascot, is an Akita puppy in the pictures the bundle carries under `Contents/Resources/akita`: nine for a desktop pet (lying, resting lazily, and in three sleeping poses), five sitting ones for the starting view, small faces and the favicon sizes, each at 1x and `@2x`. The app does not draw them yet. Like the icon they are committed files, in `macos/art/akita` (1.17 MB, transparent PNGs with a thin cream rim so the outline still shows on a dark desktop), and the build copies the folder as it is. `anchors.json` gives every picture's canvas, ground line and centre in points, so that a change of pose does not jump. The art masters stay outside the repository; to make the pictures again from them, on a Mac:
+
+```bash
+uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
+```
+
+`picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script. Pillow is fetched for that run only, and two runs give the same bytes. `GET /api/health` now also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); the app's policy for Melo reads it to show a run that just finished.
+
 Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
 startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
 20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
