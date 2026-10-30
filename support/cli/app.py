@@ -180,7 +180,8 @@ def status_fragments(
         segments=tuple(shown(segment) for segment in bar.segments),
     )
     mode = cut_cells(bar.mode, max(1, width - 3), ellipsis)
-    room = width - 2 - cells(mode) - 1
+    # No mode (ask, which everyone expects): the room of its cells and gap is the rest's.
+    room = width - 2 - (cells(mode) + 1 if mode else 0)
     model, context, title = bar.model, bar.context, bar.title
     segments = [segment for segment in bar.segments if segment]
 
@@ -213,7 +214,7 @@ def status_fragments(
     left = joined(workspace)
     if cells(left) > room or cells(left) <= cells(ellipsis) + 1 and ellipsis in left:
         left = ""  # no room for even a cut model
-    gap = max(1, width - 2 - cells(left) - cells(mode))
+    gap = max(1 if mode else 0, width - 2 - cells(left) - cells(mode))
     return [
         ("class:status", "  " + left + " " * gap),
         (bar.mode_style, mode),

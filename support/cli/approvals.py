@@ -16,7 +16,7 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -47,6 +47,18 @@ ESCAPED_WARNING: Final = "The arguments contain control characters, shown escape
 Mode = Literal["ask", "auto", "deny", "yolo"]
 # The reason a denial in deny mode gives the model.
 DENY_REASON: Final = "approvals are set to deny"
+_MODE_WORDS: Final = {
+    "ask": "asks before running commands or changing files",
+    "auto": "runs commands and changes files without asking",
+    "deny": "never runs commands or changes files",
+    "yolo": "runs everything without asking (--yolo)",
+}
+# What a session grant covers, in the words of the panel that asked.
+_GRANT_WORDS: Final = {
+    "shell_exec": "shell commands",
+    "python_exec": "Python code",
+    "file_write": "file writes",
+}
 Choice = Literal["once", "session", "deny"]
 
 
@@ -360,6 +372,14 @@ class EditSnapshots:
     def clear(self) -> None:
         """Drop every snapshot, as ``/new`` does."""
         self._snapshots.clear()
+
+
+def approval_words(mode: Mode, grants: Iterable[str]) -> str:
+    """What the approval *mode* does, and in ask mode what the session allowed already."""
+    allowed = ", ".join(_GRANT_WORDS.get(tool, tool) for tool in sorted(grants))
+    if mode == "ask" and allowed:
+        return f"{_MODE_WORDS[mode]} · allowed this session: {allowed}"
+    return _MODE_WORDS[mode]
 
 
 class Approvals:

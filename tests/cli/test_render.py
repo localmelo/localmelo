@@ -912,7 +912,8 @@ def test_the_banner_box() -> None:
     assert lines[1].endswith(" │")
     assert "│ tools      4 built-in (3 ask first)" in lines[3]
     assert (
-        "│ memory     no long-term memory · --embedding-base-url adds one" in lines[4]
+        "│ memory     no long-term memory · -X endpoint.embedding_url=URL adds one"
+        in lines[4]
     )
     assert "│ session    new" in lines[5]
     assert all(cells(line) == 80 for line in lines[:7])
@@ -1018,7 +1019,7 @@ def test_a_narrow_banner_keeps_the_memory_text_in_full(
         assert "Qwen3-Embedding-0.6B" in text
     else:
         assert "no long-term memory" in text
-        assert "--embedding-base-url adds one" in text
+        assert "-X endpoint.embedding_url=URL adds one" in " ".join(text.split())
     assert all(cells(line) <= 45 for line in text.split("\n"))
 
 

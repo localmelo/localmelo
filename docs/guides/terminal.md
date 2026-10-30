@@ -28,15 +28,16 @@ Try: What is this project? · / commands · ctrl+d quit
 ────────────────────────────────────────────────────────────────────────────
 › Ask melo · / for commands
 ────────────────────────────────────────────────────────────────────────────
-  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?         ask
+  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?
 ```
 
 The welcome is three rows: the version and the model, with how to change it;
 the folder melo works in; and one thing to try, with the keys for commands and
 for quitting. It shows the model's server in a row of its own only when the
-model is not the saved default. Warnings follow it, and `/status` shows the
-server, tools, memory and session. In developer mode (`--developer`, or
-`[ui] mode = "developer"`) the welcome is a box of every row.
+model is not the saved default. Warnings follow it, and `/status` checks that
+the model answers and shows the folder, session, approvals and context use. In
+developer mode (`--developer`, or `[ui] mode = "developer"`) the welcome is a
+box of every row.
 
 It needs a terminal: stdin and stdout must both be terminals and `TERM`
 must not be `dumb`. Otherwise `melo` prints this on stderr and exits with
@@ -123,12 +124,14 @@ run does).
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one. The list starts
-with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
+type more letters to narrow them, Tab or Enter to take one. The everyday
+commands come first, and are the menu's first screen: `/model`, `/new`,
+`/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
+the command does and, where it needs one, its argument (`/attach PATH`).
 
 | Command | What it does |
 |---|---|
-| `/help [command]` | The commands and keys, or one command's details. |
+| `/help [command]` | The everyday commands in three groups (Conversation, Model, Help), the `!` line and how to see more. `/help all`, and `/help` in developer mode, list every command and the keys; `/help NAME` gives one command's details. A row longer than the terminal continues under its description. |
 | `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
 | `/attachments` | List staged files and their numbers. |
 | `/detach N\|all` | Remove the numbered staged file or all staged files. |
@@ -146,7 +149,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
-| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks: a row appears once it has data; `--developer` shows every row), files and version. |
+| `/status [all]` | Five rows that say whether melo is ready: the model and its server with `✓ answers` (or `✗ does not answer (connection refused). Start it, then /status checks again.`), the folder, the session, what the approvals do in words, and how full the context is (`8% used (2.6k of 32k tokens)`, or `2.6k tokens used` when no limit is known). `/status all`, and `/status` in developer mode, print every row instead: the model and server with `reachable` or why not, the workspace and its fence, the session with its id, the approval mode and grants, tools, memory (with the window and why it has that size, `64 (local server)`), limits, a usage block (cache, context, steps, tasks: a row appears once it has data; developer mode shows every row), files and version. A row longer than the terminal continues under its text. Any other argument says `✗ Use /status or /status all.` |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: a list of the server's chat models (an embedding or reranking model is left out), the current one marked `✓` and the ones in memory `(loaded)` where the server says. Type to filter, ↑ ↓ to move, Enter to switch and save the model as the default, Esc to keep the current one. With a listed id, or a number from the server's listing (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. With no list to pick from (a cloud API), `/model` says so and `/model NAME` switches. |
@@ -383,7 +386,7 @@ Left to right, after the model and the workspace, each segment appears only
 when it has data:
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.
 ```
 
 - `cache 83%` is the share of the last request's prompt tokens the server
@@ -399,8 +402,10 @@ when it has data:
 - `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
-the last redraw. On a narrow terminal the title goes first, then the segments
-right to left, then the workspace is cut, and the bar never wraps. `/status`
+the last redraw. The approval mode shows at the right edge only when it is not
+`ask` (`auto`, `deny`, or the `⚠ YOLO: no approvals` warning); developer mode
+always shows it. On a narrow terminal the title goes first, then the segments
+right to left, then the workspace is cut, and the bar never wraps. `/status all`
 prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
 it was before these segments: the model, workspace, `ctx` of the last request
 and the title. There is no command-line flag for it.

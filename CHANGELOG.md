@@ -1053,6 +1053,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runs). Code that runs on the bundled interpreter, such as the `python_exec` tool,
   can no longer import tkinter or turtle or run pip, and `python -m venv` needs
   `--without-pip`. ([#NN])
+- `/help` and the `/` menu start with the everyday commands. `/help` prints eight of them
+  in three groups (Conversation, Model, Help), the `!` line and `/help all lists every
+  command and key.`; `/help all` (and `/help` in developer mode) lists every command and the
+  keys, and `/help NAME` explains one. The menu opens on those eight (`/model`, `/new`,
+  `/status`, `/help`, `/exit`, `/undo`, `/copy`, `/retry`) and shows each command's name
+  alone, with its argument written into the description where one is needed: its name
+  column used to be as wide as `/approvals [ask|auto|deny|forget [tool]]`, which cut
+  every description at 80 columns. A row longer than the terminal continues under its
+  description instead of at the first column. Hints that named a retired spelling name
+  the new one: `--mcp FILE` in `/mcp`, `-X endpoint.embedding_url=URL` in the memory
+  row of developer mode's banner, and `melo console --reset` when the gateway's token
+  is invalid. Direct mode's stdout and stderr, JSON, exit codes and requests are
+  unchanged ([#250]).
+
+- `/status` says whether melo is ready, in five rows: the model and its server with
+  `✓ answers` (or `✗ does not answer (connection refused). Start it, then /status checks
+  again.`), the folder, the session, what the approvals do in words (`asks before running
+  commands or changing files`) and how full the context is (`8% used (2.6k of 32k tokens)`).
+  `/status all`, and `/status` in developer mode, print every row as before, with two
+  differences: a row longer than the terminal continues under its text instead of at the
+  first column, and the memory row names the window with its reason (`64 (local server)`).
+  The status bar names the approval mode only when it is not `ask`, which gives the
+  other segments that room. `melo config keys` and `melo config get` show an unset
+  `agent.window_messages` as the window it falls back to (`64 (local server)` or
+  `20 (cloud)`) instead of `unset`. Direct mode's stdout and stderr, JSON, exit codes and
+  requests are unchanged ([#250]).
 
 - Reflections survive two more one-character slips in their JSON. With the default
   `reflection_gate flags`, a reply that holds no reflection already gets one repair of
@@ -1791,6 +1817,7 @@ earlier milestones.
 [#247]: https://github.com/localmelo/localmelo/pull/247
 [#248]: https://github.com/localmelo/localmelo/pull/248
 [#249]: https://github.com/localmelo/localmelo/pull/249
+[#250]: https://github.com/localmelo/localmelo/pull/250
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

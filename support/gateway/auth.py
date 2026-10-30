@@ -134,7 +134,7 @@ class GatewayAuth:
         if len(data) != 64 or any(c not in b"0123456789abcdef" for c in data):
             raise ValueError(
                 f"Gateway token at {self.path / TOKEN_FILE} is invalid; "
-                "run melo --gateway-rotate-token to replace it"
+                "run melo console --reset to replace it"
             )
         return data
 

@@ -109,7 +109,7 @@ melo -h all                                  # every option, command and setting
 
 - `-X KEY=VALUE`（长格式 `--set KEY=VALUE`，可重复）只对本次运行修改一项设置。值按 TOML 读取（`true`、`5`、`"v3"`），否则当作文本；`on` 和 `off` 也表示布尔值。`-X` 优先于配置文件，配置文件优先于默认值，并且从不写入文件。出现在 `--` 之后时，它是任务文字。
 - 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
-- `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。
+- `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。未设置的 `agent.window_messages` 在 `keys` 和 `get` 中显示它实际采用的窗口及原因（`64 (local server)`、`20 (cloud)`）。
 - 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
 
 <a id="modes"></a>

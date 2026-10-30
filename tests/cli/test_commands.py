@@ -8,9 +8,17 @@ import pytest
 from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 
-from localmelo.support.cli.commands import COMMANDS, find, help_text, parse_command
+from localmelo.support.cli.commands import (
+    COMMANDS,
+    HELP_GROUPS,
+    find,
+    help_text,
+    parse_command,
+)
 from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
 from localmelo.support.cli.output import RecordingOut
+from localmelo.support.cli.text import cells
+from localmelo.support.cli.theme import ASCII
 
 
 @pytest.mark.parametrize(
@@ -77,41 +85,37 @@ def test_attachment_completions_are_workspace_files_only(tmp_path: Path) -> None
         assert complete(text) == []
 
 
-def test_slash_lists_every_command_with_its_line() -> None:
+def test_slash_lists_the_everyday_commands_first_by_their_bare_names() -> None:
     shown = _complete("/")
-    assert [text for text, _, _ in shown] == [
-        "/model",
-        "/backend",
-        "/new",
-        "/status",
-        "/help",
-        "/exit",
-        "/attach",
-        "/attachments",
-        "/detach",
-        "/sessions",
-        "/resume",
-        "/title",
-        "/undo",
-        "/usage",
-        "/memory",
+    names = [text for text, _, _ in shown]
+    everyday = [name for _, group in HELP_GROUPS for name in group]
+    assert names[:8] == ["/model", "/new", "/status", "/help", "/exit", "/undo"] + [
         "/copy",
-        "/verbose",
-        "/thinking",
-        "/stream",
-        "/expand",
-        "/approvals",
-        "/progress",
-        "/mcp",
         "/retry",
     ]
-    assert ("/help", "/help [command]", "Show commands and keys") in shown
+    assert {n[1:] for n in names[:8]} == set(everyday)  # the menu shows 8 rows
+    assert names[8:11] == ["/backend", "/attach", "/attachments"]
+    assert names[-1] == "/mcp" and len(names) == len(COMMANDS)
+    assert all(
+        text == display for text, display, _ in shown
+    )  # arguments are in the line
+    assert ("/help", "/help", "Show commands; /help all lists every one") in shown
+
+
+def test_no_menu_description_is_cut_at_80_columns() -> None:
+    # The name column is as wide as the longest name, plus 2; the menu has 79 columns,
+    # and the description keeps 1 cell on each side of it.
+    shown = _complete("/")
+    column = max(cells(display) for _, display, _ in shown) + 2
+    assert all(cells(meta) <= 79 - column - 2 for _, _, meta in shown)
 
 
 def test_typing_narrows_the_list() -> None:
-    assert _complete("/he") == [("/help", "/help [command]", "Show commands and keys")]
+    assert _complete("/he") == [
+        ("/help", "/help", "Show commands; /help all lists every one")
+    ]
     assert _complete("/mo") == [
-        ("/model", "/model [name]", "Show, list or switch the model (saved)")
+        ("/model", "/model", "Pick a model, or /model NAME (saved)")
     ]
     assert _complete("hello /he") == []
 
@@ -132,19 +136,70 @@ def test_model_completes_the_listed_models() -> None:
     ]
 
 
-def test_help_lists_the_commands_and_one_commands_details() -> None:
-    out = RecordingOut(80)
-    out.print(help_text())
-    text = out.text()
-    assert all(f"/{command.name}" in text for command in COMMANDS)
+def _help(topic: str = "", *, width: int = 80, everything: bool = False) -> list[str]:
+    out = RecordingOut(width)
+    out.print(help_text(topic, width=width, everything=everything))
+    return out.text().strip("\n").split("\n")
+
+
+def test_help_starts_with_the_everyday_commands_in_three_groups() -> None:
+    rows = _help()
+    assert [row for row in rows if not row.startswith(" ")] == [
+        "Conversation",
+        "Model",
+        "Help",
+    ]
+    assert [row.split()[0] for row in rows if row.startswith("  /")][:-1] == [
+        "/new",
+        "/retry",
+        "/undo",
+        "/copy",
+        "/model",
+        "/status",
+        "/help",
+        "/exit",
+    ]
+    text = "\n".join(rows)
+    assert "! command runs it in your shell" in text and "esc stop the turn" not in text
+    assert rows[-1] == "  /help all lists every command and key."
+    assert "/backend" not in text and len(rows) <= 14  # one screen
+
+
+@pytest.mark.parametrize(("topic", "everything"), [("all", False), ("", True)])
+def test_help_all_and_developer_mode_list_every_command_and_the_keys(
+    topic: str, everything: bool
+) -> None:
+    text = "\n".join(_help(topic, everything=everything))
+    assert all(f"/{command.name} " in text for command in COMMANDS)
+    assert "More\n" in text and "Input\n  enter send" in text
     assert "esc stop the turn" in text
-    out = RecordingOut(80)
-    out.print(help_text("model"))
-    assert (
-        "/model [name]\n  Show, list or switch the model (saved)\n  During a turn: no"
-        in out.text()
-    )
+
+
+def test_one_commands_details_and_the_unknown_one() -> None:
+    assert _help("model") == [
+        "/model [name]",
+        "  Pick a model, or /model NAME (saved)",
+        "  During a turn: no",
+    ]
+    assert _help("nope") == ["Unknown command /nope. /help lists the commands."]
     assert find("quit") is find("exit")
+
+
+@pytest.mark.parametrize("width", [80, 60, 44])
+def test_help_rows_continue_under_their_description(width: int) -> None:
+    for everything in (False, True):
+        rows = _help(width=width, everything=everything)
+        # Only a heading is at the first column, and no row is wider than the terminal.
+        assert all(row.startswith(" ") or row.isalpha() for row in rows)
+        assert all(cells(row) <= width for row in rows)
+    # A description longer than its room goes under itself: "/approvals" is 14 cells.
+    assert any(row.startswith(" " * 16) for row in _help("all", width=44))
+
+
+def test_help_keeps_ascii_in_ascii_mode() -> None:
+    out = RecordingOut(80)
+    out.print(help_text("all", ASCII))
+    assert out.text().isascii() and "up/down history" in out.text()
 
 
 def test_the_bare_slash_lists_each_command_once() -> None:
@@ -161,5 +216,5 @@ def test_an_alias_row_names_the_other_spelling() -> None:
     assert _complete("/exi") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
     assert _complete("/ex") == [
         ("/exit", "/exit", "Quit (also /quit, ctrl+d)"),
-        ("/expand", "/expand [turn.call]", "Show a tool call's full output"),
+        ("/expand", "/expand", "Show a tool call's full output"),
     ]

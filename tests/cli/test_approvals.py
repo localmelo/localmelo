@@ -22,6 +22,7 @@ from localmelo.support.cli.approvals import (
     Approvals,
     EditSnapshots,
     TerminalApprover,
+    approval_words,
     panel_text,
     session_warning,
 )
@@ -54,6 +55,28 @@ def _request(
         workspace_root=WORKSPACE,
         tier=tier,
     )
+
+
+# ── The mode in words ──
+
+
+@pytest.mark.parametrize(
+    ("mode", "grants", "words"),
+    [
+        ("ask", [], "asks before running commands or changing files"),
+        (
+            "ask",
+            ["shell_exec", "file_write", "mcp__files__read"],
+            "asks before running commands or changing files · allowed this session: "
+            "file writes, mcp__files__read, shell commands",
+        ),
+        ("auto", ["shell_exec"], "runs commands and changes files without asking"),
+        ("deny", [], "never runs commands or changes files"),
+        ("yolo", [], "runs everything without asking (--yolo)"),
+    ],
+)
+def test_the_mode_and_grants_in_words(mode: Any, grants: list[str], words: str) -> None:
+    assert approval_words(mode, grants) == words
 
 
 # ── The panel's text ──

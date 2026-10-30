@@ -93,7 +93,7 @@ class SlashCompleter(Completer):
                         yield Completion(
                             usage,
                             start_position=-len(text),
-                            display=f"{usage} {command.args}".rstrip(),
+                            display=usage,
                             display_meta=command.line(alias),
                         )
             return

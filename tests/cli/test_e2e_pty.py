@@ -444,7 +444,7 @@ def test_ascii_mode_prints_only_ascii(
     term.see("Stopped")
     time.sleep(1)  # the turn wraps up
     term.type("/help\r")
-    term.see("ctrl+d quit")
+    term.see("/help all lists every command and key.")
     term.type("/model\r")
     term.see("Switch model")  # the list takes the keys until esc closes it
     term.type("\x1b")
@@ -470,11 +470,11 @@ def listed(melo: Callable[..., Melo], tmp_path: Path, stub: StubServer) -> Melo:
 def test_tab_then_enter_runs_the_completed_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/he")
-    listed.see("Show commands and keys")
+    listed.see("lists every one")
     listed.type("\t")
     time.sleep(0.3)
     listed.type("\r")
-    listed.see("esc stop the turn · ctrl+c clear, stop or quit")
+    listed.see("/help all lists every command and key.")
     assert "Unknown command" not in listed.text()
     assert listed.quit() == 0
 
@@ -499,7 +499,7 @@ def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/")
     listed.see("Start a new session")
-    listed.type("\x1b[B" * 3)  # /model, /backend, then /new
+    listed.type("\x1b[B" * 2)  # /model, then /new
     time.sleep(0.3)
     listed.type("\r")
     listed.see("─ New session ─")
