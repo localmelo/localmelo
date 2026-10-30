@@ -286,7 +286,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   picture. `tool_images_keep` and `tool_images_retire` set the counts. A run whose tools return no
   picture sends the same requests as before. An MCP result's `structuredContent` is no longer
   sent as text beside a picture, so a server that repeats a screenshot's base64 there sends the
-  picture, not the base64 ([#NN]).
+  picture, not the base64 ([#295]).
 
 - The terminal's status bar says what the session uses and what runs beside
   it, not the model and folder again (the welcome and `/status` keep those).
@@ -2330,6 +2330,7 @@ earlier milestones.
 [#292]: https://github.com/localmelo/localmelo/pull/292
 [#293]: https://github.com/localmelo/localmelo/pull/293
 [#294]: https://github.com/localmelo/localmelo/pull/294
+[#295]: https://github.com/localmelo/localmelo/pull/295
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
