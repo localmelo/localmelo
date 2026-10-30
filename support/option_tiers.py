@@ -1,7 +1,7 @@
 """The tier of every ``melo`` option, the table of settings, and the help built from them.
 
-``melo -h`` shows the everyday options and the command words in 20 lines; ``melo -h
-all`` (also plain ``-h`` in developer mode, ``[ui] mode = "developer"`` or
+``melo -h`` shows the everyday options and three everyday commands in 23 lines;
+``melo -h all`` (also plain ``-h`` in developer mode, ``[ui] mode = "developer"`` or
 ``--developer``) shows every option, command and setting. The tier and the mode decide
 only what help shows: every option parses and works in both modes.
 
@@ -213,7 +213,7 @@ OPTION_ROWS = (
     ("-w, --workspace", "DIR", "folder to work in (default: this one)"),
     ("-c, --continue", "", "continue the newest chat here"),
     ("-r, --resume", "[ID]", "resume a chat, or pick one from a list"),
-    ("-s, --steps", "N", "planning-call limit (default 30)"),
+    ("-s, --steps", "N", "most model calls per task (default 30)"),
     ("-t, --timeout", "SEC", "stop the run after SEC seconds"),
     ("-o, --output", "FORMAT", "text (default) or json"),
     ("-y, --yolo", "", "run tools without asking"),
@@ -248,8 +248,8 @@ def _options(rows: Sequence[tuple[str, str, str]]) -> list[str]:
 
 
 def help_short() -> str:
-    """``melo -h``: the everyday options, the command words, where to look next."""
-    from localmelo.support.command_words import COMMANDS
+    """``melo -h``: the everyday options, three commands with what they do, and more."""
+    from localmelo.support.command_words import EVERYDAY
 
     lines = [
         USAGE,
@@ -259,8 +259,9 @@ def help_short() -> str:
         "Options:",
         *_options(OPTION_ROWS[:SHORT_ROWS]),
         "",
-        "Commands: " + " · ".join(COMMANDS),
-        "More: melo -h all (every option and setting) · melo COMMAND -h",
+        "Commands:",
+        *(f"  {word:<10}{text}" for word, text in EVERYDAY),
+        "More commands and every setting: melo -h all",
     ]
     return "\n".join(lines) + "\n"
 

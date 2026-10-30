@@ -1058,6 +1058,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
   JSON, exit codes and requests are unchanged ([#NN]).
 
+- `melo -h` says what its everyday commands do. It lists `setup` (choose the model
+  server again), `serve` (run the web console and API) and `console` (open the web
+  console), then `More commands and every setting: melo -h all`, where it listed seven
+  bare words (`setup · config · serve · console · task · worker · import`) that a new
+  user could not tell apart. `-s, --steps` reads `most model calls per task (default 30)`
+  where it said `planning-call limit`. The help is 23 lines instead of 20; `melo -h all`
+  still lists every command and setting, and `melo COMMAND -h` still explains one. Every
+  option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
+  exit codes and requests ([#NN]).
+
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
