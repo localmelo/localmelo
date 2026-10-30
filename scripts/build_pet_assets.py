@@ -23,6 +23,10 @@ for the whole set, so Melo is the same size sitting, lying and asleep.
   error); favicon/16.png, 32.png and 64.png: the idle face.
 - anchors.json: per picture, its canvas (pt), `ground` (pt from the top: where the paws rest), `centre` (pt from the
   left) and `box` (x, y, width, height of the drawn dog on the canvas, pt, from the @2x file).
+
+The web console shows the same pictures, so the same run copies the ones it needs, at 2x, into
+support/gateway/static/akita (see CONSOLE_FILES); `--console-only` makes that copy again from the committed files in
+macos/art/akita, without the masters.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -38,6 +43,7 @@ from PIL import Image, PngImagePlugin  # type: ignore[import-not-found]
 
 ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "macos/art/akita"
+CONSOLE = ROOT / "support/gateway/static/akita"
 
 PET = (
     "lie-idle",
@@ -52,6 +58,7 @@ PET = (
 )
 PORTRAIT = ("sit-idle", "sit-working", "sit-waiting", "sit-done", "sit-error")
 FAVICONS = (16, 32, 64)
+FACE_NAMES = tuple(state.removeprefix("sit-") for state in PORTRAIT)
 
 SCALE = 0.17  # points per master pixel: the lying dog is about 115 pt wide
 # The generation drew a few poses a little larger or smaller; these factors match their eye distance to lie-idle's.
@@ -65,6 +72,14 @@ MARGIN = 3  # points of transparent canvas around the dogs: room for the rim
 EDGE_GAIN = 4  # the cut-out's alpha is pulled to a hard edge: 0.5 stays, 0.375 and 0.625 become 0 and 1
 RIM_POINTS, RIM_ALPHA, RIM_COLOUR = 1, 0.70, (0xF8, 0xF5, 0xE7)
 SCALES = (1, 2)
+# What the web console serves, as file below the art folder -> file below CONSOLE: the idle portrait of the empty
+# chat, the five faces (the reply icons, the approval bar, the brand) and the three favicons. The portrait and the
+# faces are the @2x files, shown at half their size, so one file looks sharp on any screen the console meets.
+CONSOLE_FILES = {
+    "portrait/sit-idle@2x.png": "sit-idle.png",
+    **{f"face/{name}@2x.png": f"face-{name}.png" for name in FACE_NAMES},
+    **{f"favicon/{size}.png": f"favicon-{size}.png" for size in FAVICONS},
+}
 
 
 def defringe(path: Path) -> Image.Image:
@@ -182,6 +197,14 @@ def faces(masters: dict[str, Image.Image], out: Path) -> None:
         save(out / "favicon" / f"{pixels}.png", render("sit-idle", pixels))
 
 
+def copy_console(art: Path, out: Path) -> int:
+    """Copy the pictures the console serves from `art` into `out`; the number of bytes."""
+    out.mkdir(parents=True, exist_ok=True)
+    for source, name in CONSOLE_FILES.items():
+        shutil.copyfile(art / source, out / name)
+    return sum((out / name).stat().st_size for name in CONSOLE_FILES.values())
+
+
 def build(picks: Path, out: Path) -> int:
     """Write every file under `out`; the number of bytes of the pictures."""
     spec = json.loads(picks.read_text())
@@ -203,15 +226,31 @@ def build(picks: Path, out: Path) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument(
-        "--picks", type=Path, required=True, help="picks.json of the masters"
-    )
+    parser.add_argument("--picks", type=Path, help="picks.json of the masters")
     parser.add_argument(
         "--out", type=Path, default=ART, help=f"where to write (default {ART})"
     )
+    parser.add_argument(
+        "--console",
+        type=Path,
+        default=CONSOLE,
+        help=f"where the web console's copies go (default {CONSOLE})",
+    )
+    parser.add_argument(
+        "--console-only",
+        action="store_true",
+        help="only copy the console's pictures from --out; no masters needed",
+    )
     args = parser.parse_args()
-    total = build(args.picks, args.out)
-    print(f"Wrote {args.out}: {total / 1024:.0f} KiB of pictures and anchors.json")
+    if not args.console_only:
+        if args.picks is None:
+            parser.error("--picks is required unless --console-only is given")
+        total = build(args.picks, args.out)
+        print(f"Wrote {args.out}: {total / 1024:.0f} KiB of pictures and anchors.json")
+    size = copy_console(args.out, args.console)
+    print(
+        f"Copied {len(CONSOLE_FILES)} pictures ({size / 1024:.0f} KiB) to {args.console}"
+    )
 
 
 if __name__ == "__main__":
