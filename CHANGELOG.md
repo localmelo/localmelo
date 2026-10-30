@@ -120,7 +120,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   squashes a little and rises, and the new picture fades in over the low point (250 ms) so
   the pose changes where it is hidden. Under Reduce Motion, Low Power Mode and heat nothing
   moves and a change is a plain 200 ms cross-fade. The mood still follows the app's 2 s
-  health poll ([#NN]).
+  health poll ([#306]).
 
 - Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
   replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
@@ -2400,6 +2400,7 @@ earlier milestones.
 [#297]: https://github.com/localmelo/localmelo/pull/297
 [#304]: https://github.com/localmelo/localmelo/pull/304
 [#305]: https://github.com/localmelo/localmelo/pull/305
+[#306]: https://github.com/localmelo/localmelo/pull/306
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
