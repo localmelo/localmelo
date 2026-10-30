@@ -486,6 +486,7 @@ class Symbols:
     file_new: str
     file_modified: str
     gutter: str  # beside code when there is no panel
+    bar: str  # a scrollbar's thumb
     spinner: tuple[str, ...]
 
 
@@ -519,6 +520,7 @@ UNICODE: Final = Symbols(
     file_new="+",
     file_modified="~",
     gutter="│",
+    bar="┃",
     spinner=("·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"),
 )
 
@@ -552,6 +554,7 @@ ASCII: Final = Symbols(
     file_new="+",
     file_modified="~",
     gutter="|",
+    bar="|",
     spinner=("-", "\\", "|", "/"),
 )
 

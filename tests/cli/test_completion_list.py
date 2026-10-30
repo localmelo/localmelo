@@ -57,10 +57,10 @@ async def test_the_chosen_row_has_the_pickers_mark_and_the_names_do_not_move() -
 async def test_the_bar_shows_only_when_there_are_more_rows_than_fit() -> None:
     async with running_app(FakeController(), completer=SlashCompleter()) as app:
         rows = await _opened(app, "/")
-        assert any(row.endswith(UNICODE.gutter) for row in rows), rows
+        assert any(row.endswith(UNICODE.bar) for row in rows), rows
         app.type("mo")
         await app.wait(lambda: len(_menu(app)) == 1)
-        assert UNICODE.gutter not in _menu(app)[0]
+        assert UNICODE.bar not in _menu(app)[0]
 
 
 async def test_arguments_use_the_same_list() -> None:
@@ -73,7 +73,7 @@ async def test_arguments_use_the_same_list() -> None:
 def test_the_bar_is_a_cell_of_the_symbol_set_sized_and_placed_by_the_scroll(
     symbols: Symbols,
 ) -> None:
-    bar = _Scrollbar(symbols.gutter)
+    bar = _Scrollbar(symbols.bar)
 
     def draw(total: int, rows: int, scroll: int) -> list[str]:
         info = SimpleNamespace(
@@ -82,7 +82,7 @@ def test_the_bar_is_a_cell_of_the_symbol_set_sized_and_placed_by_the_scroll(
         fragments = bar.create_margin(info, 1, rows)  # type: ignore[arg-type]
         return "".join(part[1] for part in fragments).split("\n")
 
-    mark = symbols.gutter
+    mark = symbols.bar
     assert draw(8, 8, 0) == [""]  # everything fits: no bar
     assert draw(3, 8, 0) == [""]
     assert draw(32, 8, 0) == [mark, mark] + [" "] * 6

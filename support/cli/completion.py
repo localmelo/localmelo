@@ -215,4 +215,4 @@ class CompletionList(CompletionsMenu):
         super().__init__(max_height=max_rows, scroll_offset=scroll_offset)
         window = cast(Window, self.content)
         window.content = _ListControl(symbols.selection, symbols.ellipsis)
-        window.right_margins = [_Scrollbar(symbols.gutter)]
+        window.right_margins = [_Scrollbar(symbols.bar)]
