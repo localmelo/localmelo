@@ -423,7 +423,8 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           through an OpenAI-compatible API on a Mac with Apple silicon and
           macOS 15 or later. localmelo supports it as a local server: first-run
           setup finds it on port 8000 and asks it which models are loaded. In
-          the config file it is the <code>vllm</code> backend; the
+          the config file it is the <code>vllm</code> backend, also spelled
+          <code>omlx</code>; the
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">guide</a>
           explains why. To use it instead of Ollama:
         </p>
@@ -522,7 +523,7 @@ brew install jundot/omlx/omlx</code></pre>
         <ul>
           <li>One chat model: it is the default.</li>
           <li>Several, and oMLX says which are loaded: setup marks them <code>(loaded)</code> and makes the first of them the default.</li>
-          <li>Several, and none is loaded or oMLX does not say: there is no default. Type the number of the model to use; Enter alone asks again, because choosing for you could start a long load of a large model. While a key is set, oMLX does not say, even with <strong>Allow inference without API key</strong> on, and setup prints <code>The server did not say which models are loaded (it needs a key for that).</code> A model that has an alias in oMLX is listed under the alias but reported as loaded under its folder name, so it is not marked.</li>
+          <li>Several, and none is loaded or oMLX does not say: there is no default. Type the number of the model to use; Enter alone asks again, because choosing for you could start a long load of a large model. While a key is set, oMLX does not say, even with <strong>Allow inference without API key</strong> on, and setup prints <code>The server did not say which models are loaded (it needs a key for that).</code> A model that has an alias in oMLX is listed under the alias, and the status reply names the alias beside the folder name (<code>model_alias</code>, as oMLX 0.7.1rc1 sends it), so the model is marked and can be the default under the alias. A server whose reply has no alias cannot mark such a model.</li>
         </ul>
         <p>
           With a configuration saved already, run step 5 first, so that the

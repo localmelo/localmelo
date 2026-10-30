@@ -209,7 +209,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
 
       <section class="section" id="serve-a-model-with-omlx">
         <h2>用 oMLX 提供模型</h2>
-        <p><a href="https://github.com/jundot/omlx">oMLX</a> 在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，通过兼容 OpenAI 的 API 提供 MLX 模型。localmelo 支持把它作为本地服务器：首次运行时的设置会在 8000 端口找到它，并询问它哪些模型已加载。在配置文件中它是 <code>vllm</code> 后端；原因见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">指南（英文）</a>。用它代替 Ollama 的步骤：</p>
+        <p><a href="https://github.com/jundot/omlx">oMLX</a> 在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，通过兼容 OpenAI 的 API 提供 MLX 模型。localmelo 支持把它作为本地服务器：首次运行时的设置会在 8000 端口找到它，并询问它哪些模型已加载。在配置文件中它是 <code>vllm</code> 后端，也可写作 <code>omlx</code>；原因见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">指南（英文）</a>。用它代替 Ollama 的步骤：</p>
         <ol>
           <li>
             <p>用 Homebrew 安装 oMLX：</p>
@@ -242,7 +242,7 @@ brew install jundot/omlx/omlx</code></pre>
         <ul>
           <li>只有一个对话模型：它就是默认值。</li>
           <li>有多个，且 oMLX 说明了哪些已加载：设置会给已加载的模型标上 <code>(loaded)</code>，并以其中第一个作为默认值。</li>
-          <li>有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 <strong>Allow inference without API key</strong>，oMLX 也不会说明，此时设置会输出 <code>The server did not say which models are loaded (it needs a key for that).</code> 在 oMLX 中设置了别名的模型，会以别名列出，却以文件夹名报告为已加载，所以也不会被标出。</li>
+          <li>有多个，但没有已加载的，或者 oMLX 没有说明：没有默认值。请输入要使用的模型的编号；只按 Enter 会再次询问，因为替你选择可能会开始漫长的大模型加载。设置了密钥时，即使开启了 <strong>Allow inference without API key</strong>，oMLX 也不会说明，此时设置会输出 <code>The server did not say which models are loaded (it needs a key for that).</code> 在 oMLX 中设置了别名的模型会以别名列出，状态回复会在文件夹名旁边给出该别名（<code>model_alias</code>，oMLX 0.7.1rc1 就是这样发送的），所以该模型会被标出，并且可以在别名下成为默认值。状态回复中没有别名的服务器无法标出这样的模型。</li>
         </ul>
         <p>已经有配置时，先完成第 5 步，让模型加载好，再运行 <code>melo --reconfigure</code>：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 <code>n</code> 之后，或使用 <code>--developer</code>），对话后端选 oMLX 或 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">配置（英文）</a>。网页工作区随后会使用这个模型；它读取配置文件。</p>
       </section>
