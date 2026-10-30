@@ -1,4 +1,4 @@
-"""A fake embedding model for the memory-across-chats tests, in process or over HTTP.
+"""A fake embedding model and a fake chat model for the memory-across-chats tests.
 
 The vectors are concepts, not a model: one dimension per concept below, set when
 the text holds one of its words (English or Chinese), plus a few small hashed
@@ -17,7 +17,12 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+from localmelo.melo.contracts.providers import (
+    BaseEmbeddingProvider,
+    BaseLLMProvider,
+    ProviderError,
+)
+from localmelo.melo.schema import Message, ToolDef
 
 CONCEPTS: dict[str, tuple[str, ...]] = {
     "meeting": ("meeting", "sync", "standup", "组会", "会议"),
@@ -113,3 +118,50 @@ class EmbeddingServer:
         self._httpd.shutdown()
         self._httpd.server_close()
         self._thread.join(timeout=5)
+
+
+class FakeChat(BaseLLMProvider):
+    """A chat model in process that answers the retrieval request.
+
+    It picks the catalog lines (``[alias] label · text``) that hold *needle*;
+    *reply* sends that text instead, *delay_s* makes it slow, *fail* makes it
+    raise a provider error. ``usage`` is what the server would report.
+    """
+
+    def __init__(
+        self,
+        needle: str = "",
+        *,
+        reply: str | None = None,
+        delay_s: float = 0.0,
+        fail: bool = False,
+    ) -> None:
+        self.model = "fake-chat"
+        self.needle = needle
+        self.reply = reply
+        self.delay_s = delay_s
+        self.fail = fail
+        self.calls: list[str] = []
+        self.last_usage: dict[str, int] | None = None
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        assert tools is None
+        user = str(messages[-1].content)
+        self.calls.append(user)
+        if self.delay_s:
+            await asyncio.sleep(self.delay_s)
+        if self.fail:
+            raise ProviderError("the chat server is down")
+        picked = [
+            alias
+            for alias, line in re.findall(r"^\[(\w+)\] (.*)$", user, re.MULTILINE)
+            if self.needle.lower() in line.lower()
+        ]
+        content = self.reply if self.reply is not None else json.dumps({"ids": picked})
+        self.last_usage = {"prompt_tokens": 321, "completion_tokens": 9}
+        return Message("assistant", content, usage=dict(self.last_usage))
+
+    async def close(self) -> None:
+        return None
