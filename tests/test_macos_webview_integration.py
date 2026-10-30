@@ -14,6 +14,7 @@ import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -66,6 +67,20 @@ auth = GatewayAuth()
 requests = home / "requests"
 logins = home / "logins"
 closing = False
+# The page asks the app about folders, one answer at a time; a sandboxed frame asks too and must get none.
+FOLDER_PAGE = '''<html><body><iframe sandbox="allow-scripts" src="/frame"></iframe><script>
+const said = [], ask = (name, message) => webkit.messageHandlers.localmeloFolder.postMessage(message)
+  .then((value) => said.push(name + "=" + JSON.stringify(value)), () => said.push(name + "=refused"));
+ask("choose", {action: "choose"}).then(() => ask("reveal-picked", {action: "reveal", path: JSON.parse(said[0].slice(7))}))
+  .then(() => Promise.all([ask("reveal-chat", {action: "reveal", path: "~/proj"}), ask("reveal-other", {action: "reveal", path: "~/other"}),
+    ask("reveal-relative", {action: "reveal", path: "proj"}), ask("bogus", {action: "bogus"})]))
+  .then(() => { new Image().src = "/report?" + encodeURIComponent(said.join(" ")); });
+</script></body></html>'''
+FOLDER_FRAME = '''<html><body><script>
+const report = (text) => { new Image().src = "/report?frame-" + text; };
+try { webkit.messageHandlers.localmeloFolder.postMessage({action: "choose"}).then(() => report("answered"), () => report("refused")); }
+catch (error) { report("no-handler"); }
+</script></body></html>'''
 
 def record(text):
     with requests.open("a") as stream:
@@ -168,8 +183,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.headers.get("X-LocalMelo-Instance") is None:
             (home / "requested-page").write_text("yes")
+        if mode == "folders" and self.path.startswith("/report"):
+            self.send_response(204)
+            self.end_headers()
+            return
+        if mode == "folders" and self.path == "/api/sessions":
+            listed = cookie_ok(self.headers.get("Cookie", ""))
+            body = json.dumps({"sessions": [{"workspace": str(home / "proj")}]}).encode() if listed else b"{}"
+            self.send_response(200 if listed else 401)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         page = ('<html><body id="test-page"><button id="settings-btn" '
                 'onclick="document.body.dataset.settings=\'open\'">Settings</button>test page</body></html>')
+        if mode == "folders":
+            page = FOLDER_FRAME if self.path == "/frame" else FOLDER_PAGE
         body = page.encode()
         if mode == "handoff-probe" and self.path == "/":
             handoff()
@@ -235,6 +264,9 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     shutil.copy(ROOT / "macos/mark.svg", bundle / "Resources/mark.svg")
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
+        # The system's panel and Finder cannot run here: the panel answers the folder the test names.
+        "        panel.beginSheetModal(for: window) { response in\n            let path = response == .OK ? panel.url?.path : nil\n": '        DispatchQueue.main.async {\n            record("panel")\n            let path = ProcessInfo.processInfo.environment["TEST_FOLDER"]\n',
+        "NSWorkspace.shared.activateFileViewerSelecting([url])": 'record("reveal " + url.path)',
         "        webView = nil": '        webView = nil\n        record("removed")',
         "        tearDownWebView()\n        if let failed = child, failed.isRunning {": r"""        tearDownWebView()
         record("alert " + text)
@@ -394,6 +426,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "/usr/bin/xcrun",
             "swiftc",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(main),
@@ -512,6 +545,45 @@ def test_reauthentication_gets_a_new_session(
         wait_for(tmp_path / "logins", "login", process, timeout=20, count=4)
         events = wait_for(tmp_path / "events", "loaded", process, count=2)
         assert "alert " not in events
+
+
+def test_the_folder_bridge_answers_the_page_only_with_the_panel_and_its_own_chat_folders(
+    app: Path, tmp_path: Path
+) -> None:
+    for name in ("proj", "other", "picked"):
+        (tmp_path / name).mkdir()
+    process = launch(app, tmp_path, "folders", TEST_FOLDER=str(tmp_path / "picked"))
+    try:
+        wait_for(tmp_path / "port", "\n", process)
+        requests = wait_for(tmp_path / "requests", "GET /report?", process, count=2)
+        events = (tmp_path / "events").read_text()
+    finally:
+        stop(process, tmp_path)
+    reports = [
+        unquote(x.split("?", 1)[1])
+        for x in requests.splitlines()
+        if x.startswith("GET /report?")
+    ]
+    page = next(x for x in reports if x.startswith("choose="))
+    assert sorted(page.split(" ")) == sorted(
+        [
+            f'choose="{tmp_path / "picked"}"',  # only what the panel returned
+            "reveal-picked=true",
+            "reveal-chat=true",  # a folder of one of the gateway's chats
+            "reveal-other=false",  # a folder that exists, but no chat's
+            "reveal-relative=refused",
+            "bogus=refused",
+        ]
+    )
+    assert "frame-refused" in reports, "a frame of the page gets no answer"
+    assert events.count("panel") == 1, "only the page's own message opened the panel"
+    shown = [x for x in events.splitlines() if x.startswith("reveal ")]
+    # Foundation spells /private/var as /var when it resolves links.
+    real = [
+        str((tmp_path / n).resolve()).replace("/private/var", "/var")
+        for n in ("picked", "proj")
+    ]
+    assert sorted(shown) == sorted(f"reveal {path}" for path in real)
 
 
 def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:

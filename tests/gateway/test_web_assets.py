@@ -447,6 +447,25 @@ async def test_setup_card_module_is_served_and_the_shell_has_its_card(
     assert "setup-btn" not in page.text and "POSSIBILITY" not in page.text
 
 
+async def test_the_shell_has_the_folder_chip_and_the_starters_in_place_of_the_cards(
+    client: httpx.AsyncClient,
+) -> None:
+    assert "setupFolderPicker" in (await client.get("/assets/folder.mjs")).text
+    page = (await client.get("/")).text
+    hidden = set(
+        re.findall(r'<(?:div|button)\b[^>]*\bid="([\w-]+)"[^>]*\bhidden\b', page)
+    )
+    assert {"folder-picker", "folder-menu", "folder-path-row", "starters"} <= hidden
+    starters = re.findall(r'data-prompt="([^"]+)"[^>]*>([^<]+)<', page)
+    assert [label for _, label in starters] == [
+        "Summarize the files in this folder",
+        "Plan a small project with me",
+        "Explain a piece of code",
+    ]
+    assert all(prompt.startswith(label) for prompt, label in starters)
+    assert "suggestions" not in page and "suggestions" not in _stylesheet()
+
+
 def test_a_done_status_line_draws_in_the_success_colour() -> None:
     css = _stylesheet()
     assert re.search(
