@@ -22,7 +22,7 @@
       "source_sha256": "b002ccb145d21440565faace257862ebe4ff7e557497d333f31e02d12e381dcb",
       "namespace_defaults": {"attempt_policy": null, "base_url": null, "builtins": null, "chat_model": null, "daemon": null, "embedding_base_url": null, "embedding_model": null, "host": null, "max_steps": null, "mcp_config": null, "mcp_only": false, "memory": null, "memory_dir": null, "output_format": null, "port": null, "progress": null, "query": [], "reconfigure": false, "reflection_gate": null, "request_timeout": null, "routine": null, "serve": false, "timeout": null, "tool_exposure": null},
       "cases": [
-        {"id": "task-0-bare", "argv": ["task"], "result": "direct", "namespace": {"query": ["task"]}},
+        {"id": "task-0-bare", "argv": ["--", "task"], "result": "direct", "namespace": {"query": ["task"]}},
         {"id": "task-0-escaped", "argv": ["--", "task"], "result": "direct", "namespace": {"query": ["task"]}},
         {"id": "task-1-bare", "argv": [""], "result": "direct", "namespace": {"query": [""]}},
         {"id": "task-1-escaped", "argv": ["--", ""], "result": "direct", "namespace": {"query": [""]}},

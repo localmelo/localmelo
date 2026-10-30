@@ -104,13 +104,13 @@ def read_token(path: Path) -> str:
         os.close(fd)
 
 
-def parser() -> argparse.ArgumentParser:
+def parser(prog: str = "melo-task") -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     common.add_argument("--gateway", help="Loopback gateway URL")
     common.add_argument(
         "--json", action="store_true", help="Write machine-readable JSON"
     )
-    p = argparse.ArgumentParser(prog="melo-task", allow_abbrev=False, parents=[common])
+    p = argparse.ArgumentParser(prog=prog, allow_abbrev=False, parents=[common])
     subs = p.add_subparsers(dest="command", required=True)
     new = subs.add_parser("new", parents=[common], allow_abbrev=False)
     new.add_argument("text", nargs="?")
@@ -355,8 +355,8 @@ def _waiting_approval(task: dict[str, Any]) -> str | None:
     return f"Waiting for your approval: {what} (answer it in the web console, Tasks)"
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+def main(argv: list[str] | None = None, prog: str = "melo-task") -> int:
+    args = parser(prog).parse_args(argv)
     try:
         if args.command == "follow" and not 0 <= args.after <= 2**63 - 1:
             raise ValueError("invalid event cursor")
@@ -395,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, ClientError, FollowError, OSError, httpx.HTTPError) as exc:
         code = 2 if isinstance(exc, ValueError) else 1
         message = _safe(exc)
-        print(f"melo-task: {message}", file=sys.stderr)
+        print(f"{prog}: {message}", file=sys.stderr)
         if (
             getattr(args, "json", False)
             and args.command != "follow"

@@ -1145,8 +1145,8 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             parser.error(
                 "--import-session cannot be combined with a task or another mode"
             )
-    elif args.title is not None:
-        parser.error("--title requires --import-session")
+    elif args.title is not None and not args.query and args.brief is None:
+        parser.error("--title is for a task, melo worker or melo import")
     if args.no_save_session and args.save_session is not None:
         parser.error("--no-save-session cannot be combined with --save-session")
     if args.no_save_session and args.parent_run is not None:
@@ -1883,12 +1883,14 @@ def _build_parser(
     return parser
 
 
-def main() -> None:
-    _register_backends()
+def _parse(argv: Sequence[str]) -> tuple[argparse.ArgumentParser, argparse.Namespace]:
+    """The parser and the checked namespace of a command line (words included)."""
+    from localmelo.support.command_words import expand
 
+    argv = expand(argv)
     legacy = _build_parser(direct_only=True)
     try:
-        args, unknown = legacy.parse_known_args()
+        args, unknown = legacy.parse_known_args(argv)
     except argparse.ArgumentError:
         args, unknown = None, []
     # Keep the legacy namespace for direct runs (even query == [""]). The
@@ -1897,7 +1899,16 @@ def main() -> None:
     if isinstance(parser, _InteractiveParser) and isinstance(legacy, _DirectParser):
         parser.validation_error = legacy.validation_error
     if args is None or unknown or not args.query or args.serve or args.daemon:
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
+    if (
+        args.title is not None
+        and args.import_session is None
+        and (args.query or args.brief is not None)
+    ):
+        # `--title T` names a task's worker session, as `--save-session T` does.
+        if args.save_session is not None:
+            parser.error("--title and --save-session both name the session")
+        args.save_session, args.title = args.title, None
     if args.inbox is not None and args.brief is None:
         parser.error("--inbox requires --brief")
     if args.inbox_fd is not None and args.brief is None:
@@ -1926,6 +1937,12 @@ def main() -> None:
     elif args.output_format == "stream-json":
         parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
+    return parser, args
+
+
+def main() -> None:
+    _register_backends()
+    parser, args = _parse(sys.argv[1:])
 
     if getattr(args, "gateway_login", False) or getattr(
         args, "gateway_rotate_token", False
