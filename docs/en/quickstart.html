@@ -51,28 +51,17 @@
     <article class="content">
       <header class="doc-hero">
         <h1>Quickstart</h1>
-        <p class="lead">
-          This tutorial installs localmelo, runs a first task against a local
-          model server, saves a configuration and starts the gateway.
-        </p>
+        <p class="lead">Install localmelo, run a first task on your own model server, save a configuration and start the gateway.</p>
       </header>
 
       <section class="section" id="before-you-begin">
         <h2>Before you begin</h2>
-        <p>You need:</p>
         <ul>
-          <li>macOS (developed and tested) or Linux (should work, untested). Windows is not supported.</li>
+          <li>macOS (developed and tested) or Linux (should work, untested); Windows is not supported.</li>
           <li>Python 3.11 or later, Git, and <a href="https://docs.astral.sh/uv/">uv</a> (or pip, see <a href="#install-with-pip">Install with pip</a>).</li>
-          <li>
-            A model server. The commands below use <a href="https://ollama.com">Ollama</a>:
-            install it, start it, and pull a model with <code>ollama pull qwen3:8b</code>.
-            On a Mac with Apple silicon,
-            <a href="#serve-a-model-with-omlx">oMLX</a> is the recommended
-            server: use <code>http://127.0.0.1:8000/v1</code> and your model's
-            folder name in the commands instead. Any server with an
-            OpenAI-compatible API works too: use its <code>/v1</code> URL and
-            its model name.
-          </li>
+          <li>A model server. The commands below use <a href="https://ollama.com">Ollama</a> with <code>ollama pull qwen3:8b</code>.</li>
+          <li>On a Mac with Apple silicon, <a href="#serve-a-model-with-omlx">oMLX</a> is recommended: use <code>http://127.0.0.1:8000/v1</code> and your model's folder name instead.</li>
+          <li>Any OpenAI-compatible server works too: use its <code>/v1</code> URL and its model name.</li>
         </ul>
       </section>
 
@@ -82,36 +71,12 @@
 cd localmelo
 uv sync --extra gateway
 source .venv/bin/activate</code></pre>
-        <p>
-          uv creates the virtual environment <code>.venv/</code> (installing
-          Python 3.13 if you do not have it) and installs localmelo with the
-          gateway's dependencies.
-        </p>
-        <p>
-          Keep the directory name <code>localmelo</code>: the package is built
-          from it. A renamed folder or a ZIP download (<code>localmelo-main</code>)
-          fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.
-        </p>
-        <p>
-          On a Mac with Apple silicon, the
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">macOS development app</a>
-          puts a native window around the console. One command,
-          <code>uv run python scripts/build_macos_app.py --install</code>, builds
-          it, signs it ad hoc and installs it in <code>~/Applications</code>
-          without admin rights. It needs no Apple developer account and stays
-          on the Mac that builds it, and it needs a Swift compiler, from the release
-          Xcode or the Command Line Tools: it is a development bundle, not a
-          notarized release or a Homebrew cask.
-        </p>
-        <p>
-          The rest of this guide calls <code>melo</code> directly. Activation
-          lasts for this terminal only: in a new terminal, run
-          <code>source &lt;clone&gt;/.venv/bin/activate</code> again, where
-          <code>&lt;clone&gt;</code> is your <code>localmelo</code> directory.
-          With uv you can also run <code>uv run melo …</code> inside the
-          clone, or <code>uv run --project &lt;clone&gt; melo …</code> from
-          anywhere else.
-        </p>
+        <ul>
+          <li>uv creates <code>.venv/</code> (installing Python 3.13 if needed) with the gateway's dependencies.</li>
+          <li>Keep the folder name <code>localmelo</code>: a renamed folder or a ZIP download fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.</li>
+          <li>Activation lasts for this terminal; elsewhere use <code>uv run --project &lt;clone&gt; melo …</code>.</li>
+          <li>On a Mac with Apple silicon, <code class="wrap">uv run python scripts/build_macos_app.py --install</code> builds the <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">app</a> into <code>~/Applications</code>.</li>
+        </ul>
 
         <h3 id="install-with-pip">Install with pip</h3>
         <pre><code>git clone https://github.com/localmelo/localmelo.git
@@ -119,88 +84,42 @@ cd localmelo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[gateway]"</code></pre>
-        <p>
-          <code>python3</code> must be Python 3.11 or later. The
-          <code>-e</code> flag keeps the installation linked to this checkout,
-          so source changes apply without reinstalling.
-        </p>
+        <p><code>python3</code> must be Python 3.11 or later; <code>-e</code> keeps the install linked to this checkout.</p>
       </section>
 
       <section class="section" id="run-your-first-task">
         <h2>Run your first task</h2>
         <div class="callout warning">
-          <p>
-            <strong>The model can run shell commands and Python code, and read
-            or write any file you can: there is no sandbox.</strong> To run a
-            task without tools, add <code>--builtins none</code>. See the
-            <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>
-            and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">what the checks do</a>.
-          </p>
+          <p><strong>The model can run shell commands and Python code, and read or write any file you can: there is no sandbox.</strong> To run a task without tools, add <code>--builtins none</code>. See the <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>.</p>
         </div>
         <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
-        <p>
-          The answer is printed on stdout, and the command exits with code 0
-          (<code>echo $?</code> prints <code>0</code>). <code>-u</code>
-          (<code>--url</code>) points localmelo at an OpenAI-compatible server
-          for this one run, without a configuration file, and <code>-m</code>
-          (<code>--model</code>) names the model. The old spellings
-          <code>--base-url</code> and <code>--chat-model</code> still work
-          (<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#old-spelling-to-new">old spelling to new</a>).
-          It sends no API key, so use it for local servers; for a cloud API,
-          save a configuration (below).
-        </p>
-        <p>
-          With <a href="#serve-a-model-with-omlx">oMLX</a>, use its URL and the
-          name of a model folder:
-        </p>
+        <p>With <a href="#serve-a-model-with-omlx">oMLX</a>, use its URL and a model folder's name:</p>
         <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
-        <p>
-          For every option, see the
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">command-line reference</a>.
-        </p>
+        <ul>
+          <li>The answer prints on stdout, and the exit code is 0 (<code>echo $?</code> prints <code>0</code>).</li>
+          <li><code>-u</code> (<code>--url</code>) picks the server for this run, without a config file; <code>-m</code> (<code>--model</code>) names the model.</li>
+          <li>It sends no API key: for a cloud API, save a configuration (below).</li>
+          <li>Every option is in the <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">command-line reference</a>.</li>
+        </ul>
       </section>
 
       <section class="section" id="json-output">
         <h2>Get the result as JSON</h2>
         <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"</code></pre>
-        <p>Example output (values vary):</p>
-        <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}</code></pre>
-        <p>
-          stdout holds exactly this one line. The exit code is 0 only when
-          <code>status</code> is <code>completed</code>.
-        </p>
-
+        <ul>
+          <li>stdout holds exactly one JSON line; the exit code is 0 only when <code>status</code> is <code>completed</code>.</li>
+        </ul>
         <h3 id="run-results">Run results</h3>
-        <p>
-          <code>status</code> says how the run ended, for example
-          <code>completed</code>, <code>budget_exhausted</code> or
-          <code>provider_error</code>. The counters say how many steps, model
-          requests and tool calls the run took, and <code>config</code>
-          records the options it ran with. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/run-results.md">Run results</a>
-          for every status and field.
-        </p>
+        <ul>
+          <li><code>status</code> says how the run ended, such as <code>completed</code>, <code>budget_exhausted</code> or <code>provider_error</code>.</li>
+          <li>The counters give the steps, model requests and tool calls; <code>config</code> records the options.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/run-results.md">Run results</a> lists every status and field.</li>
+        </ul>
       </section>
 
       <section class="section" id="save-a-configuration">
         <h2>Save a configuration</h2>
-        <p>
-          A configuration file saves the backends, so that <code>melo</code>,
-          <code>melo "&lt;task&gt;"</code> and the gateway work without
-          <code>-u</code>.
-        </p>
-        <p>
-          For a local server, run <code>melo</code> in a terminal. With no
-          configuration yet, it first says what it needs, a model server on
-          this computer. It then looks for one (oMLX on port 8000, Ollama on
-          11434), asks whether to use the one it found
-          (<code>Use this model server?</code>, a list: Enter takes the
-          selected <code>Use it</code>) and for a model from
-          the server's list, which shows chat models
-          first and tags an embedding or reranking model, saves
-          <code>~/.cache/localmelo/config.toml</code> and opens the
-          interactive UI:
-        </p>
+        <p>Run <code>melo</code> in a terminal. With nothing saved, it finds a model server on this computer, asks to use it, and saves <code>~/.cache/localmelo/config.toml</code>:</p>
         <pre><code>$ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
@@ -210,157 +129,69 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
 Try: What is this project? · / commands · ctrl+d quit</code></pre>
-        <p>
-          The first row shows the package version, and on a git checkout the
-          short commit, as in <code>melo 0.1.0 (baab21e)</code>;
-          <code>melo --version</code> prints the same line and exits 0.
-          <code>/status</code> checks that the model answers and shows the folder, session,
-          approvals and context use; <code>/status all</code> adds the tools, memory, limits and files.
-        </p>
-        <p>
-          Type a message and press Enter, or <code>/exit</code> to leave. From
-          then on, <code>melo</code> goes straight in and
-          <code>melo "&lt;task&gt;"</code> uses the saved server. The server
-          here is Ollama, so it is saved as the <code>ollama</code> backend;
-          an oMLX server is saved as <code>omlx</code> and any other
-          OpenAI-compatible server as <code>vllm</code>, the key for those.
-          When the server lists an
-          embedding model, the first run asks one more question,
-          <code>Remember across chats with &lt;model&gt;?</code>, a list whose
-          selected row, <code>Use it</code>, saves it. Every question with a
-          fixed set of answers is a list on a terminal (↑ ↓ or a number move,
-          Enter confirms, Esc takes the safe answer); piped answers keep the
-          typed questions. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
-          and
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">Set up an embedding model</a>.
-        </p>
-        <p>
-          With no model server running, <code>melo</code> prints this
-          computer's commands for starting one (oMLX on a Mac, Ollama
-          elsewhere, the ones in the
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">model servers guide</a>) and asks
-          <code>No model server found. What now?</code> with
-          <code>Check again</code>, <code>Enter an address</code> and
-          <code>Quit</code> (piped:
-          <code>Press Enter to check again, type an address, or q to quit:</code>).
-          Start the server in another terminal, then choose
-          <code>Check again</code>; melo installs and starts nothing itself.
-        </p>
+        <figure class="shot">
+          <img src="../assets/img/status.webp" alt="/status in the terminal: the model and whether it answers, the folder, the session, the approvals and context use." width="1280" height="1298" loading="lazy">
+          <figcaption><code>/status</code> checks that the model answers, and shows the folder, the session and the approvals.</figcaption>
+        </figure>
+        <ul>
+          <li>From then on, <code>melo</code> and <code>melo "&lt;task&gt;"</code> use the saved server.</li>
+          <li>Every question is a list: ↑ ↓ move, Enter confirms, Esc takes the safe answer.</li>
+          <li>With no server running, melo prints the commands that start one and offers <code>Check again</code>.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">Set up an embedding model</a> have the details.</li>
+        </ul>
+
         <h3 id="with-the-setup-wizard">With the setup wizard</h3>
-        <p>
-          The setup wizard also sets up an embedding server or a cloud API.
-          For a cloud API, first run
-          <code>export OPENAI_API_KEY="&lt;your key&gt;"</code> (or your
-          vendor's variable) in this terminal: the wizard's test request uses
-          that key. Run the wizard, then start the gateway:
-        </p>
+        <p>The wizard also sets up an embedding server or a cloud API. For a cloud API, first run <code>export OPENAI_API_KEY="&lt;your key&gt;"</code> (or your vendor's variable).</p>
         <pre><code>melo setup
 melo serve</code></pre>
-        <p>
-          In default mode <code>melo setup</code> first offers the server it
-          finds (<code>Use this model server?</code>); choose
-          <code>Use another server</code> for the full menu, which developer mode
-          (<code>melo config set ui.mode developer</code>) shows at once. The
-          wizard asks:
-        </p>
         <div class="table-wrap">
           <table>
             <thead>
               <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>Your server type, such as <code>2. Ollama (local endpoint)</code>: move with ↑ ↓ and press Enter, or press the number (piped: type it). The saved backend is selected first, else MLC (<code>1</code>). For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (<code>3</code>).</td></tr>
-              <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one.</td></tr>
+              <tr><td><code>Use this model server?</code></td><td>The server it found, or <code>Use another server</code> for the full menu.</td></tr>
+              <tr><td><code>Chat backend</code></td><td>Your server type, such as <code>2. Ollama (local endpoint)</code>, or a cloud vendor.</td></tr>
+              <tr><td><code>Base URL</code></td><td>Your server's URL; Enter keeps the default in brackets. Ollama's has no <code>/v1</code>.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
-              <tr><td><code>Save these settings?</code></td><td>Press Enter on <code>Save and continue</code>, or choose <code>Cancel setup</code> (piped: <code>Save and continue? [Y]:</code>).</td></tr>
-              <tr><td><code>Embedding backend</code></td><td><code>5. None (no long-term memory)</code>. Without a saved embedding, the chat server's own embedding models are appended as <code>6</code>, <code>7</code>, … with the first selected; choosing one is enough.</td></tr>
-              <tr><td><code>Embedding endpoint URL</code>, <code>Embedding model name</code></td><td>Only asked when you chose one of the fixed embedding backends <code>1</code>–<code>4</code>, not a detected model.</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5. None (no long-term memory)</code>, or an embedding model the chat server lists.</td></tr>
             </tbody>
           </table>
         </div>
-        <p>
-          For a cloud API, choose the vendor. The wizard then asks for
-          <code>API key env var</code>, the name of the variable you exported,
-          and <code>Chat model</code> instead of <code>Base URL</code> and
-          <code>Chat model name</code>.
-        </p>
-        <p>
-          For Ollama, the default URL <code>http://localhost:11434</code> has
-          no <code>/v1</code>. That is correct: the <code>ollama</code> backend
-          uses Ollama's own API, not the OpenAI-compatible one.
-        </p>
-        <p>
-          Next, the wizard sends a short test request to each server
-          (<code>Probing backends ...</code>). If the chat server does not
-          answer, it prints <code>Probe failed: …</code> and asks
-          <code>The check failed. What now?</code> with <code>Try again</code>,
-          <code>Save anyway</code> and <code>Cancel setup</code> (piped:
-          <code>[r]etry, [s]ave anyway, [N]o [N]:</code>); <code>Try again</code>
-          asks for the URL and model again, and Enter, which takes the selected
-          <code>Cancel setup</code>, saves nothing. If
-          only the embedding server fails, the wizard saves with embedding off
-          and says so. On success it prints <code>Config saved to …</code>,
-          the path of <code>~/.cache/localmelo/config.toml</code>, and opens
-          the interactive UI; leave it with Ctrl+D. Then
-          <code>melo serve</code> starts the gateway on
-          <code>http://127.0.0.1:8401</code>, and it keeps running in this
-          terminal. In default mode <code>melo setup</code> starts with the
-          first run's question: it prints
-          <code>Found a model server at …</code> and asks
-          <code>Use this model server?</code>. The full menu above follows only
-          after <code>Use another server</code>, in developer mode, or when no
-          server is found while a backend is saved; with nothing saved, it
-          prints the commands that start a server instead.
-        </p>
+        <ul>
+          <li>The wizard sends a short test request to each server before it saves.</li>
+          <li>If the check fails, choose <code>Try again</code>, <code>Save anyway</code> or <code>Cancel setup</code>.</li>
+          <li>On success it prints <code>Config saved to …</code>; then <code>melo serve</code> starts the gateway on <code>http://127.0.0.1:8401</code>.</li>
+        </ul>
       </section>
 
       <section class="section" id="set-up-an-embedding-model">
         <h2>Set up an embedding model</h2>
-        <p>
-          Long-term memory needs an embedding model. localmelo never downloads
-          or starts one: point it at a model your server already serves. The
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">guide</a>
-          covers Ollama, oMLX, vLLM, SGLang and MLC.
-        </p>
-        <p>With Ollama:</p>
+        <figure class="shot">
+          <img src="../assets/img/embedding.webp" alt="The first run lists the server's models and offers one for long-term memory." width="1280" height="291" loading="lazy">
+        </figure>
+        <p>Long-term memory needs an embedding model that your server already serves. With Ollama:</p>
         <pre><code>ollama pull qwen3-embedding:0.6b
 curl -sS http://127.0.0.1:11434/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
 melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
-        <p>
-          The reply must hold a non-empty <code>data[0].embedding</code>.
-          <code>nomic-embed-text</code> is a smaller English-only alternative.
-        </p>
         <p>With oMLX the chat server also serves the model:</p>
         <pre><code>curl -sS http://127.0.0.1:8000/v1/models
 curl -sS http://127.0.0.1:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</code></pre>
-        <p>
-          <code>GET /v1/models</code> gives ids but no type, so the embeddings
-          request is the check. Keep the chat server and set
-          <code>embedding_backend = "vllm"</code> with that table's
-          <code>embedding_url</code> and <code>embedding_model</code>; see
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX</a>.
-        </p>
-        <p>
-          Changing the model changes the vector space: stored vectors of
-          another dimension are skipped, so old entries stop ranking. To
-          reclaim the space, stop localmelo and remove
-          <code>~/.cache/localmelo/memory/long_term.db*</code>.
-        </p>
+        <ul>
+          <li>The reply must hold a non-empty <code>data[0].embedding</code>.</li>
+          <li>For oMLX, set <code>embedding_backend = "vllm"</code> with <code>embedding_url</code> and <code>embedding_model</code> (<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX</a>).</li>
+          <li>A new model means new vectors: old entries stop ranking until you remove <code>~/.cache/localmelo/memory/long_term.db*</code>.</li>
+          <li>The <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">guide</a> covers Ollama, oMLX, vLLM, SGLang and MLC.</li>
+        </ul>
       </section>
 
       <section class="section" id="start-the-gateway">
         <h2>Start the gateway</h2>
-        <p>
-          Once the configuration is saved, by <code>melo</code> or by the
-          wizard above, start the gateway with <code>melo serve</code>. From a
-          second terminal, check the gateway and run a task through it:
-        </p>
-        <p>API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
+        <p>Run <code>melo serve</code>. From a second terminal, check it and run a task through it; the token goes to curl through a pipe, not the command line:</p>
         <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -368,40 +199,20 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <p>Example output (values vary):</p>
         <pre><code>{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
 {"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
-        <p>
-          The health check does not contact the model server; a task does.
-          The web workspace opens in your browser when <code>melo serve</code>
-          starts at a terminal on this computer; <code>melo console</code>
-          opens it again. Over SSH, or when no browser starts,
-          <code>melo console</code> prints a one-use link to open within 60
-          seconds; do not share it (see
-          <a href="#interactive-conversations">Interactive conversations</a>).
-        </p>
-        <p>
-          Press Ctrl+C in the first terminal to stop the gateway. Tasks use the
-          saved configuration:
-        </p>
-        <pre><code>melo "What is 6*7?"</code></pre>
-        <p>To start the gateway again, run <code>melo serve</code>.</p>
-        <p>
-          The separate <code>melo-task</code> client creates, inspects, follows and
-          controls gateway tasks over authenticated loopback HTTP, and never starts
-          the gateway. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#task-command">the task command</a>.
-        </p>
+        <ul>
+          <li>The health check does not contact the model server; a task does.</li>
+          <li>At a terminal on this computer, <code>melo serve</code> opens the console in your browser; <code>melo console</code> opens it again.</li>
+          <li>Over SSH, <code>melo console</code> prints a one-use link to open within 60 seconds; do not share it.</li>
+          <li>Ctrl+C stops the gateway; <code>melo "What is 6*7?"</code> then uses the saved configuration.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#task-command"><code>melo-task</code></a> creates and controls the gateway's tasks.</li>
+        </ul>
       </section>
 
       <section class="section" id="interactive-conversations">
         <h2>Interactive conversations</h2>
-        <p>
-          Run <code>melo</code> without a task to chat in the terminal. A turn
-          shows its work as it happens: the model's thinking on one line, each
-          tool call as it finishes, retries, notices and reflections, and a live
-          area with what melo is doing, the time, the tokens and the running
-          tool (developer mode adds the step, the phase and the run's progress
-          facts). The answer prints as Markdown, and a turn that wrote files
-          ends with a line that names them:
-        </p>
+        <figure class="shot">
+          <img src="../assets/img/first-answer.webp" alt="A terminal chat: thinking, three tool calls on quiet lines, and the answer with a code sample." width="1280" height="828" loading="lazy">
+        </figure>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
 # -m it uses the server's only chat model or its one loaded model;
@@ -409,195 +220,78 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 melo -u http://127.0.0.1:8000/v1
 melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>Type <code>/</code> for the commands (<code>/help</code> lists the everyday
-            ones, <code>/help all</code> every one): <code>/model</code> lists
-            the server's models and switches to one, <code>/backend</code>
-            switches to another server (both saved as the default),
-            <code>/verbose</code> and <code>/thinking</code> add or leave out
-            detail, <code>/expand</code> prints a tool call's whole output,
-            <code>/progress</code> the facts the live area rests on,
-            <code>/approvals</code> the mode and grants, <code>/status</code>
-            the session's facts, <code>/mcp</code> the MCP servers,
-            <code>/retry</code> the newest turn again, <code>/attach PATH</code>
-            stages one workspace text file (at most 256 KiB) for the next
-            message, <code>/attachments</code> and <code>/detach N|all</code>
-            list and remove the staged files, <code>/new</code> starts over,
-            <code>/exit</code> or Ctrl+D leaves.</li>
-          <li>melo asks before it runs a shell command, Python code or a file
-            write: press <code>1</code> to allow it, <code>2</code> to allow
-            that tool for the session, <code>3</code> to refuse and tell melo
-            why. Esc stops a turn.</li>
-          <li>melo works in the current folder (<code>-w DIR</code>
-            picks another): file tools stay in it; commands and Python can
-            reach other files, so melo asks first.</li>
+          <li>Each tool call shows on one line, and the answer prints as Markdown; developer mode adds the step, the phase and the run's progress facts.</li>
+          <li>Type <code>/</code> for commands: <code>/help</code>, <code>/model</code>, <code>/status</code>, <code>/attach PATH</code>, <code>/new</code>; Ctrl+D leaves.</li>
+          <li>melo asks before a shell command, Python code or a file write: allow once, allow for the session, or refuse and say why.</li>
+          <li>melo works in the current folder (<code>-w DIR</code> picks another); Esc stops a turn.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">The interactive UI</a> has the keys and the rest.</li>
         </ul>
-        <p>
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">The interactive UI</a>
-          has the keys and the rest. <code>melo ""</code> opens the plain
-          conversation loop of earlier releases. Without a terminal,
-          <code>melo</code> alone exits with code 2; start the gateway with
-          <code>melo serve</code>.
-        </p>
-        <p>
-          The web workspace at <code>http://127.0.0.1:8401/</code> is the
-          console's live page and talks only to <code>/api</code>: it uses the
-          gateway's configured model, which you can change in Settings
-          or with <code>melo setup</code>. On a first run, with no model set
-          up, its welcome shows a card that finds the model server already running
-          on this Mac and connects it with <strong>Use this model</strong>, without
-          opening settings. It lists your chats newest first, with search and a draft for
-          each, and draws a turn as the terminal does: your message, a work
-          card for each tool call, folded reasoning and reflections, notices,
-          the live progress row and the answer with its facts and
-          <code>Copy response</code>. Stop cancels the turn, a waiting approval
-          shows as <code>Needs approval</code>, and the chats are saved in the
-          gateway's <code>sessions.db</code>, so a restart keeps them. Other
-          browser tabs on the same gateway see the same chats. Approval cards
-          let you allow or deny tool calls, and show a numbered diff of what a
-          file write replaces; Settings changes the model server. The Workers section shows saved worker runs read-only.
-          The gateway requires authentication; use <code>melo console</code>
-          to sign in. Approvals are not a security boundary against same-user
-          processes or other localhost services.
-        </p>
+        <figure class="shot">
+          <img src="../assets/img/panel.webp" alt="The web console with a panel beside the chat: today's activity and a task waiting for approval." width="1280" height="800" loading="lazy">
+          <figcaption>The web console: your chats, each turn's work and answer, and the panel beside the chat.</figcaption>
+        </figure>
+        <ul>
+          <li>The console at <code>http://127.0.0.1:8401/</code> uses the gateway's model; Settings or <code>melo setup</code> change it.</li>
+          <li>On a first run, its welcome finds the model server on this Mac and connects it with <strong>Use this model</strong>.</li>
+          <li>Chats are saved in the gateway's <code>sessions.db</code>, so a restart keeps them.</li>
+          <li>Approval cards show the diff a file write makes; they are not a security boundary against same-user processes.</li>
+        </ul>
       </section>
 
       <section class="section" id="serve-a-model-with-omlx">
         <h2>Serve a model with oMLX</h2>
-        <p>
-          <a href="https://github.com/jundot/omlx">oMLX</a> serves MLX models
-          through an OpenAI-compatible API on a Mac with Apple silicon and
-          macOS 15 or later. localmelo supports it as a local server: first-run
-          setup finds it on port 8000 and asks it which models are loaded. In
-          the config file it is the <code>vllm</code> backend, also spelled
-          <code>omlx</code>; the
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">guide</a>
-          explains why. To use it instead of Ollama:
-        </p>
+        <p><a href="https://github.com/jundot/omlx">oMLX</a> serves MLX models through an OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later.</p>
         <ol>
           <li>
-            <p>Install oMLX with Homebrew:</p>
+            <p>Install oMLX with Homebrew (the oMLX app also installs <code>~/.omlx/bin/omlx</code>):</p>
             <pre><code>brew tap jundot/omlx https://github.com/jundot/omlx
 brew install jundot/omlx/omlx</code></pre>
-            <p>
-              The oMLX macOS app also installs the command, as
-              <code>~/.omlx/bin/omlx</code>. Its
-              <a href="https://github.com/jundot/omlx#install">README</a> has
-              the other ways to install it. The Homebrew command above installs
-              oMLX without its optional native kernels, which a few model
-              families (Qwen3.5, for example) need to run at full speed; the app
-              ships them, and the README explains the Homebrew option.
-            </p>
           </li>
           <li>
-            <p>
-              Put each model in a folder of its own inside one models folder.
-              oMLX serves every subfolder that holds a model (a
-              <code>config.json</code> and its weights), and a subfolder's
-              name is its model id. For example, with the Hugging Face command
-              line (<code>hf</code>, from <code>uv tool install huggingface_hub</code>):
-            </p>
+            <p>Put each model in its own folder; the folder's name is the model id:</p>
             <pre><code>hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit</code></pre>
           </li>
           <li>
             <p>Start the server, and leave it running in its own terminal:</p>
             <pre><code>omlx serve --model-dir ~/models --port 8000</code></pre>
-            <p>
-              It listens on <code>http://127.0.0.1:8000</code>. oMLX saves
-              <code>--model-dir</code> and <code>--port</code> in its
-              <code>settings.json</code> (under <code>~/.omlx</code> by
-              default) and uses them when you leave the flags out, so a port
-              saved earlier wins over the default 8000; giving
-              <code>--port</code> avoids that. The oMLX app and
-              <code>omlx start</code> run the server in the background instead,
-              with the folder and port saved in oMLX (the Homebrew service
-              starts with <code>~/.omlx/models</code> and port 8000): then skip
-              the command above.
-            </p>
-            <p>
-              Keep the default host and do not set <code>--api-key</code>:
-              localmelo sends no API key to a local server. If requests fail
-              with HTTP 401 (<code>API key required</code>), a key was set
-              earlier, in oMLX's admin page or with <code>OMLX_API_KEY</code>:
-              turn on <strong>Allow inference without API key</strong> in the
-              admin page's settings, or unset <code>OMLX_API_KEY</code>. With
-              that setting on, listing models and chat work, but oMLX still asks
-              for the key on the route that says which models are loaded, so
-              setup cannot mark them (see below).
-            </p>
+            <p>Do not set <code>--api-key</code>: localmelo sends no key to a local server. On HTTP 401, turn on <strong>Allow inference without API key</strong> in oMLX's admin page.</p>
           </li>
           <li>
-            <p>Check that the server lists the model:</p>
+            <p>Check that the server lists the model (<code>"id": "Qwen3-8B-4bit"</code>):</p>
             <pre><code>curl -sS http://127.0.0.1:8000/v1/models</code></pre>
-            <p>
-              The reply's <code>data</code> list holds an entry with
-              <code>"id": "Qwen3-8B-4bit"</code>. It can also list MLX models
-              from your Hugging Face cache. <code>Failed to connect</code>
-              means that nothing listens on that port: check the port in
-              oMLX's startup log. <code>API key required</code> means that a
-              key is set: see step 3.
-            </p>
           </li>
           <li>
-            <p>Run a task with that id:</p>
+            <p>Run a task with that id (a first request loads the model; <code>-X request_timeout_s=600</code> gives it more time):</p>
             <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
-            <p>
-              oMLX loads the model on its first request, which can take a
-              minute for a large model. If that request times out, add
-              <code>-X request_timeout_s=600</code> (<code>-X KEY=VALUE</code>
-              changes one setting for one run). Without
-              <code>-m</code>, melo asks oMLX which models it has and
-              uses the only chat model or the one that is loaded, for a task and
-              for <code>melo -u http://127.0.0.1:8000/v1</code> without a
-              task (the interactive UI); with several chat models and not exactly
-              one loaded, it exits 2, lists them and asks for
-              <code>--chat-model &lt;id&gt;</code>. Name the model with
-              <code>-m</code> to skip that lookup.
-            </p>
           </li>
         </ol>
-        <p>
-          To make oMLX your default, run <code>melo</code> in a terminal before
-          any configuration is saved: it finds oMLX on port 8000, lists its
-          models and saves the one you pick;
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
-          shows the exchange. oMLX loads a model when the first request for it
-          arrives, so a listed model is not always in memory, and loading a
-          large one can take minutes. Setup therefore chooses like this, and
-          with several chat models it asks oMLX which are loaded
-          (<code>GET /v1/models/status</code>, one second at most):
-        </p>
+        <figure class="shot">
+          <img src="../assets/img/model-picker.webp" alt="The model picker under the input box: three models, the current one ticked, and a filter." width="1280" height="506" loading="lazy">
+        </figure>
         <ul>
-          <li>One chat model: it is the default.</li>
-          <li>Several, and oMLX says which are loaded: setup marks them <code>(loaded)</code> and makes the first of them the default.</li>
-          <li>Several, and none is loaded or oMLX does not say: there is no default: nothing is highlighted and Enter does nothing until you move to a model with ↑ ↓ (answers piped in: type the number of the model to use; Enter alone asks again), because choosing for you could start a long load of a large model. While a key is set, oMLX does not say, even with <strong>Allow inference without API key</strong> on, and setup prints <code>The server did not say which models are loaded (it needs a key for that).</code> A model that has an alias in oMLX is listed under the alias, and the status reply names the alias beside the folder name (<code>model_alias</code>, as oMLX 0.7.1rc1 sends it), so the model is marked and can be the default under the alias. A server whose reply has no alias cannot mark such a model.</li>
+          <li>To make oMLX your default, run <code>melo</code> before anything is saved: it finds oMLX on port 8000 and saves the model you pick.</li>
+          <li>One chat model is the default; with several, setup marks the loaded ones and picks the first.</li>
+          <li>When none is loaded, nothing is picked for you: loading a large model can take minutes.</li>
+          <li>The <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">guide</a> has the config file and how to turn off a Qwen3 model's thinking.</li>
         </ul>
-        <p>
-          With a configuration saved already, run step 5 first, so that the
-          model is loaded, then <code>melo setup</code>: in default mode
-          it offers the server it finds with the first run's questions. In the
-          full menu (after <code>Use another server</code>, or in developer mode),
-          choose oMLX or vLLM (<code>3</code>) as the chat backend, enter
-          <code>http://127.0.0.1:8000/v1</code> and the model id, and choose
-          <code>5</code> (None) as the embedding backend unless oMLX also
-          serves an embedding model.
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">Configuration</a>
-          shows the file they save and the table to add to turn off a Qwen3
-          model's thinking. The web workspace then uses that model; it reads
-          the configuration file.
-        </p>
       </section>
 
       <section class="section" id="next-steps">
         <h2>Next steps</h2>
-        <ul>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">Configuration</a>: backends, cloud API keys, timeouts.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">Tools and MCP</a>: choose built-in tools and add MCP servers.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">Gateway and HTTP API</a>: sessions, the web workspace, running at login.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API</a>: run tasks from Python, follow their events, approve tool calls.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">Memory</a>: keep memory between runs, inspect and reset it.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">Command-line reference</a>: every option, exit codes, scripting.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/troubleshooting.md">Troubleshooting</a>: error messages and fixes.</li>
-        </ul>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Page</th><th scope="col">What it has</th></tr></thead>
+            <tbody>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">Configuration</a></td><td>Backends, cloud API keys, timeouts</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">Tools and MCP</a></td><td>Built-in tools and MCP servers</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">Gateway and HTTP API</a></td><td>Sessions, the console, running at login</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API</a></td><td>Run tasks from Python, follow events, approve tool calls</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">Memory</a></td><td>Keep, inspect and reset memory</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">Command-line reference</a></td><td>Every option, exit codes, scripting</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/troubleshooting.md">Troubleshooting</a></td><td>Error messages and fixes</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </article>
   </main>

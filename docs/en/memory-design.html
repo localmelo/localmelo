@@ -300,22 +300,16 @@
     <article class="content">
       <header class="doc-hero" id="overview">
         <h1>Memory design</h1>
-        <div class="callout">
-          <p>
-            <strong>Design.</strong> This page keeps localmelo's memory design
-            as its maintainer wrote it. Parts of it are not built yet. For what
-            the code does today, see <a href="./architecture.html">Architecture</a>,
-            the <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">memory guide</a>
-            and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">Offline retrieval</a>,
-            which compares the retrievers offline and documents the reasoning
-            notes that the compress modes now recall.
-          </p>
-        </div>
-        <p>
-          The text below moved here word for word from the Architecture page
-          and the updates page, in the order it had there.
-        </p>
+        <p class="lead">The maintainer's design for memory, kept as written. Parts of it are not built yet.</p>
       </header>
+      <figure class="shot">
+        <img src="../assets/img/memory-across.webp" alt="A console chat that answers from a note: under the answer, the note it used and the chat it came from." width="1280" height="800" loading="lazy">
+        <figcaption>Built today: melo remembers across chats and says where each recall came from.</figcaption>
+      </figure>
+      <ul>
+        <li>What the code does today: <a href="./architecture.html">Architecture</a>, the <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md">memory concepts</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">Offline retrieval</a>.</li>
+        <li>The text below moved here word for word from the Architecture and updates pages, in its order there.</li>
+      </ul>
 
       <section class="section" id="components">
         <h2>Components</h2>
