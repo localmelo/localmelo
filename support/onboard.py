@@ -377,6 +377,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         section = getattr(cfg, picked_choice.key)
         section.embedding_url, section.embedding_model = old_embedding
 
+    _spell_omlx(cfg)
     config.save(cfg)
     print(f"\n  Config saved to {_home_path(config.CONFIG_PATH)}")
     return cfg
@@ -547,6 +548,20 @@ def _choose_model(url: str, models: list[str]) -> str:
             print(f"  Type a number from 1 to {len(models)}, or a model id.")
 
 
+def _spell_omlx(cfg: config.Config) -> None:
+    """Spell a ``vllm`` backend ``omlx`` where a model listing named oMLX.
+
+    The first run, ``/backend`` and the wizard list the server they save, so
+    the file says oMLX and every later banner does, with no request of its own.
+    """
+    if cfg.chat_backend == "vllm" and discovery.is_omlx(cfg.vllm.chat_url):
+        cfg.chat_alias = config.OMLX_ALIAS
+    if cfg.embedding_backend == "vllm" and discovery.is_omlx(
+        cfg.vllm.embedding_url or cfg.vllm.chat_url
+    ):
+        cfg.embedding_alias = config.OMLX_ALIAS
+
+
 def _with_chat_server(
     cfg: config.Config,
     url: str,
@@ -557,11 +572,11 @@ def _with_chat_server(
 ) -> config.Config:
     """*cfg* with its chat on *url*, as :func:`save_chat_server` writes it.
 
-    *ollama* makes the chat backend ``ollama``; otherwise it is ``vllm``.
-    With *embedding_model*, the same table's embedding URL and model are
-    set too, so a first run can probe exactly what it will save. A file's
-    ``omlx`` spelling stays only while the chat server is the same. Nothing
-    is written to disk.
+    *ollama* makes the chat backend ``ollama``; otherwise it is ``vllm``, spelled
+    ``omlx`` when a listing of *url* named oMLX. With *embedding_model*, the same
+    table's embedding URL and model are set too, so a first run can probe exactly
+    what it will save. A file's ``omlx`` spelling stays while the chat server is
+    the same. Nothing is written to disk.
     """
     if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
         cfg.chat_alias = ""  # the file's "omlx" named another server
@@ -579,6 +594,7 @@ def _with_chat_server(
         embedding_section = getattr(cfg, cfg.chat_backend)
         embedding_section.embedding_url = url
         embedding_section.embedding_model = embedding_model
+    _spell_omlx(cfg)
     return cfg
 
 
@@ -595,12 +611,13 @@ async def save_chat_server(
     An Ollama server (it answers ``GET /api/version``) is saved as the
     ``ollama`` backend in the ``[ollama]`` table; the backend chats on
     Ollama's native API with its 300 s timeout. Any other OpenAI-compatible
-    server is saved as ``vllm``. *ollama* is the answer to that question
-    when the caller asked it already. With *embedding_model*, the chat
-    backend's table also gets that embedding URL and model (the first-run
-    choice). Otherwise the first run turns embedding off; with
-    *keep_embedding* (a server chosen in a configured session) the
-    embedding backend stays. The config's other values are kept.
+    server is saved as ``vllm``, spelled ``omlx`` when a listing named oMLX.
+    *ollama* is the answer to that question when the caller asked it
+    already. With *embedding_model*, the chat backend's table also gets that
+    embedding URL and model (the first-run choice). Otherwise the first run
+    turns embedding off; with *keep_embedding* (a server chosen in a
+    configured session) the embedding backend stays. The config's other
+    values are kept.
     """
     cfg = config.load()
     if ollama is None:

@@ -281,9 +281,10 @@ class AgentFactory:
 
         A configured backend keeps its key and gets the new model. A server
         /backend chose in a configured session is saved as the ``ollama``
-        backend when it answered like Ollama, else as ``vllm``, the rest of
-        the config kept; any other server is saved as an OpenAI-compatible
-        one with embedding off, as the first run saves it.
+        backend when it answered like Ollama, else as ``vllm`` (``omlx`` when
+        a listing named oMLX), the rest of the config kept; any other server
+        is saved as an OpenAI-compatible one with embedding off, as the first
+        run saves it.
         """
         backend = self.backend
         if not self.saves:

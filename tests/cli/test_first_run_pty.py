@@ -51,10 +51,21 @@ def _text(term: Terminal) -> str:
     return _ESCAPES.sub(b"", term.output).decode().replace("\r\n", "\n")
 
 
+@pytest.mark.parametrize(
+    ("owned_by", "key", "label"),
+    [("", "vllm", "OpenAI-compatible server"), ("omlx", "omlx", "oMLX")],
+    ids=["another-server", "an-omlx-server"],
+)
 def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
-    chat_server: FakeChatServer, tmp_path: Path  # noqa: F811
+    chat_server: FakeChatServer,  # noqa: F811
+    tmp_path: Path,
+    owned_by: str,
+    key: str,
+    label: str,
 ) -> None:
+    """A server that lists itself as owned by oMLX is saved, and shown, as oMLX."""
     chat_server.models = ["nomic-embed-text", "chat-a", "chat-b"]
+    chat_server.owned_by = owned_by
     url = chat_server.base_url
 
     term = _melo(tmp_path, chat_server)
@@ -85,13 +96,13 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     text = _text(term)
     assert f"Found a model server at {url} (3 models).\n" in text
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
-    assert f"chat-b · OpenAI-compatible server · {url}" in text
+    assert f"chat-b · {label} · {url}" in text
     assert "saved as the default" in text
     assert chat_server.bodies[0]["model"] == "chat-b"
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
-    assert 'chat_backend = "vllm"' in saved
+    assert f'chat_backend = "{key}"' in saved
     assert f'chat_url = "{url}"' in saved and 'chat_model = "chat-b"' in saved
-    assert 'embedding_backend = "vllm"' in saved
+    assert f'embedding_backend = "{key}"' in saved
     assert 'embedding_model = "nomic-embed-text"' in saved
 
     chat_server.models = []  # the second run lists nothing and asks nothing
@@ -103,8 +114,9 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     finally:
         term.close()
     text = _text(term)
-    assert f"chat-b · OpenAI-compatible server · {url}" in text
-    assert "long-term memory · OpenAI-compatible server · nomic-embed-text" in text
+    # A new process has listed nothing yet; the file alone names the server.
+    assert f"chat-b · {label} · {url}" in text
+    assert f"long-term memory · {label} · nomic-embed-text" in text
     assert "Model server URL" not in text
 
 
