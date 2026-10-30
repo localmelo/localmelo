@@ -101,6 +101,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "requests",
                 "readable",
                 "unreadable_reason",
+                "repaired",
                 "usage",
                 "prefix",
                 "duration_s",
@@ -149,7 +150,15 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "assistant.message": frozenset({"prefix"}),
         "reflection": frozenset(
-            {"prefix", "flags", "gate", "utility", "stop_reason", "unreadable_reason"}
+            {
+                "prefix",
+                "flags",
+                "gate",
+                "utility",
+                "stop_reason",
+                "unreadable_reason",
+                "repaired",
+            }
         ),
     }
 )

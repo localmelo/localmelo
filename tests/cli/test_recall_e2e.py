@@ -154,6 +154,8 @@ def _run(tmp_path: Path, stub: StubServer, scenario: str, *args: str) -> dict[st
         "bm25",
         "--memory",
         "off",
+        "--window-messages",
+        "20",  # the scenario fills a 20-message window
         "--builtins",
         "all",
         "--output-format",

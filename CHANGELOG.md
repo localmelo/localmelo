@@ -31,6 +31,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A reflection reply with one common slip in its JSON no longer costs a retry.
+  A reply with a stray `]` after a string value (a `]` that no `[` opened) could
+  not be decoded, so it was asked for again, and a second failure lost the
+  reflection. With the default `reflection_gate flags`, a reply that holds no
+  reflection now gets one repair of the `{...}` the decoder rejects, at the
+  decoder's error and nowhere else: a `]` or `}` that no opener matches is
+  dropped, a comma before a closer is dropped, or raw newline, carriage return
+  and tab characters inside strings are escaped. The repaired text must still
+  hold an object with a valid `recommended_action`, nothing is closed or
+  inserted, and a reply that needs two repairs stays unreadable. The
+  `reflection` event gains `repaired` (`unmatched_closer`, `trailing_comma`,
+  `control_char` or `null`). When a reply with JSON that the decoder rejected
+  is asked for again, the retry adds one line after its note that quotes the
+  decoder's error and up to 60 characters around it. The repair changes no
+  request whose first reply reads. ([#239])
 - `melo --serve` writes its startup lines, the port that `--port 0` picked
   included, as soon as they are printed when stdout is a pipe or a file. They
   used to wait in the buffer until the server exited, so a script or a log
@@ -161,6 +176,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
+
+- One command builds and installs the macOS app on this Mac. `uv run python
+  scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
+  developer account), puts it in `~/Applications/LocalMelo.app` and links
+  `~/.local/bin/melo` to its launcher, then says in three plain lines what happened
+  and what to do next. An earlier copy is replaced only when its bundle id is
+  `org.localmelo.app`; another app of that name is refused. The link is made only when
+  no other `melo` is on `PATH` (the checkout's own does not count), and an existing
+  `melo` is never replaced. `--uninstall` removes the app and the link. The verified
+  Python archive is cached in `~/Library/Caches/LocalMelo` and hashed on every use, and
+  build tools print only when they fail. The bundled Python is compiled to bytecode
+  before signing (the standalone archive has none), so `melo --version` from the bundle
+  takes 0.29 s instead of 0.96 s (median of three runs) and nothing writes bytecode into
+  the signed bundle, at the cost of 63 MB (120 to 183 MB). ([#238])
 
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,
@@ -965,6 +994,47 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The measured cache layout is now the default (part of #183 and #185).
+  `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
+  a reflection is appended to the window once, at the attempt boundary, instead of being
+  rebuilt as the last message of every planning request, and an unreadable reflection is
+  asked again on the same prefix. `[agent] window_messages` is 64 (was 20) on a local
+  server and for a `--base-url` server; a cloud backend keeps 20 for now, because without
+  prompt caching a longer window costs input tokens. A key you set keeps its value on any
+  backend, and a file without the key has the default. Two benchmark rounds on 12 coding
+  tasks, two runs each, with a Qwen model on oMLX compared the earlier defaults with these
+  two. With the new defaults 46 of 48 runs passed (earlier: 44 of 48); 86.8% of the prompt
+  tokens were served from the cache (78.9%); the share of tokens that an earlier request of
+  the same run already held and the cache reused rose from 92.9% to 99.7%, and in the worst
+  run from 79.4% to 93.7%; the uncached tokens per run fell from 9,865 to 6,059; a run took
+  8.3 steps (8.7) and 32 s (35 s). `--cache-layout v2 --window-messages 20`, or the same
+  keys in `[agent]`, send the earlier requests. Both flags moved from the experimental to
+  the advanced tier of `melo --developer --help`. A default run's JSON result now carries
+  `config.cache_layout`, and `config.window_messages` on a local server. ([#239])
+
+- The macOS app's window says what is happening. Until the console has loaded it
+  shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
+  `Signing in`, `Opening your workspace`) instead of an empty web view, and its
+  background matches the console's, so a dark window no longer flashes white. When
+  the gateway cannot start, does not start within 20 seconds or stops, the same
+  view gives the reason and offers Try Again (a new gateway), Open Log and Quit;
+  these problems no longer show a dialog and close the app ([#238]).
+
+- The macOS app starts its gateway with `--port 0` and reads the port from the
+  gateway's startup line (`Gateway: http://127.0.0.1:PORT`) instead of using a
+  fixed port. It can no longer collide with another gateway, the background
+  service or the ports other work reserves, so `LOCALMELO_APP_PORT` and the
+  "port in use" check before the start are gone. The gateway's output still goes
+  to `~/Library/Logs/LocalMelo/gateway.log`, and the 20-second start deadline now
+  also covers the wait for that line ([#238]).
+
+- The macOS app calls itself localmelo wherever it names itself: the window title, the
+  Dock and the app menu, the menu-bar item (`localmelo`, or `localmelo · 3` while three
+  things run, where it read `Melo`), the menu entries, the quit dialog and the
+  output of `--install` and `--uninstall`, as its starting view and failure view
+  already did. `LocalMelo.app` stays the file name and the bundle id stays
+  `org.localmelo.app` ([#238]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`
@@ -1522,6 +1592,8 @@ earlier milestones.
 [#232]: https://github.com/localmelo/localmelo/pull/232
 [#236]: https://github.com/localmelo/localmelo/pull/236
 [#237]: https://github.com/localmelo/localmelo/pull/237
+[#238]: https://github.com/localmelo/localmelo/pull/238
+[#239]: https://github.com/localmelo/localmelo/pull/239
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

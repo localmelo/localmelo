@@ -43,13 +43,20 @@ Details:
 - **Unreadable reflections.** A reflection reply is readable when it holds a
   JSON object whose `recommended_action` is `done`, `continue`, `stop` or
   `decompose`; other JSON, such as a tool call written out as text, does not
-  count. An unreadable reply is asked for once more, without tools: the
-  attempt's turns are written out as text, and a closing line asks for the
-  JSON object only. Both requests count in `n_aux`. When the second reply is
+  count. A reply that holds none as it stands gets one repair of a common
+  slip in its JSON: a `]` or `}` that no opener matches, a comma before a
+  closer, or raw newline, carriage return and tab characters inside strings
+  (see `repaired` in [Events](events.md#reflection)). Nothing is closed or
+  inserted, and a reply that needs two repairs is unreadable. An unreadable
+  reply is asked for once more, without tools: the attempt's turns are
+  written out as text, and a closing line asks for the JSON object only; when
+  the reply had JSON that the decoder rejected, one more line quotes the
+  decoder's error. Both requests count in `n_aux`. When the second reply is
   unreadable too, nothing of it is kept and the next attempt starts. If none
   can start, the run ends as `budget_exhausted`, with the latest text the
   model wrote in the run as `result`. With `--reflection-gate utility`, any
-  JSON object counts as readable, and a second reply without one ends the
+  JSON object counts as readable, nothing is repaired or quoted, and a second
+  reply without one ends the
   run as `gate_stopped`: the error is `Could not parse reflection response`
   when the reply could not be read, or
   `Reflection response was not a JSON object` when it was valid JSON that
@@ -146,8 +153,8 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
-| `cache_layout` | `v3` when the run used it; absent for `v2` (the default). |
-| `window_messages` | The window's message cap when it is not 20; absent otherwise. |
+| `cache_layout` | `v3` (the default) when the run used it; absent for `v2`. |
+| `window_messages` | The window's message cap when it is not 20 (64 by default on a local server or a URL); absent for 20. |
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |

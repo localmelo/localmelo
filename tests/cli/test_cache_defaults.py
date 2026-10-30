@@ -1,8 +1,11 @@
 """The cache settings' defaults at the config, flag, chat and gateway boundaries.
 
 ``[agent] fixed_prefix``, ``window_eviction`` and ``reflect_tool_guard``
-default to ``true``, ``"chunk"`` and ``true``. A config file that sets a key
-keeps it, a file without the key has the default, and a flag beats the file.
+default to ``true``, ``"chunk"`` and ``true``; ``cache_layout`` to ``"v3"`` and the
+window to 64 messages on a local server (20 on a cloud vendor). A config file that
+sets a key keeps it, a file without the key has the default, and a flag beats the
+file. The layout and the window have their own file, ``test_cache_layout_config.py``;
+here they join the opt-outs that give the earlier requests and the default sessions.
 """
 
 from __future__ import annotations
@@ -35,6 +38,10 @@ SETTINGS: dict[str, tuple[Any, Any, tuple[str, str]]] = {
     "reflect_tool_guard": (True, False, ("--reflect-tool-guard", "off")),
 }
 OPT_OUT_FLAGS = [part for _, _, flag in SETTINGS.values() for part in flag]
+# The layout and the window: the defaults of a local server, and their opt-outs.
+LAYOUT_DEFAULTS = {"cache_layout": "v3", "window_messages": 64}
+LAYOUT_OPT_OUTS = {"cache_layout": "v2", "window_messages": 20}
+LAYOUT_OPT_OUT_FLAGS = ["--cache-layout", "v2", "--window-messages", "20"]
 URL = "http://127.0.0.1:1/v1"
 
 
@@ -147,8 +154,9 @@ async def test_a_direct_run_without_a_config_file_has_the_defaults(
     config_home: Path,
 ) -> None:
     options = await _direct_agent_options()
-    assert {name: getattr(options, name) for name in SETTINGS} == {
-        name: default for name, (default, _, _) in SETTINGS.items()
+    assert {name: getattr(options, name) for name in (*SETTINGS, *LAYOUT_DEFAULTS)} == {
+        **{name: default for name, (default, _, _) in SETTINGS.items()},
+        **LAYOUT_DEFAULTS,
     }
 
 
@@ -176,18 +184,24 @@ async def test_a_flag_beats_the_config_file_in_both_directions(
     assert getattr(await _direct_agent_options(flag, off_value), name) == opt_out
 
 
-async def test_the_three_opt_out_flags_give_the_options_of_the_earlier_defaults(
+async def test_the_five_opt_out_flags_give_the_options_of_the_earlier_defaults(
     config_home: Path,
 ) -> None:
-    options = await _direct_agent_options(*OPT_OUT_FLAGS)
+    options = await _direct_agent_options(*OPT_OUT_FLAGS, *LAYOUT_OPT_OUT_FLAGS)
     assert options == AgentOptions(**LEGACY_CACHE_OPTIONS)
 
 
-async def test_the_three_opt_out_flags_beat_a_config_file_that_says_the_opposite(
+async def test_the_five_opt_out_flags_beat_a_config_file_that_says_the_opposite(
     config_home: Path,
 ) -> None:
-    save(Config(agent=AgentConfig(window_eviction="boundary")))
-    options = await _direct_agent_options(*OPT_OUT_FLAGS)
+    save(
+        Config(
+            agent=AgentConfig(
+                window_eviction="boundary", cache_layout="v3", window_messages=48
+            )
+        )
+    )
+    options = await _direct_agent_options(*OPT_OUT_FLAGS, *LAYOUT_OPT_OUT_FLAGS)
     assert options == AgentOptions(**LEGACY_CACHE_OPTIONS)
 
 
@@ -263,8 +277,9 @@ def test_a_chat_session_starts_with_the_defaults(
 ) -> None:
     cfg = _configured() if from_config else None
     options = _chat_options(cfg, monkeypatch, tmp_path)
-    assert {name: getattr(options, name) for name in SETTINGS} == {
-        name: default for name, (default, _, _) in SETTINGS.items()
+    assert {name: getattr(options, name) for name in (*SETTINGS, *LAYOUT_DEFAULTS)} == {
+        **{name: default for name, (default, _, _) in SETTINGS.items()},
+        **LAYOUT_DEFAULTS,
     }
 
 
@@ -279,6 +294,8 @@ def test_a_chat_session_keeps_the_opt_outs_of_the_config_file(
     cfg.agent.fixed_prefix = False
     cfg.agent.window_eviction = "slide"
     cfg.agent.reflect_tool_guard = False
+    cfg.agent.cache_layout = "v2"
+    cfg.agent.window_messages = 20
     save(cfg)
     options = _chat_options(cfg if from_config else None, monkeypatch, tmp_path)
     assert options == AgentOptions(**LEGACY_CACHE_OPTIONS)
@@ -292,7 +309,9 @@ def test_the_opt_out_flags_reach_a_chat_session(
     from_config: bool,
 ) -> None:
     cfg = _configured() if from_config else None
-    options = _chat_options(cfg, monkeypatch, tmp_path, *OPT_OUT_FLAGS)
+    options = _chat_options(
+        cfg, monkeypatch, tmp_path, *OPT_OUT_FLAGS, *LAYOUT_OPT_OUT_FLAGS
+    )
     assert options == AgentOptions(**LEGACY_CACHE_OPTIONS)
 
 
@@ -308,10 +327,19 @@ def _gateway_options(cfg: Config) -> AgentOptions:
 
 def test_a_gateway_session_starts_with_the_defaults() -> None:
     options = _gateway_options(_configured())
-    assert {name: getattr(options, name) for name in SETTINGS} == {
-        name: default for name, (default, _, _) in SETTINGS.items()
+    assert {name: getattr(options, name) for name in (*SETTINGS, *LAYOUT_DEFAULTS)} == {
+        **{name: default for name, (default, _, _) in SETTINGS.items()},
+        **LAYOUT_DEFAULTS,
     }
     assert options.mode == "gateway" and options.record_answers
+
+
+def test_a_gateway_session_on_a_cloud_backend_keeps_the_earlier_window() -> None:
+    cfg = Config(chat_backend="openai")
+    options = _gateway_options(cfg)
+    assert (options.cache_layout, options.window_messages) == ("v3", 20)
+    cfg.agent.window_messages = 64  # a value the file sets wins
+    assert _gateway_options(cfg).window_messages == 64
 
 
 def test_a_gateway_session_keeps_the_opt_outs_of_the_config_file() -> None:
@@ -319,6 +347,8 @@ def test_a_gateway_session_keeps_the_opt_outs_of_the_config_file() -> None:
     cfg.agent.fixed_prefix = False
     cfg.agent.window_eviction = "slide"
     cfg.agent.reflect_tool_guard = False
+    cfg.agent.cache_layout = "v2"
+    cfg.agent.window_messages = 20
     options = _gateway_options(cfg)
     assert options == AgentOptions(
         **LEGACY_CACHE_OPTIONS, mode="gateway", record_answers=True

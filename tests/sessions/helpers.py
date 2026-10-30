@@ -98,6 +98,7 @@ def core_event(
             "requests": 1,
             "readable": True,
             "unreadable_reason": None,
+            "repaired": None,
             "usage": {},
             "prefix": None,
             "duration_s": 0.1,
