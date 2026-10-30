@@ -24,12 +24,14 @@ from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DiscoveryError
 from localmelo.support.cli import commands
 from localmelo.support.cli.agents import AgentFactory, url_backend
+from localmelo.support.cli.app import StatusBar
 from localmelo.support.cli.approvals import TerminalApprover
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.picker import ModelRow
 from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import ASCII, UNICODE
+from localmelo.support.cli.work import WorkBeside, WorkTask
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -2051,18 +2053,22 @@ def _request_event(prompt: int, cached: int | None) -> StoredEvent:
     return StoredEvent(None, "s1", 1, event)
 
 
+def _usage(bar: StatusBar) -> str:
+    """The usage zone's text, as the bar joins it."""
+    return "".join(
+        (" " if part.glued else " · ") * bool(n) + part.text
+        for n, part in enumerate(bar.usage)
+    )
+
+
 async def test_status_bar_redraws_after_an_assistant_message(setup: Setup) -> None:
     session = setup.session
-    assert session.status_bar().segments == ()
+    assert session.status_bar().usage == ()
     before = setup.app.invalidated
     session.on_event(_request_event(1000, 830))
     assert setup.app.invalidated == before + 1
     # Without a context_budget event the bar keeps its last request's figure.
-    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
-    assert session.status_bar().context == ""
-    session.developer = True  # developer mode keeps the compact figures
-    bar = session.status_bar()
-    assert bar.segments == ("cache 83%",) and bar.context == "ctx 1.0k"
+    assert _usage(session.status_bar()) == "↑ 1.0k ↓ 5 · ctx 1.0k · cache 83%"
 
 
 def _context_budget(measured: int, limit: int | None) -> dict[str, Any]:
@@ -2070,33 +2076,61 @@ def _context_budget(measured: int, limit: int | None) -> dict[str, Any]:
     return {"type": "context_budget", "ts": time.time(), "data": data}
 
 
-async def test_the_status_bar_says_its_figures_in_words_until_developer_mode(
+async def test_a_local_bar_says_tokens_context_cache_and_idle_time(
     setup: Setup,
 ) -> None:
     session = setup.session
+    # No model and no folder: the welcome and /status say them.
     session.renderer.usage.observe(_context_budget(2600, 32000))
     session.on_event(_request_event(1000, None))  # the server reports no cache
     bar = session.status_bar()
-    # The cache waits for a value; the context says how full it is.
-    assert bar.segments == ("context 8% used",) and bar.context == ""
+    assert _usage(bar) == "↑ 1.0k ↓ 5 · ctx 2.6k/32k ▮▯▯▯▯"
+    assert "m1" not in _usage(bar) and bar.title == "New chat"
     session.on_event(_request_event(1000, 830))
-    assert session.status_bar().segments == ("83% cached", "context 8% used")
-    session.developer = True
-    assert session.status_bar().segments == ("cache 83%", "ctx 2.6k/32k")
-    session.developer = False
-    session.renderer.usage.observe(_context_budget(2600, None))
-    assert session.status_bar().segments[-1] == "context 2.6k tokens"
+    session.on_event(_request_event(1000, 610))
+    assert _usage(session.status_bar()) == (
+        "↑ 3.0k ↓ 15 · ctx 2.6k/32k ▮▯▯▯▯ · cache 61% (avg 72%)"
+    )
+    # A local prefix cache is evicted by memory: the idle time, no countdown,
+    # and the bar redraws for it only once it shows.
+    assert not session.clock_visible()
+    session.renderer.usage.last_request_ts = time.time() - 125
+    assert session.clock_visible()
+    assert _usage(session.status_bar()).endswith(" · idle 2m")
+    session.developer = True  # the same figures in developer mode
+    assert _usage(session.status_bar()).endswith(" · idle 2m")
+
+
+async def test_a_cloud_bar_says_the_cost_from_configured_prices(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    setup.factory.backend = replace(setup.factory.backend, key="openai")
+    session.pricing = {"m1": {"input": 2.0, "output": 10.0, "cache_read": 0.5}}
+    session.on_event(_request_event(100_000, 50_000))
+    # 50k uncached at $2, 50k cached at $0.50, 5 out at $10, per million.
+    assert _usage(session.status_bar()) == "$0.13 · ctx 100k"
+    assert session.status_bar().usage[0].role == "figure"
+    assert not session.clock_visible()  # no limit was reported
+    # The tightest limit the last response reported, with its reset.
+    session.agent._llm.last_limits = (42, time.time() + 190)  # type: ignore[attr-defined]
+    assert _usage(session.status_bar()) == "$0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m"
+    assert session.clock_visible()
+
+
+async def test_a_cloud_bar_without_a_price_says_the_tokens(setup: Setup) -> None:
+    session = setup.session
+    setup.factory.backend = replace(setup.factory.backend, key="openai")
+    session.pricing = {"another-model": {"input": 1.0, "output": 1.0}}
+    session.on_event(_request_event(100_000, 50_000))
+    assert _usage(session.status_bar()) == "↑ 100k ↓ 5 · ctx 100k"
 
 
 async def test_a_new_chat_is_named_in_the_status_bar(setup: Setup) -> None:
     assert setup.session.status_bar().title == "New chat"
 
 
-async def test_the_step_is_in_the_run_zone_in_both_modes_not_a_segment(
-    setup: Setup,
-) -> None:
-    # The step was a developer-mode segment; the run zone now carries it in
-    # both modes, so the resources zone holds the cache and context alone.
+async def test_the_step_is_in_the_run_zone_not_the_usage(setup: Setup) -> None:
     from localmelo.support.cli.render import LiveState
 
     session = setup.session
@@ -2109,34 +2143,80 @@ async def test_the_step_is_in_the_run_zone_in_both_modes_not_a_segment(
     session.on_event(_request_event(1000, 830))
     session._state = "running"
     session.renderer.live = LiveState(activity="Thinking", started=0.0, step=4)
-    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
-    assert session.status_bar().run == "step 4 · ctrl+o steps"
-    session.developer = True
-    assert session.status_bar().segments == ("cache 83%",)
+    assert _usage(session.status_bar()) == "↑ 1.0k ↓ 5 · ctx 1.0k · cache 83%"
     assert session.status_bar().run == "step 4 · ctrl+o steps"
     session._state = "idle"
     session.renderer.live = None
 
 
-async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
+async def test_status_line_off_keeps_the_context_alone(setup: Setup) -> None:
     session = setup.session
+    session.work = WorkBeside(_Tasks([WorkTask("t1", "Bench", "running", 1)]))
+    await session.work.refresh()
     session.on_event(_request_event(1000, 830))
     auto = session.status_bar()
+    assert auto.work
     session.status_line = "off"
     before = setup.app.invalidated
     session.on_event(_request_event(1000, 830))
     assert setup.app.invalidated == before
     off = session.status_bar()
-    assert off.segments == ()
-    assert (off.model, off.workspace, off.context, off.title, off.mode) == (
-        auto.model,
-        auto.workspace,
-        "context 1.0k tokens",
-        auto.title,
-        auto.mode,
+    assert _usage(off) == "ctx 1.0k" and off.work == ()
+    assert (off.title, off.mode) == (auto.title, auto.mode)
+    assert not session.clock_visible()
+
+
+class _Tasks:
+    """A gateway with these tasks, which records the actions it is asked for."""
+
+    def __init__(self, tasks: list[WorkTask]) -> None:
+        self.tasks = tasks
+        self.acted: list[tuple[str, str, str | None]] = []
+
+    def available(self) -> bool:
+        return True
+
+    def list(self) -> list[WorkTask]:
+        return list(self.tasks)
+
+    def act(self, task: WorkTask, action: Any) -> WorkTask:
+        self.acted.append((task.task_id, action.command, action.level))
+        return replace(task, state="parked")
+
+
+async def test_the_work_zone_counts_tasks_by_state_and_names_its_key(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.status_bar().work == ()
+    session.work = WorkBeside(_Tasks([]), on_change=setup.app.invalidate)
+    await session.work.refresh()
+    assert session.status_bar().work == ()  # no tasks: no zone
+    session.work.source = _Tasks(  # type: ignore[assignment]
+        [
+            WorkTask("t1", "Bench", "running", 2),
+            WorkTask("t2", "Docs", "queued", 1),
+            WorkTask("t3", "Old", "parked", 5),
+        ]
     )
-    session.developer = True
-    assert session.status_bar().context == "ctx 1.0k"
+    before = setup.app.invalidated
+    await session.work.refresh()
+    await session.work.refresh()  # the same counts redraw nothing
+    assert setup.app.invalidated == before + 1
+    work = session.status_bar().work
+    assert [part.text for part in work] == [
+        "1 running",
+        "1 queued",
+        "1 paused",
+        "P1",
+        "ctrl+t tasks",
+    ]
+    assert [part.role for part in work][:1] == ["live"]
+
+
+async def test_ctrl_t_without_a_gateway_says_how_to_add_a_task(setup: Setup) -> None:
+    await setup.session.open_work()
+    assert setup.app.hints[-1].startswith("No tasks beside this chat")
 
 
 async def test_the_run_zone_gives_the_steps_in_brief_while_a_turn_runs(

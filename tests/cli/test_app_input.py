@@ -19,6 +19,7 @@ from localmelo.support.cli.app import StatusBar, open_history, status_fragments
 from localmelo.support.cli.completion import SlashCompleter
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
+from localmelo.support.usage_snapshot import BarPart
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
     CTRL_C,
@@ -327,11 +328,11 @@ async def test_the_status_bar_keeps_the_mode_in_the_last_column() -> None:
 
 async def test_the_status_bar_cuts_the_title_first_when_narrow() -> None:
     controller = FakeController(title="Fix the failing test in the parser")
-    async with running_app(controller, columns=40) as app:
+    async with running_app(controller, columns=30) as app:
         await app.settle()
         line = next(row for row in reversed(app.screen()) if row.strip())
-        assert line.startswith("  stub-model · ~/demo-project")
-        assert line.endswith("ask") and cells(line) == 40
+        assert line.startswith("  Fix the failing test")
+        assert line.endswith("ask") and cells(line) == 30
 
 
 async def test_the_live_area_shows_the_spinner_row(
@@ -406,22 +407,24 @@ async def test_a_tall_chinese_draft_scrolls_to_its_cursor(
 
 
 def _bar_line(width: int, mode: str = "ask") -> str:
-    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", mode)
+    usage = (BarPart("ctx 120"),)
+    bar = StatusBar("fail please", mode, usage=usage)
     return "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
 
 
-def test_a_dropped_context_gives_its_room_back_to_the_workspace() -> None:
-    assert _bar_line(30) == "  stub-model · ~/demo-pro… ask"
+def test_a_dropped_title_gives_its_room_back_to_the_figures() -> None:
+    assert _bar_line(30) == "  ctx 120 │ fail please    ask"
+    assert _bar_line(20) == "  ctx 120        ask"
 
 
 def test_a_bar_without_a_mode_gives_its_room_to_the_rest() -> None:
-    # The cells and the gap kept for "ask" are the rest's: at 41 columns the
-    # context still fits beside the whole folder, and with "ask" it goes first.
-    assert _bar_line(41, "") == "  stub-model · ~/demo-project │ ctx 120  "
-    assert "ctx 120" not in _bar_line(41) and "~/demo-project" in _bar_line(41)
+    # The cells and the gap kept for "ask" are the rest's: at 24 columns the
+    # title still fits beside the context, and with "ask" it goes first.
+    assert _bar_line(24, "") == "  ctx 120 │ fail please "
+    assert "fail please" not in _bar_line(24) and "ctx 120" in _bar_line(24)
 
 
-@pytest.mark.parametrize("width", [16, 20, 25, 30, 37, 39, 41, 60])
+@pytest.mark.parametrize("width", [8, 12, 16, 20, 25, 30, 37, 39, 41, 60])
 def test_a_bar_without_a_mode_never_overflows(width: int) -> None:
     line = _bar_line(width, "")
     assert cells(line) == width and not line.strip().startswith("…"), line
@@ -525,10 +528,10 @@ async def test_ctrl_z_does_nothing_in_the_input_box() -> None:
 
 
 def test_control_characters_never_push_the_mode_off_the_status_bar() -> None:
-    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "abc\x1a\x1b[2J", "ask")
+    bar = StatusBar("abc\x1a\x1b[2J", "ask", usage=(BarPart("ctx 1\x1a20"),))
     line = "".join(fragment[1] for fragment in status_fragments(bar, 70, "…"))
     assert line.endswith("ask") and cells(line) == 70, line
-    assert "abc^Z^[[2J" in line and "\x1a" not in line
+    assert "abc^Z^[[2J" in line and "ctx 1^Z20" in line and "\x1a" not in line
 
 
 async def test_control_characters_in_the_queued_line_and_the_hint_are_spelled() -> None:
@@ -553,7 +556,7 @@ async def test_a_tall_draft_on_a_short_terminal_keeps_the_ui() -> None:
         screen = app.screen()
         assert "Window too small" not in "\n".join(screen)
         rows = [row for row in screen if row.strip()]
-        assert "stub-model" in rows[-1]  # the status bar
+        assert rows[-1].endswith("ask")  # the status bar
         assert any("line 15" in row for row in rows)  # the cursor's row
 
 
@@ -631,99 +634,3 @@ async def test_printing_above_the_app_keeps_the_terminal_raw(
         assert screen.index("printed above") < screen.index(
             "› Ask melo · / for commands"
         )
-
-
-ROW = ("cache 83% idle 3m", "ctx 12k/32k", "step 4")
-
-
-def _row_line(width: int, segments: tuple[str, ...] = ROW) -> str:
-    bar = StatusBar(
-        "stub-model", "~/demo-project", "", "fail please", "ask", segments=segments
-    )
-    line = "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
-    assert len(line) == width  # nothing wraps, and the mode stays at the edge
-    return line
-
-
-def test_the_status_row_shows_every_segment_at_120_columns() -> None:
-    # Zones: who and where │ the run (the title when idle) │ resources.
-    line = _row_line(120)
-    assert line.index("~/demo-project │ fail please │ cache 83% idle 3m") > 0
-    assert line.index("cache 83% idle 3m") < line.index("ctx 12k/32k")
-    assert line.index("ctx 12k/32k") < line.index("step 4")
-    assert line.endswith(" ask")
-
-
-def test_the_status_row_drops_the_title_then_segments_right_to_left() -> None:
-    shown_at = {
-        width: [part for part in (*ROW, "fail please") if part in _row_line(width)]
-        for width in (120, 80, 70, 60, 50)
-    }
-    assert shown_at[120] == [*ROW, "fail please"]
-    assert shown_at[80] == list(ROW)
-    assert shown_at[70] == list(ROW[:2])
-    assert shown_at[60] == list(ROW[:1])
-    assert shown_at[50] == []
-    assert "stub-model · ~/demo-project" in _row_line(50)
-
-
-@pytest.mark.parametrize("width", [8, 10, 16, 20, 25, 30, 40, 60])
-def test_the_status_row_never_wraps_at_any_width(width: int) -> None:
-    line = _row_line(width)
-    if "cache" in line:
-        assert "stub-model" in line and "~/demo" in line
-
-
-WORDS = ("83% cached", "context 8% used")
-
-
-def _words_line(width: int, mode: str = "") -> str:
-    bar = StatusBar(
-        "stub-model",
-        "~/demo-project",
-        "",
-        "What is this project?",
-        mode,
-        segments=WORDS,
-    )
-    line = "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
-    assert len(line) == width  # nothing wraps
-    return line
-
-
-def test_the_bar_in_words_shows_both_figures_at_100_columns() -> None:
-    assert _words_line(100).rstrip() == (
-        "  stub-model · ~/demo-project │ What is this project?"
-        " │ 83% cached · context 8% used"
-    )
-
-
-def test_the_bar_in_words_at_80_columns_cuts_the_title_before_a_figure() -> None:
-    line = _words_line(80)
-    assert line.startswith("  stub-model · ~/demo-project │ What is this")
-    assert line.rstrip().endswith("… │ 83% cached · context 8% used")  # the title
-
-
-def test_the_bar_in_words_drops_figures_whole_at_44_columns() -> None:
-    # The words are longer than the compact figures, so the last one goes first
-    # and whole, as the row always dropped them; none is cut ("context 8%…").
-    line = _words_line(44)
-    assert line.rstrip() == "  stub-model · ~/demo-project │ 83% cached"
-    # A mode at the right edge takes room from the figures.
-    line = _words_line(44, "auto")
-    assert line.startswith("  stub-model · ~/demo-project") and line.endswith(" auto")
-    assert "cached" not in line and "context" not in line and "…" not in line
-
-
-@pytest.mark.parametrize("width", range(30, 100, 5))
-def test_a_figure_in_words_shows_whole_or_not_at_all(width: int) -> None:
-    line = _words_line(width, "auto")
-    for figure in WORDS:
-        assert figure in line or figure[:6] not in line, (width, line)
-
-
-def test_without_segments_the_bar_is_the_old_one() -> None:
-    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", "ask")
-    left = "  stub-model · ~/demo-project │ fail please │ ctx 120"
-    expected = left + " " * (120 - len(left) - len("ask")) + "ask"
-    assert "".join(f[1] for f in status_fragments(bar, 120, "…")) == expected
