@@ -31,7 +31,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   folder), and the run's JSON result carries `confinement`. `--brief` runs and
   saved tasks keep `confine_writes`; chats are unchanged. A run that cannot be
   confined stops before its first command with one line on stderr and exit
-  code 1 ([#NN]).
+  code 1 ([#284]).
 
 - Gateway authentication is in progress: loopback-only binding, a private bearer
   token for API clients, and a one-use terminal sign-in link for browser sessions.
@@ -2160,6 +2160,7 @@ earlier milestones.
 [#273]: https://github.com/localmelo/localmelo/pull/273
 [#274]: https://github.com/localmelo/localmelo/pull/274
 [#275]: https://github.com/localmelo/localmelo/pull/275
+[#284]: https://github.com/localmelo/localmelo/pull/284
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
