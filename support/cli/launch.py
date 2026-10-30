@@ -568,24 +568,8 @@ async def main_async(
                 "; ".join(errors),
             )
             pricing = {}
-        session = CliSession(
-            store=store,
-            factory=factory,
-            agent=agent,
-            renderer=renderer,
-            approver=approver,
-            mode="yolo" if args.yolo else "ask",
-            resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
-            stream=session_config.cli.stream,
-            reasoning_tags=session_config.cli.reasoning_tags,
-            status_line=session_config.cli.status_line,
-            out=out,
-            developer=developer,
-            pricing=pricing,
-            work=WorkBeside(GatewayTasks()),
-        )
 
-        def show_banner(selected: SessionInfo | None = None) -> None:
+        def draw_banner(selected: SessionInfo | None = None) -> None:
             out.print(
                 banner(
                     version=display_version(),
@@ -601,6 +585,27 @@ async def main_async(
                     palette=active(),
                 )
             )
+
+        session = CliSession(
+            store=store,
+            factory=factory,
+            agent=agent,
+            renderer=renderer,
+            approver=approver,
+            mode="yolo" if args.yolo else "ask",
+            resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
+            stream=session_config.cli.stream,
+            reasoning_tags=session_config.cli.reasoning_tags,
+            status_line=session_config.cli.status_line,
+            out=out,
+            developer=developer,
+            pricing=pricing,
+            work=WorkBeside(GatewayTasks()),
+            welcome=draw_banner,
+        )
+
+        def show_banner(selected: SessionInfo | None = None) -> None:
+            draw_banner(selected)
             if invalid_mode:
                 out.print(
                     Text(

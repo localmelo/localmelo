@@ -167,7 +167,7 @@ and moss band every list has, and the names stand under the text you typed. At
 most eight rows show, with a slim bar at the right when there are more. A
 command's argument (`/model NAME`) uses the same list. The everyday
 commands come first, and are the menu's first screen: `/model`, `/new`,
-`/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
+`/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`; `/clear` follows them. Each line says what
 the command does and, where it needs one, its argument (`/attach PATH`).
 
 | Command | What it does |
@@ -176,7 +176,8 @@ the command does and, where it needs one, its argument (`/attach PATH`).
 | `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
 | `/attachments` | List staged files and their numbers. |
 | `/detach N\|all` | Remove the numbered staged file or all staged files. |
-| `/new` (also `/clear`) | Start a new chat: the model forgets the conversation, and this chat's grants end. A `── New chat ──` rule marks the start. |
+| `/new` | Start a new chat: the model forgets the conversation, and this chat's grants end. A `── New chat ──` rule marks the start, and the page above it stays. |
+| `/clear` | `/new` on an empty screen: the model forgets the conversation and the grants end as with `/new`, then the screen and its scrollback are wiped and the welcome is drawn again at the top, with the input box below. With `NO_COLOR` set, `TERM=dumb` or output that is not a terminal, no escape code is written and `/clear` does what `/new` does. |
 | `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
 | `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the chat is saved. |
@@ -201,7 +202,7 @@ the command does and, where it needs one, its argument (`/attach PATH`).
 - A command that runs is echoed in the scrollback as a message is
   (`› /model 2`), followed by its output. A refused one is not, and
   `/exit` prints nothing.
-- `/new`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the
+- `/new`, `/clear`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the
   draft stays and the hint says
   `/model is not available while a turn runs (esc stops it).`; press Enter
   again once the turn ends.
@@ -328,7 +329,7 @@ from-the-child
 
 `/title` can name a chat before any message is sent; it does not create a
 saved session on its own. The chosen title is applied when the first turn
-creates that session. `/new` or a successful resume clears an unsaved title.
+creates that session. `/new`, `/clear` or a successful resume clears an unsaved title.
 Titles may be changed during a turn, but not while switching sessions.
 
 `/undo` removes the newest finished turn from the model's restored working
@@ -600,7 +601,7 @@ and in developer mode labels it `↳ partial reply (tool call)`, `(retrying)`,
 after `●`. A provider
 without streaming sends the complete reply, which prints as usual.
 `/stream on|off` flips the setting for later turns without saving it, and
-`/new` puts it back to `[cli] stream`. Runs without the interactive UI
+`/new` and `/clear` put it back to `[cli] stream`. Runs without the interactive UI
 (direct mode, workers, the gateway) never stream, so their output and request
 bodies are unchanged. An invalid `[cli]` value never fails a run: the
 interactive UI warns and uses the defaults, and direct mode and the gateway do
@@ -801,8 +802,8 @@ Web and scheduler sessions are never offered. The web console's Workers view
 shows your chats here read-only under **Terminal chats**, redacted as it reads
 them (the stored copy is not redacted); it cannot change or send to them. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
-`/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
-resets those display preferences (`/stream` back to `[cli] stream`). A note says when the chat previously worked in another folder.
+`/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new` and `/clear`
+reset those display preferences (`/stream` back to `[cli] stream`). A note says when the chat previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
 redacted copies, as plain text: your message after `›`, and each answer after
