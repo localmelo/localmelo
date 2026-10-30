@@ -342,7 +342,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   main chat in `main` with its newest card, the main chat's turns carry `cards`,
   `POST /api/sessions` still makes a chat (a side chat), `POST /api/tasks` takes an
   optional `front_id` (the chat that starts the task owns it; else the main chat),
-  and deleting the main chat is 409 `main_chat`. See [The main chat and side chats](docs/guides/web-console.md#the-main-chat-and-side-chats) ([#NN]).
+  and deleting the main chat is 409 `main_chat`. See [The main chat and side chats](docs/guides/web-console.md#the-main-chat-and-side-chats) ([#317]).
 - The panel follows the open chat, and approvals fold into Activity. A side chat's
   panel lists that chat's own activity and the workers it started; the main chat's,
   and the panel with no chat open, list the whole day, and Melo's status line says
@@ -2565,6 +2565,7 @@ earlier milestones.
 [#313]: https://github.com/localmelo/localmelo/pull/313
 [#314]: https://github.com/localmelo/localmelo/pull/314
 [#316]: https://github.com/localmelo/localmelo/pull/316
+[#317]: https://github.com/localmelo/localmelo/pull/317
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
