@@ -177,6 +177,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
+  default and with no flag: `[agent] lean_output = true` in the config file, or
+  `-X agent.lean_output=true` for one run (`melo config keys lean` lists it, and `melo -h all`
+  names the issue). A task given on the command line, `melo worker BRIEF` and their `json` and
+  `stream-json` runs then send a system prompt whose last line, "Think step by step. Be
+  concise.", is replaced by three short lines: no text between tool calls and a final answer of
+  at most three lines; relative paths without a `sys.path` setup; read the files a task names
+  before listing folders. With the default `reflection_gate flags` the reflection prompt also
+  leaves out the five estimates, `progress_made` and `new_information_gained`, which the gate
+  does not read, and asks for `best_effort_result` only with `done` or `stop`; the action and the
+  three flags are still asked for, and a reply in the earlier long form is read as before.
+  `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep the
+  old system line. The interactive UI, the `melo ""` loop and the gateway ignore the setting.
+  Without it every request is the one sent before. ([#255])
+
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
   panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
@@ -1861,6 +1876,7 @@ earlier milestones.
 [#250]: https://github.com/localmelo/localmelo/pull/250
 [#251]: https://github.com/localmelo/localmelo/pull/251
 [#254]: https://github.com/localmelo/localmelo/pull/254
+[#255]: https://github.com/localmelo/localmelo/pull/255
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
