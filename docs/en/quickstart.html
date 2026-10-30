@@ -193,8 +193,9 @@ pip install -e ".[gateway]"</code></pre>
           For a local server, run <code>melo</code> in a terminal. With no
           configuration yet, it first says what it needs, a model server on
           this computer. It then looks for one (oMLX on port 8000, Ollama on
-          11434), asks for its URL (press Enter to accept the one it found)
-          and for a model from the server's list, which shows chat models
+          11434), asks whether to use the one it found
+          (<code>Use it? [Y/n]:</code>, Enter says yes) and for a model from
+          the server's list, which shows chat models
           first and tags an embedding or reranking model, saves
           <code>~/.cache/localmelo/config.toml</code> and opens the
           interactive UI:
@@ -202,9 +203,9 @@ pip install -e ".[gateway]"</code></pre>
         <pre><code>$ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Server URL [http://127.0.0.1:11434/v1]:
+Use it? [Y/n]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -230,16 +231,32 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           and
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">Set up an embedding model</a>.
         </p>
+        <p>
+          With no model server running, <code>melo</code> prints this
+          computer's commands for starting one (oMLX on a Mac, Ollama
+          elsewhere, the ones in the
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">model servers guide</a>) and asks
+          <code>Press Enter to check again, type an address, or q to quit:</code>.
+          Start the server in another terminal, then press Enter; melo installs
+          and starts nothing itself.
+        </p>
         <h3 id="with-the-setup-wizard">With the setup wizard</h3>
         <p>
-          The setup wizard also sets up an embedding server or a cloud API,
-          and can start the gateway when it is done. For a cloud API, first
-          run <code>export OPENAI_API_KEY="&lt;your key&gt;"</code> (or your
+          The setup wizard also sets up an embedding server or a cloud API.
+          For a cloud API, first run
+          <code>export OPENAI_API_KEY="&lt;your key&gt;"</code> (or your
           vendor's variable) in this terminal: the wizard's test request uses
-          that key.
+          that key. Run the wizard, then start the gateway:
         </p>
-        <pre><code>melo --serve --reconfigure</code></pre>
-        <p>The wizard asks:</p>
+        <pre><code>melo setup
+melo serve</code></pre>
+        <p>
+          In default mode <code>melo setup</code> first offers the server it
+          finds (<code>Use it? [Y/n]:</code>); answer <code>n</code> for the
+          full menu, which developer mode
+          (<code>melo config set ui.mode developer</code>) shows at once. The
+          wizard asks:
+        </p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -274,16 +291,17 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           for the URL and model again, and pressing Enter saves nothing. If
           only the embedding server fails, the wizard saves with embedding off
           and says so. On success it prints <code>Config saved to …</code>,
-          the path of <code>~/.cache/localmelo/config.toml</code>, and then
-          <strong>starts the gateway</strong> on
-          <code>http://127.0.0.1:8401</code>. The gateway keeps running in this
-          terminal. <code>melo setup</code> alone
-          opens the interactive UI instead, and in
-          default mode it starts with the first run's question: it prints
+          the path of <code>~/.cache/localmelo/config.toml</code>, and opens
+          the interactive UI; leave it with Ctrl+D. Then
+          <code>melo serve</code> starts the gateway on
+          <code>http://127.0.0.1:8401</code>, and it keeps running in this
+          terminal. In default mode <code>melo setup</code> starts with the
+          first run's question: it prints
           <code>Found a model server at …</code> and asks
           <code>Use it? [Y/n]:</code>. The full menu above follows only after
-          <code>n</code>, when no server is found, or with
-          <code>--developer</code>.
+          <code>n</code>, in developer mode, or when no server is found while
+          a backend is saved; with nothing saved, it prints the commands that
+          start a server instead.
         </p>
       </section>
 
@@ -328,12 +346,11 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
       <section class="section" id="start-the-gateway">
         <h2>Start the gateway</h2>
         <p>
-          If you saved the configuration with <code>melo</code>, start the
-          gateway with <code>melo serve</code>; the wizard above starts it by
-          itself. From a second terminal, check the gateway and run a task
-          through it:
+          Once the configuration is saved, by <code>melo</code> or by the
+          wizard above, start the gateway with <code>melo serve</code>. From a
+          second terminal, check the gateway and run a task through it:
         </p>
-        <p>Run <code>melo console</code> in a terminal and open the private one-use link within 60 seconds. API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
+        <p>API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
         <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -343,15 +360,19 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 {"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
         <p>
           The health check does not contact the model server; a task does.
-          Open <code>http://127.0.0.1:8401/</code> in a browser for the web
-          workspace (see <a href="#interactive-conversations">Interactive conversations</a>).
+          The web workspace opens in your browser when <code>melo serve</code>
+          starts at a terminal on this computer; <code>melo console</code>
+          opens it again. Over SSH, or when no browser starts,
+          <code>melo console</code> prints a one-use link to open within 60
+          seconds; do not share it (see
+          <a href="#interactive-conversations">Interactive conversations</a>).
         </p>
         <p>
           Press Ctrl+C in the first terminal to stop the gateway. Tasks use the
           saved configuration:
         </p>
         <pre><code>melo "What is 6*7?"</code></pre>
-        <p>To start the gateway again without the wizard, run <code>melo serve</code>.</p>
+        <p>To start the gateway again, run <code>melo serve</code>.</p>
         <p>
           The separate <code>melo-task</code> client creates, inspects, follows and
           controls gateway tasks over authenticated loopback HTTP, and never starts
@@ -364,10 +385,12 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <h2>Interactive conversations</h2>
         <p>
           Run <code>melo</code> without a task to chat in the terminal. A turn
-          shows its work as it happens: the model's thinking, each tool call
-          as it finishes, retries, notices and reflections, and a live area
-          with the step, the phase, the running tool and the run's progress
-          facts. The answer prints as Markdown:
+          shows its work as it happens: the model's thinking on one line, each
+          tool call as it finishes, retries, notices and reflections, and a live
+          area with what melo is doing, the time, the tokens and the running
+          tool (developer mode adds the step, the phase and the run's progress
+          facts). The answer prints as Markdown, and a turn that wrote files
+          ends with a line that names them:
         </p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
@@ -408,7 +431,7 @@ melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <p>
           The web workspace at <code>http://127.0.0.1:8401/</code> is the
           console's live page and talks only to <code>/api</code>: it uses the
-          gateway's configured model, which you can change in connection settings
+          gateway's configured model, which you can change in Settings
           or with <code>melo setup</code>. On a first run, with no model set
           up, its welcome shows a card that finds the model server already running
           on this Mac and connects it with <strong>Use this model</strong>, without
@@ -420,8 +443,8 @@ melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
           shows as <code>Needs approval</code>, and the chats are saved in the
           gateway's <code>sessions.db</code>, so a restart keeps them. Other
           browser tabs on the same gateway see the same chats. Approval cards
-          let you allow or deny tool calls; the settings dialog configures the
-          connection. The Workers section shows saved worker runs read-only.
+          let you allow or deny tool calls, and show a numbered diff of what a
+          file write replaces; Settings changes the model server. The Workers section shows saved worker runs read-only.
           The gateway requires authentication; use <code>melo console</code>
           to sign in. Approvals are not a security boundary against same-user
           processes or other localhost services.

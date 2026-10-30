@@ -32,6 +32,16 @@ source .venv/bin/activate
 
 请保留目录名 `localmelo`：软件包就是从这个目录构建的。不使用 uv 时，请看[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)。
 
+## 在 Mac 上：应用
+
+在搭载 Apple 芯片的 Mac 上，在克隆下来的目录里运行一条命令，就能构建 macOS 应用并安装到 `~/Applications`，不需要管理员权限：
+
+```bash
+uv run python scripts/build_macos_app.py --install
+```
+
+从 Spotlight 打开 localmelo。应用是网页控制台外面的一个原生窗口，它的菜单栏图标显示有多少聊天和任务在运行，以及何时有一个在等你批准。这是开发版本，使用临时签名（ad hoc），在使用它的这台 Mac 上构建，不是经过公证的下载。构建需要 Swift 编译器：正式版 Xcode，或者 Command Line Tools（`xcode-select --install`）；见 [macOS 应用指南](docs/zh-CN/guides/macos-app.md)。
+
 ## 快速开始
 
 启动一个模型服务器，然后运行一个任务。在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，推荐使用本地服务器 [oMLX](https://github.com/jundot/omlx)。把每个模型放进 `~/models` 下各自的文件夹（文件夹名就是模型 ID；[模型服务器指南](docs/zh-CN/guides/model-servers.md#serve-a-model-with-omlx)说明了如何下载模型），然后安装 oMLX 并提供这个文件夹：
