@@ -377,17 +377,16 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
 
 
 _SAVING_EMBEDDING_OFF = (
-    "Saving with embedding off: no long-term memory "
-    "(melo --reconfigure sets it again)."
+    "Saving with embedding off: no long-term memory " "(melo setup sets it again)."
 )
-_EMBEDDING_OFF = "Long-term memory off (melo --reconfigure sets it again)."
+_EMBEDDING_OFF = "Long-term memory off (melo setup sets it again)."
 _NO_EMBEDDING_OLLAMA = (
     "No embedding model on this server. ollama pull qwen3-embedding:0.6b, "
-    "then melo --reconfigure."
+    "then melo setup."
 )
 _NO_EMBEDDING_LOCAL = (
     "No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, "
-    "then melo --reconfigure."
+    "then melo setup."
 )
 
 
@@ -598,7 +597,7 @@ async def save_chat_server(
     except (OSError, config.ConfigError) as exc:
         print(f"Could not save {_home_path(config.CONFIG_PATH)}: {exc}")
         return False
-    print(f"Saved to {_home_path(config.CONFIG_PATH)} (melo --reconfigure changes it).")
+    print(f"Saved to {_home_path(config.CONFIG_PATH)} (melo setup changes it).")
     return True
 
 

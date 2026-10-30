@@ -266,7 +266,7 @@ class AgentFactory:
         """
         backend = self.backend
         if not self.saves:
-            return "not saved (--base-url)"
+            return "not saved (--url)"
         captured = io.StringIO()
         try:
             if self._new_server:

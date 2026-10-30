@@ -233,7 +233,7 @@ def execute(
         suffix = f"; retry with --request-key {request_key}" if request_key else ""
         raise ClientError(
             f"gateway connection failed at {client.base_url}; "
-            "start melo --serve or check --gateway" + suffix
+            "start melo serve or check --gateway" + suffix
         ) from exc
     if response.is_redirect or response.status_code >= 400:
         suffix = (
@@ -377,7 +377,7 @@ def main(argv: list[str] | None = None, prog: str = "melo-task") -> int:
             )
         except (OSError, ValueError) as exc:
             raise ClientError(
-                "gateway token unavailable or unsafe; start melo --serve or check permissions"
+                "gateway token unavailable or unsafe; start melo serve or check permissions"
             ) from exc
         with httpx.Client(
             base_url=url,

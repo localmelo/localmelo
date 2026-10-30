@@ -290,7 +290,7 @@ class Config:
 
         # -- chat_backend validation --
         if not self.chat_backend:
-            errors.append("chat_backend is not set (run 'melo --reconfigure')")
+            errors.append("chat_backend is not set (run 'melo setup')")
             return errors
 
         if self.chat_backend not in VALID_CHAT_BACKENDS:
@@ -302,7 +302,7 @@ class Config:
 
         # -- embedding_backend validation --
         if not self.embedding_backend:
-            errors.append("embedding_backend is not set (run 'melo --reconfigure')")
+            errors.append("embedding_backend is not set (run 'melo setup')")
             return errors
 
         if self.embedding_backend not in VALID_EMBEDDING_BACKENDS:

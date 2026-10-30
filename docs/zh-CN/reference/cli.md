@@ -11,18 +11,64 @@
 ```text
 melo [options] -- "<task>"                   # run one task (direct mode)
 melo [options]                               # the interactive UI (in a terminal)
-melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
-melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
-melo --reconfigure                           # run setup, then the interactive UI
-melo --serve [--host HOST] [--port PORT]     # start the gateway (--port 0: a free port)
-melo --serve --enable-playground             # opt in to legacy playground (in progress)
-melo --serve --reconfigure                   # run setup, then start the gateway
-melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
-melo --daemon install|uninstall|status       # macOS background service
-melo --developer --help                      # every option, grouped by tier
+melo -u URL [-m NAME]                        # the interactive UI on this server
+melo [-u URL] [-m NAME] ""                   # the plain conversation loop
+melo setup                                   # run setup, then the interactive UI
+melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
+melo serve --playground                      # opt in to legacy playground (in progress)
+melo import dsh-jsonl FILE [--title TITLE]   # import worker history
+melo serve install|uninstall|status          # macOS background service
+melo -h all                                  # every option, command and setting
 ```
 
 用引号括起任务，并把它放在 `--` 之后，这样形似选项的文字就不会产生歧义。不加引号的多个单词会以空格连接。既有的任务命令行、缩写以及 `melo ""` 循环，仍保持原有的解析方式。
+
+<a id="commands-and-short-options"></a>
+
+## 命令与短选项
+
+七个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。
+
+| 命令 | 作用 | 选项 |
+|---|---|---|
+| `melo setup` | 重新选择模型服务器，然后打开对话。 | |
+| `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
+| `melo serve [install\|uninstall\|status]` | 运行网关，或把它作为登录服务管理（macOS）。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo console [--reset]` | 打印打开网页控制台的一次性链接；`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
+| `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
+| `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
+| `melo import FORMAT FILE` | 导入 worker 历史。 | `--title T` |
+
+`melo -h` 只有 20 行，`melo -h all` 列出全部选项、命令和设置，`melo COMMAND -h` 说明单个命令。字母选项的值要分开写（`-s 5` 或 `-s=5`）；`--title T` 给任务的 worker 会话命名。
+
+<a id="old-spelling-to-new"></a>
+
+### 旧写法对应的新写法
+
+所有旧写法仍然可用，解析结果相同；`melo -h` 不再列出它们。各项设置（`--recall-k`、`--cache-layout` 等实验性选项）保留原有选项，由 `melo -h all` 列出。
+
+| 旧写法 | 新写法 |
+|---|---|
+| `--chat-model` | `-m, --model` |
+| `--base-url` | `-u, --url` |
+| `--max-steps` | `-s, --steps` |
+| `--output-format` | `-o, --output` |
+| `--mcp-config` | `--mcp` |
+| `--save-session` | `--title` |
+| `--reconfigure` | `melo setup` |
+| `--serve` | `melo serve` |
+| `--daemon` | `melo serve install|uninstall|status` |
+| `--host` | `melo serve --host` |
+| `--port` | `melo serve -p` |
+| `--enable-playground` | `melo serve --playground` |
+| `--allow-unconfigured` | `melo serve --force` |
+| `--gateway-login` | `melo console` |
+| `--gateway-rotate-token` | `melo console --reset` |
+| `--brief` | `melo worker BRIEF` |
+| `--inbox` | `melo worker BRIEF --inbox` |
+| `--inbox-fd` | `melo worker BRIEF --inbox-fd` |
+| `--parent-run` | `melo worker BRIEF --parent` |
+| `--import-session` | `melo import FORMAT FILE` |
 
 <a id="modes"></a>
 
@@ -59,8 +105,8 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 
 | 模式 | 如何选择 | `--help` 显示的内容 |
 |---|---|---|
-| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 用户选项，然后是这一行：`More options: melo --developer --help (or set [ui] mode = "developer").` |
-| 开发者 | 在配置中写 `[ui] mode = "developer"`，或单次运行时加 `--developer` | 所有选项，分为 Options、Advanced 和 Experimental 三组；每个实验性选项的那一行都会注明决定它去留的 issue。 |
+| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（20 行）：常用选项和命令词，最后指向更多内容的位置。 |
+| 开发者 | 在配置中写 `[ui] mode = "developer"`，或单次运行时加 `--developer` | `melo -h all` 的全部内容：所有选项、命令和设置；每个实验性设置都会注明决定它去留的 issue。 |
 
 每个选项在两种模式下都能解析和生效，无论来自命令行还是配置文件，因此脚本和基准测试不受影响：模式只是把选项从帮助中隐藏，而不是删除它。`--developer` 无论放在命令行的哪个位置都对帮助生效（`melo --help --developer` 也可以），且必须写全名。既不是 `"default"` 也不是 `"developer"` 的 `[ui] mode` 会在 stderr 上打印一行并显示默认帮助；它从不会使运行或网关停止。
 
@@ -79,22 +125,33 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | 选项 | 层级 | 决定于 |
 |---|---|---|
 | `-h`, `--help` | user |  |
-| `--version` | user |  |
-| `--base-url` | user |  |
-| `--chat-model` | user |  |
-| `--workspace` | user |  |
-| `--max-steps` | user |  |
-| `--timeout` | user |  |
-| `--output-format` | user |  |
-| `--memory` | user |  |
-| `--brief` | user |  |
+| `-V`, `--version` | user |  |
+| `-m`, `--model` | user |  |
+| `-u`, `--url` | user |  |
+| `-w`, `--workspace` | user |  |
+| `-s`, `--steps` | user |  |
+| `-t`, `--timeout` | user |  |
+| `-o`, `--output` | user |  |
 | `-c`, `--continue` | user |  |
 | `-r`, `--resume` | user |  |
-| `--yolo` | user |  |
-| `--serve` | user |  |
-| `--gateway-login` | user |  |
-| `--reconfigure` | user |  |
+| `-y`, `--yolo` | user |  |
 | `--developer` | advanced |  |
+| `--memory` | advanced |  |
+| `--builtins` | advanced |  |
+| `--mcp` | advanced |  |
+| `--routine` | advanced |  |
+| `--progress` | advanced |  |
+| `--title` | advanced |  |
+| `--mcp-only` | advanced |  |
+| `--chat-model` | advanced |  |
+| `--base-url` | advanced |  |
+| `--max-steps` | advanced |  |
+| `--output-format` | advanced |  |
+| `--mcp-config` | advanced |  |
+| `--brief` | advanced |  |
+| `--serve` | advanced |  |
+| `--gateway-login` | advanced |  |
+| `--reconfigure` | advanced |  |
 | `--gateway-rotate-token` | advanced |  |
 | `--enable-playground` | advanced |  |
 | `--host` | advanced |  |
@@ -102,7 +159,6 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--allow-unconfigured` | advanced |  |
 | `--daemon` | advanced |  |
 | `--import-session` | advanced |  |
-| `--title` | advanced |  |
 | `--save-session` | advanced |  |
 | `--no-save-session` | advanced |  |
 | `--parent-run` | advanced |  |
@@ -111,17 +167,13 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--context-window` | advanced |  |
 | `--output-reserve` | advanced |  |
 | `--safety-margin` | advanced |  |
-| `--builtins` | advanced |  |
-| `--mcp-config` | advanced |  |
-| `--mcp-only` | advanced |  |
 | `--memory-dir` | advanced |  |
 | `--request-timeout` | advanced |  |
 | `--embedding-base-url` | advanced |  |
 | `--embedding-model` | advanced |  |
-| `--progress` | advanced |  |
-| `--routine` | advanced |  |
 | `--attempt-policy` | experimental | #185 |
 | `--reflection-gate` | experimental | #185 |
+| `--brief-items` | experimental | #185 |
 | `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
 | `--reflect-tool-guard` | experimental | #183 |
@@ -133,7 +185,6 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--note-writer` | experimental | #183 |
 | `--tool-exposure` | experimental | #3 |
 | `--captured-history` | experimental | #4 |
-| `--brief-items` | experimental | #185 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -157,7 +208,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | 选项 | 默认值 | 说明 |
 |---|---|---|
 | `query`（位置参数） | 未设置 | 要运行的任务。给出它即选择直接模式；给出空字符串（`""`）则打开纯对话循环；都不给则打开交互式界面。 |
-| `-h`, `--help` | | 显示帮助并退出：默认模式下显示用户选项，[开发者模式](#default-and-developer-mode)下显示全部选项。 |
+| `-h`, `--help` | | 显示帮助并退出：默认模式下显示简短帮助，[开发者模式](#default-and-developer-mode)下显示全部内容；`-h all` 和 `-h COMMAND` 可选择其他内容。 |
 | `--version` | | 打印 `melo <version>`（包版本号；在 git 检出中其后附上短提交号，例如 `melo 0.1.0 (baab21e)`）并以 0 退出。 |
 | `--developer` | 关闭 | 本次运行时，在 `--help` 中按层级分组显示全部选项；与 `[ui] mode = "developer"` 效果相同。它只改变帮助。 |
 | `--base-url URL` | 未设置 | 把对话请求发送到这个兼容 OpenAI 的服务器，而不是已配置的后端。 |

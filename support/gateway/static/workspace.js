@@ -1003,7 +1003,7 @@ function statusNode(turn) {
     if (turn.status === "budget_exhausted") hint = "Continue gives it a new step budget; Try again starts over.";
     if (turn.status === "stuck") hint = "melo repeated itself. Rephrase the request, or try again.";
     if (turn.status === "setup_error") hint = "An MCP server failed to start.";
-    if (turn.status === "crashed" && turn.cause === "run") hint = "This is a bug in localmelo. The log is in the terminal running melo --serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
+    if (turn.status === "crashed" && turn.cause === "run") hint = "This is a bug in localmelo. The log is in the terminal running melo serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
     if (turn.status === "provider_error") {
       const backend = S.health?.model?.backend;
       hint = ["mlc", "ollama", "vllm", "sglang"].includes(backend)

@@ -657,7 +657,7 @@ async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> N
     await setup.session.check_server()
     out = " ".join(setup.out.text().split())
     assert (
-        "This server lists Qwen3-Embedding-0.6B; melo --reconfigure adds it "
+        "This server lists Qwen3-Embedding-0.6B; melo setup adds it "
         "for long-term memory."
     ) in out
 
@@ -689,7 +689,7 @@ async def test_check_server_does_not_suggest_an_embedding_where_it_cannot_act(
     setup.factory._options = replace(setup.factory._options, memory=memory)
     setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
     await setup.session.check_server()
-    assert "melo --reconfigure adds it" not in setup.out.text()
+    assert "melo setup adds it" not in setup.out.text()
 
 
 async def test_esc_after_the_run_ended_does_not_stop_the_turn(

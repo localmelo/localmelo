@@ -393,7 +393,7 @@ def test_a_blank_answer_says_so() -> None:
             "budget_exhausted",
             "Max steps reached",
             "⚠",
-            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps.",
+            "/retry tries again, or quit and run melo -c --steps 60 for more steps.",
         ),
         (
             "stuck",
@@ -649,7 +649,7 @@ def test_the_banner_names_the_configured_embedding_model() -> None:
 
 def test_the_banner_without_an_embedding_names_the_wizard() -> None:
     text = _banner(key="vllm", label="vLLM")
-    assert "│ memory     no long-term memory · melo --reconfigure adds one" in text
+    assert "│ memory     no long-term memory · melo setup adds one" in text
 
 
 def test_the_banner_cleans_an_embedding_model_id() -> None:

@@ -47,7 +47,7 @@ APP_END_S: Final = 1.0
 NO_TERMINAL: Final = (
     "melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).\n"
     '  Run one task:      melo "your task"\n'
-    "  Start the gateway: melo --serve"
+    "  Start the gateway: melo serve"
 )
 
 

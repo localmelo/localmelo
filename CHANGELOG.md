@@ -964,6 +964,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The command line has command words and short options (part of #2). `melo setup`,
+  `melo serve [install|uninstall|status]`, `melo console [--reset]`, `melo task ...`,
+  `melo worker BRIEF`, `melo import FORMAT FILE` and `melo config` replace
+  `--reconfigure`, `--serve`, `--daemon`, `--gateway-login`, `--gateway-rotate-token`,
+  `--brief` and `--import-session`. `-m/--model`, `-u/--url`, `-s/--steps`,
+  `-o/--output`, `--mcp`, `-w`, `-t`, `-y` and `-V` are more names for `--chat-model`,
+  `--base-url`, `--max-steps`, `--output-format`, `--mcp-config`, `--workspace`,
+  `--timeout`, `--yolo` and `--version`, and `--title T` names a task's worker
+  session. `melo -h` is 20 lines; `melo -h all` and `melo COMMAND -h` show the rest.
+  Every old spelling still works and parses to the same result, so scripts, the macOS
+  app and the benchmark need no change. A first argument that is exactly a command
+  word is the command: quote a task that starts with one (`melo "setup the project"`)
+  or put `--` before it. The hints name the new commands. ([#NN])
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that

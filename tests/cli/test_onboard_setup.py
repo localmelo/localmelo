@@ -161,8 +161,8 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
         "  [1] bge-m3-embed\n"
         "  [2] Qwen3-8B\n"
         f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
-        "Long-term memory off (melo --reconfigure sets it again).\n"
-        f"Saved to {config_path} (melo --reconfigure changes it).\n"
+        "Long-term memory off (melo setup sets it again).\n"
+        f"Saved to {config_path} (melo setup changes it).\n"
     )
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
@@ -377,7 +377,7 @@ def test_a_first_run_that_declines_saves_embedding_off(
     probe.assert_not_awaited()
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
-    assert "Long-term memory off (melo --reconfigure sets it again).\n" in (
+    assert "Long-term memory off (melo setup sets it again).\n" in (
         capsys.readouterr().out
     )
 
@@ -388,12 +388,12 @@ def test_a_first_run_that_declines_saves_embedding_off(
         (
             False,
             "No embedding model on this server. Serve Qwen3-Embedding-0.6B "
-            "on it, then melo --reconfigure.",
+            "on it, then melo setup.",
         ),
         (
             True,
             "No embedding model on this server. ollama pull "
-            "qwen3-embedding:0.6b, then melo --reconfigure.",
+            "qwen3-embedding:0.6b, then melo setup.",
         ),
     ],
 )

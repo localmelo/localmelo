@@ -55,6 +55,13 @@ _HELP = {
         "  -p, --port N    the gateway's port (default: the configured one)",
         "melo console",
     ),
+    "task": (
+        "melo task [--gateway URL] [--json] VERB ...",
+        "Manage the background tasks of a running gateway. VERB is new, list, show,\n"
+        "pause, resume, stop, follow or level; melo task VERB -h explains one.",
+        "",
+        "melo task list",
+    ),
     "worker": (
         "melo worker BRIEF [options]",
         "Run a worker brief and print one JSON result. Its Check: lines run when the\n"

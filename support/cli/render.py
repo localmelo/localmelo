@@ -235,7 +235,7 @@ def status_hint(
                 )
             return (
                 f"The server refused the key in {backend.key_env or 'its key variable'}; "
-                "melo --reconfigure changes the backend."
+                "melo setup changes the backend."
             )
         return f"/status checks the model server at {url}; /retry tries again."
     if status == "setup_error":
@@ -254,9 +254,7 @@ def status_hint(
     if status == "context_budget_exceeded":
         return "Reduce the task or increase the configured context window; then /retry."
     if status == "budget_exhausted":
-        return (
-            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps."
-        )
+        return "/retry tries again, or quit and run melo -c --steps 60 for more steps."
     if status == "stuck":
         return "The model repeated itself; rephrase the request, or /retry."
     if status == "crashed":

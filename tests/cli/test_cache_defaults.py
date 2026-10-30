@@ -206,7 +206,11 @@ def test_default_help_hides_the_flags_and_developer_help_lists_them_as_experimen
 
 
 def test_the_help_of_each_flag_names_its_new_default() -> None:
-    text = " ".join(cli._build_parser(developer=True).format_help().split())
+    # The options' own help text (the full help lists settings, not this prose).
+    text = " ".join(
+        " ".join(str(a.help).split())
+        for a in cli._build_parser(developer=True)._actions
+    )
     for fragment in (
         "Use a versioned run-frozen system prefix and local date (default on)",
         "chunk eight messages at a time (default)",

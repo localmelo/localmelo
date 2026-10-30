@@ -111,7 +111,7 @@ def test_start_gateway_hands_the_bound_socket_to_the_server() -> None:
     printed = "\n".join(str(call.args[0]) for call in out.call_args_list if call.args)
     assert f"  Gateway: http://127.0.0.1:{port}" in printed
     assert f"  Web UI:  http://127.0.0.1:{port}/" in printed
-    assert f"melo --gateway-login --port {port} in another terminal" in printed
+    assert f"melo console -p {port} in another terminal" in printed
     assert f"--gateway http://127.0.0.1:{port}" in printed
     assert ":0" not in printed
 

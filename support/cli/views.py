@@ -45,7 +45,7 @@ LOCAL_BACKENDS: Final = frozenset({"mlc", "ollama", "vllm", "sglang"})
 
 # What each source of the backend reads in the banner's second model row.
 SOURCE_TEXT: Final = {
-    "--base-url": "from --base-url (not saved)",
+    "--base-url": "from --url (not saved)",
     "found on this machine": "found on this machine",
     "saved": "saved as the default",
     "unsaved": "not saved; melo asks again next time",
@@ -97,7 +97,7 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
     if not backend.embedding:
         if backend.key == "openai-compatible":
             return "no long-term memory · --embedding-base-url adds one"
-        return "no long-term memory · melo --reconfigure adds one"
+        return "no long-term memory · melo setup adds one"
     # The model id can come from a server's listing; never draw its escapes.
     return f"long-term memory · {clean_output(backend.embedding)}"
 

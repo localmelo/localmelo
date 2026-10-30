@@ -10,20 +10,70 @@ see [Offline retrieval](retrieval.md).
 ```text
 melo [options] -- "<task>"                   # run one task (direct mode)
 melo [options]                               # the interactive UI (in a terminal)
-melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
-melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
-melo --reconfigure                           # run setup, then the interactive UI
-melo --serve [--host HOST] [--port PORT]     # start the gateway (--port 0: a free port)
-melo --serve --enable-playground             # opt in to legacy playground (in progress)
-melo --serve --reconfigure                   # run setup, then start the gateway
-melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
-melo --daemon install|uninstall|status       # macOS background service
-melo --developer --help                      # every option, grouped by tier
+melo -u URL [-m NAME]                        # the interactive UI on this server
+melo [-u URL] [-m NAME] ""                   # the plain conversation loop
+melo setup                                   # run setup, then the interactive UI
+melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
+melo serve --playground                      # opt in to legacy playground (in progress)
+melo import dsh-jsonl FILE [--title TITLE]   # import worker history
+melo serve install|uninstall|status          # macOS background service
+melo -h all                                  # every option, command and setting
 ```
 
 Quote the task and put it after `--` so option-like text is unambiguous.
 Several words without quotes are joined with spaces. Existing task command
 lines, abbreviations and the `melo ""` loop keep their previous parsing.
+
+<a id="commands-and-short-options"></a>
+## Commands and short options
+
+Seven command words name what `melo` does. A word counts only as the first
+argument and only as an exact match, so `melo "setup the project"` (one quoted
+argument) and `melo -- setup the project` are tasks, while `melo setup a venv`
+prints a hint and exits 2 before any model is built.
+
+| Command | What it does | Options |
+|---|---|---|
+| `melo setup` | Choose the model server again, then open the chat. | |
+| `melo config` | Show where the config file is and which settings differ from the defaults. | |
+| `melo serve [install\|uninstall\|status]` | Run the gateway, or manage it as a login service (macOS). | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo console [--reset]` | Print a one-use link to the web console; `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
+| `melo task VERB` | The `melo-task` client. | as `melo-task` |
+| `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
+| `melo import FORMAT FILE` | Import a worker history. | `--title T` |
+
+`melo -h` is 20 lines, `melo -h all` lists every option, command and setting, and
+`melo COMMAND -h` explains one command. A letter takes its value apart (`-s 5` or
+`-s=5`); `--title T` names a task's worker session.
+
+### Old spelling to new
+
+Every old spelling still works and parses to the same result; `melo -h` leaves
+them out. The settings (`--recall-k`, `--cache-layout` and the other experimental
+options) keep their options and are listed by `melo -h all`.
+
+| Old spelling | New |
+|---|---|
+| `--chat-model` | `-m, --model` |
+| `--base-url` | `-u, --url` |
+| `--max-steps` | `-s, --steps` |
+| `--output-format` | `-o, --output` |
+| `--mcp-config` | `--mcp` |
+| `--save-session` | `--title` |
+| `--reconfigure` | `melo setup` |
+| `--serve` | `melo serve` |
+| `--daemon` | `melo serve install|uninstall|status` |
+| `--host` | `melo serve --host` |
+| `--port` | `melo serve -p` |
+| `--enable-playground` | `melo serve --playground` |
+| `--allow-unconfigured` | `melo serve --force` |
+| `--gateway-login` | `melo console` |
+| `--gateway-rotate-token` | `melo console --reset` |
+| `--brief` | `melo worker BRIEF` |
+| `--inbox` | `melo worker BRIEF --inbox` |
+| `--inbox-fd` | `melo worker BRIEF --inbox-fd` |
+| `--parent-run` | `melo worker BRIEF --parent` |
+| `--import-session` | `melo import FORMAT FILE` |
 
 ## Modes
 
@@ -93,8 +143,8 @@ option does.
 
 | Mode | How to choose it | What `--help` shows |
 |---|---|---|
-| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The user options, then the line `More options: melo --developer --help (or set [ui] mode = "developer").` |
-| Developer | `[ui] mode = "developer"`, or `--developer` for one run | Every option, under the headings Options, Advanced and Experimental; each experimental line names the issue that decides it. |
+| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The short help (20 lines): the everyday options and the command words, then where to look next. |
+| Developer | `[ui] mode = "developer"`, or `--developer` for one run | Everything `melo -h all` prints: every option, command and setting; each experimental setting names the issue that decides it. |
 
 Every option parses and works in both modes, from the command line and from
 the config file, so scripts and the benchmark keep running: the mode hides an
@@ -119,22 +169,33 @@ two equal.
 | Option | Tier | Decided in |
 |---|---|---|
 | `-h`, `--help` | user |  |
-| `--version` | user |  |
-| `--base-url` | user |  |
-| `--chat-model` | user |  |
-| `--workspace` | user |  |
-| `--max-steps` | user |  |
-| `--timeout` | user |  |
-| `--output-format` | user |  |
-| `--memory` | user |  |
-| `--brief` | user |  |
+| `-V`, `--version` | user |  |
+| `-m`, `--model` | user |  |
+| `-u`, `--url` | user |  |
+| `-w`, `--workspace` | user |  |
+| `-s`, `--steps` | user |  |
+| `-t`, `--timeout` | user |  |
+| `-o`, `--output` | user |  |
 | `-c`, `--continue` | user |  |
 | `-r`, `--resume` | user |  |
-| `--yolo` | user |  |
-| `--serve` | user |  |
-| `--gateway-login` | user |  |
-| `--reconfigure` | user |  |
+| `-y`, `--yolo` | user |  |
 | `--developer` | advanced |  |
+| `--memory` | advanced |  |
+| `--builtins` | advanced |  |
+| `--mcp` | advanced |  |
+| `--routine` | advanced |  |
+| `--progress` | advanced |  |
+| `--title` | advanced |  |
+| `--mcp-only` | advanced |  |
+| `--chat-model` | advanced |  |
+| `--base-url` | advanced |  |
+| `--max-steps` | advanced |  |
+| `--output-format` | advanced |  |
+| `--mcp-config` | advanced |  |
+| `--brief` | advanced |  |
+| `--serve` | advanced |  |
+| `--gateway-login` | advanced |  |
+| `--reconfigure` | advanced |  |
 | `--gateway-rotate-token` | advanced |  |
 | `--enable-playground` | advanced |  |
 | `--host` | advanced |  |
@@ -142,7 +203,6 @@ two equal.
 | `--allow-unconfigured` | advanced |  |
 | `--daemon` | advanced |  |
 | `--import-session` | advanced |  |
-| `--title` | advanced |  |
 | `--save-session` | advanced |  |
 | `--no-save-session` | advanced |  |
 | `--parent-run` | advanced |  |
@@ -151,17 +211,13 @@ two equal.
 | `--context-window` | advanced |  |
 | `--output-reserve` | advanced |  |
 | `--safety-margin` | advanced |  |
-| `--builtins` | advanced |  |
-| `--mcp-config` | advanced |  |
-| `--mcp-only` | advanced |  |
 | `--memory-dir` | advanced |  |
 | `--request-timeout` | advanced |  |
 | `--embedding-base-url` | advanced |  |
 | `--embedding-model` | advanced |  |
-| `--progress` | advanced |  |
-| `--routine` | advanced |  |
 | `--attempt-policy` | experimental | #185 |
 | `--reflection-gate` | experimental | #185 |
+| `--brief-items` | experimental | #185 |
 | `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
 | `--reflect-tool-guard` | experimental | #183 |
@@ -173,7 +229,6 @@ two equal.
 | `--note-writer` | experimental | #183 |
 | `--tool-exposure` | experimental | #3 |
 | `--captured-history` | experimental | #4 |
-| `--brief-items` | experimental | #185 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -195,7 +250,7 @@ deliberate change: a test pins the number of options default-mode help shows.
 | Option | Default | Description |
 |---|---|---|
 | `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the plain loop; none opens the interactive UI. |
-| `-h`, `--help` | | Show the help and exit: the user options in default mode, every option in [developer mode](#default-and-developer-mode). |
+| `-h`, `--help` | | Show the help and exit: the short help in default mode, everything in [developer mode](#default-and-developer-mode); `-h all` and `-h COMMAND` choose another. |
 | `--version` | | Print `melo <version>` (the package version, then the short commit on a git checkout, e.g. `melo 0.1.0 (baab21e)`) and exit 0. |
 | `--developer` | off | Show every option in `--help`, grouped by tier, for this run; the same as `[ui] mode = "developer"`. It changes only the help. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |

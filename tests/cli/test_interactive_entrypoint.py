@@ -207,7 +207,7 @@ def test_no_config_and_no_terminal_exits_with_one_line(
     gateway.assert_not_called()
     assert capsys.readouterr() == (
         "",
-        "melo: no backend is configured; run melo --reconfigure in a terminal\n",
+        "melo: no backend is configured; run melo setup in a terminal\n",
     )
 
 

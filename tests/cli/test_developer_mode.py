@@ -1,6 +1,8 @@
-"""Default mode and developer mode (#186): the tier table and what ``--help`` shows.
+"""Default mode and developer mode (#186): the tier table and what ``-h`` shows.
 
-The mode decides only what help prints; every option parses in both modes.
+``melo -h`` is the short help (20 lines); developer mode and ``-h all`` print every
+option, command and setting. The mode decides only what help prints; every option
+parses in both modes.
 """
 
 from __future__ import annotations
@@ -14,31 +16,28 @@ from unittest import mock
 import pytest
 
 import localmelo.__main__ as cli
-from localmelo.support import config
+from localmelo.support import command_words, config
 from localmelo.support.option_tiers import (
     ADVANCED,
     EXPERIMENTAL,
     EXPERIMENTAL_ISSUES,
+    OLD_SPELLINGS,
     OPTION_TIERS,
+    SETTINGS,
     USER,
 )
 from localmelo.tests.cli.test_direct_mode import _main
 
 # Adding a user option is a deliberate change: update this number with it.
-USER_OPTION_COUNT = 16
-
-HEADINGS = (
-    "Options:",
-    "Advanced:",
-    "Experimental (compared on the benchmark, may change or go away):",
-)
+USER_OPTION_COUNT = 11
 
 
 def _long_names(parser: argparse.ArgumentParser) -> set[str]:
+    """The first long name of each option; a letter-only spelling has none."""
     return {
         next(s for s in action.option_strings if s.startswith("--"))
         for action in parser._actions
-        if action.option_strings
+        if any(s.startswith("--") for s in action.option_strings)
     }
 
 
@@ -48,8 +47,12 @@ def _help(*argv: str, capsys: pytest.CaptureFixture[str]) -> str:
 
 
 def _shown_options(text: str) -> list[str]:
-    """The long option of each entry of a help text (an entry starts at column 2)."""
-    return re.findall(r"^  (?:-\w, )?(--[a-z-]+)", text, re.M)
+    """The long option of each row of a help text (a row starts at column 2)."""
+    return re.findall(r"^  (?:-\w, )?(--[a-z-]+)(?= |$)", text, re.M)
+
+
+def _is_short(text: str) -> bool:
+    return "Commands: setup" in text and "Settings:" not in text
 
 
 def _write_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
@@ -90,26 +93,30 @@ def test_the_cli_reference_table_matches_the_code() -> None:
     assert {name: issue for name, _, issue in rows if issue} == EXPERIMENTAL_ISSUES
 
 
+def test_the_old_spelling_table_matches_the_code() -> None:
+    text = (Path(cli.__file__).parent / "docs/reference/cli.md").read_text("utf-8")
+    start = text.index("| Old spelling | New |")
+    table = text[start : text.index("\n## ", start)]
+    rows = re.findall(r"^\| `(--[a-z-]+)` \| `([^`]+)` \|$", table, re.M)
+    assert dict(rows) == OLD_SPELLINGS
+
+
 # -- default mode --------------------------------------------------------------
 
 
-def test_default_help_shows_only_the_user_options(
+def test_default_help_fits_twenty_lines_and_names_no_old_spelling(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    text = _help("--help", capsys=capsys)
-    shown = _shown_options(text)
-    assert len(shown) == USER_OPTION_COUNT
-    assert set(shown) == {n for n, tier in OPTION_TIERS.items() if tier == USER}
-    assert HEADINGS[0] in text
-    assert not any(heading in text for heading in HEADINGS[1:])
-    assert text.rstrip().endswith(
-        'More options: melo --developer --help (or set [ui] mode = "developer").'
-    )
-
-
-def test_the_parser_default_is_default_help() -> None:
-    text = cli._build_parser(developer=False).format_help()
-    assert len(_shown_options(text)) == USER_OPTION_COUNT
+    text = _help("-h", capsys=capsys)
+    lines = text.splitlines()
+    assert len(lines) <= 20 and max(map(len, lines)) <= 80
+    assert _is_short(text)
+    shown = set(_shown_options(text))
+    assert shown == {n for n, tier in OPTION_TIERS.items() if tier == USER} - {"--help"}
+    assert not shown & set(OLD_SPELLINGS)
+    assert not any(" " + old in text for old in OLD_SPELLINGS)
+    # No option is alone on its row: the row's text follows on the same line.
+    assert all(re.match(r"^  -.* {2,}\S", row) for row in lines[6:16])
 
 
 @pytest.mark.parametrize(
@@ -136,41 +143,50 @@ def test_a_hidden_option_still_reaches_the_run() -> None:
 # -- developer mode ------------------------------------------------------------
 
 
-def test_developer_help_lists_every_option_under_its_tier() -> None:
-    text = cli._build_parser(developer=True).format_help()
-    assert sorted(_shown_options(text)) == sorted(OPTION_TIERS)
-    positions = [text.index(heading) for heading in HEADINGS]
-    assert positions == sorted(positions)
-    for name, tier in OPTION_TIERS.items():
-        start = positions[(USER, ADVANCED, EXPERIMENTAL).index(tier)]
-        end = min([p for p in positions if p > start], default=len(text))
-        assert re.search(rf"^  (-\w, )?{name}\b", text[start:end], re.M), name
-
-
-def test_an_experimental_line_names_its_issue() -> None:
-    text = cli._build_parser(developer=True).format_help()
-    entries = re.split(r"\n(?=  -)", text[text.index(HEADINGS[2]) :])
-    for name, issue in EXPERIMENTAL_ISSUES.items():
-        entry = next(e for e in entries if e.startswith(f"  {name}"))
-        assert f"decided in {issue}" in " ".join(entry.split())
-    assert "decided in #" not in text[: text.index(HEADINGS[2])]
-
-
-def test_the_flag_shows_developer_help_before_or_after_help(
+def test_the_full_help_lists_every_option_command_and_setting_without_wrapping(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for argv in (["--developer", "--help"], ["--help", "--developer"]):
-        text = _help(*argv, capsys=capsys)
-        assert sorted(_shown_options(text)) == sorted(OPTION_TIERS)
+    text = _help("-h", "all", capsys=capsys)
+    assert max(map(len, text.splitlines())) <= 80
+    shown = set(_shown_options(text))
+    settings = {item.flag for item in SETTINGS}
+    visible = set(OPTION_TIERS) - set(OLD_SPELLINGS) - settings - {"--help"}
+    assert visible <= shown
+    assert not shown & set(OLD_SPELLINGS)
+    for word in ("setup", "config", "serve", "console", "task", "worker", "import"):
+        assert re.search(rf"^  {word} ", text, re.M), word
+    assert "melo-retrieve" in text and "docs/reference/cli.md" in text
+    for item in SETTINGS:
+        assert re.search(rf"^  {re.escape(item.key)} +\S.* {item.flag}\b", text, re.M)
 
 
-def test_the_help_text_of_an_experimental_option_is_not_changed_by_a_second_call() -> (
-    None
-):
-    parser = cli._build_parser(developer=True)
-    assert parser.format_help() == parser.format_help()
-    window = next(a for a in parser._actions if a.dest == "window_eviction")
-    assert "decided in" not in str(window.help)
+def test_an_experimental_setting_names_its_issue() -> None:
+    text = cli._build_parser(developer=True).format_help()
+    for item in SETTINGS:
+        row = next(r for r in text.splitlines() if r.startswith(f"  {item.key} "))
+        issue = EXPERIMENTAL_ISSUES.get(item.flag)
+        assert (f"({issue})" in row) == bool(issue), item.key
+    assert "decided in" not in text
+
+
+def test_every_setting_flag_is_a_parser_option_with_a_tier() -> None:
+    assert {item.flag for item in SETTINGS} <= set(OPTION_TIERS)
+    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 31
+    assert sum(not item.file for item in SETTINGS) == 9
+
+
+@pytest.mark.parametrize("topic", [[], ["all"]])
+def test_the_flag_shows_the_full_help_before_or_after_help(
+    topic: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    for argv in (["--developer", "--help", *topic], ["--help", *topic, "--developer"]):
+        assert not _is_short(_help(*argv, capsys=capsys)), argv
+
+
+def test_a_command_word_after_h_shows_that_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert _help("-h", "serve", capsys=capsys).startswith("usage: melo serve ")
 
 
 def test_developer_flag_is_not_an_abbreviation_and_keeps_old_ones() -> None:
@@ -208,8 +224,7 @@ def test_the_config_mode_shows_developer_help(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_config(tmp_path, monkeypatch, '[ui]\nmode = "developer"\n')
-    text = _help("--help", capsys=capsys)
-    assert sorted(_shown_options(text)) == sorted(OPTION_TIERS)
+    assert not _is_short(_help("--help", capsys=capsys))
 
 
 @pytest.mark.parametrize("text", ["", '[ui]\nmode = "default"\n', "[ui]\n"])
@@ -220,7 +235,7 @@ def test_default_or_absent_mode_shows_default_help(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_config(tmp_path, monkeypatch, text)
-    assert len(_shown_options(_help("--help", capsys=capsys))) == USER_OPTION_COUNT
+    assert _is_short(_help("--help", capsys=capsys))
 
 
 @pytest.mark.parametrize("text", ['[ui]\nmode = "dev"\n', "[ui]\nmode = 3\n"])
@@ -233,7 +248,7 @@ def test_a_bad_mode_warns_and_shows_default_help(
     _write_config(tmp_path, monkeypatch, text)
     assert _main("--help").code == 0
     out, err = capsys.readouterr()
-    assert len(_shown_options(out)) == USER_OPTION_COUNT
+    assert _is_short(out)
     assert err.startswith("[ui] mode=") and "default help" in err
 
 
@@ -243,8 +258,7 @@ def test_an_unreadable_config_still_shows_default_help(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_config(tmp_path, monkeypatch, "[ui\nmode = ")
-    text = _help("--help", capsys=capsys)
-    assert len(_shown_options(text)) == USER_OPTION_COUNT
+    assert _is_short(_help("--help", capsys=capsys))
 
 
 def test_the_mode_is_validated_and_saved() -> None:
@@ -322,10 +336,7 @@ def test_a_usage_error_in_developer_mode_keeps_the_long_usage(
     assert "Run melo --help" not in err
 
 
-def test_the_brief_help_says_a_failed_check_exits_4() -> None:
-    """The --brief help tells a worker author when Check: lines run and what a failure does."""
-    text = " ".join(cli._build_parser(developer=True).format_help().split())
-    assert (
-        "--brief FILE Read a direct worker task from a UTF-8 file; its Check: lines "
-        "run when the model is done, and a failed check exits 4"
-    ) in text
+def test_the_worker_help_says_a_failed_check_exits_4() -> None:
+    """The worker help tells a launcher's author when Check: lines run and what a failure does."""
+    text = " ".join(command_words.help_text("worker").split())
+    assert "Check: lines run when the model is done, and a failed check exits 4" in text
