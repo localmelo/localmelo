@@ -1023,6 +1023,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
   and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
   line, JSON, exit codes and requests are unchanged ([#240]).
+- A turn's record is quiet and the answer is the loudest thing on screen. A turn of three
+  tool calls printed 27 rows of thinking excerpts and output before its answer; it now
+  prints 11. Thinking is one line (`✻ Thought for 8.0s`; `/thinking on` shows the
+  excerpt). A call that succeeded shows the first line of its output with
+  `+N lines (/expand 1.1)` on the same row; a call that failed, or a command that exited
+  with another code than 0, still shows three lines, the first of a failure in red. Only
+  the mark of a tool row is colored (the whole row was green). The live row says what melo
+  does and for how long, without `step N` and the phase, and the status bar leaves out
+  `step` (`cache`, `ctx` and `tasks` stay). `--developer` (or `[ui] mode = "developer"`) and
+  `/verbose` keep the detail. Direct mode's stdout and stderr, JSON, exit codes and
+  requests are unchanged ([#NN]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being

@@ -1,0 +1,18 @@
+› Call the check.
+
+  No approvals for this turn (--yolo).
+◌ ?  {} · not run
+⚠ A check stopped the run: Response check failed: Empty tool name in response.
+  /retry, or try another model.
+✻ Stopped after 0.1s · ↓ 4 tokens
+
+› Say it again.
+
+  No approvals for this turn (--yolo).
+· The model returned an empty reply; asking it to continue.
+✻ Thought for 0.1s
+  hmm
+⚠ The model returned only empty replies.
+  /retry, or try another model.
+✻ Stopped after 0.1s
+

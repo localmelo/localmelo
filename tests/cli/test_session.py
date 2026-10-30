@@ -1263,14 +1263,14 @@ async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None
     assert session.renderer.tool_outputs
     assert session.renderer.progress is not None
     session.renderer.verbose = True
-    session.renderer.thinking = False
+    session.renderer.thinking = True  # the default mode's is False
     session.enter("/stream on")
     await _until(lambda: session.stream)
     session.enter("/new")
     await _until(lambda: session.runner is None)
     assert session.renderer.tool_outputs == []
     assert session.renderer.progress is None
-    assert not session.renderer.verbose and session.renderer.thinking
+    assert not session.renderer.verbose and not session.renderer.thinking
     assert not session.stream  # back to [cli] stream, the session's default
     session.enter("/expand")
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
@@ -1689,6 +1689,22 @@ async def test_status_bar_redraws_after_an_assistant_message(setup: Setup) -> No
     assert session.status_bar().segments == ("cache 83%",)
     # Without a context_budget event the bar keeps its own ctx, as before.
     assert session.status_bar().context == "ctx 1.0k"
+
+
+async def test_the_status_bar_shows_the_step_only_in_developer_mode(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    running = [
+        {"type": "run.started", "ts": time.time(), "data": {}},
+        {"type": "run.progress", "ts": time.time(), "data": {"level": 0, "step": 4}},
+    ]
+    for event in running:
+        session.renderer.usage.observe(event)
+    session.on_event(_request_event(1000, 830))
+    assert session.status_bar().segments == ("cache 83%",)
+    session.developer = True
+    assert session.status_bar().segments == ("cache 83%", "step 4")
 
 
 async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:

@@ -518,10 +518,12 @@ async def main_async(
                 "Invalid [cli] settings; using defaults: %s", "; ".join(errors)
             )
             session_config.cli = config.CliConfig()
+        developer = _developer(args)
         renderer = TurnRenderer(
             out,
             symbols=symbols,
             backend=lambda: factory.backend,
+            developer=developer,
             reasoning_tags=session_config.cli.reasoning_tags,
             snapshots=approver.snapshots,
         )
@@ -531,7 +533,6 @@ async def main_async(
             logging.getLogger(__name__).warning(
                 "Invalid [sessions] resume_mode %r; using pairs", raw_mode
             )
-        developer = _developer(args)
         session = CliSession(
             store=store,
             factory=factory,

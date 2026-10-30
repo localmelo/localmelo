@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.output.vt100 import Vt100_Output
+from rich.console import Group
 from rich.text import Text
 
 from localmelo.melo.schema import RunResult, ToolInfo, ToolTier
@@ -45,6 +46,7 @@ class Turn:
         width: int = 80,
         symbols: Symbols = UNICODE,
         snapshots: Any = None,
+        developer: bool = False,
         **backend: Any,
     ) -> None:
         self.out = RecordingOut(width)
@@ -55,6 +57,7 @@ class Turn:
             backend=lambda: _backend(**backend),
             snapshots=snapshots,
             clock=lambda: self.now[0],
+            developer=developer,
         )
         self.renderer.begin_turn("What is in this folder?")
 
@@ -120,9 +123,10 @@ def test_the_echo_shows_six_lines_of_a_long_message() -> None:
 
 
 def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
+    # Developer mode keeps three lines of a call's output.
     output = "\n".join(["app.py", "notes.txt", "tests", "todo.md", "zzz"])
     text = (
-        Turn()
+        Turn(developer=True)
         .tool(
             "shell_exec",
             "ls -1",
@@ -144,8 +148,130 @@ def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
 
 
 def test_a_single_line_left_prints_instead_of_the_marker() -> None:
-    text = Turn().tool("shell_exec", "ls", output="a\nb\nc\nd").text()
+    text = Turn(developer=True).tool("shell_exec", "ls", output="a\nb\nc\nd").text()
     assert "    c\n    d\n" in text and "+1 lines" not in text
+
+
+# ── Reading a turn: a quiet record of work ──
+
+FIVE = "app.py\ndata.csv\nnotes.txt\ntodo.md\ntests"
+
+
+def test_a_success_shows_one_output_line_and_the_marker_shares_its_row() -> None:
+    text = Turn().tool("shell_exec", "ls -1", output=FIVE).text()
+    assert "✓ shell_exec  ls -1 · 0.1s\n  └ app.py · +4 lines (/expand 1.1)\n" in text
+    assert "data.csv" not in text
+
+
+def test_two_lines_of_output_print_whole_and_one_line_alone() -> None:
+    both = Turn().tool("shell_exec", "ls", output="a\nb").text()
+    assert "  └ a\n    b\n" in both and "+1 line" not in both
+    assert "  └ a\n" in Turn().tool("shell_exec", "ls", output="a").text()
+
+
+def test_the_marker_shares_the_row_of_a_long_first_line_by_cutting_the_line() -> None:
+    long_line = "x" * 120
+    text = Turn().tool("file_read", "big.txt", output=f"{long_line}\ny\nz").text()
+    row = next(line for line in text.split("\n") if line.startswith("  └ x"))
+    assert row.endswith("… · +2 lines (/expand 1.1)") and cells(row) <= 80
+
+
+def test_a_row_too_narrow_for_the_marker_puts_it_on_its_own_row() -> None:
+    text = Turn(width=24).tool("file_read", "a", output="one\ntwo\nthree").text()
+    assert "  └ one\n    … +2 lines" in text
+
+
+def test_a_failure_keeps_three_lines_with_the_first_in_the_error_style() -> None:
+    turn = Turn()
+    error = "boom\nline2\nline3\nline4\nline5"
+    parts = _block(turn, name="python_exec", status="error", error=error)
+    body = parts[-1]
+    assert isinstance(body, Text)
+    assert body.plain.splitlines()[0] == "  └ boom"
+    assert body.plain.splitlines()[-1] == "    … +2 lines (/expand 1.1)"
+    assert [
+        body.plain[span.start : span.end]
+        for span in body.spans
+        if span.style == "error"
+    ] == ["boom"]
+
+
+def test_a_command_that_exited_nonzero_keeps_three_lines() -> None:
+    text = Turn().tool("shell_exec", "make", output=FIVE, exit_code=2).text()
+    assert "  └ app.py\n    data.csv\n    notes.txt\n    … +2 lines" in text
+
+
+def _tour(turn: Turn) -> Turn:
+    """A turn of four model steps and three calls, as a first question would run."""
+    session = {"allowed": True, "origin": "session", "remember": True}
+    steps = [
+        ("Look at the folder first.", "ls -1", "shell_exec", FIVE + "\nextra"),
+        ("", "app.py", "file_read", "\n".join(f"line {n}" for n in range(17))),
+        ("", "ls -1 tests", "shell_exec", "test_app.py"),
+    ]
+    for number, (text, preview, name, output) in enumerate(steps, 1):
+        thinking = " ".join(f"thought{n}" for n in range(60 * number))
+        _message(
+            turn,
+            text,
+            step=number,
+            thinking=thinking,
+            tool_calls=[{"id": f"c{number}", "name": name, "preview": preview}],
+        )
+        turn.tool(name, preview, call_id=f"c{number}", output=output, approval=session)
+    _message(turn, "", step=4, thinking="thought " * 80)
+    return turn.finish(result="This folder is a small Python project.", n_tool=3)
+
+
+def _record_rows(turn: Turn) -> list[str]:
+    """The rows between the echo and the answer, the last row that starts with ``●``."""
+    rows = turn.text().split("\n")
+    answer = max(i for i, row in enumerate(rows) if row.startswith("●"))
+    return rows[rows.index("") + 1 : answer]
+
+
+def test_a_turn_of_three_calls_leaves_at_most_twelve_rows_before_the_answer() -> None:
+    record = _record_rows(_tour(Turn()))
+    assert len(record) <= 12, "\n".join(record)
+    # Developer mode keeps today's detail: the same turn takes far more rows.
+    assert len(_record_rows(_tour(Turn(developer=True)))) >= 24
+
+
+def _block(turn: Turn, **data: Any) -> list[Any]:
+    """The renderables of one finished call: its header, then its output."""
+    fields: dict[str, Any] = {"name": "shell_exec", "status": "success", "output": ""}
+    fields.update(data)
+    block = turn.renderer.tool_block(fields, ref="1.1")
+    return list(block.renderables) if isinstance(block, Group) else [block]
+
+
+def _header_text(turn: Turn, **data: Any) -> Text:
+    header = _block(turn, **data)[0]
+    assert isinstance(header, Text)
+    return header
+
+
+@pytest.mark.parametrize(
+    ("data", "style"),
+    [
+        ({}, "ok"),
+        ({"status": "error", "error": "boom"}, "error"),
+        ({"status": "blocked", "error": "no"}, "blocked"),
+    ],
+)
+def test_only_the_mark_of_a_tool_row_is_colored(
+    data: dict[str, Any], style: str
+) -> None:
+    header = _header_text(Turn(), duration_s=0.1, **data)
+    assert header.style == ""  # no base style: the row stays the default color
+    colored = [span for span in header.spans if span.style == style]
+    assert [(span.start, span.end) for span in colored] == [(0, 1)]
+    assert {span.style for span in header.spans} <= {style, "tool", "muted", "warn"}
+
+
+def test_a_call_that_did_not_run_stays_dim_as_a_whole() -> None:
+    header = _header_text(Turn(), status="cancelled", duration_s=1.0)
+    assert header.style == "muted"
 
 
 def test_a_nonzero_exit_of_a_command_that_ran_is_a_tag_not_a_failure() -> None:
@@ -636,28 +762,49 @@ def test_the_spinner_row_never_shows_a_step_budget() -> None:
     live = LiveState(
         activity="Thinking", started=94.0, step=4, attempt=1, output_tokens=412
     )
-    rows = live_rows(live, 100.0, 80, UNICODE, frame=0)
+    rows = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)
     assert rows == [
         [("class:accent", "· Thinking… · step 4 · 6s · ↓ 412 tokens · esc to stop")]
     ]
     live.attempt = 2
-    text = live_rows(live, 100.0, 80, UNICODE, frame=0)[0][0][1]
+    text = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)[0][0][1]
     assert "step 4 · attempt 2 · 6s" in text and not re.search(r"step 4/\d", text)
 
 
 def test_the_spinner_row_drops_the_hint_then_the_tokens_when_narrow() -> None:
     live = LiveState(activity="Thinking", started=94.0, step=4, output_tokens=412)
     assert (
-        live_rows(live, 100.0, 50, UNICODE, frame=0)[0][0][1]
+        live_rows(live, 100.0, 50, UNICODE, frame=0, developer=True)[0][0][1]
         == "· Thinking… · step 4 · 6s · ↓ 412 tokens"
     )
     assert (
-        live_rows(live, 100.0, 34, UNICODE, frame=0)[0][0][1]
+        live_rows(live, 100.0, 34, UNICODE, frame=0, developer=True)[0][0][1]
         == "· Thinking… · step 4 · 6s"
     )
-    for width in range(10, 80):
-        for row in live_rows(live, 100.0, width, UNICODE, frame=0):
-            assert cells(row[0][1]) <= width
+    for developer in (False, True):
+        for width in range(10, 80):
+            for row in live_rows(
+                live, 100.0, width, UNICODE, frame=0, developer=developer
+            ):
+                assert cells(row[0][1]) <= width
+
+
+def test_the_default_live_row_leaves_out_the_step_and_the_phase() -> None:
+    live = LiveState(
+        activity="Thinking",
+        started=94.0,
+        step=4,
+        attempt=2,
+        output_tokens=412,
+        progress={"level": 0, "step": 4, "attempt": 2, "phase": "Explore"},
+    )
+    [[(style, text)]] = live_rows(live, 100.0, 80, UNICODE, frame=0)
+    assert (style, text) == (
+        "class:accent",
+        "· Thinking… · 6s · ↓ 412 tokens · esc to stop",
+    )
+    developer = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)
+    assert "step 4 · attempt 2 · Explore · 6s" in developer[0][0][1]
 
 
 def test_a_running_tool_shows_its_clock_and_limit() -> None:
@@ -678,8 +825,11 @@ def test_a_running_tool_shows_its_clock_and_limit() -> None:
 
 def test_waiting_and_wrapping_up() -> None:
     live = LiveState(activity="Thinking", started=97.0, step=1, waiting=True)
-    assert live_rows(live, 100.0, 80, UNICODE)[0][0][1].startswith(
+    assert live_rows(live, 100.0, 80, UNICODE, developer=True)[0][0][1].startswith(
         "⚠ Waiting for your approval · step 1 · 3s"
+    )
+    assert live_rows(live, 100.0, 80, UNICODE)[0][0][1] == (
+        "⚠ Waiting for your approval · 3s"
     )
     live.finished = True
     assert live_rows(live, 100.0, 80, UNICODE) == [[("class:muted", "Wrapping up…")]]
@@ -1010,7 +1160,7 @@ def test_the_spinner_row_drops_whole_parts_then_cuts_the_facts(
     width: int, row: str
 ) -> None:
     live = LiveState(activity="Thinking", started=0.0, step=3, output_tokens=1200)
-    assert live_rows(live, 4920.0, width, UNICODE, frame=2)[0] == [
+    assert live_rows(live, 4920.0, width, UNICODE, frame=2, developer=True)[0] == [
         ("class:accent", row)
     ]
 
@@ -1079,13 +1229,16 @@ VERBOSE_STREAMS = (
     "history",
 )
 NARROW_STREAMS = ("tools", "allowed", "provider_errors", "history")
-ASCII_THINKING_OFF_STREAMS = ("tools", "history")
+ASCII_STREAMS = ("tools", "history")
+# The streams whose record differs between the default mode and developer mode.
+DEVELOPER_STREAMS = ("escapes", "failed", "history", "long_output", "thinking")
 
 GOLDEN_CASES = (
-    [(name, "default", 80, UNICODE, False, True) for name in STREAMS]
-    + [(name, "verbose", 80, UNICODE, True, True) for name in VERBOSE_STREAMS]
-    + [(name, "narrow", 40, UNICODE, False, True) for name in NARROW_STREAMS]
-    + [(name, "ascii", 80, ASCII, False, False) for name in ASCII_THINKING_OFF_STREAMS]
+    [(name, "default", 80, UNICODE, False, False) for name in STREAMS]
+    + [(name, "developer", 80, UNICODE, False, True) for name in DEVELOPER_STREAMS]
+    + [(name, "verbose", 80, UNICODE, True, False) for name in VERBOSE_STREAMS]
+    + [(name, "narrow", 40, UNICODE, False, False) for name in NARROW_STREAMS]
+    + [(name, "ascii", 80, ASCII, False, False) for name in ASCII_STREAMS]
 )
 
 
@@ -1100,7 +1253,7 @@ def render_stream(
     width: int = 80,
     symbols: Symbols = UNICODE,
     verbose: bool = False,
-    thinking: bool = True,
+    developer: bool = False,
 ) -> str:
     """*name*'s recorded events through a renderer, as a session would feed them."""
     out = RecordingOut(width)
@@ -1109,7 +1262,7 @@ def render_stream(
         symbols=symbols,
         backend=_backend,
         verbose=verbose,
-        thinking=thinking,
+        developer=developer,
     )
     turn = 0
     for record in _record(name):
@@ -1130,7 +1283,7 @@ def render_stream(
 
 
 @pytest.mark.parametrize(
-    ("name", "mode", "width", "symbols", "verbose", "thinking"),
+    ("name", "mode", "width", "symbols", "verbose", "developer"),
     GOLDEN_CASES,
     ids=[f"{name}-{mode}-{width}" for name, mode, width, _, _, _ in GOLDEN_CASES],
 )
@@ -1140,10 +1293,10 @@ def test_a_recorded_stream_renders_its_golden(
     width: int,
     symbols: Symbols,
     verbose: bool,
-    thinking: bool,
+    developer: bool,
 ) -> None:
     text = render_stream(
-        name, width=width, symbols=symbols, verbose=verbose, thinking=thinking
+        name, width=width, symbols=symbols, verbose=verbose, developer=developer
     )
     for line in text.split("\n"):
         assert cells(line) <= width, (name, mode, cells(line), line)
@@ -1282,11 +1435,37 @@ def _message(turn: Turn, content: str = "", **data: Any) -> Turn:
     return turn.event("assistant.message", **fields)
 
 
+def test_thinking_is_one_line_by_default() -> None:
+    thinking = " ".join(f"word{number}" for number in range(1, 400))
+    call = [{"id": "c1", "name": "file_read", "preview": "a"}]
+    text = _message(Turn(), thinking=thinking, tool_calls=call).text()
+    assert text.count("✻ Thought for 0.1s\n") == 1 and "word1" not in text
+
+
+@pytest.mark.parametrize("how", ["developer", "thinking on", "verbose"])
+def test_thinking_shows_its_excerpt_in_developer_mode_and_when_asked(how: str) -> None:
+    turn = Turn(developer=how == "developer")
+    turn.renderer.thinking = turn.renderer.thinking or how == "thinking on"
+    turn.renderer.verbose = how == "verbose"
+    thinking = " ".join(f"word{number}" for number in range(1, 2500))
+    text = _message(turn, thinking=thinking).text()
+    body = [row for row in text.split("\n") if row.startswith("  ")]
+    assert len(body) == (41 if how == "verbose" else 4)
+
+
+def test_a_new_session_restores_the_modes_thinking_default() -> None:
+    quiet, developer = Turn(), Turn(developer=True)
+    quiet.renderer.thinking, developer.renderer.thinking = True, False
+    quiet.renderer.new_session()
+    developer.renderer.new_session()
+    assert (quiet.renderer.thinking, developer.renderer.thinking) == (False, True)
+
+
 def test_the_thinking_excerpt_is_three_rows_then_the_marker() -> None:
     # Single line breaks inside a paragraph are joined, then the rows wrap.
     thinking = " ".join(f"word{number}" for number in range(1, 400))
     text = _message(
-        Turn(),
+        Turn(developer=True),
         thinking=thinking,
         tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
     ).text()
@@ -1314,7 +1493,7 @@ def test_verbose_shows_forty_thinking_rows_and_thinking_off_none() -> None:
 def test_an_ollama_thinking_block_is_split_once() -> None:
     content = "<think>\nweighing the options\n</think>\n\nI will read the file."
     text = _message(
-        Turn(),
+        Turn(developer=True),
         content=content,
         tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
     ).text()
@@ -1582,7 +1761,7 @@ def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
         "and whether it needs data.\nThe tests will say which behaviour matters."
     )
     text = _message(
-        Turn(width=100),
+        Turn(width=100, developer=True),
         thinking=thinking,
         tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
     ).text()

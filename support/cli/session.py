@@ -270,7 +270,10 @@ class CliSession:
         if self.status_line == "auto":
             segments = tuple(
                 status_segments(
-                    self.renderer.usage, local=backend.local, now=time.time()
+                    self.renderer.usage,
+                    local=backend.local,
+                    now=time.time(),
+                    steps=self.developer,
                 )
             )
             # The ctx segment shows the measured tokens and the limit; without

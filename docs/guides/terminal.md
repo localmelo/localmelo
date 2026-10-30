@@ -4,12 +4,14 @@ This guide explains the interactive terminal: how to chat, use its keys and comm
 
 ## The interactive UI
 
-`melo` without a task, in a terminal, opens a chat that shows its work as
-it happens: the model's thinking, each tool call as it finishes, notices
-and reflections, and a live area with the step, the phase, the running
-tool and the run's progress facts while the model works. The answer
-prints as Markdown. What it prints stays in the terminal's scrollback; the
-input box and a status bar stay at the bottom.
+`melo` without a task, in a terminal, opens a chat that keeps a quiet record
+of its work and makes the answer the loudest thing on screen: one line for
+each thought, one row for each tool call with the first line of its output,
+notices and reflections, and a live area that says what melo is doing, for
+how long, and which tool runs. The answer prints as Markdown. What it prints
+stays in the terminal's scrollback; the input box and a status bar stay at
+the bottom. Developer mode keeps the whole record (see
+[A turn's output](#a-turns-output)).
 
 ```text
 melo 0.1.0 · Qwen3-8B (/model to change)
@@ -19,10 +21,7 @@ Try: What is this project? · / commands · ctrl+d quit
 › What is in this folder?
 
 ✓ shell_exec  ls -1 · 0.1s · allowed
-  └ app.py
-    notes.txt
-    tests
-    … +1 lines
+  └ app.py · +3 lines (/expand 1.1)
 ● The folder holds app.py, notes.txt, tests and todo.md.
 ✻ Worked for 6.2s · 1 tool call · ↓ 412 tokens
 
@@ -142,7 +141,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
 | `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
-| `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode), leaving only `Thought for 1.2s`; without an argument, flips it. |
 | `/stream [on\|off]` | Live streamed replies for later turns on or off; without an argument, flips it. See [Streamed replies](#streamed-replies). |
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
@@ -327,29 +326,34 @@ happens without the explicit `/copy` command.
   `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
   `Thinking`, `Replying`, `Running`, `Waiting for your approval`,
-  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the run's
-  facts: the step
-  (`step 4`, never against `--max-steps`), the attempt from the second
-  one, the phase with its cycle, the tests seen, and the time; the output
-  tokens and `esc to stop` follow. When the line is narrow the hint goes
-  first, then the tokens, and the facts are cut with `…`. The second row
+  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the time;
+  the output tokens and `esc to stop` follow (`Thinking… · 14s · ↓ 180 tokens
+  · esc to stop`). Developer mode puts the run's facts before the time: the
+  step (`step 4`, never against `--max-steps`), the attempt from the second
+  one, the phase with its cycle and the tests seen. When the line is narrow
+  the hint goes first, then the tokens, and in developer mode the facts are
+  cut with `…`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
   10:00`. On a session's first turn, a third row shows the past runs the
   progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
   ✓`.
-- **Thinking.** `✻ Thought for 1.2s`, then the first 3 rows of the
-  thinking (40 with `/verbose`, none with `/thinking off`), wrapped to
-  the width. An intermediate message prints as Markdown after `●`; the
+- **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
+  mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
+  width. An intermediate message prints as Markdown after `●`; the
   last one is held, prints at the next step, and at the end only when it
   differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`
-  exits 1 without failing); how its approval ended; and up to 3 lines of
-  its output (20 with `/verbose`), then `… +N lines (/expand T.C)` (a
-  single line left prints instead). `/verbose` adds the call's arguments
-  and images print as `▪ image/png · 312 KB · not shown`. Escape
+  exits 1 without failing); how its approval ended; and the first line of
+  its output with `+N lines (/expand T.C)` on the same row (a second line
+  prints instead of a count of one). Only the mark carries the color (`✓`
+  green, `✗` red, `⊘` yellow); the rest of the row is the default color, with
+  the duration and tags dim. A call that failed, or that ran and exited with
+  another code than 0, shows up to 3 lines, the first in red for a failure;
+  developer mode shows 3 lines for every call and `/verbose` 20, with the
+  call's arguments. Images print as `▪ image/png · 312 KB · not shown`. Escape
   sequences in the output are removed, so a tool cannot move the cursor,
   set the title or write the clipboard.
 - **Notices and reflections.** `↻` marks a retry: one line a turn, which for
@@ -390,7 +394,8 @@ when it has data:
 - `ctx 12k/32k` is the last measured prompt over the input limit, or just
   `ctx 12k` when no limit is known.
 - `step 4 attempt 2 phase fix` are the run's progress facts while a run is
-  active, never a percent or `n/max`.
+  active, never a percent or `n/max`. Developer mode shows them; the default
+  mode leaves them out.
 - `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of

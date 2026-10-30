@@ -8,7 +8,7 @@
 
 ## 交互式界面
 
-在终端中不带任务运行 `melo`，会打开一个聊天界面，实时显示工作过程：模型的思考、每次完成的工具调用、通知和反思，以及模型工作时显示步骤、阶段、正在运行的工具和运行进度信息的实时区域。回答以 Markdown 格式输出。输出内容保留在终端的滚动缓冲区中；输入框和状态栏留在底部。
+在终端中不带任务运行 `melo`，会打开一个聊天界面，它安静地记录工作过程，并让回答成为屏幕上最醒目的内容：每次思考一行，每次工具调用一行并附上其输出的第一行，还有通知和反思，以及一个说明 melo 正在做什么、已用多久、哪个工具在运行的实时区域。回答以 Markdown 格式输出。输出内容保留在终端的滚动缓冲区中；输入框和状态栏留在底部。开发者模式保留完整的记录（见[一轮的输出](#a-turns-output)）。
 
 ```text
 melo 0.1.0 · Qwen3-8B (/model to change)
@@ -18,10 +18,7 @@ Try: What is this project? · / commands · ctrl+d quit
 › What is in this folder?
 
 ✓ shell_exec  ls -1 · 0.1s · allowed
-  └ app.py
-    notes.txt
-    tests
-    … +1 lines
+  └ app.py · +3 lines (/expand 1.1)
 ● The folder holds app.py, notes.txt, tests and todo.md.
 ✻ Worked for 6.2s · 1 tool call · ↓ 412 tokens
 
@@ -96,7 +93,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/memory` | 查看模型工作窗口的副本及其计数、长期记忆后端和恢复限制；不调用模型，也不写入记忆。 |
 | `/copy [turn]` | 复制已存储回答的 Markdown，而不是终端中换行后的显示内容。不带编号时使用最近已完成且未撤销的轮次。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用参数、20 行输出、反思摘要及完整理由；不带参数时切换开关。 |
-| `/thinking [on\|off]` | 开启（默认）或关闭思考摘录；关闭时只保留 `Thought for 1.2s`；不带参数时切换开关。 |
+| `/thinking [on\|off]` | 开启或关闭思考摘录（默认关闭，开发者模式除外）；关闭时只保留 `Thought for 1.2s`；不带参数时切换开关。 |
 | `/stream [on\|off]` | 开启或关闭后续轮次的实时流式回复；不带参数时切换开关。见[流式回复](#streamed-replies)。 |
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
@@ -181,9 +178,9 @@ from-the-child
 ### 一轮的输出
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
-- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示运行信息：步骤（`step 4`，不与 `--max-steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期、已见到的测试和时间；后面是输出 token 数和 `esc to stop`。行宽不足时先省略提示，再省略 token 数，信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
-- **思考。**显示 `✻ Thought for 1.2s`，然后显示思考的前 3 行（使用 `/verbose` 时为 40 行，使用 `/thinking off` 时不显示），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
-- **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及最多 3 行输出（使用 `/verbose` 时为 20 行），之后显示 `… +N lines (/expand T.C)`（若只剩一行则直接显示该行）。`/verbose` 还显示调用参数，图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
+- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--max-steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
+- **思考。**显示 `✻ Thought for 1.2s`，只有一行。`/thinking on` 和开发者模式会再显示思考的前 3 行（`/verbose` 为 40 行），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
+- **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及输出的第一行，同一行末尾显示 `+N lines (/expand T.C)`（若只剩一行则直接显示该行，不显示计数）。只有标记带颜色（`✓` 绿色，`✗` 红色，`⊘` 黄色）；这一行的其余部分是默认颜色，耗时和标签是暗色。失败的调用，或运行后以非 0 退出码结束的命令，最多显示 3 行，失败时第一行为红色；开发者模式对每次调用显示 3 行，`/verbose` 显示 20 行并附上调用参数。图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试：每轮一行，服务器无法连接时这一行会保留它的 URL（`↻ Could not reach URL; trying again in 1 s`），延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会先输出尽力生成的结果，再用平实的话说明发生了什么、该怎么做：`✗ Could not reach the model server at URL.`，其下是 `Start it, then /retry.`。第一行是共享表中该状态的标题（`Ran out of steps (30).`、`Stopped: the same calls kept repeating.`），并附上有帮助的原因（URL、模型、失败检查的错误）；第二行是操作建议，使用默认颜色。页脚此时显示 `✻ Stopped after 14s` 而不是 `Worked for`，且不显示为零的工具调用次数。直接模式仍在标准错误上输出 `melo: run ended with status …` 这一行。
 
@@ -201,7 +198,7 @@ from-the-child
 - `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
   本地服务器在距上次请求超过一分钟后还会显示 `idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
 - `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
-- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。
+- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。开发者模式显示它们，默认模式不显示。
 - `tasks 1 running 2 queued`：仅在能访问任务存储时出现；有任务在等待（例如等待审批）时追加 `1 held`。
 
 状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。

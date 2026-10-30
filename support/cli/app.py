@@ -685,6 +685,7 @@ class InteractiveApp:
                 stream_lines=min(
                     STREAM_LIVE_LINES, max(0, self.app.output.get_size().rows - 14)
                 ),
+                developer=self.renderer.developer,
             )
         else:
             activity = self.controller.activity or ""
