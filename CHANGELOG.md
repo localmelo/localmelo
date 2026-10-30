@@ -267,7 +267,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   picture does not lie on its original. All of it is Core Animation in the app (no timer) and
   CSS in the console (no script), and stops under Reduce Motion (`prefers-reduced-motion` in the
   console), in Low Power Mode, when the Mac runs hot, while the window or Melo is hidden or
-  covered and while the screen sleeps. ([#NN])
+  covered and while the screen sleeps. ([#292])
 
 - Chats say who they are. A model that is told nothing answers "who are you?" with the
   assistant it was trained as. The terminal chat, the web console and the macOS app now tell
@@ -2278,6 +2278,7 @@ earlier milestones.
 [#289]: https://github.com/localmelo/localmelo/pull/289
 [#290]: https://github.com/localmelo/localmelo/pull/290
 [#291]: https://github.com/localmelo/localmelo/pull/291
+[#292]: https://github.com/localmelo/localmelo/pull/292
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
