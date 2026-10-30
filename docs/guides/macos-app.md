@@ -29,14 +29,16 @@ start` or `localmelo stopped`, and offers **Try Again**, which starts a new gate
 `~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. A problem never shows a dialog and never closes the app. The
 window and the web view use the console's canvas colour, so a dark window does not flash white.
 
+The menu-bar item is Melo's head, a template image that the system tints for a light bar, a dark bar and the open menu. Idle, it is the head alone. While something runs, the number running sits beside it, counting the console's chats, tasks, direct runs and terminal chats (the count of the console's header chip). While a chat or a task waits for your answer to a tool approval, a dot appears beside the head. All of it comes from the app's 2-second health check, so an approval shows within one poll. VoiceOver and the hover tooltip say it in words (`localmelo, nothing running`, `localmelo, 3 running` or `localmelo, waiting for your approval`), and the start of a wait is announced. The menu starts with what runs (`Nothing running`, `3 running`) and, while an approval waits, **Waiting for your approval**, which opens the window on that chat or task. Below them are **Open localmelo**, **Settings…** (Command-comma in the app menu too; it opens the console's settings), **Sign In Again** and **Quit localmelo**. If the mark is missing from the bundle, the item shows the text `localmelo` instead.
+
+The app's icon is drawn once. `macos/mark.svg` is the only drawing of Melo's head (a placeholder drawn in-house, not final artwork). The build copies it into the bundle for the menu-bar item and, before it signs the bundle, renders `LocalMelo.icns` from it with `sips` and `iconutil`, which ship with macOS: the head in paper white on a deep sage tile. The plist's `CFBundleIconFile` names it, so the Dock, Spotlight and every dialog, the quit dialog included, show it instead of the generic icon.
+
 Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
 startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
 20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
 reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
 first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
-quitting always asks before stopping the gateway and any running tasks. The menu-bar item reads `localmelo` when nothing runs
-and `localmelo · 3` when three things run, counting the console's chats, tasks, direct runs and terminal chats (the count of the
-console's header chip), read with the app's 2-second health check. The quit dialog names what would stop, for example
+quitting always asks before stopping the gateway and any running tasks. The quit dialog names what would stop, for example
 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`; direct runs and terminal chats
 belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background
 service, `melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
