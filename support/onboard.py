@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -399,9 +400,10 @@ _NO_EMBEDDING_LOCAL = (
 
 def _print_probe_failed(exc: ProbeError, *, blank_line: bool = True) -> None:
     """The failed-check lines, shared by first run and the wizard."""
-    prefix = "\n" if blank_line else ""
-    print(f"{prefix}  Probe failed: {exc}")
-    print(f"  {_SAVING_EMBEDDING_OFF}")
+    if blank_line:
+        print()
+    _say(f"Probe failed: {exc}", indent=2)
+    _say(_SAVING_EMBEDDING_OFF, indent=2)
 
 
 def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> bool:
@@ -472,17 +474,18 @@ def _question(prompt: str, default: str = "") -> str:
     return input(f"{prompt}{suffix}: ").strip() or default
 
 
-def _choose(prompt: str, letters: str, default: str) -> str:
+def _choose(prompt: str, letters: str, default: str, *, invalid: str = "") -> str:
     """Ask *prompt* until the answer's first letter is one of *letters*.
 
     Enter chooses *default*; a whole word (``retry``, ``save anyway``)
-    counts by its first letter.
+    counts by its first letter. *invalid* is what an unknown answer is told,
+    where the prompt names its keys otherwise than by their letters.
     """
     while True:
         answer = input(prompt).strip().lower() or default
         if answer[0] in letters:
             return answer[0]
-        print(f"  Type {', '.join(letters[:-1])} or {letters[-1]}.")
+        print(invalid or f"  Type {', '.join(letters[:-1])} or {letters[-1]}.")
 
 
 def _home_path(path: str) -> str:
@@ -490,6 +493,39 @@ def _home_path(path: str) -> str:
     if path == home or path.startswith(home + os.sep):
         return "~" + path[len(home) :]
     return path
+
+
+def _columns() -> int | None:
+    """The terminal's width in cells; None when output is not a terminal."""
+    try:
+        return os.get_terminal_size(sys.stdout.fileno()).columns
+    except (OSError, ValueError):
+        return None
+
+
+def _say(text: str, *, indent: int = 0, hang: int = 0) -> None:
+    """Print *text* wrapped at word boundaries to the terminal's width.
+
+    Continuation rows start *indent* + *hang* cells in. A word longer than a
+    row (a URL) stays whole. Without a terminal the text is printed as it
+    is, one line for a pipe or a log.
+    """
+    width = _columns()
+    if width is None:
+        print(" " * indent + text)
+        return
+    print(
+        "\n".join(
+            textwrap.wrap(
+                text,
+                max(width - 1, 20),
+                initial_indent=" " * indent,
+                subsequent_indent=" " * (indent + hang),
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+        )
+    )
 
 
 def _port(url: str) -> str:
@@ -502,20 +538,36 @@ def _start_a_server() -> str:
     return "omlx serve or ollama serve" if sys.platform == "darwin" else "ollama serve"
 
 
+def _servers_named() -> str:
+    """Examples of a model server, for the line that says what the first run needs."""
+    mac = sys.platform == "darwin"
+    return "oMLX, Ollama, LM Studio…" if mac else "Ollama, LM Studio, vLLM…"
+
+
 class ModelChoiceError(Exception):
     """Several models are served, none is known to be loaded, and none was named."""
+
+
+def _kind(model: str) -> str:
+    """What a listed id names: ``chat``, ``embedding`` or ``reranking``."""
+    if "rerank" in model.lower():
+        return "reranking"
+    return "embedding" if discovery.is_embedding_model(model) else "chat"
 
 
 def _choose_model(url: str, models: list[str]) -> str:
     """The model to use: asked from *models*, unless it is the one chat model.
 
-    With several chat models the default is the one the server says is
-    loaded; if it does not say, there is no default and Enter asks again.
-    Without a terminal an empty answer then raises :class:`ModelChoiceError`.
+    Chat models are listed first, an embedding or reranking model is tagged
+    and is never the default. With several chat models the default is the
+    one the server says is loaded; if it does not say, there is no default
+    and Enter asks again. Without a terminal an empty answer then raises
+    :class:`ModelChoiceError`.
     """
-    chat = [model for model in models if discovery.is_chat_model(model)]
+    chat = [model for model in models if _kind(model) == "chat"]
     if len(models) == 1 and chat:
         return models[0]
+    listed = chat + [model for model in models if model not in chat]
     # Only a choice between chat models needs to know which are in memory.
     loaded = (
         asyncio.run(discovery.loaded_models(url))
@@ -523,28 +575,32 @@ def _choose_model(url: str, models: list[str]) -> str:
         else discovery.LoadedModels()
     )
     print(f"Models on {url}:")
-    for i, model in enumerate(models, 1):
-        print(f"  [{i}] {model}{'  (loaded)' if model in loaded.ids else ''}")
+    for i, model in enumerate(listed, 1):
+        tags = [] if model in chat else [_kind(model)]
+        tags += ["loaded"] if model in loaded.ids else []
+        suffix = f"  ({', '.join(tags)})" if tags else ""
+        print(f"  [{i}] {model}{suffix}")
     if not chat:
-        print(
-            "  These look like embedding or reranking models; chat needs a chat model."
+        _say(
+            "These look like embedding or reranking models; chat needs a chat model.",
+            indent=2,
         )
-    pick = discovery.pick_model(models, loaded)
-    default = str(models.index(pick) + 1) if pick else ""
+    pick = discovery.pick_model(chat or listed, loaded)
+    default = str(listed.index(pick) + 1) if pick else ""
     if len(chat) > 1 and not default and loaded.needs_key:
-        print(f"  {discovery.NO_STATUS_KEY_NOTE}")
+        _say(discovery.NO_STATUS_KEY_NOTE, indent=2)
     while True:
         raw = _question("Model", default)
         if not raw:
             if not sys.stdin.isatty():
                 raise ModelChoiceError(discovery.NO_DEFAULT_MODEL)
-            print(f"  {discovery.NO_DEFAULT_HINT}")
-        elif raw.isdigit() and 1 <= int(raw) <= len(models):
-            return models[int(raw) - 1]
+            _say(discovery.NO_DEFAULT_HINT, indent=2)
+        elif raw.isdigit() and 1 <= int(raw) <= len(listed):
+            return listed[int(raw) - 1]
         elif raw in models:
             return raw
         else:
-            print(f"  Type a number from 1 to {len(models)}, or a model id.")
+            _say(f"Type a number from 1 to {len(listed)}, or a model id.", indent=2)
 
 
 def _spell_omlx(cfg: config.Config) -> None:
@@ -627,9 +683,9 @@ async def save_chat_server(
     try:
         config.save(cfg)
     except (OSError, config.ConfigError) as exc:
-        print(f"Could not save {_home_path(config.CONFIG_PATH)}: {exc}")
+        _say(f"Could not save {_home_path(config.CONFIG_PATH)}: {exc}")
         return False
-    print(f"Saved to {_home_path(config.CONFIG_PATH)} (melo setup changes it).")
+    _say(f"Saved to {_home_path(config.CONFIG_PATH)} (melo setup changes it).")
     return True
 
 
@@ -651,13 +707,13 @@ def _offer_embedding(
     if not candidates:
         if ollama is None:
             ollama = asyncio.run(discovery.is_ollama(url))
-        print(_NO_EMBEDDING_OLLAMA if ollama else _NO_EMBEDDING_LOCAL)
+        _say(_NO_EMBEDDING_OLLAMA if ollama else _NO_EMBEDDING_LOCAL)
         return None, ollama
     candidate = discovery.recommend_embedding(candidates)
     assert candidate is not None  # candidates is not empty
     answer = _choose(f"Use {candidate} for long-term memory? [Y/n]: ", "yn", "y")
     if answer == "n":
-        print(_EMBEDDING_OFF)
+        _say(_EMBEDDING_OFF)
         return None, ollama
     if ollama is None:
         ollama = asyncio.run(discovery.is_ollama(url))
@@ -675,8 +731,9 @@ def _offer_embedding(
 def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
-    A server found on this machine prefills the URL; the model is chosen
-    from the server's list. Only ``GET <url>/models`` is sent, and
+    The first line says what the first run needs: a model server. A server
+    found on this machine prefills the URL; the model is chosen from the
+    server's list. Only ``GET <url>/models`` is sent, and
     ``GET /api/version`` once when saving, to tell Ollama apart. When the
     check fails the user may retry, start without saving, or quit
     (None). EOFError and KeyboardInterrupt reach the caller.
@@ -686,13 +743,15 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     raises :class:`_FullMenuError` before anything is saved.
     """
     urls = discovery.detect_urls()
+    if not ask_keep:
+        _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     if ask_keep and (found is None or not found.models):
         raise _FullMenuError()
     keep = False
     if found is not None and found.models:
         count = len(found.models)
-        print(
+        _say(
             f"Found a model server at {found.url} "
             f"({count} model{'' if count == 1 else 's'})."
         )
@@ -702,12 +761,12 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
                 raise _FullMenuError(found)
             keep = True
     elif found is not None:
-        print(f"A model server at {found.url} answered, but {found.problem}.")
+        _say(f"A model server at {found.url} answered, but {found.problem}.")
         default_url = found.url
     else:
         if urls:
             ports = ", ".join(_port(url) for url in urls)
-            print(
+            _say(
                 f"No model server found on this computer (looked at ports {ports}). "
                 f"Start one (for example {_start_a_server()}), or enter its URL."
             )
@@ -716,7 +775,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         default_url = urls[0] if overridden and urls else _FIRST_RUN_URL
 
     while True:
-        url = default_url if keep else _question("Model server URL", default_url)
+        url = default_url if keep else _question("Server URL", default_url)
         keep = False
         try:
             if found is not None and found.models and url == found.url:
@@ -730,19 +789,27 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
             reason = str(exc)
         if not reason:
             break
-        print(f"✗ {url}: {reason}.")
-        choice = _choose("[r]etry, [s]tart without saving, [q]uit [r]: ", "rsq", "r")
+        _say(f"✗ {url}: {reason}.", hang=2)
+        choice = _choose(
+            "Enter tries again · s starts without saving · q quits: ",
+            "rsq",
+            "r",
+            invalid="  Press Enter, s or q.",
+        )
         if choice == "q":
             return None
         if choice == "s":
             model = _question("Model name", "default")
-            print("Not saved: melo asks again next time.")
+            _say("Not saved: melo asks again next time.")
             return FirstSetup(url=url, model=model, saved=False)
         default_url = url
 
     model = _choose_model(url, models)
     count = len(models)
-    print(f"✓ {url} lists {count} model{'' if count == 1 else 's'}; using {model}.")
+    _say(
+        f"✓ {url} lists {count} model{'' if count == 1 else 's'}; using {model}.",
+        hang=2,
+    )
     embedding_model, ollama = _offer_embedding(url, model, models, ollama=None)
     saved = asyncio.run(
         save_chat_server(

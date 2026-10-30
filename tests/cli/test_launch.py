@@ -280,6 +280,8 @@ def test_with_no_config_the_first_run_saves_and_the_session_uses_the_config() ->
     faked.first.assert_called_once_with()
     assert (choice.backend.model, choice.backend.source) == ("m", "saved")
     assert choice.cfg is not None and choice.checked
+    # The first run has just said how long-term memory is added.
+    assert choice.backend.memory_told
 
 
 def test_a_server_started_anyway_is_used_unsaved_with_the_chat_model_first() -> None:
@@ -287,6 +289,7 @@ def test_a_server_started_anyway_is_used_unsaved_with_the_chat_model_first() -> 
     choice = _choice(Faked(first=unsaved).choose())
     assert (choice.backend.base_url, choice.backend.model) == (URL, "typed")
     assert choice.backend.source == "unsaved" and not choice.checked
+    assert not choice.backend.memory_told  # the memory question was never asked
     choice = _choice(Faked(first=unsaved).choose(chat_model="M"))
     assert choice.backend.model == "M"
 

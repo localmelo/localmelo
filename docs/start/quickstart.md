@@ -163,38 +163,35 @@ A configuration file saves the backends, so that `melo`, `melo "<task>"`
 and the gateway work without `--url`.
 
 For a local server, run `melo` in a terminal. With no configuration yet, it
-looks for a model server on this computer (oMLX on port 8000, Ollama on
-11434), asks for its URL (press Enter to accept the one it found) and for a
-model from the server's list, saves
-`~/.cache/localmelo/config.toml` and opens the interactive UI. When the list
-holds several chat models and the server says which are in memory (oMLX,
-Ollama), they are marked `(loaded)` and Enter chooses the first of them, so
-it does not load a large model that is not in memory. When it does not say
-(a server with an API key answers 401, others have no such route) or none is
-loaded, there is no default: type the number of the model to use, because a
-model that is not loaded yet can take minutes and a lot of memory to load.
-Enter alone asks again, and with the answers piped in, an empty answer is an
-error. With one chat model there is nothing to choose:
+first says what it needs, a model server on this computer. It then looks for
+one (oMLX on port 8000, Ollama on 11434), asks for its URL (press Enter to
+accept the one it found) and for a model from the server's list, saves
+`~/.cache/localmelo/config.toml` and opens the interactive UI. The list shows
+chat models first. An embedding or reranking model is tagged `(embedding)` or
+`(reranking)` and is never the default. When the list holds several chat
+models and the server says which are in memory (oMLX, Ollama), they are
+marked `(loaded)` and Enter chooses the first of them, so it does not load a
+large model that is not in memory. When it does not say (a server with an API
+key answers 401, others have no such route) or none is loaded, there is no
+default: type the number of the model to use, because a model that is not
+loaded yet can take minutes and a lot of memory to load. Enter alone asks
+again, and with the answers piped in, an empty answer is an error. With one
+chat model there is nothing to choose:
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Model server URL [http://127.0.0.1:11434/v1]:
+Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
-╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
-│            saved as the default                                          │
-│ workspace  ~/demo-project                                                │
-│ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo setup adds one             │
-│ session    new                                                           │
-╰──────────────────────────────────────────────────────────────────────────╯
-  / commands · esc stop · ctrl+d quit
+melo 0.1.0 · qwen3:8b (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
 ```
 
-The title shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0.
+The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` shows the server, tools, memory and session.
 
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one

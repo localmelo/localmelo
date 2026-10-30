@@ -1,14 +1,15 @@
 """Default mode and developer mode (#186): the tier table and what ``-h`` shows.
 
 ``melo -h`` is the short help (20 lines); developer mode and ``-h all`` print every
-option, command and setting. The mode decides only what help prints; every option
-parses in both modes.
+option, command and setting. The mode decides what help prints and how much the
+startup banner shows; every option parses in both modes.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest import mock
@@ -28,6 +29,9 @@ from localmelo.support.option_tiers import (
     USER,
 )
 from localmelo.tests.cli.test_direct_mode import _main
+from localmelo.tests.cli.test_e2e_pty import Melo
+from localmelo.tests.cli.test_e2e_pty import melo as melo
+from localmelo.tests.cli.test_e2e_pty import stub as stub
 
 # Adding a user option is a deliberate change: update this number with it.
 USER_OPTION_COUNT = 11
@@ -344,3 +348,23 @@ def test_the_worker_help_says_a_failed_check_exits_4() -> None:
     """The worker help tells a launcher's author when Check: lines run and what a failure does."""
     text = " ".join(command_words.help_text("worker").split())
     assert "Check: lines run when the model is done, and a failed check exits 4" in text
+
+
+# -- the banner ----------------------------------------------------------------
+
+
+def test_developer_mode_keeps_the_banner_box_and_default_mode_shows_three_rows(
+    melo: Callable[..., Melo],
+) -> None:
+    from_box = melo("--developer")
+    from_box.see("Ask melo")
+    text = from_box.text()
+    assert "╭─ melo" in text and "tools      4 built-in (3 ask first)" in text
+    assert "esc stop" in text and "Try: What is this project?" not in text
+    assert from_box.quit() == 0
+    welcome = melo()
+    welcome.see("Ask melo")
+    text = welcome.text()
+    assert "╭─" not in text and "tools      " not in text
+    assert "(/model to change)" in text and "Try: What is this project?" in text
+    assert welcome.quit() == 0

@@ -12,14 +12,9 @@ prints as Markdown. What it prints stays in the terminal's scrollback; the
 input box and a status bar stay at the bottom.
 
 ```text
-╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1                    │
-│ workspace  ~/demo-project                                                │
-│ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo setup adds one             │
-│ session    new                                                           │
-╰──────────────────────────────────────────────────────────────────────────╯
-  / commands · esc stop · ctrl+d quit
+melo 0.1.0 · Qwen3-8B (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
 
 › What is in this folder?
 
@@ -36,6 +31,13 @@ input box and a status bar stay at the bottom.
 ────────────────────────────────────────────────────────────────────────────
   Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?         ask
 ```
+
+The welcome is three rows: the version and the model, with how to change it;
+the folder melo works in; and one thing to try, with the keys for commands and
+for quitting. It shows the model's server in a row of its own only when the
+model is not the saved default. Warnings follow it, and `/status` shows the
+server, tools, memory and session. In developer mode (`--developer`, or
+`[ui] mode = "developer"`) the welcome is a box of every row.
 
 It needs a terminal: stdin and stdout must both be terminals and `TERM`
 must not be `dumb`. Otherwise `melo` prints this on stderr and exits with
@@ -75,15 +77,19 @@ The first of these that applies:
    `⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. No saved backend: the [first-run](#first-run) questions, then the UI.
 
-The banner's title shows the package version, and on a git checkout the short
-commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
-backend, a second line says where they come from (`from --url (not
-saved)`, `saved as the default`) and, when melo took the one model the server says is loaded out of several,
-`the loaded one of N; /model lists them`. The server is called `oMLX` when the
-config file says `omlx` or a model listing of the server did, and otherwise
-`OpenAI-compatible server` (Ollama, MLC LLM and SGLang keep their names); a
-saved server is listed after the banner, so the banner shows what the file
-says, unless the run already listed the server (the first run does).
+The welcome's first row shows the package version, and on a git checkout the
+short commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line.
+When the model is not the saved default, a row after the folder gives the
+server's URL and where it comes from (`from --url (not saved)`,
+`not saved; melo asks again next time`) and, when melo took the one model the
+server says is loaded out of several,
+`the loaded one of N; /model lists them`. A server that does not answer gets
+the warning below the welcome instead. `/status` calls the server `oMLX` when the config file says `omlx` or
+a model listing of the server did, and otherwise `OpenAI-compatible server`
+(Ollama, MLC LLM and SGLang keep their names). Developer mode's box has a
+model row with that name; a saved server is listed after the box, so the box
+shows what the file says, unless the run already listed the server (the first
+run does).
 
 ### Keys
 
@@ -346,15 +352,24 @@ happens without the explicit `/copy` command.
   and images print as `▪ image/png · 312 KB · not shown`. Escape
   sequences in the output are removed, so a tool cannot move the cursor,
   set the title or write the clipboard.
-- **Notices and reflections.** `↻` marks a retry, with its delay counting
+- **Notices and reflections.** `↻` marks a retry: one line a turn, which for
+  a server that cannot be reached keeps its URL
+  (`↻ Could not reach URL; trying again in 1 s`), with its delay counting
   down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
   notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
   Read the test before editing. (2.3s)`; `/verbose` adds its summary and
   whole rationale, and `asked twice` when it was; an unreadable one says
   whether the run continues.
 - **The answer** prints as Markdown after `●`. A run that did not complete
-  prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
-  `Is the model server running at URL?` for a server that does not answer.
+  prints its best effort, then what happened and what to do, in plain words:
+  `✗ Could not reach the model server at URL.` and, under it,
+  `Start it, then /retry.` The first line is the status's title from the
+  shared table (`Ran out of steps (30).`,
+  `Stopped: the same calls kept repeating.`) with the reason that helps (the
+  URL, the model, the error of a failed check), and the second is the action,
+  in the default color. The footer then reads `✻ Stopped after 14s` instead of
+  `Worked for`, without a count of zero tool calls. Direct mode keeps its
+  `melo: run ended with status …` line on stderr.
 
 ### The status bar
 
@@ -506,8 +521,9 @@ starts new, without creating an empty row. `melo -r REF` resolves an ID,
 a prefix of at least four characters, or an exact case-insensitive title;
 multiple matches, or a title/message search fallback, open the picker.
 An unknown reference exits 2. The startup choice, including the `-r` picker,
-happens before the banner: a chosen chat is labelled `"TITLE" (resumed)`;
-Esc or an empty list gives a new-session banner. `-c` and `-r` cannot be
+happens before the banner: the recap names a chosen chat (`◆ Resumed "TITLE"`,
+and developer mode's box labels it `"TITLE" (resumed)`); Esc or an empty list
+gives a new-session banner. `-c` and `-r` cannot be
 combined, or used with a task or `melo serve`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest
@@ -553,8 +569,9 @@ model, it asks once more whether to use it. Later runs go straight in.
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
-Model server URL [http://127.0.0.1:8000/v1]:
+Server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
 No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo setup.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
@@ -583,14 +600,16 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
-- A server that lists several models shows them as a numbered list and asks
-  `Model [N]:`; type a number or an id. With several chat models, a loaded
-  one is marked `(loaded)` and is the default; when the server does not say
-  which are loaded, the prompt is `Model:` with no default and Enter alone
-  asks again (`Type the number of the model to use. …`). Without a terminal
-  an empty answer then exits 2 with an error. `/backend` asks the same
-  way. A server that lists only such models is shown the same
-  way, with a line saying that chat needs a chat model.
+- A server that lists several models shows them as a numbered list, chat
+  models first, and asks `Model [N]:`; type a number or an id. An embedding
+  or reranking model is tagged `(embedding)` or `(reranking)` and is never
+  the default. With several chat models, a loaded one is marked `(loaded)` and
+  is the default; when the server does not say which are loaded, the prompt is
+  `Model:` with no default and Enter alone asks again
+  (`Type the number of the model to use. …`). Without a terminal an empty
+  answer then exits 2 with an error. `/backend` asks the same way. A server that lists only embedding or
+  reranking models is shown the same way, with a line saying that chat needs a
+  chat model. The hints are wrapped to the terminal's width at word boundaries.
 - An Ollama server, one that answers `GET /api/version` with
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
   `[ollama]` table's `chat_url` and `chat_model`; the banner then says
@@ -611,16 +630,17 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
-  `[r]etry, [s]tart without saving, [q]uit [r]:`. `r` asks for the URL again, with
-  the one you typed as the default; `s` asks `Model name [default]:` and
-  opens the UI without saving (`Not saved: melo asks again next time.`);
-  `q` exits with code 0. The reasons are `connection refused`,
+  `Enter tries again · s starts without saving · q quits:`. Enter asks for the
+  URL again, with the one you typed as the default; `s` asks
+  `Model name [default]:` and opens the UI without saving
+  (`Not saved: melo asks again next time.`); `q` exits with code 0. The reasons are `connection refused`,
   `no answer in 5 s`, `HTTP 401` or `HTTP 403` with
   `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`,
   another `HTTP` status (a redirect names its target, which melo does not
   follow), `the reply is not a model list`, `the reply could not be read`,
   `not a URL` and `it lists no models`.
 - An option is chosen by its first letter, so `s`, `start` and
-  `start without saving` are the same answer; another answer asks again.
+  `start without saving` are the same answer (and `r` or `retry` is Enter);
+  another answer asks again.
 - Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;
   Ctrl+C prints the same and exits with 130.

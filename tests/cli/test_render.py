@@ -349,89 +349,189 @@ def test_a_blank_answer_says_so() -> None:
     assert "● (no answer text)" in Turn().finish(result="  ").text()
 
 
+_UNREACHABLE = (
+    f"cannot reach the model server at {URL}. Start it, or run melo to set one up. "
+    "(ConnectError: All connection attempts failed)"
+)
+
+
 @pytest.mark.parametrize(
-    ("status", "error", "mark", "hint"),
+    ("status", "error", "mark", "headline", "action"),
     [
         (
             "provider_error",
             "POST /chat/completions failed: ConnectError: refused",
             "✗",
-            f"Is the model server running at {URL}?",
+            f"Could not reach the model server at {URL}.",
+            "Start it, then /retry.",
         ),
         (
             "provider_error",
-            f"cannot reach the model server at {URL}. Start it, or run melo to set "
-            "one up. (ConnectError: All connection attempts failed)",
+            _UNREACHABLE,
             "✗",
-            f"Is the model server running at {URL}?",
+            f"Could not reach the model server at {URL}.",
+            "Start it, then /retry.",
         ),
         (
             "provider_error",
             "POST /chat/completions failed: ReadTimeout: x",
             "✗",
-            "may still be loading the model.",
+            "The model server did not answer in time.",
+            "It may still be loading the model. /retry tries again.",
         ),
         (
             "provider_error",
             "POST /chat/completions failed with HTTP 404: no",
             "✗",
-            "The server does not know the model 'stub-model'; check the name (/model lists the models it has).",
+            "The model server does not know the model 'stub-model'.",
+            "Check the name (/model lists the models it has).",
         ),
         (
             "provider_error",
             "POST /chat/completions failed with HTTP 401: key",
             "✗",
-            'Turn the key off in the server (oMLX: "Allow inference without API key").',
+            "The model server requires an API key.",
+            "localmelo sends none to local servers. Turn the key off in the server "
+            '(oMLX: "Allow inference without API key").',
         ),
         (
             "provider_error",
             "POST /chat/completions failed with HTTP 400: tools",
             "✗",
-            "if it says the model does not support tools",
+            "The model server refused the request: HTTP 400: tools.",
+            "If it says the model does not support tools, choose one that does.",
+        ),
+        (
+            "provider_error",
+            "POST /chat/completions failed with HTTP 500: boom",
+            "✗",
+            "Could not get an answer from the model server: HTTP 500: boom.",
+            f"/status checks the model server at {URL}; /retry tries again.",
         ),
         (
             "budget_exhausted",
             "Max steps reached",
             "⚠",
-            "/retry tries again, or quit and run melo -c --steps 60 for more steps.",
+            "Ran out of steps.",
+            "/retry tries again; for more steps, quit and run melo -c --steps 60.",
         ),
         (
             "stuck",
             "repeated",
             "⚠",
-            "The model repeated itself; rephrase the request, or /retry.",
+            "Stopped: the same calls kept repeating.",
+            "Rephrase the request, or /retry.",
         ),
         (
             "failed",
             "empty replies",
             "⚠",
-            "The model returned only empty replies; /retry, or try another model.",
+            "The model returned only empty replies.",
+            "/retry, or try another model.",
+        ),
+        (
+            "failed",
+            "post_plan refused",
+            "⚠",
+            "A check stopped the run: post_plan refused.",
+            "/retry, or try another model.",
         ),
         (
             "gate_stopped",
-            "stop",
+            "Trying the same command again would not help",
             "⚠",
-            "melo judged that another attempt would not help.",
+            "Stopped after reflection: Trying the same command again would not help.",
+            "melo judged that another attempt would not help. "
+            "Rephrase the request, or /retry.",
+        ),
+        (
+            "context_budget_exceeded",
+            "1.2k tokens over",
+            "⚠",
+            "Context budget exceeded: 1.2k tokens over.",
+            "Reduce the task or increase the configured context window; then /retry.",
+        ),
+        (
+            "setup_error",
+            "MCP server 'notes' exited (code 1)",
+            "✗",
+            "Tools could not start: MCP server 'notes' exited (code 1).",
+            "/mcp shows why.",
         ),
         (
             "crashed",
             "KeyError: x",
             "✗",
-            "This is a bug in localmelo; the log is ~/.cache/localmelo/logs/cli.log.",
+            "Something went wrong inside localmelo: KeyError: x.",
+            "This is a bug; the log is ~/.cache/localmelo/logs/cli.log.",
         ),
     ],
 )
-def test_a_run_that_did_not_complete_prints_its_status_line_and_hint(
-    status: str, error: str, mark: str, hint: str | None
+def test_a_run_that_did_not_complete_says_what_happened_and_what_to_do(
+    status: str, error: str, mark: str, headline: str, action: str
 ) -> None:
     text = Turn().finish(status, error=error, result="partial").text()
     assert "● Best effort: partial" in text
-    assert f"{mark} melo: run ended with status {status}: " in text
-    if hint:
-        assert " ".join(hint.split()) in " ".join(text.split())
-    else:
-        assert "\n  " not in text.split("melo: run ended")[1].split("✻")[0]
-    assert "✻ Worked for" in text
+    assert f"{mark} {headline} {action} ✻ Stopped after 14s" in " ".join(text.split())
+    # Direct mode's machine line and the status word are not for this screen.
+    assert "melo: run ended" not in text and status not in text
+    assert "Worked for" not in text
+
+
+def test_a_server_that_cannot_be_reached_reads_in_two_rows_that_are_not_cut() -> None:
+    turn = Turn()
+    turn.event(
+        "run.started", query="q", max_steps=30, workspace_root="/w", approval=True
+    )
+    for delay in (1.0, 4.0):
+        turn.event(
+            "notice",
+            kind="retry",
+            message=f"Model request failed; retrying in {delay:g} s: {_UNREACHABLE}",
+            detail={"request_attempt": 1, "delay_s": delay, "status_code": None},
+            step=1,
+            attempt=1,
+        )
+    # Only the first retry prints; the live row counts down the second.
+    assert turn.renderer.live is not None and turn.renderer.live.retry_until == 104.0
+    turn.finish("provider_error", error=_UNREACHABLE)
+    assert turn.text().split("\n")[2:] == [
+        f"↻ Could not reach {URL}; trying again in 1 s",
+        f"✗ Could not reach the model server at {URL}.",
+        "  Start it, then /retry.",
+        "✻ Stopped after 14s",
+        "",
+    ]
+
+
+def test_the_retry_line_gives_up_its_wait_before_its_url() -> None:
+    rows = {}
+    for width in (80, 60, 30):
+        turn = Turn(width)
+        turn.event(
+            "notice",
+            kind="retry",
+            message=f"Model request failed; retrying in 1 s: {_UNREACHABLE}",
+            detail={"request_attempt": 1, "delay_s": 1.0},
+            step=1,
+            attempt=1,
+        )
+        [rows[width]] = [row for row in turn.text().split("\n") if "↻" in row]
+    assert rows[80] == f"↻ Could not reach {URL}; trying again in 1 s"
+    assert rows[60] == f"↻ Could not reach {URL}"  # the wait goes, the URL stays
+    assert cells(rows[30]) <= 30
+
+
+def test_a_run_that_ran_out_of_steps_names_the_limit() -> None:
+    turn = Turn()
+    turn.event(
+        "run.started", query="q", max_steps=30, workspace_root="/w", approval=True
+    )
+    turn.finish("budget_exhausted", error="Max steps reached", n_tool=29)
+    assert (
+        "⚠ Ran out of steps (30).\n  /retry tries again; for more steps," in turn.text()
+    )
+    assert "✻ Stopped after 14s · 29 tool calls\n" in turn.text()
 
 
 def test_ollama_and_cloud_hints() -> None:
@@ -440,7 +540,10 @@ def test_ollama_and_cloud_hints() -> None:
         .finish("provider_error", error="POST /api/chat failed with HTTP 404: x")
         .text()
     )
-    assert "ollama pull stub-model fetches it." in text
+    assert (
+        "Check the name (/model lists the models it has). ollama pull stub-model fetches it."
+        in " ".join(text.split())
+    )
     text = (
         Turn(key="openai", label="OpenAI", base_url="", key_env="OPENAI_API_KEY")
         .finish(
@@ -448,7 +551,16 @@ def test_ollama_and_cloud_hints() -> None:
         )
         .text()
     )
-    assert "The server refused the key in OPENAI_API_KEY;" in text
+    assert (
+        "The server refused the key in OPENAI_API_KEY. melo setup changes the backend."
+        in " ".join(text.split())
+    )
+    text = (
+        Turn(key="openai", label="OpenAI", base_url="")
+        .finish("provider_error", error=_UNREACHABLE)
+        .text()
+    )
+    assert "✗ Could not reach OpenAI.\n  Check the network, then /retry.\n" in text
 
 
 @pytest.mark.parametrize(
@@ -610,22 +722,37 @@ def _tools() -> list[ToolInfo]:
 
 
 def _banner(
-    width: int = 80, workspace: str = "/tmp/demo-project", **backend: Any
+    width: int = 80,
+    workspace: str = "/tmp/demo-project",
+    *,
+    developer: bool = True,
+    version: str = "0.1.0",
+    yolo: bool = False,
+    symbols: Symbols = UNICODE,
+    **backend: Any,
 ) -> str:
     out = RecordingOut(width)
     out.print(
         banner(
-            version="0.1.0",
+            version=version,
             backend=_backend(**backend),
             workspace=workspace,
             tools=_tools(),
             memory=True,
-            yolo=False,
+            yolo=yolo,
             width=width,
-            symbols=UNICODE,
+            symbols=symbols,
+            developer=developer,
         )
     )
     return out.text()
+
+
+def _welcome(width: int = 80, **kwargs: Any) -> list[str]:
+    """The rows of the default banner, without the blank rows around them."""
+    text = _banner(width, developer=False, **kwargs)
+    assert text.startswith("\n") and text.endswith("\n\n")
+    return text.strip("\n").split("\n")
 
 
 def test_the_banner_box() -> None:
@@ -642,6 +769,50 @@ def test_the_banner_box() -> None:
     assert lines[7] == "  / commands · esc stop · ctrl+d quit"
 
 
+def test_the_welcome_is_three_rows_that_start_the_conversation() -> None:
+    assert _welcome() == [
+        "melo 0.1.0 · stub-model (/model to change)",
+        "/tmp/demo-project",
+        "Try: What is this project? · / commands · ctrl+d quit",
+    ]
+    assert _welcome(symbols=ASCII)[2].endswith("? - / commands - ctrl+d quit")
+
+
+@pytest.mark.parametrize("width", [80, 60, 44])
+def test_the_welcome_keeps_three_rows_and_wraps_none(width: int) -> None:
+    rows = _welcome(width, version="0.1.0 (6a400ec)")
+    assert len(rows) == 3 and all(cells(row) <= width for row in rows), rows
+    assert "(/model to change)" in rows[0] and "ctrl+d quit" in rows[2]
+    assert rows[2].startswith("Try: What is this project?")
+
+
+def test_the_welcome_names_the_server_only_for_a_model_that_is_not_saved() -> None:
+    for source in ("config", "saved"):
+        assert len(_welcome(source=source)) == 3
+    wide = _welcome(120, source="--base-url", listed=3)
+    assert wide[2] == (
+        f"{URL} · from --url (not saved) · the loaded one of 3; /model lists them"
+    )
+    assert _welcome(80, source="--base-url", listed=3)[2] == (
+        f"{URL} · from --url (not saved)"
+    )
+    assert _welcome(44, source="unsaved")[2] == URL  # the longer notes give way
+
+
+def test_the_welcome_keeps_the_warnings_and_cleans_the_model_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    rows = _welcome(
+        workspace=os.path.realpath(tmp_path), yolo=True, model=f"qwen{OSC_TITLE}3"
+    )
+    assert rows[0] == "melo 0.1.0 · qwen3 (/model to change)" and rows[1] == "~"
+    assert rows[3:] == [
+        "⚠ YOLO: tools run without asking.",
+        "⚠ The workspace is ~: file tools can reach every file in it.",
+    ]
+
+
 def test_the_banner_names_the_configured_embedding_model() -> None:
     text = _banner(key="vllm", label="vLLM", embedding="vllm · Qwen3-Embedding-0.6B")
     assert "│ memory     long-term memory · vllm · Qwen3-Embedding-0.6B" in text
@@ -650,6 +821,12 @@ def test_the_banner_names_the_configured_embedding_model() -> None:
 def test_the_banner_without_an_embedding_names_the_wizard() -> None:
     text = _banner(key="vllm", label="vLLM")
     assert "│ memory     no long-term memory · melo setup adds one" in text
+
+
+def test_the_banner_after_the_first_run_does_not_repeat_how_to_add_memory() -> None:
+    text = _banner(key="vllm", label="vLLM", memory_told=True)
+    assert "│ memory     no long-term memory " in text
+    assert "adds one" not in text
 
 
 def test_the_banner_cleans_an_embedding_model_id() -> None:
@@ -682,7 +859,7 @@ def test_a_boxed_banner_wraps_the_memory_text_inside_the_box() -> None:
     ids=["no-embedding", "configured"],
 )
 def test_a_narrow_banner_keeps_the_memory_text_in_full(
-    backend: dict[str, str],
+    backend: dict[str, Any],
 ) -> None:
     text = _banner(width=45, **backend)
     assert "╭" not in text
@@ -761,7 +938,7 @@ def test_a_best_effort_and_its_error_are_cleaned() -> None:
         .text()
     )
     assert "\x1b" not in text
-    assert "failed with HTTP 400: bad" in text
+    assert "refused the request: HTTP 400: bad." in text
 
 
 def test_a_tool_name_from_the_model_is_cleaned() -> None:
@@ -1178,7 +1355,9 @@ def test_a_held_message_that_differs_prints_before_the_status() -> None:
         .finish("failed", error="post_plan refused", result="")
         .text()
     )
-    assert text.index("● My plan was to read it.") < text.index("melo: run ended")
+    assert text.index("● My plan was to read it.") < text.index(
+        "A check stopped the run"
+    )
 
 
 # ── Reflections ──
@@ -1391,11 +1570,11 @@ def test_a_stale_turn_takes_its_status_from_turn_finished() -> None:
         )
         .text()
     )
-    assert "melo: run ended with status crashed" in text
-    assert "melo stopped before this turn finished" in text
+    assert "melo: run ended" not in text and "crashed" not in text
+    assert "The process was killed or the computer lost power." in text
     # A crash cause is a warning, not a bug: yellow, not the red failed mark.
-    assert "⚠ melo: run ended with status crashed" in text
-    assert "✗ melo: run ended" not in text
+    assert "⚠ Interrupted: melo stopped unexpectedly." in text
+    assert "✗ Interrupted" not in text
 
 
 def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:

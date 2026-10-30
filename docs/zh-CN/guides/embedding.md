@@ -156,7 +156,7 @@ embedding_model = "nomic-embed-text"
 
 ## 会有哪些变化
 
-- 交互式界面横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）；没有嵌入后端时显示 `no long-term memory · melo setup adds one`（在 `--url` 会话中则显示 `--embedding-base-url adds one`）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
+- `/status` 和开发者模式横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）。没有嵌入后端时，`/status` 显示 `no long-term memory (no embedding backend)`，横幅显示 `no long-term memory · melo setup adds one`（在 `--url` 会话中则显示 `--embedding-base-url adds one`；首次运行刚说明过怎么加，所以它的横幅不再重复）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
 - 新建的长期记忆存储初始为空。运行结束和步骤完成时，符合条件的条目可能被接纳；已有的纯文本条目不会重新生成嵌入。
 - 更换模型会改变向量空间。已存向量的维度与新模型不同时，该向量会被跳过，因此旧条目不再参与排序，而不会破坏召回。要回收空间，请停止 localmelo 并删除 `~/.cache/localmelo/memory/long_term.db*`；见[重置记忆](memory.md#reset-memory)。
 - 网页工作区也有连接设置。见[网页工作区](web-console.md#web-workspace)。
@@ -165,7 +165,7 @@ embedding_model = "nomic-embed-text"
 
 ## 检查是否生效
 
-- 在终端启动 `melo`，查看横幅中的记忆行。
+- 在终端启动 `melo` 并输入 `/status`：其记忆行会写出嵌入模型。
 - `/status` 可用后，其 `memory` 行来自相同的文本。
 - 运行一个使用工具的任务并结束，然后运行一个相关任务。持久化可以让已接纳的条目在后续运行中可用；召回还取决于模式、启用的触发点和相关匹配。见[跨运行保留记忆](memory.md#keep-memory-between-runs)。
 - 要在自己的语料上衡量模型，使用 `melo-retrieve --retriever embedding …`；见[离线检索](../../reference/retrieval.md)（英文）。
