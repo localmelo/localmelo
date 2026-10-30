@@ -166,13 +166,22 @@ function title(session) {
   return isMain(session) ? "Main chat" : session?.title || newTitle();
 }
 
-/** The newest card the person has not seen: a card from the chat open now counts as seen. */
+// The newest card id this page has heard of, and the one before it: a card from the open side
+// chat counts as seen only when everything before it was.
+let newestCard = 0;
+let cardBefore = 0;
+
+/**
+ * The newest card the person has not seen, or null. Opening the main chat sees them all; a card
+ * from the side chat open now is seen too, unless an earlier card is still unread.
+ */
 function unreadCard() {
   const card = S.main?.last_card;
   if (!card || typeof card.id !== "number") return null;
   const seen = Number(stored(KEY + "-seen-card").id) || 0;
+  if (card.id > newestCard) [cardBefore, newestCard] = [newestCard, card.id];
   if (card.id <= seen) return null;
-  if (mainActive() || card.source_id === S.activeId) {
+  if (mainActive() || (seen >= cardBefore && card.source_id === S.activeId)) {
     persist(KEY + "-seen-card", { id: card.id });
     return null;
   }

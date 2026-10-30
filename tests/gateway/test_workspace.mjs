@@ -4218,3 +4218,21 @@ test('in default mode worker history is linked from the empty main chat once a r
   await runs.run('init()');
   assert.deepEqual([runs.element('workers-link').hidden, runs.element('welcome-workers').hidden], [true, false]);
 });
+
+test('a card from the open side chat is seen there, unless an earlier one is still unread', async () => {
+  let last = {id: 5, ts: NOW, at: NOW, state: 'done', source_id: 'a', source_kind: 'chat', title: 'Plan the trip', line: ''};
+  const h = harness(mainRoutes({'GET /sessions': () => ({
+    sessions: [session('a', {title: 'Plan the trip', updated_at: NOW - 30}), session('b', {title: 'Fix CI', updated_at: NOW - 60})],
+    main: mainSession({last_card: last}), machine: null, has_more: false,
+  })}));
+  h.local.setItem('localmelo-console-view', JSON.stringify({id: 'a'}));
+  await h.run('init()');
+  const dot = () => findNode(h.element('main-chat-row'), (node) => /attention-dot/.test(node.innerHTML ?? ''));
+  assert.equal(dot(), null, 'Its own run coming back is no news in the chat that ran it');
+  last = {...last, id: 6, source_id: 'b', title: 'Fix CI'};
+  await h.run('refreshList()');
+  assert.ok(dot(), 'Another side chat\'s result is news');
+  last = {...last, id: 7, source_id: 'a', title: 'Plan the trip'};
+  await h.run('refreshList()');
+  assert.ok(dot(), 'The unread one keeps the dot');
+});

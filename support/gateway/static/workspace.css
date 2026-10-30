@@ -299,10 +299,11 @@ button:hover:not(:disabled) {
 .list-day { margin: 12px 4px 2px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; }
 .list-day:first-child { margin-top: 2px; }
 .header-trail { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.header-trail strong { min-width: 0; }
 .header-parent { flex: none; border: 0; background: none; padding: 0; color: var(--accent); font-size: 13px; }
 .header-parent:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
 .header-parent::after { content: "›"; margin-left: 6px; color: var(--muted); text-decoration: none; display: inline-block; }
-.welcome > .welcome-link { margin-top: -10px; }
+.welcome > #welcome-workers { margin-top: -12px; }
 .welcome-link a { color: var(--accent); font-size: var(--text-small); }
 /* Cards: what a side chat or a task sent back. Events, so they sit apart from the turns. */
 .day-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; }
