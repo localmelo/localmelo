@@ -1115,7 +1115,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   so scripts keep working; a direct run, `--output-format json` and workers never ask.
   In the UI, `/backend`'s model question is the list `/model` shows (it was numbered
   rows and a typed number). The inline list the first run's model question uses now
-  serves them all ([#NN]).
+  serves them all ([#266]).
 
 - Quitting the macOS app asks only when something would stop. With no chat or task running and
   nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task
@@ -2053,6 +2053,7 @@ earlier milestones.
 [#263]: https://github.com/localmelo/localmelo/pull/263
 [#264]: https://github.com/localmelo/localmelo/pull/264
 [#265]: https://github.com/localmelo/localmelo/pull/265
+[#266]: https://github.com/localmelo/localmelo/pull/266
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
