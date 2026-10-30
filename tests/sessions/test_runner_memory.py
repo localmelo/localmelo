@@ -170,6 +170,27 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
     assert [t.user_text for t in await store.list_turns(session_id)] == [ASKS]
 
 
+async def test_a_stated_fact_reaches_the_model_as_kept_with_the_instruction_not_to_file_it(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    events = await chat(memory, store, stub, tmp_path / "a", "Call me Ray.")
+    (said,) = memory_events(events)
+    assert [r["text"] for r in said["remembered"]] == ["You go by Ray."]
+    (request,) = stub.requests
+    assert request["messages"][-1]["content"] == (
+        f"Call me Ray.\n\n{BLOCK_HEADER}\nmelo kept from this message: “Call me "
+        "Ray.” (saved; nothing else to save)"
+    )
+    system = request["messages"][0]["content"]
+    assert "localmelo keeps those notes by itself; you do not." in system
+    assert "Never save what the user says about themselves in a file or with code" in (
+        system
+    )
+    # The stored turn keeps only what was typed.
+    session_id = (await store.list_sessions())[0].id
+    assert [t.user_text for t in await store.list_turns(session_id)] == ["Call me Ray."]
+
+
 async def test_the_chat_b_request_carries_a_paraphrase_with_vectors(
     store: SessionStore, stub: Any, tmp_path: Path
 ) -> None:
