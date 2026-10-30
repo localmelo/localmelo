@@ -69,7 +69,7 @@ Safari opens them apart from your own windows, with an orange address field. The
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. |
 | `browser_wait` | Wait (30 seconds at most) for the page to load, or for some text to appear or go. |
-| `browser_screenshot` | Take a picture of the page. You see it in the chat; the model gets only a note that it was taken. |
+| `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images, and the model gets only a note that it was taken. |
 
 A page reaches the model as one bounded block:
 
@@ -111,3 +111,9 @@ This is part 1 of browsing. Planned next, in this order: acting in your own sign
 | `This Safari's automation server lacks the tools melo needs` | Update macOS and Safari. |
 | A page reads as empty | It may need a sign-in or be built by scripts after loading; try `browser_wait`, or open it yourself. |
 | melo says it did not open a site | You answered no to the question about it; ask again and allow the site. |
+
+To see what Safari's automation server answers, with no model involved, run this from the checkout. It opens an automation window, reads one page, lists the tabs, takes a picture and closes; each line shows what came back, and a failure says what to turn on:
+
+```bash
+uv run python -m localmelo.support.browser.probe
+```

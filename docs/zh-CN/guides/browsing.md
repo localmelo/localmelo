@@ -81,7 +81,7 @@ Safari 把它们与你自己的窗口分开打开，地址栏是橙色的。它�
 | `browser_back` | 在该标签页中后退一页。 |
 | `browser_tabs` | 列出 melo 的标签页、切换或关闭其中一个。 |
 | `browser_wait` | 等待（最多 30 秒）页面加载完成，或某段文字出现或消失。 |
-| `browser_screenshot` | 给页面拍一张图。你能在对话中看到；模型只得到一条“已拍摄”的说明。 |
+| `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片，模型只得到一条“已拍摄”的说明。 |
 
 页面以一个有界的块交给模型：
 
@@ -129,3 +129,9 @@ elements:
 | `This Safari's automation server lacks the tools melo needs` | 更新 macOS 和 Safari。 |
 | 页面读出来是空的 | 可能需要登录，或页面在加载后由脚本生成；试试 `browser_wait`，或自己打开它。 |
 | melo 说没有打开某个网站 | 你对该网站的询问回答了“否”；再问一次并允许该网站。 |
+
+要在不涉及模型的情况下查看 Safari 的自动化服务器回答了什么，在检出目录中运行下面的命令。它会打开一个自动化窗口，读取一个页面，列出标签页，拍一张图并关闭；每一行显示返回的内容，失败时会说明要打开什么：
+
+```bash
+uv run python -m localmelo.support.browser.probe
+```
