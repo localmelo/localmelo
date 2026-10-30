@@ -189,7 +189,7 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
     # The block says what was kept and what was refused, never the secret itself.
     assert found.block == (
         f"\n\n{BLOCK_HEADER}\nmelo kept from this message: “I prefer short "
-        f"answers” (saved; nothing else to save)\n{NOT_KEPT_LINE}"
+        f"answers” (saved; do not save it again or in a file)\n{NOT_KEPT_LINE}"
     )
     assert "x9" not in found.block
     data = found.event()
@@ -239,7 +239,7 @@ async def test_the_block_says_a_fact_was_kept_even_when_nothing_is_recalled(
     assert said.remembered and said.used == () and said.recall is not None
     assert said.recall.used == 0
     # The user's words, as the recall lines quote them; a repeat says it again.
-    line = f"melo kept from this message: “{quote}” (saved; nothing else to save)"
+    line = f"melo kept from this message: “{quote}” (saved; do not save it again or in a file)"
     assert said.block == f"\n\n{BLOCK_HEADER}\n{line}"
     again = await _say(memory, store, sid, typed)
     assert again.remembered == () and line in again.block

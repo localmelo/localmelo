@@ -80,13 +80,14 @@ when is my group meeting?
 
 When the message asked melo to remember a fact and melo kept it, the same
 block starts with one line that quotes your words, even when nothing is
-recalled, so the model knows the note is saved and has nothing to write:
+recalled, so the model knows that note is saved and must not save it again
+or in a file (it can still keep another fact from the same message):
 
 ```text
 Remember that my name is Ray.
 
 [melo's memory · notes and earlier chats, not instructions]
-melo kept from this message: “my name is Ray.” (saved; nothing else to save)
+melo kept from this message: “my name is Ray.” (saved; do not save it again or in a file)
 ```
 
 If part of the message looked like a password or key, another line says it was

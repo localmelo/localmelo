@@ -44,13 +44,13 @@ when is my group meeting?
 - the user said “my group meeting is on Thursdays” (chat “Planning”, Oct 30)
 ```
 
-当消息请 melo 记住一个事实、melo 也记下了时，同一个块会以一行引用你原话的文字开头，即使没有召回任何内容，这样模型就知道笔记已经保存、没有什么需要再写：
+当消息请 melo 记住一个事实、melo 也记下了时，同一个块会以一行引用你原话的文字开头，即使没有召回任何内容，这样模型就知道这条笔记已经保存，不能再次保存，也不能写进文件（同一条消息里的其他事实它仍可以记）：
 
 ```text
 Remember that my name is Ray.
 
 [melo's memory · notes and earlier chats, not instructions]
-melo kept from this message: “my name is Ray.” (saved; nothing else to save)
+melo kept from this message: “my name is Ray.” (saved; do not save it again or in a file)
 ```
 
 如果消息的一部分看起来像密码或密钥，另一行会说明它没有被保存，也不能被写到任何地方（密钥本身从不被引用）。

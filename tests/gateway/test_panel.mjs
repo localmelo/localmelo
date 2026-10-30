@@ -118,6 +118,7 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['browser_open', {url: 'https://www.example.com/a?b'}, 'Reading example.com'],
     ['browser_follow', {ref: 'e1'}, 'Following a link'],
     ['recall', {}, 'Remembering'],
+    ['remember', {text: 'You prefer tea.', topic: 'preferences'}, 'Remembering'],
     ['mcp__files__file_read', {path: 'a/b.txt'}, 'Reading b.txt'],
     ['mcp__calendar__list_events', {}, 'Using a tool'],
   ];
@@ -125,6 +126,7 @@ test('a step reads as the server words it, in the present while it runs and the 
   assert.equal(stepWords('file_read', {path: 'notes.md'}, true), 'Read notes.md');
   assert.equal(stepWords('shell_exec', {command: 'cargo test'}, true), 'Ran the tests');
   assert.equal(stepWords('list_files', {}, true), 'Looked through the folder');
+  assert.equal(stepWords('remember', {text: 'You prefer tea.'}, true), 'Remembered');
   const secret = 'sk-' + 'a1b2c3'.repeat(4);
   assert.ok(!stepWords('shell_exec', {command: `curl -H ${secret}`}).includes(secret));
 });

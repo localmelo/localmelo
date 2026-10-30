@@ -1514,7 +1514,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`Remembered: … · Undo`): the turn's `turn.memory` event is sent again, whole, with it.
   The chat's instructions now tell the model to keep notes with `remember`, never to ask
   whether to remember something, never to save notes in a file or with code, and to
-  acknowledge a note in one short sentence. The tool asks no approval. Direct runs,
+  acknowledge a note in one short sentence. The line that tells the model a requested
+  note is saved now reads `(saved; do not save it again or in a file)`, so it can still
+  keep another fact from the same message. While the tool runs, the panel and the
+  activity line say `Remembering`, then `Remembered`. The tool asks no approval. Direct runs,
   workers, the terminal chat and the benchmark have no `remember` tool and are unchanged
   ([#NN]).
 

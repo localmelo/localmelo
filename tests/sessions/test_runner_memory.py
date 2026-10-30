@@ -216,7 +216,7 @@ async def test_a_request_to_remember_reaches_the_model_as_kept_without_a_tool_ca
     (request,) = stub.requests
     assert request["messages"][-1]["content"] == (
         f"{typed}\n\n{BLOCK_HEADER}\nmelo kept from this message: “my name is "
-        "Ray.” (saved; nothing else to save)"
+        "Ray.” (saved; do not save it again or in a file)"
     )
     system = request["messages"][0]["content"]
     assert "keep it with remember" in system and "Never ask whether" in system

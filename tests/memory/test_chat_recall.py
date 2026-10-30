@@ -246,7 +246,7 @@ async def test_the_block_names_what_was_kept_before_what_was_recalled(
         kept, recalled = found.block.split("\n")[3:]
         assert kept == (
             "melo kept from this message: “my group meeting is on Thursdays at "
-            "3 pm.” (saved; nothing else to save)"
+            "3 pm.” (saved; do not save it again or in a file)"
         )
         assert recalled.startswith("- the user said “My group meeting is on Thu")
         assert found.recall is not None and found.recall.used == len(found.used) == 1

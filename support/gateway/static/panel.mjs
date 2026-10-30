@@ -58,7 +58,7 @@ export function stepWords(name, args, done = false) {
   if (tool === 'list_files') return say('Looking through', 'Looked through', base(a.path) || 'the folder');
   if (tool === 'shell_exec') return TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? say('Running', 'Ran', 'the tests') : say('Running', 'Ran', 'a command');
   if (tool === 'python_exec') return say('Running', 'Ran', 'Python');
-  if (tool === 'recall' || tool === 'search_memory') return say('Remembering', 'Remembered');
+  if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('Remembering', 'Remembered');
   if (tool === 'browser_open') {
     let host = '';
     try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }
