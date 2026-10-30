@@ -33,9 +33,11 @@ import {
   liveFacts,
   newTurn,
   newView,
+  nextAction,
   printable,
   reflectionLine,
   statusLine,
+  statusMark,
   statusText,
   toolState,
   turnDuration,
@@ -346,8 +348,9 @@ function syncUI() {
   document.title = `localmelo · ${session ? title(session) : "New chat"}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
   const storeBanner = $("store-banner");
   const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
-  setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : (!S.online ? "Could not reach the gateway. Check that the gateway is running." : ""));
+  setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : "");
   storeBanner.hidden = !storeBanner.textContent;
+  $("offline-banner").hidden = S.online;
   const modelBanner = $("model-banner");
   setTextIfChanged(modelBanner, S.health?.configured === false ? "No model is configured yet. Open connection settings to connect one." : "");
   modelBanner.hidden = !modelBanner.textContent;
@@ -990,46 +993,81 @@ function actionsNode(turn) {
   return actions;
 }
 
+// The glyph a status line starts with: the terminal's, in the status's colour. It is
+// decoration for a screen reader; the title says the same in words.
+function statusMarkNode(severity, stopped = false) {
+  const mark = el("span", "status-mark", statusMark(stopped ? "stopped" : severity));
+  mark.dataset.severity = severity;
+  mark.setAttribute("aria-hidden", "true");
+  return mark;
+}
+
+// What to check or do about a run that ended badly; it names only the buttons the card offers.
+function failureHint(turn, can) {
+  const own = [];
+  if (can.continue) own.push("Continue picks up where it stopped.");
+  if (can.retry) own.push("Try again starts over.");
+  switch (turn.status) {
+    case "provider_error": {
+      const backend = S.health?.model?.backend;
+      return ["mlc", "ollama", "vllm", "sglang"].includes(backend)
+        ? `Is the model server running at ${S.health?.model_server?.url_label || "the configured address"}? Start it, or open model settings to change the address.`
+        : "Check the API key and the model name in model settings.";
+    }
+    case "budget_exhausted": return ["melo used all its steps before it finished.", ...own].join(" ");
+    case "timeout": return ["The run took too long and was stopped.", ...own].join(" ");
+    case "stuck": return "melo repeated itself. Rephrase the request, or try again.";
+    case "failed": return "Try again, or rephrase the request.";
+    case "gate_stopped": return "melo judged that another attempt would not help. Rephrase the request, or try again.";
+    case "context_budget_exceeded": return "This chat no longer fits the model's context window. Start a new chat, or shorten the request.";
+    case "setup_error": return "An MCP server failed to start. Show tools lists what is set up; fix it, then try again.";
+    case "crashed": return "This is a bug in localmelo. Copy the details into a bug report. The log is in the terminal running melo --serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
+    default: return "";
+  }
+}
+
+// The row of next steps. The newest turn's first step is the filled button; the rest are links.
+function failureActions(turn, {stopped, newest, can, error}) {
+  const first = nextAction(turn.status, turn.cause);
+  const offered = [
+    ["continue", can.continue, "Continue", () => queueMessage("Continue the task from where you stopped.")],
+    ["retry", can.retry, "Try again", () => retryTurn(turn)],
+    ["settings", turn.status === "provider_error", "Open model settings", () => openSettings()],
+    ["tools", turn.status === "setup_error", "Show tools", () => drawer.open("tools")],
+    ["copy", !stopped, first === "copy" ? "Copy details" : "Copy error", async () => {
+      try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
+      catch { notify("Clipboard unavailable. Select the error text to copy it."); }
+    }],
+  ].filter(([, shown]) => shown);
+  const has = (key) => offered.some(([name]) => name === key);
+  const primary = !newest ? null : has(first) ? first : first === "continue" && has("retry") ? "retry" : null;
+  const actions = el("div", "failure-actions");
+  for (const [key, , label, run] of [...offered.filter(([name]) => name === primary), ...offered.filter(([name]) => name !== primary)]) {
+    const action = button(key === primary ? "primary-button" : "link-button", label, run);
+    if (key === "retry") {
+      action.disabled = retrying;
+      action.title = "Run this message again from the start. Files it changed stay changed.";
+    }
+    actions.append(action);
+  }
+  return actions;
+}
+
 function statusNode(turn) {
   const info = statusText(turn.status, turn.cause);
   const stopped = turn.status === "cancelled" || (turn.status === "crashed" && turn.cause === "crash");
+  const newest = S.view?.turns[S.view.turns.length - 1] === turn;
+  const can = {continue: canContinue(turn, newest), retry: canRetry(turn, newest)};
   const node = el("div", stopped ? "turn-status stopped-line" : "failure-card");
   node.dataset.severity = info.severity;
-  node.append(el("p", "failure-title", `${stopped ? "[-]" : info.severity === "error" ? "[x]" : "[!]"} ${info.title}.`));
+  const heading = el("p", "failure-title");
+  heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
+  node.append(heading);
   const error = String(turn.result?.error || turn.error || "");
   if (!stopped && error) node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
-  if (!stopped) {
-    let hint = "";
-    if (turn.status === "budget_exhausted") hint = "Continue gives it a new step budget; Try again starts over.";
-    if (turn.status === "stuck") hint = "melo repeated itself. Rephrase the request, or try again.";
-    if (turn.status === "setup_error") hint = "An MCP server failed to start.";
-    if (turn.status === "crashed" && turn.cause === "run") hint = "This is a bug in localmelo. The log is in the terminal running melo --serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
-    if (turn.status === "provider_error") {
-      const backend = S.health?.model?.backend;
-      hint = ["mlc", "ollama", "vllm", "sglang"].includes(backend)
-        ? `Is it running at ${S.health?.model_server?.url_label || "the configured server"}?`
-        : "Check the API key and the model name.";
-    }
-    if (hint) node.append(el("p", "failure-hint", hint));
-    if (turn.status === "provider_error") node.append(button("link-button", "Open settings", () => openSettings()));
-  }
-  const actions = el("div", "failure-actions");
-  const newest = S.view?.turns[S.view.turns.length - 1] === turn;
-  if (canContinue(turn, newest)) actions.append(button("link-button", "Continue", () => queueMessage("Continue the task from where you stopped.")));
-  if (canRetry(turn, newest)) {
-    const retry = button("link-button", "Try again", () => retryTurn(turn));
-    retry.disabled = retrying;
-    retry.title = "Run this message again from the start. Files it changed stay changed.";
-    actions.append(retry);
-  }
-  if (!stopped) {
-    actions.append(button("link-button", "Copy error", async () => {
-      try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
-      catch { notify("Clipboard unavailable. Select the error text to copy it."); }
-    }));
-  }
-  if (turn.status === "setup_error") actions.append(button("link-button", "Show tools", () => drawer.open("tools")));
-  node.append(actions);
+  const hint = stopped ? "" : failureHint(turn, can);
+  if (hint) node.append(el("p", "failure-hint", hint));
+  node.append(failureActions(turn, {stopped, newest, can, error}));
   if (!stopped) {
     const details = el("details", "failure-details");
     details.append(el("summary", "", "Details"));
@@ -1110,7 +1148,7 @@ function itemNode(item, turn, context = {}) {
       return node;
     }
     case "notice": {
-      const node = el("div", "notice-item", `[!] ${item.message}`);
+      const node = el("div", "notice-item", `${item.noticeKind === "retry" ? "↻" : "⚠"} ${item.message}`);
       node.dataset.kind = item.noticeKind || "";
       return node;
     }
@@ -1958,9 +1996,17 @@ function turnWork(turn, sessionId, render, empty) {
   }
   if (turn.answer) nodes.push(answerNode(turn.answer));
   if (turn.status) {
-    nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
+    const info = statusText(turn.status, turn.cause);
+    const line = el("p", "turn-status");
+    line.dataset.severity = info.severity;
+    line.append(statusMarkNode(info.severity), el("span", "", info.title));
+    nodes.push(line);
     const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
-    if (error) nodes.push(el("p", "failure-error", error));
+    if (error) {
+      const text = el("p", "failure-error", error);
+      text.dataset.severity = info.severity;
+      nodes.push(text);
+    }
   }
   return nodes;
 }
@@ -2279,6 +2325,15 @@ $("details-trigger").addEventListener("click", async () => {
   drawer.open();
 });
 $("stop-btn").addEventListener("click", stop);
+$("offline-retry").addEventListener("click", async () => {
+  const retry = $("offline-retry");
+  retry.disabled = true;
+  await refreshList();
+  try { setHealth(await api("/health")); } catch { /* still unreachable: the banner stays */ }
+  retry.disabled = false;
+  syncUI();
+  if (S.online && document.activeElement === retry) input.focus();
+});
 $("reconnect-btn").addEventListener("click", async () => {
   const id = S.activeId;
   if (!id || S.stream.status !== "paused") return;

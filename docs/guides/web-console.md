@@ -227,9 +227,18 @@ group and moves to **Allow once**. If approval details cannot be loaded, or
 arguments were truncated or converted, both allow buttons are disabled; you can
 reload the details, deny, or stop the run.
 
-A failed turn shows its error and details; the newest finished turn can offer
-**Try again**, and **Continue** when it has run tools and its status permits
-continuation. Stopped or interrupted turns use a neutral line instead.
+A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
+plain title, the first line of the error and a hint. On the newest turn one next
+step is the filled button and the other actions are links: **Open model
+settings** after a model server error, **Continue** after running out of steps
+or timing out (**Try again** when no tool ran), **Try again** when the run was
+stuck, failed or stopped after reflection, **Show tools** when tools could not
+start, and **Copy details** after a crash inside localmelo. **Try again** and
+**Continue** are offered on the newest finished turn only, and Continue needs a
+turn that ran tools. **Copy error** copies one line and the run id for a bug
+report; the technical fields stay under **Details**. Stopped or interrupted
+turns use a neutral line (■). The banner shown when the page cannot reach the
+gateway has **Try again**.
 
 ## Persistence and limits
 

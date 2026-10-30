@@ -82,7 +82,7 @@
 
 卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt (125 bytes)?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在 Tasks 中为 **Allow for this task**）让该工具在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会警告它可以访问工作区之外的文件。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
 
-失败的轮次会显示错误及详情；最近完成的轮次可能提供 **Try again**，如果该轮次已运行工具且其状态允许继续，还可能提供 **Continue**。已停止或中断的轮次则使用中性提示行。
+失败的轮次会显示一张卡片：符号（错误为 ✗，警告为 ⚠）、简明的标题、错误的第一行和一条提示。最近的轮次用实心按钮给出一个下一步，其余操作以链接显示：模型服务器出错时为 **Open model settings**，步数用尽或超时后为 **Continue**（没有运行过工具时为 **Try again**），卡住、失败或反思后停止时为 **Try again**，工具无法启动时为 **Show tools**，localmelo 内部崩溃后为 **Copy details**。**Try again** 和 **Continue** 只在最近完成的轮次上提供，Continue 还要求该轮次已运行工具。**Copy error** 复制一行文字和运行 ID，便于提交错误报告；技术字段仍放在 **Details** 中。已停止或中断的轮次使用中性提示行（■）。页面连不上网关时，提示条带有 **Try again**。
 
 <a id="persistence-and-limits"></a>
 

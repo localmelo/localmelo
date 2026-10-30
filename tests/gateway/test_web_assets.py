@@ -435,6 +435,31 @@ def test_shell_buttons_have_no_native_title_tooltips() -> None:
     assert not re.findall(r"<button\b[^>]*\btitle=", page)
 
 
+def test_a_done_status_line_draws_in_the_success_colour() -> None:
+    css = _stylesheet()
+    assert re.search(
+        r'\.turn-status\[data-severity="ok"\]\s*\{[^}]*color:\s*var\(--ok\)', css
+    )
+
+
+def test_the_selected_chat_row_has_a_cue_that_is_not_only_a_colour() -> None:
+    css = _stylesheet()
+    active = re.search(r"\.session-item\.active\s*\{([^}]*)\}", css)
+    assert active and "box-shadow: inset 3px 0 0 var(--accent)" in active.group(1)
+    assert re.search(
+        r"\.session-item\.active \.session-title\s*\{[^}]*font-weight:\s*600", css
+    )
+
+
+def test_red_marks_an_error_and_nothing_milder_in_a_status_card() -> None:
+    css = _stylesheet()
+    for name in ("failure-error", "failure-hint", "approval-warning"):
+        rule = re.search(rf"(?m)^\.{name}\s*\{{([^}}]*)\}}", css)
+        assert rule and "--error" not in rule.group(1), name
+    assert re.search(r'\.failure-card\[data-severity="error"\] \.failure-error', css)
+    assert re.search(r'\.status-mark\[data-severity="error"\]\s*\{[^}]*--error', css)
+
+
 async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> None:
     page = (await client.get("/")).text
     bar = re.search(r'<div id="approval-bar".*?</div>', page, re.S)
@@ -442,3 +467,14 @@ async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> No
     assert "melo is waiting for your answer" in bar.group(0)
     go = r'<button\b[^>]*\bid="approval-go"[^>]*>\s*Review\s*</button>'
     assert re.search(go, bar.group(0))
+
+
+async def test_the_shell_offers_try_again_when_the_gateway_is_unreachable(
+    client: httpx.AsyncClient,
+) -> None:
+    page = (await client.get("/")).text
+    banner = re.search(r'<div\b[^>]*\bid="offline-banner"[^>]*>.*?</div>', page, re.S)
+    assert banner is not None and "hidden" in banner.group(0).split(">")[0]
+    assert "Could not reach the gateway" in banner.group(0)
+    retry = r'<button\b[^>]*\bid="offline-retry"[^>]*>\s*Try again\s*</button>'
+    assert re.search(retry, banner.group(0))

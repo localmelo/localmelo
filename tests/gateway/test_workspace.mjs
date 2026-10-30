@@ -18,7 +18,7 @@ import {setupRunning} from '../../support/gateway/static/running.mjs';
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
   formatBytes, formatDuration, formatPast, formatTokens, liveFacts, newTurn,
-  newView, reflectionLine, runElapsed, splitThinking, statusText, toolElapsed,
+  newView, nextAction, reflectionLine, runElapsed, splitThinking, statusMark, statusText, toolElapsed,
   toolState, workSummary,
 } = turns;
 
@@ -133,7 +133,7 @@ test('a tool call runs, asks for approval and finishes', () => {
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'shell_exec', status: 'success', error_category: 'none', output: 'a.py\n', output_chars: 5, error: '', duration_s: 4, images: [], approval: {request_id: 'req-1', allowed: true, reason: '', remember: true, origin: 'user'}, exit_code: 2});
   assert.equal(card.status, 'success');
   assert.equal(card.output, 'a.py\n');
-  assert.deepEqual(toolState(card), {state: 'success', mark: '[ok]', text: '4.0s · exit 2 · allowed for the session'});
+  assert.deepEqual(toolState(card), {state: 'success', mark: '✓', text: '4.0s · exit 2 · allowed for the session'});
 });
 
 test('an approval the turn withdrew leaves the call not run', () => {
@@ -158,7 +158,7 @@ test('a denied approval blocks the call and says why', () => {
   assert.equal(card.status, 'blocked');
   assert.deepEqual(view.grants, []);
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: '', duration_s: 0, images: [], approval: {request_id: 'req-1', allowed: false, reason: 'wrong file pick another', remember: false, origin: 'user'}, exit_code: null});
-  assert.deepEqual(toolState(card), {state: 'blocked', mark: '[-]', text: 'denied: wrong file pick another'});
+  assert.deepEqual(toolState(card), {state: 'blocked', mark: '⊘', text: 'denied: wrong file pick another'});
   assert.equal(deniedCount(turn), 1);
 });
 
@@ -352,11 +352,22 @@ test('tool output is cleaned and thinking is split as the terminal does', () => 
 
 test('a tool card that was cancelled shows how it ended', () => {
   const withdrawn = {status: 'cancelled', errorCategory: 'cancelled', approval: {origin: 'withdrawn'}, durationS: 3, exitCode: null};
-  assert.deepEqual(toolState(withdrawn), {state: 'cancelled', mark: '[ ]', text: 'not run'});
+  assert.deepEqual(toolState(withdrawn), {state: 'cancelled', mark: '◌', text: 'not run'});
   const stopped = {status: 'cancelled', errorCategory: 'cancelled', approval: null, durationS: 3.5, exitCode: null};
-  assert.deepEqual(toolState(stopped), {state: 'cancelled', mark: '[-]', text: 'stopped after 3.5s'});
+  assert.deepEqual(toolState(stopped), {state: 'cancelled', mark: '⊘', text: 'stopped after 3.5s'});
   const held = {status: 'running', startedTs: 10, durationS: null, approval: null, exitCode: null};
   assert.equal(toolState(held, {held: 'Resources', now: 20}).text, 'Waiting: Resources');
+});
+
+test('tool marks are the terminal glyphs, and a running call is a live dot', () => {
+  const mark = (status, options) => toolState({status, durationS: null, startedTs: 1, name: 'shell_exec', approval: null, exitCode: null}, options).mark;
+  assert.deepEqual(['running', 'waiting_approval'].map((status) => mark(status, {now: 2})), ['●', '●']);
+  assert.equal(mark('running', {held: 'Resources'}), '●', 'a held call is waiting, not failed');
+  assert.deepEqual(['error', 'timeout', 'crashed'].map((status) => mark(status)), ['✗', '✗', '✗']);
+  assert.deepEqual(['success', 'blocked', 'interrupted', 'not_run'].map((status) => mark(status)), ['✓', '⊘', '⊘', '◌']);
+  for (const status of ['running', 'success', 'error', 'blocked', 'cancelled', 'interrupted', 'not_run']) {
+    assert.doesNotMatch(mark(status), /[\[\]]/, `${status} has no bracket mark`);
+  }
 });
 
 // ── The page in a DOM double ──
@@ -1248,6 +1259,89 @@ test('failure controls copy bounded errors, continue without losing drafts and r
   h.context.stopped = stopped;
   assert.match(flatten(h.run('statusNode(stopped)')), /Stopped by you/);
   assert.doesNotMatch(flatten(h.run('statusNode(stopped)')), /Copy error|Details/);
+});
+
+test('every status maps to one next step or none', () => {
+  const steps = {
+    completed: null, cancelled: null, failed: 'retry', stuck: 'retry', gate_stopped: 'retry',
+    budget_exhausted: 'continue', timeout: 'continue', context_budget_exceeded: null,
+    provider_error: 'settings', setup_error: 'tools', crashed: 'copy',
+  };
+  for (const [status, step] of Object.entries(steps)) assert.equal(nextAction(status), step, status);
+  assert.equal(nextAction('crashed', 'run'), 'copy');
+  assert.equal(nextAction('crashed', 'crash'), null, 'an interrupted run is a neutral line');
+  for (const cause of ['user_stop', 'crash', 'shutdown', 'closed', 'takeover', 'park']) assert.equal(nextAction('cancelled', cause), null, cause);
+  assert.equal(nextAction('a_status_from_a_newer_version'), null);
+  assert.deepEqual(['ok', 'error', 'warn', 'stopped'].map(statusMark), ['✓', '✗', '⚠', '■']);
+});
+
+test('a failed turn draws a shared glyph, a plain title and one filled next step on the newest turn', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const make = (status, extra = {}, result = {}) => {
+    const turn = turns.newTurn(turnRow({id: `t-${status}`, turn: 2, status, result: {n_tool: 2, error: 'boom\nsecond line', ...result}, ...extra}));
+    h.state().view.turns = [turn];
+    h.context.turn = turn;
+    return h.run('statusNode(turn)');
+  };
+  const filled = (node) => findNode(node, (item) => item.tag === 'button' && item.className === 'primary-button');
+  const mark = (node) => findNode(node, (item) => item.className === 'status-mark');
+  for (const [status, glyph, label] of [
+    ['provider_error', '✗', 'Open model settings'], ['budget_exhausted', '⚠', 'Continue'], ['timeout', '⚠', 'Continue'],
+    ['stuck', '⚠', 'Try again'], ['failed', '⚠', 'Try again'], ['setup_error', '✗', 'Show tools'], ['crashed', '✗', 'Copy details'],
+  ]) {
+    const node = make(status);
+    assert.equal(mark(node).textContent, glyph, status);
+    assert.equal(mark(node).attributes['aria-hidden'], 'true');
+    assert.doesNotMatch(flatten(findNode(node, (item) => item.className === 'failure-title')), /\[[x!-]\]|\.$/, 'no bracket mark and no full stop');
+    assert.equal(filled(node)?.textContent, label, status);
+  }
+  assert.equal(filled(make('budget_exhausted', {}, {n_tool: 0}))?.textContent, 'Try again', 'Continue needs a run that used tools');
+  const old = turns.newTurn(turnRow({id: 'old', turn: 1, status: 'stuck'}));
+  h.state().view.turns = [old, turns.newTurn(turnRow({id: 'new', turn: 2}))];
+  h.context.turn = old;
+  assert.equal(filled(h.run('statusNode(turn)')), null, 'an older failure keeps its actions quiet');
+  const crash = make('crashed');
+  await findNode(crash, (item) => item.textContent === 'Copy details').click();
+  assert.equal(h.context.copied, 'melo: run ended with status crashed: boom second line\nrun run-1', 'the copied text is the same line as Copy error');
+  assert.equal(findNode(crash, (item) => item.textContent === 'Copy error'), null, 'one copy button, not two');
+  const stopped = make('cancelled', {cause: 'user_stop'});
+  assert.equal(stopped.className, 'turn-status stopped-line');
+  assert.equal(mark(stopped).textContent, '■');
+  assert.equal(filled(stopped), null, 'a stop is a neutral line');
+});
+
+test('the model server error says what to check for a local server and for a cloud one', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, model: {...health.model, backend: 'vllm'}, model_server: {url_label: '127.0.0.1:8500', reachable: false}};
+  h.context.turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: 'cannot reach the model server'}}));
+  assert.match(flatten(h.run('statusNode(turn)')), /Is the model server running at 127\.0\.0\.1:8500\?/);
+  h.state().health = {...health, model: {...health.model, backend: 'openai'}};
+  assert.match(flatten(h.run('statusNode(turn)')), /Check the API key and the model name in model settings/);
+});
+
+test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  for (const [status, severity] of [['completed', 'ok'], ['stuck', 'warn'], ['provider_error', 'error'], ['cancelled', 'stopped']]) {
+    h.context.turn = turns.newTurn(turnRow({status, cause: status === 'cancelled' ? 'user_stop' : 'run', result: {error: 'e'}}));
+    const nodes = h.run('turnWork(turn, "a", () => {}, "")');
+    const line = nodes.find((node) => node.className === 'turn-status');
+    assert.equal(line.dataset.severity, severity, status);
+  }
+});
+
+test('the gateway-offline banner offers Try again, which asks the gateway again', async () => {
+  let up = true;
+  const h = harness(baseRoutes({'GET /sessions': () => (up ? {sessions: [session('a')], machine: null, has_more: false} : new Error('down'))}));
+  await h.run('init()');
+  up = false;
+  await h.run('refreshList()');
+  assert.equal(h.element('offline-banner').hidden, false);
+  up = true;
+  await h.element('offline-retry').click();
+  assert.equal(h.element('offline-banner').hidden, true, 'the banner goes when the gateway answers');
 });
 
 test('earlier turns replay separately without disturbing current cursor or approvals', async () => {
