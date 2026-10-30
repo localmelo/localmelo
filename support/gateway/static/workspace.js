@@ -1163,28 +1163,42 @@ function approvalCard(request, view = chatApproval) {
   const tool = String(request.tool_name || "tool");
   const args = request.arguments || {};
   const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || "the workspace";
-  let title = `${tool} wants to run with these arguments:`;
+  const folder = workspace.replace(/\/+$/, "").split("/").pop() || workspace;
+  const scope = view.scope || "chat";
+  // A plain question, with the tool id in a caption and what "Allow for this chat" covers.
+  let title = `Let melo use ${tool}?`;
+  let caption = tool;
   let content = JSON.stringify(args, null, 2);
+  let covers = `using ${tool}`;
+  let what = "Arguments";
   if (tool === "shell_exec") {
-    title = `shell_exec wants to run a command in ${workspace}:`;
+    what = "Command";
+    title = `Run this command in ${folder}?`;
+    caption = `${tool} · ${workspace}`;
     content = typeof args.command === "string" ? args.command : JSON.stringify(args.command ?? "");
   } else if (tool === "python_exec") {
-    title = `python_exec wants to run Python in ${workspace}:`;
+    what = "Python code";
+    title = `Run this Python code in ${folder}?`;
+    caption = `${tool} · ${workspace}`;
     content = String(args.code ?? "");
   } else if (tool === "file_write") {
     const target = request.target;
     const path = target?.path_label || String(args.path ?? "the file");
     content = String(args.content ?? "");
-    title = target
-      ? target.exists
-        ? `file_write wants to overwrite ${path} (${formatBytes(target.size_bytes)}) with ${content.length} chars:`
-        : `file_write wants to create ${path} (${content.length} chars):`
-      : `file_write wants to write ${path} (checking target):`;
+    what = "File content";
+    covers = "writing files";
+    caption = target ? tool : `${tool} · checking the file`;
+    title = !target ? `Write ${path}?` : target.exists ? `Replace ${path} (${formatBytes(target.size_bytes)})?` : `Create ${path}?`;
   }
-  card.append(el("p", "approval-title", title));
+  card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   const lines = content.split("\n");
   const canFold = tool === "python_exec" || tool === "file_write";
-  card.append(el("pre", "approval-content", !canFold || state.showAll ? content : lines.slice(0, 20).join("\n")));
+  // A long command scrolls inside its box: make the box reachable and named for a keyboard user.
+  const body = el("pre", "approval-content", !canFold || state.showAll ? content : lines.slice(0, 20).join("\n"));
+  body.tabIndex = 0;
+  body.setAttribute("role", "group");
+  body.setAttribute("aria-label", what);
+  card.append(body);
   if (canFold && !state.showAll && lines.length > 20) {
     card.append(button("link-button", `Show all ${lines.length} lines`, () => {
       state.showAll = true;
@@ -1193,14 +1207,15 @@ function approvalCard(request, view = chatApproval) {
   }
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
-  const once = button("secondary-button", "Allow once", () => view.answer(request, state, "once"));
+  const once = button("primary-button", "Allow once", () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("secondary-button", `Allow every ${tool} call in this session`, () => view.answer(request, state, "session"));
+  const session = button("outline-button", `Allow for this ${scope}`, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
-  const deny = button("secondary-button", "Deny…", () => {
+  const deny = button("quiet-button", "Deny", () => {
     state.deny = true;
     actions.hidden = true;
+    grant.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
@@ -1208,11 +1223,15 @@ function approvalCard(request, view = chatApproval) {
   deny.dataset.approvalFocus = "deny";
   actions.append(once, session, deny);
   card.append(actions);
-  if (tool === "shell_exec" || tool === "python_exec") {
-    const kind = tool === "shell_exec" ? "shell command" : "Python code";
-    card.append(el("p", "approval-warning", `“Allow every” lets any ${kind} run without asking for the rest of this session. Commands can reach files outside ${workspace}.`));
-  }
-  const label = el("label", "", "Tell melo why (optional)");
+  const command = tool === "shell_exec" || tool === "python_exec";
+  const grant = el("p", "approval-warning", command
+    ? `“Allow for this ${scope}” lets any ${tool === "shell_exec" ? "shell command" : "Python code"} run without asking for the rest of this ${scope}. It can reach files outside ${workspace}.`
+    : `melo will not ask again before ${covers} in this ${scope}.`);
+  grant.id = `approval-scope-${id}`;
+  session.setAttribute("aria-describedby", grant.id);
+  card.append(grant);
+  const note = "Tell melo what to do instead (optional)";
+  const label = el("label", "", note);
   const reason = el("input", "deny-reason");
   reason.value = state.reason;
   reason.dataset.approvalFocus = "reason";
@@ -1223,17 +1242,19 @@ function approvalCard(request, view = chatApproval) {
     view.rerender();
   });
   reason.maxLength = 500;
-  reason.setAttribute("aria-label", "Tell melo why (optional)");
+  reason.setAttribute("aria-label", note);
   const counter = el("span", "deny-counter", `${state.reason.length} / 500`);
   reason.addEventListener("input", () => {
     state.reason = reason.value.slice(0, 500);
     counter.textContent = `${state.reason.length} / 500`;
   });
-  const confirm = button("secondary-button", "Deny", () => view.answer(request, state, "deny"));
-  const back = button("link-button", "Back", () => {
+  const confirm = button("outline-button", "Deny", () => view.answer(request, state, "deny"));
+  confirm.dataset.approvalConfirm = "";
+  const back = button("quiet-button", "Back", () => {
     state.deny = false;
     denyView.hidden = true;
     actions.hidden = false;
+    grant.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -1252,6 +1273,7 @@ function approvalCard(request, view = chatApproval) {
   denyView.append(label, counter, confirm, back);
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
+  grant.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false
@@ -2351,7 +2373,8 @@ document.addEventListener("keydown", (event) => {
     document.getElementById(`approval-card-${id}`)?.querySelector("[data-approval-deny]")?.focus();
     return;
   }
-  if (runningTurn() !== null) stop();
+  // Escape is for what is open; it stops work only from the composer, where the keyboard is for melo.
+  if (runningTurn() !== null && document.activeElement === input) stop();
 });
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();

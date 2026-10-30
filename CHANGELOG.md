@@ -973,6 +973,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   level and send buttons lose their native `title` tooltips and keep their
   `aria-label`. ([#NN])
 
+- The web console asks for an approval in plain words: a question such as
+  "Replace notes.txt (125 bytes)?", one filled "Allow once", an outlined "Allow
+  for this chat" that says what it covers, and a quiet "Deny" that asks what melo
+  should do instead. Escape stops a running turn only from the message box. ([#NN])
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`

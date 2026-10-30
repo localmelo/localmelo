@@ -433,3 +433,12 @@ def test_muted_text_has_a_rule_and_undone_turns_do_not_fade() -> None:
 def test_shell_buttons_have_no_native_title_tooltips() -> None:
     page = (webapp._STATIC / "index.html").read_text(encoding="utf-8")
     assert not re.findall(r"<button\b[^>]*\btitle=", page)
+
+
+async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> None:
+    page = (await client.get("/")).text
+    bar = re.search(r'<div id="approval-bar".*?</div>', page, re.S)
+    assert bar is not None
+    assert "melo is waiting for your answer" in bar.group(0)
+    go = r'<button\b[^>]*\bid="approval-go"[^>]*>\s*Review\s*</button>'
+    assert re.search(go, bar.group(0))

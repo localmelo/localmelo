@@ -463,6 +463,9 @@ function findNode(node, predicate) {
   return null;
 }
 
+const quietDeny = (card) => findNode(card, (node) => 'approvalDeny' in node.dataset);
+const confirmDeny = (card) => findNode(card, (node) => 'approvalConfirm' in node.dataset);
+
 class FakeEventSource {
   static instances = [];
   static reset() { FakeEventSource.instances = []; }
@@ -756,7 +759,7 @@ test('approval guard, denial keyboard and focus never allow by accident', async 
   h.run('S.view.pending.set("req1", request)');
   const card = h.run('approvalCard(request)');
   const once = findNode(card, (node) => node.textContent === 'Allow once');
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   assert.equal(h.context.document.activeElement, h.element('input'));
   assert.equal(card.attributes.role, 'region');
   assert.equal(once.disabled, true);
@@ -780,7 +783,7 @@ test('approval guard, denial keyboard and focus never allow by accident', async 
 });
 
 test('approval buttons post only their explicit choices and Escape closes denial', async () => {
-  for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow every shell_exec call in this session']]) {
+  for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow for this chat']]) {
     const h = harness(baseRoutes({'POST /approvals/req': {outcome: 'allowed'}}));
     await h.run('init()');
     h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
@@ -799,7 +802,7 @@ test('approval buttons post only their explicit choices and Escape closes denial
   const card = h.run('approvalCard(request)');
   h.run('approvalStates.get("deny").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   deny.click();
   const reason = findNode(card, (node) => node.className === 'deny-reason');
   let stopped = false;
@@ -810,6 +813,88 @@ test('approval buttons post only their explicit choices and Escape closes denial
   assert.equal(stopped, true);
   assert.equal(h.context.document.activeElement, deny);
   assert.equal(h.net.callsTo('/approvals/deny').length, 0);
+});
+
+test('an approval asks a plain question and puts the tool id in a caption', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const asks = [
+    ['shell_exec', {command: 'make test'}, null, 'Run this command in w?', 'shell_exec · ~/w'],
+    ['python_exec', {code: 'print(1)'}, null, 'Run this Python code in w?', 'python_exec · ~/w'],
+    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 125}, 'Replace a.txt (125 bytes)?', 'file_write'],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, 'Create b.txt?', 'file_write'],
+    ['file_write', {path: 'c.txt', content: 'abc'}, null, 'Write c.txt?', 'file_write · checking the file'],
+    ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
+  ];
+  for (const [tool, args, target, title, caption] of asks) {
+    h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
+    const card = h.run('approvalCard(request)');
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, title);
+    assert.equal(findNode(card, (node) => node.className === 'approval-caption').textContent, caption);
+  }
+  h.context.request = {request_id: 'scroll', tool_name: 'shell_exec', arguments: {command: 'make test'}, workspace_label: '~/w'};
+  const box = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(box.tabIndex, 0, 'a long command scrolls, so a keyboard reaches it');
+  assert.equal(box.attributes['aria-label'], 'Command');
+});
+
+test('the card has a filled answer, an outlined grant and a quiet deny, and says what the grant covers', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'roles', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => [node.textContent, node.className.split(' ')[0]]),
+    [['Allow once', 'primary-button'], ['Allow for this chat', 'outline-button'], ['Deny', 'quiet-button']]);
+  const warning = findNode(card, (node) => node.id === 'approval-scope-roles');
+  assert.equal(actions.children[1].attributes['aria-describedby'], 'approval-scope-roles', 'the grant is read with what it covers');
+  assert.match(warning.textContent, /“Allow for this chat” lets any shell command run without asking/);
+  assert.match(warning.textContent, /outside ~\/w/);
+  h.context.request = {request_id: 'roles-file', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0}};
+  assert.match(flatten(h.run('approvalCard(request)')), /will not ask again before writing files in this chat/);
+});
+
+test('Deny opens a box for what melo should do instead and sends it with the denial', async () => {
+  const h = harness(baseRoutes({'POST /approvals/note': {outcome: 'denied'}}));
+  await h.run('init()');
+  h.context.request = {request_id: 'note', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true};
+  h.run('S.view.pending.set("note", request)');
+  const card = h.run('approvalCard(request)');
+  h.run('approvalStates.get("note").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  const view = findNode(card, (node) => node.className === 'deny-view');
+  assert.equal(view.hidden, true);
+  quietDeny(card).click();
+  assert.equal(view.hidden, false);
+  assert.equal(findNode(card, (node) => node.id === 'approval-scope-note').hidden, true, 'the grant line goes with the three answers');
+  assert.match(flatten(view), /Tell melo what to do instead \(optional\)/);
+  const reason = findNode(card, (node) => node.className === 'deny-reason');
+  assert.equal(reason.attributes['aria-label'], 'Tell melo what to do instead (optional)');
+  reason.value = 'Write to a temp file';
+  reason.listeners.input[0]();
+  await confirmDeny(card).click();
+  assert.deepEqual(h.net.callsTo('/approvals/note')[0].body, {choice: 'deny', reason: 'Write to a temp file'});
+});
+
+test('Escape leaves the deny box first, and stops a running turn only while focus is in the composer', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'esc', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.run('approvalStates.get("esc").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  quietDeny(h.context.document.getElementById('approval-card-esc')).click();
+  const press = () => h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27});
+  press();
+  assert.equal(h.run('approvalStates.get("esc").deny'), false, 'Escape closes the deny box');
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('scroll').focus();
+  press();
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0, 'Escape with focus elsewhere does not stop the turn');
+  h.element('input').focus();
+  press();
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'Escape in the composer stops it');
 });
 
 test('approval bar navigates to the card only on request', async () => {
@@ -848,7 +933,7 @@ test('denial input keeps selection and defers redraw while composing', async () 
   h.run('approvalStates.get("ime").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
   let card = h.context.document.getElementById('approval-card-ime');
-  findNode(card, (node) => node.textContent === 'Deny…').click();
+  quietDeny(card).click();
   let reason = findNode(card, (node) => node.className === 'deny-reason');
   reason.value = 'abcdef'; reason.listeners.input[0](); reason.setSelectionRange(2, 4, 'forward');
   h.stream().emit({id: 23, type: 'session.updated', data: {model: 'changed'}});
@@ -899,12 +984,12 @@ test('incomplete or unconfirmed arguments cannot be allowed, but can be denied',
     h.run('approvalStates.get("unsafe").mountedAt -= 1000');
     h.timers.findLast((timer) => timer.ms <= 500).handler();
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-    assert.equal(findNode(card, (node) => node.textContent === 'Allow every shell_exec call in this session').disabled, true);
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow for this chat').disabled, true);
     await h.run('answerApproval(request, approvalStates.get("unsafe"), "once")');
     assert.equal(h.net.callsTo('/approvals/unsafe').length, 0);
     assert.match(flatten(card), /cannot safely be allowed|allow is disabled/);
-    findNode(card, (node) => node.textContent === 'Deny…').click();
-    await findNode(card, (node) => node.textContent === 'Deny').click();
+    quietDeny(card).click();
+    await confirmDeny(card).click();
     assert.equal(h.net.callsTo('/approvals/unsafe')[0].body.choice, 'deny');
   }
 });
@@ -918,10 +1003,10 @@ test('file approval can be denied while target details are unavailable', async (
   h.run('approvalStates.get("missing").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
   assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   assert.equal(deny.disabled, false);
   deny.click();
-  await findNode(card, (node) => node.textContent === 'Deny').click();
+  await confirmDeny(card).click();
   assert.equal(h.net.callsTo('/approvals/missing')[0].body.choice, 'deny');
 });
 
@@ -938,7 +1023,7 @@ for (const succeeds of [true, false]) {
     h.timers.findLast((timer) => timer.ms <= 500).handler();
     let card = h.context.document.getElementById('approval-card-refresh');
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-    assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    assert.equal(quietDeny(card).disabled, false);
     detail = succeeds
       ? {pending_approvals: [{request_id: 'refresh', arguments_complete: true, target: {path_label: 'a', exists: true, size_bytes: 7}}]}
       : new Error('details unavailable');
@@ -948,11 +1033,11 @@ for (const succeeds of [true, false]) {
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, !succeeds);
     assert.equal(h.net.callsTo('/approvals/refresh').length, 0);
     if (succeeds) {
-      assert.match(flatten(card), /overwrite a \(7 bytes\)/);
+      assert.match(flatten(card), /Replace a \(7 bytes\)\?/);
       assert.equal(findNode(card, (node) => node.textContent === 'Reload approval details'), null);
     } else {
       assert.match(h.element('notice').textContent, /Could not load approval details: details unavailable/);
-      assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+      assert.equal(quietDeny(card).disabled, false);
     }
   });
 }
@@ -1023,11 +1108,11 @@ test('approval cards display each tool and confirm file target before enabling',
   const h = harness(baseRoutes());
   await h.run('init()');
   for (const [name, args, target, expected] of [
-    ['shell_exec', {command: 'echo hello'}, null, /command in ~\/w/],
-    ['python_exec', {code: 'print(1)'}, null, /Python in ~\/w/],
-    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /overwrite a\.txt \(7 bytes\) with 3 chars/],
-    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /create b\.txt \(3 chars\)/],
-    ['custom', {value: 1}, null, /custom wants to run/],
+    ['shell_exec', {command: 'echo hello'}, null, /Run this command in w\?/],
+    ['python_exec', {code: 'print(1)'}, null, /Run this Python code in w\?/],
+    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /Replace a\.txt \(7 bytes\)\?/],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /Create b\.txt\?/],
+    ['custom', {value: 1}, null, /Let melo use custom\?/],
   ]) {
     h.context.request = {request_id: `req-${name}-${target?.exists}`, tool_name: name, arguments: args, workspace_label: '~/w', target};
     const card = h.run('approvalCard(request)');
@@ -1918,6 +2003,7 @@ test('Escape closes the drawer before stopping a running turn', async () => {
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.drawer.opened, false);
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('input').focus();
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1);
 });
@@ -1936,8 +2022,9 @@ test('Escape closes the level menu before it stops the turn', async () => {
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.state().levelsOpen, false, 'The open menu closes first');
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('input').focus();
   escape({key: 'Escape', isComposing: false, keyCode: 27});
-  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'A second Escape stops the turn');
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'A second Escape in the composer stops the turn');
 });
 
 test('Escape and a click outside close the running list before Escape stops the turn', async () => {
@@ -2590,7 +2677,9 @@ test('a task waiting for approval shows the chat approval card and answers it', 
   const card = findNode(panel, (node) => node.classList.contains('approval-card'));
   assert.equal(card.id, 'approval-card-req-t');
   assert.match(flatten(panel), /Waiting for your approval/);
-  assert.match(flatten(panel), /shell_exec wants to run a command in ~\/w/);
+  assert.match(flatten(panel), /Run this command in w\?/);
+  assert.match(flatten(panel), /shell_exec · ~\/w/);
+  assert.match(flatten(panel), /Allow for this task/, 'a task is not a chat');
   const once = findNode(card, (node) => node.textContent === 'Allow once');
   h.run('approvalStates.get("req-t").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();

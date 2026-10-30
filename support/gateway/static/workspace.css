@@ -78,7 +78,8 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+.approval-content:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -1319,15 +1320,26 @@ dialog::backdrop {
 .approval-card,
 .failure-card {
   margin: 10px 13px;
-  padding: 12px;
+  padding: 12px 16px;
   border: 1px solid var(--warn);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--surface);
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: var(--text-small);
 }
 .failure-card[data-severity="error"] { border-color: var(--error); }
-.approval-title, .failure-title { margin: 0 0 8px; font-weight: 600; }
+.approval-title {
+  margin: 0;
+  font-size: var(--text-title);
+  line-height: 24px;
+  font-weight: 600;
+}
+.approval-caption {
+  margin: 2px 0 12px;
+  color: var(--ink-3);
+  font: var(--text-caption)/16px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.failure-title { margin: 0 0 8px; font-weight: 600; }
 .approval-content, .failure-details pre {
   max-height: 260px;
   overflow: auto;
@@ -1340,15 +1352,39 @@ dialog::backdrop {
   font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .approval-actions, .failure-actions, .approval-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.approval-actions button, .deny-view button { font-size: 12px; }
-.approval-warning, .failure-hint { color: var(--muted); line-height: 1.5; }
+.approval-actions { margin: 12px 0 8px; }
+.approval-actions button, .deny-view button { font-size: var(--text-body); min-height: 36px; padding: 6px 16px; }
+.approval-actions .primary-button { gap: 0; }
+.approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.failure-hint { color: var(--muted); line-height: 1.5; }
 .failure-error { color: var(--error); overflow-wrap: anywhere; }
 .failure-details { margin-top: 8px; color: var(--muted); }
-.deny-view label { display: block; }
-.deny-reason { display: block; width: 100%; margin: 6px 0; }
-.deny-counter { display: block; color: var(--muted); font-size: var(--text-caption); }
-.approval-bar { margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--surface); font-size: 12px; }
+.deny-view { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.deny-view label { flex: 1 0 100%; font-weight: 500; }
+.deny-reason {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: var(--text-body);
+}
+.deny-counter { flex: 1 0 100%; color: var(--muted); font-size: var(--text-caption); }
+.approval-bar { justify-content: space-between; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--surface); font-size: var(--text-small); }
 .stopped-line { color: var(--muted); }
+/* The answers: one filled (.primary-button), one outlined, one quiet. */
+.outline-button, .quiet-button { min-height: 32px; padding: 6px 12px; border-radius: var(--radius-control); font-size: var(--text-small); }
+.outline-button { border: 1px solid var(--control); background: transparent; color: var(--ink); }
+.quiet-button { border: 1px solid transparent; background: none; color: var(--ink-2); }
+.quiet-button:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 700px) {
+  .approval-actions { flex-direction: column; align-items: stretch; }
+  .approval-actions button, .approval-bar button { min-height: 44px; }
+}
 .link-button {
   background: none;
   border: 0;
