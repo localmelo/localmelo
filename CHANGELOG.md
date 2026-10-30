@@ -1115,6 +1115,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The terminal's colour tells kinds of output apart (part 1 of its new look). Each tool row
+  shows its kind before the name, in the kind's colour: `→` reads (muted, so they fade), `±`
+  writes, `$` commands and code, `@` network. A command that exits with another code than 0
+  now shows `✗` and `exit N` in red, though its event still says the call ran. The final
+  answer's `●`, headings and bullets are Melo's orange, the only orange on screen; other
+  messages and thinking are muted. The changed-files line marks each file `+` new or `~`
+  modified (`Changed + SUMMARY.md (+3), ~ todo.md (+1 −1)`). melo draws in 24-bit or 256
+  colours when the terminal has them (it was pinned to 16), and the interactive UI asks the
+  terminal for its background (OSC 11/10, at most 100 ms); with the exact colours your message
+  sits on a raised band and inline code and code blocks on a raised chip and panel, else code
+  gets a `│` gutter. `[cli] colors` and `[cli] background` (developer settings, `-X
+  cli.background=light`) cover terminals that answer nothing. `NO_COLOR` and
+  `LOCALMELO_ASCII=1` keep every glyph. Direct mode, workers, JSON, stream-json, events and
+  exit codes are unchanged. ([#268])
 - Every terminal question with a fixed set of answers is a list you move through and
   confirm with Enter, not a letter to type. On a terminal, the first run's questions
   (`Use this model server?`, `Use <model> for long-term memory?`, `What now?` after a
@@ -2071,6 +2085,7 @@ earlier milestones.
 [#264]: https://github.com/localmelo/localmelo/pull/264
 [#265]: https://github.com/localmelo/localmelo/pull/265
 [#266]: https://github.com/localmelo/localmelo/pull/266
+[#268]: https://github.com/localmelo/localmelo/pull/268
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

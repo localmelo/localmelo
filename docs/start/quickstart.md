@@ -195,6 +195,14 @@ Try: What is this project? · / commands · ctrl+d quit
 
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
+With no model server running, `melo` prints this computer's commands for
+starting one (oMLX on a Mac, Ollama elsewhere, the ones in the
+[model servers guide](../guides/model-servers.md)) and asks
+`No model server found. What now?` with `Check again`, `Enter an address` and
+`Quit` (piped: `Press Enter to check again, type an address, or q to quit:`).
+Start the server in another terminal, then choose `Check again`; melo installs
+and starts nothing itself.
+
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory?`, and `Use it` (selected first) saves it
 after one embeddings probe.
@@ -213,16 +221,19 @@ the key for those. See
 
 ### With the setup wizard
 
-The setup wizard also sets up an embedding server or a cloud API, and can
-start the gateway when it is done. For a cloud API, first run
-`export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in this
-terminal: the wizard's test request uses that key.
+The setup wizard also sets up an embedding server or a cloud API. For a
+cloud API, first run `export OPENAI_API_KEY="<your key>"` (or your vendor's
+variable) in this terminal: the wizard's test request uses that key. Run the
+wizard, then start the gateway:
 
 ```bash
-melo --serve --reconfigure
+melo setup
+melo serve
 ```
 
-The wizard asks:
+In default mode `melo setup` first offers the server it finds (`Use this model
+server?`); choose `Use another server` for the full menu, which developer mode
+(`melo config set ui.mode developer`) shows at once. The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
@@ -249,19 +260,20 @@ Next, the wizard sends a short test request to each server
 selected `Cancel setup`, saves nothing. If only the
 embedding server fails, the wizard saves with embedding off and says so. On
 success it prints `Config saved to …`, the path of
-`~/.cache/localmelo/config.toml`, and then **starts the gateway** on
-`http://127.0.0.1:8401`. The gateway keeps running in this terminal.
-`melo setup` alone opens the interactive UI instead, and in
-default mode it starts with the first run's question: it prints
-`Found a model server at …` and asks `Use this model server?`. The full menu above
-follows only after `Use another server`, with `--developer`, or when no server is found while a backend
-is saved; with nothing saved, it prints the commands that start a server instead.
+`~/.cache/localmelo/config.toml`, and opens the interactive UI; leave it with
+Ctrl+D. Then `melo serve` starts the gateway on `http://127.0.0.1:8401`, and
+it keeps running in this terminal. In default mode `melo setup` starts with the
+first run's question: it prints `Found a model server at …` and asks
+`Use this model server?`. The full menu above follows only after
+`Use another server`, in developer mode, or when no server is found while a
+backend is saved; with nothing saved, it prints the commands that start a
+server instead.
 
 ## Start the gateway
 
-If you saved the configuration with `melo`, start the gateway with
-`melo serve`; the wizard above starts it by itself. From a second
-terminal, check the gateway and run a task through it:
+Once the configuration is saved, by `melo` or by the wizard above, start the
+gateway with `melo serve`. From a second terminal, check the gateway and run a
+task through it:
 
 The examples pipe the gateway bearer token from its private file to curl, keeping
 it out of command-line arguments and shell history. Do not enable verbose curl
@@ -294,7 +306,7 @@ configuration:
 melo "What is 6*7?"
 ```
 
-To start the gateway again without the wizard, run `melo serve`. With
+To start the gateway again, run `melo serve`. With
 `melo serve --port 0` the system picks a free port: the startup lines show
 the real address, and `melo console --port PORT` and
 `melo-task --gateway URL` need it.
@@ -343,8 +355,9 @@ waits for something. `melo-task --help` lists the other commands.
 ## Interactive conversations
 
 Run `melo` without a task to chat in the terminal. Each tool call shows as
-it finishes, a spinner shows the step and the time while the model works,
-and the answer prints as Markdown:
+it finishes, a spinner shows what melo is doing and the time while the model
+works, and the answer prints as Markdown, with the files a turn changed named
+under its footer:
 
 ```bash
 melo
@@ -383,7 +396,7 @@ notices, the live progress row and the answer with its facts and
 `Copy response`. Stop cancels the turn, a waiting approval shows as
 `Needs approval`, and the chats are saved in the gateway's `sessions.db`, so
 a restart keeps them. Other browser tabs on the same gateway see the same
-chats. Approval cards, connection settings and the session details drawer are
+chats. Approval cards, settings and the session details drawer are
 available in the workspace; see [Web workspace](../guides/web-console.md#web-workspace).
 
 ## Next steps

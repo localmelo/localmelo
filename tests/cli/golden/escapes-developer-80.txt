@@ -1,7 +1,7 @@
 › Print the demo page's raw output.
 
   No approvals for this turn (--yolo).
-✓ emit  {} · 0.1s
+✓ ± emit  {} · 0.1s
   └ red
 
     copying 3/3

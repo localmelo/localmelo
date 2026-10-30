@@ -122,7 +122,7 @@ melo -h all                                  # every option, command and setting
 | `melo`（无任务） | 在终端中打开[交互式界面](../guides/terminal.md#the-interactive-ui)，使用已保存的后端。若没有已保存的后端，会先询问并保存一个模型服务器和一个模型；见[首次运行](../guides/terminal.md#first-run)。没有终端时以退出码 2 退出，并说明应改为运行什么。 |
 | `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
 | `melo --base-url URL -- "<task>"` | 在该服务器上以直接模式运行，模型为 `--chat-model`，否则在一次模型列表请求之后，按上一行的方式选定（见[通用](#general)）。读不到列表时请求模型 `default`。`--brief` 和 `melo ""` 同样如此。 |
-| `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use this model server?`，一个列表），只有选择 `Use another server`、使用 `--developer`，或已保存后端但没有找到服务器时才显示完整的后端菜单（什么都没保存且没有找到服务器时，会输出启动服务器的命令）。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
+| `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use this model server?`，一个列表），只有选择 `Use another server`、使用 `--developer`（`melo --developer --reconfigure`）或处于开发者模式（`[ui] mode = "developer"`），或已保存后端但没有找到服务器时才显示完整的后端菜单（什么都没保存且没有找到服务器时，会输出启动服务器的命令）。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
 | `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
 | `melo --daemon …` | 管理在 macOS 上运行网关的后台服务；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。 |
@@ -378,7 +378,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--host HOST` | `127.0.0.1` | 网关监听的地址。 |
 | `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行（没有打开浏览器时才输出）写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
 | `--allow-unconfigured` | 关闭 | 与 `--serve` 一起使用时，即使没有配置任何后端或配置文件有校验错误，也启动网关，以便通过 `/api/settings` 进行配置。 |
-| `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use this model server?`；选择 `Use another server`、使用 `--developer`，或已保存后端但没有找到服务器时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
+| `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use this model server?`；选择 `Use another server`、使用 `--developer` 或 `[ui] mode = "developer"`，或已保存后端但没有找到服务器时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
 | `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`。 |
 
 - `--host` 和 `--port` 的默认值来自配置文件中的 `[gateway]` 表。这些选项只为本次运行改变它们。

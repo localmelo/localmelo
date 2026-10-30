@@ -70,6 +70,8 @@ RECALL_PLACEMENTS = ("tool", "message")
 REASONING_TAGS = ("explicit", "closing_only", "none")
 UI_MODES = ("default", "developer")
 STATUS_LINES = ("auto", "off")
+CLI_COLORS = ("auto", "16", "256", "truecolor")
+CLI_BACKGROUNDS = ("auto", "dark", "light")
 
 
 @dataclass
@@ -140,6 +142,9 @@ class CliConfig:
     # "auto" adds cache, context, step and task segments to the status bar;
     # "off" keeps the bar as it was before #176.
     status_line: str = "auto"
+    # The terminal's colour depth and background; "auto" detects them.
+    colors: str = "auto"  # auto | 16 | 256 | truecolor
+    background: str = "auto"  # auto | dark | light
 
 
 @dataclass
@@ -440,6 +445,11 @@ class Config:
             errors.append(
                 f"[cli] status_line {cli.status_line!r} is not one of {STATUS_LINES}"
             )
+        for key, allowed in (("colors", CLI_COLORS), ("background", CLI_BACKGROUNDS)):
+            if getattr(cli, key) not in allowed:
+                errors.append(
+                    f"[cli] {key} {getattr(cli, key)!r} is not one of {allowed}"
+                )
         tags = cli.reasoning_tags
         if not isinstance(tags, dict):
             return [*errors, f"[cli] reasoning_tags must be a table, got {tags!r}"]
@@ -938,6 +948,11 @@ def _load_file() -> Config:
         if "status_line" in section:
             # A bad value is kept so Config.validate can report it.
             cfg.cli.status_line = section["status_line"]
+        for key in ("colors", "background"):
+            if key in section:  # a bad value is kept for Config.validate
+                value = section[key]
+                plain_int = isinstance(value, int) and not isinstance(value, bool)
+                setattr(cfg.cli, key, str(value) if plain_int else value)
         if "reasoning_tags" in section:
             tags = section["reasoning_tags"]
             # Keep a malformed value so Config.validate can report it.
@@ -1238,6 +1253,9 @@ def save(cfg: Config) -> None:
             lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
         if cfg.cli.status_line != CliConfig().status_line:
             lines.append(f"status_line = {_toml_value(cfg.cli.status_line)}")
+        for key in ("colors", "background"):
+            if getattr(cfg.cli, key) != "auto":
+                lines.append(f"{key} = {_toml_value(getattr(cfg.cli, key))}")
         if cfg.cli.reasoning_tags:
             lines.append(f"reasoning_tags = {_toml_value(cfg.cli.reasoning_tags)}")
         lines.append("")

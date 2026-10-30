@@ -1,6 +1,8 @@
 <a id="macos-development-app"></a>
 
-# macOS 开发应用
+<a id="the-macos-app-development-build"></a>
+
+# macOS 应用（开发版本）
 
 arm64 开发应用是供构建它的这台 Mac 使用的本地原型，不是经过公证的发行版，也不是 Homebrew cask。它使用临时签名（ad hoc），因此不需要 Apple 开发者账号。构建它需要 macOS、一个 Swift 编译器、`uv`，以及在构建时获取固定版本独立 Python 和锁定依赖所需的网络访问。Swift 编译器优先使用位于 `/Applications/Xcode.app` 的正式版 Xcode；没有它时，使用 `xcode-select -p` 指向的 Command Line Tools（`xcode-select --install` 可安装它）。两者都没有时，构建会在做任何工作之前停止，并只打印一行说明。环境中设置的 `DEVELOPER_DIR` 会选择另一个开发者目录。它不会安装、启动或下载任何模型服务器。不会更改任何签名身份或 Xcode 设置。
 

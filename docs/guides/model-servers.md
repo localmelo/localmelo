@@ -110,8 +110,8 @@ like this, and with several chat models it asks oMLX which are loaded
 
 With a configuration saved already, run step 5 first, so that the model is
 loaded, then `melo setup`: in default mode it offers the server it
-finds with the first run's questions. In the full menu (after `n`, or with
-`--developer`), choose oMLX or vLLM (`3`) as the chat backend, enter
+finds with the first run's questions. In the full menu (after `Use another server`, or in
+developer mode), choose oMLX or vLLM (`3`) as the chat backend, enter
 `http://127.0.0.1:8000/v1` and the model id, and choose `5` (None) as the
 embedding backend unless oMLX also serves an embedding model.
 [oMLX configuration](model-servers.md#omlx) shows the file they save and the

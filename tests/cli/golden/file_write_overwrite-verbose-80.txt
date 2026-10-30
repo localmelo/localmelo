@@ -1,6 +1,6 @@
 › Update app.py.
 
-✓ file_write  app.py (13 chars) · 0.1s · allowed
+✓ ± file_write  app.py (13 chars) · 0.1s · allowed
     {
       "path": "app.py",
       "content": "print('new')\n"

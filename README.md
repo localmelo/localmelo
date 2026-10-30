@@ -36,6 +36,22 @@ source .venv/bin/activate
 Keep the directory name `localmelo`: the package is built from it. Without
 uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.html#install-with-pip).
 
+## On a Mac: the app
+
+On a Mac with Apple silicon, one command, run in the clone, builds the macOS app
+and installs it in `~/Applications` without admin rights:
+
+```bash
+uv run python scripts/build_macos_app.py --install
+```
+
+Open localmelo from Spotlight. The app is a native window around the web
+console, and its menu-bar item shows how many chats and tasks run and when one
+waits for your approval. It is a development build, signed ad hoc and made on
+the Mac that uses it, not a notarized download. It needs a Swift compiler, from
+the release Xcode or the Command Line Tools (`xcode-select --install`); see the
+[macOS app guide](docs/guides/macos-app.md).
+
 ## Quick start
 
 Start a model server, then run a task. On a Mac with Apple silicon (macOS 15

@@ -1356,6 +1356,50 @@ class TestCliStatusLineConfig:
         loaded.validate_or_raise()
 
 
+class TestCliColorConfig:
+    def test_auto_is_the_default_and_not_written(self, config_path: Path) -> None:
+        assert (CliConfig().colors, CliConfig().background) == ("auto", "auto")
+        save(_timeout_cfg())
+        assert "[cli]" not in config_path.read_text(encoding="utf-8")
+
+    def test_a_depth_and_a_background_round_trip(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.cli = CliConfig(colors="256", background="light")
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert 'colors = "256"' in text and 'background = "light"' in text
+        loaded = load()
+        assert (loaded.cli.colors, loaded.cli.background) == ("256", "light")
+        assert loaded.cli_errors() == []
+
+    def test_a_bare_number_reads_as_the_depth(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+            "[cli]\ncolors = 16\n",
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.cli.colors == "16" and loaded.cli_errors() == []
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [("colors", '"88"'), ("colors", "true"), ("background", '"grey"')],
+    )
+    def test_a_bad_value_is_reported_and_is_not_a_config_error(
+        self, config_path: Path, key: str, value: str
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+            f"[cli]\n{key} = {value}\n",
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert any(f"[cli] {key}" in error for error in loaded.cli_errors())
+        loaded.validate_or_raise()
+
+
 class TestCliStreamConfig:
     def test_the_default_is_on_and_not_written(self, config_path: Path) -> None:
         assert CliConfig().stream is True

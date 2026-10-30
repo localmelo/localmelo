@@ -56,7 +56,7 @@ The first of these that applies:
 1. `melo setup`: the setup wizard, then the backend it saved. In default
    mode it first offers the model server it finds on this computer (`Found a
    model server at …`, `Use this model server?`) with the first run's questions; the
-   full backend menu follows only after `Use another server`, with `--developer`, or when none is
+   full backend menu follows only after `Use another server`, in developer mode, or when none is
    found while a backend is saved (with nothing saved, it prints the commands
    that start a server). Without a task it cannot be combined with `--url`.
 2. `--url URL`: that server, without the config file. The model is
@@ -352,14 +352,17 @@ happens without the explicit `/copy` command.
   last one is held, prints at the next step, and at the end only when it
   differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
-  failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
-  `exit N` when a command ran and exited with another code than 0 (`grep`
-  exits 1 without failing); how its approval ended; and the first line of
-  its output with `+N lines (/expand T.C)` on the same row (a second line
-  prints instead of a count of one). Only the mark carries the color (`✓`
-  green, `✗` red, `⊘` yellow on a dark terminal and bold elsewhere); the rest of the row is the default color, with
-  the duration and tags dim. A call that failed, or that ran and exited with
-  another code than 0, shows up to 3 lines, the first in red for a failure;
+  failed, `⊘` blocked or denied, `◌` stopped or not run; then the tool's kind
+  (`→` read, `±` write, `$` run, `@` network) and name; the duration;
+  `exit N` when a command ran and exited with another code than 0, shown
+  with `✗` in red although the call ran (`grep` exits 1 without failing);
+  how its approval ended; and the first line of its output with
+  `+N lines (/expand T.C)` on the same row (a second line prints instead of a
+  count of one). The mark carries the outcome's color, the kind's glyph and
+  the name carry the kind's (a read is muted, so reads fade), and the
+  duration and tags are dim; see [Terminal colours](#terminal-colours). A
+  call that failed, or that ran and exited with another code than 0, shows
+  up to 3 lines, the first in red;
   developer mode shows 3 lines for every call and `/verbose` 20, with the
   call's arguments. Images print as `▪ image/png · 312 KB · not shown`. Escape
   sequences in the output are removed, so a tool cannot move the cursor,
@@ -387,21 +390,23 @@ happens without the explicit `/copy` command.
   block:
 
   ```text
-  ✓ file_write  hello.py (15 chars) · 0.0s · allowed
+  ✓ ± file_write  hello.py (15 chars) · 0.0s · allowed
     └ new file, 1 line
   ● I saved hello.py. Run it with python hello.py.
   ✻ Worked for 4.7s · 1 tool call · ↓ 50 tokens
-    Changed hello.py (+1)
+    Changed + hello.py (+1)
   ```
 
-  Several files read `Changed hello.py (+1), README.md (+3 −1)`: paths relative to the
+  Several files read `Changed + hello.py (+1), ~ README.md (+3 −1)`: `+` a new file and
+  `~` a modified one, paths relative to the
   folder melo works in, each with the lines the turn added and removed in it. At most
   three names show, then `and 2 more`; a narrow terminal shows fewer and never wraps. A
   file written twice counts once, the file as the turn found it against the file as it
-  left it, and a file written back as it was is left out. A name stands alone, with no
-  counts, when there is nothing to count or compare: a new empty file, a file melo could
-  not compare (too large, or not text) and every file of a `--yolo` turn, where nothing
-  read the old file first. The line comes from the turn's own `file_write` calls: a
+  left it, and a file written back as it was is left out. A name has no counts when
+  there is nothing to count or compare: a new empty file, a file melo could not compare
+  (too large, or not text) and every file of a `--yolo` turn, where nothing read the old
+  file first; the last two have no `+` or `~` either, since melo does not know whether
+  the file was new. The line comes from the turn's own `file_write` calls: a
   write that was denied or refused (a path outside the folder) is not listed, and
   neither is a file that a shell command or a script changed, because melo never scans
   the folder. Nothing prints when the turn changed no file, or when you stop it (a
@@ -570,20 +575,55 @@ wrapped message leaves no blank rows. Known limits:
 - Text that an input method (such as macOS Pinyin) is still composing is
   drawn by the terminal, not by melo.
 
+### Terminal colours
+
+Colour sorts what a turn prints, so the answer, a failure and the files that
+changed stand out while reads fade. Every colour has a glyph or a place that
+says the same without it, so `NO_COLOR` and `LOCALMELO_ASCII=1` lose nothing.
+
+| What | Glyph (ASCII) | Colour |
+|---|---|---|
+| Your message | `›` (`>`) | moss mark, on a raised band across the row |
+| The answer, its headings and bullets | `●` (`*`) | Melo's orange (navy headings on a light terminal), the only orange |
+| A message that is not the answer; thinking | `●` (`*`); `✻` (`*`) | muted |
+| A tool that reads | `→` (`>`) | muted, so reads fade |
+| A tool that writes | `±` (`~`) | violet |
+| A tool that runs a command or code | `$` | blue |
+| A tool that reaches the network | `@` | indigo |
+| Ran; failed or exited with another code than 0; refused; not run | `✓` (`+`); `✗` (`x`); `⊘` (`!`); `◌` (`-`) | teal; red, with `exit N`; amber; the whole row dim |
+| A changed file: new; modified | `+`; `~` | teal; amber |
+| Durations, counts, hints | `·` (`-`) | muted |
+
+Inline code is set on a raised chip and a code block on a raised panel, its
+keywords moss, strings gold and names navy.
+
+How melo chooses:
+
+- **How many colours.** `NO_COLOR` (any value but empty) or `TERM=dumb`:
+  none, only bold, dim and underline, with every glyph kept. Otherwise the
+  `[cli] colors` setting, then `COLORTERM=truecolor` (or `24bit`) for 24-bit
+  colour, then a `TERM` that ends in `256color` for 256 colours, else the 16
+  named colours of your terminal's theme.
+- **The background.** The `[cli] background` setting, then the terminal's own
+  answer: when the interactive UI starts, it asks the terminal for its
+  background and text colours (OSC 11 and OSC 10), waiting at most 100 ms
+  (never in direct mode, with `--json`, or without a terminal), then
+  `COLORFGBG`. With the exact colours, melo draws the band, the chips and the
+  panel, each only where your text keeps a contrast of 4.5:1 on it, and moves
+  a colour drawn on them until it reads. With only dark or light known, the
+  colours stay and the fills go: inline code is bold and a code block has a
+  `│` gutter. With nothing known, melo uses the 16 named colours.
+- **When colours look wrong.** Some terminals, and tmux, screen or ssh, answer
+  nothing. Say which background yours has: `-X cli.background=light` (or
+  `dark`) for one run, or `melo config set cli.background light` to keep it.
+  `-X cli.colors=16`, `256` or `truecolor` sets the number of colours.
+
 ### Terminal settings
 
-- The UI uses the 16 ANSI colors, so light and dark themes both work. Set
-  `NO_COLOR` to a non-empty value to turn the colors off.
-- A light terminal. melo learns the background from `COLORFGBG` (`FG;BG` in
-  ANSI color numbers, which some terminals set, iTerm2 and rxvt for example)
-  and never queries the terminal. Yellow marks a warning only on a background
-  that reports dark; on a light or unknown one a warning is bold in the default
-  color, and the code in an answer uses the light syntax theme on a light one.
-  A terminal that does not set the variable is treated as unknown: start melo
-  with `COLORFGBG='0;15' melo` to say it is light, or `COLORFGBG='15;0' melo`
-  for dark.
+- Colours: see [Terminal colours](#terminal-colours); set `NO_COLOR` to a
+  non-empty value to turn them off.
   A sentence you must read or act on (a warning, the approval's warning and
-  keys, the hint under the input box) is never dim; dim is for durations,
+  keys, the hint under the input box) is never muted; muted is for durations,
   counts and `(/expand T.C)`.
 - On a terminal whose encoding is not UTF-8, or with `LOCALMELO_ASCII=1`,
   melo draws ASCII stand-ins for its symbols (`>` for `›`, `...` for `…`).

@@ -123,7 +123,8 @@ stop the gateway.
 
 In default mode, `melo setup` starts as the first
 run does: it prints `Found a model server at …` and asks `Use this model
-server?`. The full menu follows only after `Use another server`, with `--developer`, or when no server is found
+server?`. The full menu follows only after `Use another server`, in developer mode (`[ui] mode = "developer"`;
+`melo config set ui.mode developer` saves it), or when no server is found
 while a backend is saved. With nothing saved and no server running, it prints the
 commands that start one instead. `melo serve` before any setup does the same.
 

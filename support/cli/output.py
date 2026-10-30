@@ -19,7 +19,7 @@ from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.output import Output
 from rich.console import Console, RenderableType
 
-from localmelo.support.cli.theme import RICH_THEME
+from localmelo.support.cli.theme import active
 
 
 class Out(Protocol):
@@ -34,16 +34,17 @@ class Out(Protocol):
 
 
 def _console(file: io.StringIO, width: int, *, no_color: bool) -> Console:
+    palette = active()
     return Console(
         file=file,
         force_terminal=True,
-        color_system="standard",
+        color_system=palette.rich_system,
         no_color=no_color,
         width=width,
         markup=False,
         highlight=False,
         emoji=False,
-        theme=RICH_THEME,
+        theme=palette.rich_theme,
         legacy_windows=False,
     )
 
@@ -159,7 +160,7 @@ class RecordingOut:
             markup=False,
             highlight=False,
             emoji=False,
-            theme=RICH_THEME,
+            theme=active().rich_theme,
         )
 
     @property

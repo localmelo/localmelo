@@ -1792,7 +1792,7 @@ async def test_deny_mode_refuses_a_file_write(setup: Setup) -> None:
     session.approvals.set_mode("deny")
     session.enter("write it")
     await setup.idle()
-    assert "denied by policy: approvals are set to de" in out.text()
+    assert "denied by policy: approvals are set to" in out.text()
     root = Path(session.agent.workspace_root or "")
     assert not (root / "blocked.txt").exists()
 
@@ -1833,7 +1833,7 @@ async def test_a_turn_that_wrote_files_names_them_and_not_a_refused_write(
     text = out.text()
     assert "✻ Worked for" in text
     # Real results and real snapshots: the old notes.txt line is replaced.
-    assert text.endswith("\n  Changed notes.txt (+1 −1), ideas.md (+2)\n\n"), text
+    assert text.endswith("\n  Changed ~ notes.txt (+1 −1), + ideas.md (+2)\n\n"), text
     assert text.count("Changed") == 1
     root = Path(session.agent.workspace_root or "")
     assert not (root.parent / "outside.txt").exists()

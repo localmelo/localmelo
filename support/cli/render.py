@@ -17,8 +17,16 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
+from markdown_it.token import Token as MarkdownToken
+from pygments.token import (  # type: ignore[import-untyped]
+    Comment,
+    Keyword,
+    Name,
+    String,
+    Token,
+)
 from rich.console import (
     Console,
     ConsoleOptions,
@@ -26,11 +34,16 @@ from rich.console import (
     RenderableType,
     RenderResult,
 )
-from rich.markdown import Heading, Markdown
+from rich.markdown import CodeBlock, Heading, Markdown
 from rich.padding import Padding
+from rich.segment import Segment
+from rich.style import Style
+from rich.syntax import ANSISyntaxTheme, Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
 
+from localmelo.melo.checker.tiers import BUILTIN_TIERS
 from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
@@ -43,7 +56,7 @@ from localmelo.support.cli.text import (
     expand_tabs,
     wrap_words,
 )
-from localmelo.support.cli.theme import CODE_THEME, Symbols
+from localmelo.support.cli.theme import Symbols
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.progress_line import (
     format_line,
@@ -91,6 +104,9 @@ ECHO_LINES: Final = 6
 CHANGED_NAMES: Final = 3
 # Tools whose running line shows the session's time limit.
 LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
+# A tool's kind by its permission tier; a tool the session does not know is
+# drawn as the cautious default, write.
+KINDS: Final = {"read": "read", "write": "write", "exec": "run", "network": "network"}
 
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
 
@@ -115,27 +131,133 @@ _FAILED_WITH: Final = re.compile(r"failed: (\w+)")
 
 
 class _LeftHeading(Heading):
-    """A Markdown heading, bold and left-aligned, without rich's box."""
+    """A Markdown heading, left-aligned, without rich's box: bold, or the answer's role."""
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
         text = self.text
         text.justify = "left"
-        text.stylize("bold")
+        text.stylize(console.get_style("markdown.heading", default="bold"))
         if self.tag == "h1":
             text.stylize("underline")
         yield text
 
 
+class _Code(CodeBlock):
+    """A code block: on the raised panel when there is a fill, else beside a gutter.
+
+    Its tokens take the roles' colours (``syntax.*`` of the theme), so a code
+    block follows the terminal's background like everything else.
+    """
+
+    gutter = "│"
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: MarkdownToken) -> _Code:
+        block = cls((token.info or "").partition(" ")[0] or "text", markdown.code_theme)
+        block.gutter = getattr(markdown, "gutter", cls.gutter)
+        return block
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        def style(name: str) -> Style:
+            return console.get_style(f"syntax.{name}", default="none")
+
+        theme = ANSISyntaxTheme(
+            {
+                Token: Style(),
+                Keyword: style("keyword"),
+                Name.Function: style("name"),
+                Name.Class: style("name"),
+                Name.Builtin: style("name"),
+                String: style("string"),
+                Comment: style("comment"),
+            }
+        )
+        fill = console.get_style("raised", default="none").bgcolor
+        code = str(self.text).rstrip()
+        syntax = Syntax(
+            code,
+            self.lexer_name,
+            theme=theme,
+            word_wrap=True,
+            background_color=fill.name if fill is not None else None,
+            padding=(1, 2) if fill is not None else 0,
+        )
+        if fill is not None:
+            yield syntax
+            return
+        bar = Segment(self.gutter + " ", console.get_style("muted", default="none"))
+        width = max(1, options.max_width - cells(bar.text))
+        for line in console.render_lines(syntax, options.update(width=width)):
+            yield bar
+            yield from line
+            yield Segment.line()
+
+
 class AnswerMarkdown(Markdown):
-    """rich's Markdown with left-aligned headings."""
+    """rich's Markdown with left-aligned headings and melo's code blocks."""
 
-    elements = {**Markdown.elements, "heading_open": _LeftHeading}
+    elements = {
+        **Markdown.elements,
+        "heading_open": _LeftHeading,
+        "fence": _Code,
+        "code_block": _Code,
+    }
 
 
-def markdown(text: str) -> Markdown:
-    return AnswerMarkdown(text, code_theme=CODE_THEME, hyperlinks=False)
+class _Answer:
+    """The final answer's Markdown: headings and bullets in the answer's roles."""
+
+    def __init__(self, body: RenderableType) -> None:
+        self.body = body
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        console.push_theme(
+            Theme(
+                {
+                    "markdown.heading": console.get_style("markdown.answer.heading"),
+                    "markdown.item.bullet": console.get_style("markdown.answer.bullet"),
+                    "markdown.item.number": console.get_style("markdown.answer.bullet"),
+                },
+                inherit=False,  # rich's defaults would undo the palette's
+            )
+        )
+        try:
+            lines = console.render_lines(self.body, options, pad=False, new_lines=True)
+        finally:
+            console.pop_theme()
+        for line in lines:
+            yield from line
+
+
+class Band:
+    """*body* on the raised fill across the whole row; *body* alone without a fill."""
+
+    def __init__(self, body: RenderableType) -> None:
+        self.body = body
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        fill = console.get_style("raised", default="none")
+        if fill.bgcolor is None:
+            yield self.body
+            return
+        for line in console.render_lines(self.body, options, style=fill, pad=True):
+            yield from line
+            yield Segment.line()
+
+
+def markdown(text: str, symbols: Symbols, *, answer: bool = False) -> RenderableType:
+    """*text* as Markdown; the final *answer* has its heading and bullets in Melo's fur."""
+    body = AnswerMarkdown(text, hyperlinks=False)
+    body.gutter = symbols.gutter  # type: ignore[attr-defined]
+    return _Answer(body) if answer else body
 
 
 @dataclass
@@ -434,6 +556,10 @@ class TurnRenderer:
         self._whole_told = False
         self._backend = backend
         self._clock = clock
+        # Each tool's permission tier by name (the session sets the lookup);
+        # read again when a name is not known yet.
+        self.tool_tiers: Callable[[], Mapping[str, str]] | None = None
+        self._tiers: dict[str, str] = {}
         self.live: LiveState | None = None
         # The latest run.progress of this session, for /progress.
         self.progress: Mapping[str, Any] | None = None
@@ -484,7 +610,8 @@ class TurnRenderer:
                 f"\n{self.symbols.ellipsis} +{len(lines) - len(shown)} lines",
                 style="muted",
             )
-        self.out.print(_marked(self.symbols.prompt, "accent", echo))
+        # The raised band marks where a turn starts (with a fill).
+        self.out.print(Band(_marked(self.symbols.prompt, "user", echo)))
 
     def begin_turn(self, text: str, *, first_turn: bool = False) -> None:
         """Echo *text* and start the live area."""
@@ -635,7 +762,7 @@ class TurnRenderer:
                         style="muted",
                     )
                 )
-            self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
+            self.out.print(self._intermediate(shown))
             printed = shown
         if self.live is not None:
             self.live.stream_text = ""
@@ -774,12 +901,15 @@ class TurnRenderer:
                         style="muted",
                     )
                 )
-            self.out.print(_marked(self.symbols.assistant, "", markdown(text)))
+            self.out.print(self._intermediate(text))
 
     def _print_thinking(self, text: str, duration_s: float) -> None:
         """``✻ Thought for 1.2s`` and the thinking's first rows (section 3)."""
         self.out.print(
-            Text(f"{self.symbols.thought} Thought for {format_duration(duration_s)}")
+            Text(
+                f"{self.symbols.thought} Thought for {format_duration(duration_s)}",
+                style="thinking",
+            )
         )
         if not (self.thinking or self.verbose):
             return
@@ -796,11 +926,17 @@ class TurnRenderer:
             body.append(marker + ("" if self.verbose else " (/verbose)"))
         self.out.print(Padding(body, (0, 0, 0, 0), style="muted"))
 
+    def _intermediate(self, text: str) -> RenderableType:
+        """Text that is not the answer: a muted mark, the text in the body's ink."""
+        return _marked(
+            self.symbols.assistant, "intermediate", markdown(text, self.symbols)
+        )
+
     def _print_held(self) -> None:
         """Print a held assistant message as intermediate text."""
         text, self._held = self._held, ""
         if text:
-            self.out.print(_marked(self.symbols.assistant, "", markdown(text)))
+            self.out.print(self._intermediate(text))
 
     def _on_tool_started(self, data: Mapping[str, Any]) -> None:
         preview = str(data.get("preview") or "")
@@ -997,7 +1133,7 @@ class TurnRenderer:
             and held.strip() != answer.strip()
             and not (shown and _same_display_text(held, shown))
         ):
-            self.out.print(_marked(self.symbols.assistant, "", markdown(held)))
+            self.out.print(self._intermediate(held))
         if result.status == "cancelled":
             # The cause is turn.finished's, which comes after this event.
             self._cancelled_pending = True
@@ -1084,21 +1220,31 @@ class TurnRenderer:
                 )
             )
 
+    def kind(self, name: str) -> str:
+        """The kind of the tool *name*: read, write, run or network, from its tier."""
+        if name not in self._tiers and self.tool_tiers is not None:
+            self._tiers = dict(self.tool_tiers())
+        tier = self._tiers.get(name) or BUILTIN_TIERS.get(name, "write")
+        return KINDS.get(tier, "write")
+
     def _header(
         self, symbol: str, style: str, name: str, preview: str, meta: list[str]
     ) -> Text:
-        """``<symbol> <name>  <preview> · <meta> · ...``, cut to the width.
+        """``<symbol> <kind> <name>  <preview> · <meta> · ...``, cut to the width.
 
+        The kind's glyph and the name take the kind's color (a read fades).
         The preview gives way to the meta, except to a long last part that
         carries free text (a denial's reason, a block's error), which is cut
         at the line's end; a fixed tag such as ``allowed by a session
         grant`` always shows whole.
         """
         width = self.out.width
+        kind = self.kind(name)
+        glyph = getattr(self.symbols, f"kind_{kind}")
         name = plain(name)
         dot = f" {self.symbols.dot} "
         meta = [part for part in meta if part]
-        start = f"{symbol} {name}  "
+        start = f"{symbol} {glyph} {name}  "
         shown, _ = escape_arguments(" ".join(preview.split("\n")))
         fixed = sum(cells(dot + part) for part in meta[:-1])
         last = cells(dot + meta[-1]) if meta else 0
@@ -1110,12 +1256,12 @@ class TurnRenderer:
         head = Text(style="muted" if style == "muted" else "")
         head.append(symbol, style=style)
         head.append(" ")
-        head.append(name, style="tool")
+        head.append(f"{glyph} {name}", style=f"kind_{kind}")
         if shown and room >= 4:
             head.append("  " + cut_cells(shown, room, self.symbols.ellipsis))
         for part in meta:
             head.append(dot, style="muted")
-            head.append(part, style="warn" if part.startswith("exit ") else "muted")
+            head.append(part, style="error" if part.startswith("exit ") else "muted")
         head.no_wrap = True
         head.truncate(width, overflow="ellipsis")
         return head
@@ -1152,15 +1298,18 @@ class TurnRenderer:
             return self._header(symbols.blocked, "blocked", name, preview, [tag])
         meta = [duration]
         exit_code = data.get("exit_code")
+        nonzero = isinstance(exit_code, int) and exit_code != 0
         if status == "success":
-            symbol, style, body = symbols.ok, "ok", output
-            if isinstance(exit_code, int) and exit_code != 0:
+            # A command that exits nonzero ran (the event says success), but
+            # its row reads as a failure: the thing to notice in a turn.
+            symbol, style = (symbols.failed, "error") if nonzero else (symbols.ok, "ok")
+            body = output
+            if nonzero:
                 meta.append(f"exit {exit_code}")
         else:
             symbol, style = symbols.failed, "error"
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
-        nonzero = isinstance(exit_code, int) and exit_code != 0
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
         if status == "success" and snapshot is not None:
             parts.append(self._change_body(snapshot))
@@ -1177,7 +1326,7 @@ class TurnRenderer:
                 body,
                 ref=ref,
                 limit=self._output_limit(failed=nonzero or status != "success"),
-                first_style="error" if status != "success" else "",
+                first_style="error" if nonzero or status != "success" else "",
             )
         )
         images = _image_lines(data.get("images"), self.symbols)
@@ -1232,25 +1381,27 @@ class TurnRenderer:
         else:  # written again: the first write's "before" stays
             known.after = after
 
-    def _changes(self) -> list[tuple[str, tuple[int, int] | None]]:
-        """The files the turn changed with their lines added and removed, when known.
+    def _changes(self) -> list[Change]:
+        """The files the turn changed, each new or modified, with its lines added and removed.
 
         Net of the turn: the file as the turn found it against as it left it. A file
-        written back as it was is not listed.
+        written back as it was is not listed. A file no approval read first has no
+        known state and no counts.
         """
-        changes: list[tuple[str, tuple[int, int] | None]] = []
+        changes: list[Change] = []
         for path, written in self._written.items():
-            counts = None
+            counts, state = None, ""
             if written.before is not None:
                 _, added, removed = edits.diff(written.before, written.after)
                 if not (added or removed or written.created):
                     continue
                 counts = (added, removed) if added or removed else None
-            changes.append((display_path(path, self._root), counts))
+                state = "new" if written.created else "modified"
+            changes.append(Change(display_path(path, self._root), counts, state))
         return changes
 
     def changed_line(self) -> Text | None:
-        """``  Changed hello.py (+1), README.md (+3 −1)``, or ``None`` when no file changed."""
+        """``  Changed + hello.py (+1), ~ README.md (+3 −1)``, or ``None`` when none changed."""
         return changed_text(self._changes(), self.out.width, self.symbols)
 
     def _change_body(self, snapshot: Snapshot) -> Text:
@@ -1262,12 +1413,11 @@ class TurnRenderer:
         target = snapshot.target
         if not target.exists:
             count = len(snapshot.new.splitlines())
-            return Text(
-                f"  {self.symbols.connector} new file, {count} line"
-                + ("" if count == 1 else "s"),
-                no_wrap=True,
-                overflow="ellipsis",
-            )
+            body = Text(no_wrap=True, overflow="ellipsis")
+            body.append(f"  {self.symbols.connector} ", style="muted")
+            body.append("new file", style="file_new")
+            body.append(f", {count} line" + ("" if count == 1 else "s"), style="muted")
+            return body
         if not target.diffable:
             # No text was read (too large, binary, not regular): no counts
             # are known, and the panel said why.
@@ -1279,11 +1429,11 @@ class TurnRenderer:
             )
         rows, _, _ = edits.diff(target.text or "", snapshot.new)
         body = Text(no_wrap=True, overflow="ellipsis")
-        body.append(
-            f"  {self.symbols.connector} +{snapshot.added} "
-            f"{self.symbols.minus}{snapshot.removed} lines",
-            style="muted",
-        )
+        body.append(f"  {self.symbols.connector} ", style="muted")
+        body.append(f"+{snapshot.added}", style="ok_text")
+        body.append(" ")
+        body.append(f"{self.symbols.minus}{snapshot.removed}", style="error")
+        body.append(" lines", style="muted")
         if self.verbose:
             width = max(1, self.out.width - 6)
             for row in rows:
@@ -1373,19 +1523,21 @@ class TurnRenderer:
         answer = clean_output(answer)
         if result.status == "completed":
             body: RenderableType = (
-                markdown(answer) if answer else Text("(no answer text)", style="muted")
+                markdown(answer, symbols, answer=True)
+                if answer
+                else Text("(no answer text)", style="muted")
             )
-            self.out.print(_marked(symbols.assistant, "", body))
+            self.out.print(_marked(symbols.assistant, "answer", body))
         else:
             if answer:
                 # Inline before a paragraph; on a line of its own before a
                 # block, which "Best effort: " in front would break.
                 effort: RenderableType = (
-                    Group(Text("Best effort:"), markdown(answer))
+                    Group(Text("Best effort:"), markdown(answer, symbols, answer=True))
                     if _BLOCK_START.match(answer)
-                    else markdown("Best effort: " + answer)
+                    else markdown("Best effort: " + answer, symbols, answer=True)
                 )
-                self.out.print(_marked(symbols.assistant, "", effort))
+                self.out.print(_marked(symbols.assistant, "answer", effort))
             self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
@@ -1454,42 +1606,69 @@ def _one_line(line: str, width: int, symbols: Symbols) -> Text:
     )
 
 
-def _counts(counts: tuple[int, int] | None, symbols: Symbols) -> str:
+class Change(NamedTuple):
+    """A file the turn changed: its path, lines added and removed, and its state.
+
+    *state* is ``new``, ``modified``, or ``""`` when it is not known.
+    """
+
+    path: str
+    counts: tuple[int, int] | None = None
+    state: str = ""
+
+
+def _counts(counts: tuple[int, int] | None, symbols: Symbols) -> Text:
     """`` (+3 −1)``: the lines a file gained and lost; empty when they are not known."""
-    parts: list[str] = []
-    if counts is not None:
-        added, removed = counts
-        if added:
-            parts.append(f"+{added}")
-        if removed:
-            parts.append(f"{symbols.minus}{removed}")
-    return f" ({' '.join(parts)})" if parts else ""
+    added, removed = counts or (0, 0)
+    parts = [(f"+{added}", "ok_text")] if added else []
+    parts += [(f"{symbols.minus}{removed}", "error")] if removed else []
+    text = Text()
+    if parts:
+        text.append(" (", style="muted")
+        for number, (part, style) in enumerate(parts):
+            text.append(" " if number else "", style="muted")
+            text.append(part, style=style)
+        text.append(")", style="muted")
+    return text
+
+
+# A changed file as the line draws it: its name, counts, and state mark and style.
+_Entry = tuple[str, Text, tuple[str, str] | None]
 
 
 def changed_text(
-    changes: Sequence[tuple[str, tuple[int, int] | None]], width: int, symbols: Symbols
+    changes: Sequence[Change], width: int, symbols: Symbols
 ) -> Text | None:
     """The line under a footer that names a turn's changed files, within *width* cells.
 
-    ``  Changed hello.py (+1), README.md (+3 −1)``: at most :data:`CHANGED_NAMES`
-    names, then ``and N more``. The names are the default color, since they are what a
-    person looks for, and the words and counts around them are dim. A line that is too
-    wide gives up names before it cuts one; the first path that still does not fit is
-    cut in the middle, so its file name stays, after its counts have gone if it must.
-    ``None`` when nothing changed.
+    ``  Changed + hello.py (+1), ~ README.md (+3 −1)``: each file's state (``+``
+    new, ``~`` modified; none when not known) and its name in the state's color,
+    at most :data:`CHANGED_NAMES` of them, then ``and N more``. The words around
+    them are dim. A line that is too wide gives up names before it cuts one; the
+    first path that still does not fit is cut in the middle, so its file name
+    stays, after its counts have gone if it must. ``None`` when nothing changed.
     """
     if not changes:
         return None
-    entries = [(plain(path), _counts(counts, symbols)) for path, counts in changes]
+    marks = {
+        "new": (symbols.file_new, "file_new"),
+        "modified": (symbols.file_modified, "file_mod"),
+    }
+    entries = [
+        (plain(change.path), _counts(change.counts, symbols), marks.get(change.state))
+        for change in changes
+    ]
 
-    def line(shown: Sequence[tuple[str, str]], more: int) -> Text:
+    def line(shown: Sequence[_Entry], more: int) -> Text:
         text = Text("  ", no_wrap=True, overflow="ellipsis")
         text.append("Changed ", style="muted")
-        for number, (name, counts) in enumerate(shown):
+        for number, (name, counts, mark) in enumerate(shown):
             if number:
                 text.append(", ", style="muted")
-            text.append(name)
-            text.append(counts, style="muted")
+            if mark is not None:
+                text.append(f"{mark[0]} ", style=mark[1])
+            text.append(name, style=mark[1] if mark else "")
+            text.append_text(counts)
         if more:
             text.append(f" and {more} more", style="muted")
         return text
@@ -1498,15 +1677,15 @@ def changed_text(
         text = line(entries[:count], len(entries) - count)
         if cells(text.plain) <= width:
             return text
-    name, counts = entries[0]
+    name, counts, mark = entries[0]
     more = len(entries) - 1
     file_name = name.rpartition("/")[2]
-    for kept in (counts, ""):  # the counts go before the file name is cut
-        room = width - cells(line([("", kept)], more).plain)
+    for kept in (counts, Text()):  # the counts go before the file name is cut
+        room = width - cells(line([("", kept, mark)], more).plain)
         cut = cut_middle(name, max(1, room), symbols.ellipsis)
         if cut.endswith(file_name):
             break
-    text = line([(cut, kept)], more)
+    text = line([(cut, kept, mark)], more)
     text.truncate(width, overflow="ellipsis")
     return text
 
