@@ -1052,7 +1052,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   verifies, and `melo --version` from the bundle takes 0.28 s as before (median of five
   runs). Code that runs on the bundled interpreter, such as the `python_exec` tool,
   can no longer import tkinter or turtle or run pip, and `python -m venv` needs
-  `--without-pip`. ([#NN])
+  `--without-pip`. ([#251])
 - `/help` and the `/` menu start with the everyday commands. `/help` prints eight of them
   in three groups (Conversation, Model, Help), the `!` line and `/help all lists every
   command and key.`; `/help all` (and `/help` in developer mode) lists every command and the
@@ -1818,6 +1818,7 @@ earlier milestones.
 [#248]: https://github.com/localmelo/localmelo/pull/248
 [#249]: https://github.com/localmelo/localmelo/pull/249
 [#250]: https://github.com/localmelo/localmelo/pull/250
+[#251]: https://github.com/localmelo/localmelo/pull/251
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
