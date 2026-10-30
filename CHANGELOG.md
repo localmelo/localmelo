@@ -283,7 +283,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   PNG, JPEG, GIF, WebP or SVG, and it is at most 20 MB, with `nosniff`, `Cache-Control: private`
   and, for SVG, `Content-Security-Policy: sandbox; default-src 'none'; style-src
   'unsafe-inline'`, so a picture never runs as a page. It writes and lists nothing. Direct runs
-  and the terminal are unchanged. ([#NN])
+  and the terminal are unchanged. ([#291])
 
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
@@ -2265,6 +2265,7 @@ earlier milestones.
 [#288]: https://github.com/localmelo/localmelo/pull/288
 [#289]: https://github.com/localmelo/localmelo/pull/289
 [#290]: https://github.com/localmelo/localmelo/pull/290
+[#291]: https://github.com/localmelo/localmelo/pull/291
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
