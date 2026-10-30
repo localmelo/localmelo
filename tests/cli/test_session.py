@@ -1815,6 +1815,27 @@ async def test_a_turn_that_wrote_files_names_them_and_not_a_refused_write(
     )
 
 
+async def test_a_file_melo_cannot_compare_is_named_without_counts(
+    setup: Setup,
+) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    root = Path(session.agent.workspace_root or "")
+    (root / "data.bin").write_bytes(b"\xff\xfe not text")
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "data.bin", "content": "x\n"}),
+        answer("Rewrote it."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("rewrite the data")
+    await setup.idle()
+    # The old bytes are not text, so no diff and no counts: the name alone.
+    assert "  └ changed; no diff shown" in out.text()
+    assert out.text().endswith("\n  Changed data.bin\n\n"), out.text()
+
+
 async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
     session, out = setup.session, setup.out
     session.approvals._policy._granted.add("file_write")
