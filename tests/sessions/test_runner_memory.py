@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import AgentOptions
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions.agents import build_session_agent
@@ -38,8 +39,17 @@ def today() -> str:
 
 @pytest.fixture()
 def stub() -> Any:
-    scenarios = {
-        "answer": {"replies": [{"content": "I prefer long answers. My name is Melo."}]}
+    scenarios: dict[str, dict[str, Any]] = {
+        "answer": {"replies": [{"content": "I prefer long answers. My name is Melo."}]},
+        # The chat model as the llm retriever meets it: it keeps the first note.
+        "pick": {
+            "replies": [
+                {
+                    "content": '{"ids": ["n1"]}',
+                    "usage": {"prompt_tokens": 150, "completion_tokens": 7},
+                }
+            ]
+        },
     }
     server = StubServer(scenarios=scenarios).start()
     try:
@@ -201,7 +211,10 @@ async def test_the_answer_attachments_and_workers_write_no_record(
     events = await chat(
         memory, store, stub, tmp_path / "a", "please read this", attachments=(note,)
     )
-    assert memory_events(events) == []
+    # Memory is on, so the turn says what it did: nothing used, kept or refused.
+    (quiet,) = memory_events(events)
+    assert (quiet["used"], quiet["remembered"], quiet["refused"]) == ([], [], "")
+    assert quiet["recall"]["used"] == 0
     worker = await chat(
         memory, store, stub, tmp_path / "w", "I prefer tea.", kind="worker"
     )
@@ -242,3 +255,40 @@ async def test_an_undone_turn_leaves_no_document(
 ) -> None:
     await chat(memory, store, stub, tmp_path / "a", "tomato garden plan", undo=True)
     assert (await memory.status())["documents"] == 0
+
+
+async def test_llm_recall_over_http_reports_its_timings_in_the_event_and_the_turn_result(
+    store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    cfg = Config()
+    memory = ChatMemory(
+        lambda: cfg,
+        directory=str(tmp_path / "memory"),
+        chat_url=stub.base_url.replace("/v1", "/s/pick/v1"),
+        chat_model="stub-model",
+    )
+    try:
+        await chat(memory, store, stub, tmp_path / "a", SAYS)
+        cfg.memory.retriever = "llm"
+        stub.requests.clear()
+        b = await chat(memory, store, stub, tmp_path / "b", ASKS)
+        (asked,) = memory_events(b)
+        assert [u["text"] for u in asked["used"]] == [
+            "Your group meeting is on Thursdays."
+        ]
+        recall = asked["recall"]
+        assert (recall["retriever"], recall["fallback"]) == ("llm", "none")
+        assert recall["select_tokens"] == {"prompt": 150, "completion": 7}
+        assert recall["candidates"] >= 1 and recall["used"] == 1
+        assert recall["embed_ms"] == 0 and recall["select_ms"] >= 0
+        retrieval, plan = stub.requests
+        assert "tools" not in retrieval and "[n1] note · Your group meeting" in (
+            retrieval["messages"][-1]["content"]
+        )
+        assert "the user said" in plan["messages"][-1]["content"]
+        # A client of the HTTP API reads the same numbers with the turn's result.
+        session_id = (await store.list_sessions())[0].id
+        (turn,) = await store.list_turns(session_id)
+        assert turn.result is not None and turn.result["memory_recall"] == recall
+    finally:
+        await memory.aclose()

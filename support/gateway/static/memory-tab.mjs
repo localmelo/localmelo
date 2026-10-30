@@ -24,8 +24,10 @@ export function matches(row, query) {
 }
 
 /** What melo says about how it searches: by meaning with the embedding model, else by words only. */
-export function searchLine(on, model) {
+export function searchLine(on, model, retriever = 'auto') {
   if (!on) return 'Off. Notes stay on this computer but are not used in chats.';
+  if (retriever === 'bm25') return 'Searching by words only, as the memory retriever setting says.';
+  if (retriever === 'llm') return 'Searching by words, and your chat model picks the notes that matter.';
   return model ? `Searching by meaning with ${model}, and by words.` : 'Searching by words only. An embedding model in Settings adds search by meaning.';
 }
 
@@ -37,7 +39,7 @@ export function forgetLine(notes, turns) {
 }
 
 export function setupMemoryTab({doc, api, developer = () => false}) {
-  const state = {loaded: false, error: '', on: true, rows: [], documents: 0, model: '', query: '', edit: null, draft: '', fault: '',
+  const state = {loaded: false, error: '', on: true, rows: [], documents: 0, model: '', retriever: 'auto', query: '', edit: null, draft: '', fault: '',
     ask: null, forgetting: false, notice: '', busy: false, focus: false};
   let reads = 0;
   function node(tag, className, text) {
@@ -72,7 +74,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
       const page = await api('/memory/records');
       if (mine !== reads) return;
       Object.assign(state, {rows: page.records ?? [], on: page.on !== false, documents: page.documents ?? 0,
-        model: page.embedding_model ?? '', loaded: true, error: ''});
+        model: page.embedding_model ?? '', retriever: page.retriever ?? 'auto', loaded: true, error: ''});
     } catch (error) {
       if (mine !== reads || quiet) return;
       state.error = error?.message || 'Could not read what melo remembers.';
@@ -108,7 +110,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
       draw();
     });
     row.append(node('strong', '', 'Remember across chats'), toggle);
-    head.replaceChildren(row, node('p', 'memory-line', searchLine(state.on, state.model)));
+    head.replaceChildren(row, node('p', 'memory-line', searchLine(state.on, state.model, state.retriever)));
   }
   function noteNode(row) {
     const item = node('li', 'memory-note');

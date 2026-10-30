@@ -88,6 +88,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Memory across chats keeps and finds more of what you say. "My reading group meets on
+  Tuesdays." and "我的猫叫团子。" were not kept as notes, because only "my ... is" sentences
+  counted; a sentence that starts with "my" or "our" and has a verb of habit or state
+  (meets, starts, lives, plays, likes ...), or "我的X" with 叫, 姓, 住在, 喜欢 or 每周, is now
+  a note. And a chat asked "which day does my reading group meet?" recalled nothing
+  though an earlier turn said it: the words were compared as written, so "meet" did not
+  match "meets" and only 2 of the 4 content words matched. A plural, "-ing" or "-ed"
+  ending is now ignored when words are compared ([#310]).
+
 - A chat says plainly what it remembers and answers in the script you write in. Asked about
   memory, melo had described how the system around it works ("retrieved context and
   reflections", "cannot write to long-term memory") and had answered in traditional characters
@@ -346,6 +355,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in `~/.cache/localmelo/memory/` (`records.db`, `index.db`); `[memory] across_chats =
   false` turns it all off. Direct runs, workers, the terminal chat and the benchmark are
   unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#309]).
+- Choose how memory across chats finds notes, and time every recall. The developer
+  setting `[memory] retriever` (`-X memory.retriever=...`, listed by `melo -h all`) is
+  `auto` (the default: words, and meaning too with an embedding model), `bm25` (words
+  only), `embedding` (the same as `auto` with a model; `melo serve` refuses to start
+  without one) or `llm` (words pick up to 20 candidates and the chat model chooses among
+  them within 4 s, falling back to words alone on a timeout, an error or an unreadable
+  reply, with no embedding calls). Every console turn with memory on now carries a
+  `recall` object in its `turn.memory` event (the retriever, why it fell back, the
+  milliseconds spent embedding, searching and choosing, the tokens of the choice, the
+  candidates and the items used), also when nothing is recalled, and the stored turn's
+  result repeats it as `memory_recall`. A failed query embedding is no longer tried a
+  second time within the same search. See
+  [How recall finds notes](docs/concepts/memory.md#memory-across-chats) ([#310]).
 - The panel beside a chat. The web console (and so the macOS app) shows Melo on
   the right of the chat: his portrait, which rests, works, waits or cheers with
   what runs, one status line (`Connected · <model> on <server>`, `Working on 2
@@ -2461,6 +2483,7 @@ earlier milestones.
 [#306]: https://github.com/localmelo/localmelo/pull/306
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
+[#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

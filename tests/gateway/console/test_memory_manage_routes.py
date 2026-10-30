@@ -126,6 +126,7 @@ async def test_forget_everything_needs_its_flag_and_reports_what_went(
         "records": [],
         "documents": 0,
         "embedding_model": "",
+        "retriever": "auto",
         "last_error": "",
     }
 
@@ -198,3 +199,14 @@ async def test_an_open_chat_is_rebuilt_when_a_note_its_instructions_pin_changes(
     assert (
         console.sessions._sessions[open_again].agent is None
     ), "a deleted note is gone from open chats too"
+
+
+async def test_the_tab_is_told_the_retriever_and_hears_no_embedding_model_when_it_makes_no_call(
+    setup: Setup, tmp_path: Path  # noqa: F811
+) -> None:
+    console, client, _ = setup
+    assert (await notes(client))["retriever"] == "auto"
+    for mode in ("bm25", "llm"):
+        console.cfg.memory.retriever = mode
+        body = await notes(client)
+        assert (body["retriever"], body["embedding_model"]) == (mode, "")

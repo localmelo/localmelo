@@ -117,6 +117,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             "records": [_row(e, console, chats if known else None) for e in entries],
             "documents": status["documents"],
             "embedding_model": status["embedding_model"],
+            "retriever": status["retriever"],
             "last_error": status["last_error"],
         }
 

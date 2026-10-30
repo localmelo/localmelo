@@ -60,6 +60,10 @@ test('the words: what a search matches, how memory searches, and what forgetting
   assert.match(searchLine(true, ''), /^Searching by words only\./);
   assert.equal(searchLine(true, 'Qwen3-Embedding-0.6B'), 'Searching by meaning with Qwen3-Embedding-0.6B, and by words.');
   assert.match(searchLine(false, 'x'), /^Off\./);
+  // A retriever that makes no embedding call says so, whatever model is set up.
+  assert.match(searchLine(true, '', 'bm25'), /^Searching by words only, as the memory retriever setting says\./);
+  assert.match(searchLine(true, '', 'llm'), /^Searching by words, and your chat model picks/);
+  assert.match(searchLine(true, 'Qwen3-Embedding-0.6B', 'embedding'), /by meaning with Qwen3-Embedding-0.6B/);
   assert.equal(forgetLine(2, 5), "This removes 2 notes and melo's search index of 5 chat turns. Your chats stay. It cannot be undone.");
   assert.equal(forgetLine(1, 0), 'This removes 1 note. Your chats stay. It cannot be undone.');
 });

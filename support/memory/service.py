@@ -7,8 +7,12 @@ A chat's runner calls :meth:`ChatMemory.before_turn` before each turn's run
 (write the user's statements, recall what matches) and
 :meth:`ChatMemory.after_turn` once it ends (index it, off the reply path).
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
-to BM25 for that turn. Nothing leaves the computer except the embedding
-requests to the user's own model server.
+to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
+``auto`` (words, and meaning too with an embedding model), ``bm25``,
+``embedding`` or ``llm`` (words pick :data:`CANDIDATES`, the chat model chooses
+among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). Every recall
+reports its timings in a :class:`Recall`. Nothing leaves the computer except
+the embedding and chat requests to the user's own model server.
 """
 
 from __future__ import annotations
@@ -19,15 +23,17 @@ import logging
 import os
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory._sqlite import make_private_dir
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
+from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import ToolDef, split_thinking
 from localmelo.support.memory import records
 from localmelo.support.memory.index import ConversationIndex, Document, document_text
@@ -39,7 +45,9 @@ from localmelo.support.memory.recall import (
     block,
     chat_label,
     day,
-    rank,
+    pick,
+    ranked,
+    snippet,
     unit,
 )
 
@@ -51,6 +59,14 @@ logger = logging.getLogger(__name__)
 
 EMBED_TIMEOUT_S: Final = 1.5
 INDEX_EMBED_TIMEOUT_S: Final = 10.0
+SELECT_TIMEOUT_S: Final = 4.0
+CANDIDATES: Final = 20
+# What the llm retriever names a failure, as ``recall.fallback`` does.
+_SELECT_FAILURES: Final = {
+    "timeout": "timeout",
+    "provider_error": "error",
+    "parse": "unreadable",
+}
 PINNED_CHARS: Final = 600
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
@@ -61,6 +77,50 @@ _QWEN3_QUERY: Final = (
 )
 
 
+@dataclass
+class Recall:
+    """How one recall went: the ``recall`` field of ``turn.memory``.
+
+    *retriever* is what answered (``bm25``, ``embedding`` or ``llm``);
+    *fallback* is ``none``, or why it fell back to words only: ``timeout``,
+    ``error``, ``unreadable`` (the chat model's reply) or ``no-embedding``
+    (the retriever asked for vectors and there is no embedding model).
+    *candidates* are the notes and turns that passed to the choice, *used* the
+    ones the message carries.
+    """
+
+    retriever: str = "bm25"
+    fallback: str = "none"
+    embed_ms: int = 0
+    search_ms: int = 0
+    select_ms: int = 0
+    select_tokens: dict[str, int] = field(
+        default_factory=lambda: {"prompt": 0, "completion": 0}
+    )
+    candidates: int = 0
+    used: int = 0
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _resolve(mode: str, failure: str) -> tuple[str, str]:
+    """The retriever that answers and its ``fallback``, for a configured *mode*."""
+    if mode in ("bm25", "llm"):
+        return mode, "none"
+    if failure == "no-embedding":  # `auto` without a model is just words
+        return "bm25", "none" if mode == "auto" else failure
+    return "embedding", failure or "none"
+
+
+class Embedded(NamedTuple):
+    """The vectors of one embedding call (``None`` if none came) and why not."""
+
+    vectors: list[list[float]] | None
+    model: str
+    failure: str = ""  # "", "timeout", "error" or "no-embedding"
+
+
 @dataclass(frozen=True)
 class TurnMemory:
     """What memory did for one turn: the block it appends, and what it shows."""
@@ -69,15 +129,17 @@ class TurnMemory:
     used: tuple[Item, ...] = ()
     remembered: tuple[records.Written, ...] = ()
     refused: bool = False
+    recall: Recall | None = None
 
     def event(self) -> dict[str, Any] | None:
-        """The ``turn.memory`` data (without the turn's keys); ``None`` for nothing."""
-        if not (self.used or self.remembered or self.refused):
+        """The ``turn.memory`` data (without the turn's keys); ``None`` with memory off."""
+        if self.recall is None:
             return None
         return {
             "used": [item.to_json() for item in self.used],
             "remembered": [record.to_json() for record in self.remembered],
             "refused": records.NOT_KEPT if self.refused else "",
+            "recall": self.recall.to_json(),
         }
 
 
@@ -125,14 +187,29 @@ def _build_embedder(
     return None
 
 
+def _build_llm(
+    key: tuple[str, ...] | None, cfg: Config | None
+) -> BaseLLMProvider | None:
+    if key is not None and key[0] == "url":
+        from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+        return OpenAICompatLLM(key[1], key[2], timeout=30.0)
+    if key is not None and cfg is not None:
+        from localmelo.support.backends.registry import get_backend
+
+        return get_backend(key[0]).build_chat_provider(cfg)
+    return None
+
+
 class ChatMemory:
     """Records, the conversation index and recall, for the chats of one process.
 
     *settings* is read on every call: ``[memory] across_chats`` switches it
     (``None``, no config file, counts as on) and the embedding backend picks
     the model. *embedding_url* and *embedding_model* name a server in place of
-    the config's (the terminal's ``--embedding-base-url``). *surface* is
-    ``gateway`` or ``cli``, the session file the chats live in.
+    the config's (the terminal's ``--embedding-base-url``), and *chat_url* and
+    *chat_model* the chat model ``llm`` recall asks. *surface* is ``gateway``
+    or ``cli``, the session file the chats live in.
     """
 
     def __init__(
@@ -143,12 +220,16 @@ class ChatMemory:
         surface: str = "gateway",
         embedding_url: str | None = None,
         embedding_model: str | None = None,
+        chat_url: str | None = None,
+        chat_model: str | None = None,
     ) -> None:
         self._settings = settings
         self.directory = os.path.expanduser(directory or DEFAULT_MEMORY_DIR)
         self.surface = surface
         self._embedding_url = embedding_url
         self._embedding_model = embedding_model
+        self._chat_url = chat_url
+        self._chat_model = chat_model
         self._records: SqliteLongTerm | None = None
         self._index: ConversationIndex | None = None
         self._corpus = Corpus()
@@ -158,6 +239,8 @@ class ChatMemory:
         self._embedder: BaseEmbeddingProvider | None = None
         self._embed_key: tuple[str, ...] | None = None
         self._model = ""
+        self._llm: BaseLLMProvider | None = None
+        self._llm_key: tuple[str, ...] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self.last_error = ""
         self._warned = False
@@ -203,17 +286,50 @@ class ChatMemory:
             )
         return self._embedder, self._model if self._embedder is not None else ""
 
+    def retriever(self) -> str:
+        """The ``[memory] retriever`` of the settings now (an unknown value is ``auto``)."""
+        cfg = self._settings()
+        mode = cfg.memory.retriever if cfg is not None else "auto"
+        return mode if mode in ("bm25", "embedding", "llm") else "auto"
+
+    def chat_provider(self) -> BaseLLMProvider | None:
+        """The chat model of the settings now, for ``llm`` recall; ``None`` if not set up."""
+        cfg = self._settings()
+        key: tuple[str, ...] | None = None
+        if self._chat_url:
+            key = ("url", self._chat_url, self._chat_model or "default")
+        elif cfg is not None and cfg.is_configured:
+            section = getattr(cfg, cfg.chat_backend, None)
+            key = (
+                cfg.chat_backend,
+                str(getattr(section, "chat_url", "")),
+                str(getattr(section, "chat_model", "")),
+            )
+        if key != self._llm_key:
+            old, self._llm, self._llm_key = self._llm, None, key
+            if old is not None:
+                self._spawn(old.close())
+            try:
+                self._llm = _build_llm(key, cfg)
+            except Exception as exc:
+                self.last_error = f"the chat model could not be set up: {exc}"
+        return self._llm
+
     async def _embed(
         self, texts: Sequence[str], timeout: float, *, query: bool
-    ) -> tuple[list[list[float]] | None, str]:
-        """Vectors of *texts*, or ``None`` when there is no model or it failed.
+    ) -> Embedded:
+        """Vectors of *texts*, or none: no model, a failure, or a retriever without vectors.
 
         With *query*, the first text is a question and gets the query
         instruction the Qwen3 embedding models expect.
         """
+        if self.retriever() in ("bm25", "llm"):
+            return Embedded(None, "")  # these two make no embedding calls
         provider, model = self.embedding()
-        if provider is None or not texts:
-            return None, model
+        if provider is None:
+            return Embedded(None, model, "no-embedding")
+        if not texts:
+            return Embedded(None, model)
         batch = list(texts)
         if query and "qwen3-embedding" in model.lower():
             batch[0] = _QWEN3_QUERY + batch[0]
@@ -223,21 +339,28 @@ class ChatMemory:
             if len(vectors) != len(batch):
                 raise ValueError(f"{len(vectors)} vectors for {len(batch)} texts")
             self.last_error = ""
-            return vectors, model
+            return Embedded(vectors, model)
         except Exception as exc:
             reason = (
                 f"it took over {timeout:.1f} s"
                 if isinstance(exc, TimeoutError)
                 else str(exc)
             )
-            self.last_error = f"{model}: {reason or type(exc).__name__}"
-            log = logger.debug if self._warned else logger.warning
-            log(
-                "Memory search uses words only this time; the embedding model failed: %s",
-                self.last_error,
+            self._failed(f"{model}: {reason or type(exc).__name__}", "embedding")
+            return Embedded(
+                None, model, "timeout" if isinstance(exc, TimeoutError) else "error"
             )
-            self._warned = True
-            return None, model
+
+    def _failed(self, detail: str, what: str) -> None:
+        """Remember why a model failed; the log says so once, then quietly."""
+        self.last_error = detail
+        log = logger.debug if self._warned else logger.warning
+        log(
+            "Memory search uses words only this time; the %s model failed: %s",
+            what,
+            detail,
+        )
+        self._warned = True
 
     async def _sync(self) -> Corpus:
         """Bring the corpus up to date with both files (only new and gone items)."""
@@ -261,29 +384,132 @@ class ChatMemory:
         self,
         query: str,
         *,
-        vector: list[float] | None = None,
-        model: str = "",
         records_k: int = AUTO_RECORDS,
         docs_k: int = AUTO_DOCS,
         exclude_session: str = "",
+        recall: Recall | None = None,
     ) -> list[Item]:
-        """The items that match *query*; embeds it unless *vector* is given."""
+        """The items that match *query*; embeds it when the retriever uses vectors.
+
+        *recall*, when given, is filled in with how the search went.
+        """
         query = query[:_QUERY_CHARS]
-        if vector is None:
-            vectors, model = await self._embed([query], EMBED_TIMEOUT_S, query=True)
-            vector = vectors[0] if vectors else None
+        recall = recall if recall is not None else Recall()
+        started = time.perf_counter()
+        embedded = await self._embed([query], EMBED_TIMEOUT_S, query=True)
+        recall.embed_ms = elapsed_ms(started)
+        return await self._find(
+            query,
+            embedded,
+            recall,
+            records_k=records_k,
+            docs_k=docs_k,
+            exclude_session=exclude_session,
+        )
+
+    async def _find(
+        self,
+        query: str,
+        embedded: Embedded,
+        recall: Recall,
+        *,
+        records_k: int,
+        docs_k: int,
+        exclude_session: str,
+    ) -> list[Item]:
+        """Rank for *query* as the retriever says; the numbers go to *recall*."""
+        mode = self.retriever()
+        recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
+        started = time.perf_counter()
+        vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
             corpus = await self._sync()
-            return rank(
+            now = time.time()
+            found = ranked(
                 corpus,
                 query,
-                unit(vector),
-                model,
-                now=time.time(),
-                records=records_k,
-                docs=docs_k,
+                vector,
+                embedded.model,
+                now=now,
                 exclude_session=exclude_session,
             )
+            loose = (
+                ranked(
+                    corpus,
+                    query,
+                    None,
+                    "",
+                    now=now,
+                    exclude_session=exclude_session,
+                    coverage=0.0,
+                )[:CANDIDATES]
+                if mode == "llm"
+                else []
+            )
+        recall.search_ms = elapsed_ms(started)
+        recall.candidates = len(loose) if mode == "llm" else len(found)
+        if loose:
+            found = await self._select(
+                query, loose, found, recall, k=records_k + docs_k
+            )
+        items = pick(found, records=records_k, docs=docs_k)
+        recall.used = len(items)
+        return items
+
+    async def _select(
+        self,
+        query: str,
+        candidates: list[Item],
+        words: list[Item],
+        recall: Recall,
+        *,
+        k: int,
+    ) -> list[Item]:
+        """The candidates the chat model chooses, best first.
+
+        On a timeout, an error or a reply it cannot read, *words* (what the
+        ``bm25`` retriever finds) stand in and ``recall.fallback`` says why.
+        """
+        started = time.perf_counter()
+        failure = ""
+        chosen: list[Item] = []
+        try:
+            llm = self.chat_provider()
+            if llm is None:
+                raise RuntimeError(self.last_error or "no chat model is set up")
+            docs = [
+                Doc(
+                    item.key,
+                    "note" if item.is_record else "digest",
+                    item.text,
+                    snippet(item.text),
+                )
+                for item in candidates
+            ]
+            answer = await LLMRetriever(
+                send_from_provider(llm), timeout_s=SELECT_TIMEOUT_S
+            ).search(query, docs, k=k)
+            usage = answer.usage
+            recall.select_tokens = {
+                "prompt": usage.get("prompt_tokens", 0),
+                "completion": usage.get("completion_tokens", 0),
+            }
+            failure = (
+                _SELECT_FAILURES.get(answer.fallback, "error")
+                if answer.fallback
+                else ""
+            )
+            by_key = {item.key: item for item in candidates}
+            chosen = [by_key[hit.doc_id] for hit in answer.hits]
+        except Exception as exc:
+            failure = "error"
+            self._failed(f"chat model: {exc or type(exc).__name__}", "chat")
+        recall.select_ms = elapsed_ms(started)
+        if failure:
+            recall.fallback = failure
+            return words
+        self.last_error = ""
+        return chosen
 
     # ── A chat's turns ──
 
@@ -309,31 +535,44 @@ class ChatMemory:
             return TurnMemory()
         found, refused = records.candidates(typed)
         query = typed[:_QUERY_CHARS]
+        recall = Recall()
         if not query.strip():
-            return TurnMemory()
-        vectors, model = await self._embed(
+            failure = "" if self.embedding()[0] else "no-embedding"
+            recall.retriever, recall.fallback = _resolve(self.retriever(), failure)
+            return TurnMemory(recall=recall)
+        started = time.perf_counter()
+        embedded = await self._embed(
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
-        used = await self.search(
+        recall.embed_ms = elapsed_ms(started)
+        used = await self._find(
             query,
-            vector=vectors[0] if vectors else None,
-            model=model,
+            embedded,
+            recall,
+            records_k=AUTO_RECORDS,
+            docs_k=AUTO_DOCS,
             exclude_session=info.session_id,
         )
         text, used = block(used)
+        recall.used = len(used)
         written: list[records.Written] = []
         if found:
             source = await self._source(store, info)
+            vectors = embedded.vectors
             async with self._lock:
                 written = await records.write(
                     self.stores()[0],
                     found,
                     vectors[1:] if vectors else [None] * len(found),
                     source=source,
-                    embed_model=model,
+                    embed_model=embedded.model,
                 )
         return TurnMemory(
-            "\n\n" + text if text else "", tuple(used), tuple(written), refused
+            "\n\n" + text if text else "",
+            tuple(used),
+            tuple(written),
+            refused,
+            recall,
         )
 
     def after_turn(
@@ -366,7 +605,7 @@ class ChatMemory:
             )
             for src, _, typed, answer, _ in turns
         ]
-        vectors, model = await self._embed(texts, timeout, query=False)
+        vectors, model, _ = await self._embed(texts, timeout, query=False)
         for number, (src, turn, _, _, at) in enumerate(turns):
             doc = Document(
                 session_id=str(src["session_id"]),
@@ -429,7 +668,7 @@ class ChatMemory:
         for entry in entries:
             if not model or entry.embed_model == model:
                 continue
-            vectors, _ = await self._embed(
+            vectors, _, _ = await self._embed(
                 [entry.text], INDEX_EMBED_TIMEOUT_S, query=False
             )
             if vectors:
@@ -494,7 +733,9 @@ class ChatMemory:
             raise ValueError(
                 "That looks like a password or key, so melo does not keep it."
             )
-        vectors, model = await self._embed([text], INDEX_EMBED_TIMEOUT_S, query=False)
+        vectors, model, _ = await self._embed(
+            [text], INDEX_EMBED_TIMEOUT_S, query=False
+        )
         async with self._lock:
             store = self.stores()[0]
             done = await store.edit_entry(
@@ -533,7 +774,9 @@ class ChatMemory:
 
     async def status(self) -> dict[str, Any]:
         store, index = self.stores()
-        _, model = self.embedding()
+        mode = self.retriever()
+        # The words-only and chat-model retrievers make no embedding call.
+        model = "" if mode in ("bm25", "llm") else self.embedding()[1]
         async with self._lock:
             counts = len(await store.active_entries()), await index.count()
         return {
@@ -541,6 +784,7 @@ class ChatMemory:
             "records": counts[0],
             "documents": counts[1],
             "embedding_model": model,
+            "retriever": mode,
             "last_error": self.last_error,
         }
 
@@ -562,6 +806,10 @@ class ChatMemory:
             with contextlib.suppress(Exception):
                 await self._embedder.close()
             self._embedder, self._embed_key = None, None
+        if self._llm is not None:
+            with contextlib.suppress(Exception):
+                await self._llm.close()
+            self._llm, self._llm_key = None, None
         for closer in (self._records, self._index):
             if closer is not None:
                 with contextlib.suppress(Exception):

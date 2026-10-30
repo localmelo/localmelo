@@ -1243,15 +1243,15 @@ panel uses these routes.
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
 ```
 
 - `GET /api/memory/records` lists the notes newest first; `?session_id=ID` keeps one chat's.
   `topic` is `about`, `preferences`, `people`, `projects` or `decisions`. `from` names the
   chat and the day, or `from a deleted chat, Oct 30` (`chat_gone` true) once the chat is
   gone; `edited` is true once the user reworded the note. `documents` counts the chat turns in the
-  index, `embedding_model` is the model that searches by meaning (`""`: words only) and
-  `last_error` the last reason it was not used.
+  index, `embedding_model` is the model that searches by meaning (`""`: words only, which
+  `retriever` `bm25` or `llm` always is) and `last_error` the last reason it was not used.
 - `PATCH /api/memory/records/{id}` with `{"text": "..."}` rewords a note in place and answers
   the note as above. The old wording is overwritten (not kept), the new one is embedded, and
   the text of the note's decision rows is blanked. A wording that is empty, over 300

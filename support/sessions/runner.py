@@ -169,6 +169,8 @@ class _Turn:
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     # The checked text of the last digest note event of this turn (R4).
     last_note: str = ""
+    # How memory's recall went for this turn (``turn.memory``'s ``recall``).
+    recall: dict[str, Any] | None = None
     # Whether the writer still takes events; it stops at step 7.2.
     accepting: bool = True
     writer: asyncio.Task[None] | None = None
@@ -714,6 +716,7 @@ class SessionRunner:
             return turn.text
         data = found.event()
         if data is not None:
+            turn.recall = data["recall"]
             info = turn.turn
             self._enqueue(
                 turn, MEMORY_EVENT_TYPE, {"turn": info.turn, "turn_id": info.id, **data}
@@ -883,6 +886,8 @@ class SessionRunner:
             # The result column carries the reason too: a caller that reads the
             # saved turn (instead of turn.finished) must see why it ended.
             result = turn.fallback.to_dict()
+        if turn.recall is not None and result is not None:
+            result["memory_recall"] = turn.recall  # per-turn timings, beside duration_s
         end: dict[str, Any] = {
             "session_id": info.session_id,
             "turn": info.turn,

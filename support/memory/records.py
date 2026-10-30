@@ -24,6 +24,7 @@ from localmelo.melo.memory.hippo.policy import content_tokens, normalise, overla
 from localmelo.melo.memory.hippo.signals import classify_user_text
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
@@ -75,6 +76,23 @@ _SINGLE = {
         ("timezone", r"\btime ?zone\b|时区"),
     )
 }
+# A statement about the user's own things that the shared lexicon (``my … is``)
+# misses: "My reading group meets on Tuesdays.", "我的猫叫团子。". The sentence
+# starts with "my"/"our" and its predicate is a verb of habit or state, so a
+# request ("my code fails, fix it") or a report of the work ("my code works")
+# stays out.
+_OWN_FACT = re.compile(
+    r"^\W*(?:my|our)\b(?P<thing>[^.\n]{1,60}?)\s+(?:meets?|starts?|ends?|begins?|"
+    r"opens?|closes?|lives?|studies|teaches|plays|likes?|loves?|hates?|eats?|"
+    r"drinks?|speaks?|visits?|moved)\b"
+    r"|^\W*我的(?P<cjk>[^。\n]{1,20}?)(?:叫|姓|住在|喜欢|每(?:周|天|月)|在(?:周|星期))",
+    re.IGNORECASE,
+)
+_OWN_META = re.compile(
+    r"\b(?:task|question|request|goal|plan|problem|issue|job|point)\b"
+    r"|任务|问题|请求|目标|计划",
+    re.IGNORECASE,
+)
 # The never-kept classes: passwords and codes, card and ID numbers.
 _SECRET_WORDS = re.compile(
     r"\b(passwords?|passcodes?|passwd|pin|cvv|security code|one-time code|otp)\b"
@@ -181,9 +199,11 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return [], False
     # A ";" joins two statements as often as it joins two clauses.
-    signals = classify_user_text(re.sub(r"\s*[;；]\s*", "\n", typed))
+    joined = re.sub(r"\s*[;；]\s*", "\n", typed)
+    signals = classify_user_text(joined)
     found: list[tuple[str, str]] = [(f, "user_request") for f in signals.request_facts]
     found += [(f, "user_statement") for f in signals.facts]
+    found += [(s, "user_statement") for s in _own_facts(joined, signals.facts)]
     decisions = [
         s.strip()
         for s in re.split(r"(?<=[.!?。！？])\s+|\n", typed)
@@ -202,6 +222,22 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
         topic = topic_of(sentence, request=signal == "user_request")
         out.append(Candidate(text, sentence[:MAX_RECORD_CHARS], topic, signal))
     return out, refused
+
+
+def _own_facts(text: str, known: Sequence[str]) -> list[str]:
+    """The declarative sentences about the user's own things that *known* lacks."""
+    out: list[str] = []
+    for _, sentence in split_sentences(text):
+        match = _OWN_FACT.match(sentence)
+        if (
+            match is None
+            or sentence in known
+            or sentence.rstrip().endswith(("?", "？"))
+            or _OWN_META.search(match.group("thing") or match.group("cjk") or "")
+        ):
+            continue
+        out.append(sentence)
+    return out
 
 
 def _single(text: str) -> str:

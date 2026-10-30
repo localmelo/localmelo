@@ -696,10 +696,10 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
 ```
 
-- `GET /api/memory/records` 按时间从新到旧列出笔记；`?session_id=ID` 只保留某个对话的。`topic` 为 `about`、`preferences`、`people`、`projects` 或 `decisions`。`from` 写明对话和日期；对话被删除后是 `from a deleted chat, Oct 30`（`chat_gone` 为 true）；用户改写过笔记后 `edited` 为 true。`documents` 是对话索引中的轮次数，`embedding_model` 是按含义搜索的模型（`""` 表示只按词），`last_error` 是它最近一次没被使用的原因。
+- `GET /api/memory/records` 按时间从新到旧列出笔记；`?session_id=ID` 只保留某个对话的。`topic` 为 `about`、`preferences`、`people`、`projects` 或 `decisions`。`from` 写明对话和日期；对话被删除后是 `from a deleted chat, Oct 30`（`chat_gone` 为 true）；用户改写过笔记后 `edited` 为 true。`documents` 是对话索引中的轮次数，`embedding_model` 是按含义搜索的模型（`""` 表示只按词，`retriever` 为 `bm25` 或 `llm` 时总是如此），`last_error` 是它最近一次没被使用的原因。
 - `PATCH /api/memory/records/{id}`，请求体 `{"text": "..."}`，原地改写一条笔记，并返回上述形式的笔记。旧文字被覆盖（不保留），新文字重新嵌入，笔记的决策行中的文字被清空。空文字、超过 300 个字符或看起来像密码或密钥的文字返回 400 `invalid_request` 并给出原因；未知笔记返回 404 `not_found`。
 - `DELETE /api/memory/records/{id}` 删除一条笔记、它的向量和它取代过的旧文字，并清空其决策行中的文字：204，或 404 `not_found`。带 `?undo=true`（消息下方的 “Undo”）时，被它替换的笔记恢复为当前。
 - `DELETE /api/memory/records?all=true` 忘记所有笔记并清空对话索引，返回 `{"notes": 12, "turns": 48}`。没有 `all=true` 时返回 400。对话本身不受影响。

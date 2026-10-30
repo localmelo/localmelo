@@ -7,6 +7,6 @@ the memory folder (``~/.cache/localmelo/memory`` by default), mode 0700:
 
 from __future__ import annotations
 
-from localmelo.support.memory.service import ChatMemory, MemoryTools, TurnMemory
+from localmelo.support.memory.service import ChatMemory, MemoryTools, Recall, TurnMemory
 
-__all__ = ["ChatMemory", "MemoryTools", "TurnMemory"]
+__all__ = ["ChatMemory", "MemoryTools", "Recall", "TurnMemory"]
