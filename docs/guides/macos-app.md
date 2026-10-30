@@ -1,6 +1,6 @@
 # macOS development app
 
-The arm64 development app is a local prototype for the Mac that builds it, not a notarized release or a Homebrew cask. It is signed ad hoc, so no Apple developer account is needed. It needs macOS, the release Xcode at `/Applications/Xcode.app`, `uv`, and network access to obtain the pinned standalone Python and locked dependencies at build time. It does not install, start or download a model server. No signing identities or Xcode settings are changed.
+The arm64 development app is a local prototype for the Mac that builds it, not a notarized release or a Homebrew cask. It is signed ad hoc, so no Apple developer account is needed. It needs macOS, a Swift compiler, `uv`, and network access to obtain the pinned standalone Python and locked dependencies at build time. The Swift compiler is the release Xcode at `/Applications/Xcode.app` when that is installed, and otherwise the Command Line Tools that `xcode-select -p` names (`xcode-select --install` installs them). With neither, the build stops before it does any work and prints one line that says so. A `DEVELOPER_DIR` set in the environment chooses another developer folder. It does not install, start or download a model server. No signing identities or Xcode settings are changed.
 
 From a checkout named `localmelo`, one command builds the app and installs it for your user, with no admin rights:
 
@@ -20,7 +20,7 @@ To build without installing, give a new path:
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with release Xcode, compiles the bundled Python to bytecode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The bytecode is hash-based and never checks the source, and neither the launcher nor a direct run of the bundled interpreter writes more of it, so the signature stays valid. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
+The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with the compiler named above (the summary says which tools it used, for example `Built with the Command Line Tools.`), compiles the bundled Python to bytecode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The bytecode is hash-based and never checks the source, and neither the launcher nor a direct run of the bundled interpreter writes more of it, so the signature stays valid. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
 
 Before the dependencies go in, the builder trims the Python runtime it copied. IDLE, tkinter and turtle with the Tcl/Tk libraries they load, pip, setuptools, ensurepip and 2to3 are left out, 36 MB in all, so the app is about 147 MB instead of 183 MB. A fixed list of paths below the runtime decides (`UNUSED` in `scripts/build_macos_app.py`); `unittest`, `distutils`, `venv` and `pydoc` stay, and so does everything the dependencies import. A listed path that leads out of the runtime through a link stops the build. Code that runs on the bundled interpreter, such as the `python_exec` tool, cannot import what was left out, and `python -m venv` needs `--without-pip`.
 
@@ -28,10 +28,12 @@ Until the console has loaded, the window shows a native starting view: Melo's pi
 spinner beside a line that names the step (`Starting the local server`, `Signing in`, `Opening your workspace`). If the
 gateway cannot start within its 20-second deadline, or stops later, the same view says why, under `localmelo could not
 start` or `localmelo stopped`, and offers **Try Again**, which starts a new gateway, **Open Log**, which opens
-`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. A problem never shows a dialog and never closes the app. The
+`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. When the gateway quits on its own, the view says so in plain
+words (`Its background service quit unexpectedly. Try Again starts it again; Open Log shows what happened.`); the signal
+or exit status that tells why goes to the log. A problem never shows a dialog and never closes the app. The
 window and the web view use the console's canvas colour, so a dark window does not flash white.
 
-The menu-bar item is Melo's head, a template image that the system tints for a light bar, a dark bar and the open menu. Idle, it is the head alone. While something runs, the number running sits beside it, counting the console's chats, tasks, direct runs and terminal chats (the count of the console's header chip). While a chat or a task waits for your answer to a tool approval, a dot appears beside the head. All of it comes from the app's 2-second health check, so an approval shows within one poll. VoiceOver and the hover tooltip say it in words (`localmelo, nothing running`, `localmelo, 3 running` or `localmelo, waiting for your approval`), and the start of a wait is announced. The menu starts with what runs (`Nothing running`, `3 running`) and, while an approval waits, **Waiting for your approval**, which opens the window on that chat or task. Below them are **Open localmelo**, **Settings…** (Command-comma in the app menu too; it opens the console's settings), **Sign In Again** and **Quit localmelo**. If the mark is missing from the bundle, the item shows the text `localmelo` instead.
+The menu-bar item is Melo's head, a template image that the system tints for a light bar, a dark bar and the open menu. Idle, it is the head alone. While something runs, the number running sits beside it, counting the console's chats, tasks, direct runs and terminal chats (the count of the console's header chip). While a chat or a task waits for your answer to a tool approval, a dot appears beside the head. All of it comes from the app's 2-second health check, so an approval shows within one poll. VoiceOver and the hover tooltip say it in words (`localmelo, nothing running`, `localmelo, 3 running` or `localmelo, waiting for your approval`), and the start of a wait is announced. The menu starts with what runs (`Nothing running`, `3 running`) and, while an approval waits, **Waiting for your approval**, which opens the window on that chat or task. Below them are **Open localmelo**, **Settings…** (Command-comma in the app menu too; it opens the console's settings) and **Quit localmelo**. **Sign In Again** joins them only when it can help: after four sign-in attempts in a row have failed, while the console shows its Locked screen, and always in developer mode (the app asks the page, which says its mode and whether it is locked). If the mark is missing from the bundle, the item shows the text `localmelo` instead.
 
 The app's icon is drawn once. `macos/mark.svg` is the only drawing of Melo's head (a placeholder drawn in-house, not final artwork). The build copies it into the bundle for the menu-bar item and, before it signs the bundle, renders `LocalMelo.icns` from it with `sips` and `iconutil`, which ship with macOS: the head in paper white on a deep sage tile. The plist's `CFBundleIconFile` names it, so the Dock, Spotlight and every dialog, the quit dialog included, show it instead of the generic icon.
 
@@ -41,7 +43,7 @@ startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gat
 reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
 first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
 quitting always asks before stopping the gateway and any running tasks. The quit dialog names what would stop, for example
-`2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`; direct runs and terminal chats
+`Quitting stops what is running: 2 tasks and 1 chat.` (`Quitting stops 1 chat.` for one); direct runs and terminal chats
 belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background
 service, `melo serve status` checks it and `melo serve uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
@@ -55,7 +57,7 @@ authentication:** any local process can read the response header and replay it. 
 authentication: for its own health checks and web view the app obtains short-lived, single-use login codes without
 logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment, which the console
 removes after sign-in. It verifies the health cookie and retries a login that stores none. After a token rotation it
-signs in again and reloads; the app menu's **Sign In Again** action does the same on demand. The codes come from a
+signs in again and reloads; the app menu's **Sign In Again** action, which shows when sign-in has failed, does the same on demand. The codes come from a
 private in-bundle snippet; a documented `melo` command for this is A1b work, not yet available. Same-user processes and other localhost services remain outside the authentication boundary, and tools run as the user. Do not expose it on a network or use it with untrusted tasks.
 
 The console's folder chip reaches the app through one message handler, `localmeloFolder`. The app takes a

@@ -20,7 +20,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
-import { setupFolderPicker } from "./folder.mjs";
+import { folderName, setupFolderPicker } from "./folder.mjs";
 import {
   activity,
   applyEvent,
@@ -40,11 +40,15 @@ import {
   nextAction,
   printable,
   reflectionLine,
+  serverAddress,
+  serverUnreachable,
+  shownItems,
   statusLine,
   statusMark,
   statusText,
   toolState,
   turnDuration,
+  unreachableUrl,
   workSummary,
 } from "./turns.mjs";
 
@@ -165,6 +169,8 @@ function lock(message = "") {
   $("app").inert = true;
   $("app").hidden = true;
   $("lock-screen").hidden = false;
+  // The macOS app reads this (and `data-mode`) to decide when its menu offers "Sign In Again".
+  document.documentElement.dataset.locked = "1";
   $("lock-status").textContent = message;
   $("lock-title").focus();
 }
@@ -362,6 +368,7 @@ function applyChrome() {
   $("tasks-link").hidden = !developerMode && !sections.tasks;
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
+  $("local-badge").hidden = !developerMode;
   setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
 }
 
@@ -369,6 +376,12 @@ function applyChrome() {
 function chatSubtitle(model, folder) {
   if (!folder) return model;
   return developerMode ? `${model} · ${folder}` : `In ${folder}`;
+}
+
+/** A chat's second line in the sidebar: its folder, which tells chats apart; a developer sees the model first. */
+function chatMeta(session) {
+  const folder = session.workspace_label ? folderName(session.workspace_label) : "";
+  return developerMode ? [session.model, folder].filter(Boolean).join(" · ") : folder || session.model || "";
 }
 
 function syncUI() {
@@ -418,6 +431,8 @@ function syncUI() {
   const connection = connectionState({ turn, held, pending, session });
   $("connection-label").textContent = connection.text;
   $("connection-dot").classList.toggle("offline", connection.offline);
+  // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
+  $("connection-btn").classList.toggle("names-model", !developerMode && !connection.offline);
   if (developerMode) $("connection-btn").removeAttribute("aria-label");
   else $("connection-btn").setAttribute("aria-label", `Model: ${connection.text}. Open settings.`);
   // Unhide before the text write, so a screen reader announces the wait.
@@ -438,7 +453,7 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  $("run-status").textContent = turn ? (held ? holdText(held) : "Running on your backend") : "";
+  $("run-status").textContent = turn ? (held ? holdText(held) : developerMode ? "Running on your backend" : "Working…") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -476,6 +491,8 @@ function renderSessions() {
       session.id,
       session.title,
       session.model,
+      session.workspace_label,
+      developerMode,
       session.busy,
       session.held || "",
       session.pending_approvals || 0,
@@ -503,15 +520,10 @@ function renderSessions() {
     const info = el("button", "session-info");
     info.type = "button";
     if (session.id === active) info.setAttribute("aria-current", "page");
-    const marker =
-      session.pending_approvals > 0
-        ? "● Approval needed · "
-        : session.busy
-          ? session.held
-            ? "● Waiting · "
-            : "● Working · "
-          : "";
-    info.innerHTML = `<div class="session-title">${esc(title(session))}</div><div class="session-meta">${marker}${esc(session.model || "")}</div>`;
+    const asking = session.pending_approvals > 0;
+    const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
+    const dot = asking ? '<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"></span>' : "";
+    info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${marker}${esc(chatMeta(session))}</div>`;
     info.addEventListener("click", () => {
       openSession(session.id);
     });
@@ -1008,7 +1020,7 @@ function assistantNode(turn) {
   icon.alt = "";
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
-  if (!turn.finishedAt || turn.items.length > 0) article.append(workGroup(turn));
+  if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
       article.append(el("p", "turn-caption", "Best effort"));
@@ -1057,15 +1069,22 @@ function statusMarkNode(severity, stopped = false) {
   return mark;
 }
 
+// Whether the model runs on a server of the user's own (the settings have an address to change).
+const localBackend = () => ["mlc", "ollama", "vllm", "sglang"].includes(S.health?.model?.backend);
+
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
-function failureHint(turn, can) {
+function failureHint(turn, can, error) {
   const own = [];
   if (can.continue) own.push("Continue picks up where it stopped.");
   if (can.retry) own.push("Try again starts over.");
   switch (turn.status) {
     case "provider_error": {
-      const backend = S.health?.model?.backend;
-      return ["mlc", "ollama", "vllm", "sglang"].includes(backend)
+      if (serverUnreachable(turn.status, error)) {
+        if (S.health?.model?.backend && !localBackend()) return "Check your network connection, then try again.";
+        const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
+        return `Is your model server still running${where ? ` at ${where}` : ""}? Start it, then try again.`;
+      }
+      return localBackend()
         ? `Is the model server running at ${S.health?.model_server?.url_label || "the configured address"}? Start it, or open model settings to change the address.`
         : "Check the API key and the model name in model settings.";
     }
@@ -1083,11 +1102,12 @@ function failureHint(turn, can) {
 
 // The row of next steps. The newest turn's first step is the filled button; the rest are links.
 function failureActions(turn, {stopped, newest, can, error}) {
-  const first = nextAction(turn.status, turn.cause);
+  const first = nextAction(turn.status, turn.cause, error);
+  const address = serverUnreachable(turn.status, error) && localBackend();
   const offered = [
     ["continue", can.continue, "Continue", () => queueMessage("Continue the task from where you stopped.")],
     ["retry", can.retry, "Try again", () => retryTurn(turn)],
-    ["settings", turn.status === "provider_error", "Open model settings", () => openSettings()],
+    ["settings", turn.status === "provider_error", address ? "Change the server address" : "Open model settings", () => openSettings()],
     ["tools", turn.status === "setup_error", "Show tools", () => drawer.open("tools")],
     ["copy", !stopped, first === "copy" ? "Copy details" : "Copy error", async () => {
       try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
@@ -1109,7 +1129,8 @@ function failureActions(turn, {stopped, newest, can, error}) {
 }
 
 function statusNode(turn) {
-  const info = statusText(turn.status, turn.cause);
+  const error = String(turn.result?.error || turn.error || "");
+  const info = statusText(turn.status, turn.cause, error);
   const stopped = turn.status === "cancelled" || (turn.status === "crashed" && turn.cause === "crash");
   const newest = S.view?.turns[S.view.turns.length - 1] === turn;
   const can = {continue: canContinue(turn, newest), retry: canRetry(turn, newest)};
@@ -1118,9 +1139,11 @@ function statusNode(turn) {
   const heading = el("p", "failure-title");
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
-  const error = String(turn.result?.error || turn.error || "");
-  if (!stopped && error) node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
-  const hint = stopped ? "" : failureHint(turn, can);
+  // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
+  if (!stopped && error && !serverUnreachable(turn.status, error)) {
+    node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
+  }
+  const hint = stopped ? "" : failureHint(turn, can, error);
   if (hint) node.append(el("p", "failure-hint", hint));
   node.append(failureActions(turn, {stopped, newest, can, error}));
   if (!stopped) {
@@ -1166,7 +1189,7 @@ function workGroup(turn) {
   group.addEventListener("toggle", () => {
     if (group.open !== open) turn.userToggledGroup = group.open;
   });
-  for (const item of turn.items) {
+  for (const item of shownItems(turn)) {
     group.append(itemNode(item, turn));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
     if (request) group.append(approvalCard(request));
@@ -2220,6 +2243,8 @@ async function refreshMode(saved) {
   try {
     const settings = saved ?? await api("/settings");
     developerMode = settings.mode === "developer";
+    // The macOS app reads this to decide what its menu offers (an app has no other way to know the mode).
+    document.documentElement.dataset.mode = developerMode ? "developer" : "default";
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
   } catch { /* Keep the last known mode and folder. */ }
 }
@@ -2337,6 +2362,7 @@ async function init() {
   S.authenticated = true;
   await refreshMode();
   $("lock-screen").hidden = true;
+  delete document.documentElement.dataset.locked;
   $("app").hidden = false;
   $("app").inert = false;
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");

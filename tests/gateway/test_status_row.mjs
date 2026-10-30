@@ -100,12 +100,12 @@ test('a failed fetch keeps the row, and clear cancels a waiting fetch', async ()
   assert.equal(t.timers[0].cancelled, true);
 });
 
-test('the plain row keeps the context and the step, and leaves out the cache, the phase and the queue', () => {
+test('the plain row keeps the context, and leaves out the cache, the step and phase and the queue', () => {
   assert.deepEqual(
     plainSegments(['cache 67% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify (cycle 1)', 'tasks 1 running 2 queued']),
-    ['ctx 1.0k/8.0k', 'step 3 attempt 2'],
+    ['ctx 1.0k/8.0k'],
   );
-  assert.deepEqual(plainSegments(['cache --', 'step 1']), ['step 1']);
+  assert.deepEqual(plainSegments(['cache --', 'step 1']), [], 'a bare step number tells a new user nothing');
   assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), ['tasks 0 running 0 queued 2 held'], 'A task held for the user stays');
   assert.deepEqual(plainSegments([]), []);
 });

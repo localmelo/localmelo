@@ -245,6 +245,15 @@ button:hover:not(:disabled) {
   font-size: var(--text-small);
   font-weight: 500;
 }
+.attention-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  vertical-align: 1px;
+}
 .session-meta {
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -1103,6 +1112,9 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   .machine-chip {
     max-width: 120px;
   }
+  .connection-chip.names-model {
+    display: none;
+  }
   .chat-header {
     position: relative;
   }
@@ -1176,7 +1188,15 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 /* Touch targets are 44px: send, stop, the menu button and the chips. */
 @media (pointer: coarse), (max-width: 700px) {
   .send-button { width: 44px; height: 44px; }
-  .stop-button, .connection-chip, .running-chip, .level-chip, .level-item, .icon-button { min-height: 44px; }
+  .stop-button, .connection-chip, .running-chip, .level-chip, .level-item, .icon-button, .failure-actions button { min-height: 44px; }
+  .failure-actions .link-button {
+    padding: 0 16px;
+    border: 1px solid var(--control);
+    border-radius: var(--radius-control);
+    color: var(--ink);
+    font-size: var(--text-small);
+    text-decoration: none;
+  }
   .folder-chip, .folder-item, .folder-action, #folder-use, .folder-path input, .starters button { min-height: 44px; }
   .icon-button { min-width: 44px; }
 }
@@ -1188,8 +1208,9 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
     transition: none !important;
   }
 }
-@media (hover: none) {
-  .new-chat kbd {
+/* Keyboard hints mean nothing on a touch screen or in a phone-width window. */
+@media (hover: none), (pointer: coarse), (max-width: 700px) {
+  .new-chat kbd, .composer-hint {
     display: none;
   }
 }

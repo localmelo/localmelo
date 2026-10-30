@@ -177,6 +177,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
+  default and with no flag: `[agent] lean_output = true` in the config file, or
+  `-X agent.lean_output=true` for one run (`melo config keys lean` lists it, and `melo -h all`
+  names the issue). A task given on the command line, `melo worker BRIEF` and their `json` and
+  `stream-json` runs then send a system prompt whose last line, "Think step by step. Be
+  concise.", is replaced by three short lines: no text between tool calls and a final answer of
+  at most three lines; relative paths without a `sys.path` setup; read the files a task names
+  before listing folders. With the default `reflection_gate flags` the reflection prompt also
+  leaves out the five estimates, `progress_made` and `new_information_gained`, which the gate
+  does not read, and asks for `best_effort_result` only with `done` or `stop`; the action and the
+  three flags are still asked for, and a reply in the earlier long form is read as before.
+  `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep the
+  old system line. The interactive UI, the `melo ""` loop and the gateway ignore the setting.
+  Without it every request is the one sent before. ([#255])
+
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
   panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
@@ -1064,13 +1079,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Enter looks again at the same ports; an address typed instead is checked as a URL is,
   and its failure still offers `s starts without saving`. `melo serve` and `melo setup`
   with nothing saved do the same instead of opening the eight-way menu. The web console's
-  setup card shows the same commands in a block that one click selects, with a Copy
-  commands button, links the model
-  servers guide in place of the quickstart, and asks `GET /api/setup/detect` every three
-  seconds while it says that no server runs, so the model appears once the server starts
-  (nothing is asked while the card is hidden or the tab is). `GET /api/setup/detect` gains
-  `start` in every answer. The model servers guide gains a short Ollama section. Direct
-  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+  setup card shows the same commands in a block that one click selects, each command on
+  one line, with a Copy commands button, links the model servers guide in place of the
+  quickstart, and asks `GET /api/setup/detect` every three seconds while it says that no
+  server runs, so the model appears once the server starts (nothing is asked while the
+  card is hidden or the tab is). `GET /api/setup/detect` gains `start` in every answer.
+  The model servers guide gains a short Ollama section. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#NN]).
 - `melo serve` before any setup asks what the first run asks. With no config file and
   a terminal it printed `Welcome to localmelo.` and opened the eight-way backend menu with
   MLC as the default, even while a model server ran on this computer. Outside developer
@@ -1081,6 +1096,46 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`Model: Qwen3-8B-4bit on oMLX`) where they named a backend key (`Chat: vllm`); the
   `Gateway:` line, which the macOS app reads, is unchanged. The gateway's API, direct
   mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+- The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
+  model chip while it only names the model, which the composer already shows, so a chat's
+  title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
+  model`). `Enter to send · Shift + Enter for a new line` and `⌘ K` are hidden there, and the
+  next steps of a failed turn (Try again, Change the server address, Copy error) are outlined
+  buttons at least 44 px tall instead of text links. In the sidebar, a chat's second line is its
+  folder (`localmelo-workspace`) instead of the model, which every chat shared, and an accent
+  dot before the title marks a chat that waits for an approval; developer mode shows the model
+  first and the folder after it. Direct mode's stdout and stderr, JSON, exit codes and requests
+  are unchanged. ([#257])
+- The console and the app use plain words by default. The settings call the server **Model
+  server** and its address **Server address**, with `The address your model server prints when
+  it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the
+  list of models says `Lists the models this server offers.` A running chat reads `Working…`
+  beside Stop, the status row drops its `step N`, and the sidebar's **LOCAL** badge is gone. In
+  the macOS app the quit dialog says `Quitting stops 1 chat.` (or `Quitting stops what is
+  running: 2 tasks and 1 chat.`) and no longer mentions the gateway, and **Sign In Again** is
+  left out of the menus until it helps: after four failed sign-in attempts in a row, while the
+  console shows its Locked screen, and always in developer mode (the page now carries `data-mode`
+  and `data-locked` on its root element for the app to read). Developer mode keeps every word it
+  shows today: **Chat backend**, **Chat API URL**, `Running on your backend`, the badge and the
+  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#257])
+- The console and the app point the right way when the model server is down. In the console, a
+  run that could not reach the server now says `Could not reach the model server` and asks
+  `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the
+  red line that repeated the error, and the work box's retry line, are gone, and the provider's
+  own text stays under Details. The filled button is **Try again** (**Continue** when the run had
+  used tools), and **Change the server address** is a link beside it; a hosted model reads
+  `Check your network connection, then try again.` and keeps **Open model settings**. A server
+  that answered with an error keeps its card as before. In the macOS app, a gateway that quits
+  on its own shows `Its background service quit unexpectedly. Try Again starts it again; Open
+  Log shows what happened.` instead of `The gateway was terminated by signal 9.`; the signal or
+  exit status goes to `gateway.log`. The provider's error text, direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged. ([#257])
+- The macOS app builds with the Command Line Tools when the full Xcode is not
+  installed. The Swift host is compiled with the developer folder that
+  `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
+  folder `xcode-select -p` names when it has a Swift compiler. With none of them
+  the build stops before it does any work and prints `xcode-select --install` as
+  the fix. The build's summary says which tools built the app ([#254]).
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
@@ -1859,6 +1914,9 @@ earlier milestones.
 [#249]: https://github.com/localmelo/localmelo/pull/249
 [#250]: https://github.com/localmelo/localmelo/pull/250
 [#251]: https://github.com/localmelo/localmelo/pull/251
+[#254]: https://github.com/localmelo/localmelo/pull/254
+[#255]: https://github.com/localmelo/localmelo/pull/255
+[#257]: https://github.com/localmelo/localmelo/pull/257
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

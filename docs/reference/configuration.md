@@ -46,6 +46,7 @@ tables of the chosen backends.
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
 | `brief_items` | `[agent]` | `false` | Experimental. `true` makes a `--brief` run name the brief's numbered items that no edit has touched yet; see [`--brief-items`](cli.md#brief-items). |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
+| `lean_output` | `[agent]` | `false` | Experimental. `true` makes a task given on the command line ask for fewer output tokens; there is no flag, and `-X agent.lean_output=true` sets it for one run. The interactive UI and the gateway ignore it. See [Context accounting](#context-accounting). |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` sends the earlier requests, with a reflection rebuilt as the last message of every planning request; `"v3"`, with `fixed_prefix`, appends it once instead. See [Context accounting](#context-accounting). |
 | `window_messages` | `[agent]` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
@@ -326,6 +327,21 @@ secrets. The model's checked preview can still contain raw text; the `Message.to
 `tool.finished` event and trace use redacted copies. Existing history retention and permissions
 apply. `Agent.run_tool()` does not write captured history and retains its existing result check.
 The option is off by default.
+
+Opt in to fewer output tokens in direct runs with `[agent] lean_output = true` or
+`-X agent.lean_output=true` (experimental; there is no flag). A task given on the command line
+(`melo "<task>"` or `melo worker BRIEF`, with `json` or `stream-json` output too) then sends a
+system prompt that, in place of `Think step by step. Be concise.`, asks for no text between tool
+calls, a final answer of at most three lines, relative paths without a `sys.path` setup, and
+reading the files a task names before listing folders. With the default
+`reflection_gate = "flags"` the reflection prompt also leaves out the five estimates,
+`progress_made` and `new_information_gained` (only `utility` reads the estimates, and nothing
+reads the other two) and asks for `best_effort_result` only with `done` or `stop`; the action and
+the three flags the gate reads are still asked for, and a reply in the long form is read as
+before. `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep
+the system prompt's last line, because their notes are text between tool calls. The interactive
+UI, the `melo ""` loop and the gateway ignore the key. Off, the default, every request is the one
+sent before the option existed; on, the start of the requests stays the same on every turn of a run.
 
 ## Embedding and long-term memory
 

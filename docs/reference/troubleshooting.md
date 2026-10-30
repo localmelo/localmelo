@@ -391,7 +391,8 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   `melo --serve --host 127.0.0.1`. Proxies and remote access are not
   supported; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
-  In the macOS app, use **Sign In Again** rather than posting a code minted
+  In the macOS app, use **Sign In Again** (it shows once sign-ins have failed or the
+  console is locked, and always in developer mode) rather than posting a code minted
   elsewhere.
 
 ### HTTP 403 foreign_origin

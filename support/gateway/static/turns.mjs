@@ -324,8 +324,34 @@ const STATUS_TEXT = {
   "cancelled|park": {word: "Parked", severity: "stopped", title: "Parked"},
 };
 
-/** `status_text`: the word, severity and title of a run's end. */
-export function statusText(status, cause = "") {
+// How a provider's error starts when it could not connect at all
+// (`UNREACHABLE_PREFIX` in `support/providers/_http.py`; a test keeps the two equal).
+const UNREACHABLE_PREFIX = "cannot reach the model server at ";
+
+/** Whether a run ended because the model server could not be reached, not because it answered with an error. */
+export function serverUnreachable(status, error) {
+  return status === "provider_error" && String(error ?? "").startsWith(UNREACHABLE_PREFIX);
+}
+
+/** The address that error names, as the provider wrote it, or "". */
+export function unreachableUrl(error) {
+  return new RegExp(`^${UNREACHABLE_PREFIX}(\\S+)\\. `).exec(String(error ?? ""))?.[1] ?? "";
+}
+
+/** `127.0.0.1:8000` for `http://127.0.0.1:8000/v1`; text that is not an absolute URL comes back as it is. */
+export function serverAddress(url) {
+  try {
+    return new URL(url).host || String(url);
+  } catch {
+    return String(url ?? "");
+  }
+}
+
+/** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
+export function statusText(status, cause = "", error = "") {
+  if (serverUnreachable(status, error)) {
+    return {...STATUS_TEXT.provider_error, title: "Could not reach the model server"};
+  }
   const found =
     STATUS_TEXT[`${status}|${cause}`] ?? STATUS_TEXT[status] ?? null;
   if (found !== null) return found;
@@ -355,11 +381,25 @@ const NEXT_ACTION = {
   gate_stopped: "retry",
 };
 
-/** The one next step a run's end offers first: `settings`, `tools`, `continue`, `retry`, `copy` or null. */
-export function nextAction(status, cause = "") {
+/**
+ * The one next step a run's end offers first: `settings`, `tools`, `continue`, `retry`, `copy` or null.
+ * An unreachable server is fixed by starting it, not by a setting: the step is to pick the work up
+ * again (`continue`, which the card turns into `retry` when no tool ran).
+ */
+export function nextAction(status, cause = "", error = "") {
+  if (serverUnreachable(status, error)) return "continue";
   const own = (key) => Object.hasOwn(NEXT_ACTION, key);
   const keyed = `${status}|${cause}`;
   return own(keyed) ? NEXT_ACTION[keyed] : own(status) ? NEXT_ACTION[status] : null;
+}
+
+/**
+ * The items a work box lists. A run that ended on a model-server error leaves out its retry
+ * notices: the failure card already says it, and says it once.
+ */
+export function shownItems(turn) {
+  if (!turn.finishedAt || turn.status !== "provider_error") return turn.items;
+  return turn.items.filter((item) => !(item.kind === "notice" && item.noticeKind === "retry"));
 }
 
 /** `status_line`: one bounded line, without the user's task text. */
