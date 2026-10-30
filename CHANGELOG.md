@@ -189,7 +189,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and wags when a run is done, with Core Animation only: all of that stops under Reduce
   Motion, in Low Power Mode, when the Mac runs hot, and when Melo is covered or the screen
   sleeps. VoiceOver reads its mood when Melo is focused; the menu-bar item still announces a wait, Melo stays silent so it is not read twice. The Dock icon now opens the window
-  again after it was closed. ([#NN])
+  again after it was closed. ([#272])
 
 - Melo the Akita puppy gets pictures, a mood policy and a place in `GET /api/health`, the
   first step towards a desktop pet. `macos/art/akita` holds 14 transparent pictures, each at
@@ -2101,6 +2101,7 @@ earlier milestones.
 [#266]: https://github.com/localmelo/localmelo/pull/266
 [#268]: https://github.com/localmelo/localmelo/pull/268
 [#271]: https://github.com/localmelo/localmelo/pull/271
+[#272]: https://github.com/localmelo/localmelo/pull/272
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
