@@ -4,14 +4,15 @@
 ``on_event``), keeps :class:`LiveState` for the live area and prints what
 has finished: the echo of the user's message, thinking, intermediate text,
 one block per tool call, notices and reflections, the answer as Markdown,
-the status line of a run that did not complete, with its hint, and the
-footer.
+the status line of a run that did not complete, with its hint, the
+footer and the line that names the files the turn wrote.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -37,6 +38,7 @@ from localmelo.support.cli.output import Out
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
+    cut_middle,
     escape_arguments,
     expand_tabs,
     wrap_words,
@@ -53,6 +55,7 @@ from localmelo.support.providers._http import UNREACHABLE_PREFIX
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.display import (
     clean_output,
+    display_path,
     format_bytes,
     format_duration,
     format_tokens,
@@ -84,6 +87,8 @@ FREE_TEXT_CELLS: Final = 24
 _FREE_TEXT_TAGS: Final = ("denied: ", "denied by policy: ", "blocked: ")
 # Lines of the user's message echoed.
 ECHO_LINES: Final = 6
+# Files the line under a footer names before "and N more".
+CHANGED_NAMES: Final = 3
 # Tools whose running line shows the session's time limit.
 LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
 
@@ -175,6 +180,21 @@ class ToolOutput:
 class _Call:
     name: str
     preview: str
+
+
+@dataclass
+class _Written:
+    """A file the turn wrote with ``file_write``, as the turn found it and as it left it.
+
+    *before* is the file's text when the turn first wrote it: ``""`` for a new file,
+    ``None`` when it is not known (no approval read it first, or it is too large, or
+    not text). *after* is the text of the last write, and *created* tells a new empty
+    file from an old one that was written with the text it had.
+    """
+
+    before: str | None
+    after: str
+    created: bool
 
 
 def _marked(symbol: str, style: str, body: RenderableType) -> Table:
@@ -431,6 +451,10 @@ class TurnRenderer:
         self._finished = False
         self._tool_count = 0
         self._stop_cause = ""
+        # The files this turn's file_write calls wrote, by path, in the order they
+        # were first written, and the workspace the paths are shown against.
+        self._written: dict[str, _Written] = {}
+        self._root = ""
         # The turn's step limit, and whether its retry line has printed.
         self._max_steps = 0
         self._retry_noted = False
@@ -474,6 +498,7 @@ class TurnRenderer:
         self._finished = False
         self._cancelled_pending = False
         self._tool_count = 0
+        self._written = {}
         self._stop_cause = ""
         self._max_steps = 0
         self._retry_noted = False
@@ -682,6 +707,8 @@ class TurnRenderer:
 
     def _on_run_started(self, data: Mapping[str, Any]) -> None:
         self._max_steps = _int(data.get("max_steps"), 0)
+        root = data.get("workspace_root")
+        self._root = root if isinstance(root, str) else ""
         if data.get("approval") is False:
             self.out.print(
                 Text("  No approvals for this turn (--yolo).", style="muted")
@@ -795,7 +822,13 @@ class TurnRenderer:
     def _on_tool_finished(self, data: Mapping[str, Any]) -> None:
         self._tool_count += 1
         self._call_number += 1
-        self.out.print(self.tool_block(data, ref=f"{self._turn}.{self._call_number}"))
+        snapshot = self._take_snapshot(data)
+        self._note_write(data, snapshot)
+        self.out.print(
+            self.tool_block(
+                data, ref=f"{self._turn}.{self._call_number}", snapshot=snapshot
+            )
+        )
         self._remember_tool_output(data)
         call_id = data.get("call_id")
         if isinstance(call_id, str):
@@ -1010,6 +1043,7 @@ class TurnRenderer:
         self._finished = False
         self._cancelled_pending = False
         self._tool_count = 0
+        self._written = {}
         self._stop_cause = ""
         self._max_steps = 0
         self._retry_noted = False
@@ -1084,8 +1118,17 @@ class TurnRenderer:
         head.truncate(width, overflow="ellipsis")
         return head
 
-    def tool_block(self, data: Mapping[str, Any], *, ref: str = "") -> RenderableType:
-        """The block of one finished tool call: its header, arguments, output, images."""
+    def tool_block(
+        self,
+        data: Mapping[str, Any],
+        *,
+        ref: str = "",
+        snapshot: Snapshot | None = None,
+    ) -> RenderableType:
+        """The block of one finished tool call: its header, arguments, output, images.
+
+        A ``file_write`` shows its change when it has the *snapshot* its approval took.
+        """
         status = str(data.get("status") or "")
         name = str(data.get("name") or "?")
         preview = self._preview_of(data)
@@ -1117,7 +1160,6 @@ class TurnRenderer:
         meta.append(tag)
         nonzero = isinstance(exit_code, int) and exit_code != 0
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
-        snapshot = self._take_snapshot(data)
         if status == "success" and snapshot is not None:
             parts.append(self._change_body(snapshot))
             images = _image_lines(data.get("images"), self.symbols)
@@ -1158,6 +1200,56 @@ class TurnRenderer:
         if not isinstance(request_id, str):
             return None
         return self._snapshots.take(request_id)
+
+    def _note_write(self, data: Mapping[str, Any], snapshot: Snapshot | None) -> None:
+        """Remember the file a finished ``file_write`` wrote, for the line under the footer.
+
+        Only a call whose result says it succeeded wrote one: a path the executor
+        refused, a denial and a failure left the file alone. The text is what the
+        call wrote, never what the folder holds now.
+        """
+        if data.get("name") != "file_write" or data.get("status") != "success":
+            return
+        arguments = self._arguments_of(data)
+        given = arguments.get("path") if isinstance(arguments, Mapping) else None
+        if snapshot is not None:  # its path is the one the executor checked
+            path = snapshot.target.path
+        elif isinstance(given, str) and given:
+            path = os.path.normpath(os.path.join(self._root, given))
+        else:
+            return
+        if snapshot is None:  # no approval read the file first: no counts
+            before, after, created = None, "", False
+        else:
+            created = not snapshot.target.exists
+            before = "" if created else snapshot.target.text
+            after = snapshot.new
+        known = self._written.get(path)
+        if known is None:
+            self._written[path] = _Written(before, after, created)
+        else:  # written again: the first write's "before" stays
+            known.after = after
+
+    def _changes(self) -> list[tuple[str, tuple[int, int] | None]]:
+        """The files the turn changed with their lines added and removed, when known.
+
+        Net of the turn: the file as the turn found it against as it left it. A file
+        written back as it was is not listed.
+        """
+        changes: list[tuple[str, tuple[int, int] | None]] = []
+        for path, written in self._written.items():
+            counts = None
+            if written.before is not None:
+                _, added, removed = edits.diff(written.before, written.after)
+                if not (added or removed or written.created):
+                    continue
+                counts = (added, removed) if added or removed else None
+            changes.append((display_path(path, self._root), counts))
+        return changes
+
+    def changed_line(self) -> Text | None:
+        """``  Changed hello.py (+1), README.md (+3 −1)``, or ``None`` when no file changed."""
+        return changed_text(self._changes(), self.out.width, self.symbols)
 
     def _change_body(self, snapshot: Snapshot) -> Text:
         """A file write's change: ``+1 −1 lines``, or ``new file, 12 lines``.
@@ -1295,6 +1387,9 @@ class TurnRenderer:
             self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
+            changed = self.changed_line()
+            if changed is not None:
+                self.out.print(changed)
             model = self._backend().model
             if (
                 self._buffered
@@ -1354,6 +1449,57 @@ def _one_line(line: str, width: int, symbols: Symbols) -> Text:
     return Text(
         cut_cells(line, width, symbols.ellipsis), no_wrap=True, overflow="ellipsis"
     )
+
+
+def _counts(counts: tuple[int, int] | None, symbols: Symbols) -> str:
+    """`` (+3 −1)``: the lines a file gained and lost; empty when they are not known."""
+    parts: list[str] = []
+    if counts is not None:
+        added, removed = counts
+        if added:
+            parts.append(f"+{added}")
+        if removed:
+            parts.append(f"{symbols.minus}{removed}")
+    return f" ({' '.join(parts)})" if parts else ""
+
+
+def changed_text(
+    changes: Sequence[tuple[str, tuple[int, int] | None]], width: int, symbols: Symbols
+) -> Text | None:
+    """The line under a footer that names a turn's changed files, within *width* cells.
+
+    ``  Changed hello.py (+1), README.md (+3 −1)``: at most :data:`CHANGED_NAMES`
+    names, then ``and N more``. The names are the default color, since they are what a
+    person looks for, and the words and counts around them are dim. A line that is too
+    wide gives up names before it cuts one; a lone path that still does not fit is cut
+    in the middle, so its file name stays. ``None`` when nothing changed.
+    """
+    if not changes:
+        return None
+    entries = [(plain(path), _counts(counts, symbols)) for path, counts in changes]
+
+    def line(shown: Sequence[tuple[str, str]], more: int) -> Text:
+        text = Text("  ", no_wrap=True, overflow="ellipsis")
+        text.append("Changed ", style="muted")
+        for number, (name, counts) in enumerate(shown):
+            if number:
+                text.append(", ", style="muted")
+            text.append(name)
+            text.append(counts, style="muted")
+        if more:
+            text.append(f" and {more} more", style="muted")
+        return text
+
+    for count in range(min(len(entries), CHANGED_NAMES), 0, -1):
+        text = line(entries[:count], len(entries) - count)
+        if cells(text.plain) <= width:
+            return text
+    name, counts = entries[0]
+    more = len(entries) - 1
+    room = width - cells(line([("", counts)], more).plain)
+    text = line([(cut_middle(name, max(1, room), symbols.ellipsis), counts)], more)
+    text.truncate(width, overflow="ellipsis")
+    return text
 
 
 def _first_line(text: str) -> str:

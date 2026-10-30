@@ -1779,6 +1779,42 @@ async def test_auto_mode_writes_and_shows_the_change(setup: Setup) -> None:
     assert "└ +1 −1 lines" in out.text()
 
 
+async def test_a_turn_that_wrote_files_names_them_and_not_a_refused_write(
+    setup: Setup,
+) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "notes.txt", "content": "new note\n"}),
+        tool_call("file_write", {"path": "ideas.md", "content": "- one\n- two\n"}),
+        # The executor refuses a path outside the workspace; nothing is written.
+        tool_call("file_write", {"path": "../outside.txt", "content": "x\n"}),
+        answer("Wrote two files."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("write the notes")
+    await setup.idle()
+    text = out.text()
+    assert "✻ Worked for" in text
+    # Real results and real snapshots: the old notes.txt line is replaced.
+    assert text.endswith("\n  Changed notes.txt (+1 −1), ideas.md (+2)\n\n"), text
+    assert text.count("Changed") == 1
+    root = Path(session.agent.workspace_root or "")
+    assert not (root.parent / "outside.txt").exists()
+    # A later turn that wrote nothing names nothing, and not the first turn's files.
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.append(answer("Nothing to write."))
+    session.enter("is there anything to write?")
+    await setup.idle()
+    assert out.text().count("Changed") == 1
+    assert re.search(
+        r"● Nothing to write\.\n✻ Worked for [\d.]+s · 0 tool calls\n\n$", out.text()
+    )
+
+
 async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
     session, out = setup.session, setup.out
     session.approvals._policy._granted.add("file_write")

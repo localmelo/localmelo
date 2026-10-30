@@ -16,10 +16,12 @@ from rich.console import Group
 from rich.text import Text
 
 from localmelo.melo.schema import RunResult, ToolInfo, ToolTier
+from localmelo.support.cli import edits
+from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import RecordingOut, TerminalOut
 from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
-from localmelo.support.cli.theme import ASCII, UNICODE, Symbols
+from localmelo.support.cli.theme import ASCII, UNICODE, Symbols, rich_theme
 from localmelo.support.cli.views import BackendInfo, banner
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.store import StoredEvent
@@ -2056,3 +2058,345 @@ def test_events_feed_the_usage_snapshot_until_the_session_is_cleared() -> None:
     assert usage.progress is not None
     turn.renderer.clear_session()
     assert turn.renderer.usage.requests == 0
+
+
+# ── The files a turn changed ──
+
+ROOT = "/home/me/demo-project"
+FOOTERS = ("✻ Worked for", "✻ Stopped after", "* Worked for", "* Stopped after")
+
+
+class Writes:
+    """A turn of a session that asks first: each file_write has its approval's snapshot."""
+
+    def __init__(
+        self,
+        *,
+        width: int = 80,
+        symbols: Symbols = UNICODE,
+        developer: bool = False,
+        root: str | None = ROOT,
+    ) -> None:
+        self.snapshots = EditSnapshots()
+        self.turn = Turn(
+            width=width, symbols=symbols, snapshots=self.snapshots, developer=developer
+        )
+        self.turn.event(
+            "run.started", query="q", max_steps=30, workspace_root=root, approval=True
+        )
+        self.calls = 0
+
+    def write(
+        self,
+        path: str,
+        content: str,
+        *,
+        old: str | None = None,
+        unreadable: bool = False,
+        asked: bool = True,
+        allowed: bool = True,
+        status: str = "success",
+        **finished: Any,
+    ) -> Writes:
+        """A finished ``file_write``: a new file, or over *old*.
+
+        *asked* False is a run with no approvals (``--yolo``); *unreadable* is a
+        file that exists and cannot be compared.
+        """
+        self.calls += 1
+        call_id, request_id = f"c{self.calls}", f"r{self.calls}"
+        real = path if path.startswith("/") else f"{ROOT}/{path}"
+        self.turn.event(
+            "tool.started",
+            step=1,
+            call_id=call_id,
+            name="file_write",
+            arguments={"path": path, "content": content},
+            preview=path,
+        )
+        approval = None
+        if asked:
+            if unreadable:
+                target = edits.Target(path=real, exists=True, problem="is not text")
+            else:
+                target = edits.Target(path=real, exists=old is not None, text=old)
+            _, added, removed = edits.diff(old or "", content)
+            self.snapshots._snapshots[request_id] = Snapshot(
+                request_id, target, content, added, removed
+            )
+            approval = {
+                "request_id": request_id,
+                "allowed": allowed,
+                "reason": "",
+                "remember": False,
+                "origin": "user",
+            }
+        data: dict[str, Any] = {
+            "step": 1,
+            "call_id": call_id,
+            "name": "file_write",
+            "status": status,
+            "error_category": "none",
+            "output": f"Written {len(content)} bytes to {real}",
+            "output_chars": 0,
+            "error": "",
+            "duration_s": 0.1,
+            "images": [],
+            "approval": approval,
+            "exit_code": None,
+        }
+        data.update(finished)
+        self.turn.event("tool.finished", **data)
+        return self
+
+    def done(self, status: str = "completed", **result: Any) -> str:
+        """The turn's text once its run has finished."""
+        return self.turn.finish(status, n_tool=self.calls, **result).text()
+
+
+def _after_footer(text: str) -> list[str]:
+    """The rows that follow the footer row."""
+    rows = text.split("\n")
+    footer = max(i for i, row in enumerate(rows) if row.startswith(FOOTERS))
+    return [row for row in rows[footer + 1 :] if row]
+
+
+@pytest.mark.parametrize("developer", [False, True])
+def test_a_turn_that_wrote_a_file_lists_it_under_the_footer(developer: bool) -> None:
+    text = Writes(developer=developer).write("hello.py", 'print("hello")\n').done()
+    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+    # Under the footer and nowhere else.
+    assert text.count("Changed") == 1
+
+
+def test_several_files_list_their_counts_and_a_removal_has_a_minus() -> None:
+    old = "# demo\n\nOld.\n"
+    new = "# demo\n\nNew.\nMore.\nAnd more.\n"
+    text = Writes().write("hello.py", "x\n").write("README.md", new, old=old).done()
+    assert _after_footer(text) == ["  Changed hello.py (+1), README.md (+3 −1)"]
+    # A file that only lost lines shows the minus alone.
+    text = Writes().write("notes.txt", "a\n", old="a\nb\nc\n").done()
+    assert _after_footer(text) == ["  Changed notes.txt (−2)"]
+
+
+def test_the_line_is_ascii_in_an_ascii_terminal() -> None:
+    writes = Writes(symbols=ASCII).write("README.md", "b\nc\n", old="a\n")
+    assert _after_footer(writes.done()) == ["  Changed README.md (+2 -1)"]
+
+
+def test_at_most_three_names_then_and_n_more() -> None:
+    writes = Writes()
+    for name in ("a.py", "b.py", "c.py"):
+        writes.write(name, "x\n")
+    assert _after_footer(writes.done()) == ["  Changed a.py (+1), b.py (+1), c.py (+1)"]
+    writes = Writes()
+    for name in ("a.py", "b.py", "c.py", "d.py"):
+        writes.write(name, "x\n")
+    assert _after_footer(writes.done()) == [
+        "  Changed a.py (+1), b.py (+1), c.py (+1) and 1 more"
+    ]
+    writes = Writes()
+    for name in ("a.py", "b.py", "c.py", "d.py", "e.py", "f.py"):
+        writes.write(name, "x\n")
+    assert _after_footer(writes.done()) == [
+        "  Changed a.py (+1), b.py (+1), c.py (+1) and 3 more"
+    ]
+
+
+def test_a_turn_that_changed_no_file_prints_no_line() -> None:
+    turn = Turn()
+    turn.tool("file_read", "app.py", output="print()")
+    turn.tool("shell_exec", "ls -1", call_id="c2", output="app.py")
+    text = turn.finish(result="Done.", n_tool=2).text()
+    assert "Changed" not in text
+    assert _after_footer(text) == []
+    # A turn that only answers has none either.
+    assert "Changed" not in Turn().finish(result="Hi.").text()
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        # The executor refused a path outside the workspace before anyone was asked.
+        {
+            "asked": False,
+            "status": "error",
+            "error_category": "path_policy_violation",
+            "error": "Path is outside the workspace: /home/me/outside.txt",
+        },
+        # The person said no.
+        {
+            "allowed": False,
+            "status": "blocked",
+            "error_category": "approval_denied",
+            "error": "denied: not that file",
+        },
+        {
+            "status": "error",
+            "error_category": "runtime_error",
+            "error": "Permission denied",
+        },
+        {
+            "status": "timeout",
+            "error_category": "timeout",
+            "error": "Execution timed out after 60.0s",
+        },
+        {"status": "cancelled", "error": "The call was interrupted"},
+    ],
+    ids=["outside", "denied", "failed", "timeout", "cancelled"],
+)
+def test_a_write_that_did_not_succeed_is_not_listed(refused: dict[str, Any]) -> None:
+    text = Writes().write("../outside.txt", "x\n", **refused).done()
+    assert "Changed" not in text
+    # Beside a write that worked, only that one is listed.
+    both = Writes().write("../outside.txt", "x\n", **refused).write("hello.py", "x\n")
+    assert _after_footer(both.done()) == ["  Changed hello.py (+1)"]
+
+
+def test_a_failed_or_stopped_run_still_lists_the_files_it_wrote() -> None:
+    text = Writes().write("hello.py", "x\n").done("failed", error="the model broke")
+    assert "✻ Stopped after" in text
+    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+
+
+def test_paths_are_relative_to_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    writes = Writes()
+    writes.write("src/app.py", "x\n")
+    writes.write(f"{ROOT}/docs/guide.md", "x\n")
+    # A path that was written outside the workspace shows in full.
+    outside = f"{tmp_path}/notes/todo.md"
+    writes.write(outside, "x\n")
+    assert _after_footer(writes.done()) == [
+        "  Changed src/app.py (+1), docs/guide.md (+1), ~/notes/todo.md (+1)"
+    ]
+
+
+def test_a_file_written_twice_counts_its_net_change() -> None:
+    writes = Writes()
+    writes.write("app.py", "a\nb\n")  # a new file: +2
+    writes.write("app.py", "a\nb\nc\n", old="a\nb\n")  # then written again: +1
+    assert _after_footer(writes.done()) == ["  Changed app.py (+3)"]
+    # Over an old file the counts are against the file as the turn found it.
+    writes = Writes()
+    writes.write("app.py", "b\nc\n", old="a\nb\n")
+    writes.write("app.py", "b\nd\n", old="b\nc\n")
+    assert _after_footer(writes.done()) == ["  Changed app.py (+1 −1)"]
+
+
+def test_a_file_that_ends_as_it_began_is_not_listed() -> None:
+    writes = (
+        Writes().write("app.py", "b\n", old="a\n").write("app.py", "a\n", old="b\n")
+    )
+    assert "Changed" not in writes.done()
+    # So is a file written with the text it had.
+    assert "Changed" not in Writes().write("app.py", "a\n", old="a\n").done()
+
+
+def test_a_new_empty_file_is_listed_without_counts() -> None:
+    text = Writes().write("tests/__init__.py", "").done()
+    assert _after_footer(text) == ["  Changed tests/__init__.py"]
+
+
+def test_a_run_with_no_approvals_names_the_file_without_counts() -> None:
+    # --yolo: nobody was asked, so nothing read the file first.
+    text = Writes().write("hello.py", "x\n", asked=False).done()
+    assert _after_footer(text) == ["  Changed hello.py"]
+    # A file that exists and cannot be compared is named the same way.
+    text = Writes().write("data.bin", "x\n", unreadable=True).done()
+    assert _after_footer(text) == ["  Changed data.bin"]
+
+
+def test_a_new_turn_and_a_new_session_start_a_new_list() -> None:
+    writes = Writes().write("hello.py", "x\n")
+    renderer = writes.turn.renderer
+    renderer.begin_turn("Again.")
+    assert renderer.changed_line() is None
+    writes.write("other.py", "x\n")
+    assert renderer.changed_line() is not None
+    renderer.clear_session()
+    assert renderer.changed_line() is None
+
+
+def test_the_files_come_from_the_turns_calls_and_the_folder_is_never_scanned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def scanned(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the folder was scanned")
+
+    for name in ("scandir", "listdir", "walk"):
+        monkeypatch.setattr(os, name, scanned)
+    monkeypatch.setattr(Path, "iterdir", scanned)
+    text = Writes().write("hello.py", "x\n").done()
+    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+
+
+@pytest.mark.parametrize("width", [80, 60, 44, 30])
+def test_the_line_never_wraps_or_runs_past_the_width(width: int) -> None:
+    writes = Writes(width=width)
+    for name in (
+        "src/components/settings/ThemeSwitcher.tsx",
+        "README.md",
+        "文档/说明/安装指南.md",
+        "x.py",
+        "y.py",
+    ):
+        writes.write(name, "a\nb\n")
+    [row] = _after_footer(writes.done())
+    assert row.startswith("  Changed ") and cells(row) <= width, row
+
+
+def test_names_give_way_before_a_name_is_cut() -> None:
+    writes = Writes(width=44)
+    for name in ("a.py", "b.py", "c.py", "d.py", "e.py"):
+        writes.write(name, "x\n")
+    # Three names and "and 2 more" take 53 cells; two names and "and 3 more", 41.
+    assert _after_footer(writes.done()) == ["  Changed a.py (+1), b.py (+1) and 3 more"]
+
+
+def test_one_long_path_is_cut_in_the_middle_and_keeps_its_file_name() -> None:
+    long = "src/components/settings/panels/ThemeSwitcher.tsx"
+    [row] = _after_footer(Writes(width=44).write(long, "a\n").done())
+    assert row.startswith("  Changed src/") and "…" in row
+    assert row.endswith("ThemeSwitcher.tsx (+1)") and cells(row) <= 44, row
+    # In an ASCII terminal the cut uses three dots.
+    [row] = _after_footer(Writes(width=44, symbols=ASCII).write(long, "a\n").done())
+    assert "..." in row and "…" not in row and cells(row) <= 44, row
+
+
+def test_the_names_are_the_default_color_on_a_light_terminal() -> None:
+    from rich.console import Console
+
+    writes = Writes().write("SUMMARY.md", "a\n").write("todo.md", "b\n", old="a\n")
+    line = writes.turn.renderer.changed_line()
+    assert line is not None
+    console = Console(
+        theme=rich_theme("light"), force_terminal=True, color_system="standard"
+    )
+    for name in ("SUMMARY.md", "todo.md"):
+        style = line.get_style_at_offset(console, line.plain.index(name))
+        # Not dim, no color: the terminal's own text color at full strength.
+        assert style.color is None and not style.dim, name
+    # Only the words around the names are quiet.
+    assert line.get_style_at_offset(console, 3).dim
+
+
+def test_the_line_has_no_color_to_lose_under_no_color() -> None:
+    line = Writes().write("hello.py", "x\n").turn.renderer.changed_line()
+    assert line is not None
+    output = Vt100_Output(
+        io.StringIO(), lambda: Size(rows=24, columns=80), term="xterm"
+    )
+    for no_color in (True, False):
+        drawn = TerminalOut(output, no_color=no_color).render(line)
+        assert not re.search(r"\x1b\[[0-9;]*(?:3\d|9\d|4\d|10\d)m", drawn), drawn
+        assert re.sub(r"\x1b\[[0-9;]*m", "", drawn).strip() == "Changed hello.py (+1)"
+
+
+def test_a_file_name_cannot_act_on_the_terminal() -> None:
+    name = "a\x1b]0;PWNED\x07b.txt"
+    text = Writes().write(name, "x\n").done()
+    assert "\x1b" not in text and "\x07" not in text
+    assert _after_footer(text) == ["  Changed ab.txt (+1)"]

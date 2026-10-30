@@ -177,6 +177,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal says which files a turn changed. A turn that wrote files with `file_write`
+  ends with one more quiet line under its footer, `Changed hello.py (+1), README.md
+  (+3 −1)`: the paths relative to the folder melo works in, each with the lines the turn
+  added and removed in it, at most three names and then `and 2 more` (fewer on a narrow
+  terminal, never wrapped). A file written twice counts once, as the turn found it against
+  as it left it; a file written back as it was is left out; a new file shows its line
+  count. A file that nothing read first (a run with `--yolo`, a new empty file, a file too
+  large or not text) shows its name alone. Only the turn's own `file_write` calls count: a
+  write that was denied or refused (a path outside the folder) is not listed, and neither
+  is a file that a shell command or a script changed, since melo never scans the folder.
+  A turn that changed no file prints nothing, and developer mode shows the same line.
+  Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
   panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
