@@ -6,7 +6,7 @@ import asyncio
 import os
 import sys
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from localmelo.support import config
@@ -387,7 +387,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
 _SAVING_EMBEDDING_OFF = (
     "Saving with embedding off: no long-term memory " "(melo setup sets it again)."
 )
-_EMBEDDING_OFF = "Long-term memory off (melo setup sets it again)."
+_EMBEDDING_OFF = "Long-term memory is off; melo setup turns it on."
 _NO_EMBEDDING_OLLAMA = (
     "No embedding model on this server. ollama pull qwen3-embedding:0.6b, "
     "then melo setup."
@@ -533,9 +533,34 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _start_a_server() -> str:
-    """The servers the first run suggests: oMLX first on a Mac, then Ollama."""
-    return "omlx serve or ollama serve" if sys.platform == "darwin" else "ollama serve"
+def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
+    """Say how to start a model server, then look again each time Enter is pressed.
+
+    Returns the server a look found, or the address typed in its place (the
+    caller checks it), or None when the user quits. EOFError and
+    KeyboardInterrupt reach the caller.
+    """
+    how = discovery.how_to_start()
+    _say(f"No model server is running yet. To start one with {how.name}:")
+    print()
+    for command in how.commands:
+        print(f"  {command}")
+    print()
+    _say(f"{how.note} The guide shows how:")
+    print(discovery.GUIDE_URL)
+    while True:
+        answer = input(
+            "Press Enter to check again, type an address, or q to quit: "
+        ).strip()
+        if answer.lower() in ("q", "quit"):
+            return None
+        if answer:
+            return answer
+        found = asyncio.run(discovery.detect_local_server(urls))
+        if found is not None:
+            return found
+        ports = ", ".join(_port(url) for url in urls)
+        _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
 
 
 def _servers_named() -> str:
@@ -729,14 +754,15 @@ async def save_chat_server(
 
 
 def _offer_embedding(
-    url: str, model: str, models: list[str], *, ollama: bool | None
+    url: str, model: str, models: list[str], *, ollama: bool | None, first: bool = False
 ) -> tuple[str | None, bool | None]:
     """Ask whether to use the server's embedding model; the model and Ollama answer.
 
     *ollama* is the answer to ``GET /api/version`` when the caller already
     asked it, else None. Returns ``(embedding_model, ollama)``: the model
     to save, or None for embedding off, and the Ollama answer to pass on so
-    the first run asks the server only once.
+    the first run asks the server only once. With no candidate, a *first*
+    run says only that memory is off; ``melo setup`` says how to add a model.
     """
     candidates = [
         candidate
@@ -744,6 +770,9 @@ def _offer_embedding(
         if candidate != model
     ]
     if not candidates:
+        if first:
+            _say(_EMBEDDING_OFF)
+            return None, ollama
         if ollama is None:
             ollama = asyncio.run(discovery.is_ollama(url))
         _say(_NO_EMBEDDING_OLLAMA if ollama else _NO_EMBEDDING_LOCAL)
@@ -771,23 +800,39 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     The first line says what the first run needs: a model server. A server
-    found on this machine prefills the URL; the model is chosen from the
-    server's list. Only ``GET <url>/models`` is sent, and
-    ``GET /api/version`` once when saving, to tell Ollama apart. When the
-    check fails the user may retry, start without saving, or quit
-    (None). EOFError and KeyboardInterrupt reach the caller.
+    found on this machine is offered with one question (``n`` asks for a URL,
+    prefilled with it); the model is chosen from the server's list. With none
+    found, it prints the commands that start one and looks again on each
+    Enter; an address typed instead is checked as a URL is. Only
+    ``GET <url>/models`` is sent, and ``GET /api/version`` once when saving, to
+    tell Ollama apart. When the check of a URL fails the user may retry, start
+    without saving, or quit (None). EOFError and KeyboardInterrupt reach the
+    caller.
 
-    With *ask_keep* (``--reconfigure``), the found server is offered with one
-    question instead of the URL question; no server found, or a ``n``,
-    raises :class:`_FullMenuError` before anything is saved.
+    With *ask_keep* (``--reconfigure``), a ``n``, or no server found while a
+    backend is saved, raises :class:`_FullMenuError` before anything is saved,
+    and a model server without an embedding model is told how to get one.
     """
     urls = discovery.detect_urls()
-    if not ask_keep:
+    # A reconfigure knows what melo needs; a first run says it, also when it
+    # reaches this question through `melo serve`.
+    first = not ask_keep or not config.load().is_configured
+    if first:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
-    if ask_keep and (found is None or not found.models):
+    typed = ""
+    if found is None and urls and first:
+        waited = _wait_for_a_server(urls)
+        if waited is None:
+            return None
+        if isinstance(waited, str):
+            typed = waited
+        else:
+            found = waited
+    if ask_keep and not typed and (found is None or not found.models):
         raise _FullMenuError()
-    keep = False
+    keep = bool(typed)
+    default_url = typed
     if found is not None and found.models:
         count = len(found.models)
         _say(
@@ -795,23 +840,15 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
             f"({count} model{'' if count == 1 else 's'})."
         )
         default_url = found.url
-        if ask_keep:
-            if _choose("Use it? [Y/n]: ", "yn", "y") == "n":
-                raise _FullMenuError(found)
+        if _choose("Use it? [Y/n]: ", "yn", "y") == "y":
             keep = True
+        elif ask_keep:
+            raise _FullMenuError(found)  # a first run asks for another URL below
     elif found is not None:
         _say(f"A model server at {found.url} answered, but {found.problem}.")
         default_url = found.url
-    else:
-        if urls:
-            ports = ", ".join(_port(url) for url in urls)
-            _say(
-                f"No model server found on this computer (looked at ports {ports}). "
-                f"Start one (for example {_start_a_server()}), or enter its URL."
-            )
-        # URLs named in the environment are the ones to try first.
-        overridden = discovery.DETECT_URLS_ENV in os.environ
-        default_url = urls[0] if overridden and urls else _FIRST_RUN_URL
+    elif not typed:
+        default_url = _FIRST_RUN_URL  # detection is off: the usual address is a guess
 
     while True:
         url = default_url if keep else _question("Server URL", default_url)
@@ -849,7 +886,9 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         f"✓ {url} lists {count} model{'' if count == 1 else 's'}; using {model}.",
         hang=2,
     )
-    embedding_model, ollama = _offer_embedding(url, model, models, ollama=None)
+    embedding_model, ollama = _offer_embedding(
+        url, model, models, ollama=None, first=first
+    )
     saved = asyncio.run(
         save_chat_server(
             url,

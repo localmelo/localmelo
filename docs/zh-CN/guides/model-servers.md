@@ -57,6 +57,19 @@
 
 已有配置时，先运行第 5 步以加载模型，再运行 `melo setup`：在默认模式下，它会用首次运行的问题提供它找到的服务器。在完整菜单中（回答 `n` 之后，或使用 `--developer`），选择 oMLX 或 vLLM（`3`）作为对话后端，输入 `http://127.0.0.1:8000/v1` 和模型 ID；除非 oMLX 也提供嵌入模型，否则选择 `5`（None）作为嵌入后端。[oMLX 配置](model-servers.md#omlx)展示了保存后的文件，以及关闭 Qwen3 模型思考时要添加的表。网页工作区随后会使用该模型；它会读取配置文件。
 
+<a id="serve-a-model-with-ollama"></a>
+
+## 使用 Ollama 提供模型服务
+
+[Ollama](https://ollama.com) 是其他系统上的替代方案。从其官网安装后，启动服务器并拉取一个模型：
+
+```bash
+ollama serve
+ollama pull qwen3:8b
+```
+
+`ollama serve` 会一直运行，所以请在另一个终端运行 `ollama pull`。如果 Ollama 已经以应用或服务的形式运行，跳过第一条命令。首次运行的设置会在 11434 端口找到 Ollama 并列出它的模型。
+
 <a id="backends"></a>
 
 ## 后端

@@ -92,6 +92,24 @@ def test_detect(
     assert tuple(body[key] for key in keys) == expected
 
 
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_every_answer_says_how_to_start_a_server_on_this_system(
+    client: TestClient,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+) -> None:
+    """The card shows the commands the terminal's first run prints, from one place."""
+    monkeypatch.setattr(discovery.sys, "platform", platform)
+    for answers in ({}, {f"{URL}/models": listing("a-7b")}):
+        body, _ = detect(client, console, monkeypatch, answers)
+        assert body["start"] == discovery.how_to_start().to_json()
+        assert body["start"]["name"] == ("oMLX" if platform == "darwin" else "Ollama")
+        assert body["start"]["commands"] and body["start"]["guide"].startswith(
+            "https://"
+        )
+
+
 def test_a_server_that_cannot_be_used_says_why(
     client: TestClient, console: Console, monkeypatch: pytest.MonkeyPatch
 ) -> None:

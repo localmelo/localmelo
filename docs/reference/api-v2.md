@@ -308,7 +308,7 @@ setup card calls it, and only while the card is shown.
 ```
 
 ```json
-{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": "", "start": {"name": "oMLX", "commands": ["brew tap jundot/omlx https://github.com/jundot/omlx", "brew install jundot/omlx/omlx", "omlx serve --model-dir ~/models --port 8000"], "note": "Put a model in its own folder of ~/models first.", "guide": "https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md"}}
 ```
 
 - `state` is `found` (a chat model to offer), `needs_key` (a server answered 401
@@ -325,6 +325,11 @@ setup card calls it, and only while the card is shown.
   must let the user choose.
 - `url` is empty when nothing answered. `problem` says why a server that answered
   cannot be used. A user name or password in a URL is never returned.
+- `start` is in every answer: how to start a model server on this computer, from the
+  same place as the terminal's first run. `name` is `oMLX` on a Mac and `Ollama`
+  elsewhere, `commands` are the lines to run, `note` is the one thing to do besides
+  running them, and `guide` is the model servers guide. The card shows them while
+  `state` is `none`.
 
 ## Scheduler tasks (S3a.2)
 

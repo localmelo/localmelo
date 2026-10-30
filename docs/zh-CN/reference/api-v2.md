@@ -189,7 +189,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 ```json
-{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": ""}
+{"state": "found", "name": "oMLX", "backend": "vllm", "url": "http://127.0.0.1:8000/v1", "models": ["Qwen3-32B-4bit", "qwen3"], "loaded": ["qwen3"], "suggested": "qwen3", "problem": "", "start": {"name": "oMLX", "commands": ["brew tap jundot/omlx https://github.com/jundot/omlx", "brew install jundot/omlx/omlx", "omlx serve --model-dir ~/models --port 8000"], "note": "Put a model in its own folder of ~/models first.", "guide": "https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md"}}
 ```
 
 - `state` 是 `found`（有可提供的对话模型）、`needs_key`（某个服务器返回 401 或 403；localmelo 不会向本地服务器发送密钥）或 `none`。
@@ -197,6 +197,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `models` 是按列表顺序排列的对话模型（不含嵌入和重排序模型）。`loaded` 是服务器说已在内存中的模型；只有在多个对话模型之间才会询问，`[]` 也可能表示它没有回答。
 - `suggested` 是要提供的模型：唯一的对话模型，或一个已加载的模型。当提供了多个模型而且不知道哪个已加载时为 `null`，客户端必须让用户自己选择。
 - 没有任何服务器回应时 `url` 为空。`problem` 说明已回应的服务器为什么不能使用。URL 中的用户名或密码绝不会返回。
+- 每个回答都带有 `start`：如何在这台电脑上启动模型服务器，来源与终端的首次运行相同。`name` 在 Mac 上是 `oMLX`，其他系统是 `Ollama`；`commands` 是要运行的命令，`note` 是运行命令之外要做的一件事，`guide` 是模型服务器指南。`state` 为 `none` 时，卡片会显示它们。
 
 ## Scheduler tasks (S3a.2)
 

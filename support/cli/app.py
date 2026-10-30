@@ -884,6 +884,7 @@ class InteractiveApp:
                 target=pending.target,
                 width=inner - 2,
                 minus=symbols.minus,
+                show_tier=self.renderer.developer,
             )
             # The header holds a path: its rows keep every character.
             header = text.header.replace(" · ", f" {symbols.dot} ")
@@ -989,6 +990,7 @@ class InteractiveApp:
             target=pending.target,
             width=self.renderer.out.width - 2,
             minus=self.symbols.minus,
+            show_tier=self.renderer.developer,
         )
         header = text.header.replace(" · ", f" {self.symbols.dot} ")
         self.renderer.out.print(

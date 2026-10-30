@@ -135,7 +135,7 @@ def test_a_bearer_token_split_across_chunks_is_never_drawn(
 def test_a_tool_call_preamble_is_labelled_before_the_tool_block(
     streamed: Callable[..., Melo],
 ) -> None:
-    term = streamed("stream_tool")
+    term = streamed("stream_tool", argv=["--developer"])
     (term.workspace / "app.py").write_text("print('hello')\n", encoding="utf-8")
     term.see("Ask melo")
     term.type("read app.py\r")
@@ -146,10 +146,24 @@ def test_a_tool_call_preamble_is_labelled_before_the_tool_block(
     assert term.quit() == 0
 
 
+def test_a_tool_call_preamble_outside_developer_mode_has_no_label(
+    streamed: Callable[..., Melo],
+) -> None:
+    term = streamed("stream_tool")
+    (term.workspace / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    term.see("Ask melo")
+    term.type("read app.py\r")
+    term.see("The file prints hello.")
+    text = screen(term)
+    assert text.count("Let me read it.") == 1
+    assert "partial reply" not in text
+    assert term.quit() == 0
+
+
 def test_esc_mid_stream_closes_and_labels_the_partial_once(
     streamed: Callable[..., Melo],
 ) -> None:
-    term = streamed("stream_slow")
+    term = streamed("stream_slow", argv=["--developer"])
     term.see("Ask melo")
     term.type("stream please\r")
     term.see("Streaming line one.")
@@ -177,7 +191,7 @@ def test_separate_reasoning_is_never_content_and_thinking_off_hides_it(
 def test_a_stream_that_breaks_before_the_end_is_labelled(
     streamed: Callable[..., Melo],
 ) -> None:
-    term = streamed("stream_drop")
+    term = streamed("stream_drop", argv=["--developer"])
     term.see("Ask melo")
     term.type("drop please\r")
     term.see("partial reply (not the final answer)")
@@ -200,11 +214,20 @@ def test_opted_out_turns_send_no_stream_and_print_the_answer_once(
     assert term.quit() == 0
 
 
-def test_with_no_config_for_it_the_reply_streams_and_a_whole_one_is_noted_once(
-    streamed: Callable[..., Melo], servers: list[StubServer]
+@pytest.mark.parametrize(
+    ("argv", "notes"),
+    [(["--developer"], 1), ([], 0)],
+    ids=["developer mode", "default mode"],
+)
+def test_with_no_config_for_it_the_reply_streams_and_developer_mode_notes_a_whole_one(
+    streamed: Callable[..., Melo],
+    servers: list[StubServer],
+    argv: list[str],
+    notes: int,
 ) -> None:
-    """Streaming is on by default; a model with no hint says why its reply waited."""
-    term = streamed("answer", hint=None, stream=None)
+    """Streaming is on by default; a model with no hint says why its reply waited,
+    once, in developer mode: a new user has no use for the reasoning format."""
+    term = streamed("answer", hint=None, stream=None, argv=argv)
     term.see("Ask melo")
     term.type("hello\r")
     term.see("Worked for")
@@ -215,7 +238,7 @@ def test_with_no_config_for_it_the_reply_streams_and_a_whole_one_is_noted_once(
     text = " ".join(screen(term).split())
     assert (
         text.count("replies appear when complete until its reasoning format is set")
-        == 1
+        == notes
     )
     assert text.count("● Hello! I am melo, running on a stub model.") == 2
     assert term.quit() == 0

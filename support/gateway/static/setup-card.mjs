@@ -6,9 +6,11 @@
  * model" saves the choice as the settings dialog does (`PUT /api/settings` with the revision
  * just read), runs the connection test, and calls `connected()` so the page reads its health
  * again. Hidden, the card asks nothing. It never picks a model for the user: with several
- * models and none known to be loaded, the user chooses from the list.
+ * models and none known to be loaded, the user chooses from the list. While it says that no
+ * server runs, it shows the commands that start one and asks again every few seconds, so the
+ * model appears without a click; a hidden card or tab asks nothing.
  */
-const QUICKSTART_URL = "https://localmelo.github.io/localmelo/en/quickstart.html";
+const RECHECK_MS = 3000;
 
 const host = (url) => {
   try {
@@ -19,7 +21,10 @@ const host = (url) => {
 };
 const firstLine = (error) => String(error.message).split(/\r?\n/)[0];
 
-export function setupModelCard({root, api, openSettings, connected}) {
+export function setupModelCard({
+  root, api, openSettings, connected, schedule = setTimeout, cancel = clearTimeout,
+  writeText = (text) => globalThis.navigator.clipboard.writeText(text),
+}) {
   const doc = root.ownerDocument;
   root.hidden = true;
   let shown = false;
@@ -30,6 +35,7 @@ export function setupModelCard({root, api, openSettings, connected}) {
   let choosing = false;
   let failure = "";
   let refocus = false;
+  let timer = null; // The next look, while the card says that no server runs.
 
   const el = (tag, className, text) => {
     const node = doc.createElement(tag);
@@ -64,12 +70,15 @@ export function setupModelCard({root, api, openSettings, connected}) {
       return {title: "A model server needs an API key", text, label: "Check again", run: detect};
     }
     const answered = data.url !== "";
+    const {name, commands, note, guide} = data.start;
     return {
       title: answered ? `Found ${who}, but no model is ready` : "No model server is running on this Mac",
-      text: answered ? `It answered at ${where}: ${data.problem}.` : "Start oMLX or Ollama, then check again.",
+      text: answered ? `It answered at ${where}: ${data.problem}.` : `To start one with ${name}, run this in a terminal:`,
+      commands: answered ? [] : commands,
+      note: answered ? "" : `${note} melo finds the server by itself.`,
       label: "Check again",
       run: detect,
-      guide: true,
+      guide,
     };
   }
 
@@ -91,7 +100,7 @@ export function setupModelCard({root, api, openSettings, connected}) {
 
   function render() {
     refocus = root.contains(doc.activeElement);
-    const {title, text, label, run, guide} = copy();
+    const {title, text, commands = [], note, label, run, guide} = copy();
     const settled = phase === "ready" || phase === "failed";
     const found = settled && data?.state === "found";
     const list = found && phase === "ready" && (choosing || !data.suggested);
@@ -99,6 +108,15 @@ export function setupModelCard({root, api, openSettings, connected}) {
     heading.id = "setup-title";
     const parts = [heading];
     if (text) parts.push(el("p", "", text));
+    // The commands, each on one line (the block scrolls, so a flag never breaks): one click selects
+    // them all, a focusable group lets the keyboard scroll it, and a button copies them.
+    if (commands.length) {
+      const block = el("pre", "setup-commands", commands.join("\n"));
+      block.tabIndex = 0;
+      block.setAttribute("role", "group");
+      block.setAttribute("aria-label", "Commands");
+      parts.push(block, el("p", "", note));
+    }
     const main = label ? button("primary-button", label, run) : null;
     if (list) {
       const group = el("fieldset", "setup-models");
@@ -119,9 +137,20 @@ export function setupModelCard({root, api, openSettings, connected}) {
     if (main) actions.append(main);
     if (found && !list && data.models.length > 1) actions.append(button("link-button", "Choose another…", choose));
     if (phase === "failed" || (phase === "ready" && !found)) actions.append(button("link-button", "Enter a server address…", openSettings));
+    if (commands.length) {
+      const copyButton = button("link-button", "Copy commands", async () => {
+        try {
+          await writeText(commands.join("\n"));
+          copyButton.textContent = "Copied";
+        } catch {
+          copyButton.textContent = "Copy failed: select the commands";
+        }
+      });
+      actions.append(copyButton);
+    }
     if (guide) {
-      const link = el("a", "link-button", "Read the quickstart");
-      Object.assign(link, {href: QUICKSTART_URL, target: "_blank", rel: "noopener noreferrer"});
+      const link = el("a", "link-button", "Read the model servers guide");
+      Object.assign(link, {href: guide, target: "_blank", rel: "noopener noreferrer"});
       actions.append(link);
     }
     if (actions.children.length) parts.push(actions);
@@ -134,6 +163,36 @@ export function setupModelCard({root, api, openSettings, connected}) {
     choosing = true;
     phase = "ready";
     render();
+  }
+
+  function stopWatching() {
+    if (timer !== null) cancel(timer);
+    timer = null;
+  }
+
+  /** While no server runs, ask again every few seconds; the card changes only when the answer does. */
+  function watch() {
+    stopWatching();
+    if (!shown || phase !== "ready" || data?.state !== "none") return;
+    const mine = version;
+    timer = schedule(async () => {
+      timer = null;
+      if (mine !== version) return;
+      if (!doc.hidden) {
+        try {
+          const found = await api("/setup/detect");
+          if (mine !== version) return;
+          if (found.state !== "none" || found.url !== data.url || found.problem !== data.problem) {
+            data = found;
+            picked = found.suggested || "";
+            render();
+          }
+        } catch {
+          // The card stays as it is; the next look tries again.
+        }
+      }
+      if (mine === version) watch();
+    }, RECHECK_MS);
   }
 
   async function detect() {
@@ -155,6 +214,7 @@ export function setupModelCard({root, api, openSettings, connected}) {
       phase = "failed";
     }
     render();
+    watch();
   }
 
   async function use() {
@@ -191,6 +251,7 @@ export function setupModelCard({root, api, openSettings, connected}) {
       shown = visible;
       root.hidden = !visible;
       version += 1;
+      stopWatching();
       if (visible) {
         detect();
       } else {
