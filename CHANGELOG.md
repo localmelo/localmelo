@@ -1519,7 +1519,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   keep another fact from the same message. While the tool runs, the panel and the
   activity line say `Remembering`, then `Remembered`. The tool asks no approval. Direct runs,
   workers, the terminal chat and the benchmark have no `remember` tool and are unchanged
-  ([#NN]).
+  ([#316]).
 
 - The command list under the input box is in the terminal's colours. Typing `/`, `@` or a
   command's argument showed a grey block (prompt_toolkit's default, black text on grey bars);
@@ -2550,6 +2550,7 @@ earlier milestones.
 [#312]: https://github.com/localmelo/localmelo/pull/312
 [#313]: https://github.com/localmelo/localmelo/pull/313
 [#314]: https://github.com/localmelo/localmelo/pull/314
+[#316]: https://github.com/localmelo/localmelo/pull/316
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
