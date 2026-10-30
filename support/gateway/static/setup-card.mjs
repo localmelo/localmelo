@@ -198,7 +198,7 @@ export function setupModelCard({root, api, openSettings, connected}) {
         data = null;
       }
     },
-    /** Whether a connection is being made or has just failed: the page keeps the card up. */
-    holding: () => phase === "connecting" || phase === "failed",
+    /** Whether a connection to the chosen server is being made or has just failed: the page keeps the card up. */
+    holding: () => data !== null && (phase === "connecting" || phase === "failed"),
   };
 }

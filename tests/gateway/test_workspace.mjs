@@ -1188,6 +1188,14 @@ test('a key, no server and a failed test are worded plainly, and Check again ask
   assert.match(h.text('setup-card'), /Found oMLX/);
 });
 
+test('a detection that fails is shown, and the card goes once a model is set up', async () => {
+  const h = await firstRun({status: 500, body: {error: {code: 'oops', message: 'detection broke\nmore'}}});
+  assert.match(h.text('setup-card'), /Could not look for a model server.*detection broke(?!.*more).*Try again/);
+  h.state().health = {...health, configured: true};
+  h.run('syncUI()');
+  assert.equal(h.element('setup-card').hidden, true, 'Nothing was chosen, so nothing holds the card');
+});
+
 test('a failed test keeps the card up, also after health says a model is set, until it passes', async () => {
   let reply = {ok: false, error: 'chat probe failed: HTTP 401\nsecond line'};
   const h = await firstRun(omlx, {'POST /settings/test': () => reply});
