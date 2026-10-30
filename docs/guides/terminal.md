@@ -349,7 +349,7 @@ happens without the explicit `/copy` command.
   exits 1 without failing); how its approval ended; and the first line of
   its output with `+N lines (/expand T.C)` on the same row (a second line
   prints instead of a count of one). Only the mark carries the color (`✓`
-  green, `✗` red, `⊘` yellow); the rest of the row is the default color, with
+  green, `✗` red, `⊘` yellow on a dark terminal and bold elsewhere); the rest of the row is the default color, with
   the duration and tags dim. A call that failed, or that ran and exited with
   another code than 0, shows up to 3 lines, the first in red for a failure;
   developer mode shows 3 lines for every call and `/verbose` 20, with the
@@ -511,6 +511,17 @@ wrapped message leaves no blank rows. Known limits:
 
 - The UI uses the 16 ANSI colors, so light and dark themes both work. Set
   `NO_COLOR` to a non-empty value to turn the colors off.
+- A light terminal. melo learns the background from `COLORFGBG` (`FG;BG` in
+  ANSI color numbers, which some terminals set, iTerm2 and rxvt for example)
+  and never queries the terminal. Yellow marks a warning only on a background
+  that reports dark; on a light or unknown one a warning is bold in the default
+  color, and the code in an answer uses the light syntax theme on a light one.
+  A terminal that does not set the variable is treated as unknown: start melo
+  with `COLORFGBG='0;15' melo` to say it is light, or `COLORFGBG='15;0' melo`
+  for dark.
+  A sentence you must read or act on (a warning, the approval's warning and
+  keys, the hint under the input box) is never dim; dim is for durations,
+  counts and `(/expand T.C)`.
 - On a terminal whose encoding is not UTF-8, or with `LOCALMELO_ASCII=1`,
   melo draws ASCII stand-ins for its symbols (`>` for `›`, `...` for `…`).
 - melo rings the terminal's bell when an approval panel opens and when a

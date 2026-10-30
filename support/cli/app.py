@@ -819,7 +819,7 @@ class InteractiveApp:
             if pending.offer_session:
                 where = home_label(pending.request.workspace_root or "")
                 for line in session_warning(pending.request.tool_name, where):
-                    options += wrapped("class:muted", "  " + line, width, "  ")
+                    options += wrapped("", "  " + line, width, "  ")
             dot = f" {symbols.dot} "
             line = dot.join(
                 [
@@ -830,7 +830,7 @@ class InteractiveApp:
                     "esc stop the turn",
                 ]
             )
-            keys = wrapped("class:muted", "  " + line, width, "  ")
+            keys = wrapped("", "  " + line, width, "  ")
         # The rows the rest of the screen keeps: the status bar, the live
         # area, a queued line, a hint and the reason field.
         rows = size.rows - 1

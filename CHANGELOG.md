@@ -1034,6 +1034,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `step` (`cache`, `ctx` and `tasks` stay). `--developer` (or `[ui] mode = "developer"`) and
   `/verbose` keep the detail. Direct mode's stdout and stderr, JSON, exit codes and
   requests are unchanged ([#NN]).
+- The terminal UI is readable on a light terminal. The sentences a person must read or
+  act on were dim, which a light background draws at about 2.4:1: the approval's warning
+  and key line, and the hint row under the input box are now default text, dim stays for
+  durations, counts and `(/expand T.C)`. A warning is yellow only on a background
+  `COLORFGBG` reports as dark and bold in the default color elsewhere, and the code in an
+  answer uses rich's `ansi_light` theme on a light background. The terminal is never
+  queried; start melo with `COLORFGBG='0;15' melo` where the variable is not set. Direct mode's
+  stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being
