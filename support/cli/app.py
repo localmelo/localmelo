@@ -281,6 +281,30 @@ class _Placeholder(Processor):
         return Transformation(ti.fragments)
 
 
+class _InputBuffer(Buffer):
+    """The draft: the menu is asked again after characters are deleted.
+
+    prompt_toolkit completes while typing only after an insert, so the menu
+    of ``/ex`` was gone once the ``i`` of ``/exi`` was deleted (#277). A
+    deletion that removed text starts the completer again on the text
+    before the cursor; the completer offers nothing once that is no longer
+    a slash command or an ``@`` path, which closes the menu. Moving the
+    cursor alone opens nothing, and Esc closes the menu until the next
+    change.
+    """
+
+    def delete_before_cursor(self, count: int = 1) -> str:
+        return self._complete_again(super().delete_before_cursor(count))
+
+    def delete(self, count: int = 1) -> str:
+        return self._complete_again(super().delete(count))
+
+    def _complete_again(self, deleted: str) -> str:
+        if deleted and self.completer is not None and self.complete_while_typing():
+            self.start_completion(complete_event=CompleteEvent())
+        return deleted
+
+
 class _InputControl(BufferControl):
     """The input box's control: a line's height is counted as it is drawn.
 
@@ -441,7 +465,7 @@ class InteractiveApp:
         frame = os.environ.get(SPINNER_FRAME_ENV, "")
         self._frame = int(frame) if frame.isdigit() else None
 
-        self.buffer = Buffer(
+        self.buffer = _InputBuffer(
             multiline=True,
             history=history,
             completer=None if completer is None else ThreadedCompleter(completer),

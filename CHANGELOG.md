@@ -55,6 +55,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The terminal's command list stays open while you delete characters. Typing
+  `/exi` showed `/exit`, but deleting the `i` closed the list instead of showing
+  the `/ex` matches, because prompt_toolkit completes only after text is
+  inserted. Any deletion that removes text (Backspace, Delete, Ctrl+W, Ctrl+U,
+  Ctrl+K) now asks for completions again on the text before the cursor: the
+  commands of `/ex`, all of them at `/`, the names after an `@`, and nothing once
+  the `/` or `@` is gone, which closes the list. Moving the cursor alone still
+  opens nothing, Esc closes the list until the next edit, and Tab, Enter and the
+  arrow keys take a command as before. ([#285])
+
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
   not be decoded, so it was asked for again, and a second failure lost the
@@ -2161,6 +2171,7 @@ earlier milestones.
 [#274]: https://github.com/localmelo/localmelo/pull/274
 [#275]: https://github.com/localmelo/localmelo/pull/275
 [#284]: https://github.com/localmelo/localmelo/pull/284
+[#285]: https://github.com/localmelo/localmelo/pull/285
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
