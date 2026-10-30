@@ -565,9 +565,7 @@ class TestGatewayMode:
             _start_gateway(cfg)
 
         out = capsys.readouterr().out
-        sign_in = (
-            "  Sign in: run melo --gateway-login --port 5000 in another terminal\n"
-        )
+        sign_in = "  Sign in: run melo console -p 5000 in another terminal\n"
         assert sign_in in out
         assert out.index("  Web UI:") < out.index(sign_in)
 

@@ -17,6 +17,15 @@ _REAL_CACHE_GUARD = RealCacheGuard(real_cache_dir())
 
 
 @pytest.fixture(autouse=True)
+def _no_setting_overrides() -> Iterator[None]:
+    """``-X`` settings belong to the process: no test inherits another's."""
+    yield
+    from localmelo.support import config
+
+    config.set_overrides({})
+
+
+@pytest.fixture(autouse=True)
 def _no_env_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let the environment point a test at a real memory dir.
 

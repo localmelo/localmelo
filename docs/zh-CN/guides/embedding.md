@@ -40,7 +40,7 @@ ollama pull qwen3-embedding:0.6b
 curl -sS http://127.0.0.1:11434/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
+melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
 ```
 
 在向导中选择 `2`，即 `Ollama (local endpoint)`，接受 `http://localhost:11434`，并输入模型名 `qwen3-embedding:0.6b`。向导写入：
@@ -116,7 +116,7 @@ python -m sglang.launch_server --model-path Qwen/Qwen3-Embedding-0.6B --is-embed
 curl -sS http://127.0.0.1:30001/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen/Qwen3-Embedding-0.6B", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
+melo setup    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
 ```
 
 MLC 需要编译后的嵌入产物；对话产物不能提供嵌入。以下 `<artifact>` 表示编译后的 Qwen3-Embedding 目录：
@@ -126,7 +126,7 @@ mlc_llm serve <artifact> --port 8080
 curl -sS http://127.0.0.1:8080/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "<the served id>", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
+melo setup    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
 ```
 
 上面的 SGLang 和 MLC 命令都没有在这台 Mac 上运行。归档的后端冒烟测试在 MLC 上使用了编译后的 `Qwen3-Embedding-0.6B-q0f16-MLC` 产物，服务提供的 ID 为 `qwen3-embedding`。
@@ -156,7 +156,7 @@ embedding_model = "nomic-embed-text"
 
 ## 会有哪些变化
 
-- `/status` 和开发者模式横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）。没有嵌入后端时，`/status` 显示 `no long-term memory (no embedding backend)`，横幅显示 `no long-term memory · melo --reconfigure adds one`（在 `--base-url` 会话中则显示 `--embedding-base-url adds one`；首次运行刚说明过怎么加，所以它的横幅不再重复）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
+- `/status` 和开发者模式横幅的记忆行会显示后端和模型，例如 `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`（配置文件写 `omlx` 时为 `oMLX`）。没有嵌入后端时，`/status` 显示 `no long-term memory (no embedding backend)`，横幅显示 `no long-term memory · melo setup adds one`（在 `--url` 会话中则显示 `--embedding-base-url adds one`；首次运行刚说明过怎么加，所以它的横幅不再重复）。这一行描述的是嵌入配置，而非显式模式是否可以使用纯文本长期记忆。
 - 新建的长期记忆存储初始为空。运行结束和步骤完成时，符合条件的条目可能被接纳；已有的纯文本条目不会重新生成嵌入。
 - 更换模型会改变向量空间。已存向量的维度与新模型不同时，该向量会被跳过，因此旧条目不再参与排序，而不会破坏召回。要回收空间，请停止 localmelo 并删除 `~/.cache/localmelo/memory/long_term.db*`；见[重置记忆](memory.md#reset-memory)。
 - 网页工作区也有连接设置。见[网页工作区](web-console.md#web-workspace)。

@@ -161,8 +161,8 @@ do the in-memory `History` and `LongTerm`.
 To delete everything, including what the API does not touch, stop every
 localmelo process and remove the files:
 
-1. Stop every localmelo process: direct runs, `melo --serve`, and the
-   background service. Stop the service with `melo --daemon uninstall`; a
+1. Stop every localmelo process: direct runs, `melo serve`, and the
+   background service. Stop the service with `melo serve uninstall`; a
    plain `kill` is undone by launchd.
 2. Remove the files:
 
@@ -241,6 +241,6 @@ that directory instead.
   database file's free pages or in `history.db-wal`/`long_term.db-wal`.
 - The console stores its session rows and turns in
   `~/.cache/localmelo/gateway/sessions.db`. The legacy playground is disabled
-  by default; when enabled with `melo --serve --enable-playground`, it saves
+  by default; when enabled with `melo serve --playground`, it saves
   its chats' history and procedural memory, and their long-term memory when
   an embedding model is selected, in `~/.cache/localmelo/playground/`.

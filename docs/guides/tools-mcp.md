@@ -39,14 +39,14 @@ JSON file, in the `mcpServers` format that other MCP clients use:
 
 This example uses the MCP project's reference time server, which `uvx`
 downloads on first use. Save the file, for example as `mcp.json`, and pass it
-with `--mcp-config`:
+with `--mcp`:
 
 ```bash
-melo --mcp-config mcp.json "What time is it in Tokyo?"
+melo --mcp mcp.json "What time is it in Tokyo?"
 ```
 
 The server's tools are registered as `mcp__time__<tool>`. To see them, add
-`--output-format json` and read `config.tools`. To use only the MCP tools,
+`--output json` and read `config.tools`. To use only the MCP tools,
 add `--mcp-only`.
 
 A server does not inherit melo's environment: it gets `PATH`, `HOME`,
@@ -264,7 +264,7 @@ without the flag and the gateway never set a workspace root.
   `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`, plus
   `AgentOptions(tool_env={...})`. Config-backed direct runs, the UI and
   console sessions also resolve the extra names in `[agent] tool_env`;
-  `--base-url` sessions/runs ignore that setting. The Python API can pass
+  `--url` sessions/runs ignore that setting. The Python API can pass
   any variable in its mapping. An MCP server gets the same base environment
   plus its own `env`, not the agent's extra names.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status

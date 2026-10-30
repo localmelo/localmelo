@@ -224,7 +224,7 @@ def test_startup_error_on_a_broken_pipe_exits_one(tmp_path: Path, fmt: str) -> N
 
 
 def test_legacy_startup_exception_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["melo", "task"])
+    monkeypatch.setattr(sys, "argv", ["melo", "--", "task"])
 
     def fail(*args: object, **kwargs: object) -> None:
         raise ValueError("original")

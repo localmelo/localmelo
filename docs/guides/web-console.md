@@ -12,7 +12,7 @@ permissions and are not sandboxed; review a task before approving a tool call.
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](../reference/api-v2.md)), so the gateway
-must be running to serve it: `melo --serve`. Run `melo --gateway-login` in a
+must be running to serve it: `melo serve`. Run `melo console` in a
 terminal and open its single-use link within 60 seconds (add `--port PORT`
 for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
@@ -22,7 +22,7 @@ for a nondefault port). Keep the link private; see [gateway security](gateway.md
    never the key. Saving uses the loaded settings revision; if the file changed,
    reload the dialog and retry. **Test connection** probes the unsaved model
    settings; **Theme** applies System, Light or Dark immediately and remembers
-   it in this browser. You can also use `melo --reconfigure`.
+   it in this browser. You can also use `melo setup`.
 2. Type a message and send. The first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
    its own. Answers are rendered as Markdown, with code blocks.

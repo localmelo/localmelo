@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.melo.checker.redaction import REDACTED
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.running import MAX_ITEMS
 from localmelo.support.gateway.console.worker_reader import WorkerReader
@@ -87,6 +88,7 @@ async def test_nothing_runs_on_a_fresh_console(client: TestClient) -> None:
         "running": {"chats": 0, "tasks": 0, "runs": 0, "terminal": 0},
         "tasks": {"running": 0, "queued": 0, "held": 0, "top_level": None},
         "items": [],
+        "waiting": [],
     }
     # Every field health had before stays.
     assert body["sessions"]["running"] == 0 and body["model"]["name"] == "stub-model"
@@ -109,6 +111,53 @@ async def test_a_running_chat_is_counted_and_listed_by_title(
     ]
     assert client.get("/api/health").json()["sessions"]["running"] == 1
     monkeypatch.undo()
+
+
+def ask(console: Console, owner: str, request_id: str) -> Any:
+    """A tool approval that waits for an answer; *owner* is a chat's session id or a task id."""
+    request = ApprovalRequest(
+        request_id=request_id,
+        run_id="",
+        call_id="call_1",
+        tool_name="file_write",
+        arguments={},
+        preview="a.txt",
+        workspace_root=None,
+    )
+    return console.broker.begin(owner, request)
+
+
+async def test_chats_and_tasks_that_wait_for_an_approval_are_listed(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The app's menu bar reads this list: an approval in any chat or task, and where to find it."""
+    turn = await seed_turn(console.store, workspace)
+    await open_session(console.sessions, turn.session_id)
+
+    async def listed(states: Any = None) -> list[Record]:
+        return [
+            Record("t1", "held", 2, "Index the repo"),
+            Record("t2", "queued", 2, ""),
+        ]
+
+    monkeypatch.setattr(console.workers.tasks, "list_tasks", listed)
+    assert status(client)["waiting"] == []
+    chat = ask(console, turn.session_id, "req-chat")
+    task = ask(console, "t1", "req-task")
+    assert status(client)["waiting"] == [
+        {"kind": "chat", "id": turn.session_id},
+        {"kind": "task", "id": "t1"},
+    ]
+    # An answer takes the chat off the list within the next health read.
+    assert console.broker.answer("req-chat", ApprovalDecision(True, "ok")) == "resolved"
+    await chat
+    assert status(client)["waiting"] == [{"kind": "task", "id": "t1"}]
+    console.broker.withdraw_all(reason="done")
+    await task
+    assert status(client)["waiting"] == []
 
 
 async def test_running_tasks_are_counted_with_the_queue(

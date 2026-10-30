@@ -44,13 +44,13 @@ for task in read_trace(Path(sys.argv[1])):
 84dd6b2355c5 1
 ```
 
-以下调用不受门控，行为与之前完全一致：直接模式（`melo --base-url … -- <task>` 以及带配置的 `melo`）、交互式命令行和旧版 `/v1/agent/run` 路由。它们在自己的进程中或 `melo/` 内构建提供方，因此门看不到它们的调用，而 `r_f` 为它们保留一个槽位。
+以下调用不受门控，行为与之前完全一致：直接模式（`melo --url … -- <task>` 以及带配置的 `melo`）、交互式命令行和旧版 `/v1/agent/run` 路由。它们在自己的进程中或 `melo/` 内构建提供方，因此门看不到它们的调用，而 `r_f` 为它们保留一个槽位。
 
 <a id="the-gpu-lock-and-the-battery-s2b"></a>
 
 ## GPU 锁和电池（S2b）
 
-网关读取两个机器来源并记录它们，从不写入其中任何一个。一个任务监视共享的 GPU 锁，另一个轮询电池，两者都是只读的。锁是基准测试的写入方创建的四行文件（在这台 Mac 上为 `~/Developer/mlsys/experiments/.gpu-lock`）；电池信息来自 `pmset -g batt`。直接运行和交互式命令行都不读取两者。网关应用导入该监视器并随网关一起启动（`/v1/agent/run` 的请求和回答保持不变），`melo --serve` 在启动时输出一行 INFO 日志，之后每次变化再输出一行。
+网关读取两个机器来源并记录它们，从不写入其中任何一个。一个任务监视共享的 GPU 锁，另一个轮询电池，两者都是只读的。锁是基准测试的写入方创建的四行文件（在这台 Mac 上为 `~/Developer/mlsys/experiments/.gpu-lock`）；电池信息来自 `pmset -g batt`。直接运行和交互式命令行都不读取两者。网关应用导入该监视器并随网关一起启动（`/v1/agent/run` 的请求和回答保持不变），`melo serve` 在启动时输出一行 INFO 日志，之后每次变化再输出一行。
 
 ```toml
 [scheduler]

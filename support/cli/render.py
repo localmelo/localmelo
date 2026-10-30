@@ -217,7 +217,7 @@ _ACTIONS: Final = {
         "Reduce the task or increase the configured context window; then /retry."
     ),
     "budget_exhausted": (
-        "/retry tries again; for more steps, quit and run melo -c --max-steps 60."
+        "/retry tries again; for more steps, quit and run melo -c --steps 60."
     ),
     "stuck": "Rephrase the request, or /retry.",
 }
@@ -275,7 +275,7 @@ def _server_end(error: str, backend: BackendInfo) -> tuple[str, str]:
         key = backend.key_env or "its key variable"
         return (
             f"The server refused the key in {key}.",
-            "melo --reconfigure changes the backend.",
+            "melo setup changes the backend.",
         )
     return (
         f"Could not get an answer from the model server: {_reason(error)}",

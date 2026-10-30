@@ -177,6 +177,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The macOS app's menu bar says when melo needs you, and the app has an icon. The
+  menu-bar item is Melo's head (a template image the system tints for light and dark)
+  with the number of running things beside it, and a dot beside the head while a chat
+  or a task waits for your answer to a tool approval; it shows at the next 2-second
+  health check. VoiceOver and the tooltip say it in words (`localmelo, 3 running`,
+  `localmelo, waiting for your approval`), and the start of a wait is announced. The
+  menu starts with what runs and, while an approval waits, "Waiting for your approval",
+  which opens that chat or task; "Settings…" (Command-comma) opens the console's
+  settings. `GET /api/health` gains `status.waiting`, the chats and tasks with an
+  approval to answer (`sessions.pending_approvals` counted open chats only and named
+  none). The build draws `LocalMelo.icns` from one SVG mark, `macos/mark.svg`, with
+  `sips` and `iconutil` and names it in the plist, so the Dock and every dialog show it
+  instead of the generic icon. The item's text title (`localmelo · N`) is gone. ([#241])
+
 - One command builds and installs the macOS app on this Mac. `uv run python
   scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
   developer account), puts it in `~/Applications/LocalMelo.app` and links
@@ -1099,6 +1113,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   default under the alias, because its status reply names the alias (`model_alias`). The requests
   of `melo --base-url … --chat-model …` runs are unchanged ([#237]).
 
+- The command line has command words and short options (part of #2). `melo setup`,
+  `melo serve [install|uninstall|status]`, `melo console [--reset]`, `melo task ...`,
+  `melo worker BRIEF`, `melo import FORMAT FILE` and `melo config` replace
+  `--reconfigure`, `--serve`, `--daemon`, `--gateway-login`, `--gateway-rotate-token`,
+  `--brief` and `--import-session`. `-m/--model`, `-u/--url`, `-s/--steps`,
+  `-o/--output`, `--mcp`, `-w`, `-t`, `-y` and `-V` are more names for `--chat-model`,
+  `--base-url`, `--max-steps`, `--output-format`, `--mcp-config`, `--workspace`,
+  `--timeout`, `--yolo` and `--version`, and `--title T` names a task's worker
+  session. `melo -h` is 20 lines; `melo -h all` and `melo COMMAND -h` show the rest.
+  Every old spelling still works and parses to the same result, so scripts, the macOS
+  app and the benchmark need no change. A first argument that is exactly a command
+  word is the command: quote a task that starts with one (`melo "setup the project"`)
+  or put `--` before it. `-X KEY=VALUE` (long form `--set`) changes one `config.toml`
+  key for one run and never writes the file: a key that has an old option
+  (`-X retrieval.k=5` is `--recall-k 5`) becomes that option, so the run is the same,
+  and any other key (`cli.stream`, `scheduler.policy`) overrides the loaded config and
+  is checked. `melo config keys`, `get` and `set` list, read and save keys; nine keys
+  are for one run only. The hints name the new commands. A command word alone after
+  options (`melo -X gateway.port=9000 serve`) is refused, and the message says where
+  it goes; `melo -- serve` gives the task "serve". A key named like an option
+  (`-X agent.max_steps=5`) is refused, and the message says to use `-s N (--steps)`.
+  ([#242])
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that
@@ -1620,6 +1657,8 @@ earlier milestones.
 [#238]: https://github.com/localmelo/localmelo/pull/238
 [#239]: https://github.com/localmelo/localmelo/pull/239
 [#240]: https://github.com/localmelo/localmelo/pull/240
+[#241]: https://github.com/localmelo/localmelo/pull/241
+[#242]: https://github.com/localmelo/localmelo/pull/242
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

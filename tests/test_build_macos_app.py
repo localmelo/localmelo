@@ -119,6 +119,9 @@ def test_build_assembles_locked_runtime_and_swift(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     (root / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
+    (root / "macos/mark.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L1 1 Z"/></svg>'
+    )
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
@@ -145,6 +148,8 @@ def test_build_assembles_locked_runtime_and_swift(
                 and env["DEVELOPER_DIR"] == "/Applications/Xcode.app/Contents/Developer"
             )
             Path(args[-1]).touch()
+        elif args[0] in ("/usr/bin/sips", "/usr/bin/iconutil"):
+            Path(args[-1]).touch()  # both end with the file they write
 
     monkeypatch.setattr(build_app, "run", fake_run)
     output = tmp_path / "app with spaces/LocalMelo.app"
@@ -152,6 +157,7 @@ def test_build_assembles_locked_runtime_and_swift(
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
     assert (output / "Contents/Resources/melo.png").is_file()  # the starting view
+    assert (output / "Contents/Resources/mark.svg").is_file()  # the menu-bar item
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()
@@ -173,9 +179,28 @@ def test_build_assembles_locked_runtime_and_swift(
     assert plist["CFBundleIdentifier"] == "org.localmelo.app"
     # The Dock and the app menu say localmelo; only the file and the executable keep LocalMelo.
     assert plist["CFBundleName"] == plist["CFBundleDisplayName"] == "localmelo"
+    # Alerts and the Dock show the icon the plist names, built before the bundle is signed.
+    assert (output / "Contents/Resources" / plist["CFBundleIconFile"]).is_file()
+    assert [c[0] for c in commands].index("/usr/bin/iconutil") < len(commands) - 2
     with pytest.raises(FileExistsError):
         build_app.build(output)
     shutil.rmtree(output)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="needs macOS sips and iconutil")
+def test_the_icon_is_rendered_from_the_mark(tmp_path: Path) -> None:
+    resources, stage = tmp_path / "Resources", tmp_path / "stage"
+    resources.mkdir()
+    stage.mkdir()
+    build_app.make_icon(resources, stage)
+    data = (resources / "LocalMelo.icns").read_bytes()
+    assert data[:4] == b"icns" and int.from_bytes(data[4:8], "big") == len(data)
+    kinds, offset = set(), 8
+    while offset < len(data):
+        kinds.add(data[offset : offset + 4])
+        offset += int.from_bytes(data[offset + 4 : offset + 8], "big")
+    # 16 to 1024 px: ic04 and ic05 are the two small sizes, ic07 to ic14 the others.
+    assert {b"ic04", b"ic05", *(b"ic%02d" % n for n in range(7, 15))} <= kinds
 
 
 def test_bundled_python_is_precompiled_and_nothing_writes_bytecode(

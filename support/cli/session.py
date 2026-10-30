@@ -1465,7 +1465,7 @@ class CliSession:
             if candidate:
                 self.out.print(
                     self._text(
-                        f"This server lists {candidate}; melo --reconfigure adds it for long-term memory.",
+                        f"This server lists {candidate}; melo setup adds it for long-term memory.",
                         style="muted",
                     )
                 )

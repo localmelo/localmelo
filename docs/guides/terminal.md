@@ -45,31 +45,31 @@ code 2:
 ```text
 melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Run one task:      melo "your task"
-  Start the gateway: melo --serve
+  Start the gateway: melo serve
 ```
 
 ### Which model server
 
 The first of these that applies:
 
-1. `--reconfigure`: the setup wizard, then the backend it saved. In default
+1. `melo setup`: the setup wizard, then the backend it saved. In default
    mode it first offers the model server it finds on this computer (`Found a
    model server at …`, `Use it? [Y/n]:`) with the first run's questions; the
    full backend menu follows only after `n`, when none is found, or with
-   `--developer`. Without a task it cannot be combined with `--base-url`.
-2. `--base-url URL`: that server, without the config file. The model is
-   `--chat-model`, else the only chat model that `GET URL/models` lists
+   `--developer`. Without a task it cannot be combined with `--url`.
+2. `--url URL`: that server, without the config file. The model is
+   `--model`, else the only chat model that `GET URL/models` lists
    (ids containing `embed` or `rerank` are not chat models), else the one
    chat model the server says is loaded; with several and none known to be
-   loaded it exits 2, lists them and asks for `--chat-model <id>`. A task,
-   `--brief` and `melo ""` choose the model the same way before their first request
+   loaded it exits 2, lists them and asks for `--model <id>`. A task,
+   `melo worker` and `melo ""` choose the model the same way before their first request
    (see the [command-line reference](../reference/cli.md#general)). A URL without `/v1` is listed at `URL/v1/models`, and when that
    answers the UI uses `URL/v1` too. When the server does not answer the
    list, or lists no model, the model is `default` and a warning under the
    banner says why. With no config file it asks once
    `Save URL · MODEL as the default backend? [Y/n]`; Enter saves it, as the
    first run does.
-3. The saved backend, with `--chat-model` in place of its model for this
+3. The saved backend, with `--model` in place of its model for this
    session. Nothing is checked before the UI opens: after the banner, melo
    lists the server's models once (`GET /models`) and warns when the server
    does not answer, or does not list the model:
@@ -79,7 +79,7 @@ The first of these that applies:
 The welcome's first row shows the package version, and on a git checkout the
 short commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line.
 When the model is not the saved default, a row after the folder gives the
-server's URL and where it comes from (`from --base-url (not saved)`,
+server's URL and where it comes from (`from --url (not saved)`,
 `not saved; melo asks again next time`) and, when melo took the one model the
 server says is loaded out of several,
 `the loaded one of N; /model lists them`. A server that does not answer gets
@@ -147,7 +147,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
 | `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks: a row appears once it has data; `--developer` shows every row), files and version. |
-| `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
+| `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, `omlx` when its model listing names oMLX, else `vllm`). |
@@ -174,7 +174,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
   else as `vllm`; it writes `chat_backend` and
   that table's `chat_url` and `chat_model`, and keeps the rest of the
   config: embedding, `request_timeout_s` and `extra_body`; the session runs
-  on the config as saved. In a `melo --base-url URL` session they switch for
+  on the config as saved. In a `melo --url URL` session they switch for
   this session only, unless melo asked `Save URL · MODEL as the default
   backend?` (only when there is no config file yet) and you answered yes.
   After `s` (start without saving) at the first run's questions, `/model` and
@@ -329,7 +329,7 @@ happens without the explicit `/copy` command.
   `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the time;
   the output tokens and `esc to stop` follow (`Thinking… · 14s · ↓ 180 tokens
   · esc to stop`). Developer mode puts the run's facts before the time: the
-  step (`step 4`, never against `--max-steps`), the attempt from the second
+  step (`step 4`, never against `--steps`), the attempt from the second
   one, the phase with its cycle and the tests seen. When the line is narrow
   the hint goes first, then the tokens, and in developer mode the facts are
   cut with `…`. The second row
@@ -447,7 +447,7 @@ mode and the gateway do not read it.
 
 `shell_exec`, `python_exec` and `file_write` run only once you answer, and
 so do MCP tools marked for approval. (The interactive UI loads the MCP
-servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
+servers of `--mcp`, else of the top-level `mcp_config` key; a server
 that fails to start turns MCP off for the session and `/mcp` says why.) The panel takes the place
 of the input box, and your draft stays:
 
@@ -540,7 +540,7 @@ An unknown reference exits 2. The startup choice, including the `-r` picker,
 happens before the banner: the recap names a chosen chat (`◆ Resumed "TITLE"`,
 and developer mode's box labels it `"TITLE" (resumed)`); Esc or an empty list
 gives a new-session banner. `-c` and `-r` cannot be
-combined, or used with a task, `--serve` or `--daemon`.
+combined, or used with a task or `melo serve`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest
 first. The filter updates after 150 ms; Tab toggles this folder/all folders.
@@ -589,8 +589,8 @@ melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo --reconfigure.
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo setup.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 With a server that lists an embedding model too:

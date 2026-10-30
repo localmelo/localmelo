@@ -121,7 +121,7 @@ def test_serve_with_no_config_and_no_terminal_exits_with_one_line(
     )
     assert result.returncode == 1
     assert result.stderr == (
-        "melo: no backend is configured; run melo --reconfigure in a terminal\n"
+        "melo: no backend is configured; run melo setup in a terminal\n"
     )
     assert "Welcome" not in result.stdout
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
@@ -274,7 +274,7 @@ def test_bare_melo_without_a_terminal_exits_2_and_says_why(tmp_path: Path) -> No
     assert result.stderr == (
         "melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).\n"
         '  Run one task:      melo "your task"\n'
-        "  Start the gateway: melo --serve\n"
+        "  Start the gateway: melo serve\n"
     )
     assert "Traceback" not in result.stderr
 

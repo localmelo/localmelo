@@ -74,7 +74,7 @@ for task in read_trace(Path(sys.argv[1])):
 84dd6b2355c5 1
 ```
 
-Not gated, exactly as before: direct mode (`melo --base-url … -- <task>` and
+Not gated, exactly as before: direct mode (`melo --url … -- <task>` and
 `melo` with a config), the interactive CLI, and the legacy `/v1/agent/run`
 route. They build their providers in their own process or inside `melo/`, so
 the gate never sees their calls, and `r_f` keeps a slot for them.
@@ -87,7 +87,7 @@ are read-only. The lock is the four-line file the benchmark writers create
 (`~/Developer/mlsys/experiments/.gpu-lock` on this Mac); the battery comes
 from `pmset -g batt`. Direct runs and the interactive CLI do not read
 either. The gateway app imports the monitor and starts it with the gateway
-(`/v1/agent/run`'s requests and answers are unchanged), and `melo --serve`
+(`/v1/agent/run`'s requests and answers are unchanged), and `melo serve`
 logs one INFO line at startup and per change.
 
 ```toml

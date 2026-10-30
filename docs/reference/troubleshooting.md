@@ -88,16 +88,18 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
   saves it (see [First run](../guides/terminal.md#first-run)), or save a configuration
   with `melo --serve --reconfigure`, or add `--base-url` and `--chat-model`.
 
-### No backend is configured; run melo --reconfigure in a terminal
+<a id="no-backend-is-configured-run-melo---reconfigure-in-a-terminal"></a>
+
+### No backend is configured; run melo setup in a terminal
 
 ```text
-melo: no backend is configured; run melo --reconfigure in a terminal
+melo: no backend is configured; run melo setup in a terminal
 ```
 
 - **Cause:** `melo --serve` found no config file, and the setup wizard
   cannot ask its questions without a terminal. Under launchd this line
   goes to the gateway's error log. `melo` exits with code 1.
-- **Fix:** run `melo` or `melo --reconfigure` once in a terminal, then
+- **Fix:** run `melo` or `melo setup` once in a terminal, then
   start the gateway again.
 
 ### The interactive UI needs a terminal
@@ -105,14 +107,14 @@ melo: no backend is configured; run melo --reconfigure in a terminal
 ```text
 melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Run one task:      melo "your task"
-  Start the gateway: melo --serve
+  Start the gateway: melo serve
 ```
 
 - **Cause:** bare `melo` opens the interactive UI, which needs stdin and
   stdout to be a terminal and `TERM` not to be `dumb`: here one of them was
   a pipe or a file (a script, `melo | tee`), or `TERM=dumb`. `melo` exits
   with code 2.
-- **Fix:** run `melo "<task>"` for one task, or `melo --serve` for the
+- **Fix:** run `melo "<task>"` for one task, or `melo serve` for the
   gateway, or run `melo` in a real terminal.
 
 ### A model server cannot be used at the first run
@@ -175,7 +177,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: embedding probe failed: …
-  Saving with embedding off: no long-term memory (melo --reconfigure sets it again).
+  Saving with embedding off: no long-term memory (melo setup sets it again).
 ```
 
 - **Cause:** the `POST /v1/embeddings` probe failed. **HTTP 404** means the
@@ -184,7 +186,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
   listens at that URL.
 - **Fix:** list the server's models with `curl -sS <url>/v1/models`, use an
   id it lists, and check that a `POST /v1/embeddings` with that id returns a
-  non-empty `data[0].embedding`. Then run `melo --reconfigure` again. See
+  non-empty `data[0].embedding`. Then run `melo setup` again. See
   [Set up an embedding model](../guides/embedding.md#check-the-server).
 - **Recall is empty after changing the model:** the old vectors have
   another dimension and are skipped. Restore the old model, or stop

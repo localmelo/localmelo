@@ -19,6 +19,7 @@ import tarfile
 import tempfile
 import tomllib
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
@@ -33,6 +34,14 @@ PYTHON_SHA256 = "e1d745b07b6acc0641dbb3237d3c5953deeeed182141bab2242684076fd8654
 BUNDLE_ID = "org.localmelo.app"
 XCODE = "/Applications/Xcode.app/Contents/Developer"
 LAUNCHER_PATH = "Contents/Resources/runtime/bin/melo"
+# The app icon: the mark in paper white on a deep sage tile, in the macOS icon grid (824 of 1024 px).
+ICON_TILE, ICON_INK = "#2f4a2b", "#fbfbf9"
+# The iconset names iconutil expects, with their pixel sizes.
+ICONSET = {
+    f"icon_{n}x{n}{suffix}.png": n * scale
+    for n in (16, 32, 128, 256, 512)
+    for suffix, scale in (("", 1), ("@2x", 2))
+}
 
 # Resolve every link, including a Homebrew-style link to this launcher. No build
 # paths or shell-interpreted user arguments are embedded in the bundle.
@@ -159,6 +168,31 @@ def sign(app: Path) -> None:
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
 
 
+def make_icon(resources: Path, stage: Path) -> None:
+    """Render LocalMelo.icns from macos/mark.svg with the tools macOS ships (sips, iconutil).
+
+    The mark is the only drawing: the icon is its path, scaled, on a tile. The menu-bar item draws
+    the same file as a template image, so the app has no other artwork to keep in step.
+    """
+    mark = ET.parse(ROOT / "macos/mark.svg").getroot()
+    path = mark.find("{http://www.w3.org/2000/svg}path")
+    assert path is not None
+    iconset = stage / "LocalMelo.iconset"
+    iconset.mkdir()
+    for name, size in ICONSET.items():
+        svg = stage / f"icon-{size}.svg"
+        svg.write_text(
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="{size}" height="{size}">'
+            f'<rect x="100" y="100" width="824" height="824" rx="185" fill="{ICON_TILE}"/>'
+            f'<path transform="translate(217.6 208.4) scale(9.2)" fill="{ICON_INK}" fill-rule="evenodd" '
+            f'd="{path.get("d")}"/></svg>'
+        )
+        png = iconset / name
+        run(["/usr/bin/sips", "-s", "format", "png", str(svg), "--out", str(png)])
+    icns = resources / "LocalMelo.icns"
+    run(["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o", str(icns)])
+
+
 def build(output: Path) -> None:
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         raise RuntimeError("Building requires an arm64 macOS host")
@@ -247,6 +281,8 @@ def build(output: Path) -> None:
         shutil.copy2(
             ROOT / "support/gateway/static/melo.png", contents / "Resources/melo.png"
         )
+        # The menu-bar item draws Melo's head from this file, as a template image.
+        shutil.copy2(ROOT / "macos/mark.svg", contents / "Resources/mark.svg")
         verify_links(python)
         run(
             [
@@ -262,10 +298,12 @@ def build(output: Path) -> None:
             },
         )
         precompile(interpreter, python, site)
+        make_icon(contents / "Resources", stage)
         with (contents / "Info.plist").open("wb") as f:
             plistlib.dump(
                 {
                     "CFBundleExecutable": "LocalMelo",
+                    "CFBundleIconFile": "LocalMelo.icns",
                     "CFBundleIdentifier": BUNDLE_ID,
                     # What the Dock and the app menu call it; LocalMelo.app is only the file name.
                     "CFBundleName": "localmelo",

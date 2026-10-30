@@ -57,7 +57,7 @@ ollama pull qwen3-embedding:0.6b
 curl -sS http://127.0.0.1:11434/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
+melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
 ```
 
 In the wizard, choose `2` for `Ollama (local endpoint)`, accept
@@ -143,7 +143,7 @@ python -m sglang.launch_server --model-path Qwen/Qwen3-Embedding-0.6B --is-embed
 curl -sS http://127.0.0.1:30001/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen/Qwen3-Embedding-0.6B", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
+melo setup    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
 ```
 
 MLC needs a compiled embedding artifact; a chat artifact does not serve
@@ -154,7 +154,7 @@ mlc_llm serve <artifact> --port 8080
 curl -sS http://127.0.0.1:8080/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "<the served id>", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
+melo setup    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
 ```
 
 The SGLang and MLC commands above are not run on this Mac. The archived backend smoke used a
@@ -191,8 +191,8 @@ See [Mix backends](model-servers.md#mix-backends).
   `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
   (`oMLX` where the config file says `omlx`). Without one, `/status` says
   `no long-term memory (no embedding backend)` and the banner says
-  `no long-term memory · melo --reconfigure adds one` (or
-  `--embedding-base-url adds one` in a `--base-url` session; the first run
+  `no long-term memory · melo setup adds one` (or
+  `--embedding-base-url adds one` in a `--url` session; the first run
   has just said how, so its banner omits it). This row describes the embedding
   configuration, not whether explicit modes can use text-only long-term
   memory.

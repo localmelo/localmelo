@@ -26,9 +26,10 @@ def test_output_format_help_and_invalid_choice(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import localmelo.__main__ as cli
+    from localmelo.support import command_words
 
     parser = cli._build_parser()
-    assert "stream-json" in parser.format_help()
+    assert "stream-json" in command_words.help_text("worker")
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["--output-format", "bogus", "task"])
     assert exc.value.code == 2

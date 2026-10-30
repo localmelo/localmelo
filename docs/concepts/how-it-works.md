@@ -20,11 +20,11 @@ and no tool call is the final answer: the run ends as `completed`.
 
 The run has a budget:
 
-- At most 30 steps in total (`--max-steps`).
+- At most 30 steps in total (`--steps`).
 - With the default `reflect` policy, steps come in attempts of up to 10
   steps, and a run has at most 5 attempts.
 - With `--attempt-policy none`, the run is one attempt of up to
-  `--max-steps` steps. If the same tool calls, or the same errors, repeat
+  `--steps` steps. If the same tool calls, or the same errors, repeat
   three steps in a row, it ends as `stuck`.
 
 A reply with neither text nor a tool call is an empty reply. localmelo asks

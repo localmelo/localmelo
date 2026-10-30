@@ -20,7 +20,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var window: NSWindow!
     private var webView: WKWebView!
     private var statusView: StatusView!
-    private var statusItem: NSStatusItem!
+    private var menuBar: MenuBar!
+    // Where "Waiting for your approval" goes: the console route of the first chat or task that waits.
+    private var pendingRoute: String?
     private var child: Process?
     private var timer: Timer?
     private var healthTimer: Timer?
@@ -71,6 +73,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func createMenu() {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Open localmelo", action: #selector(openWindow), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -88,9 +91,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         editEntry.submenu = edit
         root.addItem(editEntry)
         NSApp.mainMenu = root
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = menuTitle(nil)
-        statusItem.menu = appMenu.copy() as? NSMenu
+        menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting))
     }
 
     private func handle(_ action: FailureAction) {
@@ -124,6 +125,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     @objc private func openWindow() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // The console has no route for its settings, so this presses the button its sidebar has; it needs
+    // the console, and before it has loaded the window just opens.
+    @objc private func openSettings() {
+        openWindow()
+        webView?.evaluateJavaScript("document.getElementById('settings-btn')?.click()")
+    }
+
+    // The window, then the chat or task that waits. The route reaches the page as an argument, never as
+    // script text, and the console follows the hash as it does for a link.
+    @objc private func openWaiting() {
+        openWindow()
+        guard let route = pendingRoute else { return }
+        webView?.callAsyncJavaScript("location.hash = route", arguments: ["route": route], in: nil, in: .page)
     }
 
     // A manual sign-in uses the same instance-checked flow as startup and
@@ -431,7 +447,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 }
                 guard status == 200, let data = data, let health = gatewayHealth(data) else { return }
                 self.healthAuthenticated = true
-                self.statusItem.button?.title = menuTitle(runningCounts(data))
+                self.menuBar.show(menuBarState(data))
+                self.pendingRoute = waitingRoute(data)
                 guard health.store == "ok" else {
                     if !self.ready {
                         self.timer?.invalidate()
@@ -635,7 +652,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             }
         }
         child = nil
-        statusItem.button?.title = menuTitle(nil)
+        menuBar.show(.unknown)
+        pendingRoute = nil
         statusView.showFailure(failureNotice(reason: text, ready: ready))
         openWindow()
     }
