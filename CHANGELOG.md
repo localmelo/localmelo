@@ -21,7 +21,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and the network are not confined. A refused write gains a line that says so,
   and `run.confinement` counts them. A run whose writes cannot be confined stops
   before its first command; other systems run unconfined and say so. Chats are
-  unchanged; `-X agent.confine_writes=false` turns it off ([#NN]).
+  unchanged; `-X agent.confine_writes=false` turns it off ([#274]).
 
 - Gateway authentication is in progress: loopback-only binding, a private bearer
   token for API clients, and a one-use terminal sign-in link for browser sessions.
@@ -2133,6 +2133,7 @@ earlier milestones.
 [#271]: https://github.com/localmelo/localmelo/pull/271
 [#272]: https://github.com/localmelo/localmelo/pull/272
 [#273]: https://github.com/localmelo/localmelo/pull/273
+[#274]: https://github.com/localmelo/localmelo/pull/274
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
