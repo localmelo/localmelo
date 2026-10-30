@@ -97,19 +97,27 @@ for mood in [PetMood.unknown, .resting, .sleeping(.sleepSide), .working(2), .don
 }
 // A press that moves 3 points or less is a click; farther, a drag.
 precondition(petIsClick(moved: 0) && petIsClick(moved: 3) && !petIsClick(moved: 3.1))
-// Cross-fades: none for the first picture, a swap under Reduce Motion, 0.9 s from pose to pose, else 0.15 s.
+// Cross-fades: none for the first picture or the same one; 0.25 s from pose to pose and 0.9 s between sleeping poses
+// while the pet may move (a squash and rise hides the first, not the turn); else the plain 0.2 s cross-fade.
 var env = PetEnvironment()
 precondition(petFade(from: nil, to: .restLazy, environment: env) == 0)
 precondition(petFade(from: .restLazy, to: .restLazy, environment: env) == 0)
-precondition(petFade(from: .restLazy, to: .lieWorking, environment: env) == 0.15)
-precondition(petFade(from: .lieWorking, to: .sleepSide, environment: env) == 0.15)
+precondition(petFade(from: .restLazy, to: .lieWorking, environment: env) == 0.25)
+precondition(petFade(from: .lieWorking, to: .sleepSide, environment: env) == 0.25)
 precondition(petFade(from: .sleepFront, to: .sleepSide, environment: env) == 0.9)
-env.lowPower = true  // loops stop, but the change still fades, shortly
-precondition(petFade(from: .sleepFront, to: .sleepSide, environment: env) == 0.15)
-precondition(petFade(from: .restLazy, to: .lieDone, environment: env) == 0.15)
-env = PetEnvironment(); env.reduceMotion = true
-precondition(petFade(from: .sleepFront, to: .sleepSide, environment: env) == 0)
-precondition(petFade(from: .restLazy, to: .lieDone, environment: env) == 0)
+precondition(petDips(from: .restLazy, to: .lieWorking, environment: env))
+precondition(petDips(from: .sleepFront, to: .restLazy, environment: env))  // waking up dips
+precondition(!petDips(from: nil, to: .restLazy, environment: env) && !petDips(from: .lieDone, to: .lieDone, environment: env))
+precondition(!petDips(from: .sleepFront, to: .sleepSide, environment: env))  // the turn is its slow fade alone
+env.lowPower = true  // loops stop, but the change still fades, plainly: no squash
+precondition(petFade(from: .sleepFront, to: .sleepSide, environment: env) == 0.2)
+precondition(petFade(from: .restLazy, to: .lieDone, environment: env) == 0.2)
+precondition(!petDips(from: .restLazy, to: .lieDone, environment: env))
+env = PetEnvironment(); env.reduceMotion = true  // no motion at all: a plain 200 ms cross-fade, no squash
+precondition(petFade(from: .sleepFront, to: .sleepSide, environment: env) == 0.2)
+precondition(petFade(from: .restLazy, to: .lieDone, environment: env) == 0.2)
+precondition(petFade(from: nil, to: .restLazy, environment: env) == 0)
+precondition(!petDips(from: .restLazy, to: .lieDone, environment: env))
 """,
     )
 
@@ -284,7 +292,8 @@ let slow = motion.picture.animation(forKey: "breath") as? CABasicAnimation
 precondition(slow?.duration == 1.6)
 motion.play(petMotionPlan(.sleeping(.sleepBack)), entering: true, animate: true)
 let deep = motion.picture.animation(forKey: "breath") as? CABasicAnimation
-precondition(deep?.duration == 2.2 && number(deep?.toValue) == 1.03 && motion.moving.animation(forKey: "beat") == nil)
+precondition(deep?.duration == 2.2 && number(deep?.toValue) == 1.03)
+precondition(motion.moving.animation(forKey: "beat") != nil)  // the hop in the air is not cut: it lands (a sleeping dog adds no beat)
 
 // The blink: two in an 11 s loop, at 4.2 s and 9.6 s, each 60 ms in, 30 ms held and 70 ms out; only with a patch.
 let idle = PetParts(blink: patch, body: nil, tail: nil, zStart: nil)
@@ -376,6 +385,189 @@ for (mood, parts) in [(PetMood.done, finished), (.unknown, idle), (.unknown, cal
 motion.show(picture, fade: 0.15)
 motion.stop()
 precondition(motion.picture.animation(forKey: kCATransition) != nil)
+""",
+    )
+
+
+@darwin
+def test_a_change_waits_for_a_rest_point_and_a_change_of_pose_hides_in_a_squash(
+    tmp_path: Path,
+) -> None:
+    run_swift(
+        tmp_path,
+        ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
+        r"""
+func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
+func bitmap(_ width: Int, _ height: Int) -> CGImage {
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    return context.makeImage()!
+}
+func near(_ a: Double, _ b: Double, _ tolerance: Double = 1e-9) -> Bool { abs(a - b) < tolerance }
+
+// The rest wait: nothing at rest; a breath that ends within 0.4 s is waited for, a later end is not (it is eased to
+// rest instead); a squash or lift in the air has to land; an eye that is shut has to open; never more than 0.4 s.
+let calm = PetBreath(amount: 1.02, seconds: 3.2)
+precondition(petWaitMost == 0.4)
+precondition(petRestWait(landsIn: 0, breath: nil, breathAge: 0, opensIn: 0) == 0)
+precondition(petRestWait(landsIn: 0, breath: calm, breathAge: 0, opensIn: 0) == 0)  // a breath just begun: at rest now
+precondition(petRestWait(landsIn: 0, breath: calm, breathAge: 1.0, opensIn: 0) == 0)  // 2.2 s to its end: do not wait
+precondition(near(petRestWait(landsIn: 0, breath: calm, breathAge: 3.0, opensIn: 0), 0.2))
+precondition(near(petRestWait(landsIn: 0, breath: calm, breathAge: 3.2 * 5 + 3.0, opensIn: 0), 0.2))  // later breaths
+precondition(petRestWait(landsIn: 0, breath: calm, breathAge: -0.2, opensIn: 0) == 0)  // the breath has not begun
+precondition(near(petRestWait(landsIn: 0.3, breath: calm, breathAge: 1.0, opensIn: 0), 0.3))
+precondition(near(petRestWait(landsIn: 0.1, breath: calm, breathAge: 3.0, opensIn: 0.15), 0.2))  // the longest wins
+precondition(petRestWait(landsIn: 0.9, breath: calm, breathAge: 3.0, opensIn: 0) == 0.4)
+precondition(petRestWait(landsIn: -1, breath: nil, breathAge: 0, opensIn: -1) == 0)
+precondition(PetMotion.opensIn(blinkAge: 4.0) == 0 && PetMotion.opensIn(blinkAge: 4.36) == 0)
+precondition(near(PetMotion.opensIn(blinkAge: 4.25), 0.11) && near(PetMotion.opensIn(blinkAge: 11 + 9.7), 0.06))
+
+// A first picture or no change: no wait, no squash. Resting -> working keeps the breath (the same one) and squashes.
+let motion = PetMotion(size: petPanelSize, anchor: CGPoint(x: 66, y: 3))
+let picture = bitmap(264, 194)
+motion.show(picture, fade: 0)
+precondition(motion.moving.animation(forKey: "dip") == nil && motion.picture.animation(forKey: kCATransition) == nil)
+motion.play(petMotionPlan(.resting), entering: true, animate: true)
+let breathBegan = motion.breathAt
+precondition(motion.picture.animation(forKey: "breath") != nil && motion.restWait() <= petWaitMost)
+motion.shown = { _, path in path == "transform.scale.y" ? 1.012 : nil }  // the eye sees the dog mid-breath
+let dips = PetBegin(wait: 0, dip: true)
+let before = CACurrentMediaTime()
+motion.show(bitmap(264, 194), fade: 0.25, begin: dips)
+motion.play(petMotionPlan(.working(1)), entering: true, animate: true, begin: dips)
+precondition(motion.breathAt == breathBegan && motion.picture.animation(forKey: "breath") != nil)  // not cut, not restarted
+precondition(motion.picture.animation(forKey: "release.transform.scale.y") == nil)  // nothing was removed, so nothing eased
+// The squash: the whole pet, 0.35 s, lower (0.95) and wider (1.025) at the low point, half way; the fade (0.25 s) is
+// centred on it, so the pose changes at its lowest, and the bob springs up from it.
+let dip = motion.moving.animation(forKey: "dip") as? CAAnimationGroup
+let down = dip?.animations?.first as? CAKeyframeAnimation, wide = dip?.animations?.last as? CAKeyframeAnimation
+precondition(dip?.duration == 0.35 && dip?.animations?.count == 2 && dip!.beginTime >= before)
+precondition(down?.keyPath == "transform.scale.y" && down?.values?.map { number($0)! } == [1, 0.95, 1])
+precondition(wide?.keyPath == "transform.scale.x" && wide?.values?.map { number($0)! } == [1, 1.025, 1])
+precondition(down?.keyTimes?.map { number($0)! } == [0, 0.5, 1] && down?.timingFunctions?.count == 2)
+let fade = motion.picture.animation(forKey: kCATransition) as? CATransition
+precondition(fade?.type == .fade && fade?.duration == 0.25 && fade?.fillMode == .backwards)  // the old picture is held
+precondition(near(fade!.beginTime + 0.125, dip!.beginTime + 0.175))
+let bob = motion.moving.animation(forKey: "beat") as? CAKeyframeAnimation
+precondition(bob?.keyPath == "transform.translation.y" && near(bob!.beginTime, dip!.beginTime + 0.175, 1e-3))  // read a moment later
+// While it is in the air a second change has to wait for it to land (at most 0.4 s).
+let landing = motion.restWait()
+precondition(landing > 0.2 && landing <= petWaitMost)
+
+// A wait moves the whole change later and holds the old picture until then.
+motion.stop()
+precondition(motion.restWait() == 0 && motion.moving.animation(forKey: "dip") == nil)
+let waits = PetBegin(wait: 0.3, dip: true)
+let asked = CACurrentMediaTime()
+motion.show(picture, fade: 0.25, begin: waits)
+motion.play(petMotionPlan(.waiting), entering: true, animate: true, begin: waits)
+let later = motion.moving.animation(forKey: "dip") as? CAAnimationGroup
+precondition(later!.beginTime >= asked + 0.3 && later!.beginTime < asked + 0.4)
+let held = motion.picture.animation(forKey: kCATransition) as? CATransition
+precondition(held!.beginTime >= asked + 0.35 && held?.fillMode == .backwards)
+let hop = motion.moving.animation(forKey: "beat") as? CAKeyframeAnimation
+precondition(number(hop?.values?[1]) == 6 && near(hop!.beginTime, later!.beginTime + 0.175, 1e-3))
+
+// A breath the plan changes is not cut: the old one is taken off and the eye's value eases to rest (0.25 s) before
+// the new one begins.
+motion.stop()
+motion.shown = { _, path in path == "transform.scale.y" ? 1.012 : nil }
+motion.play(petMotionPlan(.resting), entering: false, animate: true)
+let at = CACurrentMediaTime()
+motion.play(petMotionPlan(.sleeping(.sleepFront)), entering: true, animate: true)
+let ease = motion.picture.animation(forKey: "release.transform.scale.y") as? CABasicAnimation
+precondition(ease?.fromValue as? Double == 1.012 && number(ease?.toValue) == 1 && ease?.duration == 0.25)
+let slow = motion.picture.animation(forKey: "breath") as? CABasicAnimation
+precondition(number(slow?.toValue) == 1.03 && slow!.beginTime >= at + 0.25 && motion.breathAt == slow!.beginTime)
+precondition(motion.restWait() > 0.2)  // a change that follows waits for the ease to end
+// ... at rest already (or off screen, with nothing to read) there is nothing to ease from.
+motion.stop()
+motion.shown = { _, _ in 1.0 }
+motion.play(petMotionPlan(.resting), entering: false, animate: true)
+motion.play(petMotionPlan(.sleeping(.sleepFront)), entering: false, animate: true)
+precondition(motion.picture.animation(forKey: "release.transform.scale.y") == nil)
+precondition((motion.picture.animation(forKey: "breath") as? CABasicAnimation)!.beginTime < CACurrentMediaTime() + 0.01)
+
+// The sleeping dog's "z" fades out over 0.18 s from where it is when the dog wakes, and is not restarted while it stays.
+let zed = PetParts(blink: nil, body: nil, tail: nil, zStart: CGPoint(x: 86, y: 24))
+motion.show(picture, parts: zed, fade: 0)
+motion.play(petMotionPlan(.sleeping(.sleepFront)), entering: true, animate: true)
+precondition(motion.drift.animation(forKey: "drift") != nil)
+motion.shown = { layer, path in layer === motion.drift ? (path == "opacity" ? 0.8 : 2) : nil }
+motion.play(petMotionPlan(.sleeping(.sleepSide)), entering: false, animate: true)
+precondition(motion.drift.animation(forKey: "drift") != nil && motion.drift.animation(forKey: "release.opacity") == nil)
+motion.play(petMotionPlan(.resting), entering: true, animate: true)
+let gone = motion.drift.animation(forKey: "release.opacity") as? CABasicAnimation
+precondition(motion.drift.animation(forKey: "drift") == nil && gone?.fromValue as? Double == 0.8 && number(gone?.toValue) == 0)
+precondition(gone?.duration == 0.18 && number((motion.drift.animation(forKey: "release.transform.translation.y") as? CABasicAnimation)?.fromValue) == 2)
+
+// Reduce Motion (and the other stops): the picture changes by the plain cross-fade, no squash, and nothing plays.
+var env = PetEnvironment(); env.reduceMotion = true
+let plain = PetBegin(wait: 0, dip: petDips(from: .sleepFront, to: .restLazy, environment: env))
+precondition(plain == PetBegin())
+motion.play(petMotionPlan(.working(1)), entering: true, animate: true)
+motion.show(picture, fade: petFade(from: .sleepFront, to: .restLazy, environment: env), begin: plain)
+motion.play(petMotionPlan(.resting), entering: true, animate: shouldAnimate(env), begin: plain)
+let still = motion.picture.animation(forKey: kCATransition) as? CATransition
+precondition(still?.duration == 0.2 && still?.beginTime == 0 && still?.fillMode == .removed)
+for layer in [motion.moving, motion.picture, motion.blink, motion.tail, motion.ear, motion.drift] {
+    precondition((layer.animationKeys() ?? []).filter { $0 != kCATransition }.isEmpty)
+}
+""",
+    )
+
+
+@darwin
+def test_a_change_of_mood_does_not_jump_the_picture_where_the_eye_sees_it(
+    tmp_path: Path,
+) -> None:
+    # The layers are rendered by a CARenderer (no window, no screen), which gives them presentation layers: what the
+    # eye sees now. A sleeping breath is read mid-way; the change to a resting one must start from that value (the old
+    # code snapped it back to 1.0, 0.009 away).
+    run_swift(
+        tmp_path,
+        ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
+        r"""
+import Metal
+guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
+    print("no Metal device: live check skipped")
+    exit(0)
+}
+let description = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 264, height: 194, mipmapped: false)
+description.usage = [.renderTarget, .shaderRead]
+description.storageMode = .shared
+let renderer = CARenderer(mtlTexture: device.makeTexture(descriptor: description)!, options: [kCARendererMetalCommandQueue: queue])
+let root = CALayer()
+root.bounds = CGRect(origin: .zero, size: petPanelSize)
+root.anchorPoint = .zero
+let motion = PetMotion(size: petPanelSize, anchor: CGPoint(x: 66, y: 3))
+root.addSublayer(motion.moving)
+renderer.layer = root
+renderer.bounds = root.bounds
+let context = CGContext(data: nil, width: 264, height: 194, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+let picture = context.makeImage()!
+func scale() -> Double {
+    CATransaction.flush()  // the presentation layer follows the clock at each commit
+    return (motion.picture.presentation()?.value(forKeyPath: "transform.scale.y") as? NSNumber)?.doubleValue ?? -1
+}
+
+motion.show(picture, fade: 0)
+motion.play(petMotionPlan(.sleeping(.sleepFront)), entering: true, animate: true)
+Thread.sleep(forTimeInterval: 0.9)
+let seen = scale()
+precondition(seen > 1.005 && seen < 1.03)  // mid-breath, read from the presentation layer
+let begin = PetBegin(wait: 0, dip: true)
+motion.show(picture, fade: 0.25, begin: begin)
+motion.play(petMotionPlan(.resting), entering: true, animate: true, begin: begin)
+let after = scale()
+precondition(abs(after - seen) < 0.003)  // it goes on from where it was
+Thread.sleep(forTimeInterval: 0.2)
+let easing = scale()
+precondition(easing < after && easing > 1)  // ... and eases down to rest
+Thread.sleep(forTimeInterval: 0.2)
+precondition(abs(scale() - 1) < 0.002)  // rest, before the new breath begins
 """,
     )
 
