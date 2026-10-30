@@ -20,6 +20,7 @@ from localmelo.melo.schema import ToolDef, ToolTier
 # builtin_names(), so a new built-in cannot be added without a tier.
 BUILTIN_TIERS: Mapping[str, ToolTier] = {
     "file_read": "read",
+    "list_files": "read",
     "file_write": "write",
     "shell_exec": "exec",
     "python_exec": "exec",

@@ -10,9 +10,10 @@ from MCP servers, which tools each step offers, and what the checks do.
 | `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
+| `list_files` | Lists a folder: its folders first, each ending in `/`, then its files with their sizes; a link ends in `@`. Takes `path` (default: the workspace folder) and `depth` (1 to 3, default 1). Never reads a file, never follows a link and skips `.git`. | Shows 200 entries, then `... and N more`. Read-only, so it never asks for approval. The interactive UI and gateway and console sessions offer it by default; a direct run and the Python API's default mode do not (`--builtins list_files` or `all` names it). |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
 
-A `file_read` or `file_write` call may take up to 60 seconds, and an MCP tool
+A `file_read`, `file_write` or `list_files` call may take up to 60 seconds, and an MCP tool
 call up to its server's `timeout`. Output longer than 50,000 characters is
 cut.
 
@@ -39,13 +40,14 @@ agent, and exposing a proxy variable also exposes any credentials in it.
 
 This is how the built-in tools work in a direct run without `--workspace`
 and in the gateway. A direct run with `--workspace DIR` and a Python agent
-with `workspace_root` keep the file tools inside a directory and start
+with `workspace_root` keep the file tools (`file_read`, `file_write` and `list_files`) inside a directory and start
 `shell_exec` and `python_exec` there (see
 [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root too, and asks before each
-`shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
+`shell_exec`, `python_exec` and `file_write` call, unless `--yolo`; `file_read` and
+`list_files` only read, so they never ask (see
 [Permission tiers](../guides/tools-mcp.md#permission-tiers)); direct mode has no approval policy
-and does not offer `shell_exec`, with or without a root. The interactive UI loads the MCP
+and offers neither `shell_exec` nor `list_files`, with or without a root. The interactive UI loads the MCP
 servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
 that fails to start turns MCP off for that session (`/mcp` says why). A
 Python run with an approval policy asks its own policy about an MCP tool by

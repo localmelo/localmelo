@@ -156,9 +156,9 @@ about when its permission tier is not `read` (see
 
 The interactive UI always has a policy (unless `--yolo`); direct mode, the
 gateway and a Python run without `approval=` have none, which is why those
-modes do not offer `shell_exec` by default. `file_read` is `read` and does
-not ask: a
-[workspace root](#work-in-a-directory) limits it instead. A read-only MCP
+modes do not offer `shell_exec` by default. `file_read` and `list_files` are
+`read` and do not ask: a
+[workspace root](#work-in-a-directory) limits them instead. A read-only MCP
 tool (`readOnlyHint: true`) does not ask either, unless `require_approval`
 names it. A tool registered directly with `agent.executor.register` keeps
 its explicit `requires_approval`; its tier is a label only. Without a
@@ -338,6 +338,9 @@ Both lines print the real path of `~/melo-work`, such as
   characters, is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`. `file_write` reports the
   resolved path.
+- **`list_files`** resolves its path the same way (no path lists the root)
+  and refuses one outside with the same message. It never enters a symlink
+  and never reads a file.
 - **`shell_exec` and `python_exec`** always run in a child process with a
   process group of its own, which a timeout or a cancellation kills as a
   whole; the root is the directory they start in. A shell command's standard

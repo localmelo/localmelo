@@ -236,6 +236,31 @@ def test_a_file_write_waits_for_the_answer(
     assert term.quit() == 0
 
 
+def test_a_question_about_the_folder_lists_it_without_an_approval(
+    melo: Callable[..., Melo], tmp_path: Path, stub: StubServer
+) -> None:
+    project = tmp_path / "demo-project"
+    (project / "tests").mkdir(parents=True, exist_ok=True)
+    (project / "app.py").write_text("print('hi')\n")
+    term = melo()
+    term.see("Ask melo")
+    # The scenario matches this prompt only, so the suggested "What is this
+    # project?" stays free for scripts that expect the default scenario.
+    term.type("List the folder with list_files\r")
+    term.see("This folder holds a small Python project.")
+    term.see("Worked for")
+    text = term.text()
+    assert "list_files" in text
+    for panel in ("Waiting for your approval", "Run a shell command?", "allow every"):
+        assert panel not in text
+    # The model was offered the tool, and got the folder's real listing.
+    prompt = "List the folder with list_files"
+    sent = [r for r in stub.requests if prompt in str(r["messages"])]
+    assert "list_files" in {t["function"]["name"] for t in sent[0]["tools"]}
+    assert sent[-1]["messages"][-1]["content"] == "tests/\napp.py  12 B"
+    assert term.quit() == 0
+
+
 def test_esc_stops_a_turn(melo: Callable[..., Melo], tmp_path: Path) -> None:
     term = melo()
     term.see("Ask melo")
