@@ -197,5 +197,9 @@ async def test_without_a_root_it_lists_the_process_folder(
     _tree(root)
     monkeypatch.chdir(root)
 
-    assert (await _run(None)).output == "Docs/\nsrc/\na.txt  2.4 MB\nb.txt  5 B"
+    listing = "Docs/\nsrc/\na.txt  2.4 MB\nb.txt  5 B"
+    assert (await _run(None)).output == listing
+    # A path that is itself a symlink (macOS's /tmp is one) is followed.
+    (root.parent / "alias").symlink_to(root)
+    assert (await _run(None, path=str(root.parent / "alias"))).output == listing
     assert (await _run(None, path="src")).output == "pkg/\napp.py  1 B"

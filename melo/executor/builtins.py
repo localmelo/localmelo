@@ -89,9 +89,6 @@ LIST_FILES_MAX_ENTRIES = 200
 LIST_FILES_MAX_DEPTH = 3
 _LIST_FILES_COUNT_LIMIT = 10_000
 
-# list_files opens a folder without following a symlink.
-_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-
 
 def _builtin(tool_def: ToolDef) -> Callable[[ToolFunction], ToolFunction]:
     def decorator(fn: ToolFunction) -> ToolFunction:
@@ -281,7 +278,8 @@ async def _file_read(path: str) -> str:
 )
 async def _list_files(path: str = ".", depth: int = 1) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _list_directory, path or ".", depth)
+    target = os.path.realpath(path or ".")  # like file_read: a given path is followed
+    return await loop.run_in_executor(None, _list_directory, target, depth)
 
 
 @_builtin(
@@ -689,7 +687,7 @@ def _list_directory(path: str, depth: int) -> str:
     *path* itself raises the ``OSError`` it gets.
     """
     depth = max(1, min(depth, LIST_FILES_MAX_DEPTH))
-    fd = os.open(path, _DIRECTORY_FLAGS)
+    fd = _open_folder(path)
     try:
         # Closing the walk closes the folders it still holds open.
         with contextlib.closing(_walk(fd, 1, depth)) as lines:
@@ -701,6 +699,12 @@ def _list_directory(path: str, depth: int) -> str:
         plus = "+" if left > _LIST_FILES_COUNT_LIMIT else ""
         shown.append(f"... and {min(left, _LIST_FILES_COUNT_LIMIT)}{plus} more")
     return "\n".join(shown) or "(empty)"
+
+
+def _open_folder(name: str, parent: int | None = None) -> int:
+    """A descriptor of the folder *name* (of *parent*), never through a symlink."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    return os.open(name, flags, dir_fd=parent)
 
 
 def _walk(fd: int, level: int, depth: int) -> Generator[str, None, None]:
@@ -733,7 +737,7 @@ def _walk(fd: int, level: int, depth: int) -> Generator[str, None, None]:
             try:
                 # Through the parent's descriptor, without following a link:
                 # a folder swapped for a symlink since the scan is not entered.
-                child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=fd)
+                child = _open_folder(entry.name, fd)
                 try:
                     yield from _walk(child, level + 1, depth)
                 finally:
