@@ -20,6 +20,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
+import { setupFolderPicker } from "./folder.mjs";
 import {
   activity,
   applyEvent,
@@ -31,7 +32,9 @@ import {
   formatDuration,
   formatPast,
   formatTokens,
+  holdText,
   liveFacts,
+  LOCK_HOLD,
   newTurn,
   newView,
   nextAction,
@@ -58,7 +61,8 @@ const S = {
   machine: null,
   sessions: [],
   activeId: null,
-  newWorkspace: null,
+  newWorkspace: null, // The folder picked for the next new chat; null is the server's default.
+  defaultWorkspace: "", // That default, as `GET /api/settings` says it.
   drafts: {},
   outbox: {},
   cancelling: new Set(),
@@ -333,14 +337,11 @@ function setupShown() {
   return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
 }
 
-// The scheduler's reason for a call that waits on a foreign GPU lock.
-const LOCK_HOLD = "Reservation";
-
 /** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
 function connectionState({ turn, held, pending, session }) {
   if (!S.online) return { text: "Gateway offline", offline: true };
   if (developerMode) {
-    const text = turn ? (held ? `Waiting: ${held}` : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
+    const text = turn ? (held ? holdText(held) : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
     return { text, offline: false };
   }
   const model = S.health?.model;
@@ -362,6 +363,12 @@ function applyChrome() {
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
   setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
+}
+
+/** Under a chat's title: its folder in default mode, its model and its folder in developer mode. */
+function chatSubtitle(model, folder) {
+  if (!folder) return model;
+  return developerMode ? `${model} · ${folder}` : `In ${folder}`;
 }
 
 function syncUI() {
@@ -395,12 +402,16 @@ function syncUI() {
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
   input.placeholder = setup ? "Connect a model to start" : COMPOSER_PLACEHOLDER;
+  // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
+  const fresh = S.ready && !S.activeId && !setup && !workerMode;
+  folderPicker.update(fresh);
+  $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
   const modelBanner = $("model-banner");
   setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? "No model is configured yet. Open connection settings to connect one." : "");
   modelBanner.hidden = !modelBanner.textContent;
   refreshStreamNotice();
   $("header-model").textContent = session
-    ? session.model || "Your configured model"
+    ? chatSubtitle(session.model || "Your configured model", session.workspace_label)
     : model?.name
       ? `${model.name} · ${model.backend_label}`
       : "Connect your model to get started";
@@ -427,7 +438,7 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  $("run-status").textContent = turn ? (held ? `Waiting: ${held}` : "Running on your backend") : "";
+  $("run-status").textContent = turn ? (held ? holdText(held) : "Running on your backend") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -2206,7 +2217,11 @@ function sidebar(open) {
 // tab and its run and memory internals) and never changes what a panel does.
 let developerMode = false;
 async function refreshMode(saved) {
-  try { developerMode = (saved ?? await api("/settings")).mode === "developer"; } catch { /* Keep the last known mode. */ }
+  try {
+    const settings = saved ?? await api("/settings");
+    developerMode = settings.mode === "developer";
+    if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
+  } catch { /* Keep the last known mode and folder. */ }
 }
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 const showSettings = setupSettings({
@@ -2229,6 +2244,17 @@ function openSettings() {
   drawer.close();
   return showSettings();
 }
+const folderPicker = setupFolderPicker({
+  doc: document,
+  state: () => ({ sessions: S.sessions, fallback: S.defaultWorkspace, current: S.newWorkspace }),
+  pick: (path) => {
+    S.newWorkspace = path;
+    syncUI();
+  },
+  notify: (message) => notify(message),
+  // Only the macOS app registers this handler; a browser has none.
+  bridge: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
+});
 const setupCard = setupModelCard({
   root: $("setup-card"),
   api,
@@ -2458,6 +2484,7 @@ $("level-menu").addEventListener("keydown", (event) => {
   } else if (event.key === "Tab") showLevelMenu(false);
 });
 document.addEventListener("click", (event) => {
+  if (folderPicker.isOpen() && !event.target.closest?.(".folder-picker")) folderPicker.close();
   if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
   if (running.isOpen() && !event.target.closest?.(".running-picker")) running.toggle(false);
 });
@@ -2483,14 +2510,16 @@ globalThis.addEventListener?.("hashchange", async () => {
   }
   if ((globalThis.location?.hash || "") === "#/new" && (wasWorker || S.activeId !== null)) newChat();
 });
+/** Put a starter's text in the composer, ready to send or change. */
+function usePrompt(text) {
+  input.value = text;
+  saveDraft();
+  resizeInput();
+  syncUI();
+  input.focus();
+}
 document.querySelectorAll("[data-prompt]").forEach((node) =>
-  node.addEventListener("click", () => {
-    input.value = node.dataset.prompt;
-    saveDraft();
-    resizeInput();
-    syncUI();
-    input.focus();
-  }),
+  node.addEventListener("click", () => usePrompt(node.dataset.prompt)),
 );
 document.addEventListener("keydown", (event) => {
   if (!S.authenticated) return;
@@ -2505,6 +2534,11 @@ document.addEventListener("keydown", (event) => {
   if (running.isOpen()) {
     running.toggle(false);
     $("running-btn").focus();
+    return;
+  }
+  if (folderPicker.isOpen()) {
+    folderPicker.close();
+    $("folder-btn").focus();
     return;
   }
   if (S.levelsOpen) {

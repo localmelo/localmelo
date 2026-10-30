@@ -177,6 +177,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The first task in the web console shows the folder melo works in, and lets you pick
+  another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
+  panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
+  in the macOS app, "Show in Finder". In the app "Choose a folder…" opens the system's
+  folder panel; in a browser it opens a path field. The pick goes out with the first
+  message as `workspace` in `POST /api/sessions` (a chat in the default folder sends the
+  same request as before), and a chat's folder shows in its header ("In ~/notes";
+  developer mode adds it after the model). Three one-line starters under the composer
+  ("Summarize the files in this folder", "Plan a small project with me", "Explain a piece
+  of code") replace the three cards. The app answers the page through one message handler
+  that accepts only the gateway's own page, returns only a path picked in the panel and
+  shows in Finder only a folder of the gateway's chats or one picked there. ([#248])
+
 - The web console connects the model server that already runs on this Mac in one
   step. While no model is set up (or the configured server is down) and no chat
   is open, the welcome shows a setup card in place of the banner and the starters:
@@ -1042,6 +1055,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   In a replay of 72 reflection replies from a benchmark run, 4 stayed unreadable after
   the earlier repair and 2 do now (a tool call, and a list written without its opening
   bracket). Fewer reflections are asked for again; request bodies are unchanged. ([#NN])
+- A chat that waits on a foreign GPU lock says so in plain words in both modes of the
+  web console: its work group, live row, tool card, header chip and composer read
+  "Waiting for this Mac's GPU" where they read "Waiting: Reservation". Other waits keep
+  the scheduler's code; the terminal and the API are unchanged. ([#248])
 
 - `/model` is a list to pick from. Alone, it opens the server's chat models under
   the input box: type to filter, ↑ ↓ to move, Enter to switch and save the model as
@@ -1759,6 +1776,7 @@ earlier milestones.
 [#245]: https://github.com/localmelo/localmelo/pull/245
 [#246]: https://github.com/localmelo/localmelo/pull/246
 [#247]: https://github.com/localmelo/localmelo/pull/247
+[#248]: https://github.com/localmelo/localmelo/pull/248
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
