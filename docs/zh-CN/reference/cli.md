@@ -27,7 +27,7 @@ melo -h all                                  # every option, command and setting
 
 ## 命令与短选项
 
-七个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。
+七个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。跟在选项后面、单独成为任务的命令词（如 `melo -X gateway.port=9000 serve`）同样会被拒绝，提示会说明该词应放在哪里（`melo serve -X gateway.port=9000`）；`melo -- serve` 会把 serve 当作任务运行，而作为选项值出现的命令词（如 `melo -w serve "fix it"`）不受影响。
 
 | 命令 | 作用 | 选项 |
 |---|---|---|
@@ -109,7 +109,7 @@ melo -h all                                  # every option, command and setting
 
 - `-X KEY=VALUE`（长格式 `--set KEY=VALUE`，可重复）只对本次运行修改一项设置。值按 TOML 读取（`true`、`5`、`"v3"`），否则当作文本；`on` 和 `off` 也表示布尔值。`-X` 优先于配置文件，配置文件优先于默认值，并且从不写入文件。出现在 `--` 之后时，它是任务文字。
 - 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
-- `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个。
+- `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。
 - 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
 
 <a id="modes"></a>
@@ -384,7 +384,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 - `--host` 和 `--port` 的默认值来自配置文件中的 `[gateway]` 表。这些选项只为本次运行改变它们。
 - 给出任务时，`--host`、`--port` 和 `--reconfigure` 会被忽略。
 - 没有任务时，`--host` 和 `--port` 需要 `--serve`、`--daemon`、`--gateway-login` 或 `--gateway-rotate-token` 之一。
-- 没有终端且没有配置文件时，`melo --serve` 会在 stderr 上打印一行并以退出码 1 退出，与 launchd 下的行为一致：`melo: no backend is configured; run melo --reconfigure in a terminal`。没有终端时，`--reconfigure` 仍会运行设置向导，并从标准输入读取答案，因此脚本可以通过管道输入。`--allow-unconfigured` 同时跳过设置向导和启动时校验，因此 `melo --serve --allow-unconfigured` 可以在没有配置文件的情况下启动；它不能与 `--reconfigure` 同用，也不能不带 `--serve` 使用。
+- 没有终端且没有配置文件时，`melo --serve` 会在 stderr 上打印一行并以退出码 1 退出，与 launchd 下的行为一致：`melo: no backend is configured; run melo setup in a terminal`。没有终端时，`--reconfigure` 仍会运行设置向导，并从标准输入读取答案，因此脚本可以通过管道输入。`--allow-unconfigured` 同时跳过设置向导和启动时校验，因此 `melo --serve --allow-unconfigured` 可以在没有配置文件的情况下启动；它不能与 `--reconfigure` 同用，也不能不带 `--serve` 使用。
 - 在设置向导的问题处按 Ctrl-D 会打印 `Setup cancelled.` 并以退出码 0 退出；按 Ctrl+C 会打印相同内容，并以 130 退出。
 - `melo --gateway-login [--port PORT]` 会在终端中打印一次性登录链接；`melo --gateway-rotate-token` 轮换共享的本地网关令牌。网关拒绝非回环地址的绑定，并要求认证；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。
 

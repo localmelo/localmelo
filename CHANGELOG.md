@@ -998,7 +998,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`-X retrieval.k=5` is `--recall-k 5`) becomes that option, so the run is the same,
   and any other key (`cli.stream`, `scheduler.policy`) overrides the loaded config and
   is checked. `melo config keys`, `get` and `set` list, read and save keys; nine keys
-  are for one run only. The hints name the new commands. ([#NN])
+  are for one run only. The hints name the new commands. A command word alone after
+  options (`melo -X gateway.port=9000 serve`) is refused, and the message says where
+  it goes; `melo -- serve` gives the task "serve". A key named like an option
+  (`-X agent.max_steps=5`) is refused, and the message says to use `-s N (--steps)`.
+  ([#NN])
 
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and

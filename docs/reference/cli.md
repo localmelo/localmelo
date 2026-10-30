@@ -30,7 +30,11 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 Seven command words name what `melo` does. A word counts only as the first
 argument and only as an exact match, so `melo "setup the project"` (one quoted
 argument) and `melo -- setup the project` are tasks, while `melo setup a venv`
-prints a hint and exits 2 before any model is built.
+prints a hint and exits 2 before any model is built. A task that is one command
+word after options, as in `melo -X gateway.port=9000 serve`, is refused the same
+way, and the message says where the word goes (`melo serve -X gateway.port=9000`).
+`melo -- serve` runs the task "serve"; an option value such as
+`melo -w serve "fix it"` is not affected.
 
 | Command | What it does | Options |
 |---|---|---|
@@ -127,7 +131,8 @@ dot. `melo -h all` lists the keys with their defaults.
 - `melo config` shows the file and what differs from the defaults. `melo config keys
   [FILTER]` lists every key with its value, default and source (default, file or `-X`),
   `melo config get KEY` prints one, and `melo config set KEY VALUE` checks a key and
-  saves it. An unknown key names the nearest ones.
+  saves it. An unknown key names the nearest ones; a name that is an option,
+  such as `agent.max_steps`, says to use that option (`-s N (--steps)`).
 - Whatever writes the file (`/model`, the console's settings page, `melo config set`)
   writes what the file had, never a `-X` value.
 
@@ -594,7 +599,7 @@ These options apply to `melo` without a task.
   `--gateway-login` or `--gateway-rotate-token`.
 - Without a terminal and with no config file, `melo --serve` prints one
   line on stderr and exits with code 1, as under launchd:
-  `melo: no backend is configured; run melo --reconfigure in a terminal`.
+  `melo: no backend is configured; run melo setup in a terminal`.
   `--reconfigure` still runs the wizard without a terminal and reads its
   answers from stdin, so a script can pipe them in.
   `--allow-unconfigured` skips both the wizard and startup validation so
