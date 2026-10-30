@@ -4,8 +4,10 @@
 and the worker runs and terminal chats that hold a live lease in the CLI file.
 ``tasks`` is the scheduler's queue, as the status row shows it. ``items`` lists
 what runs, newest kinds first, for the header's list: it is capped, and the
-counts are not. A part whose store cannot be read counts as nothing running:
-health is served while a store is unavailable.
+counts are not. ``waiting`` lists the chats and tasks that wait for the
+person's answer to a tool approval, for the macOS app's menu bar. A part whose
+store cannot be read counts as nothing running: health is served while a store
+is unavailable.
 """
 
 from __future__ import annotations
@@ -57,10 +59,26 @@ async def _chat_items(console: Console) -> list[dict[str, str]]:
     return items
 
 
+def _waiting(console: Console, live: list[Any] | None) -> list[dict[str, str]]:
+    """The chats and tasks with an approval request that waits for an answer.
+
+    The broker keys a chat's requests by its session id and a task's by its task
+    id, so one pass over both says which: the chats first, then the tasks.
+    """
+    owners = [("chat", entry.session_id) for entry in console.sessions.entries()]
+    owners += [("task", record.task_id) for record in live or ()]
+    return [
+        {"kind": kind, "id": owner}
+        for kind, owner in owners
+        if console.broker.pending(owner)
+    ][:MAX_ITEMS]
+
+
 async def running_status(console: Console) -> dict[str, Any]:
-    """The ``status`` object: counts by kind, the task queue and the running items."""
+    """The ``status`` object: counts by kind, the queue, the running and waiting items."""
     chats: list[dict[str, str]] = []
     tasks: list[dict[str, str]] = []
+    live: list[Any] | None = None
     queue = TaskCounts(0, 0, 0)
     if console.store_state() == "ok":
         chats = await _chat_items(console)
@@ -102,4 +120,5 @@ async def running_status(console: Console) -> dict[str, Any]:
             "top_level": queue.top_level,
         },
         "items": items[:MAX_ITEMS],
+        "waiting": _waiting(console, live),
     }
