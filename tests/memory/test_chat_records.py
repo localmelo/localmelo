@@ -47,6 +47,18 @@ HOLDER = "test-host:1:memory"
         ("我的组会是每周四。", ["你的组会是每周四。"], ["about"]),
         ("叫我小王", ["你希望被叫作小王。"], ["about"]),
         ("记住：我的车停在B2层。", ["你的车停在B2层。"], ["about"]),
+        (
+            "My reading group meets on Tuesdays.",
+            ["Your reading group meets on Tuesdays."],
+            ["about"],
+        ),
+        (
+            "Our team lives in Pittsburgh.",
+            ["Your team lives in Pittsburgh."],
+            ["about"],
+        ),
+        ("我的猫叫团子。", ["你的猫叫团子。"], ["about"]),
+        ("我的导师姓林。", ["你的导师姓林。"], ["about"]),
     ],
 )
 def test_statements_in_english_and_chinese_become_second_person_records(
@@ -69,6 +81,10 @@ def test_statements_in_english_and_chinese_become_second_person_records(
         "Do you remember my name?",
         "Remember to buy milk.",
         "My task is to fix the build.",
+        "Does my reading group meet on Tuesdays?",
+        "Summarize my reading group notes.",
+        "My task meets the spec.",
+        "我的问题叫什么名字？",
         "Read notes.md and tell me what my plan is.",
         "x" * 2_100 + " I prefer tea.",
     ],
