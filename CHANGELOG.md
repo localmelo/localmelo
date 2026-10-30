@@ -1056,6 +1056,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app and its menu-bar item use the localmelo logo, Melo the mascot,
+  instead of the placeholder mark. The app icon (Dock, Finder, Spotlight and every
+  dialog) is the README's emblem, `docs/assets/melo.png`, whole, on a rounded tile of
+  the macOS icon grid in the emblem's own paper colour, taken from its four corners;
+  the emblem fades into the tile, so no edge shows, and every size is made from the
+  picture itself. The menu-bar item is the round logo, `docs/assets/icon_small.png`,
+  in colour instead of a template image, with the states it had: the logo alone while
+  idle, the count beside it while something runs, and a red dot with a ring while an
+  approval waits (a lighter red on a dark bar). VoiceOver, the tooltip and the
+  announcement of a wait are unchanged. `macos/mark.svg` is gone, and the build needs
+  `numpy`, which localmelo already uses, and `iconutil` instead of `sips` ([#NN]).
+
 - The macOS app builds with the Command Line Tools when the full Xcode is not
   installed. The Swift host is compiled with the developer folder that
   `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
