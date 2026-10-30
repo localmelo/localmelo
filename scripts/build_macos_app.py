@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import glob
 import hashlib
 import os
 import plistlib
@@ -31,6 +32,44 @@ PYTHON_URL = (
     "cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only_stripped.tar.gz"
 )
 PYTHON_SHA256 = "e1d745b07b6acc0641dbb3237d3c5953deeeed182141bab2242684076fd86547"
+# The standard library folder, below the runtime folder (python/ in the bundle).
+STDLIB = f"lib/python{'.'.join(PYTHON_VERSION.split('.')[:2])}"
+# What the app never runs in the standalone Python, as patterns below the runtime folder.
+# They are matched there and never against an absolute path, so the folder the app is
+# built in cannot match one. Everything else stays: `unittest`, `distutils`, `venv` and
+# `pydoc` too, and every dependency, which goes in after the trim.
+UNUSED = (
+    # IDLE, tkinter and turtle, with the Tcl/Tk libraries they load
+    f"{STDLIB}/idlelib",
+    f"{STDLIB}/tkinter",
+    f"{STDLIB}/turtle.py",
+    f"{STDLIB}/turtledemo",
+    f"{STDLIB}/lib-dynload/_tkinter*.so",
+    "lib/libtcl*.dylib",
+    "lib/tcl[0-9]*",
+    "lib/tk[0-9]*",
+    "lib/itcl[0-9]*",
+    "lib/thread[0-9]*",
+    # 2to3, pip and setuptools (ensurepip carries a wheel of each), and their commands
+    f"{STDLIB}/lib2to3",
+    f"{STDLIB}/ensurepip",
+    f"{STDLIB}/site-packages/pip",
+    f"{STDLIB}/site-packages/pip-*.dist-info",
+    f"{STDLIB}/site-packages/setuptools",
+    f"{STDLIB}/site-packages/setuptools-*.dist-info",
+    f"{STDLIB}/site-packages/_distutils_hack",
+    f"{STDLIB}/site-packages/distutils-precedence.pth",
+    "bin/2to3*",
+    "bin/idle3*",
+    "bin/pip*",
+    # The standard library's own tests. The stripped archive pinned above has none, so
+    # these match nothing today; they keep a different archive from growing the app.
+    f"{STDLIB}/test",
+    f"{STDLIB}/ctypes/test",
+    f"{STDLIB}/distutils/tests",
+    f"{STDLIB}/sqlite3/test",
+    f"{STDLIB}/unittest/test",
+)
 BUNDLE_ID = "org.localmelo.app"
 XCODE = "/Applications/Xcode.app/Contents/Developer"
 LAUNCHER_PATH = "Contents/Resources/runtime/bin/melo"
@@ -79,6 +118,26 @@ def verify_links(root: Path) -> None:
                 target.relative_to(root)
             except (OSError, RuntimeError, ValueError) as exc:
                 raise ValueError(f"Python payload has unsafe symlink: {path}") from exc
+
+
+def trim_python(python: Path) -> None:
+    """Leave out the parts of the standalone Python that the app never runs (UNUSED).
+
+    Every match is checked before the first is removed: one that leads outside the
+    payload through a link is refused like in verify_links, and nothing is removed then.
+    A path that is not there is fine, and a link is removed, never followed.
+    """
+    root = python.resolve()
+    found = sorted({m for p in UNUSED for m in glob.glob(p, root_dir=python)})
+    for name in found:
+        if not (python / name).resolve().is_relative_to(root):
+            raise ValueError(f"Python payload has unsafe symlink: {python / name}")
+    for name in found:
+        path = python / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif os.path.lexists(path):  # not inside a folder that went before it
+            path.unlink()
 
 
 def download_python(archive: Path) -> None:
@@ -216,6 +275,8 @@ def build(output: Path) -> None:
         python = runtime / "python"
         shutil.copytree(fetch_python(stage), python, symlinks=True)
         verify_links(python)
+        # Before the dependencies go in: a pattern can only meet what the archive has.
+        trim_python(python)
         interpreter = python / "bin/python3"
         requirements = stage / "requirements.txt"
         run(
@@ -248,12 +309,7 @@ def build(output: Path) -> None:
             ]
         )
         # Copy the project package without an editable install or build-time paths.
-        site = (
-            python
-            / "lib"
-            / f"python{'.'.join(PYTHON_VERSION.split('.')[:2])}"
-            / "site-packages"
-        )
+        site = python / STDLIB / "site-packages"
         package = site / "localmelo"
         package.mkdir(parents=True, exist_ok=True)
         for name in ("__init__.py", "__main__.py"):
