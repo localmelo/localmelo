@@ -23,6 +23,7 @@ from localmelo.support.gateway.playground import (  # noqa: E402
     _SCENARIOS_PATH,
     SmokePlayground,
 )
+from localmelo.support.providers._http import UNREACHABLE_PREFIX  # noqa: E402
 
 
 class ShellAssets(HTMLParser):
@@ -183,9 +184,18 @@ async def test_chat_url_placeholder_matches_the_omlx_hint(
     page = await client.get("/")
     parser = InputPlaceholders()
     parser.feed(page.text)
-    # The hint beside the field names oMLX, whose server listens on port 8000 by default.
-    assert "oMLX" in page.text
-    assert parser.placeholders["s-chat-url"] == "http://127.0.0.1:8000/v1"
+    # oMLX's server listens on port 8000 by default. The plain hint beside the field shows that address
+    # as its example, and the developer's wording (settings.mjs) still names oMLX.
+    placeholder = parser.placeholders["s-chat-url"]
+    assert placeholder == "http://127.0.0.1:8000/v1"
+    assert f"such as {placeholder}." in page.text
+    # A screen reader reads that instruction with the field.
+    assert (
+        _shell_attributes(page.text, "input", "s-chat-url")["aria-describedby"]
+        == "s-chat-url-hint"
+    )
+    settings = await client.get("/assets/settings.mjs")
+    assert "oMLX supports the OpenAI-compatible adapter." in settings.text
 
 
 @pytest.mark.parametrize(
@@ -274,6 +284,11 @@ async def test_settings_module_is_served_as_javascript(
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "setupSettings" in response.text
+
+
+def test_the_console_reads_an_unreachable_server_as_the_provider_words_it() -> None:
+    turns = (webapp._STATIC / "turns.mjs").read_text(encoding="utf-8")
+    assert f'const UNREACHABLE_PREFIX = "{UNREACHABLE_PREFIX}";' in turns
 
 
 def test_quickstart_describes_available_workspace_controls() -> None:
