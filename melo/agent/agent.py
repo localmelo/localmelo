@@ -219,6 +219,7 @@ from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     SHORT_TERM_MAX,
+    UNFINISHED_ANSWER_ERROR,
     WINDOW_EVICT_CHUNK,
     WINDOW_FIT_TARGET,
     CandidateItem,
@@ -241,6 +242,7 @@ from localmelo.melo.schema import (
     new_record_id,
     new_tool_call_id,
     split_thinking,
+    unfinished_as_thinking,
 )
 
 if TYPE_CHECKING:
@@ -1157,8 +1159,10 @@ class _RunState:
     reflection_thinking: str = ""
     # The thinking of the reply that gave the result, once the run ends.
     answer_thinking: str = ""
-    # Planning replies in a row with neither a tool call nor text.
+    # Planning replies in a row with neither a tool call nor text, and
+    # whether one of them was only unfinished thinking (#278).
     empty_replies: int = 0
+    unfinished_row: bool = False
     # The run's task id ("" for a call without a task record).
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
@@ -1844,6 +1848,7 @@ class Agent:
                 if self.options.lean_output and self.options.reflection_gate == "flags"
                 else REFLECTION_PROMPT
             ),
+            identity=self.options.identity or "",
         )
 
         names = (
@@ -4804,6 +4809,12 @@ class Agent:
         :data:`MAX_EMPTY_REPLIES`-th empty reply in a row in this run
         (reflections in between do not break the row) ends it as
         ``failed`` with the error ``empty replies``.
+
+        A reply that is only unfinished thinking (``Chat.unfinished``, #278)
+        is stored and shown with all its text as thinking and no content, and
+        goes the same way with an ``unfinished_answer`` notice: the model is
+        asked once more, and a row that held such a reply ends the run with
+        :data:`~localmelo.melo.schema.UNFINISHED_ANSWER_ERROR` instead.
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = (
@@ -4879,6 +4890,21 @@ class Agent:
                 run=run,
                 **({"on_ready": on_ready} if on_ready is not None else {}),
             )
+            # A reply that is only unfinished thinking (#278) is thinking with
+            # no answer: it is stored and shown so, and goes on as empty.
+            unfinished = fail is None and bool(
+                getattr(self.chat, "last_unfinished", False)
+            )
+            if unfinished:
+                before = len(response.thinking)
+                response = dataclasses.replace(
+                    response,
+                    content="",
+                    thinking=unfinished_as_thinking(
+                        response.content, response.thinking
+                    ),
+                )
+                self.chat.stats.reasoning_chars += len(response.thinking) - before
             # Also a reply the post-plan check refuses.
             run.events.assistant_message(response, run.plan_call)
             if fail is not None:
@@ -4945,8 +4971,16 @@ class Agent:
                     if entry is not None:
                         label_content = f"{EMPTY_REPLY_LABEL}\n{entry.text}"
                 run.empty_replies += 1
+                run.unfinished_row = run.unfinished_row or unfinished
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
-                    run.end("failed", error="empty replies")
+                    run.end(
+                        "failed",
+                        error=(
+                            UNFINISHED_ANSWER_ERROR
+                            if run.unfinished_row
+                            else "empty replies"
+                        ),
+                    )
                     return step + 1, ""
                 # The label stands in for the reply, so the nudge does not
                 # follow another user message; as one unit, the two are
@@ -4977,9 +5011,13 @@ class Agent:
                     [Message(role="user", content=nudge)],
                     aliases=aliases,
                 )
-                run.events.empty_reply(run.empty_replies)
+                if unfinished:
+                    run.events.unfinished_answer()
+                else:
+                    run.events.empty_reply(run.empty_replies)
                 continue
             run.empty_replies = 0
+            run.unfinished_row = False
 
             # Execute every call in order, each through the executor boundary,
             # which runs only the tools this planning call offered. Until the

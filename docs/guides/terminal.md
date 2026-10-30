@@ -93,6 +93,23 @@ model row with that name; a saved server is listed after the box, so the box
 shows what the file says, unless the run already listed the server (the first
 run does).
 
+### What melo says about itself
+
+Every chat tells its model who it is, so that "who are you?" is answered as
+melo and not as the assistant the model was trained as. The paragraph says that
+melo is melo from localmelo, an open-source agent that works in your folder with
+tools and asks before it changes anything; that it names the model it runs on
+when asked; that it does not present itself as the model's own assistant or as
+made by its maker; and that it answers in your language. It also names the
+server as the banner does (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a
+cloud provider) and says whether the server is on this computer (`on this
+computer`, or `at 192.168.1.20` for a server on another machine), and it asks
+the model to answer a greeting, or a question it can answer directly, without
+tools. `/model` and `/backend` start the next turn on the new choice, and that
+turn names the new model. The web console and the macOS app do the same; direct
+runs (`melo "task"`), workers and the benchmark send no such paragraph, so their
+requests are as before.
+
 ### Keys
 
 | Key | What it does |
@@ -130,7 +147,11 @@ Type `/` and the commands show under the input box with what each does;
 type more letters to narrow them, delete letters to widen them again (the list
 closes when the `/` is deleted), Tab or Enter to take one. Esc closes the list
 until your next edit; moving the cursor alone does not open it. The same goes
-for the file names after an `@`. The everyday
+for the file names after an `@`. The list has no background block: the names
+are in your text colour, their descriptions muted, the chosen row has the `❯`
+and moss band every list has, and the names stand under the text you typed. At
+most eight rows show, with a slim bar at the right when there are more. A
+command's argument (`/model NAME`) uses the same list. The everyday
 commands come first, and are the menu's first screen: `/model`, `/new`,
 `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
 the command does and, where it needs one, its argument (`/attach PATH`).
@@ -343,14 +364,17 @@ happens without the explicit `/copy` command.
   step (`step 4`, never against `--steps`), the attempt from the second
   one, the phase with its cycle and the tests seen. When the line is narrow
   the hint goes first, then the tokens, and in developer mode the facts are
-  cut with `…`. The second row
+  cut with `…`. Text the model sends that is held until it is complete adds no
+  row: the first row already says `Thinking`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
   10:00`. For a task melo has run before, a third row shows the past runs the
   progress line would, with the steps they took: `last time 6 steps, 2m10s:
   Run ls ✓ · Read app.py ✓`. It shows on a session's first turn, and in
   developer mode on every turn.
-- **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
+- **Thinking.** `✻ Thought for 1.2s`: one line. A reply that ends a turn without
+  any tool call prints `✻ Thought`, because the footer under the answer gives
+  that time. `/thinking on` and developer
   mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
   width. An intermediate message prints as Markdown after `●`; the
   last one is held, prints at the next step, and at the end only when it
@@ -374,8 +398,10 @@ happens without the explicit `/copy` command.
 - **Notices and reflections.** `↻` marks a retry: one line a turn, which for
   a server that cannot be reached keeps its URL
   (`↻ Could not reach URL; trying again in 1 s`), with its delay counting
-  down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
-  notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
+  down in the live area; `·` an empty reply, or a reply that was only
+  unfinished thinking (`· The model's reply ended inside its thinking; asking
+  it for its answer.`), which prints as thinking (`✻ Thought`) and never as
+  the answer; `⚠` a stuck or spent-budget notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
   Read the test before editing. (2.3s)`; `/verbose` adds its summary and
   whole rationale, and `asked twice` when it was; an unreadable one says
   whether the run continues.
@@ -509,14 +535,20 @@ reasoning, which a per-model hint in `config.toml` declares:
 The hint is `explicit` (a leading `<think>` starts reasoning), `closing_only`
 (everything before `</think>` is reasoning) or `none` (tags are literal text).
 A model with no hint keeps the conservative rule: content is held until the
-reply ends, so the live area shows `✻ thinking…` rather than text. In
+reply ends, so the live area shows its one spinner row (`Thinking…`) rather
+than text. In
 developer mode, after its first whole reply melo says so once: `This model's
 replies appear when complete until its reasoning format is set (see Streamed
 replies).` A new user never sees that note. A server
 that sends reasoning in a field of its own streams without a hint, and that
 field is never drawn as content; `/thinking on` shows its excerpt. The same
 hint splits the completed reply, so the stream and the stored answer do not
-disagree.
+disagree. The hint also says whether a reply stopped inside its thinking:
+with `closing_only`, a reply without `</think>` is unfinished thinking. Such
+a reply's held text is never released, provisional text of it is dropped,
+and it prints as thinking; melo asks the model once more, and a second reply
+without an answer ends the turn with `melo did not finish an answer.` and
+`/retry, or try another model.`
 
 Streamed text is provisional. If the reply becomes a tool call, a retry,
 a run that fails, or a stop, melo closes the live text and prints it once,
@@ -628,6 +660,7 @@ Panels, lists and bars use the same colours:
 |---|---|
 | The approval panel | an amber frame with its title bold; the chosen answer `❯ 1. Yes` on a moss band; a diff's added rows on a teal band and removed rows on a red one |
 | Every list (`/model`, `/sessions`, the setup questions, the attach question, Ctrl+O's steps) | the title bold, the chosen row on a moss band with one `❯`, the current model's `✓` teal |
+| The list under the input box (`/`, `@`, an argument) | no background; names in your text colour, descriptions muted, the chosen row on the moss band with one `❯`; a slim bar in the rule colour only when there are more rows than the eight shown |
 | A line of keys (`↑↓ select · enter confirm · esc stop the turn`) | the keys in your text colour, their words muted (plain at 16 colours, never dim) |
 | The live row | the spinner moss, what melo does in your text colour, the time and tokens muted; while an approval waits, an amber `⚠` and bold words |
 | The status bar | the model bold, the folder gold, the rest muted, a rule between the zones |

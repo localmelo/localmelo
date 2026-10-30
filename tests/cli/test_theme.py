@@ -323,3 +323,83 @@ def test_the_chosen_row_without_fills_is_bold_and_reverse_with_no_color() -> Non
     assert attrs(Palette("256", "dark"), "faint").color  # type: ignore[attr-defined]
     assert not attrs(Palette("16", "light"), "faint").dim  # type: ignore[attr-defined]
     assert attrs(Palette("truecolor", "dark"), "frame").color == "e9bc54"  # type: ignore[attr-defined]
+
+
+# ── The completion list: prompt_toolkit's own classes, drawn from the roles ──
+
+MENU_PALETTES = {
+    "dark-truecolor": Palette("truecolor", "dark", "#181a1f", "#e6e6e6"),
+    "light-truecolor": Palette("truecolor", "light", "#ffffff", "#1f1f1f"),
+    "dark-256": Palette("256", "dark", "#181a1f", "#e6e6e6"),
+    "light-256": Palette("256", "light", "#fafafa", "#1f1f1f"),
+    "polarity-only": Palette("256", "dark"),
+    "16-colours": Palette("16"),
+    "no-color": Palette("none"),
+}
+
+
+def _menu_attrs(palette: Palette, name: str) -> object:
+    """What the app draws for *name*: prompt_toolkit's defaults merged under ours."""
+    from prompt_toolkit.styles import default_ui_style, merge_styles
+
+    style = merge_styles([default_ui_style(), palette.pt_style])
+    return style.get_attrs_for_style_str(f"class:completion-menu class:{name}")
+
+
+@pytest.mark.parametrize("palette", MENU_PALETTES.values(), ids=MENU_PALETTES)
+def test_the_completion_list_has_no_block_and_names_in_the_body_ink(
+    palette: Palette,
+) -> None:
+    for name in ("completion-menu", "completion-menu.completion"):
+        plain = _menu_attrs(palette, name)
+        assert not (plain.bgcolor or plain.color or plain.reverse), name  # type: ignore[attr-defined]
+        assert not (plain.bold or plain.dim), name  # type: ignore[attr-defined]
+    for name in ("scrollbar.background", "completion-menu.multi-column-meta"):
+        assert not _menu_attrs(palette, name).bgcolor, name  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("palette", MENU_PALETTES.values(), ids=MENU_PALETTES)
+def test_the_chosen_row_of_the_list_is_the_pickers_band(palette: Palette) -> None:
+    chosen = _menu_attrs(palette, "chosen")
+    row = _menu_attrs(palette, "completion-menu.completion.current")
+    for field in ("color", "bgcolor", "bold", "reverse"):
+        assert getattr(row, field) == getattr(chosen, field), field
+    note = _menu_attrs(palette, "completion-menu.meta.completion.current")
+    assert note.bgcolor == chosen.bgcolor and note.reverse == chosen.reverse  # type: ignore[attr-defined]
+    assert not note.bold  # type: ignore[attr-defined]
+    if palette.fills:  # a band: the exact background is known
+        assert row.bgcolor and not row.reverse  # type: ignore[attr-defined]
+    elif palette.depth == "none":
+        assert row.reverse  # type: ignore[attr-defined]
+    else:  # no band: the choice is bold in the accent, and the mark carries it
+        assert row.bold and not row.bgcolor and not row.reverse  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("palette", MENU_PALETTES.values(), ids=MENU_PALETTES)
+def test_descriptions_are_muted_and_the_bar_is_in_the_rule_colour(
+    palette: Palette,
+) -> None:
+    muted, rule = _menu_attrs(palette, "muted"), _menu_attrs(palette, "rule")
+    for name in (
+        "completion-menu.meta.completion",
+        "completion-menu.multi-column-meta",
+    ):
+        note = _menu_attrs(palette, name)
+        assert (note.color, note.dim) == (muted.color, muted.dim), name  # type: ignore[attr-defined]
+        assert not note.bgcolor, name  # type: ignore[attr-defined]
+    thumb = _menu_attrs(palette, "scrollbar.button")
+    assert (thumb.color, thumb.dim) == (rule.color, rule.dim)  # type: ignore[attr-defined]
+    assert not thumb.bgcolor  # type: ignore[attr-defined]
+
+
+def test_the_completion_list_uses_the_fur_tokens_per_theme() -> None:
+    dark, light = MENU_PALETTES["dark-truecolor"], MENU_PALETTES["light-truecolor"]
+    for palette, tokens in ((dark, "dark"), (light, "light")):
+        fill = palette.fills["selection"].value.lstrip("#")
+        row = _menu_attrs(palette, "completion-menu.completion.current")
+        assert row.bgcolor == fill  # type: ignore[attr-defined]
+        assert row.color == getattr(HUES["accent"], tokens)[1:]  # type: ignore[attr-defined]
+        note = _menu_attrs(palette, "completion-menu.meta.completion")
+        assert note.color == getattr(HUES["muted"], tokens)[1:]  # type: ignore[attr-defined]
+        thumb = _menu_attrs(palette, "scrollbar.button")
+        assert thumb.color == getattr(HUES["rule"], tokens)[1:]  # type: ignore[attr-defined]

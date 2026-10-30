@@ -31,6 +31,21 @@ A reply with neither text nor a tool call is an empty reply. localmelo asks
 the model to continue, and the step still counts. Two empty replies in a row
 end the run as `failed`.
 
+A reply that is only the model's unfinished thinking is never the answer.
+Thinking models end their thinking with a mark (`</think>`); when the model
+stops before it, a server often returns the thinking as the reply's text.
+localmelo tells such a reply by facts, never by its wording: a `<think>` that
+is never closed; no answer once the thinking is set aside, with reasoning
+tokens counted; a streamed reply whose text repeats the reasoning the server
+sent; or, for a model whose thinking ends with a mark, no thinking and no
+mark. The model's format is the one `[cli.reasoning_tags]` declares (in the
+terminal), else the one its earlier replies showed: a server that sent its
+reasoning in a field of its own, and counted no reasoning tokens in this
+reply. The reply's text becomes its thinking (folded in the terminal
+and the console), and it goes on as an empty reply: localmelo asks once
+more, and a second reply without an answer ends the run as `failed` with
+the error `melo did not finish an answer`.
+
 With `--reasoning compress`, each reply is compressed into a short note
 before the next step: the note asks what the reply planned, found, decided
 and left open, plus what its tools returned, and the model may write it

@@ -115,6 +115,32 @@ test('a held reply is flushed before the next step, or by the run end', () => {
   assert.equal(turn.answer, 'The same words.');
 });
 
+// #278: the agent stores a reply that is only unfinished thinking with its text as thinking and no content.
+const UNFINISHED = "The user just said hello. I'll keep it simple and friendly.";
+
+test('a reply that is only unfinished thinking is folded, and the answer is the next reply', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: UNFINISHED, tool_calls: []});
+  push('notice', {kind: 'unfinished_answer', message: "The model's reply ended inside its thinking; asking it for its answer.", detail: {}});
+  push('step.started', {step: 2, attempt: 1});
+  push('assistant.message', {step: 2, content: 'Hello! What can I do for you?', tool_calls: []});
+  push('run.finished', {result: {status: 'completed', result: 'Hello! What can I do for you?', duration_s: 3, n_tool: 0, steps: 2}});
+  assert.deepEqual(turn.items.filter((item) => item.kind === 'thinking').map((item) => item.text), [UNFINISHED]);
+  assert.ok(!turn.items.some((item) => item.kind === 'assistant_text' && item.text.includes('keep it simple')));
+  assert.equal(turn.answer, 'Hello! What can I do for you?');
+});
+
+test('a turn that never finished an answer says so plainly and offers Try again first', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: UNFINISHED, tool_calls: []});
+  push('run.finished', {result: {status: 'failed', result: '', error: turns.UNFINISHED_ANSWER, duration_s: 3, n_tool: 0, steps: 2}});
+  assert.equal(turn.answer, '');
+  assert.equal(turns.UNFINISHED_ANSWER, 'melo did not finish an answer');
+  assert.deepEqual(statusText('failed', 'run', turns.UNFINISHED_ANSWER), {word: 'Failed', severity: 'warn', title: 'melo did not finish an answer'});
+  assert.equal(statusText('failed', 'run', 'empty replies').title, 'A check stopped the run', 'other failures keep their words');
+  assert.equal(nextAction('failed', 'run', turns.UNFINISHED_ANSWER), 'retry');
+});
+
 test('a tool call runs, asks for approval and finishes', () => {
   const {view, turn, push} = fullTurn();
   push('assistant.message', {step: 1, content: '', tool_calls: [{id: 'call-1', name: 'shell_exec', arguments: {command: 'ls'}, preview: 'ls'}]});
@@ -383,11 +409,69 @@ test('the work group\'s summary follows the turn\'s end', () => {
   assert.equal(workSummary(turn), 'Worked for 14s · 1 tool call · 1 failed');
 
   const thought = newTurn({turn: 1, status: 'completed', started_at: 0, finished_at: 1.2, result: {duration_s: 1.2}});
-  assert.equal(workSummary(thought), 'Thought for 1.2s');
+  assert.equal(workSummary(thought), '', 'a turn without tool calls or reasoning has no line; its footer gives the time');
+  thought.items = [{kind: 'thinking', text: 'a greeting', durationS: 1.2}];
+  assert.equal(workSummary(thought), 'Thought', 'with reasoning to open the line gives no time, which the footer repeats');
+  thought.items.push({kind: 'assistant_text', text: 'Hello.'});
+  assert.equal(workSummary(thought), 'Thought');
+  assert.doesNotMatch(workSummary({...thought, status: 'failed'}), /^Thought/, 'a turn that did not complete keeps its ending');
 
   const stopped = newTurn({turn: 1, status: 'cancelled', cause: 'user_stop', started_at: 10, finished_at: 16, result: {duration_s: 6, n_tool: 2}});
   stopped.items = [{kind: 'tool', status: 'success'}, {kind: 'tool', status: 'success'}];
   assert.equal(workSummary(stopped), 'Stopped after 6.0s · 2 tool calls');
+});
+
+test('a finished chat turn without tool calls shows its time once, in the footer', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'Hello!', thinking: 'a greeting, answer it', tool_calls: [], usage: {completion_tokens: 161}, duration_s: 2.0});
+  push('run.finished', {result: {status: 'completed', result: 'Hello!', duration_s: 2, n_tool: 0, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const reply = h.run('assistantNode(turn)');
+  const group = findNode(reply, (node) => node.className === 'work-group');
+  assert.equal(group.tag, 'details');
+  assert.equal(findNode(group, (node) => node.className === 'work-summary').textContent, 'Thought');
+  assert.equal(findNode(group, (node) => node.className === 'thinking-body').textContent, 'a greeting, answer it', 'the reasoning is the group\'s body');
+  assert.equal(findNode(group, (node) => node.className === 'thinking'), null, 'not a second Thought inside the Thought');
+  const text = flatten(reply);
+  assert.equal(text.match(/2\.0s/g)?.length, 1, 'the turn\'s time appears once');
+  assert.match(text, /2\.0s · 1 step · 161 tokens/);
+  assert.doesNotMatch(text, /Thought for/);
+});
+
+test('a finished chat turn without tool calls or reasoning has no summary line at all', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'Hello!', thinking: '', tool_calls: [], usage: {}, duration_s: 2.0});
+  push('run.finished', {result: {status: 'completed', result: 'Hello!', duration_s: 2, n_tool: 0, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  assert.equal(findNode(h.run('assistantNode(turn)'), (node) => node.className === 'work-group'), null);
+  // Items without reasoning (a notice) are listed bare, with no empty summary over them.
+  turn.items.push({kind: 'notice', noticeKind: 'budget', message: 'The attempt used its step budget.'});
+  const group = findNode(h.run('assistantNode(turn)'), (node) => String(node.className).startsWith('work-group'));
+  assert.equal(group.tag, 'div');
+  assert.equal(findNode(group, (node) => node.tag === 'summary'), null);
+  assert.match(flatten(group), /used its step budget/);
+});
+
+test('a turn with tool calls keeps its group, its time and its thinking cards', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: 'look first', tool_calls: [{id: 'call-1', name: 'file_read', arguments: {}, preview: 'a'}], usage: {}, duration_s: 1.8});
+  push('tool.started', {step: 1, call_id: 'call-1', name: 'file_read', arguments: {}, preview: 'a'});
+  push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_read', status: 'success', error_category: 'none', output: 'x', output_chars: 1, error: '', duration_s: 0.1, images: [], approval: null, exit_code: null});
+  push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 14, n_tool: 1, steps: 2}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const group = findNode(h.run('assistantNode(turn)'), (node) => node.className === 'work-group');
+  assert.equal(findNode(group, (node) => node.className === 'work-summary').textContent, 'Worked for 14s · 1 tool call');
+  assert.equal(findNode(group, (node) => node.className === 'thinking').tag, 'details');
+  assert.match(flatten(group), /Thought for 1\.8s/);
 });
 
 test('tool output is cleaned and thinking is split as the terminal does', () => {
@@ -1649,6 +1733,20 @@ test('an unreachable server gets a plain title, one hint, Try again first, and i
   assert.equal(flatten(part(answered, 'failure-title')), '✗ Could not get an answer from the model server');
   assert.equal(part(answered, 'failure-error').textContent, 'POST /chat/completions returned HTTP 500: out of memory', 'a server that answered keeps its message');
   assert.equal(findNode(answered, (node) => node.className === 'primary-button').textContent, 'Open model settings');
+});
+
+test('a turn that never finished an answer has a plain title, no repeated error line and Try again first', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = turns.newTurn(turnRow({status: 'failed', result: {error: turns.UNFINISHED_ANSWER, n_tool: 0}}));
+  h.state().view.turns = [turn];
+  h.context.turn = turn;
+  const card = h.run('statusNode(turn)');
+  const part = (name) => findNode(card, (node) => node.className === name);
+  assert.equal(flatten(part('failure-title')), '⚠ melo did not finish an answer');
+  assert.equal(part('failure-error'), null, 'the title already says it');
+  assert.equal(part('failure-hint').textContent, "The model's reply held only its thinking. Try again, or rephrase the request.");
+  assert.equal(findNode(card, (node) => node.className === 'primary-button').textContent, 'Try again');
 });
 
 test('the work box of a failed turn has no retry line, and no box at all when that was all it held', async () => {
