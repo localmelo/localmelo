@@ -1148,9 +1148,12 @@ dialog::backdrop {
   }
   .settings-footer {
     gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
   .settings-footer > span {
-    max-width: 180px;
+    flex: 1 0 100%;
+    max-width: none;
   }
   .message-actions {
     gap: 10px;
