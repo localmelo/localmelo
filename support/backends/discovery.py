@@ -356,10 +356,10 @@ async def loaded_models(
     )
 
 
-NO_DEFAULT_HINT: Final = (
-    "Type the number of the model to use. A model that is not loaded yet can "
-    "take minutes and a lot of memory to load."
+LOAD_COST_NOTE: Final = (
+    "A model that is not loaded yet can take minutes and a lot of memory to load."
 )
+NO_DEFAULT_HINT: Final = f"Type the number of the model to use. {LOAD_COST_NOTE}"
 NO_DEFAULT_MODEL: Final = (
     "several models are served and none is known to be loaded, so there is "
     "no default; answer with a number or a model id"
@@ -492,6 +492,13 @@ def is_embedding_model(model: str) -> bool:
     return "embed" in lowered or any(
         family in lowered for family in _EMBEDDING_FAMILIES
     )
+
+
+def model_kind(model: str) -> str:
+    """What the id *model* names: ``chat``, ``embedding`` or ``reranking``."""
+    if "rerank" in model.lower():
+        return "reranking"
+    return "embedding" if is_embedding_model(model) else "chat"
 
 
 def embedding_models(models: Sequence[str]) -> list[str]:

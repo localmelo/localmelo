@@ -446,7 +446,9 @@ def test_ascii_mode_prints_only_ascii(
     term.type("/help\r")
     term.see("ctrl+d quit")
     term.type("/model\r")
-    term.see("/model NAME or /model N")
+    term.see("Switch model")  # the list takes the keys until esc closes it
+    term.type("\x1b")
+    term.see("Cancelled. Still using")
     term.type("/new\r")
     term.see("New session -")
     term.type("hello\r")

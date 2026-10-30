@@ -51,6 +51,7 @@ from localmelo.support.cli.attachments import (
     load as load_attachment,
 )
 from localmelo.support.cli.output import Out
+from localmelo.support.cli.picker import ModelRow
 from localmelo.support.cli.render import (
     EXPAND_LINES,
     STREAM_BUFFERED,
@@ -1225,34 +1226,10 @@ class CliSession:
         self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
     async def model(self, arguments: str) -> None:
-        """``/model``: list the server's models, or switch to one and save it."""
+        """``/model``: pick one of the server's models, or switch to one by name and save it."""
         backend = self.factory.backend
         if not arguments:
-            self.out.print(
-                self._text(
-                    f"Model: {backend.model} · {backend.label} · {backend.base_url or backend.label}"
-                )
-            )
-            if not self.factory.listable():
-                return
-            try:
-                self.models = await self.factory.list_models()
-            except discovery.DiscoveryError as exc:
-                self.out.print(
-                    self._text(f"✗ Could not list the models: {exc}", style="error")
-                )
-                return
-            lines = self._text()
-            for number, model in enumerate(self.models, 1):
-                mark = (
-                    self.renderer.symbols.selection if model == backend.model else " "
-                )
-                lines.append(
-                    clean_output(f"{mark} {number}. {model}") + "\n",
-                    style="accent" if mark != " " else None,
-                )
-            lines.append("/model NAME or /model N switches and saves.", style="muted")
-            self.out.print(lines)
+            await self._pick_current_server_model()
             return
         name = arguments
         if not self.models and self.factory.listable():
@@ -1292,6 +1269,50 @@ class CliSession:
                 return
             name = self.models[int(name) - 1]
         await self._switch(name, url=None)
+
+    async def _pick_current_server_model(self) -> None:
+        """``/model`` alone: a list of the server's chat models, the current one marked."""
+        backend = self.factory.backend
+        if self.app is None:
+            return
+        if not self.factory.listable():  # a cloud API has no list to pick from
+            self.out.print(self._text(f"Model: {backend.model} · {backend.label}"))
+            self.out.print(self._text("/model NAME switches and saves.", "muted"))
+            return
+        try:
+            self.models = await self.factory.list_models()
+        except discovery.DiscoveryError as exc:
+            self.out.print(
+                self._text(f"✗ Could not list the models: {exc}", style="error")
+            )
+            return
+        backend = self.factory.backend  # the listing may have said the server is oMLX
+        if not self.models:
+            self.out.print(
+                self._text(f"✗ {backend.base_url} lists no models.", style="error")
+            )
+            return
+        kinds = {model: discovery.model_kind(model) for model in self.models}
+        chat = [model for model in self.models if kinds[model] == "chat"]
+        loaded = (
+            await discovery.loaded_models(backend.base_url)
+            if len(chat) > 1
+            else discovery.LoadedModels()
+        )
+        rows = [
+            ModelRow(model, model in loaded.ids, kinds[model])
+            for model in (chat or self.models)
+        ]
+        where = redact_secrets(f"{backend.label} · {backend.base_url}")[0]
+        picked = await self.app.choose_model(rows, where=where, current=backend.model)
+        if picked is None:
+            self.out.print(
+                self._text(f"Cancelled. Still using {backend.model}.", "muted")
+            )
+        elif picked == backend.model:
+            self.out.print(self._text(f"Still using {picked}.", "muted"))
+        else:
+            await self._switch(picked, url=None)
 
     async def backend(self, arguments: str) -> None:
         """``/backend``: ask for a server and a model, check them, switch and save."""
