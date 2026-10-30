@@ -378,7 +378,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
-| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` (the interactive UI keeps all four by default). |
+| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
@@ -421,7 +421,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`. A direct run's default set
+  `file_write`, `list_files`, `python_exec` and `shell_exec`. A direct run's default set
   leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
   it back on, and it then runs without an approval, because direct mode has
   no policy. `recall` is accepted only with `--recall-at tool`, which

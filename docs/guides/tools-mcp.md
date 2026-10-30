@@ -12,9 +12,10 @@ melo --builtins file_read,shell_exec "How many lines does notes.txt have?"
 - `--builtins` takes `all` (every built-in, `shell_exec` included), `none`,
   or a comma-separated list of tool names. An unknown name is a usage error.
   Without the flag, the mode decides: `file_read`, `file_write` and
-  `python_exec` in a direct run, the gateway and the Python API; all four in
-  the interactive UI. `--builtins all` is the way to keep the old direct-run
-  set, and `--builtins shell_exec` names only the shell.
+  `python_exec` in a direct run and the Python API; those three and
+  `list_files` in the gateway; all five in the interactive UI.
+  `--builtins all` names every built-in, and `--builtins shell_exec` names
+  only the shell.
 - `config.builtins` and `config.tools` in the JSON line show what was
   registered.
 - In Python, use `AgentOptions(builtins=...)`; see
@@ -188,16 +189,18 @@ policy, `read` is the only tier that runs without asking.
 | `exec` | Runs a command, code or another program with your privileges. | Yes. |
 | `network` | Sends data to, or acts on, something outside this machine: an HTTP API, a chat, a payment, a GUI. | Yes. |
 
-The built-ins are fixed by name: `file_read` is `read`, `file_write` is
-`write`, and `shell_exec` and `python_exec` are `exec`. The table wins over a
+The built-ins are fixed by name: `file_read` and `list_files` are `read`,
+`file_write` is `write`, and `shell_exec` and `python_exec` are `exec`. The table wins over a
 tool's own claims, so a provided or custom tool that reuses a built-in's name
 inherits that tier.
 
 The mode decides which built-ins are offered at all. The interactive UI
-runs in `interactive` mode and gets all four; it asks before an `exec` call
-unless it runs with `--yolo`. A direct run, a gateway or console session and
-the Python API's default `python` mode get `file_read`, `file_write` and
-`python_exec`: `shell_exec` is not registered, so the model never sees it,
+runs in `interactive` mode and gets all five; it asks before an `exec` call
+unless it runs with `--yolo`. A gateway or console session gets
+`list_files` as well as `file_read`, `file_write` and `python_exec`; a
+direct run and the Python API's default `python` mode get those three
+only. In every mode but the interactive UI, `shell_exec` is not
+registered, so the model never sees it,
 and the checker refuses one that was registered anyway unless the caller
 named it in `builtins`. A model that calls it anyway gets
 `shell_exec is not available in this run. Available tools: …`, naming the
@@ -244,11 +247,15 @@ without the flag and the gateway never set a workspace root.
   `Argument 'path' for <tool> must be a non-empty string without NUL characters.`
   The tool gets the resolved path. `~` is not expanded, a path spelled in
   another letter case than the root is refused, and hard links are not
-  detected.
+  detected. `list_files` is fenced the same way, and no path (or an empty
+  one) lists the root.
 - **Opening files.** The file tools open the resolved path without following
   symlinks, so a symlink that takes the file's place after the check is
   refused. They refuse anything but a regular file, such as a FIFO, with
-  `Not a regular file: <path>`. `file_read` reads at most 200,000 bytes. A
+  `Not a regular file: <path>`. `list_files` opens a folder without
+  following a symlink and never enters a link inside it, so a link that points
+  out of the root shows as `name@` and its target stays unlisted.
+  `file_read` reads at most 200,000 bytes. A
   file over 200,000 bytes, or whose text is longer than 50,000 characters,
   is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`.

@@ -301,9 +301,9 @@ the file, no Agent built yet (`not_loaded`); its Agent is built on the
 conversation the file holds when the next turn or retry starts.
 
 A chat runs in gateway mode: its Agent gets the gateway's default run options,
-the three built-in tools `file_read`, `file_write` and `python_exec`, and no
-MCP tools, except that it keeps its answers. It can read and write files and
-run Python code; `shell_exec` is not offered, so there is no direct shell
+the built-in tools `file_read`, `file_write`, `list_files` and `python_exec`, and no
+MCP tools, except that it keeps its answers. It can list folders, read and write
+files and run Python code; `shell_exec` is not offered, so there is no direct shell
 command (Python code can still start a process). Its model is the gateway's
 own, from the config file, and the page reads that file's `[scheduler]` table
 too — `policy`, the lane sizes, the call log and the lock and battery keys.

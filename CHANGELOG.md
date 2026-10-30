@@ -177,6 +177,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A first question about the folder needs no approval. The interactive UI and the
+  gateway (the web console's chats included) have a read-only `list_files` tool: a
+  folder's folders (`name/`) and files with their sizes, 1 to 3 levels deep (`depth`),
+  200 entries and then `... and N more`, `.git` left out. It never reads a file and never
+  enters a symlink (shown as `name@`), its path is fenced to the workspace like
+  `file_read`'s, and it is a `read` tool, so "What is this project?" no longer opens an
+  approval for a shell command. A direct run, `melo --brief`, the Python API's default
+  mode and task workers keep the three built-ins they had, so their requests do not
+  change; `--builtins list_files` or `all` names it. `/status all` counts five built-ins
+  in the terminal. ([#NN])
+
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
   panel with the default folder, the folders of your recent chats, "Choose a folder…" and,

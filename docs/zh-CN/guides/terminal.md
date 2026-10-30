@@ -227,7 +227,7 @@ from-the-child
 
 ### 审批
 
-`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。（交互式界面加载 `--mcp` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
+`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。`file_read` 和 `list_files` 只读取，因此从不询问：melo 可以查看你的文件夹来回答 “What is this project?”，不会出现审批面板。（交互式界面加载 `--mcp` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
@@ -253,7 +253,7 @@ from-the-child
 
 ### 工作区
 
-melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文件工具（`file_read`、`file_write`）被限制在这个文件夹内。命令和 Python 可以访问其他文件，因此 melo 会先询问。工作区为你的主目录或 `/` 时，横幅会发出警告。界面中 `shell_exec` 和 `python_exec` 在 10 分钟后停止（单次任务分别为 30 秒和 60 秒）。
+melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文件工具（`file_read`、`file_write`、`list_files`）被限制在这个文件夹内。命令和 Python 可以访问其他文件，因此 melo 会先询问。工作区为你的主目录或 `/` 时，横幅会发出警告。界面中 `shell_exec` 和 `python_exec` 在 10 分钟后停止（单次任务分别为 30 秒和 60 秒）。
 
 <a id="chinese-and-other-wide-characters"></a>
 

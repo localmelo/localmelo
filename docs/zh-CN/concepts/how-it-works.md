@@ -69,7 +69,7 @@
 三个限制分别适用于不同层级：
 
 - **对话请求超时**（120 秒；`ollama` 后端为 300 秒）。它限制 localmelo 等待模型服务器数据的时间，每次收到数据时计时器都会重置。localmelo 不流式接收回复，所以直到完整回复生成后才发送数据的服务器必须在超时内完成；思考较慢的模型可能需要更多时间。生成过程中持续发送保活字节的服务器不会超时。超时的请求会重试两次。见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
-- **工具时限。** `shell_exec` 为 30 秒，`python_exec` 为 60 秒，`file_read` 和 `file_write` 为 60 秒，MCP 工具使用其服务器的 `timeout`。`shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。交互式界面给它们 10 分钟。Python API 的 `tool_timeout_s` 见[在目录中工作](../guides/python.md#work-in-a-directory)。
+- **工具时限。** `shell_exec` 为 30 秒，`python_exec` 为 60 秒，`file_read`、`file_write` 和 `list_files` 为 60 秒，MCP 工具使用其服务器的 `timeout`。`shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。交互式界面给它们 10 分钟。Python API 的 `tool_timeout_s` 见[在目录中工作](../guides/python.md#work-in-a-directory)。
 - **运行时限**（`--timeout`）。这是对整次运行唯一的时限。到期时，运行以 `timeout` 结束。
 
 <a id="code-layout"></a>
