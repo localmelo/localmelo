@@ -316,6 +316,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One main chat, with side chats under it. The console and the app open on the
+  **Main chat**, which is always there and cannot be closed; the chats you start
+  with **New side chat** (`⌘ K`) are listed under it, newest first under a line
+  for each day, and each names the main chat in its header, which goes back to it.
+  Your existing chats become its side chats, unchanged. When a side chat's run
+  ends, or a task finishes, fails or waits for your approval, the main chat shows
+  a card with one plain line and a button that opens it; a card is not a message,
+  so the model never reads it. The sidebar's **Chats | Workers** switch is gone:
+  the empty main chat links worker history until the panel lists workers. For API
+  clients, every session has `main`, `GET /api/sessions` names the main chat in
+  `main` with its newest card, the main chat's turns carry `cards`, `POST
+  /api/sessions` still makes a chat (a side chat), and deleting the main chat is
+  409 `main_chat`. See [The main chat and side chats](docs/guides/web-console.md#the-main-chat-and-side-chats) ([#NN]).
 - See and change what melo remembers. The panel's **Memory** tab lists the notes melo
   kept, newest first, each with its topic and the chat and day it came from; **Edit**
   rewords a note, **Delete** asks first, the search box filters, and **Forget everything…**

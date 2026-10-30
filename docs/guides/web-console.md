@@ -43,8 +43,8 @@ scheduler priority in Tasks. It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
-**Workers** and **Tasks** join the sidebar once there is a run, a terminal chat or a task
-to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
+**Tasks** joins the sidebar once there is a task to see in it; worker runs are a link
+from the [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows all of it. Everything stays in the
 page, hidden.
 
 A new chat shows where melo will work before you send anything. The chip in the composer reads
@@ -72,7 +72,8 @@ for you to send or change, and step aside once there is text.
    Appearance and the **Developer mode** toggle in one dialog; developer mode keeps the
    Model, Test, Theme and Developer tabs and shows the settings file and its revision.
    You can also use `melo setup`.
-2. Type a message and send. The first message creates the chat: the page
+2. Type a message and send. The page opens on the [main chat](#the-main-chat-and-side-chats),
+   which is always there; in a new side chat the first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
    its own. Answers are rendered as Markdown, with code blocks.
 3. A turn reads like the terminal's: your message, a work group with the
@@ -103,10 +104,12 @@ for you to send or change, and step aside once there is text.
    from `status` of `GET /api/health`, read with the page's 4-second poll; the
    list shows 20 rows at most and says how many more run.
 
-The sidebar lists chats newest first, with search and switching, and closes a
-chat. Under each title it names the chat's folder (developer mode puts the model
+The sidebar pins the main chat on top and lists its side chats under it, newest
+first under a line for each day (`Today`, `Yesterday`, `Oct 28`), with search and
+switching, and closes a side chat. Under each title it names the chat's folder (developer mode puts the model
 first), and a dot in the accent colour before the title marks a chat that waits
-for your approval. Drafts stay with each chat in the current browser tab. The open chat's
+for your approval. Up and Down move through the list, the main chat first, and Home
+and End go to its ends. Drafts stay with each chat in the current browser tab. The open chat's
 turns arrive on its event stream (SSE); after a page reload the page restores
 the chat, reads its last ten turns, and replays the stored events from there,
 so nothing is lost or drawn twice. **Show earlier turns** loads older turns
@@ -124,6 +127,29 @@ model, since the composer shows it, and keeps the chip when it warns (`Model off
 `No model`). The keyboard hints (`Enter to send · Shift + Enter for a new line` and
 `⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
 turn are buttons at least 44 px tall.
+
+## The main chat and side chats
+
+The console has one **main chat**, always there and first in the sidebar: Melo's face,
+the time of its last message, and a dot while something new has come back to it (amber
+when it waits for you). It cannot be closed. The page opens on it, and a tab that had a
+side chat open goes back to that one.
+
+**New side chat** (`⌘ K`) starts a focused conversation with its own folder; it is listed
+under the main chat. A side chat's header begins with **Main chat ›**, which goes back,
+and closing the open side chat goes back to the main chat too. Chats made before the main
+chat existed are its side chats, as they were.
+
+When a side chat's run ends, or a task finishes, fails or waits for your approval, the
+main chat shows a card under the day it happened: `Done: Plan the Tokyo trip` with the
+answer's first sentence, `Did not finish: Fix CI` with how it ended, or `Fix CI needs your
+approval`. **Open side chat**, **Open task** or **Review** goes to it. A card is not a
+message: the model never reads it. Between two of your messages a busy side chat keeps
+only its newest card. A stop of your own, a shutdown or an approval answered before the
+main chat was looked at makes no card.
+
+Until the panel lists workers, an empty main chat links **See what worker runs did**
+(once a run or a terminal chat exists, and always in developer mode).
 
 ## Pictures in the answer
 
@@ -250,7 +276,8 @@ the app's own pictures in `macos/art/akita` made by the same script (see the
 
 ## Inspect workers
 
-**Workers** (in default mode, in the sidebar once a run or a terminal chat exists) opens
+**Workers** (in the sidebar in developer mode; in default mode **See what worker runs did**
+in the empty main chat, or the panel's **All worker runs**) opens
 read-only worker history from the CLI sessions file. Filter
 by status, source or exact parent run, load more with the server's cursor, and
 open a run to inspect its recorded brief, metadata, work and answer. Every
@@ -265,7 +292,7 @@ following and catches up from the last event when shown. **Refresh** reads the
 run again at once. A run that holds notes, accepted messages, memory
 decisions or recalls shows each as one muted line. The view cannot send messages, approve calls or change grants; chat
 close and level controls are disabled while Workers is open. Connection
-settings remain available separately. **Chats** returns to the open chat.
+settings remain available separately. A chat's row in the sidebar returns to it.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
 
 The **Terminal chats** chip beside **Worker runs** lists the chats of

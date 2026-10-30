@@ -707,6 +707,10 @@ and `"run_id": ""`.
   (`SessionRunner.publish`). Their keys are not pinned yet; their `data`
   follows the [payload rules](#payload-rules). The store refuses every other
   type.
+- **`attention.card`** is the one such type with set keys: the main chat's
+  card (`source_id`, `source_kind`, `title`, `state`, `line`, `at`), stored in
+  the main chat with no turn when a side chat's run or a task comes back; see
+  [Cards in the main chat](api-v2.md#cards-in-the-main-chat).
 - **A stored `run.finished` holds the answer redacted.** Before it is
   stored, the `result` of its `RunResult` passes the same redaction as
   `assistant.message`'s text, and so do the turn's stored answer and result.
