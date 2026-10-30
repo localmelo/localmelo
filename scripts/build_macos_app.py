@@ -345,10 +345,6 @@ def build(output: Path) -> None:
         launcher = runtime / "melo"
         launcher.write_text(LAUNCHER)
         launcher.chmod(0o755)
-        # The window's starting view shows Melo's portrait.
-        shutil.copy2(
-            ROOT / "support/gateway/static/melo.png", contents / "Resources/melo.png"
-        )
         for (
             asset,
             name,

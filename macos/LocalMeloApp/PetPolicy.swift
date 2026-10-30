@@ -23,6 +23,16 @@ enum PetState: String, CaseIterable {
     func fileName(scale: Int) -> String { scale >= 2 ? "\(rawValue)@2x.png" : "\(rawValue).png" }
 }
 
+/// The sitting picture of the app's first window: the working puppy while the server starts and signs in, the calm
+/// one once the gateway is ready and the console is on its way, the one with the drooping ear when it cannot go on.
+func startPortrait(failed: Bool, ready: Bool) -> PetState {
+    failed ? .sitError : ready ? .sitIdle : .sitWorking
+}
+
+/// The points the portrait is shown at: the canvas of the sitting pictures (`anchors.json`), so a 2x file is
+/// sharp on a Retina screen and shown whole on any other.
+let portraitSize = CGSize(width: 108, height: 140)
+
 /// How the newest finished run or chat turn ended: `done`, `failed` (anything the console words as a warning or an
 /// error) or `stopped` (the person stopped it).
 enum RunOutcome: String {
