@@ -29,7 +29,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Final, cast, get_args
 
-from localmelo.melo.checker.policy import DEFAULT_BUILTINS
 from localmelo.support.scheduler.model import Origin
 
 # Where a task's folder starts when neither the request nor the config names
@@ -57,8 +56,10 @@ _DEFERRED_FIELDS: Final = (
 
 # The built-ins a worker may register. The gateway's set already omits
 # `shell_exec` (P13a), and a worker never gains a tool by origin alone: the
-# origin only decides the MCP and session-grant flags below.
-_WORKER_BUILTINS: Final = DEFAULT_BUILTINS["gateway"]
+# origin only decides the MCP and session-grant flags below. It is its own
+# set, not the gateway chat's default: a chat also has `list_files`, and a
+# worker's tools do not change with it.
+_WORKER_BUILTINS: Final = frozenset({"file_read", "file_write", "python_exec"})
 
 
 class TaskPolicyError(ValueError):

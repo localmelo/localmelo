@@ -383,7 +383,7 @@ def test_developer_mode_keeps_the_banner_box_and_default_mode_shows_three_rows(
     from_box = melo("--developer")
     from_box.see("Ask melo")
     text = from_box.text()
-    assert "╭─ melo" in text and "tools      4 built-in (3 ask first)" in text
+    assert "╭─ melo" in text and "tools      5 built-in (3 ask first)" in text
     assert "esc stop" in text and "Try: What is this project?" not in text
     assert from_box.quit() == 0
     welcome = melo()

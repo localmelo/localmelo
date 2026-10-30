@@ -185,17 +185,23 @@ class TestConstruction:
 
 
 class TestBuiltinSelection:
+    # Every mode has these; only the chat surfaces add list_files.
+    THREE = builtin_names() - {"shell_exec", "list_files"}
+
     def test_the_python_default_matches_direct(self) -> None:
         agent = Agent(llm=FakeLLM())
-        expected = builtin_names() - {"shell_exec"}
-        assert _tool_names(agent) == expected
-        assert set(agent.executor._callables) == expected
+        assert _tool_names(agent) == self.THREE
+        assert set(agent.executor._callables) == self.THREE
         assert agent._run_config()["mode"] == "python"
 
-    @pytest.mark.parametrize("mode", ["direct", "python", "gateway"])
-    def test_a_mode_without_an_approver_registers_no_shell(self, mode: str) -> None:
+    @pytest.mark.parametrize(
+        ("mode", "listing"), [("direct", False), ("python", False), ("gateway", True)]
+    )
+    def test_a_mode_without_an_approver_registers_no_shell(
+        self, mode: str, listing: bool
+    ) -> None:
         agent = Agent(llm=FakeLLM(), options=AgentOptions(mode=mode))  # type: ignore[arg-type]
-        expected = builtin_names() - {"shell_exec"}
+        expected = self.THREE | ({"list_files"} if listing else set())
         assert _tool_names(agent) == expected
         assert set(agent.executor._callables) == expected
         config = agent._run_config()

@@ -77,7 +77,7 @@ bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway
 - 一个会话同一时间只运行一个任务。对忙碌会话发出的第二个请求会等待第一个任务完成。
 - 网关最多保留 50 个会话。再创建会话时，会关闭最近最少使用的空闲会话；如果没有空闲会话，仍会创建新会话。
 - 创建会话时，还会关闭空闲超过 1 小时的会话。
-- 每个会话的智能体使用配置文件中的后端和默认运行选项（三个内置工具 `file_read`、`file_write` 和 `python_exec`，没有 MCP 工具），但会保留回答（`AgentOptions(record_answers=True, mode="gateway")`）。会话不提供 `shell_exec`：旧版 `/v1` 没有审批策略，因此无法向任何人请求审批。
+- 每个会话的智能体使用配置文件中的后端和默认运行选项（四个内置工具 `file_read`、`file_write`、`list_files` 和 `python_exec`，没有 MCP 工具），但会保留回答（`AgentOptions(record_answers=True, mode="gateway")`）。会话不提供 `shell_exec`：旧版 `/v1` 没有审批策略，因此无法向任何人请求审批。
 - 为网关设置 `LOCALMELO_PERSIST_MEMORY` 时，所有会话都会保存到同一组 SQLite 文件；参见[跨运行保留记忆](memory.md#keep-memory-between-runs)。
 
 <a id="run-the-gateway-at-login-macos"></a>

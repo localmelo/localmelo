@@ -177,6 +177,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A first question about the folder needs no approval. The interactive UI and the
+  gateway (the web console's chats included) have a read-only `list_files` tool: a
+  folder's folders (`name/`) and files with their sizes, 1 to 3 levels deep (`depth`),
+  200 entries and then `... and N more`, `.git` left out. It never reads a file and never
+  enters a symlink (shown as `name@`), its path is fenced to the workspace like
+  `file_read`'s, and it is a `read` tool, so "What is this project?" no longer opens an
+  approval for a shell command. A direct run, `melo --brief`, the Python API's default
+  mode and task workers keep the three built-ins they had, so their requests do not
+  change; `--builtins list_files` or `all` names it. `/status all` counts five built-ins
+  in the terminal. ([#259])
+
 - The terminal says which files a turn changed. A turn that wrote files with `file_write`
   ends with one more quiet line under its footer, `Changed hello.py (+1), README.md (+3
   −1)`: the paths relative to the folder melo works in, each with the lines the turn added
@@ -1948,6 +1959,7 @@ earlier milestones.
 [#255]: https://github.com/localmelo/localmelo/pull/255
 [#257]: https://github.com/localmelo/localmelo/pull/257
 [#258]: https://github.com/localmelo/localmelo/pull/258
+[#259]: https://github.com/localmelo/localmelo/pull/259
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

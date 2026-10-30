@@ -331,9 +331,9 @@ setup card calls it, and only while the card is shown.
 These routes create and control user-origin tasks in the gateway process.
 They are separate from chat turns but use the same scheduler gate. Each task
 has a `kind="task"` session with the same id; its session events and turns
-can be inspected through the existing session routes. A worker uses gateway
-built-ins (`file_read`, `file_write`, `python_exec`, not `shell_exec`) with
-memory off. Tools run with the user's permissions, not in a sandbox.
+can be inspected through the existing session routes. A worker uses the
+built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
+`list_files`) with memory off. Tools run with the user's permissions, not in a sandbox.
 
 - `POST /api/tasks` accepts `objective` (or its alias `prompt`), optional
   `title`, `workspace`, `level` and `request_key`. The objective must be
@@ -1029,8 +1029,8 @@ Every tool the session's Agent offers, with whether this session allows it.
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
   `requires_approval` says a call of it asks first; `granted` says this
   session allows it for the rest of the gateway run.
-- A console session is gateway mode: it lists `file_read`, `file_write` and
-  `python_exec`, never `shell_exec`.
+- A console session is gateway mode: it lists `file_read`, `file_write`,
+  `list_files` and `python_exec`, never `shell_exec`.
 - A task session returns 409 `task_session_read_only`; this route cannot open it as a chat.
 - This route opens the session, because a provider's tools appear only once
   its Agent started. It can take seconds, and a start that fails is 502

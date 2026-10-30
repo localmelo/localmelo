@@ -40,6 +40,17 @@ def test_the_other_three_builtins_are_in_every_default_set(mode: ToolMode) -> No
     assert {"file_read", "file_write", "python_exec"} <= DEFAULT_BUILTINS[mode]
 
 
+def test_each_mode_offers_exactly_these_builtins() -> None:
+    """Direct and python are what the benchmark ran; list_files joins chats only."""
+    three = frozenset({"file_read", "file_write", "python_exec"})
+    assert {
+        "direct": three,
+        "python": three,
+        "gateway": three | {"list_files"},
+        "interactive": three | {"list_files", "shell_exec"},
+    } == DEFAULT_BUILTINS
+
+
 @pytest.mark.parametrize(
     ("mode", "asks"),
     [("direct", False), ("interactive", True), ("gateway", False), ("python", False)],
