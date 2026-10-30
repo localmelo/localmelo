@@ -1100,7 +1100,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `macos/assets`, made by `uv run --with pillow python scripts/make_app_icons.py`
   (Pillow is fetched for that run; it is not a dependency), and the build only copies
   them, so replacing the art is regenerate and commit. `macos/mark.svg` is gone
-  ([#NN]).
+  ([#263]).
 
 - The first run and the first answer say only what helps. With a model server found, the
   first run asks `Use it? [Y/n]:` (Enter says yes; `n` asks for a URL) where it said it had
@@ -2002,6 +2002,7 @@ earlier milestones.
 [#258]: https://github.com/localmelo/localmelo/pull/258
 [#259]: https://github.com/localmelo/localmelo/pull/259
 [#260]: https://github.com/localmelo/localmelo/pull/260
+[#263]: https://github.com/localmelo/localmelo/pull/263
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
