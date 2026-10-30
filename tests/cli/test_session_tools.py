@@ -110,7 +110,7 @@ async def test_memory_reads_a_copy_with_correct_turn_and_tool_counts(
     setup.session.enter("/memory")
     await wait_for(lambda: "Long-term memory:" in setup.out.text())
     text = " ".join(setup.out.text().split())
-    assert "4 of 20 messages" in text
+    assert "4 of 64 messages" in text
     assert "1 turn, 1 with tool steps" in text
     assert "file_read" in text and "tool result" in text
     assert setup.session.agent.conversation() == original

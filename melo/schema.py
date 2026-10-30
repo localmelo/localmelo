@@ -19,8 +19,11 @@ SHORT_TERM_MAX = 20
 # retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
-# The working window's message cap (``window_messages``): SHORT_TERM_MAX by
-# default, and any value in this range.
+# The working window's message cap (``window_messages``): any value in this
+# range. The default is LOCAL_WINDOW_MESSAGES, except on a cloud vendor's
+# backend, where the CLI, the console and the gateway keep SHORT_TERM_MAX (see
+# ``support.config.default_window_messages``).
+LOCAL_WINDOW_MESSAGES = 64
 WINDOW_MESSAGES_MIN = 8
 WINDOW_MESSAGES_MAX = 256
 LONG_TERM_TOP_K = 5

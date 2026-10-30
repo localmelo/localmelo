@@ -7,17 +7,18 @@ This guide covers the first run, the setup wizard, and how to update or uninstal
 In a terminal with no config file, `melo` asks for a model server's URL and
 a chat model, saves the answers and opens the interactive UI. When the
 server also lists an embedding model, it asks once whether to use it. Here
-oMLX runs on port 8000 with three models, and the second is loaded:
+oMLX runs on port 8000 with three models, and the first chat model is loaded:
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (3 models).
-Model server URL [http://127.0.0.1:8000/v1]:
+Server URL [http://127.0.0.1:8000/v1]:
 Models on http://127.0.0.1:8000/v1:
-  [1] Qwen3-Embedding-0.6B
-  [2] Qwen3-8B-4bit  (loaded)
-  [3] Qwen3-32B-4bit
-Model [2]:
+  [1] Qwen3-8B-4bit  (loaded)
+  [2] Qwen3-32B-4bit
+  [3] Qwen3-Embedding-0.6B  (embedding)
+Model [1]:
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
 Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
@@ -25,7 +26,9 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
   30000 fills in the URL; one with a chat model comes first. Listing a
-  server's models sends `GET /v1/models`. With several chat models, setup
+  server's models sends `GET /v1/models`. The list shows chat models first;
+  an embedding or reranking model is tagged `(embedding)` or `(reranking)` and
+  is never the default. With several chat models, setup
   also asks which are in memory, with `GET /v1/models/status` (oMLX) and
   `GET /api/ps` (Ollama), one second each and without a key: it marks the
   loaded ones `(loaded)` and makes the first the default, and with none

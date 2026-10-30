@@ -181,12 +181,12 @@ async def test_memory_never_opens_a_session(tmp_path: Path) -> None:
         body = response.json()
         assert body["agent"] == "not_loaded"
         assert body["working"] == []
-        assert body["working_max"] == 20
+        assert body["working_max"] == 64  # the local backend's default
         assert body["long_term"] == {"enabled": False, "backend": "none"}
 
 
 async def test_memory_reports_the_cap_of_the_open_agent(tmp_path: Path) -> None:
-    async with console_with(tmp_path, answer("hello"), window_messages=64) as (
+    async with console_with(tmp_path, answer("hello"), window_messages=32) as (
         _console,
         client,
         _,
@@ -198,20 +198,32 @@ async def test_memory_reports_the_cap_of_the_open_agent(tmp_path: Path) -> None:
         memory = (await client.get(f"/api/sessions/{session_id}/memory")).json()
 
         assert memory["agent"] == "open"
-        assert memory["working_max"] == 64
+        assert memory["working_max"] == 32
 
 
 async def test_memory_of_a_session_not_open_reports_the_settings_cap(
     tmp_path: Path,
 ) -> None:
     async with console_with(tmp_path, answer("hello")) as (console, client, _):
-        console.cfg.agent.window_messages = 64
+        console.cfg.agent.window_messages = 32
         seeded = await seed_session(console, tmp_path)
 
         memory = (await client.get(f"/api/sessions/{seeded}/memory")).json()
 
         assert memory["agent"] == "not_loaded"
-        assert memory["working_max"] == 64
+        assert memory["working_max"] == 32
+
+
+async def test_memory_of_a_session_not_open_reports_a_cloud_backends_default(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path, answer("hello")) as (console, client, _):
+        console.cfg.chat_backend = "openai"
+        seeded = await seed_session(console, tmp_path)
+
+        memory = (await client.get(f"/api/sessions/{seeded}/memory")).json()
+
+        assert memory["working_max"] == 20
 
 
 async def test_memory_shows_the_conversation_without_thinking(

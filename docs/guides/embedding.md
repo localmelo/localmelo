@@ -186,13 +186,16 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## What changes
 
-- The interactive banner's memory row names the backend and model, for
-  example `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
-  (`oMLX` where the config file says `omlx`); without one it
-  says `no long-term memory · melo --reconfigure adds one` (or
-  `--embedding-base-url adds one` in a `--base-url` session). This row
-  describes the embedding configuration, not whether explicit modes can use
-  text-only long-term memory.
+- The memory row of `/status` and of developer mode's banner names the backend
+  and model, for example
+  `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
+  (`oMLX` where the config file says `omlx`). Without one, `/status` says
+  `no long-term memory (no embedding backend)` and the banner says
+  `no long-term memory · melo --reconfigure adds one` (or
+  `--embedding-base-url adds one` in a `--base-url` session; the first run
+  has just said how, so its banner omits it). This row describes the embedding
+  configuration, not whether explicit modes can use text-only long-term
+  memory.
 - A new long-term store starts empty. Eligible entries may be admitted as runs
   end and steps complete; existing text-only entries are not re-embedded.
 - Changing the model changes the vector space. A stored vector whose
@@ -205,7 +208,8 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## Check it works
 
-- Start `melo` in a terminal and look at the banner's memory row.
+- Start `melo` in a terminal and type `/status`: its memory row names the
+  embedding model.
 - Once `/status` is available, its `memory` row comes from the same text.
 - Run a task that uses a tool, end it, then run a related task. Persistence
   can make admitted entries available to later runs; recall also depends on

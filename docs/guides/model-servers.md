@@ -145,12 +145,12 @@ server, vLLM's own included. So oMLX has no backend of its own: it is the
 owner of its models (oMLX does, on every model it lists), and
 `embedding_backend = "omlx"` when it uses that server's embedding model; any
 other server is saved as `vllm`. Both spellings load as the same backend, with
-its settings in the `[vllm]` table, and are saved back as written. The banner,
-`/status` and the web console call the server oMLX when the file says `omlx`
-or a model listing of the server did, and otherwise an OpenAI-compatible
-server. A file that says `vllm` is named after the first listing, which the
-check after the banner makes; the banner itself shows what the file says,
-unless the run already listed the server.
+its settings in the `[vllm]` table, and are saved back as written. `/status`,
+developer mode's banner and the web console call the server oMLX when the file
+says `omlx` or a model listing of the server did, and otherwise an
+OpenAI-compatible server. A file that says `vllm` is named after the first
+listing, which the check after the banner makes; the banner itself shows what
+the file says, unless the run already listed the server.
 [Serve a model with oMLX](model-servers.md#serve-a-model-with-omlx) shows how
 to start it.
 

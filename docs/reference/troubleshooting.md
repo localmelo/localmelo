@@ -3,7 +3,10 @@
 Find the message you see, then read its cause and fix. A run that did not
 complete names its status in the line
 `melo: run ended with status <status>: <error>`, or in the `status` field of
-the JSON line.
+the JSON line. The interactive UI says the same in plain words, as
+`✗ Could not reach the model server at URL.` with what to do under it; the
+sections below are titled by the line of a task, and their causes and fixes
+apply to both.
 
 ## Install
 
@@ -116,7 +119,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-[r]etry, [s]tart without saving, [q]uit [r]:
+Enter tries again · s starts without saving · q quits:
 ```
 
 - **Cause:** `GET /v1/models` on that URL failed. `connection refused`:

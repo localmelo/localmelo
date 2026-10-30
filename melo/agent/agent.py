@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import hashlib
 import inspect
+import itertools
 import json
 import logging
 import math
@@ -66,6 +67,7 @@ from localmelo.melo.agent._chat import (
 )
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
+from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
@@ -361,7 +363,8 @@ def _find_reflection(text: str) -> dict[str, Any] | None:
     of :data:`REFLECTION_ACTIONS`. An object without one, such as the
     arguments of a tool call written out as text, is passed over for the
     objects after it, but an object nested inside it is not looked at.
-    JSON that is not an object holds no reflection.
+    JSON that is not an object holds no reflection. This is the strict
+    reading; the loop reads replies with :func:`_read_reflection`.
     """
     try:
         for value in _json_values(_coerce_str(text)):
@@ -372,6 +375,54 @@ def _find_reflection(text: str) -> dict[str, Any] | None:
     except ValueError:  # a number the decoder cannot convert ends the search
         pass
     return None
+
+
+# The most ``{...}`` objects of one reply that _read_reflection tries to repair.
+REPAIR_TRIES = 8
+
+
+def _read_reflection(text: str) -> tuple[dict[str, Any], str | None] | None:
+    """The reflection a reply holds under ``"flags"``, and the repair it took.
+
+    That is the reflection of :func:`_find_reflection` with ``None`` as the
+    repair. A reply that holds none gets one more reading with a single
+    conservative repair of a ``{...}`` the decoder rejects:
+    ``"unmatched_closer"``, ``"trailing_comma"`` or ``"control_char"`` (see
+    :func:`~localmelo.melo.agent._json_repair.repairs`). The repaired text is
+    read as any reply is, so a repair counts only when it gives an object
+    with a valid ``recommended_action``, under the order and the nesting rule
+    of :func:`_find_reflection`. A reply that needs two repairs holds no
+    reflection, and nothing is closed or inserted, so truncated text stays
+    unreadable. A reply that reads as it stands is never repaired.
+    """
+    found = _find_reflection(text)
+    if found is not None:
+        return found, None
+    text = _coerce_str(text)
+    if "recommended_action" not in text:
+        return None
+    body = _strip_code_fences(text)
+    for start, error in itertools.islice(rejected_objects(body), REPAIR_TRIES):
+        for repair, fixed in repairs(body, start, error):
+            found = _find_reflection(fixed)
+            if found is not None:
+                return found, repair
+    return None
+
+
+def _json_error_line(text: str) -> str:
+    """The line that a retry adds when a reply has JSON the decoder rejects, else ``""``.
+
+    It quotes the error of the first such ``{...}`` and the text around it
+    (see :func:`~localmelo.melo.agent._json_repair.error_line`); the position
+    counts the characters of the reply, a code fence around it included.
+    """
+    text = _coerce_str(text)
+    body = _strip_code_fences(text)
+    first = next(rejected_objects(body), None)
+    if first is None:
+        return ""
+    return error_line(body, first[1], max(text.find(body), 0))
 
 
 def _unreadable_reason(reply: Message, *, flags: bool) -> str:
@@ -3139,12 +3190,13 @@ class Agent:
 
         The object is the one the gate's parser reads: with ``"flags"``
         the first object with a valid ``recommended_action`` (see
-        :func:`_find_reflection`), with ``"utility"`` the first JSON
+        :func:`_read_reflection`), with ``"utility"`` the first JSON
         object. A non-list or non-string entries are ignored.
         """
         data: dict[str, Any] | None
         if flags:
-            data = _find_reflection(_coerce_str(content))
+            found = _read_reflection(_coerce_str(content))
+            data = found[0] if found is not None else None
         else:
             try:
                 value = _decode_reflection(_coerce_str(content))
@@ -4352,9 +4404,9 @@ class Agent:
     @staticmethod
     def _reflection_summary(content: str) -> str:
         """The summary (else rationale) of a readable reflection reply, or ""."""
-        found = _find_reflection(content)
+        found = _read_reflection(content)
         if found is not None:
-            data: object = found
+            data: object = found[0]
         else:
             try:
                 data = _decode_reflection(_coerce_str(content))
@@ -4389,12 +4441,16 @@ class Agent:
         A reply that holds no reflection, often a tool call, is asked for
         once more, with the window's turns written out as text and
         :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
+        With ``"flags"``, when that reply has JSON that the decoder rejects
+        and is not a tool call, one more line follows the note and quotes
+        the decoder's error (see :func:`_json_error_line`).
         What counts as a reflection, and how one whose serialized form
         exceeds :data:`MAX_REFLECTION_CHARS` is kept to that budget,
         depends on ``reflection_gate``:
 
         - ``"flags"``: a JSON object with a valid ``recommended_action``
-          (see :func:`_find_reflection`), so a reply whose only JSON is
+          (see :func:`_read_reflection`, which repairs one common slip of
+          the JSON and tells the event which), so a reply whose only JSON is
           something else, such as a tool call written out as text, is
           asked for again too. When the second reply holds no reflection
           either, this returns ``None``: the boundary has no reflection
@@ -4478,14 +4534,19 @@ class Agent:
         if run is not None:
             run.events.reflection_call(getattr(self.chat, "last_call", None))
         if flags:
-            readable = _find_reflection(response.content) is not None
+            readable = _read_reflection(response.content) is not None
         else:
             readable = _holds_reflection_object(response.content)
         if not readable:
+            reason = _unreadable_reason(response, flags=flags)
             if run is not None:
-                run.events.reflection_unreadable(
-                    _unreadable_reason(response, flags=flags)
-                )
+                run.events.reflection_unreadable(reason)
+            # JSON the decoder rejected: say where, so the retry can mend it.
+            hint = (
+                _json_error_line(response.content)
+                if flags and reason != "tool_call"
+                else ""
+            )
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
@@ -4497,6 +4558,7 @@ class Agent:
                 prior_reflections=prior_reflections or None,
                 final=final,
                 retry=True,
+                retry_hint=hint,
                 fit=fit,
                 notes=note_lines,
                 draft_titles=draft_titles,
@@ -4521,7 +4583,7 @@ class Agent:
         if run is not None:
             run.reflection_thinking = response.thinking
             readable = (
-                _find_reflection(response.content) is not None
+                _read_reflection(response.content) is not None
                 if flags
                 else _holds_reflection_object(response.content)
             )
@@ -4531,9 +4593,12 @@ class Agent:
                 if reflection_entry is not None and reflection_entry.note is not None:
                     reflection_note_id = reflection_entry.note.note_id
         if flags:
-            data = _find_reflection(response.content)
-            if data is None:
+            found = _read_reflection(response.content)
+            if found is None:
                 return None
+            data, repair = found
+            if run is not None:
+                run.events.reflection_repaired(repair)
             entry, decision = self._reflection_from_object(
                 data, attempt_id, failure_type
             )

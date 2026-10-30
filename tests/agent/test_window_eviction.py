@@ -166,7 +166,12 @@ async def _agent(mode: str) -> Agent:
         transport=httpx.MockTransport(lambda r: httpx.Response(500)),
     )
     return Agent(
-        llm=llm, options=AgentOptions(builtins=frozenset(), window_eviction=mode)  # type: ignore[arg-type]
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            window_eviction=mode,  # type: ignore[arg-type]
+            window_messages=SHORT_TERM_MAX,
+        ),
     )
 
 
@@ -489,7 +494,12 @@ async def _stub_run(
             window_eviction=mode,  # type: ignore[arg-type]
             max_steps=max_steps,
             steps_per_attempt=steps_per_attempt,
-            **{"fixed_prefix": False, "reflect_tool_guard": False, **options},
+            **{
+                "fixed_prefix": False,
+                "reflect_tool_guard": False,
+                "window_messages": SHORT_TERM_MAX,
+                **options,
+            },
         ),
     )
     agent.hippo.register_tool(ECHO)

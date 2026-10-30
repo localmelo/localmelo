@@ -175,9 +175,9 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     if setup.saved:
         chosen = _configured(config.load(), args.chat_model, args)
         if isinstance(chosen, Choice):
-            return replace(
-                chosen, backend=replace(chosen.backend, source="saved"), checked=True
-            )
+            # The first run just said how long-term memory is added, if it is off.
+            backend = replace(chosen.backend, source="saved", memory_told=True)
+            return replace(chosen, backend=backend, checked=True)
         return chosen
     from localmelo.support.cli.agents import url_backend
 
@@ -309,7 +309,9 @@ def run_interactive(
     try:
         if choice.cfg is None:
             loaded = config.load()
-            options = configured_cache_options(loaded, options, keep=explicit)
+            options = configured_cache_options(
+                loaded, options, keep=explicit, backend=choice.backend.key
+            )
             if "captured_history" not in explicit and loaded.agent.captured_history:
                 options = replace(options, captured_history=True)
             options = configured_context_options(
@@ -529,6 +531,7 @@ async def main_async(
             logging.getLogger(__name__).warning(
                 "Invalid [sessions] resume_mode %r; using pairs", raw_mode
             )
+        developer = _developer(args)
         session = CliSession(
             store=store,
             factory=factory,
@@ -541,7 +544,7 @@ async def main_async(
             reasoning_tags=session_config.cli.reasoning_tags,
             status_line=session_config.cli.status_line,
             out=out,
-            developer=_developer(args),
+            developer=developer,
         )
 
         def show_banner(selected: SessionInfo | None = None) -> None:
@@ -556,6 +559,7 @@ async def main_async(
                     width=out.width,
                     symbols=symbols,
                     session_title=selected.title if selected is not None else None,
+                    developer=developer,
                 )
             )
             if invalid_mode:

@@ -6,7 +6,7 @@ This page explains what localmelo remembers and how a run recalls that memory. R
 
 | Memory | What it holds | Where |
 |---|---|---|
-| Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
+| Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 64 messages (20 on a cloud vendor's backend). | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
 | Long-term memory | In `legacy`, short summaries of steps and the reflections of past runs; each step recalls the 5 entries closest to the task, and it needs an [embedding backend](../guides/embedding.md). Outside `legacy`, typed entries (semantic, episodic, profile, reflection) admitted by a signal, recalled at `start` even without an embedding. | RAM, or `long_term.db` (in `legacy` only with an embedding backend). |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
@@ -224,8 +224,9 @@ tool output and recalled memory are data, not instructions.
 
 **Working memory** holds the conversation:
 
-- It keeps the last 20 messages and drops the oldest first. A tool call is
-  never separated from its results.
+- It keeps the last 64 messages (20 on a cloud vendor's backend; see
+  [Working-memory window](../reference/memory.md#working-memory-window)) and drops
+  the oldest first. A tool call is never separated from its results.
 - A planning prompt may hold up to 100,000 characters. When it would hold
   more, the oldest turns are dropped first. The task always stays: when its
   own message has been dropped, localmelo puts it back in front. A task too

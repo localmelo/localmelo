@@ -1,7 +1,6 @@
 › Run the long check.
 
   No approvals for this turn (--yolo).
-⚠ melo: run ended with status crashed: The process running this turn stopped be…
-  melo stopped before this turn finished (the process was killed or the computer
-  lost power). /retry runs it again.
+⚠ Interrupted: melo stopped unexpectedly.
+  The process was killed or the computer lost power. /retry runs it again.
 
