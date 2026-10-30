@@ -177,6 +177,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web console connects the model server that already runs on this Mac in one
+  step. While no model is set up (or the configured server is down) and no chat
+  is open, the welcome shows a setup card in place of the banner and the starters:
+  "Found oMLX on this Mac" (or Ollama, or a model server) with its model and
+  **Use this model**, which saves it, tests it and makes the welcome ready without
+  opening settings; "A model server needs an API key"; or "No model server is
+  running on this Mac" with Check again, Enter a server address and a link to the
+  quickstart. With several chat models and none known to be loaded the card lists
+  them, marks the loaded one and waits for a pick. The composer reads "Connect a
+  model to start" meanwhile. `GET /api/setup/detect` is the route behind it: it asks
+  the servers the first run asks (`LOCALMELO_DETECT_URLS`) and answers `state`
+  (`found`, `needs_key`, `none`), the server's `name` and `backend`, its chat
+  `models`, the `loaded` ones, the `suggested` one (`null` when the user must
+  choose) and a `problem`. Saving from the console now writes an oMLX server as
+  `omlx`, as the first run does. The connection settings dialog opens on a blank
+  "Choose a server..." entry when nothing is saved, instead of a preset (MLC at
+  `http://localhost:8400/v1`), and no longer shows the terminal advice
+  (`run 'melo setup'`).
+  ([#243])
+
 - The macOS app's menu bar says when melo needs you, and the app has an icon. The
   menu-bar item is Melo's head (a template image the system tints for light and dark)
   with the number of running things beside it, and a dot beside the head while a chat
@@ -1008,6 +1028,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The web console is easier to read, in light and dark: no text under 12px, text
+  at 4.5:1 contrast or better, field, composer and focus edges at 3:1 or better,
+  a 2px focus ring on the composer, muted lines in Tasks and Workers drawn muted,
+  and undone turns in a readable grey instead of faded. Colours, sizes and radii
+  come from tokens in `workspace.css`, and the dark palette is written once. The
+  level and send buttons lose their native `title` tooltips and keep their
+  `aria-label`. ([#243])
+
+- The web console asks for an approval in plain words: a question such as
+  "Replace notes.txt (125 bytes)?", one filled "Allow once", an outlined "Allow
+  for this chat" that says what it covers, and a quiet "Deny" that asks what melo
+  should do instead. Escape stops a running turn only from the message box. ([#243])
+
+- The web console says what to do after a run ends badly: a ✗ or ⚠ symbol, a
+  hint and one filled next step (Open model settings, Continue, Try again, Show
+  tools or Copy details). Tool rows use ✓ ✗ ⊘ ◌ and a live dot, the offline banner
+  has "Try again", and the selected chat has an accent bar. ([#243])
+
 - The first run explains itself. With no config file, `melo` first says what it needs
   (`melo uses a model server on this computer (oMLX, Ollama, LM Studio…).`) and asks
   `Server URL` (it said `Model server URL`). The model list shows chat models first;
@@ -1675,6 +1713,7 @@ earlier milestones.
 [#240]: https://github.com/localmelo/localmelo/pull/240
 [#241]: https://github.com/localmelo/localmelo/pull/241
 [#242]: https://github.com/localmelo/localmelo/pull/242
+[#243]: https://github.com/localmelo/localmelo/pull/243
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

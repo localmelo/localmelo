@@ -16,8 +16,23 @@ must be running to serve it: `melo serve`. Run `melo console` in a
 terminal and open its single-use link within 60 seconds (add `--port PORT`
 for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
-1. Use **Connection settings** to choose the chat backend, model and workspace;
-   local model discovery lists models without starting one. A cloud backend
+On a first run, with no model set up, the welcome shows one card in place of the
+starters. It looks for a model server on this Mac, as the terminal's first run
+does, and shows what it found: **Found oMLX on this Mac** (or Ollama, or a model
+server) with its model, **A model server needs an API key**, or **No model server
+is running on this Mac**. **Use this model** saves the server, tests it and makes
+the welcome ready without opening settings. With several chat models and none
+known to be loaded, the card lists them, marks the loaded one and waits for you to
+choose; it never picks one for you. **Check again** looks again after you start a
+server, **Enter a server address…** opens connection settings, and the composer
+reads `Connect a model to start` until a model is set up. The card also shows when
+the configured server stops answering, and it looks for a server only while it is
+on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
+
+1. Use **Connection settings** to choose the chat backend, model and workspace.
+   With nothing saved the dialog opens on a blank **Choose a server…**, and its
+   fields, **Discover models**, **Test connection** and **Save** wait until you
+   choose one. Local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
    never the key. Saving uses the loaded settings revision; if the file changed,
    reload the dialog and retry. **Test connection** probes the unsaved model
@@ -108,8 +123,8 @@ run). Like Workers, the view replaces the chat while it is open.
   recorded until you choose **Resume anyway**, and the confirmation lasts five
   minutes and does not survive a gateway restart.
 - A task that asks to run a tool shows the state "Waiting for your approval"
-  and the same approval card as a chat, with **Allow once**, **Allow every
-  ... call in this session** and **Deny…** (with an optional reason). It is
+  and the same approval card as a chat, with **Allow once**, **Allow for this
+  task** and **Deny** (with an optional note). It is
   also where a `melo-task` task waits: nothing else shows it. The card
   disappears when you answer, and the task goes on (Allow) or gets the denial
   (Deny); pausing or stopping the task withdraws the card. While it is open,
@@ -194,7 +209,8 @@ written to the one gate the gateway shares:
 `level` and `held` on a session, `machine` on the list, and
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
-Stop cancels the run. A model request in flight is abandoned, although the
+Stop cancels the run, and so does Escape while the cursor is in the message
+box; Escape anywhere else only closes what is open. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `python_exec` child is
 killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
@@ -209,16 +225,35 @@ A tool call that needs approval shows a card below its `Needs approval` tool.
 Console sessions use `RememberingPolicy` and ask before `file_write` and
 `python_exec`; legacy `/v1` has no approval policy. Approvals are not a
 security boundary against a bearer holder or a malicious process under the same
-OS account, which can answer them. When a request is present, choose
-`Allow once`, `Allow every …` for the session, or `Deny…` with an
-optional reason. The controls wait 500 ms before they can be used; arrival
-does not move focus and no single-key shortcut answers a request. When the
-card is outside the view, **Go to approval** opens its group and moves to it.
-If approval details cannot be loaded, or arguments were truncated or converted,
-allow is disabled; you can reload the details, deny, or stop the run.
-A failed turn shows its error and details; the newest finished turn can offer
-**Try again**, and **Continue** when it has run tools and its status permits
-continuation. Stopped or interrupted turns use a neutral line instead.
+OS account, which can answer them.
+
+The card asks a plain question ("Run this command in demo-project?", "Replace
+notes.txt (125 bytes)?", "Let melo use <tool>?") and shows exactly what would
+run. **Allow once**, the filled button, runs this call only. **Allow for this
+chat** (**Allow for this task** in Tasks) stops asking about that tool for the
+rest of the chat; the line under the buttons says so, and for a command or
+Python code it warns that it can reach files outside the workspace. **Deny**
+opens an optional box, "Tell melo what to do instead", and sends the denial
+with that text; **Back** or Escape returns to the answers. The controls wait
+500 ms before they can be used; arrival does not move focus and no single-key
+shortcut answers a request. When the card is outside the view, a bar above the
+message box reads "melo is waiting for your answer", and **Review** opens its
+group and moves to **Allow once**. If approval details cannot be loaded, or
+arguments were truncated or converted, both allow buttons are disabled; you can
+reload the details, deny, or stop the run.
+
+A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
+plain title, the first line of the error and a hint. On the newest turn one next
+step is the filled button and the other actions are links: **Open model
+settings** after a model server error, **Continue** after running out of steps
+or timing out (**Try again** when no tool ran), **Try again** when the run was
+stuck, failed or stopped after reflection, **Show tools** when tools could not
+start, and **Copy details** after a crash inside localmelo. **Try again** and
+**Continue** are offered on the newest finished turn only, and Continue needs a
+turn that ran tools. **Copy error** copies one line and the run id for a bug
+report; the technical fields stay under **Details**. Stopped or interrupted
+turns use a neutral line (■). The banner shown when the page cannot reach the
+gateway has **Try again**.
 
 ## Persistence and limits
 

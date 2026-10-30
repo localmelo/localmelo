@@ -14,11 +14,12 @@ import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
+import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
   formatBytes, formatDuration, formatPast, formatTokens, liveFacts, newTurn,
-  newView, reflectionLine, runElapsed, splitThinking, statusText, toolElapsed,
+  newView, nextAction, reflectionLine, runElapsed, splitThinking, statusMark, statusText, toolElapsed,
   toolState, workSummary,
 } = turns;
 
@@ -133,7 +134,7 @@ test('a tool call runs, asks for approval and finishes', () => {
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'shell_exec', status: 'success', error_category: 'none', output: 'a.py\n', output_chars: 5, error: '', duration_s: 4, images: [], approval: {request_id: 'req-1', allowed: true, reason: '', remember: true, origin: 'user'}, exit_code: 2});
   assert.equal(card.status, 'success');
   assert.equal(card.output, 'a.py\n');
-  assert.deepEqual(toolState(card), {state: 'success', mark: '[ok]', text: '4.0s · exit 2 · allowed for the session'});
+  assert.deepEqual(toolState(card), {state: 'success', mark: '✓', text: '4.0s · exit 2 · allowed for the session'});
 });
 
 test('an approval the turn withdrew leaves the call not run', () => {
@@ -158,7 +159,7 @@ test('a denied approval blocks the call and says why', () => {
   assert.equal(card.status, 'blocked');
   assert.deepEqual(view.grants, []);
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: '', duration_s: 0, images: [], approval: {request_id: 'req-1', allowed: false, reason: 'wrong file pick another', remember: false, origin: 'user'}, exit_code: null});
-  assert.deepEqual(toolState(card), {state: 'blocked', mark: '[-]', text: 'denied: wrong file pick another'});
+  assert.deepEqual(toolState(card), {state: 'blocked', mark: '⊘', text: 'denied: wrong file pick another'});
   assert.equal(deniedCount(turn), 1);
 });
 
@@ -352,11 +353,22 @@ test('tool output is cleaned and thinking is split as the terminal does', () => 
 
 test('a tool card that was cancelled shows how it ended', () => {
   const withdrawn = {status: 'cancelled', errorCategory: 'cancelled', approval: {origin: 'withdrawn'}, durationS: 3, exitCode: null};
-  assert.deepEqual(toolState(withdrawn), {state: 'cancelled', mark: '[ ]', text: 'not run'});
+  assert.deepEqual(toolState(withdrawn), {state: 'cancelled', mark: '◌', text: 'not run'});
   const stopped = {status: 'cancelled', errorCategory: 'cancelled', approval: null, durationS: 3.5, exitCode: null};
-  assert.deepEqual(toolState(stopped), {state: 'cancelled', mark: '[-]', text: 'stopped after 3.5s'});
+  assert.deepEqual(toolState(stopped), {state: 'cancelled', mark: '⊘', text: 'stopped after 3.5s'});
   const held = {status: 'running', startedTs: 10, durationS: null, approval: null, exitCode: null};
   assert.equal(toolState(held, {held: 'Resources', now: 20}).text, 'Waiting: Resources');
+});
+
+test('tool marks are the terminal glyphs, and a running call is a live dot', () => {
+  const mark = (status, options) => toolState({status, durationS: null, startedTs: 1, name: 'shell_exec', approval: null, exitCode: null}, options).mark;
+  assert.deepEqual(['running', 'waiting_approval'].map((status) => mark(status, {now: 2})), ['●', '●']);
+  assert.equal(mark('running', {held: 'Resources'}), '●', 'a held call is waiting, not failed');
+  assert.deepEqual(['error', 'timeout', 'crashed'].map((status) => mark(status)), ['✗', '✗', '✗']);
+  assert.deepEqual(['success', 'blocked', 'interrupted', 'not_run'].map((status) => mark(status)), ['✓', '⊘', '⊘', '◌']);
+  for (const status of ['running', 'success', 'error', 'blocked', 'cancelled', 'interrupted', 'not_run']) {
+    assert.doesNotMatch(mark(status), /[\[\]]/, `${status} has no bracket mark`);
+  }
 });
 
 // ── The page in a DOM double ──
@@ -370,6 +382,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
   .replace(/^import \{ setupStatusRow \} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
+  .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -463,6 +476,9 @@ function findNode(node, predicate) {
   return null;
 }
 
+const quietDeny = (card) => findNode(card, (node) => 'approvalDeny' in node.dataset);
+const confirmDeny = (card) => findNode(card, (node) => 'approvalConfirm' in node.dataset);
+
 class FakeEventSource {
   static instances = [];
   static reset() { FakeEventSource.instances = []; }
@@ -549,7 +565,8 @@ function harness(routes, {mobile = false} = {}) {
     setupTasks,
     setupStatusRow,
     setupRunning,
-    setupSettings: () => async () => {},
+    setupModelCard,
+    setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     document,
     location: {hash: '', pathname: '/', search: ''},
@@ -756,7 +773,7 @@ test('approval guard, denial keyboard and focus never allow by accident', async 
   h.run('S.view.pending.set("req1", request)');
   const card = h.run('approvalCard(request)');
   const once = findNode(card, (node) => node.textContent === 'Allow once');
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   assert.equal(h.context.document.activeElement, h.element('input'));
   assert.equal(card.attributes.role, 'region');
   assert.equal(once.disabled, true);
@@ -780,7 +797,7 @@ test('approval guard, denial keyboard and focus never allow by accident', async 
 });
 
 test('approval buttons post only their explicit choices and Escape closes denial', async () => {
-  for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow every shell_exec call in this session']]) {
+  for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow for this chat']]) {
     const h = harness(baseRoutes({'POST /approvals/req': {outcome: 'allowed'}}));
     await h.run('init()');
     h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
@@ -799,7 +816,7 @@ test('approval buttons post only their explicit choices and Escape closes denial
   const card = h.run('approvalCard(request)');
   h.run('approvalStates.get("deny").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   deny.click();
   const reason = findNode(card, (node) => node.className === 'deny-reason');
   let stopped = false;
@@ -810,6 +827,88 @@ test('approval buttons post only their explicit choices and Escape closes denial
   assert.equal(stopped, true);
   assert.equal(h.context.document.activeElement, deny);
   assert.equal(h.net.callsTo('/approvals/deny').length, 0);
+});
+
+test('an approval asks a plain question and puts the tool id in a caption', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const asks = [
+    ['shell_exec', {command: 'make test'}, null, 'Run this command in w?', 'shell_exec · ~/w'],
+    ['python_exec', {code: 'print(1)'}, null, 'Run this Python code in w?', 'python_exec · ~/w'],
+    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 125}, 'Replace a.txt (125 bytes)?', 'file_write'],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, 'Create b.txt?', 'file_write'],
+    ['file_write', {path: 'c.txt', content: 'abc'}, null, 'Write c.txt?', 'file_write · checking the file'],
+    ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
+  ];
+  for (const [tool, args, target, title, caption] of asks) {
+    h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
+    const card = h.run('approvalCard(request)');
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, title);
+    assert.equal(findNode(card, (node) => node.className === 'approval-caption').textContent, caption);
+  }
+  h.context.request = {request_id: 'scroll', tool_name: 'shell_exec', arguments: {command: 'make test'}, workspace_label: '~/w'};
+  const box = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(box.tabIndex, 0, 'a long command scrolls, so a keyboard reaches it');
+  assert.equal(box.attributes['aria-label'], 'Command');
+});
+
+test('the card has a filled answer, an outlined grant and a quiet deny, and says what the grant covers', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'roles', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => [node.textContent, node.className.split(' ')[0]]),
+    [['Allow once', 'primary-button'], ['Allow for this chat', 'outline-button'], ['Deny', 'quiet-button']]);
+  const warning = findNode(card, (node) => node.id === 'approval-scope-roles');
+  assert.equal(actions.children[1].attributes['aria-describedby'], 'approval-scope-roles', 'the grant is read with what it covers');
+  assert.match(warning.textContent, /“Allow for this chat” lets any shell command run without asking/);
+  assert.match(warning.textContent, /outside ~\/w/);
+  h.context.request = {request_id: 'roles-file', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0}};
+  assert.match(flatten(h.run('approvalCard(request)')), /will not ask again before writing files in this chat/);
+});
+
+test('Deny opens a box for what melo should do instead and sends it with the denial', async () => {
+  const h = harness(baseRoutes({'POST /approvals/note': {outcome: 'denied'}}));
+  await h.run('init()');
+  h.context.request = {request_id: 'note', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true};
+  h.run('S.view.pending.set("note", request)');
+  const card = h.run('approvalCard(request)');
+  h.run('approvalStates.get("note").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  const view = findNode(card, (node) => node.className === 'deny-view');
+  assert.equal(view.hidden, true);
+  quietDeny(card).click();
+  assert.equal(view.hidden, false);
+  assert.equal(findNode(card, (node) => node.id === 'approval-scope-note').hidden, true, 'the grant line goes with the three answers');
+  assert.match(flatten(view), /Tell melo what to do instead \(optional\)/);
+  const reason = findNode(card, (node) => node.className === 'deny-reason');
+  assert.equal(reason.attributes['aria-label'], 'Tell melo what to do instead (optional)');
+  reason.value = 'Write to a temp file';
+  reason.listeners.input[0]();
+  await confirmDeny(card).click();
+  assert.deepEqual(h.net.callsTo('/approvals/note')[0].body, {choice: 'deny', reason: 'Write to a temp file'});
+});
+
+test('Escape leaves the deny box first, and stops a running turn only while focus is in the composer', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'esc', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.run('approvalStates.get("esc").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  quietDeny(h.context.document.getElementById('approval-card-esc')).click();
+  const press = () => h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27});
+  press();
+  assert.equal(h.run('approvalStates.get("esc").deny'), false, 'Escape closes the deny box');
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('scroll').focus();
+  press();
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0, 'Escape with focus elsewhere does not stop the turn');
+  h.element('input').focus();
+  press();
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'Escape in the composer stops it');
 });
 
 test('approval bar navigates to the card only on request', async () => {
@@ -848,7 +947,7 @@ test('denial input keeps selection and defers redraw while composing', async () 
   h.run('approvalStates.get("ime").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
   let card = h.context.document.getElementById('approval-card-ime');
-  findNode(card, (node) => node.textContent === 'Deny…').click();
+  quietDeny(card).click();
   let reason = findNode(card, (node) => node.className === 'deny-reason');
   reason.value = 'abcdef'; reason.listeners.input[0](); reason.setSelectionRange(2, 4, 'forward');
   h.stream().emit({id: 23, type: 'session.updated', data: {model: 'changed'}});
@@ -899,12 +998,12 @@ test('incomplete or unconfirmed arguments cannot be allowed, but can be denied',
     h.run('approvalStates.get("unsafe").mountedAt -= 1000');
     h.timers.findLast((timer) => timer.ms <= 500).handler();
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-    assert.equal(findNode(card, (node) => node.textContent === 'Allow every shell_exec call in this session').disabled, true);
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow for this chat').disabled, true);
     await h.run('answerApproval(request, approvalStates.get("unsafe"), "once")');
     assert.equal(h.net.callsTo('/approvals/unsafe').length, 0);
     assert.match(flatten(card), /cannot safely be allowed|allow is disabled/);
-    findNode(card, (node) => node.textContent === 'Deny…').click();
-    await findNode(card, (node) => node.textContent === 'Deny').click();
+    quietDeny(card).click();
+    await confirmDeny(card).click();
     assert.equal(h.net.callsTo('/approvals/unsafe')[0].body.choice, 'deny');
   }
 });
@@ -918,10 +1017,10 @@ test('file approval can be denied while target details are unavailable', async (
   h.run('approvalStates.get("missing").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
   assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  const deny = quietDeny(card);
   assert.equal(deny.disabled, false);
   deny.click();
-  await findNode(card, (node) => node.textContent === 'Deny').click();
+  await confirmDeny(card).click();
   assert.equal(h.net.callsTo('/approvals/missing')[0].body.choice, 'deny');
 });
 
@@ -938,7 +1037,7 @@ for (const succeeds of [true, false]) {
     h.timers.findLast((timer) => timer.ms <= 500).handler();
     let card = h.context.document.getElementById('approval-card-refresh');
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
-    assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    assert.equal(quietDeny(card).disabled, false);
     detail = succeeds
       ? {pending_approvals: [{request_id: 'refresh', arguments_complete: true, target: {path_label: 'a', exists: true, size_bytes: 7}}]}
       : new Error('details unavailable');
@@ -948,11 +1047,11 @@ for (const succeeds of [true, false]) {
     assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, !succeeds);
     assert.equal(h.net.callsTo('/approvals/refresh').length, 0);
     if (succeeds) {
-      assert.match(flatten(card), /overwrite a \(7 bytes\)/);
+      assert.match(flatten(card), /Replace a \(7 bytes\)\?/);
       assert.equal(findNode(card, (node) => node.textContent === 'Reload approval details'), null);
     } else {
       assert.match(h.element('notice').textContent, /Could not load approval details: details unavailable/);
-      assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+      assert.equal(quietDeny(card).disabled, false);
     }
   });
 }
@@ -1023,11 +1122,11 @@ test('approval cards display each tool and confirm file target before enabling',
   const h = harness(baseRoutes());
   await h.run('init()');
   for (const [name, args, target, expected] of [
-    ['shell_exec', {command: 'echo hello'}, null, /command in ~\/w/],
-    ['python_exec', {code: 'print(1)'}, null, /Python in ~\/w/],
-    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /overwrite a\.txt \(7 bytes\) with 3 chars/],
-    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /create b\.txt \(3 chars\)/],
-    ['custom', {value: 1}, null, /custom wants to run/],
+    ['shell_exec', {command: 'echo hello'}, null, /Run this command in w\?/],
+    ['python_exec', {code: 'print(1)'}, null, /Run this Python code in w\?/],
+    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /Replace a\.txt \(7 bytes\)\?/],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /Create b\.txt\?/],
+    ['custom', {value: 1}, null, /Let melo use custom\?/],
   ]) {
     h.context.request = {request_id: `req-${name}-${target?.exists}`, tool_name: name, arguments: args, workspace_label: '~/w', target};
     const card = h.run('approvalCard(request)');
@@ -1087,24 +1186,126 @@ test('status banners do not rewrite unchanged live text', async () => {
   assert.equal(writes['model-banner'], 0);
 });
 
-test('Connect a model is offered only when no model is set up or the configured server cannot be reached', async () => {
-  const welcome = async (patch) => {
-    const h = harness(baseRoutes({'GET /health': {...health, ...patch}}));
+// ── The setup card on the welcome ──
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const nothing = {state: 'none', name: '', backend: '', url: '', models: [], loaded: [], suggested: null, problem: ''};
+const omlx = {...nothing, state: 'found', name: 'oMLX', backend: 'vllm', url: 'http://127.0.0.1:8000/v1', models: ['qwen3-8b'], loaded: ['qwen3-8b'], suggested: 'qwen3-8b'};
+const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
+const press = async (node, label) => { await findNode(node, (n) => n.textContent === label).click(); await tick(); };
+
+/** A first run: nothing saved, the card detecting; the first PUT saves, and health then says so. */
+async function firstRun(detected, routes = {}) {
+  let saved = false;
+  const h = harness(baseRoutes({
+    'GET /health': () => ({...health, configured: saved}),
+    'GET /setup/detect': detected,
+    'GET /settings': {chat_backend: '', embedding_backend: '', workspace: '~/ws', revision: 'rev0'},
+    'PUT /settings': () => { saved = true; return {}; },
+    'POST /settings/test': {ok: true},
+    ...routes,
+  }));
+  h.context.location.hash = '#/new';
+  await h.run('init()');
+  await tick();
+  return h;
+}
+
+test('the setup card shows, and asks what is on this Mac, only while no model can answer', async () => {
+  for (const [patch, wanted, why] of [
+    [{model_server: server(true)}, false, 'A reachable model needs no setup'],
+    [{configured: false}, true, 'No model is configured'],
+    [{model_server: server(false)}, true, 'The configured server cannot be reached'],
+    [{model_server: server(null)}, false, 'A probe that has not answered yet is not a failure'],
+    [{model_server: null}, false, 'A cloud backend has no local server to probe'],
+  ]) {
+    const h = harness(baseRoutes({'GET /health': {...health, ...patch}, 'GET /setup/detect': nothing}));
     h.context.location.hash = '#/new';
     await h.run('init()');
-    return h;
-  };
-  const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
-  const connected = await welcome({model_server: server(true)});
-  assert.equal(connected.element('welcome').hidden, false);
-  assert.equal(connected.element('setup-btn').hidden, true, 'A reachable model needs no setup');
-  assert.equal((await welcome({configured: false})).element('setup-btn').hidden, false, 'No model is configured');
-  assert.equal((await welcome({model_server: server(false)})).element('setup-btn').hidden, false, 'The configured server cannot be reached');
-  assert.equal((await welcome({model_server: server(null)})).element('setup-btn').hidden, true, 'A probe that has not answered yet is not a failure');
-  assert.equal((await welcome({model_server: null})).element('setup-btn').hidden, true, 'A cloud backend has no local server to probe');
-  connected.state().health = {...health, model_server: server(false)};
-  connected.run('syncUI()');
-  assert.equal(connected.element('setup-btn').hidden, false, 'The next health answer shows it');
+    assert.equal(h.element('setup-card').hidden, !wanted, why);
+    assert.equal(h.net.callsTo('/setup/detect').length, wanted ? 1 : 0, why);
+    assert.equal(h.element('welcome').classList.contains('needs-model'), wanted, why);
+    assert.equal(h.element('input').disabled, wanted, why);
+  }
+  const chat = harness(baseRoutes({'GET /health': {...health, configured: false}, 'GET /setup/detect': nothing}));
+  await chat.run('init()');
+  assert.equal(chat.element('setup-card').hidden, true, 'An open chat has no setup card');
+  assert.equal(chat.net.callsTo('/setup/detect').length, 0);
+});
+
+test('Use this model saves the server that was found, tests it, and the welcome is ready without opening settings', async () => {
+  const h = await firstRun(omlx);
+  const card = h.element('setup-card');
+  assert.match(h.text('setup-card'), /Found oMLX on this Mac.*127\.0\.0\.1:8000.*qwen3-8b Loaded/);
+  assert.equal(h.element('input').placeholder, 'Connect a model to start');
+  assert.equal(h.element('send-btn').disabled, true);
+  await press(card, 'Use this model');
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/settings')).map((call) => `${call.method} ${call.path}`), ['GET /settings', 'PUT /settings', 'POST /settings/test']);
+  const sections = {vllm: {chat_url: 'http://127.0.0.1:8000/v1', chat_model: 'qwen3-8b'}};
+  const candidate = {chat_backend: 'vllm', embedding_backend: 'none', workspace: '~/ws', sections};
+  assert.deepEqual(h.net.calls.find((call) => call.method === 'PUT').body, {...candidate, revision: 'rev0'}, 'The PUT carries the loaded revision');
+  assert.deepEqual(h.net.callsTo('/settings/test')[0].body, candidate);
+  assert.equal(card.hidden, true);
+  assert.equal(h.element('input').disabled, false);
+  assert.equal(h.context.document.activeElement, h.element('input'), 'The composer has focus');
+  assert.equal(h.context.settingsOpened, undefined, 'Settings never opened');
+});
+
+test('with several models and none known loaded the card lists them and waits for a pick', async () => {
+  const h = await firstRun({...omlx, name: '', models: ['a-7b', 'b-8b'], loaded: [], suggested: null});
+  const card = h.element('setup-card');
+  const rows = [];
+  const walk = (node) => { if (node.type === 'radio') rows.push(node); (node.children ?? []).forEach(walk); };
+  walk(card);
+  assert.match(h.text('setup-card'), /Found a model server on this Mac.*Pick the model to use.*a-7b.*b-8b.*can take minutes/);
+  const use = findNode(card, (node) => node.textContent === 'Use this model');
+  assert.deepEqual(rows.map((row) => row.checked), [false, false], 'Nothing is picked for the user');
+  assert.equal(use.disabled, true);
+  rows[1].checked = true;
+  rows[1].listeners.change[0]();
+  assert.equal(use.disabled, false);
+  await use.click();
+  await tick();
+  assert.equal(h.net.calls.find((call) => call.method === 'PUT').body.sections.vllm.chat_model, 'b-8b');
+});
+
+test('a key, no server and a failed test are worded plainly, and Check again asks again', async () => {
+  let answer = {...nothing, state: 'needs_key', url: 'http://127.0.0.1:8000/v1', problem: 'HTTP 401'};
+  const h = await firstRun(() => answer);
+  assert.match(h.text('setup-card'), /A model server needs an API key.*127\.0\.0\.1:8000 asks for a key.*Allow inference without API key/);
+  answer = nothing;
+  await press(h.element('setup-card'), 'Check again');
+  assert.match(h.text('setup-card'), /No model server is running on this Mac.*Start oMLX or Ollama, then check again/);
+  assert.equal(findNode(h.element('setup-card'), (node) => node.textContent === 'Read the quickstart').href, 'https://localmelo.github.io/localmelo/en/quickstart.html');
+  await press(h.element('setup-card'), 'Enter a server address…');
+  assert.equal(h.context.settingsOpened, 1);
+  answer = omlx;
+  await press(h.element('setup-card'), 'Check again');
+  assert.equal(h.net.callsTo('/setup/detect').length, 3);
+  assert.match(h.text('setup-card'), /Found oMLX/);
+});
+
+test('a detection that fails is shown, and the card goes once a model is set up', async () => {
+  const h = await firstRun({status: 500, body: {error: {code: 'oops', message: 'detection broke\nmore'}}});
+  assert.match(h.text('setup-card'), /Could not look for a model server.*detection broke(?!.*more).*Try again/);
+  h.state().health = {...health, configured: true};
+  h.run('syncUI()');
+  assert.equal(h.element('setup-card').hidden, true, 'Nothing was chosen, so nothing holds the card');
+});
+
+test('a failed test keeps the card up, also after health says a model is set, until it passes', async () => {
+  let reply = {ok: false, error: 'chat probe failed: HTTP 401\nsecond line'};
+  const h = await firstRun(omlx, {'POST /settings/test': () => reply});
+  await press(h.element('setup-card'), 'Use this model');
+  assert.match(h.text('setup-card'), /Could not connect to oMLX.*chat probe failed: HTTP 401(?!.*second line)/);
+  h.state().health = {...health, configured: true};
+  h.run('syncUI()');
+  assert.equal(h.element('setup-card').hidden, false, 'The saved choice does not hide the failure');
+  assert.equal(h.element('input').disabled, true);
+  reply = {ok: true};
+  await press(h.element('setup-card'), 'Try again');
+  assert.equal(h.element('setup-card').hidden, true);
+  assert.equal(h.element('input').disabled, false);
 });
 
 test('setup failure offers the details drawer tools action', async () => {
@@ -1163,6 +1364,89 @@ test('failure controls copy bounded errors, continue without losing drafts and r
   h.context.stopped = stopped;
   assert.match(flatten(h.run('statusNode(stopped)')), /Stopped by you/);
   assert.doesNotMatch(flatten(h.run('statusNode(stopped)')), /Copy error|Details/);
+});
+
+test('every status maps to one next step or none', () => {
+  const steps = {
+    completed: null, cancelled: null, failed: 'retry', stuck: 'retry', gate_stopped: 'retry',
+    budget_exhausted: 'continue', timeout: 'continue', context_budget_exceeded: null,
+    provider_error: 'settings', setup_error: 'tools', crashed: 'copy',
+  };
+  for (const [status, step] of Object.entries(steps)) assert.equal(nextAction(status), step, status);
+  assert.equal(nextAction('crashed', 'run'), 'copy');
+  assert.equal(nextAction('crashed', 'crash'), null, 'an interrupted run is a neutral line');
+  for (const cause of ['user_stop', 'crash', 'shutdown', 'closed', 'takeover', 'park']) assert.equal(nextAction('cancelled', cause), null, cause);
+  assert.equal(nextAction('a_status_from_a_newer_version'), null);
+  assert.deepEqual(['ok', 'error', 'warn', 'stopped'].map(statusMark), ['✓', '✗', '⚠', '■']);
+});
+
+test('a failed turn draws a shared glyph, a plain title and one filled next step on the newest turn', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const make = (status, extra = {}, result = {}) => {
+    const turn = turns.newTurn(turnRow({id: `t-${status}`, turn: 2, status, result: {n_tool: 2, error: 'boom\nsecond line', ...result}, ...extra}));
+    h.state().view.turns = [turn];
+    h.context.turn = turn;
+    return h.run('statusNode(turn)');
+  };
+  const filled = (node) => findNode(node, (item) => item.tag === 'button' && item.className === 'primary-button');
+  const mark = (node) => findNode(node, (item) => item.className === 'status-mark');
+  for (const [status, glyph, label] of [
+    ['provider_error', '✗', 'Open model settings'], ['budget_exhausted', '⚠', 'Continue'], ['timeout', '⚠', 'Continue'],
+    ['stuck', '⚠', 'Try again'], ['failed', '⚠', 'Try again'], ['setup_error', '✗', 'Show tools'], ['crashed', '✗', 'Copy details'],
+  ]) {
+    const node = make(status);
+    assert.equal(mark(node).textContent, glyph, status);
+    assert.equal(mark(node).attributes['aria-hidden'], 'true');
+    assert.doesNotMatch(flatten(findNode(node, (item) => item.className === 'failure-title')), /\[[x!-]\]|\.$/, 'no bracket mark and no full stop');
+    assert.equal(filled(node)?.textContent, label, status);
+  }
+  assert.equal(filled(make('budget_exhausted', {}, {n_tool: 0}))?.textContent, 'Try again', 'Continue needs a run that used tools');
+  const old = turns.newTurn(turnRow({id: 'old', turn: 1, status: 'stuck'}));
+  h.state().view.turns = [old, turns.newTurn(turnRow({id: 'new', turn: 2}))];
+  h.context.turn = old;
+  assert.equal(filled(h.run('statusNode(turn)')), null, 'an older failure keeps its actions quiet');
+  const crash = make('crashed');
+  await findNode(crash, (item) => item.textContent === 'Copy details').click();
+  assert.equal(h.context.copied, 'melo: run ended with status crashed: boom second line\nrun run-1', 'the copied text is the same line as Copy error');
+  assert.equal(findNode(crash, (item) => item.textContent === 'Copy error'), null, 'one copy button, not two');
+  const stopped = make('cancelled', {cause: 'user_stop'});
+  assert.equal(stopped.className, 'turn-status stopped-line');
+  assert.equal(mark(stopped).textContent, '■');
+  assert.equal(filled(stopped), null, 'a stop is a neutral line');
+});
+
+test('the model server error says what to check for a local server and for a cloud one', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, model: {...health.model, backend: 'vllm'}, model_server: {url_label: '127.0.0.1:8500', reachable: false}};
+  h.context.turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: 'cannot reach the model server'}}));
+  assert.match(flatten(h.run('statusNode(turn)')), /Is the model server running at 127\.0\.0\.1:8500\?/);
+  h.state().health = {...health, model: {...health.model, backend: 'openai'}};
+  assert.match(flatten(h.run('statusNode(turn)')), /Check the API key and the model name in model settings/);
+});
+
+test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  for (const [status, severity] of [['completed', 'ok'], ['stuck', 'warn'], ['provider_error', 'error'], ['cancelled', 'stopped']]) {
+    h.context.turn = turns.newTurn(turnRow({status, cause: status === 'cancelled' ? 'user_stop' : 'run', result: {error: 'e'}}));
+    const nodes = h.run('turnWork(turn, "a", () => {}, "")');
+    const line = nodes.find((node) => node.className === 'turn-status');
+    assert.equal(line.dataset.severity, severity, status);
+  }
+});
+
+test('the gateway-offline banner offers Try again, which asks the gateway again', async () => {
+  let up = true;
+  const h = harness(baseRoutes({'GET /sessions': () => (up ? {sessions: [session('a')], machine: null, has_more: false} : new Error('down'))}));
+  await h.run('init()');
+  up = false;
+  await h.run('refreshList()');
+  assert.equal(h.element('offline-banner').hidden, false);
+  up = true;
+  await h.element('offline-retry').click();
+  assert.equal(h.element('offline-banner').hidden, true, 'the banner goes when the gateway answers');
 });
 
 test('earlier turns replay separately without disturbing current cursor or approvals', async () => {
@@ -1918,6 +2202,7 @@ test('Escape closes the drawer before stopping a running turn', async () => {
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.drawer.opened, false);
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('input').focus();
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1);
 });
@@ -1936,8 +2221,9 @@ test('Escape closes the level menu before it stops the turn', async () => {
   escape({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.state().levelsOpen, false, 'The open menu closes first');
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.element('input').focus();
   escape({key: 'Escape', isComposing: false, keyCode: 27});
-  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'A second Escape stops the turn');
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'A second Escape in the composer stops the turn');
 });
 
 test('Escape and a click outside close the running list before Escape stops the turn', async () => {
@@ -2590,7 +2876,9 @@ test('a task waiting for approval shows the chat approval card and answers it', 
   const card = findNode(panel, (node) => node.classList.contains('approval-card'));
   assert.equal(card.id, 'approval-card-req-t');
   assert.match(flatten(panel), /Waiting for your approval/);
-  assert.match(flatten(panel), /shell_exec wants to run a command in ~\/w/);
+  assert.match(flatten(panel), /Run this command in w\?/);
+  assert.match(flatten(panel), /shell_exec · ~\/w/);
+  assert.match(flatten(panel), /Allow for this task/, 'a task is not a chat');
   const once = findNode(card, (node) => node.textContent === 'Allow once');
   h.run('approvalStates.get("req-t").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();

@@ -333,6 +333,35 @@ export function statusText(status, cause = "") {
   return {word: unknown, severity: "warn", title: unknown};
 }
 
+const STATUS_MARK = {ok: "✓", error: "✗", warn: "⚠", stopped: "■"};
+
+/** The glyph of a status line, as the terminal draws it (`support/cli/theme.py`). */
+export function statusMark(severity) {
+  return STATUS_MARK[severity] ?? STATUS_MARK.warn;
+}
+
+// status -> the first thing to do about a run that ended so. A stop or an
+// interruption is a neutral line, and `context_budget_exceeded` has no button:
+// only a shorter request or a new chat helps, and the hint says so.
+const NEXT_ACTION = {
+  provider_error: "settings",
+  setup_error: "tools",
+  crashed: "copy",
+  "crashed|crash": null,
+  budget_exhausted: "continue",
+  timeout: "continue",
+  failed: "retry",
+  stuck: "retry",
+  gate_stopped: "retry",
+};
+
+/** The one next step a run's end offers first: `settings`, `tools`, `continue`, `retry`, `copy` or null. */
+export function nextAction(status, cause = "") {
+  const own = (key) => Object.hasOwn(NEXT_ACTION, key);
+  const keyed = `${status}|${cause}`;
+  return own(keyed) ? NEXT_ACTION[keyed] : own(status) ? NEXT_ACTION[status] : null;
+}
+
 /** `status_line`: one bounded line, without the user's task text. */
 export function statusLine(status, error) {
   let reason = String(error ?? "").split(/\s+/).filter(Boolean).join(" ");
@@ -992,23 +1021,24 @@ export function liveFacts(turn) {
 /**
  * A tool card's mark, state and short text, as the terminal shows them.
  *
- * `[ok]` with an `exit 1` warning, `[x] Failed`, `[-] denied`, `[ ] not run`,
- * `[..] Needs approval`; *held* turns a running call into `Waiting: <held>`.
+ * `✓` with an `exit 1` warning, `✗ Failed`, `⊘ denied`, `◌ not run`,
+ * `● Needs approval`; *held* turns a running call into `Waiting: <held>`. The
+ * words beside a mark say what it says, so a colour is never the only signal.
  */
 export function toolState(item, {held = "", now = 0} = {}) {
   const duration = item.durationS === null ? null : formatDuration(item.durationS);
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   switch (item.status) {
     case "running": {
-      if (held) return {state: "held", mark: "[..]", text: `Waiting: ${held}`};
+      if (held) return {state: "held", mark: "●", text: `Waiting: ${held}`};
       let clock = item.startedTs ? toolElapsed(now - item.startedTs) : "0:00";
       if (LIMITED_TOOLS.has(item.name)) {
         clock += ` of ${toolElapsed(SESSION_TOOL_TIMEOUT_S)}`;
       }
-      return {state: "running", mark: "[..]", text: `Running${SEPARATOR}${clock}`};
+      return {state: "running", mark: "●", text: `Running${SEPARATOR}${clock}`};
     }
     case "waiting_approval":
-      return {state: "waiting_approval", mark: "[..]", text: "Needs approval"};
+      return {state: "waiting_approval", mark: "●", text: "Needs approval"};
     case "success": {
       // The terminal's order: the time, then a non-zero exit, then the tag.
       const extra = [];
@@ -1017,7 +1047,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
         extra.push(`exit ${item.exitCode}`);
       }
       if (tag) extra.push(tag.short);
-      return {state: "success", mark: "[ok]", text: extra.join(SEPARATOR)};
+      return {state: "success", mark: "✓", text: extra.join(SEPARATOR)};
     }
     case "error":
     case "timeout":
@@ -1025,34 +1055,34 @@ export function toolState(item, {held = "", now = 0} = {}) {
       const word = {error: "Failed", timeout: "Timed out", crashed: "Crashed"}[item.status];
       return {
         state: item.status,
-        mark: "[x]",
+        mark: "✗",
         text: duration === null ? word : `${word}${SEPARATOR}${duration}`,
       };
     }
     case "blocked": {
       const first = cleanOutput(item.error).trim().split("\n")[0] ?? "";
       const text = tag ? tag.short : first ? `blocked: ${first}` : "blocked";
-      return {state: "blocked", mark: "[-]", text};
+      return {state: "blocked", mark: "⊘", text};
     }
     case "cancelled": {
       if (item.approval?.origin === "withdrawn") {
-        return {state: "cancelled", mark: "[ ]", text: "not run"};
+        return {state: "cancelled", mark: "◌", text: "not run"};
       }
       return {
         state: "cancelled",
-        mark: "[-]",
+        mark: "⊘",
         text: duration === null ? "stopped" : `stopped after ${duration}`,
       };
     }
     case "interrupted":
       return {
         state: "interrupted",
-        mark: "[-]",
+        mark: "⊘",
         text: "Interrupted: may have partly run",
       };
     case "not_run":
     default:
-      return {state: "not_run", mark: "[ ]", text: "not run"};
+      return {state: "not_run", mark: "◌", text: "not run"};
   }
 }
 

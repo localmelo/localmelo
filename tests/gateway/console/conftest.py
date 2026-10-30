@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.events import EVENT_FIELDS
 from localmelo.melo.schema import ImagePart, Message
+from localmelo.support.backends.discovery import DETECT_URLS_ENV
 from localmelo.support.config import (
     Config,
     GatewayConfig,
@@ -29,6 +30,16 @@ from localmelo.support.sessions.store import (
 
 PORT = 8401
 HOLDER = "test-host:1234:abcd"
+
+
+@pytest.fixture(autouse=True)
+def _no_real_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn model-server detection off unless a test names URLs of its own.
+
+    The default URLs include ports of the benchmark's servers, and a console
+    test must never reach one.
+    """
+    monkeypatch.setenv(DETECT_URLS_ENV, "")
 
 
 class FakeProbe:

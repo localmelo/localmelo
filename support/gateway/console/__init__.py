@@ -59,6 +59,8 @@ from .shapes import session_json
 from .worker_reader import WorkerReader
 
 if TYPE_CHECKING:
+    import httpx
+
     from localmelo.support.config import Config
 
 logger = logging.getLogger(__name__)
@@ -90,7 +92,8 @@ class ConsoleOptions:
     *worker_store_path* defaults to the CLI sessions file, *builder* is
     :func:`~.registry.default_builder`, and *probe* is the
     real cached model-server probe. *dev_reload* is read by the static
-    bundle of PR 5.
+    bundle of PR 5. *detect_transport* answers the requests of
+    ``GET /api/setup/detect`` in place of the network.
     """
 
     store_path: str | None = None
@@ -101,6 +104,7 @@ class ConsoleOptions:
     # passes a gate of its own (no call log, a fake clock).
     gate: ChatGate | None = None
     dev_reload: bool = False
+    detect_transport: httpx.AsyncBaseTransport | None = None
 
 
 class Console:

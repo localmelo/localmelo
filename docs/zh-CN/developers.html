@@ -101,7 +101,7 @@ cd localmelo                 # keep this name: the package is built from it
 uv sync --extra dev --extra gateway</code></pre>
         </figure>
         <p>
-          <code>uv</code> 会根据提交的 <code>uv.lock</code> 创建 <code>.venv/</code>，Python 版本按 <code>.python-version</code> 固定为 3.13；localmelo 本身支持 Python 3.11 或更高版本。<code>--extra dev</code> 会安装 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 会安装 <code>melo --serve</code> 需要的 FastAPI 和 uvicorn。
+          <code>uv</code> 会根据提交的 <code>uv.lock</code> 创建 <code>.venv/</code>，Python 版本按 <code>.python-version</code> 固定为 3.13；localmelo 本身支持 Python 3.11 或更高版本。<code>--extra dev</code> 会安装 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 会安装 <code>melo serve</code> 需要的 FastAPI 和 uvicorn。
         </p>
         <p>
           也可以运行 <code>uv run pre-commit install</code> 安装钩子。每次提交时，它们会运行 <code>ruff --fix</code>、<code>black</code>、<code>mypy</code> 和完整的 pytest 测试。提交失败通常意味着测试真的出了问题，而不是应该跳过钩子。
@@ -116,10 +116,10 @@ uv sync --extra dev --extra gateway</code></pre>
         <figure class="terminal">
           <figcaption class="terminal-title">在克隆目录中运行</figcaption>
           <pre><code>uv run melo "What is 6*7?"
-uv run melo --serve</code></pre>
+uv run melo serve</code></pre>
         </figure>
         <p>
-          在其他目录运行时，请指明克隆目录：<code>uv run --project DIR melo …</code>。一次运行需要模型服务器：传入 <code>--base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b</code>，或者先运行一次 <code>uv run melo --reconfigure</code> 保存配置。如果某次运行或某个测试不能读写你自己的 <code>~/.cache/localmelo</code>，请把 <code>HOME</code> 指向一个临时目录。
+          在其他目录运行时，请指明克隆目录：<code>uv run --project DIR melo …</code>。一次运行需要模型服务器：传入 <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>（旧写法 <code>--base-url</code> 和 <code>--chat-model</code> 仍然可用），或者先运行一次 <code>uv run melo setup</code> 保存配置。如果某次运行或某个测试不能读写你自己的 <code>~/.cache/localmelo</code>，请把 <code>HOME</code> 指向一个临时目录。
         </p>
       </section>
 

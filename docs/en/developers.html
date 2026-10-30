@@ -138,7 +138,7 @@ uv sync --extra dev --extra gateway</code></pre>
           <code>.python-version</code>; localmelo itself supports Python 3.11
           or later. <code>--extra dev</code> adds pytest, ruff, black, mypy and
           pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn for
-          <code>melo --serve</code>.
+          <code>melo serve</code>.
         </p>
         <p>
           Optionally install the hooks with <code>uv run pre-commit install</code>.
@@ -157,13 +157,14 @@ uv sync --extra dev --extra gateway</code></pre>
         <figure class="terminal">
           <figcaption class="terminal-title">From the checkout</figcaption>
           <pre><code>uv run melo "What is 6*7?"
-uv run melo --serve</code></pre>
+uv run melo serve</code></pre>
         </figure>
         <p>
           Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.
           A run needs a model server: pass
-          <code>--base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b</code>,
-          or run <code>uv run melo --reconfigure</code> once to save a
+          <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code> (the old
+          spellings <code>--base-url</code> and <code>--chat-model</code> still
+          work), or run <code>uv run melo setup</code> once to save a
           configuration. Point <code>HOME</code> at a temporary directory for a
           run or a test that must not read or write your own
           <code>~/.cache/localmelo</code>.
