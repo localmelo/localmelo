@@ -450,7 +450,7 @@ def test_ascii_mode_prints_only_ascii(
     term.type("\x1b")
     term.see("Cancelled. Still using")
     term.type("/new\r")
-    term.see("New session -")
+    term.see("New chat -")
     term.type("hello\r")
     term.see("Hello! I am melo")
     assert term.quit() == 0
@@ -498,11 +498,11 @@ def test_tab_then_enter_switches_to_the_completed_model(
 def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/")
-    listed.see("Start a new session")
+    listed.see("Start a new chat")
     listed.type("\x1b[B" * 2)  # /model, then /new
     time.sleep(0.3)
     listed.type("\r")
-    listed.see("─ New session ─")
+    listed.see("─ New chat ─")
     assert "Unknown command" not in listed.text()
     assert listed.quit() == 0
 

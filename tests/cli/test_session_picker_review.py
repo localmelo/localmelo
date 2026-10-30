@@ -100,7 +100,7 @@ async def test_picker_caps_database_and_resolved_choice_lists_at_fifty(
     assert len(picker.rows) == 50
     assert "running elsewhere" in picker._rows()
     if fixed:
-        assert "matching sessions" in picker._header()
+        assert "matching chats" in picker._header()
     picker.close()
 
 

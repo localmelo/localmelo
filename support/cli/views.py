@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -323,6 +324,64 @@ def banner(
     return Group(*lines)
 
 
+# What a recap leaves out of an answer's Markdown (see :func:`_preview`).
+_FENCE: Final = re.compile(r"\s*(```|~~~)")
+_RULE: Final = re.compile(r"\s*([-*_])(\s*\1){2,}\s*")
+_LEADER: Final = re.compile(r"^(\s*)(?:#{1,6}\s+|>\s?)+")
+_BULLET: Final = re.compile(r"^(\s*)[-*+]\s+")
+_CODE_SPAN: Final = re.compile(r"`([^`]*)`")
+_BOLD: Final = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_ITALIC: Final = re.compile(r"(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])")
+_LINK: Final = re.compile(r"\[([^\]]+)\]\([^)\s]*\)")
+# Rows of an answer or of a typed message that a recap shows.
+_ANSWER_ROWS: Final = 4
+_TYPED_ROWS: Final = 2
+
+
+def _plain(line: str) -> str:
+    """One line of Markdown as plain text: its markers off, a code span's text as it is."""
+    line = _BULLET.sub(r"\1- ", _LEADER.sub(r"\1", line, count=1), count=1)
+    parts = _CODE_SPAN.split(line)  # even parts are outside code, odd ones inside
+    return "".join(
+        (
+            part
+            if number % 2
+            else _ITALIC.sub(r"\1", _BOLD.sub(r"\1", _LINK.sub(r"\1", part)))
+        )
+        for number, part in enumerate(parts)
+    )
+
+
+def _preview(answer: str) -> list[str]:
+    """The first rows of an answer as plain text: no blank rows, fences or markers."""
+    rows: list[str] = []
+    fenced = False
+    for line in answer.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            shown = line.rstrip()
+        elif _RULE.fullmatch(line):
+            continue
+        else:
+            shown = _plain(line).rstrip()
+        if shown.strip():
+            rows.append(shown)
+        if len(rows) == _ANSWER_ROWS:
+            break
+    return rows
+
+
+def _marked(mark: str, rows: Sequence[str]) -> list[str]:
+    """*rows* with *mark* before the first and the others under its text."""
+    pad = " " * (cells(mark) + 1)
+    return [
+        f"  {mark} {row.lstrip()}" if number == 0 else f"  {pad}{row}"
+        for number, row in enumerate(rows)
+    ]
+
+
 def resume_recap(
     info: SessionInfo,
     turns: Sequence[TurnInfo],
@@ -330,8 +389,14 @@ def resume_recap(
     *,
     width: int,
     symbols: Symbols,
+    developer: bool = False,
 ) -> Text:
-    """A short, plain recap from stored redacted copies, never a live event replay."""
+    """A short, plain recap from stored redacted copies, never a live event replay.
+
+    Each message or answer has one mark; the rows under it are indented, and
+    an answer's Markdown shows as plain text. What the model remembers of the
+    tool calls is for developer mode.
+    """
     finished = [t for t in turns if not t.undone and t.status != "running"]
     lines = [
         f'◆ Resumed "{info.title}" · {info.turns} turn{"s" if info.turns != 1 else ""} · last active {session_age(info.updated_at, time.time())}',
@@ -339,12 +404,18 @@ def resume_recap(
     lines.extend(
         "  " + line
         for line in wrap_words(
-            resume_note(loaded.mode, loaded.turns, loaded.checkpoint_turns),
+            resume_note(
+                loaded.mode,
+                loaded.turns,
+                loaded.checkpoint_turns,
+                detail=developer,
+            ),
             max(1, width - 2),
         )
     )
     if len(finished) > 3:
-        lines.append(f"  … {len(finished) - 3} earlier turns")
+        earlier = len(finished) - 3
+        lines.append(f"  … {earlier} earlier turn{'s' if earlier != 1 else ''}")
     for turn in finished[-3:]:
         if turn.attachments is None:
             typed, legacy = parse_user_text(turn.user_text)
@@ -357,7 +428,8 @@ def resume_recap(
             ]
         else:
             typed, attachment_labels = turn.typed_text or turn.user_text, []
-        lines.extend("  › " + text for text in clean_output(typed).splitlines()[:2])
+        said = [row for row in clean_output(typed).splitlines() if row.strip()]
+        lines.extend(_marked("›", said[:_TYPED_ROWS]))
         lines.extend(
             f"    └ attached {clean_output(name)} ({size:,} {unit})"
             for name, size, unit in attachment_labels
@@ -369,14 +441,16 @@ def resume_recap(
             NO_ANSWER_LABEL.format(status=turn.status),
         ):
             mark = symbols.stopped if turn.status == "cancelled" else symbols.failed
-            answer = status_text(turn.status, turn.cause).title + " (no answer)"
-        lines.extend(
-            f"  {mark} " + text for text in clean_output(answer).splitlines()[:4]
-        )
+            rows = [status_text(turn.status, turn.cause).title + " (no answer)"]
+        else:
+            rows = _preview(clean_output(answer))
+        lines.extend(_marked(mark, rows))
     return Text(
         "\n".join(
             cut_cells(
-                expand_tabs(clean_output(in_symbols(line, symbols))), max(1, width)
+                expand_tabs(clean_output(in_symbols(line, symbols))),
+                max(1, width),
+                symbols.ellipsis,
             )
             for line in lines
         )

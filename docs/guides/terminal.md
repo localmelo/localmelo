@@ -135,10 +135,10 @@ the command does and, where it needs one, its argument (`/attach PATH`).
 | `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
 | `/attachments` | List staged files and their numbers. |
 | `/detach N\|all` | Remove the numbered staged file or all staged files. |
-| `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/new` (also `/clear`) | Start a new chat: the model forgets the conversation, and this chat's grants end. A `── New chat ──` rule marks the start. |
 | `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
-| `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the session is created. |
+| `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the chat is saved. |
 | `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals. `?` means not recorded. |
 | `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
@@ -546,42 +546,53 @@ wrapped message leaves no blank rows. Known limits:
 
 ### Sessions and files
 
-Bare `melo` starts a new session; only the first message creates its row.
+Bare `melo` starts a new chat; only the first message saves it. The status
+bar names it `New chat` until it has a title.
 Use `melo -c` (`--continue`) to resume the newest chat with a finished turn
 in the current workspace, or `melo -r` (`--resume`) to pick one. With none,
-either starts a new session and says so; Esc in the startup picker also
+either starts a new chat and says so; Esc in the startup picker also
 starts new, without creating an empty row. `melo -r REF` resolves an ID,
 a prefix of at least four characters, or an exact case-insensitive title;
 multiple matches, or a title/message search fallback, open the picker.
 An unknown reference exits 2. The startup choice, including the `-r` picker,
 happens before the banner: the recap names a chosen chat (`◆ Resumed "TITLE"`,
 and developer mode's box labels it `"TITLE" (resumed)`); Esc or an empty list
-gives a new-session banner. `-c` and `-r` cannot be
+gives the new-chat banner. `-c` and `-r` cannot be
 combined, or used with a task or `melo serve`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest
-first. The filter updates after 150 ms; Tab toggles this folder/all folders.
-Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
+first. Its header says what the keys do (`Resume a chat · ~/demo-project · tab:
+this folder or all · esc close`); a folder too long for the row is cut from its
+middle, so the keys stay. The filter updates after 150 ms; Tab toggles this
+folder and all folders. Enter resumes, Esc or Ctrl+D closes it, and the
+ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
 Web and scheduler sessions are never offered. The web console's Workers view
 shows your chats here read-only under **Terminal chats**, redacted as it reads
 them (the stored copy is not redacted); it cannot change or send to them. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
 `/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
-resets those display preferences (`/stream` back to `[cli] stream`). A note says when the session previously worked in another folder.
+resets those display preferences (`/stream` back to `[cli] stream`). A note says when the chat previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
-redacted copies. The line below its title says what reached model memory:
-`[sessions] resume_mode = "pairs"` (the default) restores recent user/answer
-pairs, without tool steps; `"window"` restores a saved working-memory
-checkpoint plus later pairs, falling back to pairs if no checkpoint is usable.
+redacted copies, as plain text: your message after `›`, and each answer after
+one `●`, with its Markdown markers off, its blank lines left out and at most
+four rows, the rows under the mark indented. The line below its title says how
+many turns are back in the model's memory (`1 turn is back in the model's
+memory.`); developer mode adds what became of their tool calls. `[sessions]
+resume_mode = "pairs"` (the default) restores recent user/answer pairs, without
+tool steps; `"window"` restores a saved working-memory checkpoint plus later
+pairs, falling back to pairs if no checkpoint is usable.
 Set this in `config.toml`; an invalid value warns in the UI and uses pairs,
 without adding warnings to direct-mode output. The recap's counts reflect
 the restored window after eviction, not the total number of stored turns.
 
 Two terminals may take turns on one CLI session. Before sending, melo reloads
 changes from the other window; a busy or deleted session keeps the draft.
-On exit, a session with turns prints its `melo -r ID` resume command.
+On exit, a chat with turns says how to come back to it:
+`◆ Saved "What is this project?". Continue it with: melo -c` when it is the
+newest chat of this folder and melo ran in that folder, and
+`Resume it with: melo -r ID` otherwise.
 
 Sessions are kept in `~/.cache/localmelo/cli/sessions.db`: every turn,
 with your message, the answer and each tool call with its output.

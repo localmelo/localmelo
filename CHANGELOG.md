@@ -1041,6 +1041,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Coming back to a chat in the terminal reads plainly. The exit line says
+  `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
+  newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
+  otherwise. A resumed chat's recap shows each message and each answer with one
+  mark, the rows under it indented: the answer reads as plain text (its Markdown
+  markers off, no marked blank rows, at most four rows) where it was raw Markdown
+  with a `●` on every line, and the note below the title says `1 turn is back in the
+  model's memory.` Developer mode keeps the tool-call detail (`; its tool calls are
+  not.`). The picker's header reads `Resume a chat · ~/demo-project · tab: this
+  folder or all · esc close`, and a long folder is cut from its middle so the keys
+  stay on the row. The terminal says "chat" where it said "session": `New chat` in the
+  status bar and in the `/new` rule, the `chat` row of `/status`, the picker's footer,
+  the messages around resuming, and the descriptions of `/new`, `/sessions`, `/resume`
+  and `/title`. Command names (`/sessions`, `-c`, `-r`), developer mode's rows and
+  machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#NN]).
+
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A

@@ -137,7 +137,7 @@ async def test_old_title_write_cannot_replace_new_session_state(
 async def test_title_write_is_refused_during_a_session_switch(setup: Setup) -> None:
     setup.session._state = "switching"
     assert setup.session.enter("/title must not rename the old chat") == (
-        "Wait for the session switch to finish before changing its title."
+        "Wait for the chat switch to finish before changing its title."
     )
     assert setup.session.session_tools.pending_title is None
     setup.session._state = "idle"

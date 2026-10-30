@@ -197,7 +197,7 @@ State = Literal["idle", "running", "stopping", "switching", "shell"]
 
 _STATE_HINTS: Final = {
     "stopping": "Stopping the turn; enter sends once it has stopped.",
-    "switching": "Switching the session or model; esc cancels it.",
+    "switching": "Switching the chat or model; esc cancels it.",
     "shell": "A ! command is running.",
 }
 # Why a "! command" draft waits: the draft is kept.
@@ -307,7 +307,7 @@ class CliSession:
             workspace=home_label(self.agent.workspace_root or ""),
             context=f"ctx {format_tokens(context)}" if context else "",
             segments=segments,
-            title=self.title or "New session",
+            title=self.title or "New chat",
             mode=shown,
             mode_style="class:yolo" if yolo else "class:muted",
         )
@@ -372,7 +372,7 @@ class CliSession:
                 )
                 return ""
             if self._attachments and command.name in ("new", "resume", "sessions"):
-                return "Detach staged files before switching sessions."
+                return "Detach staged files before switching chats."
             allowed = command.during_turn is True or (
                 command.during_turn == "show" and not arguments
             )
@@ -381,9 +381,7 @@ class CliSession:
                     return UNDO_HINT
                 return f"/{command.name} is not available while a turn runs (esc stops it)."
             if command.name == "title" and arguments and self._state == "switching":
-                return (
-                    "Wait for the session switch to finish before changing its title."
-                )
+                return "Wait for the chat switch to finish before changing its title."
             if command.name in (
                 "sessions",
                 "resume",
@@ -1038,7 +1036,7 @@ class CliSession:
             "file tools stay here; commands and Python can reach other files",
             "muted",
         )
-        title = self.title or "New session"
+        title = self.title or "New chat"
         session_id = self.runner.session_id if self.runner is not None else ""
         short = (session_id or "")[:12]
         count = len(turns)
@@ -1139,7 +1137,7 @@ class CliSession:
         self._row("folder", where)
         title = " ".join(self.title.split())
         count = f"{turns} turn" + ("" if turns == 1 else "s") if turns else "new"
-        self._row("session", f'"{title}" · {count}' if title else count)
+        self._row("chat", f'"{title}" · {count}' if title else count)
         mode, grants = self.approvals.mode, self.approvals.allowed_tools
         self._row("approvals", approval_words(mode, grants))
         usage, last = self.renderer.usage, self.renderer.context_tokens
@@ -1237,7 +1235,7 @@ class CliSession:
             problem = redact_secrets(factory.mcp_error)[0]
             self.out.print(
                 self._text(
-                    f"MCP is off for this session: {problem}. "
+                    f"MCP is off for this chat: {problem}. "
                     "Fix the config, then restart melo.",
                     "warn",
                 )
@@ -1297,7 +1295,7 @@ class CliSession:
         self.renderer.context_tokens = 0
         self.renderer.new_session()
         self.stream = self._default_stream
-        label = " New session "
+        label = " New chat "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule
         self.out.print(self._text(rule * side + label + rule * side, style="muted"))

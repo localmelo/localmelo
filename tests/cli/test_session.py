@@ -385,7 +385,7 @@ async def test_new_starts_a_new_session_with_no_grants(setup: Setup) -> None:
     await session.new()
     assert session.runner is None and session.approvals.allowed_tools == frozenset()
     assert session.agent.conversation() == []
-    assert "─ New session ─" in setup.out.text()
+    assert "─ New chat ─" in setup.out.text()
     setup.factory.scripts["m1"] = [answer("again")]
     session.agent = await setup.factory.build()
     session.enter("two")
@@ -1601,7 +1601,7 @@ async def test_status_answers_first_in_five_rows(
     session, out = setup.session, setup.out
     session.enter("/status")
     await _until(lambda: "context    " in out.text())
-    assert "\nsession    new\n" in out.text()
+    assert "\nchat       new\n" in out.text()
     session.enter("hello")
     await setup.idle()
     session.enter("/status")
@@ -1609,7 +1609,7 @@ async def test_status_answers_first_in_five_rows(
     assert out.text().strip().splitlines()[-5:] == [
         f"model      m1 · OpenAI-compatible server · {URL} · ✓ answers",
         "folder     ~/work",
-        'session    "hello" · 1 turn',
+        'chat       "hello" · 1 turn',
         "approvals  asks before running commands or changing files",
         "context    not measured yet",
     ]
@@ -1740,9 +1740,7 @@ async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
     assert "MCP servers from ~/mcp.json (mcp_config)" in out.text()
     factory.mcp_error = "the server exited"
     session.enter("/mcp")
-    await _until(
-        lambda: "MCP is off for this session: the server exited." in out.text()
-    )
+    await _until(lambda: "MCP is off for this chat: the server exited." in out.text())
     assert "Fix the config, then restart melo." in " ".join(out.text().split())
 
 
