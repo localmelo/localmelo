@@ -184,18 +184,12 @@ Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
-╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
-│            saved as the default                                          │
-│ workspace  ~/demo-project                                                │
-│ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory                                           │
-│ session    new                                                           │
-╰──────────────────────────────────────────────────────────────────────────╯
-  / commands · esc stop · ctrl+d quit
+melo 0.1.0 · qwen3:8b (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
 ```
 
-The title shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0.
+The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` shows the server, tools, memory and session.
 
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one

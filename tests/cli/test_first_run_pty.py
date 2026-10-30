@@ -33,11 +33,11 @@ _ESCAPES = re.compile(
 )
 
 
-def _melo(home: Path, server: FakeChatServer) -> Terminal:
+def _melo(home: Path, server: FakeChatServer, *args: str) -> Terminal:
     env = _env(home)
     env["LOCALMELO_DETECT_URLS"] = server.base_url
     env["TERM"] = "xterm-256color"  # whatever terminal runs the tests
-    term = Terminal([sys.executable, "-I", "-m", "localmelo"], env, home)
+    term = Terminal([sys.executable, "-I", "-m", "localmelo", *args], env, home)
     fcntl.ioctl(term._master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
     return term
 
@@ -87,6 +87,8 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"hi\r")
         assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
+        term.type(b"/status\r")  # the welcome no longer names the server
+        assert term.read_until(lambda out: b"version    melo" in out, 30), term.output
         term.type(b"/exit\r")
         assert _exit_code(term) == 0, term.output
     finally:
@@ -104,8 +106,8 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     hint = " ".join(row.strip() for row in rows[start : start + 2])
     assert hint == discovery.NO_DEFAULT_HINT
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
-    assert f"chat-b · {label} · {url}" in text
-    assert "saved as the default" in text
+    assert "chat-b (/model to change)" in text and "Try: What is this project?" in text
+    assert f"model      chat-b · {label} · {url}" in text
     assert chat_server.bodies[0]["model"] == "chat-b"
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
     assert f'chat_backend = "{key}"' in saved
@@ -114,7 +116,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     assert 'embedding_model = "nomic-embed-text"' in saved
 
     chat_server.models = []  # the second run lists nothing and asks nothing
-    term = _melo(tmp_path, chat_server)
+    term = _melo(tmp_path, chat_server, "--developer")  # the box names the server
     try:
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"/exit\r")

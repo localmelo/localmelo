@@ -199,7 +199,9 @@ def test_a_message_gets_its_answer_and_ctrl_d_quits(
 ) -> None:
     term = melo()
     term.see("Ask melo")
-    assert "╭─ melo" in term.text() and "stub-model" in term.text()
+    text = term.text()
+    assert "melo " in text and "stub-model (/model to change)" in text
+    assert "Try: What is this project?" in text and "╭─ melo" not in text
     term.type("hello\r")
     term.see("Hello! I am melo, running on a stub model.")
     term.see("Worked for")
@@ -303,8 +305,8 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
     term.see("as the default backend? [Y/n]")
     term.type("n\r")
     term.see("Ask melo")
-    assert f"stub-model · OpenAI-compatible server · {stub.base_url}" in term.text()
-    assert "from --base-url (not saved)" in term.text()
+    assert "stub-model (/model to change)" in term.text()
+    assert f"{stub.base_url} · from --base-url (not saved)" in term.text()
     assert term.quit() == 0
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
 

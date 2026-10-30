@@ -610,22 +610,37 @@ def _tools() -> list[ToolInfo]:
 
 
 def _banner(
-    width: int = 80, workspace: str = "/tmp/demo-project", **backend: Any
+    width: int = 80,
+    workspace: str = "/tmp/demo-project",
+    *,
+    developer: bool = True,
+    version: str = "0.1.0",
+    yolo: bool = False,
+    symbols: Symbols = UNICODE,
+    **backend: Any,
 ) -> str:
     out = RecordingOut(width)
     out.print(
         banner(
-            version="0.1.0",
+            version=version,
             backend=_backend(**backend),
             workspace=workspace,
             tools=_tools(),
             memory=True,
-            yolo=False,
+            yolo=yolo,
             width=width,
-            symbols=UNICODE,
+            symbols=symbols,
+            developer=developer,
         )
     )
     return out.text()
+
+
+def _welcome(width: int = 80, **kwargs: Any) -> list[str]:
+    """The rows of the default banner, without the blank rows around them."""
+    text = _banner(width, developer=False, **kwargs)
+    assert text.startswith("\n") and text.endswith("\n\n")
+    return text.strip("\n").split("\n")
 
 
 def test_the_banner_box() -> None:
@@ -640,6 +655,50 @@ def test_the_banner_box() -> None:
     assert "│ session    new" in lines[5]
     assert all(cells(line) == 80 for line in lines[:7])
     assert lines[7] == "  / commands · esc stop · ctrl+d quit"
+
+
+def test_the_welcome_is_three_rows_that_start_the_conversation() -> None:
+    assert _welcome() == [
+        "melo 0.1.0 · stub-model (/model to change)",
+        "/tmp/demo-project",
+        "Try: What is this project? · / commands · ctrl+d quit",
+    ]
+    assert _welcome(symbols=ASCII)[2].endswith("? - / commands - ctrl+d quit")
+
+
+@pytest.mark.parametrize("width", [80, 60, 44])
+def test_the_welcome_keeps_three_rows_and_wraps_none(width: int) -> None:
+    rows = _welcome(width, version="0.1.0 (6a400ec)")
+    assert len(rows) == 3 and all(cells(row) <= width for row in rows), rows
+    assert "(/model to change)" in rows[0] and "ctrl+d quit" in rows[2]
+    assert rows[2].startswith("Try: What is this project?")
+
+
+def test_the_welcome_names_the_server_only_for_a_model_that_is_not_saved() -> None:
+    for source in ("config", "saved"):
+        assert len(_welcome(source=source)) == 3
+    wide = _welcome(120, source="--base-url", listed=3)
+    assert wide[2] == (
+        f"{URL} · from --base-url (not saved) · the loaded one of 3; /model lists them"
+    )
+    assert _welcome(80, source="--base-url", listed=3)[2] == (
+        f"{URL} · from --base-url (not saved)"
+    )
+    assert _welcome(44, source="unsaved")[2] == URL  # the longer notes give way
+
+
+def test_the_welcome_keeps_the_warnings_and_cleans_the_model_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    rows = _welcome(
+        workspace=os.path.realpath(tmp_path), yolo=True, model=f"qwen{OSC_TITLE}3"
+    )
+    assert rows[0] == "melo 0.1.0 · qwen3 (/model to change)" and rows[1] == "~"
+    assert rows[3:] == [
+        "⚠ YOLO: tools run without asking.",
+        "⚠ The workspace is ~: file tools can reach every file in it.",
+    ]
 
 
 def test_the_banner_names_the_configured_embedding_model() -> None:
@@ -688,7 +747,7 @@ def test_a_boxed_banner_wraps_the_memory_text_inside_the_box() -> None:
     ids=["no-embedding", "configured"],
 )
 def test_a_narrow_banner_keeps_the_memory_text_in_full(
-    backend: dict[str, str],
+    backend: dict[str, Any],
 ) -> None:
     text = _banner(width=45, **backend)
     assert "╭" not in text

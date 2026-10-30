@@ -20,6 +20,7 @@ from localmelo.melo.schema import (
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
+    cut_middle,
     expand_tabs,
     pad_cells,
     wrap_words,
@@ -135,6 +136,94 @@ def workspace_warning(workspace: str, symbols: Symbols) -> str | None:
     return None
 
 
+Parts = Sequence[tuple[str, str]]
+
+
+def _fitting(options: Sequence[Parts], width: int) -> Text:
+    """The first of *options*, fullest first, that fits *width*; else the last, cut."""
+    rows: list[Text] = []
+    for parts in options:
+        row = Text(no_wrap=True, overflow="ellipsis")
+        for text, style in parts:
+            row.append(text, style=style or None)
+        rows.append(row)
+    return next((row for row in rows if row.cell_len <= width), rows[-1])
+
+
+def _warnings(workspace: str, *, yolo: bool, symbols: Symbols) -> list[Text]:
+    lines: list[Text] = []
+    if yolo:
+        lines.append(
+            Text(f"{symbols.warn} YOLO: tools run without asking.", style="warn")
+        )
+    warning = workspace_warning(workspace, symbols)
+    if warning:
+        lines.append(Text(warning, style="warn"))
+    return lines
+
+
+def welcome(
+    *,
+    version: str,
+    backend: BackendInfo,
+    workspace: str,
+    yolo: bool,
+    width: int,
+    symbols: Symbols,
+) -> RenderableType:
+    """Three rows that start the conversation: the model, the folder, what to try.
+
+    The model's server shows in a row of its own only when the model is not
+    the saved default; the tools, memory and session are in ``/status``. Narrow,
+    a row drops its least needed parts whole before anything is cut.
+    """
+    dot, ellipsis = symbols.dot, symbols.ellipsis
+    model = clean_output(backend.model)
+    change = " (/model to change)"
+    named: list[Parts] = [
+        [("melo", "bold"), (f" {v} {dot} ", "muted"), (model, ""), (change, "muted")]
+        for v in (version, version.split(" (")[0])  # then without the commit
+    ]
+    cut = cut_cells(model, max(1, width - cells(change)), ellipsis)
+    lines = [
+        _fitting(
+            [*named, [(model, ""), (change, "muted")], [(cut, ""), (change, "muted")]],
+            width,
+        ),
+        Text(
+            cut_middle(clean_output(home_label(workspace)), width, ellipsis),
+            no_wrap=True,
+            overflow="ellipsis",
+        ),
+    ]
+    if backend.source not in ("config", "saved"):
+        where = clean_output(backend.base_url or backend.label)
+        parts = [where, SOURCE_TEXT.get(backend.source, backend.source)]
+        if backend.listed > 1:
+            parts.append(f"the loaded one of {backend.listed}; /model lists them")
+        lines.append(
+            _fitting(
+                [[(f" {dot} ".join(parts[:n]), "")] for n in range(len(parts), 0, -1)],
+                width,
+            )
+        )
+    example = "Try: What is this project?"
+    lines.append(
+        _fitting(
+            [
+                [(example, ""), (f" {dot} / commands {dot} ctrl+d quit", "muted")],
+                [(example, ""), (f" {dot} ctrl+d quit", "muted")],
+                [(example, "")],
+            ],
+            width,
+        )
+    )
+    lines += _warnings(workspace, yolo=yolo, symbols=symbols)
+    # A blank row on each side: it sets the rows apart from the shell's prompt
+    # line, or from the first run's questions above.
+    return Group(Text(""), *lines, Text(""))
+
+
 def banner(
     *,
     version: str,
@@ -146,8 +235,18 @@ def banner(
     width: int,
     symbols: Symbols,
     session_title: str | None = None,
+    developer: bool = False,
 ) -> RenderableType:
-    """The startup banner: a box of rows, its warnings and the key hints."""
+    """The startup banner: the welcome, or in developer mode a box of every row."""
+    if not developer:
+        return welcome(
+            version=version,
+            backend=backend,
+            workspace=workspace,
+            yolo=yolo,
+            width=width,
+            symbols=symbols,
+        )
     rows: list[tuple[str, str, str]] = []
     for number, text in enumerate(model_rows(backend)):
         rows.append(
@@ -196,16 +295,7 @@ def banner(
                 line = Text(pad_cells(label if number == 0 else "", _LABEL_CELLS))
                 line.append(value, style=style or None)
                 lines.append(line)
-    if yolo:
-        lines.append(
-            Text(
-                f"{symbols.warn} YOLO: tools run without asking.",
-                style="warn",
-            )
-        )
-    warning = workspace_warning(workspace, symbols)
-    if warning:
-        lines.append(Text(warning, style="warn"))
+    lines += _warnings(workspace, yolo=yolo, symbols=symbols)
     dot = symbols.dot
     lines.append(Text(f"  / commands {dot} esc stop {dot} ctrl+d quit", style="muted"))
     lines.append(Text(""))

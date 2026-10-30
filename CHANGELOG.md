@@ -976,6 +976,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and the first banner no longer says how to add long-term memory right after you
   declined it. The saved config and every machine output are unchanged ([#NN]).
 
+- The welcome starts the conversation. The interactive UI opens with three rows,
+  `melo 0.1.0 · MODEL (/model to change)`, the folder, and `Try: What is this project? ·
+  / commands · ctrl+d quit`, with the warnings under them (it was a box of model,
+  workspace, tools, memory and session). The model's server shows in a row of its own
+  only when the model is not the saved default; tools, memory and session are in
+  `/status`. A narrow terminal drops the least needed parts of a row whole instead of
+  wrapping it. `--developer` (or `[ui] mode = "developer"`) keeps the box
+  ([#NN]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`

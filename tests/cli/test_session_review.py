@@ -35,6 +35,7 @@ def test_banner_names_the_selected_resumed_session() -> None:
             width=100,
             symbols=UNICODE,
             session_title="Chosen chat",
+            developer=True,
         )
     )
     assert 'session    "Chosen chat" (resumed)' in out.text()
@@ -111,7 +112,7 @@ def test_startup_banner_uses_the_resolved_title(
     first.type("hello\r")
     first.see("Worked for")
     assert first.quit() == 0
-    resumed = melo(flag, *(["hello"] if flag == "-r" else []))
+    resumed = melo("--developer", flag, *(["hello"] if flag == "-r" else []))
     resumed.see('Resumed "hello"')
     assert 'session    "hello" (resumed)' in resumed.text()
     assert "session    new" not in resumed.text()
@@ -124,7 +125,7 @@ def test_startup_picker_precedes_the_banner(melo: Callable[..., Melo]) -> None:
     first.type("hello\r")
     first.see("Worked for")
     assert first.quit() == 0
-    picker = melo("-r")
+    picker = melo("--developer", "-r")
     picker.see("Resume a session")
     assert "╭─ melo" not in picker.text()
     picker.type("\r")

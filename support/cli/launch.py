@@ -529,6 +529,7 @@ async def main_async(
             logging.getLogger(__name__).warning(
                 "Invalid [sessions] resume_mode %r; using pairs", raw_mode
             )
+        developer = _developer(args)
         session = CliSession(
             store=store,
             factory=factory,
@@ -541,7 +542,7 @@ async def main_async(
             reasoning_tags=session_config.cli.reasoning_tags,
             status_line=session_config.cli.status_line,
             out=out,
-            developer=_developer(args),
+            developer=developer,
         )
 
         def show_banner(selected: SessionInfo | None = None) -> None:
@@ -556,6 +557,7 @@ async def main_async(
                     width=out.width,
                     symbols=symbols,
                     session_title=selected.title if selected is not None else None,
+                    developer=developer,
                 )
             )
             if invalid_mode:

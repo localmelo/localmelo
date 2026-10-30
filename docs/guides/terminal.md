@@ -12,14 +12,9 @@ prints as Markdown. What it prints stays in the terminal's scrollback; the
 input box and a status bar stay at the bottom.
 
 ```text
-╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1                    │
-│ workspace  ~/demo-project                                                │
-│ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
-│ session    new                                                           │
-╰──────────────────────────────────────────────────────────────────────────╯
-  / commands · esc stop · ctrl+d quit
+melo 0.1.0 · Qwen3-8B (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
 
 › What is in this folder?
 
@@ -36,6 +31,13 @@ input box and a status bar stay at the bottom.
 ────────────────────────────────────────────────────────────────────────────
   Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?         ask
 ```
+
+The welcome is three rows: the version and the model, with how to change it;
+the folder melo works in; and one thing to try, with the keys for commands and
+for quitting. It shows the model's server in a row of its own only when the
+model is not the saved default. Warnings follow it, and `/status` shows the
+server, tools, memory and session. In developer mode (`--developer`, or
+`[ui] mode = "developer"`) the welcome is a box of every row.
 
 It needs a terminal: stdin and stdout must both be terminals and `TERM`
 must not be `dumb`. Otherwise `melo` prints this on stderr and exits with
@@ -75,15 +77,19 @@ The first of these that applies:
    `⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. No saved backend: the [first-run](#first-run) questions, then the UI.
 
-The banner's title shows the package version, and on a git checkout the short
-commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line. The banner names the model and the server; when they are not the saved
-backend, a second line says where they come from (`from --base-url (not
-saved)`, `saved as the default`) and, when melo took the one model the server says is loaded out of several,
-`the loaded one of N; /model lists them`. The server is called `oMLX` when the
-config file says `omlx` or a model listing of the server did, and otherwise
-`OpenAI-compatible server` (Ollama, MLC LLM and SGLang keep their names); a
-saved server is listed after the banner, so the banner shows what the file
-says, unless the run already listed the server (the first run does).
+The welcome's first row shows the package version, and on a git checkout the
+short commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line.
+When the model is not the saved default, a row after the folder gives the
+server's URL and where it comes from (`from --base-url (not saved)`,
+`not saved; melo asks again next time`) and, when melo took the one model the
+server says is loaded out of several, `the loaded one of N; /model lists
+them`. A server that does not answer gets the warning below the welcome
+instead. `/status` calls the server `oMLX` when the config file says `omlx` or
+a model listing of the server did, and otherwise `OpenAI-compatible server`
+(Ollama, MLC LLM and SGLang keep their names). Developer mode's box has a
+model row with that name; a saved server is listed after the box, so the box
+shows what the file says, unless the run already listed the server (the first
+run does).
 
 ### Keys
 
@@ -506,8 +512,9 @@ starts new, without creating an empty row. `melo -r REF` resolves an ID,
 a prefix of at least four characters, or an exact case-insensitive title;
 multiple matches, or a title/message search fallback, open the picker.
 An unknown reference exits 2. The startup choice, including the `-r` picker,
-happens before the banner: a chosen chat is labelled `"TITLE" (resumed)`;
-Esc or an empty list gives a new-session banner. `-c` and `-r` cannot be
+happens before the banner: the recap names a chosen chat (`◆ Resumed "TITLE"`,
+and developer mode's box labels it `"TITLE" (resumed)`); Esc or an empty list
+gives a new-session banner. `-c` and `-r` cannot be
 combined, or used with a task, `--serve` or `--daemon`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest

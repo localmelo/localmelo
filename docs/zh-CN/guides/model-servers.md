@@ -76,7 +76,7 @@
 
 ### oMLX
 
-[oMLX](https://github.com/jundot/omlx) 是受支持的本地服务器。它的 API 与 OpenAI 兼容，而 `vllm` 键代表任何 OpenAI 兼容服务器（包括 vLLM 自己的）。所以 oMLX 没有自己的后端：它就是 `vllm` 后端，配置文件里写作 `omlx`。服务器的模型列表把 oMLX 标为所列模型的所有者时（oMLX 对它列出的每个模型都这样做），首次运行的设置会保存 `chat_backend = "omlx"`，使用该服务器的嵌入模型时还会保存 `embedding_backend = "omlx"`；其他服务器保存为 `vllm`。两种写法按同一个后端加载，设置在 `[vllm]` 表中，并按原样保存回去。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，横幅、`/status` 和网页控制台把这台服务器称为 oMLX，否则称为 OpenAI 兼容服务器。写着 `vllm` 的文件要等第一次列出模型才会改称 oMLX，这由横幅之后的检查完成；横幅本身显示的是配置文件所写的名称，本次运行已经列出过该服务器时除外。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
+[oMLX](https://github.com/jundot/omlx) 是受支持的本地服务器。它的 API 与 OpenAI 兼容，而 `vllm` 键代表任何 OpenAI 兼容服务器（包括 vLLM 自己的）。所以 oMLX 没有自己的后端：它就是 `vllm` 后端，配置文件里写作 `omlx`。服务器的模型列表把 oMLX 标为所列模型的所有者时（oMLX 对它列出的每个模型都这样做），首次运行的设置会保存 `chat_backend = "omlx"`，使用该服务器的嵌入模型时还会保存 `embedding_backend = "omlx"`；其他服务器保存为 `vllm`。两种写法按同一个后端加载，设置在 `[vllm]` 表中，并按原样保存回去。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，`/status`、开发者模式的横幅和网页控制台把这台服务器称为 oMLX，否则称为 OpenAI 兼容服务器。写着 `vllm` 的文件要等第一次列出模型才会改称 oMLX，这由横幅之后的检查完成；横幅本身显示的是配置文件所写的名称，本次运行已经列出过该服务器时除外。[使用 oMLX 提供模型服务](model-servers.md#serve-a-model-with-omlx)介绍了如何启动它。
 
 ```toml
 chat_backend = "omlx"
