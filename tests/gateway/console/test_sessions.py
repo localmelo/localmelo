@@ -207,6 +207,40 @@ async def test_a_pending_file_write_shows_its_target(
     assert body["granted_at"]["file_write"] > 0
 
 
+async def test_a_pending_write_over_a_file_shows_what_it_replaces(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    entry = await open_session(console.sessions, turn.session_id)
+    path = Path(workspace) / "todo.md"
+    path.write_text("# TODO\n- buy milk\n", encoding="utf-8")
+    request = ApprovalRequest(
+        request_id="req-1",
+        run_id="",
+        call_id="call_1",
+        tool_name="file_write",
+        arguments={"path": str(path), "content": "# TODO\n- buy tea\n"},
+        preview="todo.md",
+        workspace_root=workspace,
+    )
+    deciding = asyncio.create_task(entry.policy.decide(request))
+    for _ in range(10):
+        if console.broker.pending(turn.session_id):
+            break
+        await asyncio.sleep(0)
+
+    body = client.get(f"/api/sessions/{turn.session_id}").json()
+    target = body["pending_approvals"][0]["target"]
+    assert (target["path_label"], target["exists"]) == ("todo.md", True)
+    assert [(row["kind"], row["text"]) for row in target["diff"]["rows"]] == [
+        ("context", "# TODO"),
+        ("removed", "- buy milk"),
+        ("added", "- buy tea"),
+    ]
+    assert console.broker.answer("req-1", ApprovalDecision(False)) == "resolved"
+    await deciding
+
+
 async def test_an_unknown_session_is_404(client: TestClient) -> None:
     resp = client.get("/api/sessions/0123456789ab")
     assert resp.status_code == 404

@@ -285,8 +285,19 @@ security boundary against a bearer holder or a malicious process under the same
 OS account, which can answer them.
 
 The card asks a plain question ("Run this command in demo-project?", "Replace
-notes.txt (125 bytes)?", "Let melo use <tool>?") and shows exactly what would
-run. **Allow once**, the filled button, runs this call only. **Allow for this
+notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A file
+write over an existing text file shows what it replaces: the line under the
+question counts the lines ("5 lines removed, 1 added"), and the box lists the
+changed lines, each with its number, a − or + sign and two lines of context on
+each side. Removed lines are tinted red and added ones green, and the signs say
+the same without the colours. A long change shows its first 20 rows; **Show all
+N lines** shows the rest. A secret in a row reads `[redacted]`. When melo cannot
+compare (the file is not text, cannot be read, is over 200 KB or holds a private
+key, or the change runs past 1,000 rows) the card says so in one line, asks
+"Replace logo.bin (480 bytes)?" with the file's size, and shows the new text
+alone. The comparison is for you to read: the answers below work as they do for
+any other file write. **Allow once**, the filled button, runs this call only.
+**Allow for this
 chat** (**Allow for this task** in Tasks) stops asking about that tool for the
 rest of the chat; the line under the buttons says so, and for a command or
 Python code it warns that it can reach files outside the workspace. **Deny**

@@ -579,6 +579,29 @@ token total.
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the
   response is made. Every other tool's `target` is `null`.
+- A `file_write` of text over an existing file also gives its `target` a `diff`, what the
+  write replaces, read when the response is made, as the terminal's approval panel
+  shows it. `target` has no `diff` for a new file or a call without text.
+
+  ```json
+  {"path_label": "todo.md", "exists": true, "size_bytes": 86, "diff": {"added": 1, "removed": 1, "rows": [{"kind": "context", "line": 2, "text": ""}, {"kind": "context", "line": 3, "text": "- [x] Read data.csv"}, {"kind": "removed", "line": 4, "text": "- [ ] Add a --json flag to app.py"}, {"kind": "added", "line": 4, "text": "- [x] Add a --json flag to app.py"}, {"kind": "context", "line": 5, "text": "- [ ] Test empty files"}], "note": ""}}
+  ```
+
+  - `added` and `removed` count the lines. `rows` are the changed lines with two lines of
+    context each side, and a `gap` row between changes that are further apart. `kind` is
+    `removed`, `added`, `context` or `gap`; `line` is the old line's number for a `removed`
+    row and the new line's for any other, and `null` for a `gap`; `text` is the line without
+    its ending, never cut.
+  - Secrets are redacted in every row, as in a stored event: a key reads `[redacted]`. The
+    rows come from the texts as they are, so a line that differs only in a secret is a
+    `removed` row and an `added` row.
+  - The diff is whole or absent. When melo cannot compare, `rows` is empty and `note` says why in
+    words: the file is not text, cannot be read, is not a regular file or is over 200 KB
+    (200,000 bytes); the new text is over 200,000 characters; more than 1,000 rows would
+    change; or the file or the new text holds a private key. Otherwise `note` is `""`, and
+    empty `rows` mean the file already holds the new text.
+  - `diff` is for display. The approval's other fields, the answer and its rules are the
+    same as without it.
 
 ## GET /api/sessions/{id}/turns
 
