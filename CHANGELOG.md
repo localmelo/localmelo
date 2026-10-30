@@ -336,7 +336,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   /api/memory/records/{id}`, `DELETE /api/memory/records?all=true`, `PUT /api/memory` and
   `POST /api/memory/reindex`; `DELETE /api/sessions/{id}?notes=forget`; `GET /api/models`
   lists `embedding_models`; `GET`/`PUT /api/settings` carry `across_chats`. See
-  [Memory across chats](docs/concepts/memory.md#see-and-change-what-melo-remembers) ([#NN]).
+  [Memory across chats](docs/concepts/memory.md#see-and-change-what-melo-remembers) ([#312]).
 - Memory across chats: melo remembers what you tell it, in every chat of the web console
   and the app. When a message you type says something about you ("I prefer short
   answers", "my group meeting is on Thursdays", "call me Ray", "我习惯用简体中文") or asks
@@ -2498,6 +2498,7 @@ earlier milestones.
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
 [#311]: https://github.com/localmelo/localmelo/pull/311
+[#312]: https://github.com/localmelo/localmelo/pull/312
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
