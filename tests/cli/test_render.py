@@ -1157,7 +1157,9 @@ def test_a_best_effort_keeps_its_code_block() -> None:
     lines = text.split("\n")
     assert "● Best effort:" in lines
     code = lines.index(next(line for line in lines if "def f(x):" in line))
-    assert lines[code + 1].strip() == "return x * 2"
+    # Without a fill, a gutter marks the code (a panel would need the background).
+    assert lines[code].lstrip().startswith("│ def f(x):")
+    assert lines[code + 1].lstrip().removeprefix("│").strip() == "return x * 2"
     assert lines[code + 1].index("return") > lines[code].index("def")
 
 

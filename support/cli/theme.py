@@ -16,7 +16,7 @@ from __future__ import annotations
 import functools
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, Literal, NamedTuple
 
 from prompt_toolkit.output import ColorDepth
@@ -125,6 +125,13 @@ FILLS: Final[Mapping[str, tuple[tuple[str, float], tuple[str, float]]]] = {
     "selection": (("#b5cf9f", 0.14), ("#3f5a36", 0.11)),
     "diff_add": (("#81e7d3", 0.13), ("#037f6b", 0.10)),
     "diff_remove": (("#f6a296", 0.13), ("#a21829", 0.08)),
+}
+# Code's tokens and the roles that draw them (numbers stay the body's ink:
+# orange is the answer's alone).
+SYNTAX: Final[Mapping[str, str]] = {
+    "keyword": "accent",
+    "string": "path",
+    "name": "code_name",
 }
 # The style names the UI uses, and the role that draws each.
 NAMES: Final[Mapping[str, str]] = {
@@ -261,15 +268,58 @@ class Palette:
                 return self._colour(moved, (self.background,), hue.target)
         return Colour(value, index if self.depth == "256" else None)
 
+    def on_raised(self, name: str) -> Look:
+        """*name*'s look on the raised fill: its colour moved, hue kept, until it reads at 4.5:1."""
+        look, raised = self.look(name), self.fills.get("raised")
+        fg = look.fg
+        if raised is None or fg is None or not fg.value.startswith("#"):
+            return look
+        painted = XTERM[raised.xterm] if raised.xterm is not None else raised.value
+        moved = fit(fg.value, [painted], TEXT)
+        if self.depth == "256":
+            drawn = XTERM[fg.xterm] if fg.xterm is not None else moved
+            if contrast(drawn, painted) < TEXT:
+                fg = Colour(moved, nearest256(moved, [painted], TEXT))
+        else:
+            fg = Colour(moved)
+        return replace(look, fg=fg)
+
     @functools.cached_property
     def rich_theme(self) -> Theme:
+        raised = self.fills.get("raised")
+        fill = RichStyle(bgcolor=raised.rich()) if raised else RichStyle()
+        answer, rule = self.look("answer").rich(), self.look("rule").rich()
+        accent, muted = self.look("accent").rich(), self.look("muted").rich()
         return Theme(
             {
                 **{name: self.look(name).rich() for name in NAMES},
                 "shell": "magenta",
                 "yolo": "white on red",
-                # Inline code: bold, without rich's black background.
-                "markdown.code": "bold",
+                # The user's band, inline-code chips and code panels; with no
+                # fill, the band is gone, inline code is bold and code has a gutter.
+                "raised": fill,
+                "user": self.on_raised("accent").rich(),
+                "markdown.code": fill if raised else "bold",
+                # Code: keywords moss, strings gold, names navy, comments muted.
+                **{
+                    f"syntax.{part}": self.on_raised(role).rich()
+                    for part, role in SYNTAX.items()
+                },
+                "syntax.comment": self.on_raised("muted").rich()
+                + RichStyle(italic=True),
+                # Markdown in any message; an answer adds its heading and bullets.
+                "markdown.heading": "bold",
+                "markdown.item.bullet": "bold",
+                "markdown.item.number": "",
+                "markdown.answer.heading": self.look("heading").rich(),
+                "markdown.answer.bullet": answer,
+                "markdown.link": accent + RichStyle(underline=True),
+                "markdown.link_url": accent,
+                "markdown.block_quote": muted,
+                "markdown.hr": rule,
+                "markdown.table.border": rule,
+                "markdown.table.header": "bold",
+                **{f"markdown.h{level}": "none" for level in range(1, 8)},
             }
         )
 
@@ -289,11 +339,6 @@ class Palette:
                 "question": "bold",
             }
         )
-
-    @property
-    def code_theme(self) -> str:
-        """rich's ANSI theme for code blocks: ``ansi_dark``'s bright colors need a dark one."""
-        return "ansi_light" if self.polarity == "light" else "ansi_dark"
 
     @property
     def rich_system(self) -> Literal["standard", "256", "truecolor"]:
@@ -395,6 +440,7 @@ class Symbols:
     # A changed file's state: new, modified (deleted is reserved: minus).
     file_new: str
     file_modified: str
+    gutter: str  # beside code when there is no panel
     spinner: tuple[str, ...]
 
 
@@ -427,6 +473,7 @@ UNICODE: Final = Symbols(
     kind_memory="◇",
     file_new="+",
     file_modified="~",
+    gutter="│",
     spinner=("·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"),
 )
 
@@ -459,6 +506,7 @@ ASCII: Final = Symbols(
     kind_memory="&",
     file_new="+",
     file_modified="~",
+    gutter="|",
     spinner=("-", "\\", "|", "/"),
 )
 
@@ -488,6 +536,7 @@ def _ascii_table() -> dict[int, str]:
         "kind_read",
         "kind_write",
         "kind_memory",
+        "gutter",
     ):
         table[ord(getattr(UNICODE, name))] = getattr(ASCII, name)
     return table

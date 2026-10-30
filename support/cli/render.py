@@ -19,6 +19,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NamedTuple, cast
 
+from markdown_it.token import Token as MarkdownToken
+from pygments.token import (  # type: ignore[import-untyped]
+    Comment,
+    Keyword,
+    Name,
+    String,
+    Token,
+)
 from rich.console import (
     Console,
     ConsoleOptions,
@@ -26,10 +34,14 @@ from rich.console import (
     RenderableType,
     RenderResult,
 )
-from rich.markdown import Heading, Markdown
+from rich.markdown import CodeBlock, Heading, Markdown
 from rich.padding import Padding
+from rich.segment import Segment
+from rich.style import Style
+from rich.syntax import ANSISyntaxTheme, Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS
 from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
@@ -44,7 +56,7 @@ from localmelo.support.cli.text import (
     expand_tabs,
     wrap_words,
 )
-from localmelo.support.cli.theme import Symbols, active
+from localmelo.support.cli.theme import Symbols
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.progress_line import (
     format_line,
@@ -119,27 +131,133 @@ _FAILED_WITH: Final = re.compile(r"failed: (\w+)")
 
 
 class _LeftHeading(Heading):
-    """A Markdown heading, bold and left-aligned, without rich's box."""
+    """A Markdown heading, left-aligned, without rich's box: bold, or the answer's role."""
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
         text = self.text
         text.justify = "left"
-        text.stylize("bold")
+        text.stylize(console.get_style("markdown.heading", default="bold"))
         if self.tag == "h1":
             text.stylize("underline")
         yield text
 
 
+class _Code(CodeBlock):
+    """A code block: on the raised panel when there is a fill, else beside a gutter.
+
+    Its tokens take the roles' colours (``syntax.*`` of the theme), so a code
+    block follows the terminal's background like everything else.
+    """
+
+    gutter = "│"
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: MarkdownToken) -> _Code:
+        block = cls((token.info or "").partition(" ")[0] or "text", markdown.code_theme)
+        block.gutter = getattr(markdown, "gutter", cls.gutter)
+        return block
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        def style(name: str) -> Style:
+            return console.get_style(f"syntax.{name}", default="none")
+
+        theme = ANSISyntaxTheme(
+            {
+                Token: Style(),
+                Keyword: style("keyword"),
+                Name.Function: style("name"),
+                Name.Class: style("name"),
+                Name.Builtin: style("name"),
+                String: style("string"),
+                Comment: style("comment"),
+            }
+        )
+        fill = console.get_style("raised", default="none").bgcolor
+        code = str(self.text).rstrip()
+        syntax = Syntax(
+            code,
+            self.lexer_name,
+            theme=theme,
+            word_wrap=True,
+            background_color=fill.name if fill is not None else None,
+            padding=(1, 2) if fill is not None else 0,
+        )
+        if fill is not None:
+            yield syntax
+            return
+        bar = Segment(self.gutter + " ", console.get_style("muted", default="none"))
+        width = max(1, options.max_width - cells(bar.text))
+        for line in console.render_lines(syntax, options.update(width=width)):
+            yield bar
+            yield from line
+            yield Segment.line()
+
+
 class AnswerMarkdown(Markdown):
-    """rich's Markdown with left-aligned headings."""
+    """rich's Markdown with left-aligned headings and melo's code blocks."""
 
-    elements = {**Markdown.elements, "heading_open": _LeftHeading}
+    elements = {
+        **Markdown.elements,
+        "heading_open": _LeftHeading,
+        "fence": _Code,
+        "code_block": _Code,
+    }
 
 
-def markdown(text: str) -> Markdown:
-    return AnswerMarkdown(text, code_theme=active().code_theme, hyperlinks=False)
+class _Answer:
+    """The final answer's Markdown: headings and bullets in the answer's roles."""
+
+    def __init__(self, body: RenderableType) -> None:
+        self.body = body
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        console.push_theme(
+            Theme(
+                {
+                    "markdown.heading": console.get_style("markdown.answer.heading"),
+                    "markdown.item.bullet": console.get_style("markdown.answer.bullet"),
+                    "markdown.item.number": console.get_style("markdown.answer.bullet"),
+                },
+                inherit=False,  # rich's defaults would undo the palette's
+            )
+        )
+        try:
+            lines = console.render_lines(self.body, options, pad=False, new_lines=True)
+        finally:
+            console.pop_theme()
+        for line in lines:
+            yield from line
+
+
+class Band:
+    """*body* on the raised fill across the whole row; *body* alone without a fill."""
+
+    def __init__(self, body: RenderableType) -> None:
+        self.body = body
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        fill = console.get_style("raised", default="none")
+        if fill.bgcolor is None:
+            yield self.body
+            return
+        for line in console.render_lines(self.body, options, style=fill, pad=True):
+            yield from line
+            yield Segment.line()
+
+
+def markdown(text: str, symbols: Symbols, *, answer: bool = False) -> RenderableType:
+    """*text* as Markdown; the final *answer* has its heading and bullets in Melo's fur."""
+    body = AnswerMarkdown(text, hyperlinks=False)
+    body.gutter = symbols.gutter  # type: ignore[attr-defined]
+    return _Answer(body) if answer else body
 
 
 @dataclass
@@ -492,7 +610,8 @@ class TurnRenderer:
                 f"\n{self.symbols.ellipsis} +{len(lines) - len(shown)} lines",
                 style="muted",
             )
-        self.out.print(_marked(self.symbols.prompt, "accent", echo))
+        # The raised band marks where a turn starts (with a fill).
+        self.out.print(Band(_marked(self.symbols.prompt, "user", echo)))
 
     def begin_turn(self, text: str, *, first_turn: bool = False) -> None:
         """Echo *text* and start the live area."""
@@ -643,7 +762,7 @@ class TurnRenderer:
                         style="muted",
                     )
                 )
-            self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
+            self.out.print(self._intermediate(shown))
             printed = shown
         if self.live is not None:
             self.live.stream_text = ""
@@ -782,12 +901,15 @@ class TurnRenderer:
                         style="muted",
                     )
                 )
-            self.out.print(_marked(self.symbols.assistant, "", markdown(text)))
+            self.out.print(self._intermediate(text))
 
     def _print_thinking(self, text: str, duration_s: float) -> None:
         """``✻ Thought for 1.2s`` and the thinking's first rows (section 3)."""
         self.out.print(
-            Text(f"{self.symbols.thought} Thought for {format_duration(duration_s)}")
+            Text(
+                f"{self.symbols.thought} Thought for {format_duration(duration_s)}",
+                style="thinking",
+            )
         )
         if not (self.thinking or self.verbose):
             return
@@ -804,11 +926,17 @@ class TurnRenderer:
             body.append(marker + ("" if self.verbose else " (/verbose)"))
         self.out.print(Padding(body, (0, 0, 0, 0), style="muted"))
 
+    def _intermediate(self, text: str) -> RenderableType:
+        """Text that is not the answer: a muted mark, the text in the body's ink."""
+        return _marked(
+            self.symbols.assistant, "intermediate", markdown(text, self.symbols)
+        )
+
     def _print_held(self) -> None:
         """Print a held assistant message as intermediate text."""
         text, self._held = self._held, ""
         if text:
-            self.out.print(_marked(self.symbols.assistant, "", markdown(text)))
+            self.out.print(self._intermediate(text))
 
     def _on_tool_started(self, data: Mapping[str, Any]) -> None:
         preview = str(data.get("preview") or "")
@@ -1005,7 +1133,7 @@ class TurnRenderer:
             and held.strip() != answer.strip()
             and not (shown and _same_display_text(held, shown))
         ):
-            self.out.print(_marked(self.symbols.assistant, "", markdown(held)))
+            self.out.print(self._intermediate(held))
         if result.status == "cancelled":
             # The cause is turn.finished's, which comes after this event.
             self._cancelled_pending = True
@@ -1395,19 +1523,21 @@ class TurnRenderer:
         answer = clean_output(answer)
         if result.status == "completed":
             body: RenderableType = (
-                markdown(answer) if answer else Text("(no answer text)", style="muted")
+                markdown(answer, symbols, answer=True)
+                if answer
+                else Text("(no answer text)", style="muted")
             )
-            self.out.print(_marked(symbols.assistant, "", body))
+            self.out.print(_marked(symbols.assistant, "answer", body))
         else:
             if answer:
                 # Inline before a paragraph; on a line of its own before a
                 # block, which "Best effort: " in front would break.
                 effort: RenderableType = (
-                    Group(Text("Best effort:"), markdown(answer))
+                    Group(Text("Best effort:"), markdown(answer, symbols, answer=True))
                     if _BLOCK_START.match(answer)
-                    else markdown("Best effort: " + answer)
+                    else markdown("Best effort: " + answer, symbols, answer=True)
                 )
-                self.out.print(_marked(symbols.assistant, "", effort))
+                self.out.print(_marked(symbols.assistant, "answer", effort))
             self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))

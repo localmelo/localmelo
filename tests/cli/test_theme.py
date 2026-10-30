@@ -193,8 +193,6 @@ def test_each_depth_draws_with_its_own_colors() -> None:
     assert str(Palette("truecolor").look("accent").rich()) == "green"
     # Muted is a real color with hues, not SGR dim.
     assert not dark["truecolor"].look("muted").rich().dim
-    assert Palette("16", "light").code_theme == "ansi_light"
-    assert Palette("16").code_theme == "ansi_dark"
 
 
 def test_no_color_keeps_attributes_only() -> None:

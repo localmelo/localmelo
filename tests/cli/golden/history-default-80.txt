@@ -22,11 +22,9 @@
    • notes.txt holds the one note
    • make check still fails
 
-
-   make check
-   false
-   make: *** [check] Error 1
-
+  │ make check
+  │ false
+  │ make: *** [check] Error 1
 
 
    file       state
