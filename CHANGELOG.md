@@ -190,7 +190,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   three flags are still asked for, and a reply in the earlier long form is read as before.
   `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep the
   old system line. The interactive UI, the `melo ""` loop and the gateway ignore the setting.
-  Without it every request is the one sent before. ([#NN])
+  Without it every request is the one sent before. ([#255])
 
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
@@ -1842,6 +1842,7 @@ earlier milestones.
 [#250]: https://github.com/localmelo/localmelo/pull/250
 [#251]: https://github.com/localmelo/localmelo/pull/251
 [#254]: https://github.com/localmelo/localmelo/pull/254
+[#255]: https://github.com/localmelo/localmelo/pull/255
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
