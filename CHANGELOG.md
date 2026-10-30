@@ -189,13 +189,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (a path outside the folder) is not listed, and neither is a file that a shell command or
   a script changed, since melo never scans the folder. A turn that changed no file prints
   nothing, and developer mode shows the same line. Direct mode's stdout and stderr, JSON,
-  exit codes and requests are unchanged ([#NN]).
+  exit codes and requests are unchanged ([#258]).
 
 - Developer mode shows the plan of a task melo has run before on every turn. The row of
   past runs and the steps they took (`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`)
   showed on the first turn of a session only; in developer mode it now shows on every turn
   that has past runs to show, and the default mode keeps it on the first turn. Direct
-  mode's stderr line, JSON, exit codes and requests are unchanged ([#NN]).
+  mode's stderr line, JSON, exit codes and requests are unchanged ([#258]).
 
 - Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
   default and with no flag: `[agent] lean_output = true` in the config file, or
@@ -1091,7 +1091,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the messages around resuming, and the descriptions of `/new`, `/sessions`, `/resume`
   and `/title`. Command names (`/sessions`, `-c`, `-r`), developer mode's rows and
   machine output such as `session_id` keep theirs. Direct mode's stdout and stderr,
-  JSON, exit codes and requests are unchanged ([#NN]).
+  JSON, exit codes and requests are unchanged ([#258]).
 
 - `melo -h` says what its everyday commands do. It lists `setup` (choose the model
   server again), `serve` (run the web console and API) and `console` (open the web
@@ -1101,7 +1101,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   where it said `planning-call limit`. The help is 23 lines instead of 20; `melo -h all`
   still lists every command and setting, and `melo COMMAND -h` still explains one. Every
   option and its behavior are unchanged, as are direct mode's stdout and stderr, JSON,
-  exit codes and requests ([#NN]).
+  exit codes and requests ([#258]).
 
 - The terminal's status bar says its figures in words in default mode: `context 8% used`
   (`context 2.6k tokens` when the server's input limit is not known) where it said
@@ -1111,7 +1111,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   terminal, like a measured one, before the folder is cut. The words are never cut
   in the middle. Developer mode keeps the compact segments, and so do the web console's
   status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
-  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#258]).
 
 - The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
   model chip while it only names the model, which the composer already shows, so a chat's
@@ -1935,6 +1935,7 @@ earlier milestones.
 [#254]: https://github.com/localmelo/localmelo/pull/254
 [#255]: https://github.com/localmelo/localmelo/pull/255
 [#257]: https://github.com/localmelo/localmelo/pull/257
+[#258]: https://github.com/localmelo/localmelo/pull/258
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
