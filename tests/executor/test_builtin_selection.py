@@ -38,18 +38,30 @@ def test_builtin_names_lists_every_builtin() -> None:
     assert {"file_read", "file_write", "python_exec", "shell_exec"} <= ALL_NAMES
 
 
+# The three every mode has; only the chat surfaces add list_files.
+THREE = {"file_read", "file_write", "python_exec"}
+
+
 def test_existing_signature_registers_the_python_default() -> None:
     hippo = Hippo()
     executor = Executor(hippo, Checker())
     register_builtins(executor, hippo)
-    expected = ALL_NAMES - {"shell_exec"}
-    assert {t.name for t in hippo.list_tools()} == expected
-    assert set(executor._callables) == expected
+    assert {t.name for t in hippo.list_tools()} == THREE
+    assert set(executor._callables) == THREE
 
 
-@pytest.mark.parametrize("mode", ["direct", "gateway", "python"])
-def test_a_mode_without_an_approver_leaves_shell_exec_out(mode: str) -> None:
-    expected = ALL_NAMES - {"shell_exec"}
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("direct", THREE),
+        ("gateway", THREE | {"list_files"}),
+        ("python", THREE),
+    ],
+)
+def test_a_mode_without_an_approver_leaves_shell_exec_out(
+    mode: str, expected: set[str]
+) -> None:
+    assert "shell_exec" not in expected
     assert _registered(None, mode=mode) == (expected, expected)
 
 

@@ -45,8 +45,10 @@ async def test_tools_list_each_tool_and_whether_it_is_granted(
         assert listed["mcp_error"] == "MCP is not built in the console yet"
         by_name = {tool["name"]: tool for tool in listed["tools"]}
         # A console session is gateway mode: no shell_exec, but the other
-        # built-ins stay, and the panel still asks about python_exec.
-        assert set(by_name) == {"file_read", "file_write", "python_exec"}
+        # built-ins stay, the panel still asks about python_exec, and the
+        # read-only listing never asks.
+        assert set(by_name) == {"file_read", "file_write", "list_files", "python_exec"}
+        assert by_name["list_files"]["requires_approval"] is False
         assert by_name["file_write"]["granted"] is True
         assert by_name["python_exec"]["granted"] is False
         assert by_name["python_exec"]["requires_approval"] is True
@@ -383,7 +385,7 @@ async def test_default_builder_without_a_gate_wraps_nothing(
         # The production builder, not only the test one, is gateway mode.
         assert agent.options.mode == "gateway"
         names = {tool.name for tool in agent.list_tools()}
-        assert names == {"file_read", "file_write", "python_exec"}
+        assert names == {"file_read", "file_write", "list_files", "python_exec"}
     finally:
         await agent.close()
 

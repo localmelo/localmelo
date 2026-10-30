@@ -1,0 +1,7 @@
+{
+  "match": ["What is this project?"],
+  "replies": [
+    {"tool_calls": [{"name": "list_files", "arguments": {}}]},
+    {"content": "This folder holds a small Python project."}
+  ]
+}

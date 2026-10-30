@@ -32,7 +32,10 @@ if TYPE_CHECKING:
 _DEFAULT_TIMEOUT_MS = 60_000
 
 # The tools whose "path" argument the workspace policy resolves and fences.
-_FILE_TOOLS = ("file_read", "file_write")
+_FILE_TOOLS = ("file_read", "file_write", "list_files")
+
+# The tools whose "path" may be left out or empty: the root stands for it.
+_ROOT_BY_DEFAULT = ("list_files",)
 
 # A tool callable returns plain text or a ToolOutput (text + images).
 ToolCallable = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
@@ -141,9 +144,11 @@ class Executor:
 
         With a workspace root (the executor's, or the request's
         ``workspace_root``, which replaces it), the ``path`` of
-        ``file_read`` and ``file_write`` is resolved against the root (see
-        :meth:`WorkspacePolicy.resolve`). A path that is empty, missing or
-        holds a NUL character is refused with ``INVALID_ARGUMENTS``, and
+        ``file_read``, ``file_write`` and ``list_files`` is resolved against
+        the root (see :meth:`WorkspacePolicy.resolve`); a ``list_files`` call
+        without a path, or with an empty one, lists the root. A path that is
+        empty, missing or holds a NUL character is refused with
+        ``INVALID_ARGUMENTS``, and
         one whose real path is outside the root with
         ``PATH_POLICY_VIOLATION``. Otherwise the call goes on with the real
         path in place of the given one, in a new request: the approval
@@ -277,6 +282,8 @@ class Executor:
                 policy = None
             else:
                 path = request.arguments.get("path")
+                if not path and request.tool_name in _ROOT_BY_DEFAULT:
+                    path = "."
                 try:
                     resolved = policy.resolve(path)
                 except ValueError:
