@@ -685,6 +685,7 @@ class InteractiveApp:
                 stream_lines=min(
                     STREAM_LIVE_LINES, max(0, self.app.output.get_size().rows - 14)
                 ),
+                developer=self.renderer.developer,
             )
         else:
             activity = self.controller.activity or ""
@@ -818,7 +819,7 @@ class InteractiveApp:
             if pending.offer_session:
                 where = home_label(pending.request.workspace_root or "")
                 for line in session_warning(pending.request.tool_name, where):
-                    options += wrapped("class:muted", "  " + line, width, "  ")
+                    options += wrapped("", "  " + line, width, "  ")
             dot = f" {symbols.dot} "
             line = dot.join(
                 [
@@ -829,7 +830,7 @@ class InteractiveApp:
                     "esc stop the turn",
                 ]
             )
-            keys = wrapped("class:muted", "  " + line, width, "  ")
+            keys = wrapped("", "  " + line, width, "  ")
         # The rows the rest of the screen keeps: the status bar, the live
         # area, a queued line, a hint and the reason field.
         rows = size.rows - 1

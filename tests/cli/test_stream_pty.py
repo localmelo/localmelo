@@ -15,6 +15,7 @@ from pathlib import Path
 import pyte
 import pytest
 
+from localmelo.support.cli.render import SERVER_WHOLE
 from localmelo.tests.cli.test_e2e_pty import Melo
 from localmelo.tests.fixtures.stub_llm import StubServer, load_scenarios
 
@@ -24,15 +25,16 @@ SCENARIOS = Path(__file__).resolve().parents[1] / "fixtures" / "stub_scenarios"
 
 
 def _configure(
-    home: Path, url: str, *, hint: str | None = "none", stream: bool = True
+    home: Path, url: str, *, hint: str | None = "none", stream: bool | None = True
 ) -> None:
+    """Write the config; ``stream=None`` leaves ``[cli] stream`` unset (its default)."""
     folder = home / ".cache" / "localmelo"
     folder.mkdir(parents=True, exist_ok=True)
     tags = f'\n[cli.reasoning_tags]\n"stub-model" = "{hint}"\n' if hint else ""
+    key = "" if stream is None else f"[cli]\nstream = {'true' if stream else 'false'}\n"
     (folder / "config.toml").write_text(
         f'chat_backend = "vllm"\nembedding_backend = "none"\n\n[vllm]\n'
-        f'chat_url = "{url}"\nchat_model = "stub-model"\n\n'
-        f"[cli]\nstream = {'true' if stream else 'false'}\n{tags}",
+        f'chat_url = "{url}"\nchat_model = "stub-model"\n\n{key}{tags}',
         encoding="utf-8",
     )
 
@@ -65,11 +67,17 @@ def streamed(
 ) -> Iterator[Callable[..., Melo]]:
     terms: list[Melo] = []
 
-    def start(scenario: str, *, hint: str | None = "none", stream: bool = True) -> Melo:
+    def start(
+        scenario: str,
+        *,
+        hint: str | None = "none",
+        stream: bool | None = True,
+        argv: list[str] | None = None,
+    ) -> Melo:
         server = StubServer(load_scenarios([SCENARIOS]), default=scenario).start()
         servers.append(server)
         _configure(tmp_path, server.base_url, hint=hint, stream=stream)
-        term = Melo(tmp_path, [])
+        term = Melo(tmp_path, argv or [])
         terms.append(term)
         return term
 
@@ -192,6 +200,39 @@ def test_opted_out_turns_send_no_stream_and_print_the_answer_once(
     assert term.quit() == 0
 
 
+def test_with_no_config_for_it_the_reply_streams_and_a_whole_one_is_noted_once(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    """Streaming is on by default; a model with no hint says why its reply waited."""
+    term = streamed("answer", hint=None, stream=None)
+    term.see("Ask melo")
+    term.type("hello\r")
+    term.see("Worked for")
+    assert servers[0].requests[-1].get("stream") is True
+    term.type("hello again\r")
+    term.see("Worked for", timeout_s=30)
+    term.read_until(lambda out: out.count(b"Worked for") >= 2)
+    text = " ".join(screen(term).split())
+    assert (
+        text.count("replies appear when complete until its reasoning format is set")
+        == 1
+    )
+    assert text.count("● Hello! I am melo, running on a stub model.") == 2
+    assert term.quit() == 0
+
+
+def test_x_cli_stream_false_turns_streaming_off_for_one_run(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    term = streamed("answer", hint=None, stream=None, argv=["-X", "cli.stream=false"])
+    term.see("Ask melo")
+    term.type("hello\r")
+    term.see("Worked for")
+    assert not servers[0].requests[-1].get("stream")
+    assert "reasoning format" not in term.text()
+    assert term.quit() == 0
+
+
 def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
     streamed: Callable[..., Melo],
 ) -> None:
@@ -205,4 +246,61 @@ def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
     text = screen(term)
     assert text.count("● Streaming line one.") == 1
     assert "partial reply" not in text
+    assert term.quit() == 0
+
+
+def _asked_to_stream(server: StubServer) -> list[bool]:
+    """Per planning request the server saw, whether it asked for a stream."""
+    return [request.get("stream") is True for request in server.requests]
+
+
+@pytest.mark.parametrize(
+    "scenario,reply,asked",
+    [
+        # One JSON body answers the first request; the second turn does not ask.
+        ("stream_ignored", "This reply came whole, in one body.", [True, False]),
+        # The first request is asked again at once; the second turn does not ask.
+        (
+            "stream_closed",
+            "This reply needed a second request.",
+            [True, False, False],
+        ),
+    ],
+    ids=["ignores stream", "closes the stream at once"],
+)
+def test_a_server_that_does_not_stream_still_answers_every_turn_and_says_so_once(
+    streamed: Callable[..., Melo],
+    servers: list[StubServer],
+    scenario: str,
+    reply: str,
+    asked: list[bool],
+) -> None:
+    """With streaming on by default, neither server fails a turn."""
+    term = streamed(scenario, hint=None, stream=None)
+    term.see("Ask melo")
+    term.type("plain please\r")
+    term.see("Worked for")
+    first = " ".join(screen(term).split())
+    assert first.count(f"● {reply}") == 1
+    assert first.count(SERVER_WHOLE) == 1
+    assert "Could not get an answer" not in first
+    assert "reasoning format is set" not in first  # the other whole-reply note
+    term.type("plain again\r")
+    term.read_until(lambda out: out.count(b"Worked for") >= 2)
+    text = " ".join(screen(term).split())
+    assert text.count(f"● {reply}") == 2
+    assert text.count(SERVER_WHOLE) == 1  # once, not once per turn
+    assert _asked_to_stream(servers[0]) == asked
+    assert term.quit() == 0
+
+
+def test_a_stream_that_breaks_after_part_of_a_reply_is_not_asked_again(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    term = streamed("stream_drop")
+    term.see("Ask melo")
+    term.type("drop please\r")
+    term.see("Could not get an answer from the model server: Streaming response")
+    assert SERVER_WHOLE not in " ".join(screen(term).split())
+    assert all(_asked_to_stream(servers[0]))  # no request without streaming
     assert term.quit() == 0

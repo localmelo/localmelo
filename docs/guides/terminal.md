@@ -4,12 +4,14 @@ This guide explains the interactive terminal: how to chat, use its keys and comm
 
 ## The interactive UI
 
-`melo` without a task, in a terminal, opens a chat that shows its work as
-it happens: the model's thinking, each tool call as it finishes, notices
-and reflections, and a live area with the step, the phase, the running
-tool and the run's progress facts while the model works. The answer
-prints as Markdown. What it prints stays in the terminal's scrollback; the
-input box and a status bar stay at the bottom.
+`melo` without a task, in a terminal, opens a chat that keeps a quiet record
+of its work and makes the answer the loudest thing on screen: one line for
+each thought, one row for each tool call with the first line of its output,
+notices and reflections, and a live area that says what melo is doing, for
+how long, and which tool runs. The answer prints as Markdown. What it prints
+stays in the terminal's scrollback; the input box and a status bar stay at
+the bottom. Developer mode keeps the whole record (see
+[A turn's output](#a-turns-output)).
 
 ```text
 melo 0.1.0 · Qwen3-8B (/model to change)
@@ -19,10 +21,7 @@ Try: What is this project? · / commands · ctrl+d quit
 › What is in this folder?
 
 ✓ shell_exec  ls -1 · 0.1s · allowed
-  └ app.py
-    notes.txt
-    tests
-    … +1 lines
+  └ app.py · +3 lines (/expand 1.1)
 ● The folder holds app.py, notes.txt, tests and todo.md.
 ✻ Worked for 6.2s · 1 tool call · ↓ 412 tokens
 
@@ -142,7 +141,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
 | `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
-| `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode), leaving only `Thought for 1.2s`; without an argument, flips it. |
 | `/stream [on\|off]` | Live streamed replies for later turns on or off; without an argument, flips it. See [Streamed replies](#streamed-replies). |
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
@@ -327,29 +326,34 @@ happens without the explicit `/copy` command.
   `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
   `Thinking`, `Replying`, `Running`, `Waiting for your approval`,
-  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the run's
-  facts: the step
-  (`step 4`, never against `--steps`), the attempt from the second
-  one, the phase with its cycle, the tests seen, and the time; the output
-  tokens and `esc to stop` follow. When the line is narrow the hint goes
-  first, then the tokens, and the facts are cut with `…`. The second row
+  `Retrying in 4s`, `Reflecting`, `Wrapping up`, `Stopping`), then the time;
+  the output tokens and `esc to stop` follow (`Thinking… · 14s · ↓ 180 tokens
+  · esc to stop`). Developer mode puts the run's facts before the time: the
+  step (`step 4`, never against `--steps`), the attempt from the second
+  one, the phase with its cycle and the tests seen. When the line is narrow
+  the hint goes first, then the tokens, and in developer mode the facts are
+  cut with `…`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
   10:00`. On a session's first turn, a third row shows the past runs the
   progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
   ✓`.
-- **Thinking.** `✻ Thought for 1.2s`, then the first 3 rows of the
-  thinking (40 with `/verbose`, none with `/thinking off`), wrapped to
-  the width. An intermediate message prints as Markdown after `●`; the
+- **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
+  mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
+  width. An intermediate message prints as Markdown after `●`; the
   last one is held, prints at the next step, and at the end only when it
   differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`
-  exits 1 without failing); how its approval ended; and up to 3 lines of
-  its output (20 with `/verbose`), then `… +N lines (/expand T.C)` (a
-  single line left prints instead). `/verbose` adds the call's arguments
-  and images print as `▪ image/png · 312 KB · not shown`. Escape
+  exits 1 without failing); how its approval ended; and the first line of
+  its output with `+N lines (/expand T.C)` on the same row (a second line
+  prints instead of a count of one). Only the mark carries the color (`✓`
+  green, `✗` red, `⊘` yellow on a dark terminal and bold elsewhere); the rest of the row is the default color, with
+  the duration and tags dim. A call that failed, or that ran and exited with
+  another code than 0, shows up to 3 lines, the first in red for a failure;
+  developer mode shows 3 lines for every call and `/verbose` 20, with the
+  call's arguments. Images print as `▪ image/png · 312 KB · not shown`. Escape
   sequences in the output are removed, so a tool cannot move the cursor,
   set the title or write the clipboard.
 - **Notices and reflections.** `↻` marks a retry: one line a turn, which for
@@ -390,7 +394,8 @@ when it has data:
 - `ctx 12k/32k` is the last measured prompt over the input limit, or just
   `ctx 12k` when no limit is known.
 - `step 4 attempt 2 phase fix` are the run's progress facts while a run is
-  active, never a percent or `n/max`.
+  active, never a percent or `n/max`. Developer mode shows them; the default
+  mode leaves them out.
 - `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
@@ -402,41 +407,53 @@ and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
-Streaming is off by default. Turn it on in `config.toml`:
+The interactive UI streams a model's reply as it is written, and does so by
+default: it asks the provider for a streamed planning reply and draws only text
+the release filter has already redacted, in the live area, at the app's redraw
+rate; it never writes raw deltas to the terminal. `/stream off` turns it off
+for later turns, `melo -X cli.stream=false` for one run, and
+`melo config set cli.stream false` for good.
+
+A model server that does not stream needs no setting. When it answers a
+streamed request with one ordinary JSON body, or closes the stream before it
+sends anything, melo uses that reply (or asks the same question once more,
+without streaming) and does not ask that server to stream again until melo
+quits. The reply then shows when it is complete, as it does with `/stream off`,
+and melo says so once: `This server sends replies whole; melo shows them when
+they are complete.` A stream that breaks after part of a reply has arrived is
+still an error: `Could not get an answer from the model server: Streaming
+response ended before completion`.
+
+Whether a reply shows as it is written depends on how its model frames
+reasoning, which a per-model hint in `config.toml` declares:
 
 ```toml
-[cli]
-stream = true
-
 [cli.reasoning_tags]
 "Qwen3-8B" = "closing_only"
 ```
 
-With it on, the interactive UI asks the provider for a streamed planning
-reply and draws only text the release filter has already redacted, in the
-live area, at the app's redraw rate; it never writes raw deltas to the
-terminal. The per-model hint says how that model frames reasoning:
-`explicit` (a leading `<think>` starts it), `closing_only` (everything
-before `</think>` is reasoning) or `none` (tags are literal text). A model
-with no hint keeps the conservative rule: content is held until the reply
-ends, so the live area shows `✻ thinking…` rather than text. The same hint
-splits the completed reply, so the stream and the stored answer do not
-disagree. A model field the server sends separately is always treated as
-reasoning and is never drawn as content; `/thinking off` hides its excerpt
-as before.
+The hint is `explicit` (a leading `<think>` starts reasoning), `closing_only`
+(everything before `</think>` is reasoning) or `none` (tags are literal text).
+A model with no hint keeps the conservative rule: content is held until the
+reply ends, so the live area shows `✻ thinking…` rather than text, and after
+its first whole reply melo says so once: `This model's replies appear when
+complete until its reasoning format is set (see Streamed replies).` A server
+that sends reasoning in a field of its own streams without a hint, and that
+field is never drawn as content; `/thinking on` shows its excerpt. The same
+hint splits the completed reply, so the stream and the stored answer do not
+disagree.
 
 Streamed text is provisional. If the reply becomes a tool call, a retry,
 a run that fails, or a stop, melo closes the live text and prints it once
 as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
-`(stopped)`; the completed final answer prints once after `●`. A reply a
-provider sends in one piece (or a provider without streaming) silently
-falls back to the ordinary complete reply. `/stream on|off` flips the
-setting for later turns without saving it, and `/new` puts it back to
-`[cli] stream`. Runs without the interactive UI (direct mode, workers,
-the gateway) never stream, so their output and request bodies are unchanged.
-An invalid `[cli]` value never
-fails a run: the interactive UI warns and uses the defaults, and direct
-mode and the gateway do not read it.
+`(stopped)`; the completed final answer prints once after `●`. A provider
+without streaming sends the complete reply, which prints as usual.
+`/stream on|off` flips the setting for later turns without saving it, and
+`/new` puts it back to `[cli] stream`. Runs without the interactive UI
+(direct mode, workers, the gateway) never stream, so their output and request
+bodies are unchanged. An invalid `[cli]` value never fails a run: the
+interactive UI warns and uses the defaults, and direct mode and the gateway do
+not read it.
 
 ### Approvals
 
@@ -506,6 +523,17 @@ wrapped message leaves no blank rows. Known limits:
 
 - The UI uses the 16 ANSI colors, so light and dark themes both work. Set
   `NO_COLOR` to a non-empty value to turn the colors off.
+- A light terminal. melo learns the background from `COLORFGBG` (`FG;BG` in
+  ANSI color numbers, which some terminals set, iTerm2 and rxvt for example)
+  and never queries the terminal. Yellow marks a warning only on a background
+  that reports dark; on a light or unknown one a warning is bold in the default
+  color, and the code in an answer uses the light syntax theme on a light one.
+  A terminal that does not set the variable is treated as unknown: start melo
+  with `COLORFGBG='0;15' melo` to say it is light, or `COLORFGBG='15;0' melo`
+  for dark.
+  A sentence you must read or act on (a warning, the approval's warning and
+  keys, the hint under the input box) is never dim; dim is for durations,
+  counts and `(/expand T.C)`.
 - On a terminal whose encoding is not UTF-8, or with `LOCALMELO_ASCII=1`,
   melo draws ASCII stand-ins for its symbols (`>` for `›`, `...` for `…`).
 - melo rings the terminal's bell when an approval panel opens and when a

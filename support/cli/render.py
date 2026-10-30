@@ -41,9 +41,14 @@ from localmelo.support.cli.text import (
     expand_tabs,
     wrap_words,
 )
-from localmelo.support.cli.theme import Symbols
+from localmelo.support.cli.theme import CODE_THEME, Symbols
 from localmelo.support.cli.views import BackendInfo
-from localmelo.support.progress_line import format_line, format_past, tool_elapsed
+from localmelo.support.progress_line import (
+    format_line,
+    format_past,
+    run_elapsed,
+    tool_elapsed,
+)
 from localmelo.support.providers._http import UNREACHABLE_PREFIX
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.display import (
@@ -60,9 +65,13 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.usage_snapshot import UsageSnapshot
 
-# Output lines a tool block shows under its header (20 with /verbose).
+# Output lines a tool block shows under its header (20 with /verbose). A call
+# that succeeded shows QUIET_BLOCK_LINES outside developer mode.
 BLOCK_LINES: Final = 3
+QUIET_BLOCK_LINES: Final = 1
 VERBOSE_BLOCK_LINES: Final = 20
+# The least room an output line keeps beside the "+N lines" marker of its row.
+MARKER_MIN_LINE_CELLS: Final = 8
 # Lines of the thinking excerpt (40 with /verbose).
 THINKING_LINES: Final = 3
 VERBOSE_THINKING_LINES: Final = 40
@@ -79,6 +88,17 @@ ECHO_LINES: Final = 6
 LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
 
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
+
+# What a model with no declared reasoning format means for a streamed reply.
+STREAM_BUFFERED: Final = (
+    "This model's replies appear when complete until its reasoning format is set "
+    "(see Streamed replies)."
+)
+
+# What a server that does not stream means for the replies of this session.
+SERVER_WHOLE: Final = (
+    "This server sends replies whole; melo shows them when they are complete."
+)
 
 _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
 _POST_FAILED: Final = re.compile(r"^POST \S+ failed (?:with )?")
@@ -110,7 +130,7 @@ class AnswerMarkdown(Markdown):
 
 
 def markdown(text: str) -> Markdown:
-    return AnswerMarkdown(text, code_theme="ansi_dark", hyperlinks=False)
+    return AnswerMarkdown(text, code_theme=CODE_THEME, hyperlinks=False)
 
 
 @dataclass
@@ -340,6 +360,9 @@ class StreamFeed:
     def content(self, delta: str) -> None:
         self._renderer.stream_content(delta)
 
+    def whole(self) -> None:
+        self._renderer.stream_whole()
+
     def closed(self) -> None:
         self._renderer.stream_closed()
 
@@ -354,7 +377,8 @@ class TurnRenderer:
         symbols: Symbols,
         backend: Callable[[], BackendInfo],
         verbose: bool = False,
-        thinking: bool = True,
+        thinking: bool | None = None,
+        developer: bool = False,
         reasoning_tags: Mapping[str, str] | None = None,
         snapshots: EditSnapshots | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -363,9 +387,14 @@ class TurnRenderer:
         self.symbols = symbols
         # The session's file_write snapshots, for a block's change.
         self._snapshots = snapshots
-        # Per session, not saved: /verbose and /thinking flip them.
+        # Developer mode keeps the record's full detail; the default mode
+        # shows a quiet one (thinking and a call's output in one line).
+        self.developer = developer
+        # Per session, not saved: /verbose and /thinking flip them. Thinking
+        # excerpts are on by default in developer mode only.
         self.verbose = verbose
-        self.thinking = thinking
+        self.thinking = developer if thinking is None else thinking
+        self._default_thinking = self.thinking
         # Per model, from [cli.reasoning_tags]: trusted framing declarations
         # for the stream and for the whole-reply display.
         self.reasoning_tags = dict(reasoning_tags or {})
@@ -373,6 +402,15 @@ class TurnRenderer:
         self._stream_texts: dict[int, str] = {}
         self._stream_step = 0
         self._stream_open = False
+        # How many parts the open stream released, whether this turn's reply
+        # arrived whole, and the models already told why.
+        self._stream_chunks = 0
+        self._buffered = False
+        self._noted: set[str] = set()
+        # Whether this turn's server sent a reply whole after a stream was
+        # asked for, and whether the session was told so (once).
+        self._whole = False
+        self._whole_told = False
         self._backend = backend
         self._clock = clock
         self.live: LiveState | None = None
@@ -443,6 +481,8 @@ class TurnRenderer:
         self._stream_texts = {}
         self._stream_step = 0
         self._stream_open = False
+        self._buffered = False
+        self._whole = False
         self._turn += 1
         self._call_number = 0
 
@@ -477,6 +517,7 @@ class TurnRenderer:
             "retrying", since=self._stream_step, upto=self._stream_step + 1
         )
         self._stream_open = True
+        self._stream_chunks = 0
         if self.live is not None:
             self.live.stream_text = ""
             self.live.stream_held = True
@@ -490,14 +531,22 @@ class TurnRenderer:
     def stream_content(self, delta: str) -> None:
         """Keep and show a released, already-redacted content delta."""
         step = self._stream_step
+        self._stream_chunks += 1
         self._stream_texts[step] = self._stream_texts.get(step, "") + delta
         if self.live is not None:
             self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
             self.live.stream_held = False
             self.live.activity = "Replying"
 
+    def stream_whole(self) -> None:
+        """The server sent the reply whole after a stream was asked for."""
+        self._whole = True
+
     def stream_closed(self) -> None:
         self._stream_open = False
+        # No hint and one released part: the filter held the reply to its end.
+        if self._stream_chunks == 1 and self.stream_hint() is None:
+            self._buffered = True
         if self.live is not None:
             self.live.stream_held = False
 
@@ -703,7 +752,7 @@ class TurnRenderer:
         self.out.print(
             Text(f"{self.symbols.thought} Thought for {format_duration(duration_s)}")
         )
-        if not self.thinking:
+        if not (self.thinking or self.verbose):
             return
         limit = VERBOSE_THINKING_LINES if self.verbose else THINKING_LINES
         rows = _wrapped_paragraphs(text, max(1, self.out.width - 2))
@@ -969,7 +1018,7 @@ class TurnRenderer:
         """Start a new conversation with the default display preferences."""
         self.clear_session()
         self.verbose = False
-        self.thinking = True
+        self.thinking = self._default_thinking
 
     def stopped_by(self, cause: str) -> None:
         """Note that the turn is being stopped for *cause* (its stopped line)."""
@@ -1020,7 +1069,11 @@ class TurnRenderer:
         if meta and meta[-1].startswith(_FREE_TEXT_TAGS):
             last = min(last, FREE_TEXT_CELLS)
         room = width - cells(start) - fixed - last
-        head = Text(f"{symbol} ", style=style)
+        # The mark carries the state's color and the row stays the default
+        # color; only a call that did not run is dim as a whole.
+        head = Text(style="muted" if style == "muted" else "")
+        head.append(symbol, style=style)
+        head.append(" ")
         head.append(name, style="tool")
         if shown and room >= 4:
             head.append("  " + cut_cells(shown, room, self.symbols.ellipsis))
@@ -1062,6 +1115,7 @@ class TurnRenderer:
             symbol, style = symbols.failed, "error"
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
+        nonzero = isinstance(exit_code, int) and exit_code != 0
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
         snapshot = self._take_snapshot(data)
         if status == "success" and snapshot is not None:
@@ -1074,11 +1128,24 @@ class TurnRenderer:
             arguments = _argument_lines(self._arguments_of(data), self.out.width)
             if arguments is not None:
                 parts.append(arguments)
-        parts.append(self._body(body, ref=ref))
+        parts.append(
+            self._body(
+                body,
+                ref=ref,
+                limit=self._output_limit(failed=nonzero or status != "success"),
+                first_style="error" if status != "success" else "",
+            )
+        )
         images = _image_lines(data.get("images"), self.symbols)
         if images is not None:
             parts.append(images)
         return Group(*parts)
+
+    def _output_limit(self, *, failed: bool) -> int:
+        """The output lines a call shows: a success shows one outside developer mode."""
+        if self.verbose:
+            return VERBOSE_BLOCK_LINES
+        return BLOCK_LINES if failed or self.developer else QUIET_BLOCK_LINES
 
     def _take_snapshot(self, data: Mapping[str, Any]) -> Snapshot | None:
         """The file_write snapshot of this call, removed (only a write has one)."""
@@ -1160,28 +1227,50 @@ class TurnRenderer:
         call = self._calls.get(call_id)
         return call.preview if call is not None else self._previews.get(call_id, "")
 
-    def _body(self, text: str, *, ref: str = "") -> Text:
+    def _body(
+        self,
+        text: str,
+        *,
+        ref: str = "",
+        limit: int = BLOCK_LINES,
+        first_style: str = "",
+    ) -> Text:
+        """A call's output under its header, *limit* lines, then the rest's count.
+
+        With one line shown, the count shares its row when the row has room:
+        ``└ app.py · +4 lines (/expand 1.1)``.
+        """
         lines = [
             expand_tabs(line) for line in clean_output(text).rstrip("\n").split("\n")
         ]
         if not "".join(lines).strip():
             lines = ["(no output)"]
-        limit = VERBOSE_BLOCK_LINES if self.verbose else BLOCK_LINES
         # A single line left prints instead of the "+1 lines" marker.
         shown = lines if len(lines) <= limit + 1 else lines[:limit]
         width = max(1, self.out.width - 4)
+        marker = ""
+        if len(shown) < len(lines):
+            marker = f"+{len(lines) - len(shown)} lines"
+            if ref:
+                marker += f" (/expand {ref})"
+        beside = f" {self.symbols.dot} {marker}" if marker and len(shown) == 1 else ""
+        if beside and width - cells(beside) < MARKER_MIN_LINE_CELLS:
+            beside = ""
         body = Text(no_wrap=True, overflow="ellipsis")
         for number, line in enumerate(shown):
             prefix = f"  {self.symbols.connector} " if number == 0 else "    "
             if number:
                 body.append("\n")
             body.append(prefix, style="muted")
-            body.append(cut_cells(line, width, self.symbols.ellipsis))
-        if len(shown) < len(lines):
-            marker = f"\n    {self.symbols.ellipsis} +{len(lines) - len(shown)} lines"
-            if ref:
-                marker += f" (/expand {ref})"
-            body.append(marker, style="muted")
+            room = width - cells(beside)
+            body.append(
+                cut_cells(line, room, self.symbols.ellipsis),
+                style=first_style if number == 0 else "",
+            )
+        if beside:
+            body.append(beside, style="muted")
+        elif marker:
+            body.append(f"\n    {self.symbols.ellipsis} {marker}", style="muted")
         return body
 
     def _print_result(self, result: RunResult, *, footer: bool) -> None:
@@ -1206,6 +1295,19 @@ class TurnRenderer:
             self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
+            model = self._backend().model
+            if (
+                self._buffered
+                and result.status == "completed"
+                and model not in self._noted
+            ):
+                self._noted.add(model)  # once per model, after its first whole reply
+                self.out.print(_marked(symbols.dot, "muted", Text(STREAM_BUFFERED)))
+            if self._whole and result.status == "completed" and not self._whole_told:
+                self._whole_told = True  # once per session, after the first one
+                self.out.print(
+                    _marked(symbols.dot, "muted", Text(SERVER_WHOLE, style="muted"))
+                )
 
     def _print_run_end(self, status: str, error: str, cause: str = "") -> None:
         """What happened to a run that did not complete, then what to do."""
@@ -1377,6 +1479,7 @@ def live_rows(
     *,
     frame: int | None = None,
     stream_lines: int = STREAM_LIVE_LINES,
+    developer: bool = False,
 ) -> list[list[tuple[str, str]]]:
     """The live area's rows as prompt_toolkit fragments, each within *width* cells.
 
@@ -1385,8 +1488,9 @@ def live_rows(
 
     Row 1 is the spinner line: the frame, the activity, the run's facts
     from P3's :func:`format_line`, the turn's output tokens and the stop
-    hint. When the width is short, whole parts go: the hint, then the
-    tokens, then ``format_line`` leaves out its own parts and cuts the rest
+    hint. Outside developer mode the facts are the time alone (no step, attempt,
+    phase or tests). When the width is short, whole parts go: the hint, then
+    the tokens, then ``format_line`` leaves out its own parts and cuts the rest
     with ``…`` (section 3). Row 2, while a tool runs, is its name, preview,
     clock and limit. Row 3, on a session's first turn with past runs, is
     the progress line's past facts and items (section 3). *frame* fixes the
@@ -1424,19 +1528,24 @@ def live_rows(
     payload.pop("past", None)
     payload.pop("items", None)
 
+    def facts_in(room: int) -> str:
+        if not developer:
+            return run_elapsed(now - live.started)
+        facts = format_line(payload, None, now, room, run_started=live.started)
+        # P3's line joins with its own dot; the UI's set decides the glyph.
+        return facts.replace(" · ", dot)
+
     def compose(extras: Sequence[str]) -> str:
         suffix = dot.join(extras)
         used = cells(head) + (cells(dot + suffix) if suffix else 0)
         room = max(1, width - used - cells(dot))
-        facts = format_line(payload, None, now, room, run_started=live.started)
-        # P3's line joins with its own dot; the UI's set decides the glyph.
-        facts = facts.replace(" · ", dot)
+        facts = facts_in(room)
         return dot.join([head, facts, suffix] if suffix else [head, facts])
 
     # Whole parts go when the row is short, never half a number: the hint,
     # then the tokens; then format_line drops its own parts and cuts the
     # rest with an ellipsis (section 3).
-    full_facts = format_line(payload, None, now, 10**6, run_started=live.started)
+    full_facts = facts_in(10**6)
 
     def total(extras: Sequence[str]) -> int:
         suffix = dot.join(extras)

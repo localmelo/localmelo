@@ -346,6 +346,13 @@ async def test_the_live_area_shows_the_spinner_row(
         )
         app.ui.invalidate()
         await app.wait(
+            lambda: "✶ Thinking… · 6s · ↓ 412 tokens · esc to stop" in app.text()
+        )
+        assert "step 4" not in app.text()
+        # Developer mode adds the run's facts to the row.
+        app.ui.renderer.developer = True
+        app.ui.invalidate()
+        await app.wait(
             lambda: "✶ Thinking… · step 4 · 6s · ↓ 412 tokens · esc to stop"
             in app.text()
         )

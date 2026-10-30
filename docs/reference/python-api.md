@@ -192,7 +192,13 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   completed `Message` and `finish_reason`. Providers without streaming call
   `chat()` and yield one `reply` with an empty `finish_reason`. `OpenAICompatLLM`
   sends `stream=true` only for this method and validates complete tool calls
-  before returning them. Usage is returned only if the server sends it; where
+  before returning them. A server that does not stream still answers: a
+  response that is one JSON body is read as the completion `chat()` returns, and
+  a stream that ends before it delivered anything is asked for again, once,
+  without `stream`. The `reply` then has `whole=True`, and the provider's
+  `sends_whole_replies` is true, so it does not ask that server to stream again;
+  a stream that breaks after a fragment was yielded keeps its error. Usage is
+  returned only if the server sends it; where
   supported, request it with `extra_body={"stream_options": {"include_usage": True}}`.
   Failures raise `ProviderError`; after any fragment is yielded, transport or
   premature-end errors are not retryable. Cancellation propagates. Close the generator

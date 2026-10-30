@@ -1,7 +1,6 @@
 › What is in the demo project?
 
 ✻ Thought for 0.1s
-  Let me see what is here.
 ● I will inspect the project.
 ✓ shell_exec  ls … · 0.1s · auto-allowed
   └ Makefile

@@ -1,0 +1,6 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {"content": "This reply needed a second request.", "stream_closed": true}
+  ]
+}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -28,9 +28,50 @@ from localmelo.support.providers.llm._protocol import (
 )
 from localmelo.support.providers.llm._sse import sse_data
 
+# The most bytes of a response that is one JSON body (not a stream) that
+# stream_chat reads, for a server that ignores ``stream``.
+_MAX_WHOLE_BODY = 16 * 1024 * 1024
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+
 
 def _reject_nonfinite(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
+
+
+async def _head_chunks(chunks: AsyncIterator[bytes]) -> list[bytes]:
+    """Read chunks until one shows how the body starts, and return them all.
+
+    Blank chunks, and a byte order mark (or the part of one that has come),
+    show nothing yet. The caller puts them back in front of the rest of the
+    body (:func:`_prepend`).
+    """
+    head: list[bytes] = []
+    async for chunk in chunks:
+        head.append(chunk)
+        seen = b"".join(head)
+        if not _UTF8_BOM.startswith(seen) and seen.removeprefix(_UTF8_BOM).strip():
+            break
+    return head
+
+
+def _is_object(head: list[bytes]) -> bool:
+    """Whether a body that starts with *head* is one JSON object, not events.
+
+    A server-sent-events body never starts with a brace: its lines begin
+    with a field name, a colon (a comment) or nothing at all.
+    """
+    return b"".join(head).removeprefix(_UTF8_BOM).lstrip().startswith(b"{")
+
+
+async def _prepend(
+    head: list[bytes], rest: AsyncIterator[bytes]
+) -> AsyncIterator[bytes]:
+    """The chunks of *head*, then those of *rest*."""
+    for chunk in head:
+        yield chunk
+    async for chunk in rest:
+        yield chunk
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -289,6 +330,13 @@ class OpenAICompatLLM(BaseLLMProvider):
     reply's usage with ``cached_tokens`` and ``reasoning_tokens`` from the
     usage details when the server sent them.
 
+    :meth:`stream_chat` copes with a server that does not stream: it reads a
+    response that is one JSON body as the completion :meth:`chat` would
+    return, and asks again, once and without streaming, when a stream ends
+    before it delivered anything. Either way the reply is marked
+    ``whole=True`` and ``sends_whole_replies`` becomes true: this provider
+    asks that server for whole replies from then on.
+
     Parameters
     ----------
     base_url : str
@@ -349,6 +397,10 @@ class OpenAICompatLLM(BaseLLMProvider):
         }
         self.reasoning_field = reasoning_field
         self.requires_reasoning_replay = requires_reasoning_replay
+        # Set once the server has answered a request for a stream with a whole
+        # reply (see stream_chat); later stream_chat calls then do not ask it
+        # to stream.
+        self.sends_whole_replies = False
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -360,48 +412,14 @@ class OpenAICompatLLM(BaseLLMProvider):
             follow_redirects=False,
         )
 
-    async def chat(
+    def _payload(
         self,
         messages: list[Message],
-        tools: list[ToolDef] | None = None,
-    ) -> Message:
-        reasoning_key = self.reasoning_field
-        if reasoning_key == "auto":
-            reasoning_key = self.last_reasoning_key or None
-        by_kind = self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {})
-        payload: dict[str, Any] = {
-            **self.extra_body,
-            **by_kind,
-            "model": self.model,
-            "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
-        }
-        if tools:
-            payload["tools"] = [_tool_def_to_openai(t) for t in tools]
-            payload["tool_choice"] = "auto"
-
-        path = "/chat/completions"
-        resp, data = await post_json(
-            self._http, path, payload, headers=attempt_headers()
-        )
-        msg = _choice_message(data)
-        if msg is None:
-            raise malformed_body(resp, path, "no choices[0].message object")
-
-        # Set right before the return, with no await in between.
-        self.last_reasoning_key = _reasoning_key(msg)
-        self.last_usage = _usage_details(data.get("usage"))
-        return Message(
-            role="assistant",
-            content=msg.get("content") or "",
-            tool_calls=parse_tool_calls(msg.get("tool_calls")),
-            usage=_normalize_usage(data.get("usage")),
-            thinking=_reasoning_text(msg),
-        )
-
-    async def stream_chat(
-        self, messages: list[Message], tools: list[ToolDef] | None = None
-    ) -> AsyncGenerator[StreamFragment, None]:
-        """Stream one OpenAI-compatible response; never retry after a delta."""
+        tools: list[ToolDef] | None,
+        *,
+        stream: bool = False,
+    ) -> dict[str, Any]:
+        """The request body; ``stream`` comes right after ``messages``."""
         reasoning_key = self.reasoning_field
         if reasoning_key == "auto":
             reasoning_key = self.last_reasoning_key or None
@@ -410,11 +428,103 @@ class OpenAICompatLLM(BaseLLMProvider):
             **self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {}),
             "model": self.model,
             "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
-            "stream": True,
         }
+        if stream:
+            payload["stream"] = True
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
             payload["tool_choice"] = "auto"
+        return payload
+
+    def _completion(
+        self, resp: httpx.Response, path: str, data: Any
+    ) -> tuple[Message, str]:
+        """The reply in a chat completion body, and its finish reason.
+
+        A body without a finish reason gets ``tool_calls`` when the reply
+        calls tools and ``stop`` otherwise.
+        """
+        msg = _choice_message(data)
+        if msg is None:
+            raise malformed_body(resp, path, "no choices[0].message object")
+
+        # Set right before the return, with no await in between.
+        self.last_reasoning_key = _reasoning_key(msg)
+        self.last_usage = _usage_details(data.get("usage"))
+        reply = Message(
+            role="assistant",
+            content=msg.get("content") or "",
+            tool_calls=parse_tool_calls(msg.get("tool_calls")),
+            usage=_normalize_usage(data.get("usage")),
+            thinking=_reasoning_text(msg),
+        )
+        finish = data["choices"][0].get("finish_reason")
+        if not isinstance(finish, str) or not finish:
+            finish = "tool_calls" if reply.tool_calls else "stop"
+        return reply, finish
+
+    async def _complete(
+        self, messages: list[Message], tools: list[ToolDef] | None
+    ) -> tuple[Message, str]:
+        """Send one request that does not ask for a stream: its reply and finish reason."""
+        path = "/chat/completions"
+        resp, data = await post_json(
+            self._http, path, self._payload(messages, tools), headers=attempt_headers()
+        )
+        return self._completion(resp, path, data)
+
+    async def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+    ) -> Message:
+        reply, _ = await self._complete(messages, tools)
+        return reply
+
+    async def _read_body(
+        self,
+        response: httpx.Response,
+        head: list[bytes],
+        chunks: AsyncIterator[bytes],
+    ) -> tuple[Message, str]:
+        """Read a response that is one JSON body: its reply and finish reason.
+
+        *head* holds the chunks already read and *chunks* the rest. The body
+        is read as :meth:`chat` reads it, with a bound on its size.
+        """
+        body = bytearray()
+        async for chunk in _prepend(head, chunks):
+            body.extend(chunk)
+            if len(body) > _MAX_WHOLE_BODY:
+                raise ProviderError("Response body exceeds size limit")
+        # What an error message quotes, as a response that was read.
+        seen = httpx.Response(response.status_code, content=bytes(body[:65_536]))
+        path = "/chat/completions"
+        try:
+            data = json.loads(body)
+        except ValueError as exc:
+            raise malformed_body(seen, path, "not JSON") from exc
+        return self._completion(seen, path, data)
+
+    async def stream_chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """Stream one OpenAI-compatible response; never retry after a delta.
+
+        A server that does not stream still answers. A response that is one
+        JSON body is read as the completion :meth:`chat` would return. A
+        stream that ends before it delivered anything is asked for again,
+        once, without streaming. Either way the reply comes marked
+        ``whole=True``, and the server is not asked to stream again. A stream
+        that breaks after part of a reply reached the caller keeps its error.
+        """
+        if self.sends_whole_replies:
+            reply, finish = await self._complete(messages, tools)
+            yield StreamFragment(
+                kind="reply", reply=reply, finish_reason=finish, whole=True
+            )
+            return
+        payload = self._payload(messages, tools, stream=True)
         content: list[str] = []
         thinking: list[str] = []
         calls: dict[int, dict[str, str]] = {}
@@ -426,6 +536,8 @@ class OpenAICompatLLM(BaseLLMProvider):
         finish = ""
         done = False
         emitted = False
+        opened = False
+        whole: tuple[Message, str] | None = None
         try:
             async with self._http.stream(
                 "POST", "/chat/completions", json=payload, headers=attempt_headers()
@@ -445,7 +557,15 @@ class OpenAICompatLLM(BaseLLMProvider):
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
                         context_overflow=_context_overflow(error_response),
                     )
-                async for frame in sse_data(response.aiter_bytes()):
+                opened = True
+                chunks = response.aiter_bytes()
+                head = await _head_chunks(chunks)
+                if _is_object(head):
+                    # One JSON body, not events: a server that ignores
+                    # ``stream``. Nothing is left for the loop below to read.
+                    whole = await self._read_body(response, head, chunks)
+                    head = []
+                async for frame in sse_data(_prepend(head, chunks)):
                     if frame == "[DONE]":
                         done = True
                         break
@@ -548,6 +668,14 @@ class OpenAICompatLLM(BaseLLMProvider):
                             finish = final
         except httpx.ConnectError as exc:
             raise unreachable(self._http, exc, retryable=not emitted) from exc
+        except httpx.RemoteProtocolError as exc:
+            if emitted or not opened:
+                raise ProviderError(
+                    f"Streaming request failed: {type(exc).__name__}",
+                    retryable=not emitted,
+                ) from exc
+            # The server cut the body before anything reached the caller: a
+            # stream that ended, handled below.
         except httpx.TransportError as exc:
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}", retryable=not emitted
@@ -556,10 +684,18 @@ class OpenAICompatLLM(BaseLLMProvider):
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}"
             ) from exc
-        if not done or not finish:
-            raise ProviderError(
-                "Streaming response ended before completion", retryable=not emitted
+        if whole is None and (not done or not finish):
+            if emitted:
+                raise ProviderError("Streaming response ended before completion")
+            # Nothing reached the caller, so the request can be sent again: ask
+            # for the whole reply. This raises its own error if it fails.
+            whole = await self._complete(messages, tools)
+        if whole is not None:
+            self.sends_whole_replies = True
+            yield StreamFragment(
+                kind="reply", reply=whole[0], finish_reason=whole[1], whole=True
             )
+            return
         if bool(calls) != (finish == "tool_calls"):
             raise ProviderError("Tool calls were not completed")
         raw_calls = []

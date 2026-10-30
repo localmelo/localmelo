@@ -2,7 +2,9 @@
 
 Styles are semantic and use the 16 ANSI colors only, so light and dark
 terminal themes both work; ``NO_COLOR`` removes the colors and keeps bold,
-dim and reverse. Each symbol has an ASCII stand-in, used when stdout's
+dim and reverse. A warning is yellow only on a background ``COLORFGBG``
+reports as dark and bold elsewhere, and code blocks use rich's light theme
+on a light one. Each symbol has an ASCII stand-in, used when stdout's
 encoding is not UTF-8 or ``LOCALMELO_ASCII=1``.
 """
 
@@ -11,7 +13,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 from prompt_toolkit.styles import Style
 from rich.theme import Theme
@@ -31,25 +33,68 @@ _STYLES: Final[Mapping[str, tuple[str, str]]] = {
     "yolo": ("white on red", "ansiwhite bg:ansired"),
 }
 
-RICH_THEME: Final = Theme(
-    {
-        **{name: rich for name, (rich, _) in _STYLES.items()},
-        # Inline code: bold cyan, without the default black background.
-        "markdown.code": "bold cyan",
-    }
-)
+# Yellow is unreadable on some light backgrounds: elsewhere than a known dark
+# one, bold in the default color draws the attention.
+_BOLD: Final = {"warn": ("bold", "bold"), "blocked": ("bold", "bold")}
 
-PT_STYLE: Final = Style.from_dict(
-    {
-        **{name: pt for name, (_, pt) in _STYLES.items()},
-        "rule": "dim",
-        "prompt": "ansicyan bold",
-        "placeholder": "dim",
-        "status": "",
-        "hint": "dim",
-        "question": "bold",
-    }
-)
+Background = Literal["dark", "light", "unknown"]
+
+
+def background(environ: Mapping[str, str] | None = None) -> Background:
+    """The terminal's background as ``COLORFGBG`` reports it, else ``unknown``.
+
+    The variable is ``FG;BG`` or ``FG;default;BG`` in ANSI color numbers: 0-6
+    and 8 are dark, 7 and 9-15 light. Nothing else is read and no terminal is
+    queried.
+    """
+    environ = os.environ if environ is None else environ
+    _, separator, last = environ.get("COLORFGBG", "").rpartition(";")
+    if not separator or not last.strip().isdigit():
+        return "unknown"
+    number = int(last)
+    if number in (7, *range(9, 16)):
+        return "light"
+    return "dark" if number <= 8 else "unknown"
+
+
+def _styles(bg: Background) -> Mapping[str, tuple[str, str]]:
+    return _STYLES if bg == "dark" else {**_STYLES, **_BOLD}
+
+
+def rich_theme(bg: Background) -> Theme:
+    return Theme(
+        {
+            **{name: rich for name, (rich, _) in _styles(bg).items()},
+            # Inline code: bold cyan, without the default black background.
+            "markdown.code": "bold cyan",
+        }
+    )
+
+
+def pt_style(bg: Background) -> Style:
+    return Style.from_dict(
+        {
+            **{name: pt for name, (_, pt) in _styles(bg).items()},
+            "rule": "dim",
+            "prompt": "ansicyan bold",
+            "placeholder": "dim",
+            "status": "",
+            "hint": "",  # says what to do or why a key did nothing: not dim
+            "question": "bold",
+        }
+    )
+
+
+def code_theme(bg: Background) -> str:
+    """rich's ANSI theme for code blocks: ``ansi_dark``'s bright colors need a dark one."""
+    return "ansi_light" if bg == "light" else "ansi_dark"
+
+
+# Read once: the background does not change under a running process.
+BACKGROUND: Final = background()
+RICH_THEME: Final = rich_theme(BACKGROUND)
+PT_STYLE: Final = pt_style(BACKGROUND)
+CODE_THEME: Final = code_theme(BACKGROUND)
 
 
 @dataclass(frozen=True)

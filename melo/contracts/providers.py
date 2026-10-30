@@ -69,6 +69,11 @@ class StreamFragment:
     Deltas are untrusted and must be filtered before display; they must not be
     persisted. Tool fragments contain only an index, never partial arguments.
     Only ``reply`` carries complete tool calls. Failures raise ProviderError.
+
+    ``whole`` is set on a ``reply`` from a server that was asked to stream and
+    sent the reply whole instead: it answered with one body, or ended the stream
+    before it delivered anything and answered a second request. A provider that
+    sets it has stopped asking that server to stream.
     """
 
     kind: Literal["content", "reasoning", "tool", "usage", "reply"]
@@ -77,6 +82,7 @@ class StreamFragment:
     usage: dict[str, int] | None = None
     finish_reason: str = ""
     reply: Message | None = None
+    whole: bool = False
 
 
 class BaseLLMProvider(ABC):
