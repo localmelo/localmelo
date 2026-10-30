@@ -826,7 +826,10 @@ class SessionRunner:
             outcome = turn.outcome
             if self._memory is not None and outcome and outcome.status == "completed":
                 answer = split_thinking(outcome.result)[1]
-                self._memory.after_turn(self._store, turn.turn, turn.typed, answer)
+                try:
+                    self._memory.after_turn(self._store, turn.turn, turn.typed, answer)
+                except Exception:
+                    logger.warning("Could not index a turn for memory", exc_info=True)
         except Exception:
             logger.exception(
                 "Could not end turn %d of session %s",

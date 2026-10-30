@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import dataclasses
+import logging
 import os
 from collections.abc import Callable, Collection, Mapping
 from typing import TYPE_CHECKING, Any, Final
@@ -267,7 +268,11 @@ async def build_session_agent(
     providers = load_mcp_providers(mcp_config) if mcp_config else []
     notes: str | None = None
     if memory is not None and memory.enabled:
-        notes = await memory.pinned_quotes()
+        try:
+            notes = await memory.pinned_quotes()
+        except Exception:  # a chat still opens without its pinned notes
+            logging.getLogger(__name__).warning("Could not read notes", exc_info=True)
+            notes = ""
         providers.append(memory.tools())
     if browser_driver != "off":
         from localmelo.support.browser import provider_for

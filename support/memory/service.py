@@ -308,6 +308,8 @@ class ChatMemory:
             return TurnMemory()
         found, refused = records.candidates(typed)
         query = typed[:_QUERY_CHARS]
+        if not query.strip():
+            return TurnMemory()
         vectors, model = await self._embed(
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )

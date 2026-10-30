@@ -314,3 +314,12 @@ async def test_search_memory_answers_with_sources_and_scopes(
         assert chats.startswith("1. User: How do I fix the failing CI test")
     finally:
         await memory.aclose()
+
+
+def test_a_document_keeps_no_sentence_a_note_would_refuse() -> None:
+    text = document_text(
+        "My wifi password is hunter2-lighthouse. Plan the garden.",
+        "Your card 4111 1111 1111 1111 is noted. Water daily.",
+    )
+    assert "hunter2" not in text and "4111" not in text
+    assert text == "User: [not kept] Plan the garden.\nmelo: [not kept] Water daily."

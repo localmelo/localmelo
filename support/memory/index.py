@@ -25,6 +25,8 @@ from localmelo.melo.memory._sqlite import (
     prepare_connection,
     secure_deletes,
 )
+from localmelo.melo.memory.notes import split_sentences
+from localmelo.support.memory.records import sensitive
 
 DOC_CHARS: Final = 2_000
 
@@ -65,10 +67,18 @@ class Document:
     id: int = 0
 
 
+def _kept(text: str) -> str:
+    """*text* without the sentences a note would refuse (a password, a card number)."""
+    for _, sentence in reversed(split_sentences(text)):
+        if sensitive(sentence):
+            text = text.replace(sentence, "[not kept]")
+    return text
+
+
 def document_text(typed: str, answer: str, *, title: str = "") -> str:
     """What a turn's document holds: a task's title, who said what, bounded."""
     parts = [f"Task: {title.strip()}"] if title.strip() else []
-    parts += [f"User: {typed.strip()}", f"melo: {answer.strip()}"]
+    parts += [f"User: {_kept(typed.strip())}", f"melo: {_kept(answer.strip())}"]
     return redact_secrets("\n".join(parts)[:DOC_CHARS])[0]
 
 
