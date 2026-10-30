@@ -20,6 +20,7 @@ The Chinese index is [zh-CN/README.md](zh-CN/README.md).
   [model servers](guides/model-servers.md): setup, backends and maintenance.
 - [Set up an embedding model](guides/embedding.md): servers and connection checks.
 - [Tools and MCP](guides/tools-mcp.md): selection, configuration and approvals.
+- [Browsing](guides/browsing.md): let melo read web pages in Safari on a Mac.
 - [Gateway](guides/gateway.md): startup and security; [web console](guides/web-console.md): the workspace.
 - [API client](guides/api-client.md): create and follow a console session.
 - [Python examples](guides/python.md) and [sessions](guides/sessions.md).

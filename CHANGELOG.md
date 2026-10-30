@@ -111,6 +111,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `NO_COLOR`, `TERM=dumb` or output that is not a terminal, no escape code is written and
   `/clear` does what `/new` does ([#304]).
 
+- Melo changes moves without a hitch. The desktop pet used to cut what was running when its
+  mood changed (the breath snapped back to rest and began again, a hop was cut in the air)
+  and dissolved one pose into the next in 150 ms. Now nothing that moves is cut: a breath
+  the next mood shares carries on, one it changes eases to rest over a quarter of a second
+  before the new one begins, the "z" of a sleeping Melo fades out, and a hop lands. A change
+  waits at most 0.4 s for a rest point (the end of a breath, between blinks); then Melo
+  squashes a little and rises, and the new picture fades in over the low point (250 ms) so
+  the pose changes where it is hidden. Under Reduce Motion, Low Power Mode and heat nothing
+  moves and a change is a plain 200 ms cross-fade. The mood still follows the app's 2 s
+  health poll ([#306]).
+
 - Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
   replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
   it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
@@ -2408,6 +2419,7 @@ earlier milestones.
 [#297]: https://github.com/localmelo/localmelo/pull/297
 [#304]: https://github.com/localmelo/localmelo/pull/304
 [#305]: https://github.com/localmelo/localmelo/pull/305
+[#306]: https://github.com/localmelo/localmelo/pull/306
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

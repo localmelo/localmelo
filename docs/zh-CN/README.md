@@ -19,6 +19,7 @@
 - [配置指南](guides/configure.md)和[模型服务器指南](guides/model-servers.md)：设置、后端和维护。
 - [配置嵌入模型](guides/embedding.md)：服务器和连接检查。
 - [工具与 MCP](guides/tools-mcp.md)：工具选择、配置和审批。
+- [浏览](guides/browsing.md)：让 melo 在 Mac 的 Safari 里阅读网页。
 - [网关](guides/gateway.md)：启动和安全；[网页控制台](guides/web-console.md)：工作区。
 - [API 客户端](guides/api-client.md)：创建并跟踪一个控制台会话。
 - [Python 示例](guides/python.md)和[会话](guides/sessions.md)。
