@@ -55,7 +55,7 @@ export function setupSettings({ api, onSaved }) {
     testVersion += 1;
     testStatus.textContent = "";
     testStatus.dataset.state = "";
-    testButton.disabled = busy || !settings;
+    testButton.disabled = busy || !settings || !chat.value;
   }
 
   function showError(message, conflict = false) {
@@ -65,10 +65,12 @@ export function setupSettings({ api, onSaved }) {
   }
 
   function enable(ready) {
+    const chosen = !!chat.value; // Nothing is saved until the user chooses a server.
     for (const id of inputIds) $(id).disabled = !ready;
-    save.disabled = !ready;
-    discover.disabled = !ready || isCloud();
-    testButton.disabled = !ready;
+    for (const id of ["s-chat-url", "s-chat-model"]) $(id).disabled = !ready || !chosen;
+    save.disabled = !ready || !chosen;
+    discover.disabled = !ready || !chosen || isCloud();
+    testButton.disabled = !ready || !chosen;
   }
 
   function isCloud() {
@@ -79,15 +81,16 @@ export function setupSettings({ api, onSaved }) {
     $("s-developer-options").hidden = !$("s-developer").checked;
   }
 
-  function options(node, choices, selected) {
+  function options(node, choices, selected, blank = "") {
+    const all = blank ? [{ key: "", label: blank }, ...choices] : choices;
     node.replaceChildren();
-    for (const choice of choices) {
+    for (const choice of all) {
       const option = document.createElement("option");
       option.value = choice.key;
       option.textContent = choice.label;
       node.append(option);
     }
-    node.value = choices.some((choice) => choice.key === selected) ? selected : choices[0]?.key || "";
+    node.value = all.some((choice) => choice.key === selected) ? selected : all[0]?.key || "";
   }
 
   function section(key) {
@@ -106,7 +109,7 @@ export function setupSettings({ api, onSaved }) {
     $("s-base-url").value = data.base_url || "";
     $("s-model-options").replaceChildren();
     modelStatus.textContent = cloud ? "Type the model name." : "Discovery lists models without starting a chat.";
-    discover.disabled = busy || cloud;
+    discover.disabled = busy || cloud || !chat.value;
     if (cloud) checkKey();
     else { keyVersion += 1; keyStatus.textContent = ""; }
   }
@@ -169,7 +172,7 @@ export function setupSettings({ api, onSaved }) {
         const defaults = loaded.defaults[choice.key] || {};
         sections[choice.key] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
       }
-      options(chat, loaded.choices.chat_backends, loaded.chat_backend);
+      options(chat, loaded.choices.chat_backends, loaded.chat_backend, loaded.chat_backend ? "" : "Choose a server…");
       options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
       $("s-workspace").value = loaded.workspace;
       $("s-developer").checked = loaded.mode === "developer";
@@ -185,8 +188,10 @@ export function setupSettings({ api, onSaved }) {
       renderChat();
       renderEmbedding();
       enable(true);
-      status.textContent = loaded.errors?.length ? "Review your settings before saving." : "";
-      if (Array.isArray(loaded.errors)) showError(loaded.errors.filter((item) => typeof item === "string" && item).join("\n"));
+      // "not set (run 'melo --reconfigure')" is advice for the terminal: here the empty select says it.
+      const errors = (loaded.errors || []).filter((item) => typeof item === "string" && item && !item.includes("melo --reconfigure"));
+      status.textContent = !loaded.chat_backend ? "Choose a server to continue." : errors.length ? "Review your settings before saving." : "";
+      showError(errors.join("\n"));
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       busy = false;
@@ -202,7 +207,7 @@ export function setupSettings({ api, onSaved }) {
     invalidateTest();
   });
   reload.addEventListener("click", open);
-  chat.addEventListener("change", () => { invalidateTest(); renderChat(); });
+  chat.addEventListener("change", () => { invalidateTest(); renderChat(); enable(!busy); });
   embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); });
   $("s-workspace").addEventListener("input", invalidateTest);
   $("s-developer").addEventListener("change", renderDeveloper);
@@ -303,7 +308,7 @@ export function setupSettings({ api, onSaved }) {
   });
 
   save.addEventListener("click", async () => {
-    if (busy || !settings) return;
+    if (busy || !settings || !chat.value) return;
     const currentGeneration = generation;
     const body = saveBody();
     busy = true;

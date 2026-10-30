@@ -130,6 +130,19 @@ test('unconfigured defaults, cloud manual model and safe key status', async () =
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
 
+test('nothing is chosen for a user who has saved nothing, and the terminal advice stays out', async () => {
+  const advice = "chat_backend is not set (run 'melo --reconfigure')";
+  const h = harness({'GET /settings': fixture({chat_backend: '', embedding_backend: '', revision: '', errors: [advice, 'workspace: not a folder']})});
+  await h.open();
+  assert.equal(h.element('s-adapter').value, '', 'The select does not fall back to its first entry');
+  assert.equal(h.element('s-adapter').children[0].textContent, 'Choose a server…');
+  for (const id of ['create-btn', 'settings-test', 'discover-btn', 's-chat-url', 's-chat-model']) assert.equal(h.element(id).disabled, true, id);
+  assert.equal(h.element('settings-status').textContent, 'Choose a server to continue.');
+  assert.equal(h.element('create-error').textContent, 'workspace: not a folder', 'Other problems still show');
+  await change(h, 's-adapter', 'vllm', 'change');
+  for (const id of ['create-btn', 'settings-test', 'discover-btn', 's-chat-url', 's-chat-model']) assert.equal(h.element(id).disabled, false, id);
+});
+
 test('conflict preserves edits and explicit reload replaces them', async () => {
   let count = 0;
   const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
