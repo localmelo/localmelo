@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolCall
+from localmelo.melo.schema import EMPTY_REPLY_NUDGE, SHORT_TERM_MAX, Message, ToolCall
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.session_views import memory_view, usage_view
 from localmelo.support.cli.theme import ASCII, UNICODE
@@ -124,6 +124,7 @@ def test_memory_resume_explanation_comes_from_resume_info(
         memory_view(
             [Message("user", "only the visible tail"), Message("assistant", "answer")],
             BackendInfo("vllm", "vLLM", "stub", "http://127.0.0.1:9/v1"),
+            window_max=SHORT_TERM_MAX,
             memory=True,
             loaded=loaded,
             width=100,
@@ -157,6 +158,7 @@ def test_memory_sanitizes_rows_and_does_not_mutate_the_copied_window() -> None:
         memory_view(
             messages,
             BackendInfo("vllm", "vLLM", "stub", "http://127.0.0.1:9/v1"),
+            window_max=SHORT_TERM_MAX,
             memory=False,
             loaded=None,
             width=40,

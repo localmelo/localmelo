@@ -1304,6 +1304,24 @@ async def test_status_shows_the_facts(
     assert "version    melo " in text
 
 
+@pytest.mark.parametrize("cap", [20, 64])
+async def test_memory_and_status_show_the_window_cap_the_agent_has(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, cap: int
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    options = replace(session.agent.options, window_messages=cap)
+    session.agent = Agent(llm=ScriptedLLM([]), options=options)
+    await session.agent.start()
+    session.enter("/memory")
+    await _until(lambda: f"Working memory: 0 of {cap} messages" in out.text())
+    session.enter("/status")
+    await _until(lambda: f"memory     0 of {cap} messages" in out.text())
+
+
 async def test_status_hides_the_rows_with_nothing_to_say_until_they_have_data(
     setup: Setup, monkeypatch: pytest.MonkeyPatch
 ) -> None:

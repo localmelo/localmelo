@@ -40,12 +40,16 @@ TIMEOUT_S = 10.0
 
 @contextlib.asynccontextmanager
 async def console_with(
-    tmp_path: Path, *replies: Message, scripts: list[list[Message]] | None = None
+    tmp_path: Path,
+    *replies: Message,
+    scripts: list[list[Message]] | None = None,
+    **options: Any,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, list[ScriptedLLM]]]:
     """A started console whose builder scripts every Agent with *replies*.
 
     With *scripts*, the Agent of the Nth build gets the Nth list instead,
-    for a test whose sessions need their own replies.
+    for a test whose sessions need their own replies. *options* are the
+    AgentOptions of every Agent the console builds.
     """
     llms: list[ScriptedLLM] = []
 
@@ -61,7 +65,7 @@ async def console_with(
         )
         llm = ScriptedLLM(script)
         llms.append(llm)
-        return await started_agent(Path(workspace), llm, mode="gateway")
+        return await started_agent(Path(workspace), llm, mode="gateway", **options)
 
     console = Console(
         make_cfg(),

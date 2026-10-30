@@ -1011,10 +1011,11 @@ class CliSession:
             )
         )
         messages = len(self.agent.conversation())
+        window = self.agent.options.window_messages
         embedding = backend.embedding
         self.out.print(
             self._text(
-                f"memory     {messages} of 20 messages · "
+                f"memory     {messages} of {window} messages · "
                 + (
                     f"long-term memory · {embedding}"
                     if embedding
