@@ -375,6 +375,14 @@ since there is no address to change. A run that ended this way also leaves the
 retry lines out of its work box, which the card already says; while it is still
 retrying they show.
 
+A reply that is only the model's unfinished thinking never shows as the
+answer: it is a folded thinking item in the work box, with the line `The
+model's reply ended inside its thinking; asking it for its answer.`, and the
+model is asked once more. When the second reply has no answer either, the card's
+title is `melo did not finish an answer`, the hint `The model's reply held only
+its thinking. Try again, or rephrase the request.`, and the filled button
+**Try again**.
+
 ## Persistence and limits
 
 The page's chats are sessions in the gateway's own session file,

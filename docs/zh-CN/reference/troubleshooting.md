@@ -237,6 +237,15 @@ melo: run ended with status failed: empty replies
 - **原因：** 模型连续两次回复，既没有文本也没有工具调用。
 - **修复：** 换一个模型，或检查模型服务器的日志。
 
+### failed: melo did not finish an answer
+
+```text
+melo: run ended with status failed: melo did not finish an answer
+```
+
+- **原因：** 模型在思考中、给出回答之前停下了，localmelo 再问一次时又是如此。它的思考作为思考保留（终端中用 `/thinking on`，控制台中是折叠的思考），绝不作为回答。
+- **修复：** 再试一次（终端中用 `/retry`，控制台中点 Try again）。如果反复出现，在服务器上提高模型的输出上限，或换一个模型。
+
 ### budget_exhausted: Max steps reached
 
 ```text

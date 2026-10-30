@@ -60,6 +60,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
   add something (the streamed text, the running tool, the past runs) stay ([#NN]).
 
+- A reply that is only the model's unfinished thinking is never shown as the
+  answer. When a thinking model stopped before its end-of-thinking mark, a
+  server could return the thinking as the reply's text, and a greeting got the
+  model's notes to itself as its answer. localmelo now tells such a reply by
+  facts, never by its wording: a `<think>` that is never closed, no answer
+  with reasoning tokens counted, a streamed reply that repeats the server's
+  reasoning, or no thinking and no `</think>` from a model whose thinking ends
+  with a mark (declared in `[cli.reasoning_tags]`, or seen from a server that
+  sends reasoning in a field of its own and counted none in this reply). The
+  text becomes the reply's thinking, folded in the terminal and the console,
+  and the model is asked once more (one extra request, with the notice
+  `unfinished_answer`); a second reply without an answer ends the run
+  `failed` with `melo did not finish an answer`, with `/retry` in the
+  terminal and **Try again** in the console. Direct runs and workers report
+  that error instead of returning the thinking as the result ([#288]).
+
 - The console and the terminal no longer show a turn's time twice. A turn that answered
   without tool calls showed `Thought for 2.0s` over the answer and `2.0s · 1 step` under it,
   the step's time and the turn's time being the same. The console now shows no summary line for
@@ -2214,6 +2230,7 @@ earlier milestones.
 [#284]: https://github.com/localmelo/localmelo/pull/284
 [#285]: https://github.com/localmelo/localmelo/pull/285
 [#287]: https://github.com/localmelo/localmelo/pull/287
+[#288]: https://github.com/localmelo/localmelo/pull/288
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -9,7 +9,7 @@ retried.
 | Status | Exit code | Meaning |
 |---|---|---|
 | `completed` | 0 | The model gave a final answer, or a reflection decided that the task was done. |
-| `failed` | 2 | A check refused the run, or the model gave two empty replies in a row. |
+| `failed` | 2 | A check refused the run, or the model gave two replies in a row with no answer. |
 | `gate_stopped` | 2 | After an attempt, the reflection decided not to continue. |
 | `budget_exhausted` | 2 | The run used all its steps or attempts without a final answer. |
 | `context_budget_exceeded` | 2 | The pinned request cannot fit the configured input budget, or a smaller retry still overflowed. |
@@ -30,7 +30,10 @@ Details:
   `Response check failed: …`. A reply with neither a tool call nor text is
   an empty reply: localmelo asks the model to continue and plans again, and
   the step counts. Two empty replies in a row end the run with the error
-  `empty replies`.
+  `empty replies`. A reply that is only unfinished thinking (see
+  [How it works](../concepts/how-it-works.md)) is stored as thinking and
+  counts as an empty reply; a row that held one ends with the error
+  `melo did not finish an answer`, and the thinking is never the `result`.
 - **`gate_stopped`.** The reflection chose `stop` or `decompose`, or its
   decision to continue did not pass the continuation gate (see
   [Reflection](../concepts/how-it-works.md#reflection)). `result` holds the reflection's

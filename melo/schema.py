@@ -53,6 +53,11 @@ EMPTY_REPLY_NUDGE = (
     "Your last reply was empty. Continue the task: call a tool or give your "
     "final answer."
 )
+# A planning reply that is only the model's unfinished thinking (see
+# unfinished_thinking) is no answer either: its text becomes the reply's
+# thinking and it goes the way of an empty reply. The run's error when the
+# reply that ends it, or one before it in the row, was such a reply.
+UNFINISHED_ANSWER_ERROR = "melo did not finish an answer"
 
 # ── Stopped tool calls ──
 
@@ -174,6 +179,63 @@ def split_thinking(
         rest = text[closing.end() :]
         return text[: closing.start()].strip(), rest.strip() if strip_answer else rest
     return "", text.strip() if strip_answer else text
+
+
+def _same_words(left: str, right: str) -> bool:
+    return left.split() == right.split()
+
+
+def unfinished_thinking(
+    content: str,
+    thinking: str,
+    *,
+    framing: str | None,
+    reasoning_tokens: int | None = None,
+    streamed: bool = False,
+) -> bool:
+    """Whether a reply without tool calls is only thinking that never ended (#278).
+
+    Facts decide, never the wording: *content* and *thinking* as the
+    provider returned them, *framing* (``explicit``, ``closing_only`` or
+    ``none`` as declared in ``[cli.reasoning_tags]``; ``field`` for a server
+    seen to send this model's reasoning in a field of its own; ``None``
+    when unknown) and the reasoning tokens the provider counted (``None``
+    when it reports no count). It is:
+
+    - content that opens thinking with a leading ``<think>`` and never
+      closes it, unless ``none`` declares the tags literal text;
+    - no answer once thinking is set aside, with reasoning tokens counted;
+    - a *streamed* reply whose content repeats its reasoning word for word:
+      oMLX sends unfinished thinking again as content when a stream ends;
+    - content with no thinking and no ``</think>`` when the framing ends
+      thinking with a mark: ``closing_only``, or ``field`` with a reasoning
+      count of 0, the server's word that it found no reasoning in a reply
+      of a model that reasons; it found no end mark and returned all of it
+      as the answer.
+    """
+    opened = framing != "none" and _THINK_OPENING.match(content) is not None
+    if opened and _THINK_CLOSING.search(content) is None:
+        return True
+    answer = content if framing == "none" else split_thinking(content)[1]
+    if not answer.strip():
+        return bool(reasoning_tokens)
+    if thinking.strip():
+        return streamed and _same_words(content, thinking)
+    if _THINK_CLOSING.search(content) is not None:
+        return False
+    return framing == "closing_only" or (framing == "field" and reasoning_tokens == 0)
+
+
+def unfinished_as_thinking(content: str, thinking: str) -> str:
+    """The thinking of an unfinished reply: its thinking, then its content's text.
+
+    The tags go, and content that repeats the thinking is kept once.
+    """
+    text = _THINK_OPENING.sub("", _THINK_CLOSING.sub("", content), count=1).strip()
+    parts = [thinking.strip()]
+    if not _same_words(text, thinking):
+        parts.append(text)
+    return "\n\n".join(part for part in parts if part)
 
 
 # ── Data types ──
