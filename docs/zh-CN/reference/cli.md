@@ -174,6 +174,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
   Pass --chat-model <id>.
   ```
 
+  状态路由返回 401（需要密钥）时，提示之前会多一行：`The server did not say which models are loaded (it needs a key for that).`
   带 `--brief` 时，同样的文本（合并为一行）是 `exit_code` 为 2 的 `startup_error` 结果的 `error`（见[输出](#output)）。普通的 `--output-format json` 不输出记录，与运行前的其他拒绝相同。读不到列表的服务器（没有响应、HTTP 错误、没有列出模型）仍像以前一样被请求模型 `default`，文本输出会在 stderr 上多一行，例如 `melo: warning: Could not list the models at URL (connection refused); asking for the model 'default'.` JSON 格式不输出警告。带 `--chat-model` 时不会列出任何模型。
 - 不带 `--base-url` 时，`--chat-model` 只替换本次运行的已配置对话模型，配置文件不会改变。
 - 没有任务时，两个选项都会打开交互式界面；见[使用哪个模型服务器](../guides/terminal.md#which-model-server)。与 `--serve` 或 `--daemon` 一起使用时，两者都是用法错误：网关使用配置文件。

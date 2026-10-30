@@ -45,7 +45,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server that loads models on demand can read as any model, a large one that is not
   in memory included. It lists the server's models first and chooses as the interactive
   UI does: the only chat model, or the one the server says is loaded. With several and
-  none known to be loaded it exits 2 with the list and `Pass --chat-model <id>`; with
+  none known to be loaded it exits 2 with the list and `Pass --chat-model <id>` (and, when
+  the status route answered 401, a line saying the server needs a key for that); with
   `--brief` that is a `startup_error` result whose `exit_code` is 2. A server that cannot
   be listed still gets `default`, with one warning line on stderr in text output. With
   `--chat-model` nothing changes: no list request, the same requests. ([#NN])

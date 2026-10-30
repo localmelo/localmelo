@@ -222,6 +222,8 @@ deliberate change: a test pins the number of options default-mode help shows.
   Pass --chat-model <id>.
   ```
 
+  When the status route answered 401 (it needs a key), one more line comes before
+  the hint: `The server did not say which models are loaded (it needs a key for that).`
   With `--brief` the same text, on one line, is the `error` of a `startup_error`
   result with `exit_code` 2 (see [Output](#output)). Plain `--output-format json`
   prints no record, as for any refusal before the run. A server whose list cannot

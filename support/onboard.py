@@ -521,9 +521,7 @@ def _choose_model(url: str, models: list[str]) -> str:
     pick = discovery.pick_model(models, loaded)
     default = str(models.index(pick) + 1) if pick else ""
     if len(chat) > 1 and not default and loaded.needs_key:
-        print(
-            "  The server did not say which models are loaded (it needs a key for that)."
-        )
+        print(f"  {discovery.NO_STATUS_KEY_NOTE}")
     while True:
         raw = _question("Model", default)
         if not raw:

@@ -30,6 +30,7 @@ LOADED_MODELS = discovery.loaded_models
 URL = "http://models.test/v1"
 BIG, SMALL = "big-27B", "small-8B"
 HINT = "Pass --chat-model <id>."
+KEY_NOTE = "The server did not say which models are loaded (it needs a key for that)."
 OMLX_ALL = {"models": [{"id": BIG, "loaded": False}, {"id": SMALL, "loaded": False}]}
 
 
@@ -167,17 +168,18 @@ def test_the_loaded_model_of_several_is_requested(melo: Melo) -> None:
 
 
 @pytest.mark.parametrize(
-    "status",
+    ("status", "says_key"),
     [
-        401,  # a server with a key answers its status route like the listing
-        None,  # no status route
-        OMLX_ALL,  # none in memory
-        {"models": [{"id": BIG}, {"id": SMALL}]},  # more than one in memory
+        (401, True),  # a server with a key answers its status route like the listing
+        (403, True),
+        (None, False),  # no status route
+        (OMLX_ALL, False),  # none in memory
+        ({"models": [{"id": BIG}, {"id": SMALL}]}, False),  # more than one in memory
     ],
-    ids=["401", "no-route", "none-loaded", "several-loaded"],
+    ids=["401", "403", "no-route", "none-loaded", "several-loaded"],
 )
 def test_several_models_and_none_known_loaded_exit_2_with_the_list(
-    melo: Melo, status: int | dict[str, Any] | None
+    melo: Melo, status: int | dict[str, Any] | None, says_key: bool
 ) -> None:
     server = FakeServer([BIG, SMALL], status=status)
     run = melo(server, "--base-url", URL, "task")
@@ -185,6 +187,9 @@ def test_several_models_and_none_known_loaded_exit_2_with_the_list(
     assert run.err.startswith("melo: error: " + _refusal(BIG, SMALL).split("\n  ")[0])
     assert "\n  " + BIG in run.err and "\n  " + SMALL in run.err
     assert run.err.endswith(HINT + "\n")
+    # A key-protected status route is said, in one line right before the hint.
+    assert (KEY_NOTE in run.err) is says_key
+    assert (f"\n{KEY_NOTE}\n{HINT}\n" in run.err) is says_key
     assert server.bodies == []  # no request that could load a model
 
 
@@ -304,6 +309,16 @@ def test_a_brief_refusal_is_a_startup_error_record_with_exit_2(
     assert record["error"] == " ".join(_refusal(BIG, SMALL).split())
     assert f"melo: worker startup failed: {record['error']}" in run.err
     assert server.bodies == []
+
+
+def test_a_brief_refusal_keeps_the_key_note_before_the_hint(
+    melo: Melo, tmp_path: Path
+) -> None:
+    server = FakeServer([BIG, SMALL], status=401)
+    run = melo(server, "--base-url", URL, "--brief", _brief(tmp_path))
+    error = json.loads(run.out)["error"]
+    assert run.code == 2 and error.endswith(f"{KEY_NOTE} {HINT}")
+    assert BIG in error and SMALL in error
 
 
 def test_a_long_list_does_not_cut_the_hint_out_of_the_record(

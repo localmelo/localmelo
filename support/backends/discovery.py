@@ -312,6 +312,10 @@ NO_DEFAULT_MODEL: Final = (
     "several models are served and none is known to be loaded, so there is "
     "no default; answer with a number or a model id"
 )
+# Said when the status route answered 401 or 403, as it does to a listing.
+NO_STATUS_KEY_NOTE: Final = (
+    "The server did not say which models are loaded (it needs a key for that)."
+)
 
 
 def is_chat_model(model: str) -> bool:
@@ -357,14 +361,18 @@ class ModelChoice:
     reason: str = ""
 
     def refusal(self) -> str:
-        """Why no model was chosen: several are served and none is known loaded."""
+        """Why no model was chosen: several are served and none is known loaded.
+
+        When the status route needed a key, a line says so before the hint.
+        """
         names = "".join(
             f"\n  {name}{'  (loaded)' if name in self.loaded.ids else ''}"
             for name in self.models
         )
+        note = f"\n{NO_STATUS_KEY_NOTE}" if self.loaded.needs_key else ""
         return (
             f"{self.url} serves several models and it is not known which one is "
-            f"loaded:{names}\nPass --chat-model <id>."
+            f"loaded:{names}{note}\nPass --chat-model <id>."
         )
 
     def warning(self, hint: str = "") -> str:
