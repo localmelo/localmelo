@@ -899,7 +899,10 @@ class TurnRenderer:
         if not thinking.strip():
             thinking = block
         if thinking.strip():
-            self._print_thinking(thinking, _float(data.get("duration_s")))
+            # A turn without tool calls ends in this reply: the time the
+            # footer gives is this reply's time, so the line does not repeat it.
+            timed = bool(calls) or self._tool_count > 0
+            self._print_thinking(thinking, _float(data.get("duration_s")), timed=timed)
         text = clean_output(text).strip()
         if not isinstance(calls, list) or not calls:
             # The last message may be the answer: hold it until the end
@@ -921,14 +924,15 @@ class TurnRenderer:
                 )
             self.out.print(self._intermediate(text))
 
-    def _print_thinking(self, text: str, duration_s: float) -> None:
-        """``✻ Thought for 1.2s`` and the thinking's first rows (section 3)."""
-        self.out.print(
-            Text(
-                f"{self.symbols.thought} Thought for {format_duration(duration_s)}",
-                style="thinking",
-            )
-        )
+    def _print_thinking(
+        self, text: str, duration_s: float, *, timed: bool = True
+    ) -> None:
+        """``✻ Thought for 1.2s`` and the thinking's first rows (section 3).
+
+        Without *timed* the line is ``✻ Thought``.
+        """
+        label = f"Thought for {format_duration(duration_s)}" if timed else "Thought"
+        self.out.print(Text(f"{self.symbols.thought} {label}", style="thinking"))
         if not (self.thinking or self.verbose):
             return
         limit = VERBOSE_THINKING_LINES if self.verbose else THINKING_LINES

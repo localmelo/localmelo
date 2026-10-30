@@ -78,7 +78,11 @@ for you to send or change, and step aside once there is text.
    tool cards it ran, its reasoning, its notices and reflections, the live
    row while it runs, and the final answer with `Copy response`. Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
-   GIF, WebP) show inline.
+   GIF, WebP) show inline. A turn that answers without tool calls shows its
+   time once, in the line under the answer; its reasoning, when it has some,
+   opens under a `Thought` line. Chats tell the model that it is melo from
+   localmelo and which model and server it runs on, so asking "who are you?"
+   names them (see [What melo says about itself](terminal.md#what-melo-says-about-itself)).
 4. A status row sits above the composer: the same segments as the terminal's
    developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
