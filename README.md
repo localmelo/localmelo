@@ -94,6 +94,10 @@ also honor the saved reasoning mode (default `legacy`). The separate
 [`melo-task` command](docs/reference/scheduler.md#task-command) creates,
 inspects and controls gateway tasks; it requires the local gateway to be running.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/localmelo/localmelo/pr-assets/NN/readme-terminal.png" alt="melo in a dark terminal: Melo's face beside the welcome, a turn's tool rows, a file change waiting for approval, and the status bar in zones" width="720">
+</p>
+
 ## Learn more
 
 - [Website](https://localmelo.github.io/localmelo/): what localmelo is and
