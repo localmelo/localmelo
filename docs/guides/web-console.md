@@ -12,9 +12,11 @@ permissions and are not sandboxed; review a task before approving a tool call.
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](../reference/api-v2.md)), so the gateway
-must be running to serve it: `melo serve`. Run `melo console` in a
-terminal and open its single-use link within 60 seconds (add `--port PORT`
-for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
+must be running to serve it: `melo serve` opens it in your browser, signed in.
+A page opened without a link says *Sign in to localmelo*: run `melo console`
+in a terminal and it opens the page signed in (add `--port PORT` for a
+nondefault port). Over SSH, or when no browser starts, it prints a single-use
+link to open within 60 seconds instead. Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
 On a first run, with no model set up, the welcome shows one card in place of the
 starters. It looks for a model server on this Mac, as the terminal's first run

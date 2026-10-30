@@ -530,6 +530,17 @@ async def test_the_shell_words_the_approval_bar(client: httpx.AsyncClient) -> No
     assert re.search(go, bar.group(0))
 
 
+async def test_the_lock_screen_names_the_one_step(client: httpx.AsyncClient) -> None:
+    page = (await client.get("/")).text
+    lock = re.search(r'<main class="lock-screen".*?</main>', page, re.S)
+    assert lock is not None
+    assert ">Sign in to localmelo</h1>" in lock.group(0)
+    assert (
+        "In a terminal, run <code>melo console</code>. It opens this page"
+        in lock.group(0)
+    )
+
+
 async def test_the_shell_offers_try_again_when_the_gateway_is_unreachable(
     client: httpx.AsyncClient,
 ) -> None:

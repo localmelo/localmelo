@@ -159,6 +159,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif mode == "quit":
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":1}}'
                 status = 200
+            elif mode == "idlequit":
+                body = b'{"api":2,"status":{"running":{"chats":0,"tasks":0,"runs":0,"terminal":0},"waiting":[]},"sessions":{"store":"ok","store_error":"","running":0}}'
+                status = 200
             elif mode == "menubar":
                 # What the menu bar reads: the test writes `status.json` to change it.
                 shown = home / "status.json"
@@ -887,9 +890,8 @@ def test_non_owner_store_error_gives_relevant_hint(app: Path, tmp_path: Path) ->
         assert not (tmp_path / "requested-page").exists()
 
 
-@pytest.mark.parametrize("mode", ["quit", "idlequit"])
-def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None:
-    with running(app, tmp_path, mode) as (process, _):
+def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path) -> None:
+    with running(app, tmp_path, "quit") as (process, _):
         events = wait_for(tmp_path / "events", "quit-resumed", process)
         assert "quit-cancel" in events
         assert "quit-title Quit localmelo?" in events
@@ -900,6 +902,17 @@ def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None
         events = (tmp_path / "events").read_text()
         assert "quit-confirm" in events
         assert process.returncode == 0
+
+
+def test_quitting_with_nothing_running_stops_the_gateway_without_a_dialog(
+    app: Path, tmp_path: Path
+) -> None:
+    with running(app, tmp_path, "idlequit") as (process, _):
+        assert process.wait(timeout=15) == 0
+        with pytest.raises(ProcessLookupError):
+            os.kill(int((tmp_path / "gateway-pid").read_text()), 0)
+        events = (tmp_path / "events").read_text()
+        assert "quit-health-returned" in events and "quit-prompt" not in events
 
 
 def test_a_port_the_child_does_not_own_receives_no_request(
