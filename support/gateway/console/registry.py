@@ -61,6 +61,7 @@ STOP_REASON = "Stopped from the web console"
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
+    from localmelo.support.memory import ChatMemory
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,7 @@ async def default_builder(
     mcp_config: str | None,
     session_id: str,
     gate: ChatGate | None = None,
+    memory: ChatMemory | None = None,
 ) -> Agent:
     """A started Agent for *workspace*, from the shared session builder.
 
@@ -127,7 +129,8 @@ async def default_builder(
     needs it passes its own builder in :class:`ConsoleOptions`. With *gate*,
     the providers are wrapped in :class:`GatedLLM` and
     :class:`GatedEmbedding` for *session_id*, so every call this Agent makes
-    waits for its slot like a workspace chat's.
+    waits for its slot like a workspace chat's. *memory* gives the chat
+    memory across chats (see :func:`build_session_agent`).
     """
 
     llm = None if gate is None else gate.client(session_id)
@@ -143,6 +146,7 @@ async def default_builder(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))
         ),
         identify=True,
+        memory=memory,
     )
 
 
@@ -187,6 +191,7 @@ class ConsoleSessions:
         *,
         builder: AgentBuilder | None = None,
         gate: ChatGate | None = None,
+        memory: ChatMemory | None = None,
         idle_close_s: float = IDLE_CLOSE_S,
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
@@ -197,6 +202,7 @@ class ConsoleSessions:
         self._broker = broker
         self._settings = settings
         self._gate = gate
+        self._memory = memory
         self._builder: AgentBuilder = builder or self._default_builder
         self._idle_close_s = idle_close_s
         self._max_open = max_open
@@ -217,7 +223,12 @@ class ConsoleSessions:
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
         return await default_builder(
-            settings, workspace, mcp_config, session_id, gate=self._gate
+            settings,
+            workspace,
+            mcp_config,
+            session_id,
+            gate=self._gate,
+            memory=self._memory,
         )
 
     @property
@@ -350,6 +361,7 @@ class ConsoleSessions:
                 resume_mode=DEFAULT_RESUME_MODE,
                 progress=True,
                 pictures=True,
+                memory=self._memory,
             )
             granted_at: dict[str, float] = {}
             policy = RememberingPolicy(
@@ -721,6 +733,7 @@ class ConsoleSessions:
             resume_mode=DEFAULT_RESUME_MODE,
             progress=True,
             pictures=True,
+            memory=self._memory,
             # A create's key stays where a create looks it up, even though
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
@@ -1047,6 +1060,11 @@ class ConsoleSessions:
                 ) from exc
             if not deleted:
                 raise ApiError(404, "not_found", "Session not found.")
+            if self._memory is not None:
+                try:
+                    await self._memory.forget_session(session_id)
+                except Exception:
+                    logger.warning("Could not forget a deleted chat", exc_info=True)
             if entry is not None:
                 await entry.runner.close(cause="closed")
                 if entry.agent is not None:

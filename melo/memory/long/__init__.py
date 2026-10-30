@@ -21,8 +21,12 @@ SOURCES = (
     "step_summary",
 )
 STATUSES = ("active", "superseded", "conflicted")
-ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
+# EDIT and DELETE are the user's own changes to a record.
+ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE", "EDIT", "DELETE")
+# The signals a run admits by; its counters (RunResult ``admitted``) have one each.
 SIGNALS = ("rehearsal", "user_request", "user_statement", "outcome", "sleep")
+# What the store also accepts: the user's own tap on a proposal, or edit.
+STORE_SIGNALS = (*SIGNALS, "user_confirm", "user_edit")
 
 
 class LongTermSchemaError(Exception):
@@ -204,12 +208,16 @@ class LongTerm:
         candidate_id: str,
         typed_assertion: bool = False,
         decision_details: dict[str, Any] | None = None,
+        record: dict[str, str] | None = None,
     ) -> tuple[int | None, str]:
-        """Write one decision in one step; returns ``(entry_id, action)``."""
+        """Write one decision in one step; returns ``(entry_id, action)``.
+
+        *record* is for a records file's columns; this store keeps none.
+        """
         for name, value, allowed in (
             ("kind", kind, KINDS),
             ("source", source, SOURCES),
-            ("admitted_by", admitted_by, SIGNALS),
+            ("admitted_by", admitted_by, STORE_SIGNALS),
             ("action", action, ACTIONS),
         ):
             if value not in allowed:
@@ -471,6 +479,39 @@ class LongTerm:
 
     async def decisions(self) -> list[dict[str, Any]]:
         return list(self._decisions)
+
+    async def delete_entry(self, entry_id: int, *, restore: bool = False) -> bool:
+        """Delete one entry (see :meth:`SqliteLongTerm.delete_entry`)."""
+        entry = self._find(entry_id)
+        if entry is None:
+            return False
+        self._entries.remove(entry)
+        for row in self._decisions:
+            if entry_id in (row.get("entry_id"), row.get("target_id")):
+                row["text"] = None
+                row["text_sha256"] = ""
+        previous = self._find(entry.supersedes)
+        if restore and previous is not None and previous.status == "superseded":
+            previous.status = "active"
+        self._decisions.append(
+            self._decision_row(
+                len(self._decisions) + 1,
+                candidate_id="",
+                action="DELETE",
+                kind=entry.kind,
+                admitted_by="user_edit",
+                entry_id=None,
+                target_id=entry_id,
+                reason="deleted by the user",
+                source_ids=(),
+                text="",
+                keep_text=False,
+                task_id="",
+            )
+        )
+        self._decisions[-1]["text_sha256"] = ""
+        self._index = None
+        return True
 
     async def forget(self, task_id: str) -> None:
         self._entries = [e for e in self._entries if e.task_id != task_id]

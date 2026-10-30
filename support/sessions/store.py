@@ -166,6 +166,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
         "turn.pictures": frozenset({"turn", "turn_id", "pictures"}),
+        "turn.memory": frozenset({"turn", "turn_id", "used", "remembered", "refused"}),
         "session.title": frozenset({"title"}),
         "session.updated": frozenset({"model", "workspace", "workspace_label", "meta"}),
         "approval.requested": frozenset(
@@ -196,6 +197,8 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 APPROVAL_EVENT_TYPES: Final = frozenset({"approval.requested", "approval.resolved"})
 # The picture files a console turn made or changed, stored by the runner at the end of the turn.
 PICTURES_EVENT_TYPE: Final = "turn.pictures"
+# What memory across chats did for a turn (recalled, remembered, refused), stored before its run.
+MEMORY_EVENT_TYPE: Final = "turn.memory"
 # The grammar of an event type with a reserved prefix.
 RESERVED_EVENT_TYPE_RE: Final = re.compile(r"[a-z]+(\.[a-z_]+)+")
 
@@ -2164,7 +2167,8 @@ class SessionStore:
             raise ValueError("an event needs a str 'type' and a mapping 'data'")
         pinned = EVENT_FIELDS.get(type_)
         if pinned is None and (
-            type_ in APPROVAL_EVENT_TYPES or type_ == PICTURES_EVENT_TYPE
+            type_ in APPROVAL_EVENT_TYPES
+            or type_ in (PICTURES_EVENT_TYPE, MEMORY_EVENT_TYPE)
         ):
             pinned = SESSION_EVENT_FIELDS[type_]
         if pinned is not None:

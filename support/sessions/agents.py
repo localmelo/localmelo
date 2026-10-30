@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import dataclasses
+import logging
 import os
 from collections.abc import Callable, Collection, Mapping
 from typing import TYPE_CHECKING, Any, Final
@@ -29,6 +30,7 @@ from localmelo.support.sessions.identity import (
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
+    from localmelo.support.memory import ChatMemory
 
 # Shell and Python commands of a session stop after this many seconds: test
 # suites, installs and builds take longer than a task's 30 s and 60 s.
@@ -217,6 +219,7 @@ async def build_session_agent(
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
+    memory: ChatMemory | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -247,6 +250,10 @@ async def build_session_agent(
     and place of the backend the Agent is built on, unless *options* set an
     identity already. The terminal chat and the console pass it; workers and
     the other callers do not, and their requests carry no identity.
+
+    *memory*, when it is on, gives a chat memory across chats: its identity
+    says so and pins the user's About-you and Preferences notes, and the
+    Agent gets ``search_memory``. The runner does the rest per turn.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace
@@ -259,6 +266,14 @@ async def build_session_agent(
             "retrieval_extra_body needs an llm/auto retriever outside legacy"
         )
     providers = load_mcp_providers(mcp_config) if mcp_config else []
+    notes: str | None = None
+    if memory is not None and memory.enabled:
+        try:
+            notes = await memory.pinned_quotes()
+        except Exception:  # a chat still opens without its pinned notes
+            logging.getLogger(__name__).warning("Could not read notes", exc_info=True)
+            notes = ""
+        providers.append(memory.tools())
     if browser_driver != "off":
         from localmelo.support.browser import provider_for
 
@@ -326,10 +341,10 @@ async def build_session_agent(
         identity = None
         if base_url:
             kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
-            identity = url_identity(base_url, model, kept)
+            identity = url_identity(base_url, model, kept, notes)
         elif cfg is not None:
             kept = kept_across_chats(agent_options, has_embedding=cfg.has_embedding)
-            identity = config_identity(cfg, kept)
+            identity = config_identity(cfg, kept, notes)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:
         if not from_config:

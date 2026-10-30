@@ -256,9 +256,15 @@ class RetrievalConfig:
 
 @dataclass
 class MemoryConfig:
-    """The ``[memory]`` table: R6-lite's admission default for direct runs."""
+    """The ``[memory]`` table: memory across chats, and R6-lite's default for direct runs.
+
+    ``across_chats`` keeps notes of what the user says about themselves and an
+    index of every chat, and recalls them in the chats (not in direct runs or
+    workers); it is on unless the file turns it off.
+    """
 
     admit_on_outcome: bool = False
+    across_chats: bool = True
 
 
 @dataclass
@@ -441,11 +447,12 @@ class Config:
         return [] if problem is None else [f"[gateway] workspace: {problem}"]
 
     def _validate_memory(self) -> list[str]:
-        """``[memory]`` holds a bool."""
-        value: object = self.memory.admit_on_outcome
-        if not isinstance(value, bool):
-            return [f"[memory] admit_on_outcome must be a bool, got {value!r}"]
-        return []
+        """``[memory]`` holds bools."""
+        return [
+            f"[memory] {name} must be a bool, got {value!r}"
+            for name in ("admit_on_outcome", "across_chats")
+            if not isinstance(value := getattr(self.memory, name), bool)
+        ]
 
     def _validate_browser(self) -> list[str]:
         """``[browser] driver`` names a driver."""
@@ -1348,6 +1355,8 @@ def save(cfg: Config) -> None:
         lines.append("[memory]")
         if cfg.memory.admit_on_outcome:
             lines.append("admit_on_outcome = true")
+        if not cfg.memory.across_chats:
+            lines.append("across_chats = false")
         lines.append("")
 
     if cfg.browser != BrowserConfig():
