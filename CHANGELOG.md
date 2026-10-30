@@ -1056,6 +1056,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Quitting the macOS app asks only when something would stop. With no chat or task running and
+  nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task
+  runs, something waits for an approval, or the app cannot tell what runs, the dialog is the
+  same as before (`Quit and Stop` / `Cancel`, naming what would stop). Direct runs and terminal
+  chats are other processes, so they do not make it ask. Direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged. ([#NN])
 - The web console opens in your browser. At a terminal on your computer, `melo serve` opens
   the console once the gateway listens, already signed in, and prints `Web console: opened in
   your browser (melo console opens it again).` in place of the `Web UI:` and `Sign in:` lines;

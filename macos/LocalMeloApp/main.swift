@@ -652,11 +652,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         healthSession.dataTask(with: request) { [weak self] data, response, _ in
             var running: Int?
             var counts: RunningCounts?
+            var reply: Data?
             if let data = data, (response as? HTTPURLResponse)?.statusCode == 200,
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let sessions = object["sessions"] as? [String: Any] {
                 running = sessions["running"] as? Int
                 counts = runningCounts(data)
+                reply = data
             }
             RunLoop.main.perform(inModes: [.default, .modalPanel]) {
                 guard let self = self else { sender.reply(toApplicationShouldTerminate: false); return }
@@ -666,8 +668,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     sender.reply(toApplicationShouldTerminate: true)
                     return
                 }
-                // Always ask: a turn can start while the health request is in flight.
-                do {
+                // Ask only when something would stop. A turn that starts while the health request is in
+                // flight is interrupted like any other, and the console offers to continue it on reopening.
+                if quitNeedsConfirmation(reply) {
                     let alert = NSAlert()
                     alert.messageText = "Quit localmelo?"
                     alert.informativeText = quitMessage(counts, statusKnown: running != nil)

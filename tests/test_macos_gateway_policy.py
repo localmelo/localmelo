@@ -135,6 +135,23 @@ def run_policy(tmp_path: Path, source: str) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_quitting_asks_only_when_something_would_stop(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+func health(_ chats: Int, _ tasks: Int, _ runs: Int, waiting: String = "[]") -> Data {
+    let running = #"{"chats":\#(chats),"tasks":\#(tasks),"runs":\#(runs),"terminal":1}"#
+    return Data(#"{"api":2,"status":{"running":\#(running),"waiting":\#(waiting)}}"#.utf8)
+}
+precondition(!quitNeedsConfirmation(health(0, 0, 0)) && !quitNeedsConfirmation(health(0, 0, 2)))
+precondition(quitNeedsConfirmation(health(1, 0, 0)) && quitNeedsConfirmation(health(0, 1, 0)))
+precondition(quitNeedsConfirmation(health(0, 0, 0, waiting: #"[{"kind":"task","id":"t1"}]"#)))
+precondition(quitNeedsConfirmation(nil) && quitNeedsConfirmation(Data(#"{"api":2}"#.utf8)))
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_gateway_port_comes_from_the_startup_line(tmp_path: Path) -> None:
     run_policy(
         tmp_path,
