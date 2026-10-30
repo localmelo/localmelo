@@ -60,7 +60,7 @@ BY_WORDS = {
     "how did we fix the failing CI test?",
     "do you remember the dentist appointment?",
 }
-NOTHING = ("hi", "write a haiku about autumn", "thanks!", "今天天气怎么样？")
+NOTHING = ("hi", "write a poem about autumn", "thanks!", "今天天气怎么样？")
 
 
 @pytest.fixture()
