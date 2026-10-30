@@ -127,6 +127,24 @@ def is_macho(path: Path) -> bool:
         )
 
 
+def precompile(interpreter: Path, python: Path, site: Path) -> None:
+    """Compile the bundled Python to bytecode, before the bundle is signed.
+
+    The standalone archive has none, and the launcher forbids writing it, so every start
+    compiled all it imported. These files are hash-based and never check the source, so a
+    copy that changes file times cannot make them stale, and the build path is stripped.
+    The .pth file keeps a direct run of the interpreter, which skips the launcher, from
+    writing bytecode into the signed bundle.
+    """
+    run(
+        [str(interpreter), "-I", "-B", "-m", "compileall", "-q", "-f", "-j", "0"]
+        + ["--invalidation-mode", "unchecked-hash", "-s", str(python), str(site.parent)]
+    )
+    (site / "localmelo-bundle.pth").write_text(
+        "import sys; sys.dont_write_bytecode = True\n"
+    )
+
+
 def sign(app: Path) -> None:
     """Sign ad hoc (no certificate, account or name): Mach-O files first, the bundle last."""
     machos = sorted(
@@ -239,6 +257,7 @@ def build(output: Path) -> None:
                 "DEVELOPER_DIR": XCODE,
             },
         )
+        precompile(interpreter, python, site)
         with (contents / "Info.plist").open("wb") as f:
             plistlib.dump(
                 {

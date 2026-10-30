@@ -22,7 +22,7 @@ uv run python scripts/build_macos_app.py --uninstall
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-构建器拒绝覆盖已存在的输出。它把 Python 运行时和网关额外依赖复制进应用包，用正式版 Xcode 编译 Swift 宿主，先对其中每个 Mach-O 文件、再对整个应用包签名，并包含可重定位的 `Contents/Resources/runtime/bin/melo`。精确的独立解释器归档已固定版本，解压前会校验 SHA-256；wheel 的哈希则对照锁文件检查。构建工具静默运行，只在失败时才输出。
+构建器拒绝覆盖已存在的输出。它把 Python 运行时和网关额外依赖复制进应用包，用正式版 Xcode 编译 Swift 宿主，把内置的 Python 编译为字节码，先对其中每个 Mach-O 文件、再对整个应用包签名，并包含可重定位的 `Contents/Resources/runtime/bin/melo`。字节码基于哈希且从不检查源文件，启动器和直接运行内置解释器都不会再写入字节码，因此签名保持有效。精确的独立解释器归档已固定版本，解压前会校验 SHA-256；wheel 的哈希则对照锁文件检查。构建工具静默运行，只在失败时才输出。
 
 打开应用会在 `127.0.0.1:8401` 上启动它自己的网关；它不会接管已有的监听者。先停止占用控制台存储的冲突监听者或网关。在为其他工作保留了 8400-8799 的机器上，那段工作期间不得运行该应用。做隔离的手工测试时，可用 `LOCALMELO_APP_PORT` 选择另一个可用端口；请使用临时 `HOME`，并避开其他工作占用的端口。关闭窗口会让网关继续运行；退出时总会先询问，再停止网关和正在运行的任务。菜单栏项在没有任何内容运行时显示 `Melo`，有三项在运行时显示 `Melo · 3`，统计控制台的对话、任务、直接运行和终端对话（与控制台页眉标签的数字相同），随应用每 2 秒一次的健康检查读取。退出对话框会写明将被停止的内容，例如 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`；直接运行和终端对话属于其他进程，会继续运行，对话框会补充 `Not affected: 1 run and 1 terminal chat.`。如果监听者是 melo 后台服务，`melo --daemon status` 可以检查它，`melo --daemon uninstall` 会停止并移除它。子进程输出写入 `~/Library/Logs/LocalMelo/gateway.log`。这个原型没有日志轮转。
 

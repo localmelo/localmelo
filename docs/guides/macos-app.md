@@ -20,7 +20,7 @@ To build without installing, give a new path:
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with release Xcode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
+The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with release Xcode, compiles the bundled Python to bytecode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The bytecode is hash-based and never checks the source, and neither the launcher nor a direct run of the bundled interpreter writes more of it, so the signature stays valid. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
 
 Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing listener. Stop a
 conflicting listener or gateway holding the console store first. A machine that reserves 8400-8799 for other work

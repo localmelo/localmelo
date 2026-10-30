@@ -155,7 +155,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   no other `melo` is on `PATH`, and an existing `melo` is never replaced. `--uninstall`
   removes the app and the link. The verified Python archive is cached in
   `~/Library/Caches/LocalMelo` and hashed on every use, and build tools print only when
-  they fail. ([#NN])
+  they fail. The bundled Python is compiled to bytecode before signing (the standalone
+  archive has none), so `melo --version` from the bundle takes 0.29 s instead of 0.96 s
+  (median of three runs) and nothing writes bytecode into the signed bundle, at the cost
+  of 63 MB (120 to 183 MB). ([#NN])
 
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,

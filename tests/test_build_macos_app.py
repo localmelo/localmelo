@@ -161,6 +161,7 @@ def test_build_assembles_locked_runtime_and_swift(
     assert [(d.metadata["Name"], d.version) for d in distributions] == [
         ("localmelo", "0.1.0")
     ]
+    assert "compileall" in commands[3] and commands[3][0].endswith("bin/python3")
     assert commands[-2][:4] == ["/usr/bin/codesign", "--force", "--sign", "-"]  # ad hoc
     assert commands[-1][1:4] == ["--verify", "--deep", "--strict"]
     with (output / "Contents/Info.plist").open("rb") as f:
@@ -170,6 +171,23 @@ def test_build_assembles_locked_runtime_and_swift(
     with pytest.raises(FileExistsError):
         build_app.build(output)
     shutil.rmtree(output)
+
+
+def test_bundled_python_is_precompiled_and_nothing_writes_bytecode(
+    tmp_path: Path,
+) -> None:
+    python = tmp_path / "python"
+    site = python / "lib/python3.11/site-packages"
+    (site / "demo").mkdir(parents=True)
+    (site / "demo/__init__.py").write_text("VALUE = 1\n")
+    build_app.precompile(Path(sys.executable), python, site)
+    (pyc,) = (site / "demo/__pycache__").glob("__init__.*.pyc")
+    data = pyc.read_bytes()
+    assert int.from_bytes(data[4:8], "little") == 0b01  # hash-based, source not checked
+    assert str(tmp_path).encode() not in data  # no build path
+    assert b"lib/python3.11/site-packages/demo/__init__.py" in data
+    assert "dont_write_bytecode = True" in (site / "localmelo-bundle.pth").read_text()
+    assert "export PYTHONDONTWRITEBYTECODE=1" in build_app.LAUNCHER
 
 
 def test_build_tools_are_quiet_unless_they_fail(
