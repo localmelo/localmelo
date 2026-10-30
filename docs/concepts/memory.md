@@ -70,6 +70,27 @@ so once. The chat's own earlier turns are not recalled (the chat has them), a
 note is not recalled again as the turn it came from, and older turns count for
 less (a 30-day half-life).
 
+**How recall finds notes.** `[memory] retriever` picks the way
+(`melo config set memory.retriever llm`, then restart `melo serve` or the app;
+`-X memory.retriever=llm` changes it for one run, and `melo -h all` lists it).
+It is a developer setting for comparing the ways; the default is right for
+nearly everyone.
+
+| Value | How it finds notes | What it costs |
+|---|---|---|
+| `auto` (default) | By words, and by meaning too when an embedding model is set up. | One small embedding request per message, with the 1.5 s limit above. Nothing extra without an embedding model. |
+| `bm25` | By words only. | Nothing: no model request at all. It misses a question that shares no word with the note. |
+| `embedding` | The same as `auto` with a model; `melo serve` refuses to start without one. | The same as `auto`. |
+| `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. |
+
+Every recall is timed. The page shows nothing new, but the `turn.memory` event
+of each turn has a `recall` object: the `retriever` that answered, a `fallback`
+(`none`, `timeout`, `error`, `unreadable` or `no-embedding`), milliseconds spent
+embedding (`embed_ms`), searching (`search_ms`) and choosing (`select_ms`), the
+`select_tokens` the choice used (`prompt`, `completion`), how many `candidates`
+there were and how many items were `used`. The same object is in the turn's
+`result` as `memory_recall`, so a client of the HTTP API reads it with the turn.
+
 A chat's instructions say what it remembers and list your About-you and
 Preferences notes in your own words (at most 600 characters, read when the chat
 starts its model). The chat also has the read-only tool `search_memory`

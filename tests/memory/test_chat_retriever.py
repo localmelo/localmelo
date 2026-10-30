@@ -269,3 +269,20 @@ async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
         assert (await memory.before_turn(store, turn, "hi")).event() is None
     finally:
         await memory.aclose()
+
+
+async def test_a_failed_query_embedding_is_not_tried_again_within_the_turn(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    embedding = FakeEmbedding()
+    memory, _, keys = await made(tmp_path, store, "auto", embedding)
+    try:
+        embedding.calls.clear()
+        embedding.fail = True
+        turn = await _turn(store, "Ask")
+        found = await memory.before_turn(store, turn, "when is my group meeting?")
+        assert len(embedding.calls) == 1
+        assert [item.key for item in found.used] == [keys["meeting"]]
+        assert found.recall is not None and found.recall.fallback == "error"
+    finally:
+        await memory.aclose()

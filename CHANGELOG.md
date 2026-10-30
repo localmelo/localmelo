@@ -325,6 +325,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in `~/.cache/localmelo/memory/` (`records.db`, `index.db`); `[memory] across_chats =
   false` turns it all off. Direct runs, workers, the terminal chat and the benchmark are
   unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#309]).
+- Choose how memory across chats finds notes, and time every recall. The developer
+  setting `[memory] retriever` (`-X memory.retriever=...`, listed by `melo -h all`) is
+  `auto` (the default: words, and meaning too with an embedding model), `bm25` (words
+  only), `embedding` (the same as `auto` with a model; `melo serve` refuses to start
+  without one) or `llm` (words pick up to 20 candidates and the chat model chooses among
+  them within 4 s, falling back to words alone on a timeout, an error or an unreadable
+  reply, with no embedding calls). Every console turn with memory on now carries a
+  `recall` object in its `turn.memory` event (the retriever, why it fell back, the
+  milliseconds spent embedding, searching and choosing, the tokens of the choice, the
+  candidates and the items used), also when nothing is recalled, and the stored turn's
+  result repeats it as `memory_recall`. A failed query embedding is no longer tried a
+  second time within the same search. See
+  [How recall finds notes](docs/concepts/memory.md#memory-across-chats) ([#NN]).
 - The panel beside a chat. The web console (and so the macOS app) shows Melo on
   the right of the chat: his portrait, which rests, works, waits or cheers with
   what runs, one status line (`Connected · <model> on <server>`, `Working on 2
