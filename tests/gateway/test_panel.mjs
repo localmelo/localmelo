@@ -1,7 +1,8 @@
 /**
  * The panel beside a chat (panel.mjs) in a DOM double: Melo's header, the tabs and their keys, the day's
- * activity and its calm state, a row opened to a task's live steps on a fake event stream, its actions, and the
- * sheet a phone opens from the face chip.
+ * activity and its calm state, the panel following the open chat, the approvals folded under a row, the Workers
+ * tab, a row opened to a task's live steps on a fake event stream, its actions, and the sheet a phone opens from
+ * the face chip.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -58,7 +59,7 @@ const row = (extra) => ({kind: 'task', id: 't1', title: 'Slides for the 3 pm mee
 const started = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Make slides'}};
 const tool = (id, call, type, data = {}) => ({id, turn: 1, ts: id, type, data: {step: 1, call_id: call, ...data}});
 
-function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null} = {}) {
+function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false} = {}) {
   const {doc, Element} = dom();
   const root = new Element('aside');
   const drawer = new Element('section');
@@ -67,12 +68,19 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   const chip = new Element('button');
   const backdrop = new Element('button');
   const chat = new Element('main');
-  const h = {calls: [], sources: [], timers: [], rows, turns: turns ?? [started], doc, root, chip, backdrop, chat, drawer};
+  const h = {calls: [], sources: [], timers: [], rows, turns: turns ?? [started], doc, root, chip, backdrop, chat, drawer,
+    open: openChat, scope: 'all', gate: {}, answerError: null};
   const api = async (path, options = {}) => {
     h.calls.push([options.method ?? 'GET', path, options.body]);
     if (path.startsWith('/activity')) {
       if (failActivity) throw Object.assign(new Error('down'), {status: 503});
-      return {since: 0, rows: h.rows, more: false, unavailable: []};
+      const id = new URL(path, 'http://x').searchParams.get('session_id') ?? '';
+      await h.gate[id];
+      return {since: 0, scope: id ? h.scope : 'all', rows: typeof h.rows === 'function' ? h.rows(id) : h.rows, more: false, unavailable: []};
+    }
+    if (path.startsWith('/approvals/')) {
+      if (h.answerError) throw h.answerError;
+      return {outcome: 'allowed'};
     }
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
@@ -80,7 +88,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     throw new Error(`unexpected ${path}`);
   };
   h.panel = setupPanel({
-    root, chip, backdrop, api, cover: () => [chat], storage: storage ?? {getItem: () => null, setItem: () => {}},
+    root, chip, backdrop, api, cover: () => [chat], chat: () => h.open, developer: () => developer, storage: storage ?? {getItem: () => null, setItem: () => {}},
     clock: () => 86400 * 1000 * 400,
     wide,
     live: {
@@ -93,6 +101,8 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   h.body = () => root.find((node) => node.attributes.role === 'tabpanel');
   h.tabs = () => root.findAll((node) => node.attributes.role === 'tab');
   h.heads = () => root.findAll((node) => node.className === 'activity-head');
+  h.activityCalls = () => h.calls.filter(([, path]) => path.startsWith('/activity')).map(([, path]) => path.replace(/since=\d+/, 'since=S'));
+  h.click = (label) => root.find((node) => node.tagName === 'BUTTON' && node.textContent === label)?.click();
   return h;
 }
 
@@ -158,8 +168,7 @@ test('calm: nothing running, and today newest first with each kind and result', 
   assert.match(text, /Read the readme One script\..*Check the build All 6 tests passed\./);
   const icons = h.root.findAll((node) => node.className === 'activity-icon');
   assert.deepEqual(icons.map((icon) => [icon.dataset.icon, icon.textContent]), [['read', '▤'], ['run', '>_']]);
-  const links = h.root.findAll((node) => node.tagName === 'A').map((link) => link.href);
-  assert.deepEqual(links, ['#/workers'], 'a day with no task does not offer All tasks');
+  assert.deepEqual(h.root.findAll((node) => node.tagName === 'A'), [], 'worker history is reached from the Workers tab');
   assert.equal(h.calls.filter(([, path]) => path.startsWith('/activity')).length, 1);
   // The same health again reads nothing; a change in what runs reads the day again.
   await h.panel.update(health());
@@ -186,15 +195,16 @@ test('the tabs are a tablist: arrows, Home and End move and select, and the choi
   const saved = new Map();
   const storage = {getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value)};
   const h = harness({storage});
+  await h.panel.update(health());
   const tabs = h.tabs();
-  assert.deepEqual(tabs.map((tab) => tab.text()), ['≡ Activity', '✓ Approvals', '◷ Scheduled', '◎ Memory']);
+  assert.deepEqual(tabs.map((tab) => tab.text()), ['≡ Activity', '⚙ Workers', '◷ Scheduled', '◎ Memory']);
   assert.deepEqual(tabs.map((tab) => [tab.attributes['aria-selected'], tab.tabIndex]), [['true', 0], ['false', -1], ['false', -1], ['false', -1]]);
   const list = h.root.find((node) => node.attributes.role === 'tablist');
   list.dispatch('keydown', {key: 'ArrowRight'});
   assert.equal(h.doc.activeElement, tabs[1]);
   assert.equal(tabs[1].attributes['aria-selected'], 'true');
-  assert.match(h.body().text(), /how you answered/);
-  assert.equal(h.body().attributes['aria-labelledby'], 'panel-tab-approvals');
+  assert.match(h.body().text(), /No workers yet today/);
+  assert.equal(h.body().attributes['aria-labelledby'], 'panel-tab-workers');
   list.dispatch('keydown', {key: 'End'});
   assert.equal(h.doc.activeElement, tabs[3]);
   await settle();
@@ -208,6 +218,169 @@ test('the tabs are a tablist: arrows, Home and End move and select, and the choi
   assert.equal(saved.get('localmelo-panel-tab'), 'scheduled');
   const again = harness({storage});
   assert.equal(again.tabs()[2].attributes['aria-selected'], 'true', 'a reload opens the last tab');
+});
+
+const ask = (id, what, answer, at = 1000) => ({id, what, answer, at});
+const task = (extra) => row({kind: 'task', id: 't1', title: 'Slides for the 3 pm meeting', ...extra});
+
+test('the panel follows the open chat: its own rows, then the day for the main chat or none', async () => {
+  const mine = [row({id: 'c1', kind: 'chat', title: 'Slides chat', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait'})];
+  const day = [...mine, row({id: 'c2', kind: 'chat', title: 'Taxes chat', result: 'Filed.'}), row({id: 'r1', kind: 'run', title: 'Check the build'})];
+  const h = harness({rows: (id) => (id === 'c1' ? mine : day)});
+  // The console as a whole is busy with another chat's approval.
+  const busy = health({running: {chats: 1, tasks: 0, runs: 0, terminal: 0}, waiting: [{kind: 'chat', id: 'c9'}]});
+  await h.panel.update(busy);
+  assert.deepEqual(h.activityCalls(), ['/activity?since=S']);
+  assert.match(h.body().text(), /Slides chat.*Taxes chat.*Check the build/);
+  assert.equal(h.root.dataset.mood, 'waiting', 'with no chat open the header is the whole console');
+  // A side chat opens: the old rows go at once, the chat's own are asked for, and the header reads them.
+  h.open = 'c1';
+  h.scope = 'chat';
+  const moved = h.panel.follow();
+  assert.match(h.body().text(), /Loading today/, 'another chat\'s rows are never shown for this one');
+  await moved;
+  assert.deepEqual(h.activityCalls().at(-1), '/activity?since=S&session_id=c1');
+  assert.doesNotMatch(h.body().text(), /Taxes chat|Check the build/);
+  assert.match(h.body().text(), /Slides chat/);
+  const said = (hh) => hh.root.find((node) => node.attributes.role === 'status').text();
+  assert.match(said(h), /Waiting for you/, 'its state line follows the chat: it waits');
+  assert.deepEqual([h.chip.attributes['aria-label'], h.chip.children[1].textContent], ['Activity: Waiting for you', '!'], 'so does the phone sheet\'s face chip');
+  mine[0] = row({id: 'c1', kind: 'chat', title: 'Slides chat', result: 'Done.'});
+  await h.panel.refresh();
+  assert.match(said(h), /Connected/, 'the chat is calm although the console had something running');
+  // The main chat, or no chat, is the whole day again; a health poll notices the change without a hash event.
+  h.open = '';
+  h.scope = 'all';
+  await h.panel.update(busy);
+  assert.equal(h.activityCalls().at(-1), '/activity?since=S');
+  assert.match(h.body().text(), /Taxes chat.*Check the build/);
+  assert.match(said(h), /Waiting for you/);
+});
+
+test('a read for the chat just left never lands on the chat now open', async () => {
+  let release;
+  const h = harness({rows: (id) => [row({id: id || 'all', kind: 'chat', title: id ? `Chat ${id}` : 'Everything'})]});
+  h.gate.a = new Promise((resolve) => { release = resolve; });
+  h.open = 'a';
+  h.scope = 'chat';
+  const slow = h.panel.follow();
+  h.open = 'b';
+  await h.panel.follow();
+  assert.match(h.body().text(), /Chat b/);
+  release();
+  await slow;
+  assert.match(h.body().text(), /Chat b/);
+  assert.doesNotMatch(h.body().text(), /Chat a/);
+});
+
+test('approvals fold under the row that asked: counted, opened to each answer, never a tab', async () => {
+  const asked = [ask('q1', 'Write slides.md', 'allowed once', 3600), ask('q2', 'Run the tests', 'allowed for this chat', 3700),
+    ask('q3', 'Run a command', 'denied', 3800), ask('q4', 'Write notes.md', 'no answer', 3900)];
+  const h = harness({rows: [task({approvals: asked}), row({id: 'c1', kind: 'chat', title: 'Plain', approvals: [ask('p1', 'Run Python', 'allowed once')]}),
+    row({id: 'c2', kind: 'chat', title: 'Quiet', approvals: []})]});
+  await h.panel.update(health());
+  assert.ok(!h.tabs().some((tab) => /Approvals/.test(tab.text())));
+  const folds = () => h.root.findAll((node) => node.className === 'approval-toggle');
+  assert.deepEqual(folds().map((fold) => [fold.text(), fold.attributes['aria-expanded']]), [['4 approvals', 'false'], ['1 approval', 'false']]);
+  assert.equal(h.root.findAll((node) => node.className === 'approval-list').length, 0, 'folded: no request is listed');
+  folds()[0].click();
+  const items = () => h.root.findAll((node) => node.className === 'approval-item').map((item) => item.text().replace(/\d+:\d+\s?[AP]M/, 'T'));
+  assert.deepEqual(items(), ['Write slides.md T Allowed once', 'Run the tests T Allowed for this chat', 'Run a command T Denied',
+    'Write notes.md T No answer in time']);
+  assert.equal(h.root.findAll((node) => node.className === 'approval-choices').length, 0, 'an answered request offers nothing');
+  assert.deepEqual(h.root.findAll((node) => node.className === 'approval-item').map((item) => item.dataset.answer), ['allowed', 'allowed', 'denied', 'other']);
+  folds()[0].click();
+  assert.equal(h.root.findAll((node) => node.className === 'approval-list').length, 0);
+  // The fold and the row open independently, and the fold survives the list being read again.
+  folds()[0].click();
+  await h.panel.refresh();
+  assert.equal(items().length, 4);
+});
+
+test('a waiting approval is answered from its fold with the calls the chat card makes', async () => {
+  const waiting = [ask('q1', 'Write slides.md', 'allowed once'), ask('q2', 'Run a command', 'waiting')];
+  const h = harness({rows: [row({id: 'c9', kind: 'chat', title: 'Add the date', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait', approvals: waiting})]});
+  await h.panel.update(health());
+  const fold = () => h.root.find((node) => node.className === 'approval-toggle');
+  assert.equal(fold().text(), '2 approvals, 1 waiting');
+  assert.equal(h.root.find((node) => node.className === 'approval-fold').dataset.waiting, 'true');
+  fold().click();
+  const choices = () => h.root.find((node) => node.className === 'approval-choices');
+  assert.deepEqual(choices().children.map((button) => button.textContent), ['Allow once', 'Deny', 'Review']);
+  assert.equal(choices().children[2].href, '#/s/c9', 'the full card is one link away');
+  h.rows = [row({id: 'c9', kind: 'chat', title: 'Add the date', approvals: [waiting[0], ask('q2', 'Run a command', 'allowed once')]})];
+  h.click('Allow once');
+  await settle();
+  assert.deepEqual(h.calls.find(([, path]) => path.startsWith('/approvals/')), ['GET', '/approvals/q2', {choice: 'once'}]);
+  assert.equal(fold().text(), '2 approvals', 'the row is read again and nothing waits');
+  assert.equal(h.root.findAll((node) => node.className === 'approval-choices').length, 0);
+  // Deny, and an answer that came too late.
+  h.rows = [row({id: 'c9', kind: 'chat', title: 'Add the date', state: 'waiting', approvals: [ask('q3', 'Write a.md', 'waiting')]})];
+  await h.panel.refresh();
+  h.answerError = Object.assign(new Error('This approval was answered already.'), {status: 409});
+  h.click('Deny');
+  await settle();
+  assert.deepEqual(h.calls.filter(([, path]) => path === '/approvals/q3').map(([, , body]) => body), [{choice: 'deny'}]);
+  assert.match(h.body().text(), /answered already/);
+});
+
+test('a request of a worker run or a terminal chat is listed but answered where it runs', async () => {
+  const h = harness({rows: [row({id: 'r1', kind: 'run', title: 'Check the build', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait',
+    approvals: [ask('q1', 'Run the tests', 'waiting')]})]});
+  await h.panel.update(health());
+  h.root.find((node) => node.className === 'approval-toggle').click();
+  assert.match(h.body().text(), /Run the tests.*Waiting for you/);
+  const choices = h.root.find((node) => node.className === 'approval-choices');
+  assert.deepEqual(choices.children.map((node) => node.textContent), ['Review'], 'no answer buttons: the run asks in its own terminal');
+  assert.equal(choices.children[0].href, '#/workers/r1');
+});
+
+test('Workers lists the tasks and runs of the scope, running first, each with its state in words', async () => {
+  const day = [
+    task({id: 't1', title: 'Slides', state: 'running', activity: 'Writing slides.md', icon: 'write', level: 2, at: 4000}),
+    task({id: 't2', title: 'Taxes', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait', at: 3000}),
+    row({id: 'r1', kind: 'run', title: 'Check the build', state: 'done', result: 'All 6 tests passed.', icon: 'run', at: 2000}),
+    task({id: 't3', title: 'Trip plan', state: 'failed', result: 'No disk.', icon: 'failed', at: 1500}),
+    row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.', at: 5000}),
+    row({id: 'x1', kind: 'terminal', title: 'Terminal talk', result: 'Hi.', at: 4500}),
+  ];
+  const h = harness({rows: day});
+  await h.panel.update(health());
+  h.tabs()[1].click();
+  const titles = () => h.heads().map((head) => head.find((node) => node.tagName === 'STRONG').textContent);
+  assert.deepEqual(titles(), ['Slides', 'Taxes', 'Check the build', 'Trip plan'], 'no chat, no terminal chat; running before done');
+  const lines = h.root.findAll((node) => node.className === 'activity-line').map((line) => line.textContent);
+  assert.deepEqual(lines, ['Working · Writing slides.md', 'Waiting for your approval', 'Done · All 6 tests passed.', 'Failed · No disk.']);
+  assert.doesNotMatch(h.heads()[0].text(), /\d:\d\d/, 'a worker that runs shows no time, its row is live');
+  assert.match(h.heads()[2].text(), /\d:\d\d/, 'a finished one shows when');
+  assert.deepEqual(h.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers']);
+  // A worker opens to its live steps and its actions, as an Activity row does.
+  h.heads()[0].click();
+  await settle();
+  assert.equal(h.sources[0].url.startsWith('/api/sessions/t1/events'), true);
+  const actions = h.root.find((node) => node.className === 'activity-actions');
+  assert.deepEqual(actions.children.map((node) => node.tagName), ['BUTTON', 'BUTTON', 'SELECT', 'A']);
+  // Leaving for a tab that lists no rows stops following it.
+  h.tabs()[3].click();
+  assert.equal(h.sources[0].closed, true);
+});
+
+test('Workers says when workers appear: for a side chat and for the main chat, and keeps its links in developer mode', async () => {
+  const chats = [row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.'})];
+  const side = harness({rows: chats, openChat: 'c1'});
+  side.scope = 'chat';
+  await side.panel.update(health());
+  side.tabs()[1].click();
+  assert.match(side.body().text(), /This chat has not started any workers\. When it hands a task to one, the worker is listed here/);
+  const all = harness({rows: chats});
+  await all.panel.update(health());
+  all.tabs()[1].click();
+  assert.match(all.body().text(), /No workers yet today\. When Melo hands a task to a worker, or you run one yourself, it is listed here/);
+  assert.deepEqual(all.root.findAll((node) => node.tagName === 'A'), [], 'no worker, no history link');
+  const dev = harness({rows: chats, developer: true});
+  await dev.panel.update(health());
+  dev.tabs()[1].click();
+  assert.deepEqual(dev.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers']);
 });
 
 test('a running task opens to its live steps, which follow the task stream until it ends', async () => {

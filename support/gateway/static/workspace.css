@@ -1972,6 +1972,22 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 .activity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .activity-level { min-height: 32px; padding: 0 6px; border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
 .activity-open { margin-left: auto; font-size: var(--text-small); }
+.approval-fold { padding: 0 8px 8px 50px; }
+.approval-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-3); font-size: var(--text-caption); }
+.approval-toggle::before { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; }
+.approval-toggle[aria-expanded="true"]::before { transform: rotate(45deg); }
+.approval-toggle:hover { color: var(--ink); }
+.approval-fold[data-waiting="true"] .approval-toggle { color: var(--warn); font-weight: 600; }
+.approval-list { display: grid; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+.approval-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 7px 10px; border-radius: var(--radius-control); background: var(--raised); font-size: var(--text-small); }
+.approval-what { overflow-wrap: anywhere; }
+.approval-time { color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.approval-answer { grid-column: 1 / -1; color: var(--ink-3); }
+.approval-item[data-answer="waiting"] { background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
+.approval-item[data-answer="waiting"] .approval-answer { color: var(--warn); }
+.approval-item[data-answer="denied"] .approval-answer { color: var(--error); }
+.approval-choices { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .approval-toggle::before { transition: none; } }
 /* The Memory tab: the notes melo keeps, newest first, with the switch that turns memory across chats on or off. */
 .memory-tab { display: grid; gap: var(--space-3); padding: 0 var(--space-2); }
 .memory-head { display: grid; gap: var(--space-1); padding-top: var(--space-3); }
@@ -2048,5 +2064,5 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   .panel-backdrop { position: fixed; inset: 0; z-index: 29; display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .activity-actions .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-foot .link-button, .memory-search { min-height: 44px; }
+  .panel-chip, .activity-head, .activity-level, .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-foot .link-button, .memory-search { min-height: 44px; }
 }

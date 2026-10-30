@@ -3,25 +3,38 @@ import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 
 /**
- * The panel beside a chat: Melo's portrait and status, then tabs. Activity
- * lists what runs now and what ran today (`GET /api/activity`), and a row
- * opens in place to its live steps (task-live.mjs, which follows any
- * session's events) with the actions the terminal's task list offers.
- * Approvals and Scheduled say what they will hold; Memory (memory-tab.mjs) lists the notes melo keeps. `update(health)`
- * is called on every health poll: the header follows it, and the list is read
- * again when what runs changed or every REFRESH_MS. Below 900 px the panel is
- * a bottom sheet behind `chip`, closed by Escape (`closeSheet()`), the
- * backdrop, or a drag down on its handle. `api` takes paths relative to /api.
+ * The panel beside a chat: Melo's portrait and status, then tabs. It follows
+ * the open chat (`chat()`, by default the `#/s/<id>` of the address): a side
+ * chat's panel lists its own activity and workers, the main chat's (or none)
+ * the whole day. Activity lists what runs now and what ran today
+ * (`GET /api/activity`); a row opens in place to its live steps (task-live.mjs,
+ * which follows any session's events) with the actions the terminal's task
+ * list offers, and carries the approvals it asked for folded under it, where
+ * one that waits is answered. Workers lists the tasks and runs of the same
+ * scope. Scheduled says what it will hold; Memory (memory-tab.mjs) lists the
+ * notes melo keeps. `update(health)` is called on every health poll: the
+ * header follows it, and the list is read again when what runs changed, the
+ * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
+ * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
+ * down on its handle. `api` takes paths relative to /api.
  */
 export const GLYPHS = {
   wait: '!', held: '◷', queued: '◷', paused: '‖', read: '▤', write: '✎', run: '>_', web: '⊕',
   memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●',
 };
-const TABS = [['activity', 'Activity', '≡'], ['approvals', 'Approvals', '✓'], ['scheduled', 'Scheduled', '◷'], ['memory', 'Memory', '◎']];
+const TABS = [['activity', 'Activity', '≡'], ['workers', 'Workers', '⚙'], ['scheduled', 'Scheduled', '◷'], ['memory', 'Memory', '◎']];
 const SOON = {
-  approvals: 'What melo asked to do, and how you answered, will be listed here.',
   scheduled: 'Nothing scheduled. Chores that repeat, such as a morning brief, will be listed here.',
 };
+const EMPTY_WORKERS = {
+  chat: 'This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.',
+  all: 'No workers yet today. When Melo hands a task to a worker, or you run one yourself, it is listed here, running first.',
+};
+// A row's state in words, and how an approval was answered.
+const STATE_WORDS = {running: 'Working', waiting: 'Waiting for your approval', held: 'Waiting for the model', queued: 'Waiting to start',
+  paused: 'Paused', done: 'Done', failed: 'Failed', stopped: 'Stopped'};
+const ANSWERS = {waiting: 'Waiting for you', 'allowed once': 'Allowed once', 'allowed for this chat': 'Allowed for this chat',
+  'allowed automatically': 'Allowed automatically', denied: 'Denied', 'no answer': 'No answer in time', withdrawn: 'Not run: it stopped first'};
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const LEVELS = ['Now', 'Today', 'Normal', 'Whenever', 'If idle'];
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
@@ -32,6 +45,7 @@ const REFRESH_MS = 30000;
 const KEY = 'localmelo-panel-tab';
 const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
 
+const chatOfAddress = () => /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.location?.hash ?? '')?.[1] ?? '';
 const base = (path) => String(path ?? '').replace(/\/+$/, '').split('/').pop();
 
 /** A step's plain words, as the server's `activity_text` says them: `Reading notes.md`, or `Read notes.md` once done. */
@@ -56,16 +70,20 @@ export function stepWords(name, args, done = false) {
   return say('Using', 'Used', 'a tool');
 }
 
-/** What the header says, and the link it offers: the model's state first, then what runs. */
-export function headline(health) {
+/**
+ * What the header says, and the link it offers: the model's state first, then what runs. For a side chat,
+ * `scoped` is that chat's rows and what runs is read from them instead of the whole console.
+ */
+export function headline(health, scoped = null) {
   if (!health) return {text: 'Connecting…', mood: 'idle', fix: false};
   if (health.configured === false) return {text: 'No model set up yet', mood: 'error', fix: true};
   if (health.model_server?.reachable === false) return {text: 'Model server not reachable', mood: 'error', fix: true};
   const status = health.status ?? {};
-  const count = Object.values(status.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
-  if (status.waiting?.length) return {text: 'Waiting for you', mood: 'waiting', fix: false, count};
+  const count = scoped ? scoped.filter((row) => row.state === 'running' || row.state === 'held').length
+    : Object.values(status.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  if (scoped ? scoped.some((row) => row.state === 'waiting') : status.waiting?.length) return {text: 'Waiting for you', mood: 'waiting', fix: false, count};
   if (count > 0) return {text: `Working on ${count === 1 ? '1 thing' : `${count} things`}`, mood: 'working', fix: false, count};
-  const recent = status.recent;
+  const recent = scoped && !scoped.some((row) => row.id === status.recent?.id) ? null : status.recent;
   const mood = recent && recent.ended_s_ago < 8 && recent.outcome !== 'stopped' ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
   const model = health.model?.name;
   const server = health.model?.backend_label;
@@ -74,19 +92,20 @@ export function headline(health) {
 
 export function setupPanel({
   root, chip, backdrop, api, developer = () => false, openSettings = () => {}, cover = () => [],
-  storage = globalThis.localStorage, clock = Date.now, live: follow = {},
+  storage = globalThis.localStorage, clock = Date.now, live: stream = {}, chat = chatOfAddress,
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
 }) {
   const doc = root.ownerDocument;
-  const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '',
-    tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0};
+  const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
+    tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0,
+    chat: chat(), scope: 'all', folds: new Set()};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
   // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
   const newest = (path, options) => (/\/turns\?/.test(path)
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
-  const live = taskLive({api: newest, changed: () => drawBody(), doc, ...follow});
+  const live = taskLive({api: newest, changed: () => drawBody(), doc, ...stream});
   let reads = 0;
 
   function node(tag, className, text) {
@@ -146,6 +165,8 @@ export function setupPanel({
 
   function select(id, {focus = false} = {}) {
     state.tab = id;
+    // Rows are listed on these two tabs only: on another, what was open stops being followed.
+    if (!['activity', 'workers'].includes(id) && state.open) closeRow();
     try { storage?.setItem(KEY, id); } catch { /* the choice is only for this view */ }
     drawTabs();
     drawBody();
@@ -161,7 +182,7 @@ export function setupPanel({
   }
 
   function drawHeader() {
-    const said = headline(state.health);
+    const said = headline(state.health, state.scope === 'chat' && state.loaded ? state.rows : null);
     root.dataset.mood = said.mood;
     const src = `/assets/akita/sit-${said.mood}.png`;
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
@@ -190,7 +211,9 @@ export function setupPanel({
     mark.setAttribute('aria-hidden', 'true');
     return mark;
   }
-  function rowNode(row) {
+  // A worker's second line says its state in words, then what it does or how it ended.
+  const workerLine = (row) => [STATE_WORDS[row.state], row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · ');
+  function rowNode(row, worker = false) {
     const item = node('li', 'activity-row');
     item.dataset.state = row.state;
     const open = state.open === key(row);
@@ -198,12 +221,68 @@ export function setupPanel({
     headButton.dataset.focusKey = key(row);
     headButton.setAttribute('aria-expanded', String(open));
     const text = node('span', 'activity-text');
-    text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', row.activity || row.result || ''));
+    text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
     headButton.append(icon(row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);
+    if (row.approvals?.length) item.append(approvalFold(row));
     if (open) item.append(detail(row));
     return item;
+  }
+  // The approvals a row asked for, folded under its result line: "2 approvals, 1 waiting".
+  function approvalFold(row) {
+    const asked = row.approvals;
+    const waiting = asked.filter((item) => item.answer === 'waiting').length;
+    const open = state.folds.has(key(row));
+    const box = node('div', 'approval-fold');
+    box.dataset.waiting = String(waiting > 0);
+    const toggler = button('approval-toggle', `${asked.length} approval${asked.length === 1 ? '' : 's'}${waiting ? `, ${waiting} waiting` : ''}`, () => {
+      if (!state.folds.delete(key(row))) state.folds.add(key(row));
+      drawBody();
+    });
+    toggler.dataset.focusKey = `fold:${key(row)}`;
+    toggler.setAttribute('aria-expanded', String(open));
+    box.append(toggler);
+    if (!open) return box;
+    const list = node('ul', 'approval-list');
+    for (const item of asked) {
+      const entry = node('li', 'approval-item');
+      entry.dataset.answer = item.answer === 'waiting' ? 'waiting' : item.answer.startsWith('allowed') ? 'allowed' : item.answer === 'denied' ? 'denied' : 'other';
+      entry.append(node('span', 'approval-what', item.what), node('time', 'approval-time', timeOf(item.at)),
+        node('span', 'approval-answer', ANSWERS[item.answer] ?? item.answer));
+      if (item.answer === 'waiting') {
+        // Only the gateway's own chats and tasks are answered here; the full card, with the content, is one link away.
+        const mine = ['chat', 'task'].includes(row.kind);
+        const busy = state.busy === `approval:${item.id}`;
+        const choices = mine ? [button('outline-button', 'Allow once', () => answer(row, item, 'once')), button('outline-button', 'Deny', () => answer(row, item, 'deny'))] : [];
+        for (const choice of choices) choice.disabled = busy;
+        const review = node('a', 'activity-open', 'Review');
+        review.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
+        review.addEventListener('click', () => setSheet(false));
+        const choose = node('span', 'approval-choices');
+        choose.append(...choices, review);
+        entry.append(choose);
+      }
+      list.append(entry);
+    }
+    box.append(list);
+    if (state.notice && state.noticeFor === key(row)) box.append(node('p', 'panel-note', state.notice));
+    return box;
+  }
+  // The same call the chat's approval card makes; the row is read again to show the answer.
+  async function answer(row, item, choice) {
+    if (state.busy) return;
+    state.busy = `approval:${item.id}`;
+    state.notice = '';
+    drawBody();
+    try {
+      await api(`/approvals/${encodeURIComponent(item.id)}`, {body: {choice}});
+    } catch (error) {
+      state.noticeFor = key(row);
+      state.notice = error?.status === 409 ? 'It was answered already.' : error?.message || 'Could not send the answer. Try again.';
+    }
+    state.busy = '';
+    await refresh();
   }
   function stepNode(step) {
     const running = step.status === 'running';
@@ -243,7 +322,7 @@ export function setupPanel({
     link.addEventListener('click', () => setSheet(false));
     actions.append(link);
     box.append(actions);
-    if (state.notice) box.append(node('p', 'panel-note', state.notice));
+    if (state.notice && state.noticeFor === key(row)) box.append(node('p', 'panel-note', state.notice));
     return box;
   }
   function taskActions(row) {
@@ -276,41 +355,63 @@ export function setupPanel({
     try {
       await api(`/tasks/${encodeURIComponent(row.id)}`, {method: 'PATCH', body: change});
     } catch (error) {
+      state.noticeFor = key(row);
       state.notice = error?.message || 'Could not change the task. Try again.';
     }
     state.busy = '';
     await refresh();
   }
   function toggle(row) {
-    if (state.open === key(row)) { state.open = null; live.leave(); }
+    if (state.open === key(row)) closeRow();
     else { state.open = key(row); state.notice = ''; live.leave(); live.sync(liveState(row)); }
     drawBody();
   }
+  function closeRow() {
+    state.open = null;
+    live.leave();
+  }
 
-  function activityNodes() {
-    if (!state.loaded) return [node('p', 'panel-note', state.error || 'Loading today…')];
-    const now = state.rows.filter((row) => LIVE.has(row.state));
-    const done = state.rows.filter((row) => !LIVE.has(row.state));
-    const list = (rows) => { const element = node('ul', 'activity-list'); element.append(...rows.map(rowNode)); return element; };
+  // The links to the full lists, for the kinds this scope has (all of them in developer mode).
+  function footLinks(links) {
+    const kinds = new Set(state.rows.map((row) => row.kind));
+    return links.filter(([want]) => developer() || want.some((kind) => kinds.has(kind))).map(([, text, href]) => {
+      const link = node('a', 'panel-link', text);
+      link.href = href;
+      link.addEventListener('click', () => setSheet(false));
+      return link;
+    });
+  }
+  // Today's finished rows, folded after SHOWN; the foot says how to see the rest.
+  function dayNodes(rows, worker, links) {
+    const now = rows.filter((row) => LIVE.has(row.state));
+    const done = rows.filter((row) => !LIVE.has(row.state));
+    const list = (these) => { const element = node('ul', 'activity-list'); element.append(...these.map((row) => rowNode(row, worker))); return element; };
     const nodes = [node('h3', 'panel-section', 'Now')];
-    nodes.push(now.length ? list(now) : node('p', 'panel-calm', 'Nothing running'));
+    nodes.push(now.length ? list(now) : node('p', 'panel-calm', worker ? 'No worker is running' : 'Nothing running'));
     nodes.push(node('h3', 'panel-section', 'Today'));
     const shown = state.all ? done : done.slice(0, SHOWN);
     nodes.push(done.length ? list(shown) : node('p', 'panel-note', 'Nothing finished yet today.'));
     const foot = node('div', 'panel-foot');
     if (done.length > shown.length) foot.append(button('link-button', `Earlier today (${done.length - shown.length})`, () => { state.all = true; drawBody(); }));
-    const kinds = new Set(state.rows.map((row) => row.kind));
-    for (const [want, text, href] of [[['task'], 'All tasks', '#/tasks'], [['run', 'terminal'], 'All worker runs', '#/workers']]) {
-      if (!developer() && !want.some((kind) => kinds.has(kind))) continue;
-      const link = node('a', 'panel-link', text);
-      link.href = href;
-      link.addEventListener('click', () => setSheet(false));
-      foot.append(link);
-    }
+    foot.append(...footLinks(links));
     if (foot.children.length) nodes.push(foot);
     if (state.more) nodes.push(node('p', 'panel-note', 'More ran today than this list shows.'));
     if (state.unavailable.length) nodes.push(node('p', 'panel-note', 'Part of today could not be read.'));
     return nodes;
+  }
+  function activityNodes() {
+    if (!state.loaded) return [node('p', 'panel-note', state.error || 'Loading today…')];
+    return dayNodes(state.rows, false, []);
+  }
+  // The workers of this scope: the tasks and the worker runs, running ones first. Terminal chats are not workers.
+  function workersNodes() {
+    if (!state.loaded) return [node('p', 'panel-note', state.error || 'Loading the workers…')];
+    const workers = state.rows.filter((row) => row.kind === 'task' || row.kind === 'run');
+    const links = [[['task'], 'All tasks', '#/tasks'], [['run', 'terminal'], 'All worker runs', '#/workers']];
+    if (workers.length) return dayNodes(workers, true, links);
+    const foot = node('div', 'panel-foot');
+    foot.append(...footLinks(links));
+    return [node('p', 'panel-soon', EMPTY_WORKERS[state.scope]), ...(foot.children.length ? [foot] : [])];
   }
 
   function drawBody() {
@@ -322,7 +423,8 @@ export function setupPanel({
       return;
     }
     const focused = doc.activeElement?.dataset?.focusKey;
-    const nodes = state.tab === 'activity' ? activityNodes() : [node('p', 'panel-soon', SOON[state.tab])];
+    const draw = {activity: activityNodes, workers: workersNodes, scheduled: () => [node('p', 'panel-soon', SOON.scheduled)]};
+    const nodes = draw[state.tab]();
     body.replaceChildren(...nodes);
     if (focused && body.contains(doc.activeElement) === false) {
       const again = [...body.querySelectorAll('button')].find((item) => item.dataset.focusKey === focused);
@@ -338,11 +440,12 @@ export function setupPanel({
   async function refresh() {
     const mine = ++reads;
     const since = midnight();
+    const asked = state.chat;
     try {
-      const page = await api(`/activity?since=${since}`);
+      const page = await api(`/activity?since=${since}${asked ? `&session_id=${encodeURIComponent(asked)}` : ''}`);
       if (mine !== reads) return;
       Object.assign(state, {rows: page.rows ?? [], more: Boolean(page.more), unavailable: page.unavailable ?? [],
-        loaded: true, error: '', fetchedAt: clock(), day: since});
+        scope: page.scope === 'chat' ? 'chat' : 'all', loaded: true, error: '', fetchedAt: clock(), day: since});
     } catch {
       if (mine !== reads) return;
       if (!state.loaded) state.error = 'Could not read today’s activity. It is tried again shortly.';
@@ -350,13 +453,29 @@ export function setupPanel({
     }
     const open = state.rows.find((row) => key(row) === state.open);
     if (open) live.sync(liveState(open));
-    else if (state.open) { state.open = null; live.leave(); }
+    else if (state.open) closeRow();
     if (state.tab === 'memory') memory.reload();
+    drawHeader();
     drawBody();
   }
 
+  // The panel shows the chat that is open: when it changes, the old chat's rows go and the new chat's are read.
+  function follow() {
+    const now = chat();
+    if (now === state.chat) return undefined;
+    Object.assign(state, {chat: now, rows: [], more: false, unavailable: [], loaded: false, error: '', scope: 'all', notice: '', all: false});
+    state.folds.clear();
+    closeRow();
+    drawHeader();
+    drawBody();
+    return refresh();
+  }
+  globalThis.addEventListener?.('hashchange', follow);
+
   function update(health) {
     state.health = health;
+    const moved = follow();
+    if (moved) return moved;
     drawHeader();
     const status = health?.status ?? {};
     const seen = JSON.stringify([status.running, status.tasks, status.items, status.waiting, status.recent?.id, status.recent?.outcome]);
@@ -403,5 +522,5 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, select, state, closeSheet: () => setSheet(false), openSheet: () => setSheet(true)};
+  return {update, refresh, follow, select, state, closeSheet: () => setSheet(false), openSheet: () => setSheet(true)};
 }
