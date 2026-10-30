@@ -152,6 +152,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `sections` 包含全部四个本地节（`mlc`、`ollama`、`vllm`、`sglang`）和全部四个云端节（`openai`、`gemini`、`anthropic`、`nvidia`）。云端节报告 `api_key_env`（变量名）和 `api_key_set`（该变量在网关的环境中是否非空），从不包含密钥或其遮罩。
 - `workspace` 是 `[gateway] workspace`；未设置时为 `~/localmelo-workspace`。
 - `revision` 是文件 SHA-256 的前 16 个十六进制字符；文件尚不存在时为 `""`。
+- `across_chats` 是 `[memory] across_chats`，即[跨对话记忆](#memory-across-chats)的开关。
 - `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）；控制台在开发者模式下以只读方式显示它们。
 
 ## PUT /api/settings
@@ -166,6 +167,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - 每个字符串都必须是不含控制字符的单行，`workspace` 为必填项，必须是绝对路径或以 `~/` 开头，并且不能解析为 `/` 或主目录（包括经由符号链接）；否则返回 400 `invalid_request`。`sections` 中不接受 `api_key_set`。
 - `mode` 可选：`default` 或 `developer` 会设置 `[ui] mode`（其他值返回 400 `invalid_request`）；省略时保留已保存的模式。模式只改变控制台和 `melo --help` 显示的内容。
+- `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
 
@@ -208,8 +210,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 ```json
-{"models": ["qwen3:8b"]}
+{"models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null}
 ```
+
+- `embedding_models` 是名称表明为嵌入模型的列出项，`suggested_embedding` 是优先提供的那个（Qwen3-Embedding 优先），否则为 `null`；设置对话框据此询问 `Remember across chats with <model>?`。
 
 - 不带 `backend` 或 `url` 时，使用已保存的对话后端及其 `chat_url`。
 - 云端后端返回 400 `invalid_request`：`Listing models works for local backends only; type the model name.`
@@ -599,7 +603,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 ```
 
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话被删除。
-- 204 且无响应体：该会话的行、轮次、事件和 blob 都已删除。
+- 204 且无响应体：该会话的行、轮次、事件和 blob 都已删除，它在记忆对话索引中的条目也已删除。melo 在这个对话里产生的笔记会保留（笔记比对话活得久，之后显示为 `from a deleted chat`）；`?notes=forget` 会一并忘记。`notes` 的其他取值返回 400。
 - 在仍在进行的 security-1b 改动中，轮次运行或启动排队期间，409 `session_busy` 会拒绝删除；它不会取消该轮次，也不会删除其行。请取消或等待它结束，然后重试。持有会话锁的维护操作也可能短暂地返回该错误，即使没有轮次在运行；请等待后重试。
 - 未知会话返回 404 `not_found`。
 
@@ -682,6 +686,25 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - 每段文本都像已保存的事件一样脱敏：工具输出中携带的密钥会以 `[redacted]` 返回。工具行属于窗口的一部分。
 - `tool_calls` 列出一条消息调用的名称，`images` 统计其图片引用数。
 - `working_max` 是窗口的消息上限。`long_term.enabled` 表示设置中是否指定了嵌入后端，`backend` 是其键（未指定时为 `none`）。
+
+## Memory across chats
+
+melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（见[跨对话记忆](../concepts/memory.md)）。面板的 Memory 标签页使用这些路由。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/memory/records
+```
+
+```json
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "last_error": ""}
+```
+
+- `GET /api/memory/records` 按时间从新到旧列出笔记；`?session_id=ID` 只保留某个对话的。`topic` 为 `about`、`preferences`、`people`、`projects` 或 `decisions`。`from` 写明对话和日期；对话被删除后是 `from a deleted chat, Oct 30`（`chat_gone` 为 true）；用户改写过笔记后 `edited` 为 true。`documents` 是对话索引中的轮次数，`embedding_model` 是按含义搜索的模型（`""` 表示只按词），`last_error` 是它最近一次没被使用的原因。
+- `PATCH /api/memory/records/{id}`，请求体 `{"text": "..."}`，原地改写一条笔记，并返回上述形式的笔记。旧文字被覆盖（不保留），新文字重新嵌入，笔记的决策行中的文字被清空。空文字、超过 300 个字符或看起来像密码或密钥的文字返回 400 `invalid_request` 并给出原因；未知笔记返回 404 `not_found`。
+- `DELETE /api/memory/records/{id}` 删除一条笔记、它的向量和它取代过的旧文字，并清空其决策行中的文字：204，或 404 `not_found`。带 `?undo=true`（消息下方的 “Undo”）时，被它替换的笔记恢复为当前。
+- `DELETE /api/memory/records?all=true` 忘记所有笔记并清空对话索引，返回 `{"notes": 12, "turns": 48}`。没有 `all=true` 时返回 400。对话本身不受影响。
+- `PUT /api/memory`，请求体 `{"on": false}`，切换并保存 `[memory] across_chats`；返回 `{"on": false}`。此后开始的对话会使用它。
+- `POST /api/memory/reindex` 从对话重建对话索引（上次“忘记全部”之前结束的轮次不会进入），并给每条笔记补上当前嵌入模型的向量：`{"notes": 0, "turns": 48}`。
 
 ## GET /api/sessions/{id}/runs
 

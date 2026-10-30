@@ -48,6 +48,12 @@ MAX_TYPED_CHARS: Final = 2_000
 # Content overlap at which a new record replaces an old one.
 SUPERSEDE_OVERLAP: Final = 0.6
 NOT_KEPT: Final = "it looked like a password or key"
+# What a list of notes says when it has none, and how memory starts.
+EMPTY: Final = (
+    "Nothing remembered yet. melo keeps a note when you tell it something about "
+    "yourself in the web console or the app, such as “I prefer short answers”, "
+    "or ask it to remember something."
+)
 
 _DECISION = re.compile(
     r"\b(we(?:'ve| have)? decided|let's go with|we(?:'ll| will) go with)\b"

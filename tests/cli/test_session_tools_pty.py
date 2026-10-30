@@ -25,7 +25,7 @@ def test_title_memory_usage_copy_and_undo_in_a_real_terminal(
     term.type("hello\r")
     term.see("Hello! I am melo, running on a stub model.")
     term.see("Worked for")
-    term.type("/memory\r")
+    term.type("/memory window\r")
     term.see("Working memory:")
     term.see("Long-term memory:")
     term.type("/usage\r")

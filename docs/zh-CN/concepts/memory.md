@@ -42,7 +42,22 @@ when is my group meeting?
 
 对话的指令会说明它记得什么，并用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取）。对话还有只读工具 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）。
 
-直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记；任务的运行器只把结果加入索引。网页控制台的 API 用 `GET /api/memory/records` 列出笔记，用 `DELETE /api/memory/records/{id}` 删除一条（`?undo=true` 会恢复被它替换的笔记）。除了发给你自己模型服务器的嵌入请求，没有任何内容离开你的电脑。
+直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记；任务的运行器只把结果加入索引。除了发给你自己模型服务器的嵌入请求，没有任何内容离开你的电脑。
+
+<a id="see-and-change-what-melo-remembers"></a>
+
+### 查看和修改 melo 记得什么
+
+控制台面板的 **Memory** 标签页、终端里的 `/memory` 和 `melo memory` 显示同样的笔记，并修改同样的文件。
+
+- **Memory 标签页。** 开关 **Remember across chats** 打开或关闭跨对话记忆（`[memory] across_chats`）；下面一行说明 melo 怎样搜索：用嵌入模型按含义并按词，还是只按词。再往下是按时间从新到旧的笔记，每条带主题和来源（`From chat “Planning”, Oct 30`）。**Edit** 改写一条笔记，**Delete** 会先问 `Forget this note?`，搜索框筛选列表，**Forget everything…** 会先写明将删除什么（笔记和 melo 对你的对话轮次建的搜索索引；对话本身保留），第一个答案是 `Keep everything`。没有笔记时，标签页会说明记忆怎样开始。
+- **笔记比对话活得久。** 删除一个对话会从对话索引中移除它的条目，但保留它产生的笔记，这些笔记此后显示 `From a deleted chat, Oct 30`。对话有笔记时，控制台会问 `Also forget the 2 notes from this chat?`，第一个答案是 `Keep the notes`。
+- **改写和删除都是最终的。** 改写后的笔记原地替换旧文字（旧文字被覆盖，不留作历史）并重新嵌入；看起来像密码或密钥的文字会被拒绝。删除的笔记在两个文件里都不留痕迹：它的向量、它取代过的旧文字，以及决策日志中的文字都被移除，释放的空间被覆盖并并入预写日志。删除的笔记不会再被召回。
+- **终端里。** `/memory` 列出笔记（输入即筛选）；对一条笔记按 Enter，可选 `Back`、`Edit it`、`Delete it`；最后一行 `Forget everything…` 写明将删除什么，第一个答案是 `Keep everything`。`/memory window` 显示原来的内容：模型的工作窗口。
+- **命令行。** `melo memory list [-n N]` 打印笔记；`melo memory forget [ID] [-y]` 忘记一条，不带 ID 则在提问后忘记全部（终端里是列表，管道输入时是数字；`-y` 跳过提问）；`melo memory status` 说明记忆是否开启、有多少笔记和已索引的轮次、怎样搜索；`melo memory reindex` 从你的对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。你忘记的内容不会被重新索引。控制台或应用运行时由它们持有对话，所以 `reindex` 会请你先停掉它们。
+- **设置。** 服务器列出嵌入模型时，`melo setup` 和控制台的设置会问 `Remember across chats with <model>?`：`Yes, with it` 在一次嵌入探测通过后保存，`No, by words only` 保持记忆开启但不用它。没有列出模型时会直白地说明：melo 只按词在对话之间记忆。
+
+面板标签页背后的路由见 [API 参考](../reference/api-v2.md#memory-across-chats)。
 
 <a id="reasoning-notes"></a>
 

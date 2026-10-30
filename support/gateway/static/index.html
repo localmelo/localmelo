@@ -279,8 +279,15 @@
         <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" />
         <p class="field-hint">Type a model name or choose a discovered model.</p>
       </div>
+      <div class="field" id="s-memory-field">
+        <label><input type="checkbox" id="s-across-chats" /> Remember across chats</label>
+        <div id="s-embed-offer" hidden>
+          <label><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label">Remember across chats with an embedding model?</span></label>
+        </div>
+        <p class="field-hint" id="s-memory-hint">Notes you tell melo to keep, and earlier chats, come back when they matter. Manage them in the Memory tab.</p>
+      </div>
       <details class="advanced">
-        <summary>Memory & advanced settings <span>Optional</span></summary>
+        <summary>Embedding & advanced settings <span>Optional</span></summary>
         <div class="advanced-body">
           <div class="field">
             <label for="s-embed-backend">Embedding backend</label>

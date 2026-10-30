@@ -64,7 +64,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("resume", (), "[id|title]", "Resume a chat", False),
     Command("title", (), "[text]", "Show or set the chat title", True),
     Command("usage", (), "", "Show recorded tokens, tools and time", True),
-    Command("memory", (), "", "Show what the model remembers", True),
+    Command("memory", (), "[window]", "See and change the notes melo keeps", True),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
     Command("stream", (), "[on|off]", "Toggle live streamed replies", True),

@@ -416,3 +416,46 @@ test('a mode written in the file by hand wins over what the page believed', asyn
   assert.equal(h.element('settings-dialog').dataset.layout, 'tabs');
   assert.equal(h.element('settings-tabs').hidden, false);
 });
+
+test('a server that lists an embedding model offers "Remember across chats with <model>?", and the answer is saved', async () => {
+  const value = fixture({chat_backend: 'vllm', across_chats: true, sections: {...fixture().sections, vllm: {chat_url: 'http://srv/v1', chat_model: 'chat-8b', embedding_url: '', embedding_model: ''}}});
+  const h = harness({
+    'GET /settings': value,
+    'GET /models?backend=vllm&url=http%3A%2F%2Fsrv%2Fv1': {models: ['chat-8b', 'Qwen3-Embedding-0.6B'], embedding_models: ['Qwen3-Embedding-0.6B'], suggested_embedding: 'Qwen3-Embedding-0.6B'},
+    'PUT /settings': {...value, revision: 'rev2'},
+  });
+  await h.open();
+  assert.equal(h.element('s-across-chats').checked, true);
+  assert.equal(h.element('s-embed-offer').hidden, true, 'no offer before the server is asked');
+  assert.match(h.element('s-memory-hint').textContent, /by words only/);
+  await h.element('discover-btn').emit('click');
+  assert.equal(h.element('s-embed-offer').hidden, false);
+  assert.equal(h.element('s-embed-offer-label').textContent, 'Remember across chats with Qwen3-Embedding-0.6B?');
+  assert.equal(h.element('s-embed-use').checked, false, 'the offer is an offer: nothing is chosen for the person');
+  h.element('s-embed-use').checked = true;
+  await h.element('s-embed-use').emit('change');
+  assert.deepEqual([h.element('s-embed-backend').value, h.element('s-embed-url').value, h.element('s-embed-model').value], ['vllm', 'http://srv/v1', 'Qwen3-Embedding-0.6B']);
+  assert.match(h.element('s-memory-hint').textContent, /by meaning/);
+  await h.element('create-btn').emit('click');
+  const body = h.calls.at(-1).options.body;
+  assert.equal(body.embedding_backend, 'vllm');
+  assert.deepEqual(body.sections.vllm, {chat_url: 'http://srv/v1', chat_model: 'chat-8b', embedding_url: 'http://srv/v1', embedding_model: 'Qwen3-Embedding-0.6B'});
+  assert.equal(body.across_chats, true);
+});
+
+test('unchecking the offer turns the embedding model off, and the switch is sent as the person set it', async () => {
+  const value = fixture({chat_backend: 'vllm', embedding_backend: 'vllm', across_chats: true,
+    sections: {...fixture().sections, vllm: {chat_url: 'http://srv/v1', chat_model: 'chat-8b', embedding_url: 'http://srv/v1', embedding_model: 'Qwen3-Embedding-0.6B'}}});
+  const h = harness({'GET /settings': value, 'PUT /settings': value});
+  await h.open();
+  assert.equal(h.element('s-embed-offer').hidden, false, 'a model in use is shown without asking the server');
+  assert.equal(h.element('s-embed-use').checked, true);
+  h.element('s-embed-use').checked = false;
+  await h.element('s-embed-use').emit('change');
+  assert.equal(h.element('s-embed-backend').value, 'none');
+  h.element('s-across-chats').checked = false;
+  await h.element('create-btn').emit('click');
+  const body = h.calls.at(-1).options.body;
+  assert.equal(body.embedding_backend, 'none');
+  assert.equal(body.across_chats, false);
+});

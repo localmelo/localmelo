@@ -272,6 +272,8 @@ file's revision.
   is unset.
 - `revision` is the first 16 hex characters of the file's SHA-256, or `""`
   when the file does not exist yet.
+- `across_chats` is `[memory] across_chats`, the switch of
+  [memory across chats](#memory-across-chats).
 - `mode` is `[ui] mode` (`default` or `developer`; any other saved value
   reads as `default`). `advanced_options` lists the advanced and experimental
   `melo` options from the tier table (`issue` is the deciding issue of an
@@ -297,6 +299,8 @@ sessions.
 - `mode` is optional: `default` or `developer` sets `[ui] mode` (other values
   are 400 `invalid_request`); omitted, the saved mode is kept. The mode changes
   only what the console and `melo --help` show.
+- `across_chats` is optional: a boolean that sets `[memory] across_chats`; omitted,
+  the saved value is kept.
 - A `revision` that does not match the file on disk returns 409
   `settings_changed`. Two concurrent `PUT` requests that read the same
   `revision` can both pass the check; the last writer wins, and `os.replace`
@@ -359,9 +363,12 @@ can be contacted.
 ```
 
 ```json
-{"models": ["qwen3:8b"]}
+{"models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null}
 ```
 
+- `embedding_models` are the listed ids that name embedding models and
+  `suggested_embedding` the one to offer first (Qwen3-Embedding first), or
+  `null`: the Settings dialog asks `Remember across chats with <model>?` from them.
 - Without `backend` or `url`, the saved chat backend and its `chat_url` are
   used.
 - A cloud backend returns 400 `invalid_request`:
@@ -1105,7 +1112,10 @@ Rename the session, move it to another folder, or both.
 ```
 
 - A task session returns 409 `task_session_read_only`; it cannot be deleted as a chat.
-- 204 with no body: the session's row, turns, events and blobs are gone.
+- 204 with no body: the session's row, turns, events and blobs are gone, and so are
+  its entries in memory's chat index. The notes melo made in the chat stay (a note
+  outlives its chat, and then lists as `from a deleted chat`); `?notes=forget` forgets
+  them too. Any other value of `notes` is 400.
 - In the in-progress security-1b changes, 409 `session_busy` refuses a
   delete while a turn is running or a start is queued; it does not cancel
   the turn or delete its row. Cancel or wait for it to finish, then retry.
@@ -1221,6 +1231,42 @@ What the session's Agent remembers in its window.
 - `working_max` is the window's message bound. `long_term.enabled` is
   whether the settings name an embedding backend, and `backend` is its key
   (`none` when they do not).
+
+## Memory across chats
+
+The notes melo keeps about the user and the switch that turns memory across chats on or off
+(see [Memory across chats](../concepts/memory.md#memory-across-chats)). The Memory tab of the
+panel uses these routes.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/memory/records
+```
+
+```json
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "last_error": ""}
+```
+
+- `GET /api/memory/records` lists the notes newest first; `?session_id=ID` keeps one chat's.
+  `topic` is `about`, `preferences`, `people`, `projects` or `decisions`. `from` names the
+  chat and the day, or `from a deleted chat, Oct 30` (`chat_gone` true) once the chat is
+  gone; `edited` is true once the user reworded the note. `documents` counts the chat turns in the
+  index, `embedding_model` is the model that searches by meaning (`""`: words only) and
+  `last_error` the last reason it was not used.
+- `PATCH /api/memory/records/{id}` with `{"text": "..."}` rewords a note in place and answers
+  the note as above. The old wording is overwritten (not kept), the new one is embedded, and
+  the text of the note's decision rows is blanked. A wording that is empty, over 300
+  characters or looks like a password or key is 400 `invalid_request` with the reason; an
+  unknown note is 404 `not_found`.
+- `DELETE /api/memory/records/{id}` removes a note, its vector and the older wordings it
+  replaced, and blanks the text of its decision rows: 204, or 404 `not_found`. With
+  `?undo=true` (the "Undo" under a message) the note it replaced is current again.
+- `DELETE /api/memory/records?all=true` forgets every note and empties the chat index, and
+  answers `{"notes": 12, "turns": 48}`. Without `all=true` it is 400. Chats are not touched.
+- `PUT /api/memory` with `{"on": false}` switches `[memory] across_chats` and saves it; the
+  answer is `{"on": false}`. Chats started afterwards use it.
+- `POST /api/memory/reindex` rebuilds the chat index from the chats (turns that ended
+  before the last "forget everything" stay out) and gives every note a vector of the
+  embedding model now set: `{"notes": 0, "turns": 48}`.
 
 ## GET /api/sessions/{id}/runs
 

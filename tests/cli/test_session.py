@@ -802,8 +802,8 @@ async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> N
     await setup.session.check_server()
     out = " ".join(setup.out.text().split())
     assert (
-        "This server lists Qwen3-Embedding-0.6B; melo setup adds it "
-        "for long-term memory."
+        "This server lists Qwen3-Embedding-0.6B; melo setup uses it "
+        "to remember across chats by meaning."
     ) in out
 
 
@@ -1560,7 +1560,7 @@ async def test_memory_and_status_show_the_window_cap_the_agent_has(
     options = replace(session.agent.options, window_messages=cap)
     session.agent = Agent(llm=ScriptedLLM([]), options=options)
     await session.agent.start()
-    session.enter("/memory")
+    session.enter("/memory window")
     await _until(lambda: f"Working memory: 0 of {cap} messages" in out.text())
     session.enter("/status all")  # 64 is the local server's default, 20 a choice
     await _until(lambda: f"memory     0 of {shown}" in out.text())

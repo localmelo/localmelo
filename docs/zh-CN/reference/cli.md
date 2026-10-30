@@ -27,12 +27,13 @@ melo -h all                                  # every option, command and setting
 
 ## 命令与短选项
 
-七个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。跟在选项后面、单独成为任务的命令词（如 `melo -X gateway.port=9000 serve`）同样会被拒绝，提示会说明该词应放在哪里（`melo serve -X gateway.port=9000`）；`melo -- serve` 会把 serve 当作任务运行，而作为选项值出现的命令词（如 `melo -w serve "fix it"`）不受影响。
+八个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。跟在选项后面、单独成为任务的命令词（如 `melo -X gateway.port=9000 serve`）同样会被拒绝，提示会说明该词应放在哪里（`melo serve -X gateway.port=9000`）；`melo -- serve` 会把 serve 当作任务运行，而作为选项值出现的命令词（如 `melo -w serve "fix it"`）不受影响。
 
 | 命令 | 作用 | 选项 |
 |---|---|---|
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
+| `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`。 | `list -n N`、`forget ID`、`forget -y` |
 | `melo serve [install\|uninstall\|status]` | 运行网关，或把它作为登录服务管理（macOS）。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
@@ -111,6 +112,27 @@ melo -h all                                  # every option, command and setting
 - 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
 - `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。未设置的 `agent.window_messages` 在 `keys` 和 `get` 中显示它实际采用的窗口及原因（`64 (local server)`、`20 (cloud)`）。
 - 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
+
+<a id="memory"></a>
+
+### 记忆
+
+`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`，从不调用模型。
+
+| 动词 | 作用 |
+|---|---|
+| `melo memory list [-n N]` | 按时间从新到旧打印笔记：编号、主题、文字，以及每条来自哪个对话和哪一天。`-n N` 只保留最新的 N 条。 |
+| `melo memory forget [ID] [-y]` | 忘记编号为 `ID` 的笔记；不带 `ID` 则忘记全部笔记和对话索引（对话保留）。它会先问：终端里是一个列表，`Keep it` 或 `Keep everything` 排在第一位；管道输入时是从 stdin 读取的编号问题；Esc、输入结束和 Enter 都表示保留。`-y` 不提问。什么都没忘记时退出码为 1。 |
+| `melo memory status` | 跨对话记忆是否开启、笔记数和已索引的对话轮次数、怎样搜索（用嵌入模型按含义，或只按词）、文件夹，以及嵌入模型最近一次没被使用的原因。 |
+| `melo memory reindex` | 从对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。上次“忘记全部”之前结束的轮次不会进入。`melo serve` 或应用运行时退出码为 1，因为对话由它们持有。 |
+
+```text
+$ melo memory list
+   3  Preferences  You prefer short answers.
+      from chat “I prefer short answers”, Oct 30
+$ melo memory forget 3 -y
+Forgot note 3.
+```
 
 <a id="modes"></a>
 

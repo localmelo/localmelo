@@ -1,8 +1,9 @@
 """Command words: ``melo serve`` and its kin become the options they replace.
 
-A mode is a word, not a flag. Each word except ``task`` and ``config`` is rewritten to
-the options the parser has always taken, before either parser runs, so it behaves
-exactly as they do; ``task`` runs the ``melo-task`` client and ``config`` is new.
+A mode is a word, not a flag. Each word except ``task``, ``config`` and ``memory`` is
+rewritten to the options the parser has always taken, before either parser runs, so it
+behaves exactly as they do; ``task`` runs the ``melo-task`` client, ``config`` and
+``memory`` are new.
 
 A word counts only as the first argument and only as an exact match: ``melo "serve
 the docs"`` (one quoted argument) and ``melo -- serve the docs`` are tasks. Unquoted
@@ -20,7 +21,7 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import NoReturn
 
-COMMANDS = ("setup", "config", "serve", "console", "task", "worker", "import")
+COMMANDS = ("setup", "config", "memory", "serve", "console", "task", "worker", "import")
 DAEMON_ACTIONS = ("install", "uninstall", "status")
 TASK_VERBS = ("new", "list", "show", "pause", "resume", "stop", "follow", "level")
 # The words that run with nothing after them (the others need a file, a verb or a key).
@@ -42,6 +43,17 @@ _HELP = {
         "marked one run only is set with -X KEY=VALUE.",
         "",
         "melo config keys recall",
+    ),
+    "memory": (
+        "melo memory [list [-n N] | forget [ID] [-y] | status | reindex]",
+        "See and change the notes melo keeps about you, which the web console and the\n"
+        "app list in their Memory tab. list prints them newest first; forget removes\n"
+        "one note, or every note and the chat index after a question; status says what\n"
+        "is on; reindex rebuilds the chat index and gives notes a vector of the\n"
+        "embedding model now set.",
+        "  -n N            list: only the newest N\n"
+        "  -y, --yes       forget: do not ask",
+        "melo memory list",
     ),
     "serve": (
         "melo serve [install|uninstall|status] [options]",
@@ -101,6 +113,7 @@ EVERYDAY = (
 SUMMARIES = (
     ("setup", "choose the model server again"),
     ("config", "show or change the settings"),
+    ("memory VERB", "see and change the notes melo keeps (melo memory -h)"),
     ("serve [ACTION]", "run the gateway; install | uninstall | status"),
     ("console", "open the web console in your browser"),
     ("task VERB", "manage background tasks (melo task -h)"),
@@ -258,6 +271,12 @@ def _config(rest: list[str]) -> NoReturn:
     raise SystemExit(config_cli.main(rest))
 
 
+def _memory(rest: list[str]) -> NoReturn:
+    from localmelo.support import memory_cli
+
+    raise SystemExit(memory_cli.main(rest))
+
+
 def _task(rest: list[str]) -> NoReturn:
     if rest and not rest[0].startswith("-") and rest[0] not in TASK_VERBS:
         refuse("task", rest)
@@ -269,6 +288,7 @@ def _task(rest: list[str]) -> NoReturn:
 _EXPANDERS: dict[str, Callable[[list[str]], list[str]]] = {
     "setup": _setup,
     "config": _config,
+    "memory": _memory,
     "serve": _serve,
     "console": _console,
     "task": _task,
@@ -280,7 +300,7 @@ _EXPANDERS: dict[str, Callable[[list[str]], list[str]]] = {
 def expand(argv: Sequence[str]) -> list[str]:
     """The options a command line stands for; a line with no command word is unchanged.
 
-    ``melo task`` and ``melo config`` do their work here and exit.
+    ``melo task``, ``melo config`` and ``melo memory`` do their work here and exit.
     """
     if not argv or argv[0] not in COMMANDS:
         return list(argv)
@@ -288,7 +308,7 @@ def expand(argv: Sequence[str]) -> list[str]:
     if word != "task" and ("-h" in rest or "--help" in rest):
         sys.stdout.write(help_text(word))
         raise SystemExit(0)
-    if word in ("task", "config"):
+    if word in ("task", "config", "memory"):
         return _EXPANDERS[word](rest)
     # The word's own parser does not know -X: take the settings out, put them back.
     from localmelo.support import settings

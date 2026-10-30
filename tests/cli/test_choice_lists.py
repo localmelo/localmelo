@@ -195,8 +195,8 @@ def test_long_term_memory_is_a_list_that_starts_on_using_it(
         offered = onboard._offer_embedding(URL, "chat-a", models, ollama=False)
     assert offered == (model, False)
     text = seen(drawn)
-    assert "Use nomic-embed-text for long-term memory?" in text
-    assert "❯ 1. Use it" in text and "esc leave it off" in text
+    assert "Remember across chats with nomic-embed-text?" in text
+    assert "❯ 1. Yes, with it" in text and "esc no, by words only" in text
 
 
 # ── The first run: a found server, a failed address, no server ──

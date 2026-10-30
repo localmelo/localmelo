@@ -86,7 +86,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   }
   for (const name of tabNames) $(`settings-tab-${name}`).addEventListener("click", () => select(name));
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model",
-    "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace", "s-developer"];
+    "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace", "s-developer", "s-across-chats", "s-embed-use"];
   let settings = null;
   let sections = {};
   let generation = 0;
@@ -94,6 +94,8 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   let keyVersion = 0;
   let testVersion = 0;
   let busy = false;
+  // The embedding model the last "Discover models" listed on the chat server; "" before one did.
+  let offered = "";
 
   function invalidateTest() {
     testVersion += 1;
@@ -166,6 +168,18 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     $("s-embed-model").value = data.embedding_model || "";
   }
 
+  // "Remember across chats with <model>?": offered when the server lists an embedding model (or one is in use already).
+  function renderMemory() {
+    const inUse = embedding.value !== "none" && !!embedding.value && !!$("s-embed-model").value;
+    const model = inUse ? $("s-embed-model").value : offered;
+    $("s-embed-offer").hidden = !model;
+    $("s-embed-use").checked = inUse;
+    $("s-embed-offer-label").textContent = `Remember across chats with ${model}?`;
+    $("s-memory-hint").textContent = inUse
+      ? "Melo finds notes and earlier chats by meaning as well as by words."
+      : "Melo finds notes and earlier chats by words only." + (offered ? "" : " A server that lists an embedding model adds search by meaning.");
+  }
+
   async function checkKey() {
     const version = ++keyVersion;
     const currentGeneration = generation;
@@ -220,6 +234,8 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
       options(chat, loaded.choices.chat_backends, loaded.chat_backend, loaded.chat_backend ? "" : "Choose a server…");
       options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
       $("s-workspace").value = loaded.workspace;
+      $("s-across-chats").checked = loaded.across_chats !== false;
+      offered = "";
       $("s-developer").checked = loaded.mode === "developer";
       layout(loaded.mode === "developer");
       const list = $("s-developer-list");
@@ -233,6 +249,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
       busy = false;
       renderChat();
       renderEmbedding();
+      renderMemory();
       enable(true);
       // "not set (run 'melo setup')" is advice for the terminal: here the empty select says it.
       const errors = (loaded.errors || []).filter((item) => typeof item === "string" && item && !terminalAdvice(item));
@@ -254,7 +271,20 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   });
   reload.addEventListener("click", open);
   chat.addEventListener("change", () => { invalidateTest(); renderChat(); enable(!busy); });
-  embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); });
+  embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); renderMemory(); });
+  $("s-embed-use").addEventListener("change", () => {
+    invalidateTest();
+    if ($("s-embed-use").checked) {
+      // The embedding model is served beside the chat model: same backend, same address.
+      if (!offered || !settings.choices.embedding_backends.some((choice) => choice.key === chat.value)) return renderMemory();
+      embedding.value = chat.value;
+      Object.assign(section(chat.value), { embedding_url: $("s-chat-url").value, embedding_model: offered });
+    } else {
+      embedding.value = "none";
+    }
+    renderEmbedding();
+    return renderMemory();
+  });
   $("s-workspace").addEventListener("input", invalidateTest);
   $("s-developer").addEventListener("change", renderDeveloper);
   for (const [id, field] of [["s-chat-url", "chat_url"], ["s-chat-model", "chat_model"],
@@ -296,6 +326,8 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
         $("s-model-options").append(option);
       }
       modelStatus.textContent = result.models.length ? "Choose a discovered model or type a name." : "No models found. Type a model name.";
+      offered = result.suggested_embedding || "";
+      renderMemory();
     } catch (err) {
       if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
       modelStatus.textContent = err.message || "Could not discover models. Type a model name.";
@@ -322,7 +354,8 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   }
 
   function saveBody() {
-    return { ...candidate(), revision: settings.revision, mode: $("s-developer").checked ? "developer" : "default" };
+    const across = settings.across_chats === undefined ? {} : { across_chats: $("s-across-chats").checked };
+    return { ...candidate(), revision: settings.revision, mode: $("s-developer").checked ? "developer" : "default", ...across };
   }
 
   testButton.addEventListener("click", async () => {

@@ -28,7 +28,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory._sqlite import make_private_dir
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
-from localmelo.melo.schema import ToolDef
+from localmelo.melo.schema import ToolDef, split_thinking
 from localmelo.support.memory import records
 from localmelo.support.memory.index import ConversationIndex, Document, document_text
 from localmelo.support.memory.recall import (
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 EMBED_TIMEOUT_S: Final = 1.5
 INDEX_EMBED_TIMEOUT_S: Final = 10.0
 PINNED_CHARS: Final = 600
+_BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
 # The instruction the Qwen3 embedding models expect on a query, not on documents.
 _QWEN3_QUERY: Final = (
@@ -91,7 +92,7 @@ def _record_item(entry: StoredEntry) -> Item:
         created_at=entry.created_at,
         quote=str(provenance.get("quote") or ""),
         vector=unit(entry.vector),
-        embed_model=str(provenance.get("embed_model") or ""),
+        embed_model=entry.embed_model or str(provenance.get("embed_model") or ""),
     )
 
 
@@ -347,33 +348,125 @@ class ChatMemory:
     ) -> None:
         try:
             source = await self._source(store, info)
-            task = source["kind"] == "task"
-            text = document_text(typed, answer, title=source["title"] if task else "")
-            vectors, model = await self._embed(
-                [text], INDEX_EMBED_TIMEOUT_S, query=False
+            await self._add_documents(
+                [(source, info.turn, typed, answer, time.time())], INDEX_EMBED_TIMEOUT_S
             )
-            async with self._lock:
-                await self.stores()[1].add(
-                    Document(
-                        session_id=info.session_id,
-                        turn=info.turn,
-                        surface=self.surface,
-                        kind=str(source["kind"]),
-                        title=str(source["title"]),
-                        text=text,
-                        created_at=time.time(),
-                        vector=tuple(vectors[0]) if vectors else None,
-                        embed_model=model,
-                    )
-                )
         except Exception:
             logger.warning("Could not add a turn to the memory index", exc_info=True)
+
+    async def _add_documents(
+        self,
+        turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
+        timeout: float,
+    ) -> None:
+        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch."""
+        texts = [
+            document_text(
+                typed, answer, title=src["title"] if src["kind"] == "task" else ""
+            )
+            for src, _, typed, answer, _ in turns
+        ]
+        vectors, model = await self._embed(texts, timeout, query=False)
+        for number, (src, turn, _, _, at) in enumerate(turns):
+            doc = Document(
+                session_id=str(src["session_id"]),
+                turn=turn,
+                surface=self.surface,
+                kind=str(src["kind"]),
+                title=str(src["title"]),
+                text=texts[number],
+                created_at=at,
+                vector=tuple(vectors[number]) if vectors else None,
+                embed_model=model,
+            )
+            async with self._lock:
+                await self.stores()[1].add(doc)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete what the index holds of a chat (of one turn, with *turn*)."""
         await self.drain()
         async with self._lock:
             return await self.stores()[1].delete(session_id, turn)
+
+    async def forget_all(self) -> tuple[int, int]:
+        """Forget every note and empty the chat index; the counts of each.
+
+        Chats are not touched, and the turns that ended before now are not
+        indexed again by a reindex.
+        """
+        await self.drain()
+        async with self._lock:
+            records_store, index = self.stores()
+            notes = len(await records_store.active_entries())
+            await records_store.forget_all()
+            turns = await index.forget_all()
+            self._corpus = Corpus()
+        return notes, turns
+
+    async def forget_chat_notes(self, session_id: str) -> int:
+        """Delete the notes that came from one chat; how many."""
+        async with self._lock:
+            store = self.stores()[0]
+            mine = [
+                e.id for e in await store.active_entries() if e.session_id == session_id
+            ]
+            for entry_id in mine:
+                await store.delete_entry(entry_id)
+        return len(mine)
+
+    async def reindex(self, chats: SessionStore | None) -> tuple[int, int]:
+        """Rebuild the chat index from *chats* and give every note a vector of the
+        embedding model now set; the counts of notes and turns done.
+
+        Turns that ended before the user last forgot everything stay out.
+        """
+        await self.drain()
+        records_store, index = self.stores()
+        _, model = self.embedding()
+        async with self._lock:
+            entries = await records_store.active_entries()
+        notes = 0
+        for entry in entries:
+            if not model or entry.embed_model == model:
+                continue
+            vectors, _ = await self._embed(
+                [entry.text], INDEX_EMBED_TIMEOUT_S, query=False
+            )
+            if vectors:
+                async with self._lock:
+                    await records_store.set_vector(entry.id, vectors[0], model)
+                notes += 1
+        found: list[tuple[dict[str, Any], int, str, str, float]] = []
+        if chats is not None:
+            since = await index.forgotten_at()
+            for session in await chats.list_sessions(limit=100_000, kinds=None):
+                source = {
+                    "session_id": session.id,
+                    "kind": session.kind,
+                    "title": session.title,
+                }
+                for turn in await chats.list_turns(session.id):
+                    answer = split_thinking(turn.answer)[1]
+                    if (
+                        turn.status == "completed"
+                        and not turn.undone
+                        and answer.strip()
+                        and (turn.finished_at or 0) > since
+                    ):
+                        # What was typed: the composed text holds attachments too.
+                        typed = turn.typed_text if turn.attachments else turn.user_text
+                        found.append(
+                            (source, turn.turn, typed, answer, turn.finished_at or 0)
+                        )
+            async with self._lock:
+                await index.forget_all(mark=False)
+            for start in range(0, len(found), _BATCH):
+                await self._add_documents(
+                    found[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
+                )
+        async with self._lock:
+            self._corpus = Corpus()
+        return notes, len(found)
 
     # ── Records, for the routes and the identity ──
 
@@ -384,6 +477,38 @@ class ChatMemory:
     async def delete_record(self, record_id: int, *, undo: bool = False) -> bool:
         async with self._lock:
             return await self.stores()[0].delete_entry(record_id, restore=undo)
+
+    async def edit_record(self, record_id: int, text: str) -> StoredEntry | None:
+        """Reword a note; ``None`` when it is gone. Raises ``ValueError`` (a plain
+        reason) for a wording that is empty, too long or looks like a secret."""
+        text = " ".join(text.split())
+        if not text:
+            raise ValueError("A note cannot be empty.")
+        if len(text) > records.MAX_RECORD_CHARS:
+            raise ValueError(
+                f"A note is at most {records.MAX_RECORD_CHARS} characters."
+            )
+        if records.sensitive(text):
+            raise ValueError(
+                "That looks like a password or key, so melo does not keep it."
+            )
+        vectors, model = await self._embed([text], INDEX_EMBED_TIMEOUT_S, query=False)
+        async with self._lock:
+            store = self.stores()[0]
+            done = await store.edit_entry(
+                record_id,
+                text=text,
+                embedding=vectors[0] if vectors else None,
+                embed_model=model,
+            )
+            if not done:
+                return None
+            self._corpus.remove(
+                f"r:{record_id}"
+            )  # the next search reads the new wording
+            return next(
+                (e for e in await store.active_entries() if e.id == record_id), None
+            )
 
     async def pinned_quotes(self) -> str:
         """About you and Preferences in the user's words, newest first, bounded."""
