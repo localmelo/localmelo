@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -255,3 +256,67 @@ precondition(petFrame(size: size, spot: kept, belowPaws: below, on: small)
     == CGRect(x: 1024 - 781 - 131, y: 330, width: 131, height: 97))
 """,
     )
+
+
+@darwin
+def test_each_state_gets_its_own_moves_and_only_those(tmp_path: Path) -> None:
+    run_swift(
+        tmp_path,
+        r"""
+// The blink: only the two calm pictures have an eyes-closed patch (the lazy and the sleeping dogs' eyes are shut).
+let blinking = PetState.allCases.filter { $0.blinkPatch != nil }
+precondition(Set(blinking) == [.sitIdle, .lieIdle])
+precondition(PetState.sitIdle.blinkPatch == "sit-idle-blink" && PetState.lieIdle.blinkPatch == "lie-idle-blink")
+// The tail wag: only the finished picture, as a body without its tail and the tail.
+let wagging = PetState.allCases.filter { $0.tailPieces != nil }
+precondition(wagging == [.lieDone])
+precondition(PetState.lieDone.tailPieces?.body == "lie-done-body" && PetState.lieDone.tailPieces?.tail == "lie-done-tail")
+// The "z": only the three sleeping poses, each from its own spot above the head.
+precondition(Set(PetState.allCases.filter { $0.sleepZ != nil }) == Set(PetState.sleepPoses))
+precondition(PetState.sleepPoses.allSatisfy { $0.isAsleep && $0.sleepZ != nil })
+precondition(Set(PetState.sleepPoses.map { "\($0.sleepZ!)" }).count == 3)
+// A piece's file is named like its picture's, in the picture's folder.
+precondition(PetState.lieIdle.pieceFile("lie-idle-blink", scale: 2) == "lie-idle-blink@2x.png")
+precondition(PetState.sitIdle.pieceFile("sit-idle-blink", scale: 1) == "sit-idle-blink.png")
+precondition(PetState.lieDone.fileName(scale: 2) == "lie-done@2x.png" && PetState.lieDone.folder == "pet")
+""",
+    )
+
+
+def test_the_moves_use_the_pieces_and_anchors_the_build_ships() -> None:
+    pictures = json.loads((ROOT / "macos/art/akita/anchors.json").read_text())[
+        "pictures"
+    ]
+    source = (APP / "PetPolicy.swift").read_text()
+    # Every piece the Swift names is a file in both scales, on its picture's canvas.
+    for state, folder, pieces in (
+        ("sit-idle", "portrait", ["sit-idle-blink"]),
+        ("lie-idle", "pet", ["lie-idle-blink"]),
+        ("lie-done", "pet", ["lie-done-body", "lie-done-tail"]),
+    ):
+        for name in pieces:
+            assert f'"{name}"' in source
+            for suffix, scale in (("", 1), ("@2x", 2)):
+                data = (
+                    ROOT / f"macos/art/akita/{folder}/{name}{suffix}.png"
+                ).read_bytes()
+                width, height = struct.unpack(">II", data[16:24])
+                assert [width, height] == [c * scale for c in pictures[state]["canvas"]]
+    # The "z" starts where anchors.json says, and the tail turns about the pivot it says.
+    for state, point in (
+        ("sleep-front", (86, 24)),
+        ("sleep-side", (62, 22)),
+        ("sleep-back", (30, 40)),
+    ):
+        assert pictures[state]["z"] == list(point)
+        camel = re.sub(r"-(\w)", lambda m: m.group(1).upper(), state)
+        assert f"case .{camel}: return CGPoint(x: {point[0]}, y: {point[1]})" in source
+    pivot = pictures["lie-done"]["tail"]["pivot"]
+    assert f"petTailPivot = CGPoint(x: {pivot[0]}, y: {pivot[1]:g})" in source
+    # The marks lie on their pictures: the eye bands inside the dog's box, the tail's pivot inside the tail's box.
+    for state in ("sit-idle", "lie-idle"):
+        x, y, w, h = pictures[state]["eyes"]
+        bx, by, bw, bh = pictures[state]["box"]
+        assert bx < x and by < y and x + w < bx + bw and y + h < by + bh
+    x, y, w, h = pictures["lie-done"]["tail"]["box"]
+    assert x <= pivot[0] <= x + w and y <= pivot[1] <= y + h

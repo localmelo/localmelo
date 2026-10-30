@@ -2,13 +2,13 @@
 
 API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提供，且仅当网关监听回环地址（`127.0.0.1`、`localhost` 或 `::1`）时才可用。受保护的路由需要 bearer 令牌或已登录的浏览器 cookie；不要暴露网关。见[网关与 HTTP API](../guides/gateway.md#keep-the-gateway-private)。
 
-除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
+除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
 
 `POST /api/auth/login` 用一个有效的一次性代码换取浏览器 cookie；`POST /api/auth/logout` 撤销该 cookie。`POST /api/auth/rotate` 需要 bearer 令牌，并会轮换它。登录换取要求匹配的 Origin。当 macOS 应用启动了网关时，它还要求应用的 `X-LocalMelo-Instance` 请求头，并且代码只对签发它的那个实例有效；缺失、不同或绑定不一致的值会在代码被消费之前被拒绝。见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
 
 控制台的一轮对话与工作区对话经过同样的调度器闸门：每次模型调用都要在 `[scheduler]` 下等待自己的槽位，调用日志会以会话的 id 记录它。见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。
 
-JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 使用其图片媒体类型，成功的 204 响应没有响应体。非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
+JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 和图片文件使用其图片媒体类型，成功的 204 响应没有响应体。非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`；图片见[它的路由](#get-apisessionsidpictures)）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
 
 ```json
 {"error": {"code": "not_found", "message": "Session not found.", "details": {}}}
@@ -21,11 +21,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 | 400 | `invalid_request` | JSON 格式错误、类型错误、未知字段、控制字符或孤立代理项、设置中相对路径的 `workspace`、错误的查询参数，或格式错误的 `client_request_id` |
 | 400 | `invalid_settings` | 候选设置未通过 `Config.validate()`；`details.errors` 列出各条消息 |
 | 403 | `foreign_origin` | 来自其他站点的 `/api/` 请求（`Sec-Fetch-Site` 既不是 `same-origin` 也不是 `none`），或来自其他来源的、会改变状态的请求 |
-| 404 | `not_found` | 未知的会话、blob 或路由 |
+| 403 | `outside_workspace` | 图片请求的真实路径不在会话的文件夹内 |
+| 404 | `not_found` | 未知的会话、blob、图片或路由 |
 | 405 | `method_not_allowed` | 已知路径，但不支持该方法；`Allow` 请求头列出它支持的方法 |
 | 409 | `settings_changed` | 自 `GET /api/settings` 读取其 `revision` 以来，`config.toml` 在磁盘上已被改动 |
-| 413 | `too_large` | 请求体超过 1 MiB |
+| 413 | `too_large` | 请求体超过 1 MiB，或所请求的图片超过 20 MB |
 | 415 | `unsupported_media_type` | 非空请求体没有 `Content-Type: application/json` |
+| 415 | `not_a_picture` | 图片请求的文件，其名称或内容不是 PNG、JPEG、GIF、WebP 或 SVG |
 | 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`，或由应用启动的网关的 `/api/auth/login` 没有匹配的 `X-LocalMelo-Instance` |
 | 500 | `internal_error` | 意外失败；消息为 `Internal error; see the gateway log.`，从不包含堆栈跟踪或请求中的值 |
 | 502 | `backend_unreachable` | 列出模型失败或没有返回任何模型 |
@@ -378,6 +380,19 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `sha256` 必须恰好是 64 个小写十六进制字符；其他任何值、未知的摘要和未知的会话都是 404 `not_found`。
 - `image/png`、`image/jpeg`、`image/gif` 和 `image/webp` 以其类型内联提供。其他任何已保存的类型（包括 SVG）都以 `application/octet-stream` 提供，并附带 `Content-Disposition: attachment; filename="<sha256>.bin"`。
 - 每个响应都带有 `X-Content-Type-Options: nosniff`、一个 `Content-Security-Policy` 响应头（其值为 `default-src 'none'; sandbox; frame-ancestors 'none'`，网关的 framing 规则会合并进 blob 自身的策略）以及 `Cache-Control: no-store`。
+
+## GET /api/sessions/{id}/pictures
+
+会话所在文件夹里的一个图片文件，按路径获取。控制台用它显示一轮产生的图片（[`turn.pictures` 事件](events.md#session-events)列出它们）。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -G --data-urlencode 'path=charts/fcf.png' -o fcf.png http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/pictures
+```
+
+- `path` 必填，最多 4,096 个字符：相对于会话文件夹的路径，或位于其中的绝对路径。路径中任何位置的 `..` 都会被拒绝。未知的会话、还没有文件夹的会话和不存在的文件都是 404 `not_found`。
+- 文件的真实路径（跟随所有链接后）必须位于会话的真实文件夹内，并会在已打开的文件上再检查一次；否则返回 403 `outside_workspace`（带 `..` 的路径、其他位置的绝对路径、指向外部的链接、另一个会话的文件夹）。只提供普通文件。
+- 名称必须以 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 或 `.svg` 结尾，内容也必须是这类图片（根据开头几个字节判断；`Content-Type` 取自内容而不是名称）；否则返回 415 `not_a_picture`（名为 `chart.png` 的文本文件，或实为 HTML 页面的 SVG）。超过 20 MB 的文件返回 413 `too_large`。
+- 每个响应都带有 `Content-Disposition: inline`、`X-Content-Type-Options: nosniff` 和 `Cache-Control: private`。PNG、JPEG、GIF 或 WebP 带有 `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`；SVG 带有 `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`，因此它可以绘制，但绝不会运行脚本，也不会作为页面打开。该路由只读取一个文件，不写入也不列出任何内容。
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 

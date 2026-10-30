@@ -8,7 +8,7 @@ token or signed-in browser cookie; do not expose the gateway. See [Gateway and H
 Apart from the authentication requirement, API fields remain additive:
 endpoints, optional request fields and response keys are added. A client may ignore keys it does not
 know. This page documents every API v2 route: health, settings, key status,
-connection test, model listing, sessions, turns, SSE events, blobs,
+connection test, model listing, sessions, turns, SSE events, blobs, pictures,
 submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
@@ -24,13 +24,14 @@ model call waits for its slot under `[scheduler]`, and the call log records
 it under the session's id. See [Scheduler](../guides/scheduler.md#the-gate-on-chats-s2).
 
 JSON request bodies and JSON responses use UTF-8. Event streams use
-`text/event-stream`, image blobs use their image media type, and a successful
+`text/event-stream`, image blobs and pictures use their image media type, and a successful
 204 response has no body. A request with a non-empty body
 needs `Content-Type: application/json`, and a body may have at most 1 MiB
 (1,048,576 bytes). Every string in a request must be valid UTF-8 without
 lone surrogates. Responses carry `Cache-Control: no-store`,
 `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`
-(except blobs, whose policy is `default-src 'none'; sandbox; frame-ancestors 'none'`),
+(except blobs, whose policy is `default-src 'none'; sandbox; frame-ancestors 'none'`, and pictures, see
+[their route](#get-apisessionsidpictures)),
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
 `Cross-Origin-Opener-Policy: same-origin`,
 `Cross-Origin-Resource-Policy: same-origin`, `X-Frame-Options: DENY` and
@@ -49,11 +50,13 @@ every route below:
 | 400 | `invalid_request` | malformed JSON, a wrong type, an unknown field, a control character or lone surrogate, a relative `workspace` in settings, a bad query parameter, or a malformed `client_request_id` |
 | 400 | `invalid_settings` | `Config.validate()` failed on the candidate settings; `details.errors` lists the messages |
 | 403 | `foreign_origin` | a request under `/api/` from another site (`Sec-Fetch-Site` is neither `same-origin` nor `none`), or a state-changing request from another origin |
-| 404 | `not_found` | an unknown session, blob or route |
+| 403 | `outside_workspace` | a picture request whose real path is not inside the session's folder |
+| 404 | `not_found` | an unknown session, blob, picture or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
 | 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
-| 413 | `too_large` | the request body is over 1 MiB |
+| 413 | `too_large` | the request body is over 1 MiB, or a requested picture is over 20 MB |
 | 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
+| 415 | `not_a_picture` | a picture request for a file whose name or content is not a PNG, JPEG, GIF, WebP or SVG |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, or an app-started gateway's `/api/auth/login` has no matching `X-LocalMelo-Instance` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
 | 502 | `backend_unreachable` | listing models failed or returned no models |
@@ -759,6 +762,36 @@ An image a turn's tool returned, by its SHA-256 digest.
   `default-src 'none'; sandbox; frame-ancestors 'none'` (the gateway's
   framing rule is merged into the blob's own policy) and
   `Cache-Control: no-store`.
+
+## GET /api/sessions/{id}/pictures
+
+A picture file from the folder the session works in, by its path. The console
+shows a turn's pictures with it (the [`turn.pictures` event](events.md#session-events)
+lists them).
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -G --data-urlencode 'path=charts/fcf.png' -o fcf.png http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/pictures
+```
+
+- `path` is required, up to 4,096 characters: a path relative to the session's
+  folder, or an absolute one inside it. `..` anywhere in it is refused. An
+  unknown session, a session with no folder yet and a file that does not exist
+  are 404 `not_found`.
+- The file's real path, with every link followed, must be inside the session's
+  real folder, and is checked again on the open file; otherwise the answer is 403
+  `outside_workspace` (a `..` path, an absolute path elsewhere, a link that leads
+  out, another session's folder). Only a regular file is served.
+- The name must end in `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg`, and
+  the content must be that kind of picture, judged from its first bytes (the
+  `Content-Type` is the content's, not the name's); otherwise 415 `not_a_picture`
+  (a text file named `chart.png`, an SVG that is an HTML page). A file over
+  20 MB is 413 `too_large`.
+- Every answer has `Content-Disposition: inline`, `X-Content-Type-Options:
+  nosniff` and `Cache-Control: private`. A PNG, JPEG, GIF or WebP has
+  `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`;
+  an SVG has `Content-Security-Policy: sandbox; default-src 'none'; style-src
+  'unsafe-inline'; frame-ancestors 'none'`, so it can draw but never run a
+  script or open as a page. The route reads one file and writes and lists nothing.
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 

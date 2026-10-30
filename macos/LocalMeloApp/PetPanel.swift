@@ -93,16 +93,15 @@ final class PetController: NSObject {
     var hiddenChanged: (Bool) -> Void = { _ in }
     private(set) var mood = PetMood.unknown
     private(set) var settings: PetSettings
-    private(set) var environment = PetEnvironment()
+    var environment: PetEnvironment { gate.environment }
     private let settingsURL: URL
     private let pictures: URL?
-    private var images: [PetState: CGImage] = [:]
+    private var gate: MotionGate!
+    private var images: [String: CGImage] = [:]
     private var imageScale = 0
     private var health: Data?
     private var stopped = false
     private var windowShown = true
-    private var screenOn = true
-    private var sessionActive = true
     private var touched = Date()
     private var poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
     private var shownState: PetState?
@@ -138,7 +137,17 @@ final class PetController: NSObject {
         view.onTouch = { [weak self] in self?.touch() }
         view.onClick = { [weak self] in self?.click() }
         view.onDrop = { [weak self] in self?.drop() }
-        observe()
+        gate = MotionGate(window: { [weak self] in self?.panel }, visible: { [weak self] in
+            guard let panel = self?.panel else { return false }
+            return panel.isVisible && panel.occlusionState.contains(.visible)
+        })
+        gate.changed = { [weak self] _ in
+            if self?.isShown == true { self?.applyMotion(beginning: false) }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            if self?.isShown == true { self?.place() }
+        }
     }
 
     // MARK: What the app tells it
@@ -175,13 +184,13 @@ final class PetController: NSObject {
             poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
             shownState = nil
             panel.orderFrontRegardless()
-            environmentChanged()
+            gate.refresh()
             refresh()
         } else if !wanted && panel.isVisible {
             panel.orderOut(nil)
             motion.stop()
             applied = nil
-            environmentChanged()
+            gate.refresh()
         }
     }
 
@@ -196,7 +205,7 @@ final class PetController: NSObject {
     }
 
     private func refresh() {
-        environmentChanged()  // each reply also reads the system again, so a missed notification cannot stick
+        gate.refresh()  // each reply also reads the system again, so a missed notification cannot stick
         let old = mood
         mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched),
                        poseSeed: poseSeed)
@@ -204,7 +213,8 @@ final class PetController: NSObject {
         // A beat plays when the mood begins: when the pet appears, and when what it does changes.
         let beginning = shownState == nil || petMotionPlan(old) != petMotionPlan(mood)
         if mood.picture != shownState, let image = picture(for: mood.picture) {
-            motion.show(image, fade: petFade(from: shownState, to: mood.picture, environment: environment))
+            motion.show(image, parts: parts(for: mood.picture),
+                        fade: petFade(from: shownState, to: mood.picture, environment: environment))
             shownState = mood.picture
         }
         applyMotion(beginning: beginning)
@@ -220,14 +230,26 @@ final class PetController: NSObject {
     }
 
     /// The picture for the panel's screen scale, decoded once; nil when the file is missing.
-    private func picture(for state: PetState) -> CGImage? {
+    private func picture(for state: PetState) -> CGImage? { piece(state, state.rawValue) }
+
+    /// The pieces that move over a picture (the blink patch, the body and the tail, the "z"'s start); a missing
+    /// file leaves that move out.
+    private func parts(for state: PetState) -> PetParts {
+        PetParts(blink: state.blinkPatch.flatMap { piece(state, $0) },
+                 body: state.tailPieces.flatMap { piece(state, $0.body) },
+                 tail: state.tailPieces.flatMap { piece(state, $0.tail) },
+                 zStart: state.sleepZ)
+    }
+
+    private func piece(_ state: PetState, _ name: String) -> CGImage? {
         let scale = Int((panel.screen ?? NSScreen.main)?.backingScaleFactor ?? 2) >= 2 ? 2 : 1
         if scale != imageScale { images = [:]; imageScale = scale }
-        if let image = images[state] { return image }
-        guard let url = pictures?.appendingPathComponent("\(state.folder)/\(state.fileName(scale: scale))"),
+        let file = "\(state.folder)/\(state.pieceFile(name, scale: scale))"
+        if let image = images[file] { return image }
+        guard let url = pictures?.appendingPathComponent(file),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        images[state] = image
+        images[file] = image
         return image
     }
 
@@ -294,47 +316,5 @@ final class PetController: NSObject {
     private func save() {
         try? FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? petSettingsData(settings).write(to: settingsURL, options: .atomic)
-    }
-
-    // MARK: What the system says
-
-    private func observe() {
-        let center = NotificationCenter.default, workspace = NSWorkspace.shared.notificationCenter
-        let changed: (Notification) -> Void = { [weak self] _ in self?.environmentChanged() }
-        center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main, using: changed)
-        for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
-            center.addObserver(forName: name, object: nil, queue: .main, using: changed)
-        }
-        workspace.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil,
-                              queue: .main, using: changed)
-        // The screen being off and the session being switched out stop the loops the same way.
-        let awake: [(Notification.Name, (PetController) -> Void)] = [
-            (NSWorkspace.screensDidSleepNotification, { $0.screenOn = false }),
-            (NSWorkspace.screensDidWakeNotification, { $0.screenOn = true }),
-            (NSWorkspace.sessionDidResignActiveNotification, { $0.sessionActive = false }),
-            (NSWorkspace.sessionDidBecomeActiveNotification, { $0.sessionActive = true })]
-        for (name, set) in awake {
-            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                guard let self = self else { return }
-                set(self)
-                self.environmentChanged()
-            }
-        }
-        center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            if self?.isShown == true { self?.place() }
-        }
-        environmentChanged()
-    }
-
-    private func environmentChanged() {
-        var now = PetEnvironment()
-        now.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        now.lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        now.thermal = ProcessInfo.processInfo.thermalState
-        now.visible = panel.isVisible && panel.occlusionState.contains(.visible)
-        now.screenAwake = screenOn && sessionActive
-        guard now != environment else { return }
-        environment = now
-        if isShown { applyMotion(beginning: false) }
     }
 }
