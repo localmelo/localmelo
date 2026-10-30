@@ -259,7 +259,8 @@ class AgentOptions:
       children start, on macOS, under a ``sandbox-exec`` profile that
       refuses every file write outside the workspace (the
       ``workspace_root``, else this process's directory), except in the
-      caches the project's tools write and, for a linked git worktree, its
+      caches the project's tools write, the user's own temporary folder
+      (where macOS's ``mktemp`` writes) and, for a linked git worktree, its
       own git directory and the object store (see
       :mod:`~localmelo.melo.executor.sandbox`); reads and the network stay
       open. ``TMPDIR``, ``TMP`` and ``TEMP`` point at ``.melo-tmp`` in the

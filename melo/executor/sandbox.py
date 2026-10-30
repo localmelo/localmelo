@@ -11,6 +11,8 @@ Python) inherit the profile.
 The run's temporary folder is :data:`TMP_DIR` inside the workspace, so it
 goes when the workspace goes and stays when the run is kept for review; a
 ``.gitignore`` in it keeps it out of ``git status`` and the brief's digest.
+macOS's ``mktemp`` ignores ``TMPDIR`` and writes in the user's own
+temporary folder, which stays writable (see :func:`user_temp_dir`).
 """
 
 from __future__ import annotations
@@ -43,6 +45,11 @@ DEVICES = (
     "/dev/ptmx",
 )
 _DEVICE_RULES = (r'(subpath "/dev/fd")', r'(regex #"^/dev/ttys[0-9]+$")')
+
+# confstr()'s name for the user's temporary folder (<unistd.h>), which
+# os.confstr_names does not list, and the folder every such path is under.
+_CS_DARWIN_USER_TEMP_DIR = 65537
+_USER_FOLDERS = "/private/var/folders/"
 
 _REFUSED = re.compile(r"operation not permitted", re.IGNORECASE)
 _QUOTED = re.compile(r"""['"`](/[^'"`\n]*)['"`]""")
@@ -108,15 +115,46 @@ def git_dirs(root: str) -> list[str]:
     return [gitdir, os.path.join(common, "objects")]
 
 
+def user_temp_dir() -> str | None:
+    """The user's own temporary folder on macOS (``/var/folders/.../T``), or ``None``.
+
+    It is ``confstr(_CS_DARWIN_USER_TEMP_DIR)``, else ``getconf
+    DARWIN_USER_TEMP_DIR``, as a real path. macOS's ``mktemp`` and
+    ``mktemp -d`` write there whatever ``TMPDIR`` says; the folder is
+    private to the user and holds no project. Anything that is not under
+    ``/private/var/folders/`` (so never ``/tmp``, the home folder or a
+    project) is ``None``.
+    """
+    try:
+        path = os.confstr(_CS_DARWIN_USER_TEMP_DIR)
+    except (ValueError, OSError):
+        path = None
+    if not path:
+        try:
+            path = subprocess.run(
+                ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+    real = os.path.realpath(path) if path and os.path.isabs(path) else ""
+    return real if real.startswith(_USER_FOLDERS) else None
+
+
 def allowed_paths(root: str, env: Mapping[str, str]) -> list[str]:
     """The folders a confined child may write in, real paths, each once.
 
     The workspace *root* (and so the run's temporary folder in it), the git
-    directories of :func:`git_dirs` and the caches of :func:`cache_dirs`;
-    a path inside one listed before it is left out.
+    directories of :func:`git_dirs`, the user's temporary folder of
+    :func:`user_temp_dir` and the caches of :func:`cache_dirs`; a path
+    inside one listed before it is left out.
     """
+    temp = user_temp_dir()
     out: list[str] = []
-    for path in [root, *git_dirs(root), *cache_dirs(env)]:
+    for path in [root, *git_dirs(root), *([temp] if temp else []), *cache_dirs(env)]:
         real = os.path.realpath(path)
         if not any(_inside(real, kept) for kept in out):
             out.append(real)

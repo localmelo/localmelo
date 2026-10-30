@@ -54,8 +54,9 @@ those tools can do.
   `shell_exec` and `python_exec` start under a `sandbox-exec` profile that
   refuses every file write outside the workspace, whatever the command does
   (`cd` elsewhere, a child `git` or Python). The exceptions are the caches
-  the project's tools write (uv's cache, black's cache, npm's cache), a few
-  devices (`/dev/null`, the terminal, the standard streams), and, when the
+  the project's tools write (uv's cache, black's cache, npm's cache), your own
+  temporary folder (`/var/folders/.../T`, where macOS's `mktemp` writes; `/tmp`
+  stays refused), a few devices (`/dev/null`, the terminal, the standard streams), and, when the
   workspace is a linked git worktree, its own git directory and the
   repository's object store, so `git status`, `git diff` and `git add` work
   while a commit to a branch and every file of the main checkout stay out of

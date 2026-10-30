@@ -829,15 +829,16 @@ under a `sandbox-exec` profile that refuses every file write outside the workspa
 write, `uv run` in another checkout and a child `git` or Python are all refused.
 Writes are allowed in the workspace, in `.melo-tmp` there (`TMPDIR`, `TMP` and
 `TEMP` point at it; a `.gitignore` in it keeps it out of `git status`, and it stays
-with the workspace), in uv's cache (`UV_CACHE_DIR`, else `~/.cache/uv`), black's
+with the workspace), in your own temporary folder (`/var/folders/.../T`, where
+macOS's `mktemp` and `mktemp -d` write whatever `TMPDIR` says; `/tmp` stays
+refused), in uv's cache (`UV_CACHE_DIR`, else `~/.cache/uv`), black's
 (`~/Library/Caches/black`) and npm's (`~/.npm`), in `/dev/null`, `/dev/zero`, the
 terminal, the standard streams, `/dev/fd` and pseudo-terminals, and, when the
 workspace is a linked git worktree, in its own git directory and the repository's
 `objects`: `git status`, `diff` and `add` work, a commit to a branch is refused,
 and the main checkout's files stay unwritable. `uv run`, `uv sync`, `pytest`,
 `ruff`, `black`, `mypy` and `npm` were measured to need nothing else. Reads and
-the network are not confined. macOS's `mktemp` with no template writes in the
-system's temporary folder and is refused; `mktemp "$TMPDIR/x.XXXXXX"` works. A
+the network are not confined. A
 refused write keeps its error and gains a first line (after `[exit code N]`):
 
 ```text

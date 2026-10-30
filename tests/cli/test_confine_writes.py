@@ -67,6 +67,8 @@ class TestOptionsAndRecord:
         (tmp_path / "home").mkdir()
         # Without a root, the folder melo runs in is the workspace.
         monkeypatch.chdir(tmp_path / "ws")
+        # tmp_path is inside the user's temp folder, which the profile allows.
+        monkeypatch.setattr(sandbox, "user_temp_dir", lambda: None)
         root = tmp_path / "ws" if rooted else None
         try:
             agent = _agent(root, tmp_path / "home", confine_writes=True)

@@ -157,7 +157,7 @@ On macOS, the worker's shell commands and Python code can write only in the
 workspace: a write elsewhere, even after `cd ..`, fails with `Operation not
 permitted` and a line telling the model to write in the workspace, and scratch
 files go to `$TMPDIR`, which is `.melo-tmp` in the workspace. The caches of uv,
-black and npm stay writable, and in a git worktree `git status`, `git diff` and
+black and npm and your own temporary folder (where `mktemp` writes) stay writable, and in a git worktree `git status`, `git diff` and
 `git add` work. Reads and the network are not limited. To run a worker without
 this, add `-X agent.confine_writes=false`; see
 [Writes stay in the workspace](../reference/cli.md#confined-writes).

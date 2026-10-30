@@ -35,6 +35,7 @@ from localmelo.melo.executor.sandbox import (
     git_dirs,
     profile,
     quote,
+    user_temp_dir,
 )
 
 HOME = "/Users/someone"
@@ -62,6 +63,10 @@ def _git(cwd: Path, *args: str) -> None:
         check=True,
         capture_output=True,
     )
+
+
+def _no_getconf(*args: object, **kwargs: object) -> object:
+    raise OSError("no getconf")
 
 
 def _worktree(tmp_path: Path) -> tuple[Path, Path]:
@@ -122,15 +127,51 @@ class TestAllowlist:
         ) == ["/x/uv", "/b", "/n"]
         assert cache_dirs({"UV_CACHE_DIR": "/u", "NPM_CONFIG_CACHE": "rel"}) == ["/u"]
 
-    def test_the_allowlist_is_exact(self, tmp_path: Path) -> None:
+    def test_the_allowlist_is_exact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         root = (tmp_path / "ws").resolve()
         root.mkdir()
+        temp = "/private/var/folders/xy/abc/T"
+        monkeypatch.setattr(sandbox, "user_temp_dir", lambda: temp)
         env = {"HOME": str(tmp_path), "UV_CACHE_DIR": str(root / "uv")}
         assert allowed_paths(str(root), env) == [
             str(root),  # the uv cache inside it is not listed again
+            temp,
             str(tmp_path.resolve() / "Library" / "Caches" / "black"),
             str(tmp_path.resolve() / ".npm"),
         ]
+        monkeypatch.setattr(sandbox, "user_temp_dir", lambda: None)
+        assert temp not in allowed_paths(str(root), env)
+
+    def test_the_user_temp_folder_is_the_darwin_one_or_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        found = user_temp_dir()
+        if sys.platform == "darwin":
+            assert found is not None and found.startswith("/private/var/folders/")
+            assert found == os.path.realpath(os.confstr(65537) or "")
+        for given in ("/tmp/", "/private/tmp", HOME, "rel/T", ""):
+            monkeypatch.setattr(sandbox.os, "confstr", lambda _name, v=given: v)
+            monkeypatch.setattr(sandbox.subprocess, "run", _no_getconf)
+            assert user_temp_dir() is None, given
+
+    def test_without_confstr_getconf_answers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unknown(_name: int) -> str:
+            raise ValueError("unrecognized configuration name")
+
+        def getconf(argv: list[str], **kwargs: object) -> object:
+            assert argv == ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"]
+            return SimpleNamespace(stdout="/var/folders/xy/abc/T/\n")
+
+        monkeypatch.setattr(sandbox.os, "confstr", unknown)
+        monkeypatch.setattr(sandbox.subprocess, "run", getconf)
+        monkeypatch.setattr(sandbox.os.path, "realpath", lambda p: "/private" + p)
+        assert user_temp_dir() == "/private/var/folders/xy/abc/T/"
+        monkeypatch.setattr(sandbox.subprocess, "run", _no_getconf)
+        assert user_temp_dir() is None
 
     def test_a_linked_worktree_adds_its_git_dir_and_the_objects(
         self, tmp_path: Path
@@ -260,6 +301,12 @@ def home(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def no_user_temp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave the user's temp folder out: pytest's tmp_path is inside it."""
+    monkeypatch.setattr(sandbox, "user_temp_dir", lambda: None)
+
+
 def _real(root: Path, env: dict[str, str]) -> WriteConfinement:
     if sys.platform != "darwin":
         pytest.skip("writes are confined only on macOS")
@@ -279,6 +326,31 @@ def _tools(
     return confinement, tools["shell_exec"][0], tools["python_exec"][0]
 
 
+class TestRealUserTemp:
+    async def test_mktemp_works_in_the_user_temp_folder(
+        self, ws: Path, home: Path
+    ) -> None:
+        c, shell, _ = _tools(ws, {"HOME": str(home)})
+        temp = user_temp_dir()
+        assert temp is not None and temp in c.paths
+        out = await shell('d=$(mktemp -d) && f=$(mktemp) && echo "$d" "$f"')
+        made, made_file = (Path(part) for part in out.split())
+        try:
+            assert made.is_dir() and made_file.is_file() and c.refused == 0
+            assert os.path.realpath(made).startswith(temp + "/")
+            assert os.path.realpath(made_file).startswith(temp + "/")
+        finally:
+            made_file.unlink(missing_ok=True)
+            made.rmdir()
+        outside = Path(f"/private/tmp/melo-confine-test-{os.getpid()}-{id(c)}")
+        try:
+            assert "Operation not permitted" in await shell(f"touch {outside}")
+            assert c.refused == 1 and not outside.exists()
+        finally:
+            outside.unlink(missing_ok=True)  # only if the profile let it through
+
+
+@pytest.mark.usefixtures("no_user_temp")
 class TestReal:
     async def test_a_write_in_the_workspace_and_its_temp_folder_works(
         self, ws: Path, home: Path

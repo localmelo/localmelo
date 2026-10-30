@@ -13,7 +13,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
   `python_exec`, the brief's checks included, start under a `sandbox-exec`
   profile that refuses file writes outside the workspace, whatever the command
-  does; uv's, black's and npm's caches, a few devices and, in a linked git
+  does; uv's, black's and npm's caches, the user's own temporary folder (where
+  macOS's `mktemp` writes), a few devices and, in a linked git
   worktree, its own git directory and the object store stay writable, so
   `uv run`, `pytest`, `ruff`, `black`, `mypy`, `npm` and `git status`/`diff`/`add`
   work. `TMPDIR`, `TMP` and `TEMP` point at `.melo-tmp` in the workspace. Reads

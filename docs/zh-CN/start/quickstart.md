@@ -123,7 +123,7 @@ melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.j
 
 实验性设置 `agent.brief_items`（`-X agent.brief_items=true`）还会在模型的反思请求和最后几步之前，指出简报中尚未被任何编辑触及的编号条目（见[参考](../../reference/cli.md#brief-items)）。
 
-在 macOS 上，worker 的 shell 命令和 Python 代码只能写入工作区：写到其他地方（即使先 `cd ..`）会以 `Operation not permitted` 失败，并多出一行提示模型在工作区内写入；临时文件写到 `$TMPDIR`，即工作区里的 `.melo-tmp`。uv、black 和 npm 的缓存仍可写入，在 git worktree 中 `git status`、`git diff` 和 `git add` 照常可用。读取和网络不受限制。要不加这项限制地运行 worker，请加上 `-X agent.confine_writes=false`；见[写入留在工作区内（英文）](../../reference/cli.md#confined-writes)。
+在 macOS 上，worker 的 shell 命令和 Python 代码只能写入工作区：写到其他地方（即使先 `cd ..`）会以 `Operation not permitted` 失败，并多出一行提示模型在工作区内写入；临时文件写到 `$TMPDIR`，即工作区里的 `.melo-tmp`。uv、black 和 npm 的缓存以及你自己的临时文件夹（`mktemp` 写入的位置）仍可写入，在 git worktree 中 `git status`、`git diff` 和 `git add` 照常可用。读取和网络不受限制。要不加这项限制地运行 worker，请加上 `-X agent.confine_writes=false`；见[写入留在工作区内（英文）](../../reference/cli.md#confined-writes)。
 
 结果是一行 JSON，含 `status`、`exit_code`、`tests` 和运行记录。所有字段和退出码见[命令行参考](../../reference/cli.md#output)（英文）。
 
