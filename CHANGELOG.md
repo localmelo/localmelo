@@ -45,6 +45,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The console and the terminal no longer show a turn's time twice. A turn that answered
+  without tool calls showed `Thought for 2.0s` over the answer and `2.0s · 1 step` under it,
+  the step's time and the turn's time being the same. The console now shows no summary line for
+  such a turn, or `Thought` over its reasoning when it has some (the reasoning is the body of
+  that line, not a second `Thought` inside it); the terminal prints `✻ Thought` for a reply
+  that ends a turn without tool calls. The footer keeps the turn's time. A turn with tool calls
+  is unchanged ([#NN]).
+
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
   not be decoded, so it was asked for again, and a second failure lost the
@@ -190,6 +198,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
+
+- Chats say who they are. A model that is told nothing answers "who are you?" with the
+  assistant it was trained as. The terminal chat, the web console and the macOS app now tell
+  the model one short paragraph first: it is melo, the assistant built into localmelo, an
+  open-source agent that runs on your computer, works in your folder with tools and asks before
+  it changes anything; it runs on the model you chose, served by the server named as the banner
+  names it (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a cloud provider), on this
+  computer or at the server's host; it says so when asked who or what it is, does not present
+  itself as the model's own assistant, answers in your language, and answers a greeting or a
+  question it can answer directly without tools. Switching the model (`/model`, the console's
+  model menu) names the new one from the next turn. It is the new `AgentOptions.identity`
+  (default `None`: direct runs, workers and the gateway's v1 sessions send no identity).
+  ([#NN])
 
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
@@ -1157,6 +1178,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A uv development environment with a committed `uv.lock` ([#25]).
 
 ### Changed
+
+- The fixed system section of a request no longer has the line `Prefix: fixed-prefix-v2`.
+  The model read the layout's internal name as an instruction and spent a reply deciding
+  whether to start its answers with it. The date line stays, and `prefix_cache.version` in a
+  run's result still names the layout. Every request of a run with the fixed prefix (the
+  default), direct runs included, differs from before by that one line, so a server's prompt
+  cache warms once after the upgrade ([#NN]).
 
 - The terminal's new look, part 2: panels, lists, the status bar and the welcome. The approval
   panel has an amber frame with its title bold, the chosen answer sits on a moss band, and a

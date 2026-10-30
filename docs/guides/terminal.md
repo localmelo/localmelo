@@ -93,6 +93,22 @@ model row with that name; a saved server is listed after the box, so the box
 shows what the file says, unless the run already listed the server (the first
 run does).
 
+### What melo says about itself
+
+Every chat tells its model who it is, so "who are you?" gets the same answer
+whichever model runs. Melo answers that it is melo from localmelo, an
+open-source agent that works in your folder with tools and asks before it
+changes anything, and it names the model it runs on; it does not present itself
+as the model's own assistant or as made by its maker, and it answers in your
+language. The paragraph also names the server as the banner does (`oMLX`,
+`Ollama`, an `OpenAI-compatible server`, or a cloud provider) and says whether it
+is on this computer (`on this computer`, or `at 192.168.1.20` for a server on
+another machine). `/model` and `/backend` start the next turn on the new choice,
+and that turn names the new model. A greeting or a question it can answer
+directly is answered without tools. The web console and the macOS app do the
+same; direct runs (`melo "task"`), workers and the benchmark send no such
+paragraph, so their requests are as before.
+
 ### Keys
 
 | Key | What it does |
@@ -347,7 +363,9 @@ happens without the explicit `/copy` command.
   progress line would, with the steps they took: `last time 6 steps, 2m10s:
   Run ls ✓ · Read app.py ✓`. It shows on a session's first turn, and in
   developer mode on every turn.
-- **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
+- **Thinking.** `✻ Thought for 1.2s`: one line. A reply that ends a turn without
+  any tool call prints `✻ Thought`, because the footer under the answer gives
+  that time. `/thinking on` and developer
   mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
   width. An intermediate message prints as Markdown after `●`; the
   last one is held, prints at the next step, and at the end only when it

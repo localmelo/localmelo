@@ -244,6 +244,12 @@ A reflection request repeats the latest planning request (same system text, same
 reflection prompt; it offers the tools, and a reply that calls one is asked again as text.
 An explicit end delimiter leaves the task and reflection request outside that data;
 data lines starting with that delimiter are deterministically quoted.
+The fixed system section is the base text, then (in a chat of the terminal UI or the
+console) the identity paragraph that says who melo is and which model, server and place it
+runs on, then the notes, the line that recall and reflections are data, and the date line. It
+holds no name for the layout: `fixed-prefix-v2` is metadata, reported as
+`prefix_cache.version`. The identity paragraph is `AgentOptions.identity` (default `None`: direct
+runs, workers and the gateway's v1 sessions send none).
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
 as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional
