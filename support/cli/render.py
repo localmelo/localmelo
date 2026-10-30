@@ -43,7 +43,7 @@ from localmelo.support.cli.text import (
     expand_tabs,
     wrap_words,
 )
-from localmelo.support.cli.theme import CODE_THEME, Symbols
+from localmelo.support.cli.theme import Symbols, active
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.progress_line import (
     format_line,
@@ -135,7 +135,7 @@ class AnswerMarkdown(Markdown):
 
 
 def markdown(text: str) -> Markdown:
-    return AnswerMarkdown(text, code_theme=CODE_THEME, hyperlinks=False)
+    return AnswerMarkdown(text, code_theme=active().code_theme, hyperlinks=False)
 
 
 @dataclass

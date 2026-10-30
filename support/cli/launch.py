@@ -438,7 +438,14 @@ async def main_async(
     from localmelo.support.cli.render import TurnRenderer
     from localmelo.support.cli.session import STOP_REASON, CliSession
     from localmelo.support.cli.signals import ExitSignals, save_terminal
-    from localmelo.support.cli.theme import in_symbols, symbols_for, wants_no_color
+    from localmelo.support.cli.termcolors import query_colors
+    from localmelo.support.cli.theme import (
+        activate,
+        detect,
+        in_symbols,
+        symbols_for,
+        wants_no_color,
+    )
     from localmelo.support.cli.views import banner
     from localmelo.support.sessions.display import display_version, home_label
     from localmelo.support.sessions.runner import ResumeMode
@@ -518,6 +525,16 @@ async def main_async(
                 "Invalid [cli] settings; using defaults: %s", "; ".join(errors)
             )
             session_config.cli = config.CliConfig()
+        # Before prompt_toolkit takes the terminal: ask it for its colours.
+        activate(
+            detect(
+                colors=session_config.cli.colors,
+                bg=session_config.cli.background,
+                ask=lambda: query_colors(
+                    sys.stdin.fileno(), sys.stdout.fileno(), os.environ
+                ),
+            )
+        )
         developer = _developer(args)
         renderer = TurnRenderer(
             out,

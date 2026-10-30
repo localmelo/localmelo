@@ -55,7 +55,7 @@ from prompt_toolkit.layout.processors import (
     Transformation,
     TransformationInput,
 )
-from prompt_toolkit.output import ColorDepth, Output
+from prompt_toolkit.output import Output
 from prompt_toolkit.search import SearchState
 from prompt_toolkit.widgets import SearchToolbar
 from rich.text import Text
@@ -86,7 +86,7 @@ from localmelo.support.cli.text import (
     shown,
     wrap_words,
 )
-from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
+from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols, pt_color_depth
 from localmelo.support.cli.usershell import parse as parse_shell
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionInfo, SessionStore
@@ -502,7 +502,7 @@ class InteractiveApp:
             full_screen=False,
             erase_when_done=True,
             mouse_support=False,
-            color_depth=ColorDepth.DEPTH_1_BIT if no_color else None,
+            color_depth=pt_color_depth(no_color),
         )
         # Esc waits this long for a key that would make it Alt+key.
         self.app.ttimeoutlen = 0.1

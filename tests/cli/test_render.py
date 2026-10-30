@@ -21,7 +21,7 @@ from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import RecordingOut, TerminalOut
 from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
-from localmelo.support.cli.theme import ASCII, UNICODE, Symbols, rich_theme
+from localmelo.support.cli.theme import ASCII, UNICODE, Palette, Symbols
 from localmelo.support.cli.views import BackendInfo, banner
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.store import StoredEvent
@@ -2422,7 +2422,9 @@ def test_the_names_are_the_default_color_on_a_light_terminal() -> None:
     line = writes.turn.renderer.changed_line()
     assert line is not None
     console = Console(
-        theme=rich_theme("light"), force_terminal=True, color_system="standard"
+        theme=Palette("16", "light").rich_theme,
+        force_terminal=True,
+        color_system="standard",
     )
     for name in ("SUMMARY.md", "todo.md"):
         style = line.get_style_at_offset(console, line.plain.index(name))
