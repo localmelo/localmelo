@@ -38,17 +38,37 @@ uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.h
 
 ## Quick start
 
-Start a model server (here [Ollama](https://ollama.com), with
-`ollama pull qwen3:8b`), then run a task:
+Start a model server, then run a task. On a Mac with Apple silicon (macOS 15
+or later), [oMLX](https://github.com/jundot/omlx) is the recommended local
+server. Put each model in its own folder of `~/models` (the folder's name is
+the model id; the
+[model servers guide](docs/guides/model-servers.md#serve-a-model-with-omlx)
+shows how to download one), then install oMLX and serve the folder:
+
+```bash
+brew tap jundot/omlx https://github.com/jundot/omlx
+brew install jundot/omlx/omlx
+omlx serve --model-dir ~/models --port 8000
+```
+
+In a second terminal, run a task:
+
+```bash
+melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+```
+
+On other systems, or if you prefer [Ollama](https://ollama.com), pull a model
+with `ollama pull qwen3:8b` and run:
 
 ```bash
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ```
 
-Run `melo` in a terminal to chat and save a configuration on the first run;
-`melo --serve` starts the gateway; run `melo --gateway-login` in a terminal
-and open the one-use link within 60 seconds. The HTTP API and web workspace are at
-`http://127.0.0.1:8401/`.
+Run `melo` in a terminal to chat. On the first run it finds a running server
+(oMLX on port 8000, Ollama on 11434), picks a model or asks for one, and saves
+a configuration; `melo --serve` starts the gateway; run `melo --gateway-login`
+in a terminal and open the one-use link within 60 seconds. The HTTP API and
+web workspace are at `http://127.0.0.1:8401/`.
 The interactive UI accepts the same [reasoning and recall options](docs/reference/cli.md#interactive-ui)
 as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
 also honor the saved reasoning mode (default `legacy`). The separate

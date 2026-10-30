@@ -322,6 +322,9 @@ def _command() -> list[str]:
         "localmelo",
         "--base-url",
         "http://127.0.0.1:1/v1",
+        # A named model asks the server nothing, so nothing warns on stderr.
+        "--chat-model",
+        "M",
         "",
     ]
 

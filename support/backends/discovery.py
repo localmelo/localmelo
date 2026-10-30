@@ -5,6 +5,8 @@ to tell an Ollama server apart. A first run also asks which models are in
 memory: ``GET <url>/models/status`` (oMLX) and ``GET <root>/api/ps``
 (Ollama). Nothing is generated, so listing neither waits for a server to
 load a model nor competes with runs on it. Cloud vendors are not listed.
+The same listing tells an oMLX server (see :func:`is_omlx`), so no request is
+added to name one.
 """
 
 from __future__ import annotations
@@ -44,6 +46,14 @@ NO_API_KEY_HINT: Final = (
     "the server requires an API key; localmelo sends none to local servers "
     '(oMLX: "Allow inference without API key")'
 )
+
+# What a label or an error calls a server of the OpenAI-compatible kind.
+OMLX_NAME: Final = "oMLX"
+OPENAI_COMPATIBLE_NAME: Final = "OpenAI-compatible server"
+
+# The servers whose last model listing named oMLX as its owner, by their
+# normalized URL. A listing is asked for anyway, so this costs no request.
+_OMLX_URLS: Final[set[str]] = set()
 
 
 class DiscoveryError(Exception):
@@ -105,6 +115,39 @@ def parse_model_ids(payload: Any) -> list[str]:
             seen.add(model_id)
             names.append(model_id)
     return names
+
+
+def says_omlx(payload: Any) -> bool:
+    """Whether a ``/models`` reply names oMLX as the owner of a model.
+
+    oMLX sets ``owned_by`` to ``omlx`` on every model it lists, also while
+    its status route refuses a request without a key.
+    """
+    items = payload.get("data") if isinstance(payload, dict) else None
+    return isinstance(items, list) and any(
+        isinstance(item, dict) and str(item.get("owned_by", "")).lower() == "omlx"
+        for item in items
+    )
+
+
+def is_omlx(url: str) -> bool:
+    """Whether the last model listing of the server at *url* said it is oMLX."""
+    return normalize_url(url) in _OMLX_URLS if url else False
+
+
+def server_name(url: str = "", *, declared: bool = False) -> str:
+    """What to call the OpenAI-compatible server at *url*: ``oMLX`` or not.
+
+    *declared* is a config file saying so (``chat_backend = "omlx"``);
+    otherwise a model listing of *url* must have said so. Anything else is
+    an ``OpenAI-compatible server``.
+    """
+    return OMLX_NAME if declared or is_omlx(url) else OPENAI_COMPATIBLE_NAME
+
+
+def forget_servers() -> None:
+    """Drop what the model listings said about servers (for tests)."""
+    _OMLX_URLS.clear()
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -188,6 +231,10 @@ async def list_models(
         raise DiscoveryError(
             "the reply is not a model list", reachable=True, status_code=status
         ) from exc
+    if says_omlx(payload):
+        _OMLX_URLS.add(base_url)
+    else:
+        _OMLX_URLS.discard(base_url)
     return parse_model_ids(payload)
 
 
@@ -246,7 +293,9 @@ def parse_loaded_ids(payload: Any) -> set[str] | None:
 
     Reads oMLX's ``{"models": [{"id": …, "loaded": true}]}`` and Ollama's
     ``/api/ps`` list, whose items are all running models (``name`` or
-    ``model``). An item with ``loaded`` false is not counted.
+    ``model``). An item with ``loaded`` false is not counted. oMLX reports a
+    model under its folder name (``id``) but lists it under its alias
+    (``model_alias``), so a loaded model counts under both.
     """
     items = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(items, list):
@@ -256,6 +305,9 @@ def parse_loaded_ids(payload: Any) -> set[str] | None:
         if isinstance(item, dict) and item.get("loaded") is False:
             continue
         ids.update(parse_model_ids({"models": [item]}))
+        alias = item.get("model_alias") if isinstance(item, dict) else None
+        if isinstance(alias, str) and alias.strip():
+            ids.add(alias.strip())
     return ids
 
 
@@ -312,6 +364,10 @@ NO_DEFAULT_MODEL: Final = (
     "several models are served and none is known to be loaded, so there is "
     "no default; answer with a number or a model id"
 )
+# Said when the status route answered 401 or 403, as it does to a listing.
+NO_STATUS_KEY_NOTE: Final = (
+    "The server did not say which models are loaded (it needs a key for that)."
+)
 
 
 def is_chat_model(model: str) -> bool:
@@ -338,6 +394,71 @@ def pick_model(
     if running and (len(running) == 1 or not unique):
         return running[0]
     return None
+
+
+@dataclass(frozen=True)
+class ModelChoice:
+    """The model to ask a ``--base-url`` server for, and what its list said.
+
+    *url* is normalised once the server answered there. *model* is None when
+    the list has several chat models and none is known to be loaded
+    (:meth:`refusal` says so), or when there is no usable list, which *reason*
+    then explains (:meth:`warning`).
+    """
+
+    url: str
+    model: str | None
+    models: tuple[str, ...] = ()
+    loaded: LoadedModels = LoadedModels()
+    reason: str = ""
+
+    def refusal(self) -> str:
+        """Why no model was chosen: several are served and none is known loaded.
+
+        When the status route needed a key, a line says so before the hint.
+        """
+        names = "".join(
+            f"\n  {name}{'  (loaded)' if name in self.loaded.ids else ''}"
+            for name in self.models
+        )
+        note = f"\n{NO_STATUS_KEY_NOTE}" if self.loaded.needs_key else ""
+        return (
+            f"{self.url} serves several models and it is not known which one is "
+            f"loaded:{names}{note}\nPass --chat-model <id>."
+        )
+
+    def warning(self, hint: str = "") -> str:
+        """The list could not be used, so the model ``default`` is asked for."""
+        return (
+            f"Could not list the models at {self.url} ({self.reason}); "
+            f"asking for the model 'default'{hint}."
+        )
+
+
+async def choose_model(
+    url: str, chat_model: str | None, *, list_anyway: bool = False
+) -> ModelChoice:
+    """The model for *url*: *chat_model*, else the server's list decides.
+
+    The list is asked for only without *chat_model* (or with *list_anyway*).
+    The model is then the only chat model or the one the server says is loaded
+    (see :func:`pick_model`); the status lookup is made only between several.
+    Loading a model can take minutes and tens of GB, so none is guessed.
+    """
+    models: list[str] = []
+    reason = ""
+    if not chat_model or list_anyway:
+        try:
+            models = await list_models(OPENAI_COMPATIBLE, url)
+        except DiscoveryError as exc:
+            reason = str(exc)
+        else:
+            url, reason = normalize_url(url), "" if models else "it lists no models"
+    loaded = LoadedModels()
+    if not chat_model and sum(map(is_chat_model, models)) > 1:
+        loaded = await loaded_models(url)
+    model = chat_model or pick_model(models, loaded, unique=True)
+    return ModelChoice(url, model, tuple(models), loaded, reason)
 
 
 # Families that serve embeddings but whose ids do not say "embed".

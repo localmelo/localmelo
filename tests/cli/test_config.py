@@ -1430,3 +1430,115 @@ class TestCliStreamConfig:
         assert loaded.cli_errors()
         assert not any(error.startswith("[cli]") for error in loaded.validate())
         loaded.validate_or_raise()  # a bad [cli] is not a configuration error
+
+
+# ── oMLX as another spelling of vllm ──
+
+_OMLX_FILE = """\
+chat_backend = "omlx"
+embedding_backend = "omlx"
+
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B-4bit"
+embedding_url = "http://127.0.0.1:8000/v1"
+embedding_model = "Qwen3-Embedding-0.6B"
+"""
+
+
+class TestOmlxSpelling:
+    """``omlx`` names the ``vllm`` backend: one adapter, one ``[vllm]`` table."""
+
+    def test_it_loads_as_the_vllm_backend(self, config_path: Path) -> None:
+        config_path.write_text(_OMLX_FILE, encoding="utf-8")
+        cfg = load()
+        assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "vllm")
+        assert (cfg.chat_alias, cfg.embedding_alias) == ("omlx", "omlx")
+        assert cfg.vllm.chat_model == "Qwen3-8B-4bit"
+        assert cfg.validate() == []
+        assert cfg.has_embedding
+
+    def test_it_is_the_same_config_as_the_vllm_spelling(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(_OMLX_FILE, encoding="utf-8")
+        as_omlx = load()
+        config_path.write_text(_OMLX_FILE.replace('"omlx"', '"vllm"'), encoding="utf-8")
+        as_vllm = load()
+        assert as_omlx == as_vllm and as_vllm.chat_alias == ""
+
+    def test_it_is_saved_as_written(self, config_path: Path) -> None:
+        config_path.write_text(_OMLX_FILE, encoding="utf-8")
+        cfg = load()
+        cfg.vllm.chat_model = "Qwen3-32B-4bit"  # what /model does
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert text.startswith('chat_backend = "omlx"\nembedding_backend = "omlx"\n')
+        again = load()
+        assert (again.chat_alias, again.embedding_alias) == ("omlx", "omlx")
+        assert again.vllm.chat_model == "Qwen3-32B-4bit"
+
+    def test_each_backend_keeps_its_own_spelling(self, config_path: Path) -> None:
+        config_path.write_text(
+            _OMLX_FILE.replace('chat_backend = "omlx"', 'chat_backend = "vllm"'),
+            encoding="utf-8",
+        )
+        cfg = load()
+        assert (cfg.chat_alias, cfg.embedding_alias) == ("", "omlx")
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert text.startswith('chat_backend = "vllm"\nembedding_backend = "omlx"\n')
+
+    def test_another_backend_is_saved_under_its_own_key(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(_OMLX_FILE, encoding="utf-8")
+        cfg = load()
+        cfg.chat_backend = cfg.embedding_backend = "ollama"
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert text.startswith(
+            'chat_backend = "ollama"\nembedding_backend = "ollama"\n'
+        )
+
+    def test_the_vllm_spelling_is_still_saved_as_vllm(self, config_path: Path) -> None:
+        config_path.write_text(_OMLX_FILE.replace('"omlx"', '"vllm"'), encoding="utf-8")
+        save(load())
+        text = config_path.read_text(encoding="utf-8")
+        assert text.startswith('chat_backend = "vllm"\nembedding_backend = "vllm"\n')
+
+    @pytest.mark.parametrize("spelling", ["OMLX", "omlx ", "omlx2", "oMLX"])
+    def test_another_spelling_is_not_recognised(
+        self, config_path: Path, spelling: str
+    ) -> None:
+        config_path.write_text(
+            _OMLX_FILE.replace('chat_backend = "omlx"', f'chat_backend = "{spelling}"'),
+            encoding="utf-8",
+        )
+        errors = load().validate()
+        assert len(errors) == 1 and "not recognised" in errors[0]
+        assert errors[0].startswith(f"chat_backend {spelling!r}")
+
+    def test_a_misspelt_embedding_backend_is_not_recognised(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            _OMLX_FILE.replace(
+                'embedding_backend = "omlx"', 'embedding_backend = "omlxx"'
+            ),
+            encoding="utf-8",
+        )
+        errors = load().validate()
+        assert len(errors) == 1 and "not recognised" in errors[0]
+        assert errors[0].startswith("embedding_backend 'omlxx'")
+
+    def test_the_vllm_table_is_still_checked(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "omlx"\nembedding_backend = "none"\n\n[vllm]\n',
+            encoding="utf-8",
+        )
+        assert load().validate() == [
+            "[vllm] chat_url is empty. "
+            "Set it to your oMLX URL (e.g. http://localhost:8000).",
+            "[vllm] chat_model is empty. Specify the oMLX model name.",
+        ]

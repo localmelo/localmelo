@@ -31,6 +31,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo --serve` writes its startup lines, the port that `--port 0` picked
+  included, as soon as they are printed when stdout is a pipe or a file. They
+  used to wait in the buffer until the server exited, so a script or a log
+  reader could not find the port while it ran ([#236]).
+
 - Setup never picks a model silently when several are served and none is known
   to be loaded. On a server whose status route needs a key (it answers 401) the
   first run used to default to the first listed model, which could be a large
@@ -40,6 +45,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   alone asks again (an empty answer with no terminal is an error).
   `melo --base-url URL` without `--chat-model` picks the one loaded model, or
   exits 2 with the list and `Pass --chat-model <id>`. ([#231])
+- A direct run with `--base-url` and no `--chat-model` (`melo --base-url URL -- "task"`,
+  `--brief` and `melo ""`) no longer asks a server for the model `default`, which a
+  server that loads models on demand can read as any model, a large one that is not
+  in memory included. It lists the server's models first and chooses as the interactive
+  UI does: the only chat model, or the one the server says is loaded. With several and
+  none known to be loaded it exits 2 with the list and `Pass --chat-model <id>` (and, when
+  the status route answered 401, a line saying the server needs a key for that); with
+  `--brief` that is a `startup_error` result whose `exit_code` is 2. A server that cannot
+  be listed still gets `default`, with one warning line on stderr in text output. With
+  `--chat-model` nothing changes: no list request, the same requests. ([#236])
 - The welcome screen's "Connect a model" button shows only when no model is configured or the configured server cannot be reached. With a reachable model, the welcome screen shows just the suggestions ([#230]).
 
 - `/memory` and `/status` in the terminal, and the console's details drawer, show the session's own working-window cap (`window_messages`) instead of always 20 ([#230]).
@@ -140,6 +155,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#237]).
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
 - Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
@@ -957,6 +973,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   level and send buttons lose their native `title` tooltips and keep their
   `aria-label`. ([#NN])
 
+- An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
+  settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
+  `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`
+  server `oMLX` when the config file says so or a model listing of the server did (oMLX names
+  itself as the owner of every model it lists, so no request is added), and `OpenAI-compatible
+  server` otherwise (they said `vLLM`); `--base-url` sessions use the same two names (the second
+  was `OpenAI-compatible`), and so do the backend's error messages. `chat_backend = "omlx"` and
+  `embedding_backend = "omlx"` are accepted as another spelling of `vllm`: they load as the same
+  backend and are saved as written. First-run setup (and `--reconfigure` and `/backend`) saves
+  `omlx` for a server whose model listing names oMLX, and its embedding model the same way, so
+  every banner says oMLX from the start; an older version rejects that key in a config-based run
+  (a `--base-url` run is unaffected). On macOS the no-server hint names `omlx serve` before
+  `ollama serve`. A model that oMLX serves under an alias is marked `(loaded)` and can be the
+  default under the alias, because its status reply names the alias (`model_alias`). The requests
+  of `melo --base-url … --chat-model …` runs are unchanged ([#237]).
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that
@@ -1473,6 +1505,8 @@ earlier milestones.
 [#230]: https://github.com/localmelo/localmelo/pull/230
 [#231]: https://github.com/localmelo/localmelo/pull/231
 [#232]: https://github.com/localmelo/localmelo/pull/232
+[#236]: https://github.com/localmelo/localmelo/pull/236
+[#237]: https://github.com/localmelo/localmelo/pull/237
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

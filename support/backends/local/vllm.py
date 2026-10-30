@@ -1,9 +1,10 @@
-"""vLLM backend adapter -- external OpenAI-compatible endpoint connector."""
+"""OpenAI-compatible backend adapter (key ``vllm``): oMLX, vLLM or any such server."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from localmelo.support.backends import discovery
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import (
     build_openai_chat,
@@ -20,7 +21,11 @@ if TYPE_CHECKING:
 
 
 class VllmBackend(BaseBackend):
-    """Backend adapter for vLLM (external OpenAI-compatible endpoint)."""
+    """Backend adapter for an external OpenAI-compatible server.
+
+    The key ``vllm`` stands for oMLX, vLLM and every other server that speaks
+    the OpenAI API; ``chat_backend = "omlx"`` is the same backend, spelled so.
+    """
 
     @property
     def key(self) -> str:
@@ -28,29 +33,40 @@ class VllmBackend(BaseBackend):
 
     @property
     def display_name(self) -> str:
-        return "vLLM"
+        return discovery.OPENAI_COMPATIBLE_NAME
+
+    def label(self, cfg: Config, *, embedding: bool = False) -> str:
+        """``oMLX`` when the config says so or a listing of the server did."""
+        if embedding:
+            url = cfg.vllm.embedding_url or cfg.vllm.chat_url
+            declared = cfg.embedding_alias
+        else:
+            url, declared = cfg.vllm.chat_url, cfg.chat_alias
+        return discovery.server_name(url, declared=declared == "omlx")
 
     def validate(self, cfg: Config) -> list[str]:
         errors: list[str] = []
+        name = self.label(cfg)
         if not cfg.vllm.chat_url:
             errors.append(
                 "[vllm] chat_url is empty. "
-                "Set it to your vLLM server URL (e.g. http://localhost:8000)."
+                f"Set it to your {name} URL (e.g. http://localhost:8000)."
             )
         if not cfg.vllm.chat_model:
-            errors.append("[vllm] chat_model is empty. " "Specify the vLLM model name.")
+            errors.append(f"[vllm] chat_model is empty. Specify the {name} model name.")
         return errors
 
     def validate_embedding(self, cfg: Config) -> list[str]:
         errors: list[str] = []
+        name = self.label(cfg, embedding=True)
         if not cfg.vllm.embedding_url:
             errors.append(
                 "[vllm] embedding_url is empty. "
-                "Set it to your vLLM server URL for embedding."
+                f"Set it to your {name} URL for embedding."
             )
         if not cfg.vllm.embedding_model:
             errors.append(
-                "[vllm] embedding_model is empty. " "Set a vLLM embedding model name."
+                f"[vllm] embedding_model is empty. Set an {name} embedding model name."
             )
         return errors
 
