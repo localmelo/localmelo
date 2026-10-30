@@ -257,6 +257,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal's status bar says what the session uses and what runs beside
+  it, not the model and folder again (the welcome and `/status` keep those).
+  On a local server it shows the tokens sent and received, the context with a
+  small meter, the prompt cache's share of the last request (the session's
+  average after it) and the idle time since the last request: `↑ 3.0k ↓ 15 ·
+  ctx 2.6k/32k ▮▯▯▯▯ · cache 61% (avg 72%) · idle 2m`. On a cloud API it shows
+  the session's cost from prices you configure in `[pricing.<model>]` (no
+  prices are bundled; tokens without one) and the tightest rate limit the
+  last response's headers reported, with its reset: `$0.13 · ctx 100k · limit
+  42% ▮▮▯▯▯ ↻3m`. When the gateway has tasks, a zone counts them
+  (`2 running · 1 queued · P1 · ctrl+t tasks`), and Ctrl+T lists them: Enter on
+  one offers pause or resume, a higher or lower priority, and stop (asked
+  first), each sent as `melo task` sends it. The figures are coloured by kind
+  (a good cache teal, a filling context amber then red, held work amber), a
+  narrow terminal drops the title, then details, before any figure, and the
+  bar redraws once a second only while it shows a clock. A list open above the
+  bar now ends with a blank row ([#293]).
+
 - Melo moves. It blinks, wags its tail and sleeps with a "z". The calm portrait of the app's
   first window, the console's calm portrait and its calm face beside older replies blink twice
   every 11 seconds (an eyes-closed patch fades in over the eyes for a tenth of a second); the
@@ -2279,6 +2297,7 @@ earlier milestones.
 [#290]: https://github.com/localmelo/localmelo/pull/290
 [#291]: https://github.com/localmelo/localmelo/pull/291
 [#292]: https://github.com/localmelo/localmelo/pull/292
+[#293]: https://github.com/localmelo/localmelo/pull/293
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

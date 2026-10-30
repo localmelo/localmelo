@@ -39,8 +39,9 @@ def _menu(term: Melo) -> list[str]:
     rules = [i for i, row in enumerate(rows) if row.startswith("──────")]
     if len(rules) < 2:
         return []
-    below = rows[rules[-1] + 1 :]
-    return [row.split()[0] for row in below if row.strip() and "│" not in row]
+    below = [row for row in rows[rules[-1] + 1 :] if row.strip()]
+    # The last row is the status bar, which has no rule in it before a request.
+    return [row.split()[0] for row in below[:-1]]
 
 
 def _wait(term: Melo, check: Callable[[], bool]) -> None:

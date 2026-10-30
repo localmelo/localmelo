@@ -363,6 +363,13 @@ class Palette:
                 "status_path": self.look("path").pt(),
                 "status_sep": self.look("rule").pt(),
                 "status_run": "",
+                # The bar's usage and work (#282): a figure in the body's ink,
+                # a state by kind (cache good, filling, held work, running work).
+                "status_figure": "",
+                "status_ok": self.look("ok_text").pt(),
+                "status_warn": self.look("warn_text").pt(),
+                "status_error": self.look("error").pt(),
+                "status_live": accent.pt(),
                 # A key's words beside it: muted, but never dim (dim reads at
                 # 2.4:1 on a light terminal), so plain at 16 colours.
                 "faint": muted.pt() if self.hues else "",

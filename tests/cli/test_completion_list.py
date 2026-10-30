@@ -15,11 +15,15 @@ DOWN = "\x1b[B"
 
 
 def _menu(driver: Driver) -> list[str]:
-    """The list's rows: between the input's second rule and the status bar."""
+    """The list's rows: between the input's second rule and the status bar.
+
+    A blank row sets the bar apart from the list: it is not one of the rows.
+    """
     screen = driver.screen()
     rules = [i for i, line in enumerate(screen) if line.startswith("──────")]
     status = max(i for i, line in enumerate(screen) if line.strip())
-    return screen[rules[1] + 1 : status]
+    assert not screen[status - 1].strip(), screen  # the bar never reads as a row
+    return screen[rules[1] + 1 : status - 1]
 
 
 async def _opened(app: Driver, typed: str) -> list[str]:

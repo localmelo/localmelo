@@ -20,14 +20,19 @@ import os
 import select
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, Protocol, TextIO, TypeVar
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer, CompletionState
 from prompt_toolkit.completion import CompleteEvent, Completer, ThreadedCompleter
 from prompt_toolkit.document import Document
-from prompt_toolkit.filters import Condition, has_focus, is_searching
+from prompt_toolkit.filters import (
+    Condition,
+    has_completions,
+    has_focus,
+    is_searching,
+)
 from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
 from prompt_toolkit.formatted_text.utils import fragment_list_to_text
 from prompt_toolkit.history import FileHistory, History
@@ -87,7 +92,6 @@ from localmelo.support.cli.steps import STEPS_BINDING, StepsPicker
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
-    cut_middle,
     drawn_cells,
     input_rows,
     shown,
@@ -95,18 +99,20 @@ from localmelo.support.cli.text import (
 )
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols, pt_color_depth
 from localmelo.support.cli.usershell import parse as parse_shell
+from localmelo.support.cli.work import WORK_BINDING
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionInfo, SessionStore
+from localmelo.support.usage_snapshot import BarPart
 
 # Seconds between redraws of the live area while the session is busy.
 TICK_S: Final = 0.12
+# Seconds between redraws of the bar while it shows a clock and nothing runs.
+CLOCK_S: Final = 1.0
 # A second Ctrl+C within this many seconds quits.
 DOUBLE_PRESS_S: Final = 2.0
 # How long a hint stays.
 HINT_S: Final = 2.0
 COMPLETION_ROWS: Final = 8
-# The fewest cells a cut workspace keeps in the status bar.
-MIN_PART_CELLS: Final = 4
 PLACEHOLDER: Final = "Ask melo · / for commands"
 # Continuation rows of the input box start this many cells in.
 PREFIX_CELLS: Final = 2
@@ -121,17 +127,16 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class StatusBar:
-    """The status bar's parts: its zones' parts in order, and the approval mode."""
+    """The status bar's parts: its zones in order, and the approval mode."""
 
-    model: str
-    workspace: str
-    context: str
     title: str
     mode: str
     mode_style: str = "class:muted"
-    # The usage segments (cache, ctx, tasks): the resources zone with the
-    # context; empty with [cli] status_line = "off".
-    segments: tuple[str, ...] = ()
+    # The usage zone (#282): cost or tokens, the context, the cache or the
+    # limits; empty with [cli] status_line = "off" but for the context.
+    usage: tuple[BarPart, ...] = ()
+    # The work beside the chat: tasks by state, the top priority, the key.
+    work: tuple[BarPart, ...] = ()
     # While a turn runs: its brief steps and the key that lists them
     # (``2/~8 · ctrl+o steps``); the run zone shows the title otherwise.
     run: str = ""
@@ -169,6 +174,16 @@ class Controller(Protocol):
     def status_bar(self) -> StatusBar: ...
 
 
+# How each role of a bar part is drawn.
+_ROLE_STYLES: Final = {
+    "figure": "class:status_figure",
+    "ok": "class:status_ok",
+    "warn": "class:status_warn",
+    "error": "class:status_error",
+    "live": "class:status_live",
+}
+
+
 def status_fragments(
     bar: StatusBar,
     width: int,
@@ -176,82 +191,74 @@ def status_fragments(
     dot: str = " · ",
     sep: str = " │ ",
 ) -> StyleAndTextTuples:
-    """The status bar at *width*, in zones apart: who and where, the run, resources.
+    """The status bar at *width*, in zones apart: usage, the work, the run.
 
-    The zones keep their place: the model and the folder; the run (while a
-    turn runs its brief steps and the key that lists them, else the chat's
-    title); the prompt cache and the context. The mode always shows, at the
-    right edge. When the width is short, the title is cut first, then the
-    resources go right to left, then the folder is cut (from the middle),
-    then it goes, then the model is cut; a running turn's figure stays. Every
-    cut counts cells, and no part is left as a bare ellipsis.
+    The zones keep their place: what the session uses, the work beside the
+    chat, and the run (while a turn runs its brief steps and the key that
+    lists them, else the chat's title). The mode always shows, at the right
+    edge. When the width is short, the title is cut and then goes, then the
+    work's details, then the usage's (right to left, a key last), then a
+    running turn's key, then the figures right to left; a running turn's
+    figure stays. Every cut counts cells, and no part is a bare ellipsis.
     """
     # Control characters (a pasted ^Z) count the cells they are drawn in.
     mode = cut_cells(shown(bar.mode), max(1, width - 3), ellipsis)
     # No mode (ask, which everyone expects): the room of its cells and gap is the rest's.
     room = width - 2 - (cells(mode) + 1 if mode else 0)
-    model, folder = shown(bar.model), shown(bar.workspace)
+    usage = [replace(part, text=shown(part.text)) for part in bar.usage if part.text]
+    work = [replace(part, text=shown(part.text)) for part in bar.work if part.text]
     running = bool(bar.run)
     run = shown(bar.run or bar.title)
-    resources = [shown(part) for part in (*bar.segments, bar.context) if part]
 
-    def zones(workspace: str) -> list[str]:
-        who = dot.join(part for part in (model, workspace) if part)
-        return [zone for zone in (who, run, dot.join(resources)) if zone]
+    def joined(parts: list[BarPart]) -> str:
+        return "".join(
+            (" " if part.glued else dot) * bool(number) + part.text
+            for number, part in enumerate(parts)
+        )
 
-    def used(workspace: str) -> int:
-        return cells(sep.join(zones(workspace)))
+    def used() -> int:
+        return cells(sep.join(z for z in (joined(usage), joined(work), run) if z))
 
-    workspace = folder
-    if used(workspace) > room and run and not running:
-        run = cut_cells(run, max(0, room - used(workspace) + cells(run)), ellipsis)
+    if used() > room and run and not running:
+        run = cut_cells(run, max(0, room - used() + cells(run)), ellipsis)
+        if run.endswith(" " + ellipsis):  # never "fail …"
+            run = run[: -len(ellipsis)].rstrip() + ellipsis
         if cells(run) < 6:
             run = ""
-    while resources and used(workspace) > room:
-        resources.pop()
-    if used(workspace) > room:
-        keep = room - used(folder) + cells(folder)
-        workspace = cut_middle(folder, max(MIN_PART_CELLS, keep), ellipsis)
-    if used(workspace) > room:
-        workspace = ""
-    # A running turn's key loses its word, then the model is cut, then the
-    # key goes: the figure stays.
-    shorter = [run.removesuffix(" steps"), run.partition(dot)[0]] if running else []
-    if used(workspace) > room and shorter:
-        run = shorter.pop(0)
-    if used(workspace) > room and model:
-        model = cut_cells(model, max(0, room - used("") + cells(model)), ellipsis)
-        if cells(model) <= cells(ellipsis) + 1 and ellipsis in model:
-            model = ""  # no room for even a cut model
-    if used(workspace) > room and shorter:
-        run, model = shorter.pop(0), shown(bar.model)
-        model = cut_cells(model, max(0, room - used("") + cells(model)), ellipsis)
-        if cells(model) <= cells(ellipsis) + 1 and ellipsis in model:
-            model = ""
-    if used(workspace) > room:
+    for parts in (work, usage):
+        while used() > room and any(part.detail for part in parts):
+            details = [i for i, part in enumerate(parts) if part.detail]
+            keys = [i for i in details if parts[i].role == "key"]
+            del parts[([i for i in details if i not in keys] or keys)[-1]]
+    # A running turn's key loses its word, then goes: the figure stays.
+    for shorter in [run.removesuffix(" steps"), run.partition(dot)[0]] * running:
+        if used() > room:
+            run = shorter
+    for parts in (work, usage):
+        while used() > room and parts:
+            parts.pop()
+    if used() > room:
         run = cut_cells(run, room, ellipsis) if running else ""
-        model = ""
         if cells(run) <= cells(ellipsis) + 1 and ellipsis in run:
             run = ""
     left: StyleAndTextTuples = []
-    for zone, parts in (
-        ("who", [("class:status_model", model), ("class:status_path", workspace)]),
-        ("run", [("class:status_run" if running else "class:status", run)]),
-        ("resources", [("class:status", part) for part in resources]),
-    ):
-        parts = [part for part in parts if part[1]]
-        if not parts:
+    for zone in (usage, work, [BarPart(run, "run")] if run else []):
+        if not zone:
             continue
         if left:
             left.append(("class:status_sep", sep))
-        for number, (style, text) in enumerate(parts):
+        for number, part in enumerate(zone):
             if number:
-                left.append(("class:status", dot))
-            if zone == "run" and running and dot in text:
-                figure, _, rest = text.partition(dot)
-                left += [(style, figure), *key_line(dot + rest, dot)]
+                left.append(("class:status", " " if part.glued else dot))
+            if part.role == "key":
+                left += key_line(part.text, dot)
+            elif part.role == "run" and running and dot in part.text:
+                figure, _, rest = part.text.partition(dot)
+                left += [("class:status_run", figure), *key_line(dot + rest, dot)]
+            elif part.role == "run":
+                left.append(("class:status_run" if running else "class:status", run))
             else:
-                left.append((style, text))
+                left.append((_ROLE_STYLES.get(part.role, "class:status"), part.text))
     drawn = sum(cells(text) for _, text, *_ in left)
     gap = max(1 if mode else 0, width - 2 - drawn - cells(mode))
     return [
@@ -553,6 +560,13 @@ class InteractiveApp:
                     Window(FormattedTextControl(self._hint_fragments), height=1),
                     filter=Condition(self._hint_visible),
                 ),
+                # A list drawn right above the bar (the completion menu, a
+                # picker) ends with a blank row, so the bar never reads as
+                # one of its rows.
+                ConditionalContainer(
+                    Window(height=1),
+                    filter=has_completions | Condition(lambda: self.picker is not None),
+                ),
                 Window(FormattedTextControl(self._status_fragments), height=1),
             ]
         )
@@ -643,6 +657,12 @@ class InteractiveApp:
 
         self.app.create_background_task(show())
 
+    def open_work(self) -> None:
+        """ctrl+t: the tasks beside the chat as a list; the session acts on them."""
+        opener = getattr(self.controller, "open_work", None)
+        if self.picker is None and opener is not None:
+            self.app.create_background_task(opener())
+
     async def choose_session(
         self,
         store: SessionStore,
@@ -707,6 +727,21 @@ class InteractiveApp:
         )
         return escape if row is None else row
 
+    async def choose_from(
+        self, title: str, options: Sequence[str], *, default: int = 0
+    ) -> int | None:
+        """Ask *title* as a list of *options*: the chosen index, None on Esc."""
+        return await self.choose(
+            ChoicePicker(
+                title,
+                options,
+                default=default,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+
     async def ask(self, prompt: str, default: str = "") -> str | None:
         """Ask *prompt* in the input box; the answer, *default* on Enter, None on Esc."""
         answer: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
@@ -722,12 +757,21 @@ class InteractiveApp:
             self.app.invalidate()
 
     async def _ticker(self) -> None:
+        last_clock = -CLOCK_S
         while True:
             await asyncio.sleep(TICK_S)
             busy = self.renderer.live is not None or self.controller.state != "idle"
             if busy:
                 self.controller.tick()
-            if busy or self._hint_visible():
+            # A clock in the bar (the idle time, a limit's reset) moves at
+            # most once a second; nothing else redraws an idle bar.
+            clock = getattr(self.controller, "clock_visible", None)
+            timed = not busy and clock is not None and clock()
+            if timed and self._clock() - last_clock < CLOCK_S:
+                timed = False
+            if timed:
+                last_clock = self._clock()
+            if busy or self._hint_visible() or timed:
                 self.app.invalidate()
 
     def _before_render(self, app: Application[None]) -> None:
@@ -1234,6 +1278,13 @@ class InteractiveApp:
         )
         def _(event: KeyPressEvent) -> None:
             self.open_steps()
+
+        # Over prompt_toolkit's emacs "transpose characters".
+        @kb.add(
+            WORK_BINDING, filter=in_input & ~Condition(lambda: bool(self._question))
+        )
+        def _(event: KeyPressEvent) -> None:
+            self.open_work()
 
         # Not bound in this version (no suspend): Ctrl+Z inserts nothing.
         @kb.add("c-z", filter=in_input)
