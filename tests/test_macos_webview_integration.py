@@ -265,9 +265,8 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
-    shutil.copy(
-        ROOT / "docs/assets/icon_small.png", bundle / "Resources/icon_small.png"
-    )
+    for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
+        shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.

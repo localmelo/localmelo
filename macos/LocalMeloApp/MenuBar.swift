@@ -16,7 +16,7 @@ final class MenuBar {
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
     init(menu: NSMenu, waiting: Selector) {
-        let logo = Bundle.main.url(forResource: "icon_small", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+        let logo = MenuBar.logo()
         waitingLine = NSMenuItem(title: "Waiting for your approval", action: waiting, keyEquivalent: "")
         plain = MenuBar.image(logo, badge: false)
         badged = MenuBar.image(logo, badge: true)
@@ -58,18 +58,27 @@ final class MenuBar {
         wasWaiting = waiting
     }
 
-    /// The logo, 18 points square with rounded corners as the web console shows it, in colour. The badged
-    /// image is wider and holds a red dot beside the logo's top-right corner, so the logo itself is never
-    /// covered. Neither image is a template, so the system leaves their colours alone: the dot and its
-    /// ring come in a light and a dark variant, drawn for the appearance of the bar they are on.
+    /// The logo, 18 points square: the two files the build copies, 18 and 36 px with their corners already
+    /// rounded, so the system never scales it. Nil when neither is in the bundle.
+    private static func logo() -> NSImage? {
+        let logo = NSImage(size: NSSize(width: 18, height: 18))
+        for name in ["MenuBarLogo", "MenuBarLogo@2x"] {
+            guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+                  let data = try? Data(contentsOf: url), let rep = NSBitmapImageRep(data: data) else { continue }
+            rep.size = logo.size
+            logo.addRepresentation(rep)
+        }
+        return logo.representations.isEmpty ? nil : logo
+    }
+
+    /// The logo in colour. The badged image is wider and holds a red dot beside the logo's top-right corner,
+    /// so the logo itself is never covered. Neither image is a template, so the system leaves their colours
+    /// alone: the dot and its ring come in a light and a dark variant, drawn for the appearance of the bar
+    /// they are on.
     private static func image(_ logo: NSImage?, badge: Bool) -> NSImage? {
         guard let logo = logo else { return nil }
         let image = NSImage(size: NSSize(width: badge ? 23 : 18, height: 18), flipped: false) { _ in
-            NSGraphicsContext.current?.imageInterpolation = .high
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 18, height: 18), xRadius: 4, yRadius: 4).addClip()
             logo.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
-            NSGraphicsContext.restoreGraphicsState()
             if badge {
                 Palette.badgeRing.setFill()
                 NSBezierPath(ovalIn: NSRect(x: 15, y: 10, width: 8, height: 8)).fill()
