@@ -89,6 +89,13 @@ _HELP = {
     ),
 }
 
+# melo -h: the commands a new user needs, each with what it does in a few words.
+EVERYDAY = (
+    ("setup", "choose the model server again"),
+    ("serve", "run the web console and API"),
+    ("console", "open the web console"),
+)
+
 # melo -h all: (what to type, what it does).
 SUMMARIES = (
     ("setup", "choose the model server again"),

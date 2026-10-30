@@ -330,7 +330,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 ## GET /api/sessions/{id}/status
 
-终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。worker 运行或终端对话从 CLI 的文件读取。
+终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。这些段是终端开发者模式的紧凑写法；终端的默认模式用文字表述同样的数字。worker 运行或终端对话从 CLI 的文件读取。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
@@ -348,7 +348,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 }
 ```
 
-- `segments` 是终端状态栏从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
+- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
 - 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
 - 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，以及其中最高的优先级（`top_level`，没有任务时为 `null`）。
 - 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。

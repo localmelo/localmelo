@@ -48,7 +48,7 @@ class Command:
 # the menu, whose name column is as wide as the longest name, cuts none at 80 columns.
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("model", (), "[name]", "Pick a model, or /model NAME (saved)", False),
-    Command("new", ("clear",), "", "Start a new session", False),
+    Command("new", ("clear",), "", "Start a new chat", False),
     Command("status", (), "[all]", "Check the model; /status all shows more", True),
     Command("help", (), "[command]", "Show commands; /help all lists every one", True),
     Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
@@ -59,9 +59,9 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("attach", (), "PATH", "Stage a text file: /attach PATH", False),
     Command("attachments", (), "", "List staged text files", False),
     Command("detach", (), "N|all", "Remove a staged file: /detach N or all", False),
-    Command("sessions", (), "[filter]", "Pick a session to resume", False),
-    Command("resume", (), "[id|title]", "Resume a session", False),
-    Command("title", (), "[text]", "Show or set the session title", True),
+    Command("sessions", (), "[filter]", "Pick a chat to resume", False),
+    Command("resume", (), "[id|title]", "Resume a chat", False),
+    Command("title", (), "[text]", "Show or set the chat title", True),
     Command("usage", (), "", "Show recorded tokens, tools and time", True),
     Command("memory", (), "", "Show what the model remembers", True),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
