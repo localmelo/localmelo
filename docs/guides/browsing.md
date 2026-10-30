@@ -69,7 +69,7 @@ Safari opens them apart from your own windows, with an orange address field. The
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. |
 | `browser_wait` | Wait (30 seconds at most) for the page to load, or for some text to appear or go. |
-| `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images, and the model gets only a note that it was taken. |
+| `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images. A model that reads images also receives it (see `tool_images` in the [configuration reference](../reference/configuration.md)). |
 
 A page reaches the model as one bounded block:
 

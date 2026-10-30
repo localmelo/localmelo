@@ -111,7 +111,7 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     _def(
         "browser_screenshot",
-        "Take a picture of the current page. It is kept with the chat for the person; you get a note, not the picture.",
+        "Take a picture of the current page. It is kept with the chat; a model that reads images receives it.",
         tab=_TAB,
     ),
 )
@@ -350,6 +350,6 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("No page is open in that tab. Use browser_open first.")
         shot = await self._driver.screenshot(tab_id)
         return ToolOutput(
-            text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat for the person. You cannot see it.",
+            text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
         )

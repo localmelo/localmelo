@@ -282,7 +282,7 @@ async def test_screenshot_returns_an_image_and_only_a_note_as_text() -> None:
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_screenshot")
     assert len(out.images) == 1 and out.images[0].mime_type == "image/png"
-    assert "kept with this chat for the person" in out.text
+    assert "kept with this chat" in out.text
 
 
 async def test_without_a_policy_nobody_is_asked() -> None:

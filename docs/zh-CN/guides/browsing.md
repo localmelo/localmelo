@@ -81,7 +81,7 @@ Safari 把它们与你自己的窗口分开打开，地址栏是橙色的。它�
 | `browser_back` | 在该标签页中后退一页。 |
 | `browser_tabs` | 列出 melo 的标签页、切换或关闭其中一个。 |
 | `browser_wait` | 等待（最多 30 秒）页面加载完成，或某段文字出现或消失。 |
-| `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片，模型只得到一条“已拍摄”的说明。 |
+| `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片。能读图的模型也会收到它（见[配置参考](../reference/configuration.md)中的 `tool_images`）。 |
 
 页面以一个有界的块交给模型：
 
