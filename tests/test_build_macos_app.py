@@ -256,8 +256,34 @@ def test_verified_archive_before_extraction(
     assert (build_app.fetch_python(good) / "bin/python3").read_bytes() == b"fake python"
 
 
+def use_developer_tools(tmp_path: Path, monkeypatch: MP, installed: str) -> str:
+    """Make the full Xcode, only the Command Line Tools, or neither look installed.
+
+    Returns the developer folder the build should choose.
+    """
+    monkeypatch.delenv("DEVELOPER_DIR", raising=False)
+    xcode = tmp_path / "Xcode.app/Contents/Developer"
+    clt = tmp_path / "CommandLineTools"
+    if installed == "xcode":
+        xcode.mkdir(parents=True)
+    if installed in ("xcode", "clt"):
+        (clt / "usr/bin").mkdir(parents=True)
+        (clt / "usr/bin/swiftc").touch()
+    monkeypatch.setattr(build_app, "XCODE", str(xcode))
+    monkeypatch.setattr(build_app, "xcode_select_path", lambda: str(clt))
+    return str(xcode if installed == "xcode" else clt)
+
+
+@pytest.mark.parametrize(
+    "installed, summary",
+    [("xcode", "Built with Xcode."), ("clt", "Built with the Command Line Tools.")],
+)
 def test_build_assembles_locked_runtime_and_swift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    installed: str,
+    summary: str,
 ) -> None:
     root = tmp_path / "source"
     (root / "macos/LocalMeloApp").mkdir(parents=True)
@@ -283,6 +309,7 @@ def test_build_assembles_locked_runtime_and_swift(
         build_app.os, "uname", lambda: type("Uname", (), {"machine": "arm64"})()
     )
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    developer = use_developer_tools(tmp_path, monkeypatch, installed)
     commands = []
     unused_at_install: list[bool] = []
 
@@ -304,10 +331,7 @@ def test_build_assembles_locked_runtime_and_swift(
             python = Path(args[args.index("--python") + 1]).parent.parent
             unused_at_install.append((python / STD / "idlelib").exists())
         elif args[0] == "/usr/bin/xcrun":
-            assert (
-                env
-                and env["DEVELOPER_DIR"] == "/Applications/Xcode.app/Contents/Developer"
-            )
+            assert env and env["DEVELOPER_DIR"] == developer
             Path(args[-1]).touch()
         elif args[0] in ("/usr/bin/sips", "/usr/bin/iconutil"):
             Path(args[-1]).touch()  # both end with the file they write
@@ -349,9 +373,50 @@ def test_build_assembles_locked_runtime_and_swift(
     # Alerts and the Dock show the icon the plist names, built before the bundle is signed.
     assert (output / "Contents/Resources" / plist["CFBundleIconFile"]).is_file()
     assert [c[0] for c in commands].index("/usr/bin/iconutil") < len(commands) - 2
+    assert summary in capsys.readouterr().out.splitlines()
     with pytest.raises(FileExistsError):
         build_app.build(output)
     shutil.rmtree(output)
+
+
+def test_the_callers_developer_dir_wins(tmp_path: Path, monkeypatch: MP) -> None:
+    use_developer_tools(tmp_path, monkeypatch, "xcode")  # Xcode is there too
+    beta = str(tmp_path / "Beta.app/Contents/Developer")
+    monkeypatch.setenv("DEVELOPER_DIR", beta)
+    assert build_app.swift_developer_dir() == beta
+    assert build_app.tools_name(beta) == "Beta"
+
+
+@pytest.mark.parametrize("mode", ["--output", "--install"])
+def test_no_swift_compiler_refuses_in_one_line_before_any_work(
+    tmp_path: Path, monkeypatch: MP, capsys: pytest.CaptureFixture[str], mode: str
+) -> None:
+    use_developer_tools(tmp_path, monkeypatch, "none")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(build_app.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        build_app.os, "uname", lambda: type("Uname", (), {"machine": "arm64"})()
+    )
+
+    def started(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the build started")
+
+    monkeypatch.setattr(build_app, "fetch_python", started)
+    monkeypatch.setattr(build_app, "run", started)
+    argv = ["build_macos_app.py", mode]
+    if mode == "--output":
+        argv.append(str(tmp_path / "out/LocalMelo.app"))
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as stopped:
+        build_app.main()
+    assert stopped.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""  # no "Building localmelo" line either
+    assert captured.err == (
+        "The app needs Apple's Swift compiler. Install it with: xcode-select --install\n"
+    )
+    assert not (tmp_path / "out").exists()
+    assert not (tmp_path / "home/Applications").exists()  # nothing was made
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="needs macOS sips and iconutil")
@@ -466,6 +531,7 @@ def home(tmp_path: Path, monkeypatch: MP) -> Path:
         (output / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
 
     monkeypatch.setattr(build_app, "build", fake_build)
+    monkeypatch.setattr(build_app, "swift_developer_dir", lambda: build_app.XCODE)
     return Path.home()
 
 
