@@ -1068,3 +1068,312 @@ caption {
     padding: 22px 16px;
   }
 }
+
+/* Pages people read: picture cards, the roadmap board, updates by day,
+   component cards and the status chips they share. */
+.show-grid,
+.comp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.comp-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.show-card,
+.comp-card,
+.board-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+}
+
+.show-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+a.show-card:hover,
+.comp-card:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.show-card img,
+.shot-thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top left;
+  background: var(--surface-2);
+}
+
+.show-card img {
+  border-bottom: 1px solid var(--line);
+}
+
+.show-card .show-text {
+  padding: 12px 16px 14px;
+}
+
+.show-card strong,
+.comp-card h3,
+.board-card strong {
+  display: block;
+  color: var(--ink);
+}
+
+.show-card .show-text span,
+.board-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.shot {
+  margin: 18px 0 0;
+}
+
+.shot img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.shot figcaption,
+.more-link {
+  margin-top: 8px;
+  color: var(--muted-2);
+  font-size: 0.88rem;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.board-col {
+  padding: 12px;
+  border-top: 3px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.board-col.now {
+  border-top-color: var(--accent);
+}
+
+.board-col.later {
+  border-top-style: dashed;
+}
+
+.content .board-col h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 2px 2px 10px;
+  font-size: 1rem;
+}
+
+.board-col h3 small {
+  color: var(--muted-2);
+  font-weight: 500;
+}
+
+.content .board-col ul,
+.content .day-points {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-card {
+  padding: 12px 14px;
+}
+
+.content .board-card {
+  margin: 0;
+}
+
+.board-card strong {
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.board-card span {
+  margin-top: 4px;
+  font-size: 0.88rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 1px 9px 1px 7px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.chip.building {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.chip.testing {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chip.testing::before {
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
+.chip.done {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.chip.done::before {
+  background: currentColor;
+}
+
+.day {
+  margin-top: 30px;
+}
+
+.content .day h3 {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+}
+
+.content .day-points {
+  gap: 0;
+}
+
+.content .day-points li {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.content .day-points li > p:only-child {
+  grid-column: 1 / -1;
+}
+
+.day-points p {
+  margin: 0;
+}
+
+.shot-thumb {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.anchors {
+  display: block;
+  height: 0;
+}
+
+.comp-card {
+  padding: 16px 18px;
+}
+
+.content .comp-card h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.content .comp-card p,
+.content .comp-card li {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.content .comp-card ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+
+.content .comp-card li + li {
+  margin-top: 2px;
+}
+
+.comp-card .more-link {
+  display: inline-block;
+  margin-top: 0;
+}
+
+.group.flow {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+  background: var(--teal-soft);
+}
+
+a.group {
+  z-index: 0;
+  color: inherit;
+}
+
+a.group:hover {
+  text-decoration: none;
+}
+
+.node.planned,
+.legend-box.planned {
+  border-style: dashed;
+}
+
+.legend-box.planned {
+  border-color: var(--line-2);
+  background: var(--surface);
+}
+
+@media (max-width: 920px) {
+  .comp-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .show-grid,
+  .comp-grid,
+  .board {
+    grid-template-columns: 1fr;
+  }
+
+  .content .day-points li {
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+}

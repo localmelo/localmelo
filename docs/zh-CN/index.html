@@ -46,7 +46,7 @@
     <article class="content">
       <header class="doc-hero home-hero" id="overview">
         <h1>localmelo</h1>
-        <p class="lead">一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。它可以在命令行中运行，也可以作为一个小型 HTTP 服务运行。</p>
+        <p class="lead">一个在你自己电脑上运行的个人智能体。它借助工具干活，跨对话记忆，连接你自己的模型服务器或云端 API。</p>
         <div class="doc-meta">
           <span class="tag experimental">早期预览版（pre-alpha）</span>
         </div>
@@ -59,12 +59,12 @@
 
       <figure class="home-shot">
         <img src="../assets/web-workspace.webp" alt="localmelo 的网页工作区：左侧是对话列表，右侧的对话中，智能体用带格式的列表和代码块回答了一个问题。" width="1920" height="1200">
-        <figcaption><code>melo serve</code> 在 <code>http://127.0.0.1:8401/</code> 打开的网页工作区。</figcaption>
+        <figcaption><code>melo serve</code> 在浏览器中打开的网页控制台。</figcaption>
       </figure>
 
       <section class="section" id="quickstart">
         <h2>快速开始</h2>
-        <p>你需要 macOS（在 macOS 上开发和测试）或 Linux（应该也能运行，但尚未测试），以及 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。不支持 Windows。用 uv 安装（也可以<a href="./quickstart.html#install-with-pip">用 pip 安装</a>）：</p>
+        <p>你需要 macOS（Linux 应该也能运行；不支持 Windows），以及 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。</p>
         <figure class="terminal">
           <figcaption class="terminal-title">安装</figcaption>
           <pre><code>git clone https://github.com/localmelo/localmelo.git
@@ -72,9 +72,6 @@ cd localmelo
 uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         </figure>
-        <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。</p>
-        <p>在搭载 Apple 芯片的 Mac 上，还可以用 <code>uv run python scripts/build_macos_app.py --install</code> 构建 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">macOS 应用</a>：它是网页控制台外面的一个原生窗口，从 Spotlight 打开。把窗口收起来时，一只小小的秋田犬 Melo 会趴在你的桌面上。这是开发版本，不是经过公证的下载。</p>
-        <p>启动一个模型服务器，然后运行一个任务。在搭载 Apple 芯片的 Mac 上，推荐使用本地服务器 <a href="https://github.com/jundot/omlx">oMLX</a>：用 <code>omlx serve --model-dir ~/models --port 8000</code> 提供一个模型文件夹（<a href="./quickstart.html#serve-a-model-with-omlx">快速开始</a>给出了完整步骤）。在其他系统上，使用 <a href="https://ollama.com">Ollama</a>，并用 <code>ollama pull qwen3:8b</code> 下载一个模型。答案会输出到 stdout。</p>
         <figure class="terminal">
           <figcaption class="terminal-title">用 oMLX 运行任务</figcaption>
           <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
@@ -83,7 +80,12 @@ source .venv/bin/activate</code></pre>
           <figcaption class="terminal-title">用 Ollama 运行任务</figcaption>
           <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
         </figure>
-        <p><code>-u</code> 和 <code>-m</code> 是 <code>--url</code> 和 <code>--model</code> 的字母写法；旧写法 <code>--base-url</code> 和 <code>--chat-model</code> 仍然可用（<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#old-spelling-to-new">旧写法对应的新写法</a>）。</p>
+        <ul>
+          <li>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。</li>
+          <li>在搭载 Apple 芯片的 Mac 上推荐 <a href="https://github.com/jundot/omlx">oMLX</a> 作为模型服务器；其他系统用 <a href="https://ollama.com">Ollama</a>。</li>
+          <li><code>-u</code> 和 <code>-m</code> 是 <code>--url</code> 和 <code>--model</code> 的简写；答案打印在 stdout 上。</li>
+          <li>在搭载 Apple 芯片的 Mac 上还可以构建 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">App</a>：<code>uv run python scripts/build_macos_app.py --install</code>。</li>
+        </ul>
         <div class="masthead-actions">
           <a class="button primary" href="./quickstart.html">阅读快速开始</a>
         </div>
@@ -91,110 +93,87 @@ source .venv/bin/activate</code></pre>
 
       <section class="section" id="features">
         <h2>能做什么</h2>
-        <p>每张卡片都会打开 GitHub 上对应的英文参考页面。</p>
-        <div class="link-grid">
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">
-            <strong>运行任务</strong>
-            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以运行 <code>melo</code> 在终端里对话：它以安静的记录显示工作：每个工具调用一行，答案完整显示，一轮改动的文件会在页脚下点出；批准写文件之前，还会显示这次写入将做出的改动；运行命令或写文件之前会先询问；还可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复该文件夹里已保存的对话；<code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 可以命名、撤销、查看和复制对话；整段对话还可以运行在推理和召回模式下（<code>--reasoning</code>、<code>--retriever</code> 和各个召回选项）。</span>
+        <div class="show-grid">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-interactive-ui">
+            <img src="../assets/img/terminal-chat.webp" alt="终端里的对话：每个工具调用安静地占一行，最后是彩色的答案。" width="1280" height="979" loading="lazy">
+            <span class="show-text"><strong>在终端里对话</strong><span>输入 <code>melo</code>。每个工具调用只占安静的一行，答案一眼就能看到。</span></span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">
-            <strong>工具和 MCP</strong>
-            <span>使用五个内置工具和本地 MCP 服务器提供的工具（网关和控制台会话有四个，没有 <code>shell_exec</code>；直接运行有三个）；在 Mac 上，开启浏览后，终端聊天和控制台还可以在 Safari 里阅读网页；每一步提供内置工具、模型已经调用过的工具和与任务最接近的匹配，并且只运行这些工具；子进程只拿到最小环境加上 <code>tool_env</code>，Python 调用在子进程中运行，时间限制可以终止它。</span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md">
+            <img src="../assets/img/panel.webp" alt="网页控制台：对话旁边的面板列出今天的活动和一个等待审批的任务。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>在对话旁边看到工作</strong><span>控制台显示今天的活动，并能实时查看每个任务。</span></span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">
-            <strong>模型服务器</strong>
-            <span>连接你自己运行的 oMLX（Apple 芯片的 Mac 上推荐）、Ollama、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md#memory-across-chats">
+            <img src="../assets/img/memory-tab.webp" alt="“记忆”标签页：melo 记下的关于你的笔记，每条都有来源对话以及编辑和删除按钮。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>看得见的记忆</strong><span>melo 跨对话记忆。你可以查看、编辑或删除每一条笔记。</span></span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
-            <strong>网关和网页工作区</strong>
-            <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每一轮为每个工具调用显示一张工作卡片、进度行、Stop，以及开发者模式下的优先级标签；页面只访问 <code>/api</code>。</span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">
+            <img src="../assets/img/terminal-approval.webp" alt="终端里的审批面板：写文件将做出的改动，以及一组可选的回答。" width="1280" height="946" loading="lazy">
+            <span class="show-text"><strong>重要操作由你批准</strong><span>melo 运行命令或改文件之前会先问你，并展示改动。</span></span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
-            <strong>Worker 历史</strong>
-            <span>用任务说明文件启动 worker，通过显式指定的收件箱文件或工具无法写入的继承管道 fd 发送指令，并获得 JSON 结果或事件流；也可保存或导入运行，只读查看历史。</span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md">
+            <img src="../assets/img/browser.webp" alt="终端里的对话：melo 打开一个网页并说出它的内容。" width="1280" height="552" loading="lazy">
+            <span class="show-text"><strong>读网页</strong><span>打开浏览功能后，melo 在你能看到的 Safari 窗口里读网页。</span></span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
-            <strong>API v2</strong>
-            <span>通过 <code>/api</code> 读取网页控制台的会话、轮次、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的轮次；只在回环地址上提供，并且只增不改。</span>
-          </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
-            <strong>记忆</strong>
-            <span>工作记忆、任务和步骤的历史记录与长期记忆；开启持久化后保存到 SQLite。compress 推理模式保留简短笔记，并在起始、尝试和步骤召回；启发式笔记可保留部分否定和中文陈述，但提取与来源匹配可能有误或不完整。在 Python 中可以忘掉一个任务或全部记忆。</span>
-          </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">
-            <strong>嵌入模型设置</strong>
-            <span>为长期记忆添加嵌入模型：第一次运行或配置向导会提供聊天服务器已经列出的模型，并给出 Ollama、oMLX、vLLM、SGLang 和 MLC 的步骤。</span>
-          </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">
-            <strong>Python API <span class="tag experimental">实验性</span></strong>
-            <span>在 Python 代码中运行任务：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
-          </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">
-            <strong>记忆检索</strong>
-            <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器；compress 推理模式在循环中使用同一组检索器，由 <code>auto</code> 选择。</span>
-          </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">
-            <strong>脚本和基准测试</strong>
-            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续轮次如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">
+            <img src="../assets/img/pet-smooth.webp" alt="秋田犬 Melo 从休息中起身，开始工作。" width="528" height="194" loading="lazy">
+            <span class="show-text"><strong>桌面上的 Melo</strong><span>在 Mac 上，Melo 躺在你的桌面上，工作运行或等待时会表现出来。</span></span>
           </a>
         </div>
+        <p class="more-link">另外：<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">模型服务器</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/gateway.md">HTTP API</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">worker 运行</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a> 和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#use-melo-in-scripts">脚本</a>。</p>
       </section>
 
       <section class="section" id="roadmap">
         <h2>路线图</h2>
-        <p>v0.1.0 里程碑计划于 2026-12-20 完成。</p>
-        <p>2026-10-28 落地了：工具安全-1：直接运行不提供 shell（P13b，<a href="https://github.com/localmelo/localmelo/pull/110">#110</a>）、网页控制台-1：实时对话页（U3 PR 5a，<a href="https://github.com/localmelo/localmelo/pull/111">#111</a>）、终端界面-1：显示模型的推理（R2b，<a href="https://github.com/localmelo/localmelo/pull/115">#115</a>）、记忆事实-1：可靠的事实笔记（<a href="https://github.com/localmelo/localmelo/pull/114">#114</a>）、任务调度器-1：任务库和优先级（S3a.1，<a href="https://github.com/localmelo/localmelo/pull/113">#113</a>）、记忆事实-1b：摘要说明这次尝试做了什么（<a href="https://github.com/localmelo/localmelo/pull/116">#116</a>）、网站同步（<a href="https://github.com/localmelo/localmelo/pull/118">#118</a>）和任务调度器-2：任务 API 和 workers（S3a.2，<a href="https://github.com/localmelo/localmelo/pull/119">#119</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 以来，本队列落地了核心循环-1b：请求裁剪、固定前缀和捕获历史（落地时全部为可选功能，<a href="https://github.com/localmelo/localmelo/pull/131">#131</a>、<a href="https://github.com/localmelo/localmelo/pull/142">#142</a> 和 <a href="https://github.com/localmelo/localmelo/pull/144">#144</a>；固定前缀在 <a href="https://github.com/localmelo/localmelo/pull/223">#223</a> 中成为默认）；任务调度器-3 的停放、恢复存储和重启核对（<a href="https://github.com/localmelo/localmelo/pull/135">#135</a>、<a href="https://github.com/localmelo/localmelo/pull/147">#147</a> 和 <a href="https://github.com/localmelo/localmelo/pull/152">#152</a>）；worker 契约的任务说明和 JSON 结果（<a href="https://github.com/localmelo/localmelo/pull/143">#143</a>）；网关访问令牌、playground 默认关闭和 API 客户端指南（<a href="https://github.com/localmelo/localmelo/pull/136">#136</a>、<a href="https://github.com/localmelo/localmelo/pull/141">#141</a> 和 <a href="https://github.com/localmelo/localmelo/pull/150">#150</a>）；否定和中文笔记（<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>）和更清晰的摘要标签（<a href="https://github.com/localmelo/localmelo/pull/149">#149</a>）；可选流式输出（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a> 和 <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）；文本附件（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）；以及文档线（<a href="https://github.com/localmelo/localmelo/pull/132">#132</a>、<a href="https://github.com/localmelo/localmelo/pull/133">#133</a>、<a href="https://github.com/localmelo/localmelo/pull/134">#134</a>、<a href="https://github.com/localmelo/localmelo/pull/140">#140</a> 和 <a href="https://github.com/localmelo/localmelo/pull/146">#146</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/155">#155</a> 以来，本队列还落地了 worker 启动结果（<a href="https://github.com/localmelo/localmelo/pull/157">#157</a>）和显式收件箱（<a href="https://github.com/localmelo/localmelo/pull/164">#164</a>）、调度器的休眠捕获存储（<a href="https://github.com/localmelo/localmelo/pull/158">#158</a>）及其启动接线（<a href="https://github.com/localmelo/localmelo/pull/166">#166</a>）、macOS 开发应用（<a href="https://github.com/localmelo/localmelo/pull/167">#167</a>），以及另外六份指南的中文版本（<a href="https://github.com/localmelo/localmelo/pull/161">#161</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/167">#167</a> 以来，本队列还落地了 SIGHUP 取消原因（<a href="https://github.com/localmelo/localmelo/pull/168">#168</a>）、管道收件箱（<a href="https://github.com/localmelo/localmelo/pull/169">#169</a>）、终端中的可选实时回复（<a href="https://github.com/localmelo/localmelo/pull/175">#175</a>）和已恢复任务的受控 Resume（<a href="https://github.com/localmelo/localmelo/pull/177">#177</a>）；文档线还新增了调度器、配置、会话及五份参考页的中文版本（<a href="https://github.com/localmelo/localmelo/pull/171">#171</a>、<a href="https://github.com/localmelo/localmelo/pull/173">#173</a>、<a href="https://github.com/localmelo/localmelo/pull/174">#174</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/177">#177</a> 以来，本队列还落地了终端中的 <code>!</code> shell 命令（<a href="https://github.com/localmelo/localmelo/pull/180">#180</a>）、reflection 事件中的门停止原因（<a href="https://github.com/localmelo/localmelo/pull/187">#187</a>）、PEM 私钥脱敏（<a href="https://github.com/localmelo/localmelo/pull/188">#188</a>）、控制台带 Resume 和 Stop 的任务卡片（<a href="https://github.com/localmelo/localmelo/pull/189">#189</a>）、提示缓存遥测和报告脚本（<a href="https://github.com/localmelo/localmelo/pull/190">#190</a>）、两项默认关闭的提示缓存复用实验（<a href="https://github.com/localmelo/localmelo/pull/191">#191</a>、<a href="https://github.com/localmelo/localmelo/pull/192">#192</a>）、<code>--brief</code> worker 协议（<a href="https://github.com/localmelo/localmelo/pull/193">#193</a>），以及 <code>/status</code> 用量块（<a href="https://github.com/localmelo/localmelo/pull/194">#194</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/194">#194</a> 以来，本队列还落地了 <code>--brief</code> 运行的 <code>Check:</code> 门（<a href="https://github.com/localmelo/localmelo/pull/195">#195</a>，以及失败时退出码为 4 的 <a href="https://github.com/localmelo/localmelo/pull/205">#205</a>）、<code>--brief</code> 运行的逐步推动和被丢弃输出的说明（<a href="https://github.com/localmelo/localmelo/pull/197">#197</a>）、<code>cache_report</code> 对 Python 3.9 的支持和控制台的 Tasks 标题（<a href="https://github.com/localmelo/localmelo/pull/198">#198</a>）、默认和开发者帮助模式（<a href="https://github.com/localmelo/localmelo/pull/199">#199</a> 和 <a href="https://github.com/localmelo/localmelo/pull/209">#209</a>）、状态栏的用量片段（<a href="https://github.com/localmelo/localmelo/pull/201">#201</a>）、任务视图中的任务审批（<a href="https://github.com/localmelo/localmelo/pull/208">#208</a>）、模型服务器缺失和首次运行时更清楚的提示（<a href="https://github.com/localmelo/localmelo/pull/206">#206</a>、<a href="https://github.com/localmelo/localmelo/pull/207">#207</a> 和 <a href="https://github.com/localmelo/localmelo/pull/211">#211</a>）、窗口裁剪实验（<a href="https://github.com/localmelo/localmelo/pull/204">#204</a>，默认关闭）、反思实验及其无法读取的原因（<a href="https://github.com/localmelo/localmelo/pull/210">#210</a>），以及参考页的中文版本（<a href="https://github.com/localmelo/localmelo/pull/202">#202</a> 和 <a href="https://github.com/localmelo/localmelo/pull/203">#203</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/212">#212</a> 以来，本队列还落地了 <code>--brief</code> 运行在预算将尽时再运行一次检查，并附上输出尾部（<a href="https://github.com/localmelo/localmelo/pull/214">#214</a>）、文档索引、评估页和维护指南的中文版本（<a href="https://github.com/localmelo/localmelo/pull/216">#216</a>）、直接运行默认记录（<a href="https://github.com/localmelo/localmelo/pull/217">#217</a>）、网页控制台的状态行（<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>）、优先使用已加载模型的首次设置和 <code>--serve --port 0</code>（<a href="https://github.com/localmelo/localmelo/pull/219">#219</a>）、控制台中 worker 运行的实时跟随（<a href="https://github.com/localmelo/localmelo/pull/221">#221</a>）、并发首次运行的修复（<a href="https://github.com/localmelo/localmelo/pull/222">#222</a>），以及缓存友好的默认设置（<a href="https://github.com/localmelo/localmelo/pull/223">#223</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/223">#223</a> 以来，本队列还落地了任务卡片中的实时部分（<a href="https://github.com/localmelo/localmelo/pull/224">#224</a>）、网页控制台中的终端对话（只读并已脱敏，<a href="https://github.com/localmelo/localmelo/pull/226">#226</a>）、控制台头部和 macOS 应用中的运行数量（<a href="https://github.com/localmelo/localmelo/pull/227">#227</a>），以及开发者帮助中显示的两个实验性缓存选项和可复用份额报告（<a href="https://github.com/localmelo/localmelo/pull/228">#228</a>）。实时监控（G3，议题 <a href="https://github.com/localmelo/localmelo/issues/213">#213</a>）已完成。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/228">#228</a> 以来，本队列还落地了：网页控制台的欢迎页只在未配置模型或已配置的服务器无法连接时显示 “Connect a model”，<code>/memory</code>、<code>/status</code> 和详情抽屉显示真实的工作窗口上限（<a href="https://github.com/localmelo/localmelo/pull/230">#230</a>）；几个模型同时提供时，不再静默选择模型（<a href="https://github.com/localmelo/localmelo/pull/231">#231</a>）；以及默认关闭的实验性未编辑任务说明项提醒（<a href="https://github.com/localmelo/localmelo/pull/232">#232</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/232">#232</a> 以来，本队列还落地了：直接运行像对话一样选择模型，以及 serve 的启动行立即输出（<a href="https://github.com/localmelo/localmelo/pull/236">#236</a>）；把 oMLX 作为一等本地服务器，产品中也直接称它为 oMLX（<a href="https://github.com/localmelo/localmelo/pull/237">#237</a>）；macOS 应用的一条命令安装、空闲端口和第一个窗口（<a href="https://github.com/localmelo/localmelo/pull/238">#238</a>），以及它的菜单栏状态和图标（<a href="https://github.com/localmelo/localmelo/pull/241">#241</a>）；反思能容忍一种常见的 JSON 小错误，以及把实测的缓存布局和窗口设为本地服务器的默认值（<a href="https://github.com/localmelo/localmelo/pull/239">#239</a>）；会自己说明的首次运行、欢迎页和错误文字（<a href="https://github.com/localmelo/localmelo/pull/240">#240</a>）；短命令（<a href="https://github.com/localmelo/localmelo/pull/242">#242</a>）；以及网页控制台的首次运行：易读的文字、一步连接模型、用平实语言写的审批，以及说明下一步该怎么做的错误（<a href="https://github.com/localmelo/localmelo/pull/243">#243</a>）。一处测试修复（<a href="https://github.com/localmelo/localmelo/pull/234">#234</a>）对用户没有影响。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/243">#243</a> 以来，本队列还落地了：安静的工作记录加醒目的答案、浅色终端，以及流式显示的回复，一次性返回整段回复的服务器仍能回答（<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>）；网页控制台默认提供更少的选择，开发者模式显示全部（<a href="https://github.com/localmelo/localmelo/pull/246">#246</a>）；由 <code>/model</code>、<code>/sessions</code> 和首次运行共用的模型选择器（<a href="https://github.com/localmelo/localmelo/pull/247">#247</a>）；第一个任务的文件夹，在控制台中显示，在 macOS 应用中用系统的文件夹面板选择（<a href="https://github.com/localmelo/localmelo/pull/248">#248</a>）；反思 JSON 中再修复两种单字符小错误（<a href="https://github.com/localmelo/localmelo/pull/249">#249</a>）；先给出答案的 <code>/status</code>，以及先列出常用命令的 <code>/help</code>（<a href="https://github.com/localmelo/localmelo/pull/250">#250</a>）；以及更小的 macOS 应用（<a href="https://github.com/localmelo/localmelo/pull/251">#251</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/253">#253</a> 以来，本队列还落地了：只用 Command Line Tools 就能构建 macOS 应用（<a href="https://github.com/localmelo/localmelo/pull/254">#254</a>）；一个实验性设置，让直接运行用更少的输出 token，默认关闭（<a href="https://github.com/localmelo/localmelo/pull/255">#255</a>）；控制台和应用里的平实语言、指向正确方向的错误提示和手机上的修复（<a href="https://github.com/localmelo/localmelo/pull/257">#257</a>）；回到一个聊天、轮次页脚下该轮改动的文件、说明每个命令作用的帮助，以及用文字写成的状态栏（<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>）；供聊天使用的只读 <code>list_files</code> 工具（<a href="https://github.com/localmelo/localmelo/pull/259">#259</a>）；使用它找到的服务器，或打印启动服务器所需确切命令的首次运行（<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>）；使用 localmelo 标志的应用和菜单栏图标（<a href="https://github.com/localmelo/localmelo/pull/263">#263</a>）；在浏览器中自动打开的控制台，以及只在有东西会停止时才询问的应用退出（<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>）；在你允许之前显示文件写入会替换什么的控制台（<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>）；以及每个问题都是一个可以移动选择、按回车确认的列表的终端（<a href="https://github.com/localmelo/localmelo/pull/266">#266</a>）。</p>
-        <p>自 <a href="https://github.com/localmelo/localmelo/pull/267">#267</a> 以来，本队列还落地了：终端用颜色表示的新外观，包括用颜色区分不同种类的输出（<a href="https://github.com/localmelo/localmelo/pull/268">#268</a>），以及面板、列表、分区的状态栏和带 Melo 头像的欢迎页（<a href="https://github.com/localmelo/localmelo/pull/273">#273</a>）；秋田犬 Melo，包括图片和宠物的神情（<a href="https://github.com/localmelo/localmelo/pull/271">#271</a>）、桌面上的宠物（<a href="https://github.com/localmelo/localmelo/pull/272">#272</a>）、应用和控制台里的画像（<a href="https://github.com/localmelo/localmelo/pull/275">#275</a>）以及它的动作（<a href="https://github.com/localmelo/localmelo/pull/292">#292</a>、<a href="https://github.com/localmelo/localmelo/pull/296">#296</a>、<a href="https://github.com/localmelo/localmelo/pull/306">#306</a>）；worker 的 shell 和 Python 只在它的工作区里写入（<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>），以及一个让普通直接运行也受到限制的开发者设置（<a href="https://github.com/localmelo/localmelo/pull/284">#284</a>）；删除字符时保持打开的命令列表（<a href="https://github.com/localmelo/localmelo/pull/285">#285</a>）；melo 会说自己是谁、运行在哪个模型上（<a href="https://github.com/localmelo/localmelo/pull/287">#287</a>）和聊天记得什么（<a href="https://github.com/localmelo/localmelo/pull/305">#305</a>）；没写完的思考绝不会被当作答案显示（<a href="https://github.com/localmelo/localmelo/pull/288">#288</a>）；只剩一行“思考中”，命令列表用终端自己的颜色（<a href="https://github.com/localmelo/localmelo/pull/289">#289</a>）；高影响的调用即使在会话放行内也会询问（<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>），审批卡片会说明原因（<a href="https://github.com/localmelo/localmelo/pull/294">#294</a>）；一轮生成的图片显示在回答里（<a href="https://github.com/localmelo/localmelo/pull/291">#291</a>）；显示费用、上下文和聊天旁边工作的状态栏（<a href="https://github.com/localmelo/localmelo/pull/293">#293</a>）；工具返回的图片送到能看图的模型（<a href="https://github.com/localmelo/localmelo/pull/295">#295</a>）；在 Safari 自动化窗口里浏览（<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>）；以及 <code>/clear</code> 清屏（<a href="https://github.com/localmelo/localmelo/pull/304">#304</a>）。</p>
-        <p>记忆召回-2 已落地：尝试摘要现在优先使用同一任务的摘要，并限制跨任务摘要；普通记忆仍可召回。</p>
-        <p>实验性的类型化事实可在 Python 中选择启用；未关联的陈述不会被强行关联，历史召回受相关性限制。</p>
-        <p>独立的 <code>melo-task</code> 客户端可创建、查看和控制网关任务，跟随事件时每个事件输出一行可读文本，列表会输出表头。</p>
-        <p>仍未完成，按议题 #2 的顺序：</p>
-        <ul>
-          <li>网页控制台-5：首次运行——易读的文字（设计令牌，没有小于 12px 的文字）、一步连接这台电脑上的模型服务器、用平实语言写的审批（Allow once 排在最前）、以及说明下一步该怎么做的错误已落地（<a href="https://github.com/localmelo/localmelo/pull/243">#243</a>）；默认更少的选项（开发者模式显示全部）已落地（<a href="https://github.com/localmelo/localmelo/pull/246">#246</a>）；第一个任务显示 melo 工作的文件夹，应用中可在系统的文件夹面板里另选一个，已落地（<a href="https://github.com/localmelo/localmelo/pull/248">#248</a>）；对首次使用流程的第二轮复查已完成；指向正确方向的错误提示、默认视图中的平实语言和手机上的修复已落地（<a href="https://github.com/localmelo/localmelo/pull/257">#257</a>）；只读的文件夹列表（让第一个问题不需要审批）已落地（<a href="https://github.com/localmelo/localmelo/pull/259">#259</a>）；没有模型服务器在运行时给出确切的下一步，并自动重新检查，已落地（<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>）；控制台在浏览器里打开并已登录，已落地（<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>）；文件写入在你允许之前显示它会替换什么，已落地（<a href="https://github.com/localmelo/localmelo/pull/265">#265</a>）；网站和第二轮指南已落地（<a href="https://github.com/localmelo/localmelo/pull/267">#267</a>）；melo 说出自己是谁、运行在哪个模型上，已落地（<a href="https://github.com/localmelo/localmelo/pull/287">#287</a>）；只是没写完的思考的回复绝不会成为答案，已落地（<a href="https://github.com/localmelo/localmelo/pull/288">#288</a>）；一轮生成的图片显示在回答里，已落地（<a href="https://github.com/localmelo/localmelo/pull/291">#291</a>）；</li>
-          <li>模型服务器设置（<a href="https://github.com/localmelo/localmelo/issues/252">#252</a>）：没有模型服务器在运行时，在 melo 内部设置一个本地模型服务器，让什么都没装的用户只需一次确认、不看文档就得到第一个答案；排在上面控制台、macOS 应用和终端的第二轮之后；</li>
-          <li>macOS 应用-1：桌面应用（A1）——A1a（原生外壳、内置运行时、绑定实例的登录）已落地（<a href="https://github.com/localmelo/localmelo/pull/167">#167</a>）；第一分钟（一条命令安装、从网关读回的空闲端口，以及说明正在做什么并保留失败信息的第一个窗口）已落地（<a href="https://github.com/localmelo/localmelo/pull/238">#238</a>）；菜单栏（空闲、带数量的运行中、等待审批）和应用图标已落地（<a href="https://github.com/localmelo/localmelo/pull/241">#241</a>）；更小的应用（少了 36 MB，去掉了它从不运行的那些 Python 部分）已落地（<a href="https://github.com/localmelo/localmelo/pull/251">#251</a>）；用 Command Line Tools 构建已落地（<a href="https://github.com/localmelo/localmelo/pull/254">#254</a>），平实的语言已落地（<a href="https://github.com/localmelo/localmelo/pull/257">#257</a>）；以仓库里的标志作为图标和菜单栏图标已落地（<a href="https://github.com/localmelo/localmelo/pull/263">#263</a>）；没有任务在运行时退出不再弹出确认已落地（<a href="https://github.com/localmelo/localmelo/pull/264">#264</a>）；随后是：秋田犬 Melo（行 13b）；再是应用通过 Unix socket 自己连接；</li>
-          <li>macOS 应用-2：秋田犬 Melo（<a href="https://github.com/localmelo/localmelo/issues/256">#256</a>）——给助手的一幅宠物肖像，窗口收起时变成桌面宠物；设计和第一批图片已完成（坐姿和趴姿的各种神情、一张慵懒休息、三种睡姿）；应用里的图片，连同宠物的神情和健康检查里的运行结果，已落地（<a href="https://github.com/localmelo/localmelo/pull/271">#271</a>）；桌面上的 Melo（慵懒休息、睡姿、工作、等待、完成、失败；拖动、点击打开、Hide 和 Show Melo；在“减弱动态效果”下会停下的呼吸和淡入淡出）已落地（<a href="https://github.com/localmelo/localmelo/pull/272">#272</a>）；应用第一个窗口和网页控制台里的画像（跟随每条回复状态变化的脸）已落地（<a href="https://github.com/localmelo/localmelo/pull/275">#275</a>）；眨眼、摇尾巴和睡着时飘起 z 已落地（<a href="https://github.com/localmelo/localmelo/pull/292">#292</a>）；休息时的眨眼和抖耳朵已落地（<a href="https://github.com/localmelo/localmelo/pull/296">#296</a>）；动作之间的衔接不再突兀已落地（<a href="https://github.com/localmelo/localmelo/pull/306">#306</a>）；随后是：更生动的时刻（<a href="https://github.com/localmelo/localmelo/issues/299">#299</a>），再往后是用照片做成你自己的狗；</li>
-          <li>任务调度器-3：暂停、停放和重启恢复（S3b）——受控 Resume API（<a href="https://github.com/localmelo/localmelo/pull/177">#177</a>）和控制台带 Resume 与 Stop 的任务卡片（<a href="https://github.com/localmelo/localmelo/pull/189">#189</a>）已落地；截止时间和 worker 记账随后；</li>
-          <li>任务调度器-4：<code>melo-task</code> 命令（S3c）——S3c.1 已落地（<a href="https://github.com/localmelo/localmelo/pull/159">#159</a>）；更多调度器阶段随后；</li>
-          <li>无头工作进程支持-4：worker 契约（#107 W2）——任务说明和 JSON 结果（<a href="https://github.com/localmelo/localmelo/pull/143">#143</a>）、启动结果（<a href="https://github.com/localmelo/localmelo/pull/157">#157</a>）、收件箱（<a href="https://github.com/localmelo/localmelo/pull/164">#164</a>）以及基于管道的收件箱（<a href="https://github.com/localmelo/localmelo/pull/169">#169</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/163">#163</a>）已落地；</li>
-          <li>终端界面-2：附件、shell 命令、流式输出（U2c、U4）——<code>/attach</code> 已落地（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）；流式输出已落地（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a> 和 <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）；终端中的实时回复已落地（<a href="https://github.com/localmelo/localmelo/pull/175">#175</a>，可选 <code>[cli] stream</code>；自 <a href="https://github.com/localmelo/localmelo/pull/245">#245</a> 起默认开启）；<code>!</code> shell 命令已落地（<a href="https://github.com/localmelo/localmelo/pull/180">#180</a>）；</li>
-          <li>终端界面-3：状态行（<a href="https://github.com/localmelo/localmelo/issues/176">#176</a>）——<code>/status</code> 的用量块（<a href="https://github.com/localmelo/localmelo/pull/194">#194</a>）、状态栏的用量片段（<a href="https://github.com/localmelo/localmelo/pull/201">#201</a>）和网页控制台的状态行（<a href="https://github.com/localmelo/localmelo/pull/218">#218</a>）已落地；显示费用或 token、上下文和聊天旁边工作的状态栏（任务和优先级，以及 Ctrl+T 上的操作），不再重复欢迎页已有的模型和文件夹，并带云端价格和限制，已落地（<a href="https://github.com/localmelo/localmelo/pull/293">#293</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/282">#282</a>）；</li>
-          <li>终端界面-4：上手与短命令——会自己说明的首次运行、三行欢迎页和用平实语言写的错误已落地（<a href="https://github.com/localmelo/localmelo/pull/240">#240</a>）；命令词、单字母选项、20 行帮助，以及适用于每项设置的 <code>-X KEY=VALUE</code> 已落地（<a href="https://github.com/localmelo/localmelo/pull/242">#242</a>）；安静的工作记录加醒目的答案、浅色终端，以及流式显示的回复（一次性返回整段回复的服务器仍能回答）已落地（<a href="https://github.com/localmelo/localmelo/pull/245">#245</a>）；由 <code>/model</code>、<code>/sessions</code> 和首次运行共用的模型选择器已落地（<a href="https://github.com/localmelo/localmelo/pull/247">#247</a>）；先给出答案的 <code>/status</code>，以及先列出常用命令的帮助已落地（<a href="https://github.com/localmelo/localmelo/pull/250">#250</a>）；回到一个聊天、轮次页脚下该轮改动的文件、说明每个命令作用的帮助，以及用文字写成的状态栏已落地（<a href="https://github.com/localmelo/localmelo/pull/258">#258</a>）；<code>melo serve</code> 和 <code>melo setup</code> 使用它们找到的服务器，第一个答案只说有用的话，已落地（<a href="https://github.com/localmelo/localmelo/pull/260">#260</a>）；每个问题都是一个可以移动选择、按 Enter 确认的列表，不再有 y/n，已落地（<a href="https://github.com/localmelo/localmelo/pull/266">#266</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/262">#262</a>）；带颜色的终端外观，第一部分（按终端的背景和色深选择颜色、工具行按种类着色并带标记、失败的命令显示为失败、新增和修改的文件有标记、答案用 Melo 的橙色）已落地（<a href="https://github.com/localmelo/localmelo/pull/268">#268</a>）；第二部分（审批面板和每个列表用新的颜色、分区的状态栏简要给出步骤并用 Ctrl+O 列出它们、欢迎页里 Melo 的头）已落地（<a href="https://github.com/localmelo/localmelo/pull/273">#273</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/269">#269</a>）；删除字符时命令列表保持打开已落地（<a href="https://github.com/localmelo/localmelo/pull/285">#285</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/277">#277</a>）；只剩一行“思考中”，命令列表用终端自己的颜色，已落地（<a href="https://github.com/localmelo/localmelo/pull/289">#289</a>，关闭 <a href="https://github.com/localmelo/localmelo/issues/281">#281</a>）；<code>/clear</code> 清屏已落地（<a href="https://github.com/localmelo/localmelo/pull/304">#304</a>）；</li>
-          <li>记忆事实-2：中文和否定事实——第一、二切片已落地（<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>、<a href="https://github.com/localmelo/localmelo/pull/162">#162</a>，类型化事实为可选）；</li>
-          <li>无头工作进程支持-5：任务 API 的 workers，以及供其他编码代理委派任务的 MCP 服务器（#107 W3-W4）；</li>
-          <li>文档-1：有条理、可读、双语的文档（<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>）——参考页的中文版本（<a href="https://github.com/localmelo/localmelo/pull/202">#202</a>、<a href="https://github.com/localmelo/localmelo/pull/203">#203</a>），以及最后三份中文版本和每页的目的说明（<a href="https://github.com/localmelo/localmelo/pull/216">#216</a>）已落地；发布构建后的网站，以及标题和示例的整理随后；</li>
-          <li>效率-1：本地 oMLX 上的 token 用量和提示缓存（<a href="https://github.com/localmelo/localmelo/issues/183">#183</a>）——缓存遥测（<a href="https://github.com/localmelo/localmelo/pull/190">#190</a>）已落地；窗口丢弃和固定前缀-v2 实验（<a href="https://github.com/localmelo/localmelo/pull/191">#191</a>、<a href="https://github.com/localmelo/localmelo/pull/192">#192</a> 和 <a href="https://github.com/localmelo/localmelo/pull/204">#204</a>）以默认关闭的方式落地，基准测试比较已完成；分块窗口丢弃、固定前缀和反思工具保护在 <a href="https://github.com/localmelo/localmelo/pull/223">#223</a> 中成为默认；剩余未命中的已说明原因促成了反思布局 v3 和本地服务器上 64 条消息的窗口，经两轮测量后在 <a href="https://github.com/localmelo/localmelo/pull/239">#239</a> 中成为默认；</li>
-          <li>修复：直接 worker 运行在行动或验证之前就结束（<a href="https://github.com/localmelo/localmelo/issues/185">#185</a>）——门控标记和停止原因（<a href="https://github.com/localmelo/localmelo/pull/187">#187</a>）、--brief 协议（<a href="https://github.com/localmelo/localmelo/pull/193">#193</a>）、任务说明的检查（<a href="https://github.com/localmelo/localmelo/pull/195">#195</a>、<a href="https://github.com/localmelo/localmelo/pull/205">#205</a>）、预算将尽时的检查及其输出尾部（<a href="https://github.com/localmelo/localmelo/pull/214">#214</a>），以及逐步推动和被丢弃输出的说明（<a href="https://github.com/localmelo/localmelo/pull/197">#197</a>）已落地；未处理项的实验性提醒（<a href="https://github.com/localmelo/localmelo/pull/232">#232</a>，默认关闭；回放中没有看到效果）也已落地；反思中一种常见的 JSON 小错误现在会被修复，而不是再问一次（<a href="https://github.com/localmelo/localmelo/pull/239">#239</a>），另外两种（无效转义、未闭合的数组）也是（<a href="https://github.com/localmelo/localmelo/pull/249">#249</a>）；实验性的 <code>lean_output</code> 选项让直接运行用更少的输出 token，也已落地（<a href="https://github.com/localmelo/localmelo/pull/255">#255</a>，默认关闭；其效果正在测量）；</li>
-          <li>用户界面：首次运行修复（<a href="https://github.com/localmelo/localmelo/issues/200">#200</a>）——已落地（<a href="https://github.com/localmelo/localmelo/pull/205">#205</a>、<a href="https://github.com/localmelo/localmelo/pull/206">#206</a>、<a href="https://github.com/localmelo/localmelo/pull/207">#207</a>、<a href="https://github.com/localmelo/localmelo/pull/208">#208</a> 和 <a href="https://github.com/localmelo/localmelo/pull/211">#211</a>）：任务说明的检查在默认模式下运行，失败时退出码为 4；等待审批的任务在任务视图中显示审批；缺少服务器、<code>--version</code>、<code>/status</code> 和 <code>--reconfigure</code> 的提示更清楚；快速入门中的工作任务章节；第二轮走查随后；</li>
-          <li>工具安全-2：worker 的 shell 和 Python 只在它的工作区里写入（<a href="https://github.com/localmelo/localmelo/issues/261">#261</a>），在把 melo 当作编码 worker 试用时发现——在 macOS 上，沙箱配置让 worker 运行的命令只能写入它的工作区和它自己的临时文件夹，被拒绝的写入会说明原因，已落地（<a href="https://github.com/localmelo/localmelo/pull/274">#274</a>）；一个让普通直接运行也受到限制的开发者设置已落地（<a href="https://github.com/localmelo/localmelo/pull/284">#284</a>）；</li>
-          <li>Dogfood-1：localmelo 开发 localmelo（<a href="https://github.com/localmelo/localmelo/issues/182">#182</a>）——以效率工作、本地信任、演示以及对每个会话的实时监控为前提（<a href="https://github.com/localmelo/localmelo/issues/181">#181</a>、<a href="https://github.com/localmelo/localmelo/issues/176">#176</a>）；随后是带提示缓存的原生 Anthropic Messages 提供方，以及对照现有 workers 评分的真实任务；</li>
-          <li>Track 7：递归 harness（<a href="https://github.com/localmelo/localmelo/issues/184">#184</a>）——先记录真实的自我开发案例，之后再据此设计；睡眠（<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>）是它的离线部分；</li>
-          <li>并行 worker 共享项目上下文（<a href="https://github.com/localmelo/localmelo/issues/235">#235</a>）——在同一个项目上运行任务的 worker 共享服务器提示缓存中的同一个头部（一个配置键，服务器报告缓存命中时开启），而每个 worker 的任务、记忆和工作区保持隔离；先测量共享头部，再做各个阶段；</li>
-          <li>改进（<a href="https://github.com/localmelo/localmelo/issues/299">#299</a>）：一个了解用户的主聊天、聊天旁边的工作，以及更生动的 Melo——设计已完成；先做：跨聊天的记忆（记录、每个聊天的索引、带出处的召回）和聊天旁边的面板（今天的活动、对每个任务的实时查看），正在构建；</li>
-          <li>工具安全-3：操作审查（<a href="https://github.com/localmelo/localmelo/issues/279">#279</a>）——高影响的调用即使在会话放行内也会询问，已落地（<a href="https://github.com/localmelo/localmelo/pull/290">#290</a>）；审批卡片说明原因，并且对它们不提供整个聊天的放行，已落地（<a href="https://github.com/localmelo/localmelo/pull/294">#294</a>）；</li>
-          <li>浏览与电脑操作（<a href="https://github.com/localmelo/localmelo/issues/280">#280</a>）——工具返回的图片送到能看图的模型，已落地（<a href="https://github.com/localmelo/localmelo/pull/295">#295</a>）；浏览第一部分（在 Safari 的自动化窗口里阅读并跟随网页，<code>/browser on</code>）已落地（<a href="https://github.com/localmelo/localmelo/pull/297">#297</a>）；随后是在网页上执行操作，以及浏览器扩展；</li>
-          <li>之后：更多调度器阶段、睡眠流水线（<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>）和 Track 6 的其余部分（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a>）。</li>
-        </ul>
-        <p>各阶段、相关议题、完整队列和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
+        <p>第一个版本 v0.1.0 计划于 2026-12-20 发布。</p>
+        <div class="board">
+          <div class="board-col now">
+            <h3>现在 <small>6</small></h3>
+            <ul>
+              <li class="board-card"><strong>主对话和旁支对话</strong><span>一个了解你的对话，把更大的工作交给任务。</span><span class="chip building">开发中</span></li>
+              <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，每次召回都注明来源，在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
+              <li class="board-card"><strong>浏览网页</strong><span>melo 在你能看到的窗口里读网页；接下来是在网页上操作。</span><span class="chip building">开发中</span></li>
+              <li class="board-card"><strong>秋田犬 Melo</strong><span>App、控制台和桌面上的宠物；接下来是更生动的时刻。</span><span class="chip building">开发中</span></li>
+              <li class="board-card"><strong>不看文档也能完成首次运行</strong><span>连接模型、回答 melo 的问题，无需阅读任何说明。</span><span class="chip testing">测试中</span></li>
+              <li class="board-card"><strong>本地服务器上更省 token</strong><span>在你自己的模型服务器上，提示缓存命中更多，回复更短。</span><span class="chip testing">测试中</span></li>
+            </ul>
+          </div>
+          <div class="board-col">
+            <h3>接下来 <small>5</small></h3>
+            <ul>
+              <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
+              <li class="board-card"><strong>把活干完的 worker 运行</strong><span>运行尽早动手，检查自己的结果，并说明为什么停下。</span><span class="chip testing">测试中</span></li>
+              <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
+              <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
+              <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
+            </ul>
+          </div>
+          <div class="board-col later">
+            <h3>以后 <small>5</small></h3>
+            <ul>
+              <li class="board-card"><strong>任务的截止时间</strong><span>后台任务可以有截止时间，并记录每个 worker 用掉的时间。</span></li>
+              <li class="board-card"><strong>空闲时学习</strong><span>melo 离线回顾过去的工作，只保留有用的部分。</span></li>
+              <li class="board-card"><strong>自我改进</strong><span>melo 在自己身上尝试修复，留下更好的版本，并保留退路。</span></li>
+              <li class="board-card"><strong>适合日常使用的安全</strong><span>在日常个人使用之前，达到安全和隐私的基线。</span></li>
+              <li class="board-card"><strong>发布 v0.1.0</strong><span>每次改动都跑测试，写好更新日志，在 2026-12-20 前打标签发布。</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="more-link"><a href="./updates.html#updates">最新变化</a>和<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">变更详情（英文）</a>。</p>
       </section>
 
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。在 macOS 上，worker 运行（<code>melo worker</code>）和保存的任务只能在自己的工作区内写文件；读取和网络不受限制。新建的记忆文件只有你能读取（权限 0600）。网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo console</code> 获取一次性登录链接。持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong></p>
         </div>
-        <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
+        <ul>
+          <li>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。</li>
+          <li>在 macOS 上，worker 运行（<code>melo worker</code>）和保存的任务只能在自己的工作区内写文件。</li>
+          <li>新建的记忆文件只有你能读取（权限 0600）。</li>
+          <li>网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听；<code>melo console</code> 会打印一次性登录链接。</li>
+          <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</li>
+        </ul>
+        <p class="more-link">请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>。</p>
       </section>
     </article>
   </main>

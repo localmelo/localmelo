@@ -14,6 +14,27 @@ defaults, error texts and limits in their reference page instead of copying
 tables into every guide. Do not turn examples or benchmark observations
 into promises.
 
+## Pages people read
+
+The website pages (`docs/en/*.html`, `docs/zh-CN/*.html`) and the two
+READMEs are for people who skim. The guides and references below keep the
+page template above.
+
+### Layout
+
+- A section is a heading and at most five short points, one line each.
+- No paragraph is longer than two sentences.
+- Plain words from the reader's side ("You can …"); internals only on a page about internals.
+- The roadmap is a board in three columns, Now, Next and Later: cards with a title, one line and a status chip (building, testing or done).
+- Updates are newest first: per day a heading and three to six points of what a person sees.
+
+### Pictures and numbers
+
+- A picture before words: a screenshot, a short loop or a diagram for each feature section that has one; a table for a comparison.
+- Pictures live in `docs/assets/img/` as WebP, at most 1280 pixels wide, with alt text; a page's pictures stay under 3 MB, and both languages show the same ones.
+- No PR or issue numbers on these pages; where a reader may want detail, add a small "What changed" link to the changelog.
+- `docs/for-agents.md`, `docs/llms.txt` and the changelog stay exact and terse, and keep their PR numbers.
+
 ## Examples and safety
 
 Run every command and code example when adding or changing it. Record the
@@ -30,8 +51,8 @@ fragment identifiers. Write short paragraphs, consistent terms and accurate
 platform caveats. The English page is the source; update its Chinese twin in
 the same PR, or add a visible dated stale notice naming the English revision,
 affected sections, owner and follow-up issue. Keep code, options, IDs and URLs
-identical. A DeepSeek
-headless reviewer checks meaning, terminology and missing or added facts;
+identical. A second
+reviewer checks meaning, terminology and missing or added facts;
 the lead spot-checks. The glossary in [Maintaining the docs](project/documentation.md)
 records the established terms. Every twin must be reviewed before Docs-1
 closes.
