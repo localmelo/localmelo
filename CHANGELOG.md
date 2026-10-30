@@ -342,7 +342,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   says when workers appear. Result lines in Activity and Workers are always plain
   words: `Stopped before answering`, `Made a picture`, a file's name, or the first
   sentence around code. `GET /api/activity` gains `session_id`, `scope` and, per
-  row, `approvals` ([#NN]).
+  row, `approvals` ([#314]).
 - See and change what melo remembers. The panel's **Memory** tab lists the notes melo
   kept, newest first, each with its topic and the chat and day it came from; **Edit**
   rewords a note, **Delete** asks first, the search box filters, and **Forget everything…**
@@ -2527,6 +2527,7 @@ earlier milestones.
 [#311]: https://github.com/localmelo/localmelo/pull/311
 [#312]: https://github.com/localmelo/localmelo/pull/312
 [#313]: https://github.com/localmelo/localmelo/pull/313
+[#314]: https://github.com/localmelo/localmelo/pull/314
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
