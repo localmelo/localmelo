@@ -2092,9 +2092,13 @@ async def test_a_new_chat_is_named_in_the_status_bar(setup: Setup) -> None:
     assert setup.session.status_bar().title == "New chat"
 
 
-async def test_the_status_bar_shows_the_step_only_in_developer_mode(
+async def test_the_step_is_in_the_run_zone_in_both_modes_not_a_segment(
     setup: Setup,
 ) -> None:
+    # The step was a developer-mode segment; the run zone now carries it in
+    # both modes, so the resources zone holds the cache and context alone.
+    from localmelo.support.cli.render import LiveState
+
     session = setup.session
     running = [
         {"type": "run.started", "ts": time.time(), "data": {}},
@@ -2103,9 +2107,15 @@ async def test_the_status_bar_shows_the_step_only_in_developer_mode(
     for event in running:
         session.renderer.usage.observe(event)
     session.on_event(_request_event(1000, 830))
+    session._state = "running"
+    session.renderer.live = LiveState(activity="Thinking", started=0.0, step=4)
     assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
+    assert session.status_bar().run == "step 4 · ctrl+o steps"
     session.developer = True
-    assert session.status_bar().segments == ("cache 83%", "step 4")
+    assert session.status_bar().segments == ("cache 83%",)
+    assert session.status_bar().run == "step 4 · ctrl+o steps"
+    session._state = "idle"
+    session.renderer.live = None
 
 
 async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
