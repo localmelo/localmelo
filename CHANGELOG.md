@@ -95,7 +95,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   it; `/new` keeps the page and the rule as before. `/new` says in the menu and in `/help`
   what `/clear` adds, and `/clear` has its own row in the menu and in `/help all`. With
   `NO_COLOR`, `TERM=dumb` or output that is not a terminal, no escape code is written and
-  `/clear` does what `/new` does ([#NN]).
+  `/clear` does what `/new` does ([#304]).
 
 - Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
   replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
@@ -2373,6 +2373,7 @@ earlier milestones.
 [#295]: https://github.com/localmelo/localmelo/pull/295
 [#296]: https://github.com/localmelo/localmelo/pull/296
 [#297]: https://github.com/localmelo/localmelo/pull/297
+[#304]: https://github.com/localmelo/localmelo/pull/304
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
