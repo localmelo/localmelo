@@ -12,7 +12,7 @@ import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
-import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
+import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 
@@ -380,7 +380,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
-  .replace(/^import \{ setupStatusRow \} from "\.\/status-row\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
@@ -563,6 +563,7 @@ function harness(routes, {mobile = false} = {}) {
     renderMarkdown,
     workerHistory,
     setupTasks,
+    plainSegments,
     setupStatusRow,
     setupRunning,
     setupModelCard,
@@ -639,9 +640,13 @@ function turnRow(extra = {}) {
   };
 }
 
+// The page reads `[ui] mode` when it boots. These tests are about what the page does, and most of it is
+// what developer mode shows (the header chips, the status row's cache, the task priority), so they boot
+// in it; `defaultMode` below is the same page in default mode.
 function baseRoutes(extra = {}) {
   return {
     'POST /presence': {ok: true},
+    'GET /settings': {mode: 'developer'},
     'GET /health': health,
     'GET /sessions': {sessions: [session('a')], machine: null, has_more: false},
     'GET /sessions/a': {
@@ -676,7 +681,7 @@ test('login removes the fragment before exchange and health precedes workspace i
   h.context.location.search = '?view=one';
   h.context.location.hash = '#login=single-use-code';
   await h.run('init()');
-  assert.deepEqual(h.net.calls.slice(0, 3).map((call) => call.path), ['/auth/login', '/health', '/sessions']);
+  assert.deepEqual(h.net.calls.slice(0, 4).map((call) => call.path), ['/auth/login', '/health', '/settings', '/sessions']);
   assert.equal(h.element('app').hidden, false);
   assert.equal(h.element('lock-screen').hidden, true);
   assert.equal(h.local.getItem('single-use-code'), null);
@@ -734,11 +739,11 @@ test('a presence 401 locks and closes the stream', async () => {
 });
 
 test('a 401 locks, preserves the draft, closes the stream and suppresses retries', async () => {
-  const h = harness(baseRoutes({'GET /settings': {status: 401}}));
+  const h = harness(baseRoutes({'GET /sessions/a/tools': {status: 401}}));
   await h.run('init()');
   const source = h.stream();
   h.element('input').value = 'unfinished draft';
-  await h.run('api("/settings").catch(() => {})');
+  await h.run('api("/sessions/a/tools").catch(() => {})');
   assert.equal(source.closed, true);
   assert.equal(h.element('app').hidden, true);
   assert.equal(JSON.parse(h.session.getItem('localmelo-console-drafts')).a, 'unfinished draft');
@@ -1240,7 +1245,7 @@ test('Use this model saves the server that was found, tests it, and the welcome 
   assert.equal(h.element('input').placeholder, 'Connect a model to start');
   assert.equal(h.element('send-btn').disabled, true);
   await press(card, 'Use this model');
-  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/settings')).map((call) => `${call.method} ${call.path}`), ['GET /settings', 'PUT /settings', 'POST /settings/test']);
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/settings')).map((call) => `${call.method} ${call.path}`), ['GET /settings', 'GET /settings', 'PUT /settings', 'POST /settings/test'], 'The page read the mode when it booted; the card reads the revision it saves');
   const sections = {vllm: {chat_url: 'http://127.0.0.1:8000/v1', chat_model: 'qwen3-8b'}};
   const candidate = {chat_backend: 'vllm', embedding_backend: 'none', workspace: '~/ws', sections};
   assert.deepEqual(h.net.calls.find((call) => call.method === 'PUT').body, {...candidate, revision: 'rev0'}, 'The PUT carries the loaded revision');
@@ -1530,7 +1535,7 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   assert.deepEqual(h.net.calls.map((call) => `${call.method} ${call.path}`), [
-    'GET /health', 'GET /sessions',
+    'GET /health', 'GET /settings', 'GET /sessions',
     'POST /presence', 'GET /sessions/a', 'GET /sessions/a/turns?limit=10',
     'GET /sessions/a/status',
   ]);
@@ -2085,7 +2090,7 @@ test('the level chip writes the level through /api', async () => {
   h.element('level-btn').listeners.click[0]();
   assert.equal(h.element('level-menu').hidden, false);
   assert.equal(h.element('level-menu').children.length, 4);
-  assert.equal(h.element('level-menu').children[1].attributes['aria-selected'], 'true');
+  assert.equal(h.element('level-menu').children[1].attributes['aria-checked'], 'true');
   await h.element('level-menu').children[0].listeners.click[0]();
   const [call] = h.net.callsTo('/sessions/a/level');
   assert.equal(call.method, 'POST');
@@ -3013,4 +3018,183 @@ test('leaving the task card, or opening another task, closes the live stream and
   first.emit(liveTool(9));
   second.emit(liveTool(9));
   assert.equal(h.timers.filter((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).length, 0, 'frames of a closed stream draw nothing');
+});
+
+// ── Default mode: fewer choices, the same page ──
+
+/** The page in default mode: no run, terminal chat or task exists unless a test says so. */
+const defaultMode = (extra = {}) => baseRoutes({
+  'GET /settings': {mode: 'default'},
+  'GET /sessions?kind=worker&limit=1': {sessions: []},
+  'GET /sessions?kind=terminal&limit=1': {sessions: []},
+  'GET /tasks': {tasks: []},
+  ...extra,
+});
+const ONLY_DEVELOPER = ['level-btn', 'details-trigger', 'machine-state', 'workers-link', 'tasks-link', 'section-nav', 'composer-note'];
+const hiddenOf = (h, ids) => ids.map((id) => h.element(id).hidden);
+
+test('default mode leaves out the level, Details, the GPU line and the idle sections, and keeps every id', async () => {
+  const machine = {lock: 'foreign', holder: 'bench', purpose: 'eval', stale: false, readable: true, on_ac: true, battery_pct: 100, battery_state: 'charged', band: 4, gate: 'record'};
+  const listed = {'GET /sessions': {sessions: [session('a')], machine, has_more: false}};
+  const plain = harness(defaultMode(listed));
+  await plain.run('init()');
+  assert.deepEqual(hiddenOf(plain, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => true));
+  assert.match(plain.text('machine-state'), /GPU lock: bench/, 'The element and its text stay in the page');
+  assert.equal(plain.element('connection-btn').hidden, false);
+  assert.equal(plain.text('settings-label'), 'Settings');
+  const developer = harness(baseRoutes(listed));
+  await developer.run('init()');
+  assert.deepEqual(hiddenOf(developer, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => false), 'Developer mode shows all of it');
+  assert.equal(developer.text('settings-label'), 'Connection settings');
+  assert.equal(developer.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'A developer never asks whether Workers has anything');
+});
+
+test('Workers and Tasks show in default mode once a run, a terminal chat or a task exists', async () => {
+  const nav = (h) => hiddenOf(h, ['workers-link', 'tasks-link', 'section-nav']);
+  const none = harness(defaultMode());
+  await none.run('init()');
+  assert.deepEqual(nav(none), [true, true, true]);
+  assert.deepEqual(none.net.calls.slice(-3).map((call) => call.path), ['/sessions?kind=worker&limit=1', '/sessions?kind=terminal&limit=1', '/tasks']);
+  const terminal = harness(defaultMode({'GET /sessions?kind=terminal&limit=1': {sessions: [session('k', {kind: 'chat'})]}}));
+  await terminal.run('init()');
+  assert.deepEqual(nav(terminal), [false, true, false]);
+  const task = harness(defaultMode({'GET /tasks': {tasks: [taskRow('t1')]}}));
+  await task.run('init()');
+  assert.deepEqual(nav(task), [true, false, false]);
+  // Something running shows its section at the next health read, and a route opens its own.
+  none.context.setHealth({...health, status: {running: {chats: 0, tasks: 0, runs: 1, terminal: 0}, tasks: {running: 0, queued: 0, held: 0}, items: [], waiting: []}});
+  none.run('syncUI()');
+  assert.deepEqual(nav(none), [false, true, false]);
+  none.run('showTasks("")');
+  await settle();
+  assert.deepEqual(nav(none), [false, false, false]);
+  // Leaving them brings back the chat's header, and none of the developer's.
+  none.context.location.hash = '#/s/a';
+  await none.windowListeners.hashchange[0]();
+  assert.deepEqual(hiddenOf(none, ['level-btn', 'details-trigger', 'connection-btn']), [true, true, false]);
+});
+
+test('a chat that waits on the GPU lock gets a plain banner in default mode only', async () => {
+  const held = (reason) => ({
+    'GET /sessions': {sessions: [session('a', {busy: true, held: reason})], machine: null, has_more: false},
+    'GET /sessions/a': {session: session('a', {busy: true, held: reason}), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0},
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_earlier: false, replay_from: 0},
+  });
+  const waiting = harness(defaultMode(held('Reservation')));
+  await waiting.run('init()');
+  assert.equal(waiting.element('lock-banner').hidden, false);
+  assert.equal(waiting.text('lock-banner'), "Waiting for this Mac's GPU, your chat starts when it is free.");
+  const busy = harness(defaultMode(held('Resources')));
+  await busy.run('init()');
+  assert.equal(busy.element('lock-banner').hidden, true, 'Another hold is not the lock');
+  const developer = harness(baseRoutes(held('Reservation')));
+  await developer.run('init()');
+  assert.equal(developer.element('lock-banner').hidden, true, 'A developer reads the GPU line instead');
+  waiting.state().view.session.held = '';
+  waiting.state().sessions[0].held = '';
+  waiting.run('syncUI()');
+  assert.equal(waiting.element('lock-banner').hidden, true, 'The banner goes when the chat is free');
+});
+
+test('the header chip says which model answers, or that none can, in default mode', async () => {
+  const chip = async (patch) => {
+    const h = harness(defaultMode({'GET /health': {...health, ...patch}}));
+    await h.run('init()');
+    return [h.text('connection-label'), h.element('connection-dot').classList.contains('offline'), h.element('connection-btn').attributes['aria-label']];
+  };
+  assert.deepEqual(await chip({}), ['Qwen-27B', false, 'Model: Qwen-27B. Open settings.']);
+  assert.deepEqual(await chip({model_server: server(false)}), ['Model offline', true, 'Model: Model offline. Open settings.']);
+  assert.deepEqual((await chip({configured: false})).slice(0, 2), ['No model', true]);
+  const developer = harness(baseRoutes());
+  await developer.run('init()');
+  assert.equal(developer.text('connection-label'), 'Ready', 'A developer keeps the page state');
+  assert.equal(developer.element('connection-btn').attributes['aria-label'], undefined);
+  developer.element('connection-btn').click();
+  assert.equal(developer.context.settingsOpened, 1, 'The chip opens the settings in both modes');
+});
+
+test('default mode draws the plain status row and developer mode the whole one', async () => {
+  const segments = ['cache 50% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify', 'tasks 1 running 0 queued'];
+  const row = async (routes) => {
+    const h = harness(routes({'GET /sessions/a/status': {segments}}));
+    await h.run('init()');
+    await tick();
+    return h.element('status-row').children.map((node) => node.textContent);
+  };
+  assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k', 'step 3 attempt 2']);
+  assert.deepEqual(await row(baseRoutes), segments);
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['tasks 0 running 0 queued 1 held'], 'A task held for the user is never hidden');
+});
+
+test('the task list and card name the priority in developer mode only', async () => {
+  const routes = {'GET /tasks': {tasks: [taskRow('t1', {level_eff: 3})]}, 'GET /tasks/t1': {task: taskRow('t1', {level_eff: 3})}};
+  const text = async (make) => {
+    const h = harness(make(routes));
+    await h.run('init()');
+    h.context.location.hash = '#/tasks';
+    await h.windowListeners.hashchange[0](); await settle();
+    const list = h.text('task-panel');
+    h.context.location.hash = '#/tasks/t1';
+    await h.windowListeners.hashchange[0](); await settle();
+    return [list, h.text('task-panel')];
+  };
+  const [plainList, plainCard] = await text(defaultMode);
+  assert.match(plainList, /parked · updated/);
+  assert.doesNotMatch(plainCard, /Priority|P3/);
+  const [devList, devCard] = await text(baseRoutes);
+  assert.match(devList, /parked · P3 · updated/);
+  assert.match(devCard, /Priority P3/);
+});
+
+test('Escape closes what is open in Tasks and Workers too, and stops no chat there', async () => {
+  for (const view of ['showTasks("")', 'showWorkers("")']) {
+    const status = {running: {chats: 0, tasks: 1, runs: 0, terminal: 0}, items: [{kind: 'task', id: 't1', title: 'Index the repo'}]};
+    const h = harness(defaultMode({'GET /health': () => ({body: {...health, status}}), 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+    await h.run('init()');
+    h.run(view);
+    await settle();
+    const escape = () => h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}});
+    h.element('running-btn').click();
+    assert.equal(h.run('running.isOpen()'), true);
+    escape();
+    assert.equal(h.run('running.isOpen()'), false, `Escape closes the running list in ${view}`);
+    assert.equal(h.context.document.activeElement, h.element('running-btn'));
+    h.run('sidebar(true)');
+    assert.equal(h.element('app').classList.contains('sidebar-open'), true);
+    escape();
+    assert.equal(h.element('app').classList.contains('sidebar-open'), false, `Escape closes the sidebar in ${view}`);
+    h.element('settings-dialog').showModal();
+    escape();
+    assert.equal(h.element('settings-dialog').open, false, `Escape closes the settings in ${view}`);
+    assert.equal(h.net.calls.filter((call) => call.method !== 'GET' && call.path !== '/presence').length, 0);
+  }
+});
+
+test('the level menu is a menu button: focus enters it, arrows move, Escape returns', async () => {
+  const h = harness(baseRoutes({'POST /sessions/a/level': {body: {session_id: 'a', level: 4}}}));
+  await h.run('init()');
+  const button = h.element('level-btn');
+  const menu = h.element('level-menu');
+  const focused = () => h.context.document.activeElement;
+  const press = (target, key) => target.listeners.keydown[0]({key, preventDefault() {}});
+  button.click();
+  assert.equal(button.attributes['aria-expanded'], 'true');
+  assert.deepEqual(menu.children.map((item) => item.attributes.role), Array(4).fill('menuitemradio'));
+  assert.equal(focused(), menu.children[1], 'Focus enters the menu, on the level the chat has');
+  press(menu, 'ArrowDown');
+  assert.equal(focused(), menu.children[2]);
+  press(menu, 'End');
+  assert.equal(focused(), menu.children[3]);
+  press(menu, 'ArrowDown');
+  assert.equal(focused(), menu.children[0], 'The arrows wrap');
+  press(menu, 'ArrowUp');
+  assert.equal(focused(), menu.children[3]);
+  h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}});
+  assert.equal(menu.hidden, true);
+  assert.equal(focused(), button, 'Escape returns to the button');
+  press(button, 'ArrowDown');
+  assert.equal(menu.hidden, false, 'ArrowDown on the button opens it');
+  await menu.children[3].listeners.click[0]();
+  assert.equal(h.net.callsTo('/sessions/a/level')[0].body.level, 4);
+  assert.equal(focused(), button, 'Choosing a level returns to the button');
 });

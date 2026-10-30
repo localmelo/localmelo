@@ -164,7 +164,7 @@ button:hover:not(:disabled) {
 .nav-button:hover {
   background: var(--tint);
 }
-.nav-button > span {
+.nav-button > span[aria-hidden="true"] {
   font-size: var(--text-heading);
   width: 20px;
   text-align: center;
@@ -399,8 +399,11 @@ button:hover:not(:disabled) {
 .level-item:hover {
   background: var(--soft);
 }
-.level-item[aria-selected="true"] {
+.level-item[aria-checked="true"] {
   font-weight: 600;
+}
+.level-item:focus-visible {
+  outline-offset: -2px;
 }
 .running-picker {
   position: relative;
@@ -868,7 +871,8 @@ button:hover:not(:disabled) {
   white-space: nowrap;
 }
 dialog {
-  padding: 28px;
+  --dialog-pad: 28px;
+  padding: var(--dialog-pad);
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--surface);
@@ -1008,6 +1012,15 @@ dialog::backdrop {
 .drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
 .theme-options { display: flex; gap: 16px; border: 1px solid var(--line); border-radius: var(--radius-card); margin: 16px 0; }
+/* Default mode stacks the sections: Model with its test, Appearance, and the Developer toggle last. */
+.settings-section { margin: 0 0 var(--space-3); font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
+dialog[data-layout="plain"] > section { margin-top: var(--space-4); }
+dialog[data-layout="plain"] .theme-options { margin: 0; }
+dialog[data-layout="plain"] #settings-panel-developer { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+dialog[data-layout="plain"] { scroll-padding-bottom: 96px; }
+dialog[data-layout="plain"] .settings-head .eyebrow { display: none; }
+/* The stacked sections are longer than a screen: Cancel and Save stay in view. */
+dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1 * var(--dialog-pad)); justify-content: flex-end; margin: var(--space-4) calc(-1 * var(--dialog-pad)) calc(-1 * var(--dialog-pad)); padding: var(--space-4) var(--dialog-pad); background: var(--surface); }
 #settings-test-status[data-state="success"] { color: var(--ok); }
 #settings-test-status[data-state="error"] { color: var(--error); }
 #create-error {
@@ -1165,7 +1178,8 @@ dialog::backdrop {
     padding: 10px 20px;
   }
   dialog {
-    padding: 22px;
+    --dialog-pad: 22px;
+    padding: var(--dialog-pad);
   }
   .settings-footer {
     gap: 12px;
@@ -1182,6 +1196,12 @@ dialog::backdrop {
   #run-status {
     display: none;
   }
+}
+/* Touch targets are 44px: send, stop, the menu button and the chips. */
+@media (pointer: coarse), (max-width: 700px) {
+  .send-button { width: 44px; height: 44px; }
+  .stop-button, .connection-chip, .running-chip, .level-chip, .level-item, .icon-button { min-height: 44px; }
+  .icon-button { min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *,

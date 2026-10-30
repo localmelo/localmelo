@@ -20,7 +20,8 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * (task-live.mjs): `live.nodes(view, redraw)` draws the folded turns of the
  * task's session, and `open`, `schedule` and `cancel` are passed on to follow
  * its events. The section is redrawn on its own, never the whole card, so a
- * reason being typed in an approval card keeps its focus.
+ * reason being typed in an approval card keeps its focus. `developer()` says
+ * whether developer mode is on: the scheduler's priority (P2) is shown only then.
  */
 const POLL_MS = 3000;
 
@@ -30,7 +31,7 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
-export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null}) {
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null};
@@ -84,7 +85,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', `${stateText(task)} · P${task.level_eff ?? task.level} · updated ${when(task.updated_at)}`, 'muted'));
+        node('span', [stateText(task), developer() ? `P${task.level_eff ?? task.level}` : '', `updated ${when(task.updated_at)}`].filter(Boolean).join(' · '), 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -98,7 +99,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => meta.append(node('dt', label), node('dd', value));
     row('State', stateText(task));
-    row('Priority', `P${task.level_eff ?? task.level}`);
+    if (developer()) row('Priority', `P${task.level_eff ?? task.level}`);
     row('Updated', when(task.updated_at));
     if (task.wait_reason) row('Waiting', task.wait_reason);
     if (task.workspace_label) row('Workspace', task.workspace_label);
