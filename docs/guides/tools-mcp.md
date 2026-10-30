@@ -174,6 +174,10 @@ second request of `tests/cli/test_tool_images_e2e.py` ends:
   until a tool returns a new one.
 - A run whose tools return no picture sends the same requests in every mode.
 
+## Browsing
+
+On a Mac, melo can read web pages in Safari. Browsing is off by default and read-only in this first part. Turn it on with `/browser on` in the terminal chat (or `melo -X browser.driver=safari-automation` for one run), and in Safari open Settings > Developer and turn on "Allow remote automation" once. The terminal chat and the web console then get eight tools (`browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`) that work in Safari's own automation windows, which start without any of your sign-ins. melo asks "Open a website?" before it loads a page, once per site and chat, and `auto` mode still asks; it does not click, type, sign in or post. Direct runs, workers and saved tasks never get these tools. The [browsing guide](browsing.md) has the setup, what melo can and cannot do there, and troubleshooting.
+
 ## What the checks do
 
 Before a tool runs, localmelo checks the call:
