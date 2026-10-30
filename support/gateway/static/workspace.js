@@ -2284,6 +2284,9 @@ const setupCard = setupModelCard({
   root: $("setup-card"),
   api,
   openSettings,
+  schedule: (fn, ms) => setTimeout(fn, ms),
+  cancel: (id) => clearTimeout(id),
+  writeText: (text) => navigator.clipboard.writeText(text),
   connected: async () => {
     setHealth(await api("/health"));
     syncUI();

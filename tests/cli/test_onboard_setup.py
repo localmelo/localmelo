@@ -100,10 +100,10 @@ class _Answers:
 
 
 def _servers(
-    found: FoundServer | None = None,
+    found: FoundServer | list[FoundServer | None] | None = None,
     lists: dict[str, list[str] | Exception] | None = None,
 ) -> tuple[mock.AsyncMock, mock.AsyncMock]:
-    """Fakes of detect_local_server and list_models."""
+    """Fakes of detect_local_server (a list answers one look at a time) and list_models."""
     lists = lists or {}
 
     async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
@@ -113,16 +113,16 @@ def _servers(
             raise result
         return result
 
-    return (
-        mock.AsyncMock(return_value=found),
-        mock.AsyncMock(side_effect=list_models),
-    )
+    detect = mock.AsyncMock(side_effect=found if isinstance(found, list) else None)
+    if not isinstance(found, list):
+        detect.return_value = found
+    return detect, mock.AsyncMock(side_effect=list_models)
 
 
 def _first_setup(
     answers: _Answers,
     *,
-    found: FoundServer | None = None,
+    found: FoundServer | list[FoundServer | None] | None = None,
     lists: dict[str, list[str] | Exception] | None = None,
     urls: tuple[str, ...] = ("http://127.0.0.1:8000/v1", "http://127.0.0.1:11434/v1"),
 ) -> tuple[FirstSetup | None, mock.AsyncMock, mock.AsyncMock]:
@@ -140,7 +140,7 @@ def _first_setup(
 # ── First run ──
 
 
-def test_a_found_server_prefills_the_url_and_its_models_are_offered(
+def test_a_found_server_is_offered_with_one_question_and_its_models_are_listed(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -153,7 +153,7 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     )
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
     assert answers.prompts == [
-        f"Server URL [{URL}]: ",
+        "Use it? [Y/n]: ",
         "Model [1]: ",
         "Use bge-m3-embed for long-term memory? [Y/n]: ",
     ]
@@ -168,7 +168,7 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
         "  [1] Qwen3-8B\n"
         "  [2] bge-m3-embed  (embedding)\n"
         f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
-        "Long-term memory off (melo setup sets it again).\n"
+        "Long-term memory is off; melo setup turns it on.\n"
         f"Saved to {config_path} (melo setup changes it).\n"
     )
     cfg = config.load()
@@ -236,6 +236,18 @@ def test_chat_models_come_first_and_the_others_are_tagged_and_never_the_default(
     assert _listed(capsys.readouterr().out) == rows
 
 
+def test_declining_the_found_server_in_a_first_run_asks_for_a_url(
+    config_path: Path,
+) -> None:
+    other = "http://127.0.0.1:9100/v1"
+    answers = _Answers("n", other)
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["m"]), lists={other: ["x"]}
+    )
+    assert result == FirstSetup(url=other, model="x", saved=True)
+    assert answers.prompts == ["Use it? [Y/n]: ", f"Server URL [{URL}]: "]
+
+
 def test_a_model_number_counts_in_the_listed_order(config_path: Path) -> None:
     models = ["nomic-embed-text", "chat-a", "chat-b"]
     result, _, _ = _first_setup(
@@ -270,6 +282,25 @@ def test_a_guided_reconfigure_does_not_repeat_the_first_line(
     config.save(_configured())
     _guided(_Answers("", "", "n"), found=FoundServer(url=URL, models=["Qwen3-8B"]))
     assert "melo uses a model server" not in capsys.readouterr().out
+
+
+def test_a_guided_first_run_says_what_melo_needs_then_offers_the_server(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`melo serve` before any setup asks what a first run asks, not the full menu."""
+    answers = _Answers("")
+    cfg = _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
+    assert cfg is not None
+    assert (cfg.chat_backend, cfg.vllm.chat_url, cfg.vllm.chat_model) == (
+        "vllm",
+        URL,
+        "Qwen3-8B",
+    )
+    assert answers.prompts == ["Use it? [Y/n]: "]
+    lines = capsys.readouterr().out.split("\n")
+    assert lines[0].startswith("melo uses a model server on this computer (")
+    assert lines[1] == f"Found a model server at {URL} (1 model)."
+    assert not any("Welcome" in line for line in lines)
 
 
 def test_hints_are_wrapped_at_word_boundaries_to_the_terminal_width(
@@ -576,7 +607,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
     assert answers.prompts == [
-        f"Server URL [{URL}]: ",
+        "Use it? [Y/n]: ",
         "Model [1]: ",
         "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
     ]
@@ -598,7 +629,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Qwen3-Embedding-0.6B",
     )
     out = capsys.readouterr().out
-    assert "Long-term memory off" not in out
+    assert "Long-term memory is off" not in out
 
 
 def test_a_first_run_on_ollama_saves_the_embedding_in_its_table(
@@ -637,9 +668,20 @@ def test_a_first_run_that_declines_saves_embedding_off(
     probe.assert_not_awaited()
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
-    assert "Long-term memory off (melo setup sets it again).\n" in (
+    assert "Long-term memory is off; melo setup turns it on.\n" in (
         capsys.readouterr().out
     )
+
+
+def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
+    assert result == FirstSetup(url=URL, model="only", saved=True)
+    out = capsys.readouterr().out
+    assert "Long-term memory is off; melo setup turns it on.\n" in out
+    assert "No embedding model" not in out and "Qwen3-Embedding" not in out
+    assert config.load().embedding_backend == "none"
 
 
 @pytest.mark.parametrize(
@@ -657,7 +699,7 @@ def test_a_first_run_that_declines_saves_embedding_off(
         ),
     ],
 )
-def test_a_first_run_without_a_candidate_prints_the_hint(
+def test_melo_setup_says_how_to_get_an_embedding_model(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -668,11 +710,11 @@ def test_a_first_run_without_a_candidate_prints_the_hint(
         return ollama
 
     monkeypatch.setattr(discovery, "is_ollama", is_ollama)
-    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
-    assert result == FirstSetup(url=URL, model="only", saved=True)
+    config.save(_configured())
+    cfg = _guided(_Answers(""), found=FoundServer(url=URL, models=["only"]))
+    assert cfg is not None and cfg.embedding_backend == "none"
     out = capsys.readouterr().out
-    assert f"{hint}\n" in out
-    assert config.load().embedding_backend == "none"
+    assert f"{hint}\n" in out and "Long-term memory is off" not in out
 
 
 def test_a_failed_embedding_probe_saves_with_embedding_off(
@@ -703,38 +745,89 @@ def test_without_a_found_server_the_typed_url_is_listed(
     result, _, list_models = _first_setup(answers, lists={URL: ["only"]})
     assert result == FirstSetup(url=URL, model="only", saved=True)
     # One model: nothing to choose.
-    assert answers.prompts == ["Server URL [http://127.0.0.1:8000/v1]: "]
+    assert answers.prompts == [_WAIT_PROMPT]
     list_models.assert_awaited_once_with("openai-compatible", URL)
     out = capsys.readouterr().out
     assert out.startswith(
         "melo uses a model server on this computer (Ollama, LM Studio, vLLM…).\n"
-        "No model server found on this computer (looked at ports 8000, 11434). "
-        "Start one (for example ollama serve), or enter its URL.\n"
-        f"✓ {URL} lists 1 model; using only.\n"
+        "No model server is running yet. To start one with Ollama:\n"
     )
+    assert f"✓ {URL} lists 1 model; using only.\n" in out
+
+
+_WAIT_PROMPT = "Press Enter to check again, type an address, or q to quit: "
+_GUIDE = Path(__file__).resolve().parents[2] / "docs" / "guides" / "model-servers.md"
 
 
 @pytest.mark.parametrize(
-    ("platform", "servers"),
+    ("platform", "name", "commands"),
     [
-        ("darwin", "omlx serve or ollama serve"),
-        ("linux", "ollama serve"),
-        ("win32", "ollama serve"),
+        (
+            "darwin",
+            "oMLX",
+            [
+                "brew tap jundot/omlx https://github.com/jundot/omlx",
+                "brew install jundot/omlx/omlx",
+                "omlx serve --model-dir ~/models --port 8000",
+            ],
+        ),
+        ("linux", "Ollama", ["ollama serve", "ollama pull qwen3:8b"]),
+        ("win32", "Ollama", ["ollama serve", "ollama pull qwen3:8b"]),
     ],
 )
-def test_the_no_server_hint_names_omlx_first_on_a_mac(
+def test_with_no_server_the_screen_gives_this_systems_commands_from_the_guide(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     platform: str,
-    servers: str,
+    name: str,
+    commands: list[str],
 ) -> None:
     monkeypatch.setattr(onboard.sys, "platform", platform)
-    _first_setup(_Answers(URL), lists={URL: ["only"]})
-    assert (
-        "No model server found on this computer (looked at ports 8000, 11434). "
-        f"Start one (for example {servers}), or enter its URL.\n"
-    ) in capsys.readouterr().out
+    answers = _Answers("q")
+    result, _, _ = _first_setup(answers, found=None)
+    assert result is None and answers.prompts == [_WAIT_PROMPT]
+    assert not config_path.exists()
+    out = capsys.readouterr().out
+    shown = "".join(f"  {command}\n" for command in commands)
+    assert f"To start one with {name}:\n\n{shown}\n" in out
+    assert f"{discovery.how_to_start().note} The guide shows how:\n" in out
+    assert f"{discovery.GUIDE_URL}\n" in out
+    guide = _GUIDE.read_text().splitlines()
+    for command in commands:  # a screen never invents a command
+        assert command in [line.strip() for line in guide], command
+
+
+def test_enter_looks_again_until_a_server_answers(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    found = FoundServer(url=URL, models=["Qwen3-8B"])
+    answers = _Answers("", "", "")  # look, look, then the question that follows
+    result, detect, _ = _first_setup(answers, found=[None, None, found])
+    assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
+    assert answers.prompts[:2] == [_WAIT_PROMPT] * 2
+    assert detect.await_count == 3  # the first look, then one per Enter
+    out = capsys.readouterr().out
+    missing = "✗ No model server found yet (looked at ports 8000, 11434).\n"
+    assert out.count(missing) == 1 and out.index(missing) < out.index("Found a model")
+    assert out.count("To start one with") == 1  # the commands print once
+
+
+def test_q_at_the_no_server_screen_quits_and_saves_nothing(config_path: Path) -> None:
+    answers = _Answers("", "quit")
+    result, _, _ = _first_setup(answers, found=None)
+    assert result is None and answers.prompts == [_WAIT_PROMPT] * 2
+    assert not config_path.exists()
+
+
+def test_a_fresh_guided_setup_with_no_server_says_how_to_start_one(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`melo serve` before any setup: the screen, not the eight-way menu."""
+    answers = _Answers("q")
+    assert _guided(answers, found=None) is None
+    assert answers.prompts == [_WAIT_PROMPT]
+    assert "Welcome" not in capsys.readouterr().out
 
 
 def test_a_model_is_chosen_by_number_or_id(config_path: Path) -> None:
@@ -761,7 +854,7 @@ def test_a_failed_check_retries_with_the_typed_url_as_the_default(
     result, _, _ = _first_setup(answers, lists=lists)
     assert result == FirstSetup(url=other, model="m", saved=True)
     assert answers.prompts == [
-        "Server URL [http://127.0.0.1:8000/v1]: ",
+        _WAIT_PROMPT,
         "Enter tries again · s starts without saving · q quits: ",
         f"Server URL [{URL}]: ",
     ]
@@ -1222,17 +1315,22 @@ def test_a_server_that_answered_without_a_list_is_named_and_prefilled(
     assert f"A model server at {other} answered, but {reason}.\n" in out
 
 
-def test_urls_from_the_environment_prefill_the_question(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_urls_from_the_environment_are_the_ones_looked_at_again(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(discovery.DETECT_URLS_ENV, "http://127.0.0.1:9100/v1")
-    answers = _Answers("http://127.0.0.1:9100/v1")
-    _first_setup(
-        answers,
-        lists={"http://127.0.0.1:9100/v1": ["m"]},
-        urls=("http://127.0.0.1:9100/v1",),
+    other = "http://127.0.0.1:9100/v1"
+    monkeypatch.setenv(discovery.DETECT_URLS_ENV, other)
+    found = FoundServer(url=other, models=["m"])
+    result, detect, _ = _first_setup(
+        _Answers("", ""), found=[None, found], urls=(other,)
     )
-    assert answers.prompts[0] == "Server URL [http://127.0.0.1:9100/v1]: "
+    assert result == FirstSetup(url=other, model="m", saved=True)
+    assert (
+        "(looked at ports" not in capsys.readouterr().out
+    )  # the look after Enter found it
+    detect.assert_awaited_with((other,))
 
 
 @pytest.mark.parametrize(

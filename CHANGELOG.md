@@ -1102,6 +1102,46 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   them, so replacing the art is regenerate and commit. `macos/mark.svg` is gone
   ([#NN]).
 
+- The first run and the first answer say only what helps. With a model server found, the
+  first run asks `Use it? [Y/n]:` (Enter says yes; `n` asks for a URL) where it said it had
+  found one and then asked for its URL. With no embedding model on the server it says
+  `Long-term memory is off; melo setup turns it on.`; the instruction to serve
+  Qwen3-Embedding-0.6B or run `ollama pull qwen3-embedding:0.6b` is now in `melo setup`.
+  Outside developer mode the dim `↳ partial reply (…)` line before text that was streamed
+  is gone (the text still prints once), the note after a model's first whole reply, `This
+  model's replies appear when complete until its reasoning format is set`, shows in
+  developer mode only, and the approval header names the tool and the folder
+  (`shell_exec · in ~/demo-project`); developer mode keeps the permission tier
+  (`shell_exec · exec · in ~/demo-project`). Direct mode's stdout and stderr, JSON, exit
+  codes and requests are unchanged ([#260]).
+- With no model server running, the first run says exactly how to start one. With nothing
+  saved and nothing answering on the usual ports, the first run of `melo` offered
+  `http://127.0.0.1:8000/v1` as the server URL, and Enter looped on `✗ …: connection
+  refused.` with `s starts without saving`, a chat that could not answer. It now prints
+  `No model server is running yet. To start one with oMLX:` and the commands of the model
+  servers guide (`brew tap jundot/omlx …`, `brew install jundot/omlx/omlx`, `omlx serve
+  --model-dir ~/models --port 8000`; on other systems `ollama serve` and `ollama pull
+  qwen3:8b`), then asks `Press Enter to check again, type an address, or q to quit:`.
+  Enter looks again at the same ports; an address typed instead is checked as a URL is,
+  and its failure still offers `s starts without saving`. `melo serve` and `melo setup`
+  with nothing saved do the same instead of opening the eight-way menu. The web console's
+  setup card shows the same commands in a block that one click selects, each command on
+  one line, with a Copy commands button, links the model servers guide in place of the
+  quickstart, and asks `GET /api/setup/detect` every three seconds while it says that no
+  server runs, so the model appears once the server starts (nothing is asked while the
+  card is hidden or the tab is). `GET /api/setup/detect` gains `start` in every answer.
+  The model servers guide gains a short Ollama section. Direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged ([#260]).
+- `melo serve` before any setup asks what the first run asks. With no config file and
+  a terminal it printed `Welcome to localmelo.` and opened the eight-way backend menu with
+  MLC as the default, even while a model server ran on this computer. Outside developer
+  mode it now says `melo uses a model server on this computer (…)`, prints `Found a model
+  server at … (N models).` and asks `Use it? [Y/n]:`, as `melo setup` does; the full menu
+  follows only after `n`, with `--developer` or `[ui] mode = "developer"`, or with no
+  server found while a backend is saved. The startup lines name the model and its server
+  (`Model: Qwen3-8B-4bit on oMLX`) where they named a backend key (`Chat: vllm`); the
+  `Gateway:` line, which the macOS app reads, is unchanged. The gateway's API, direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#260]).
 - Coming back to a chat in the terminal reads plainly. The exit line says
   `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
   newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
@@ -1138,7 +1178,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in the middle. Developer mode keeps the compact segments, and so do the web console's
   status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
   mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#258]).
-
 - The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
   model chip while it only names the model, which the composer already shows, so a chat's
   title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
@@ -1179,7 +1218,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   folder `xcode-select -p` names when it has a Swift compiler. With none of them
   the build stops before it does any work and prints `xcode-select --install` as
   the fix. The build's summary says which tools built the app ([#254]).
-
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A
@@ -1963,6 +2001,7 @@ earlier milestones.
 [#257]: https://github.com/localmelo/localmelo/pull/257
 [#258]: https://github.com/localmelo/localmelo/pull/258
 [#259]: https://github.com/localmelo/localmelo/pull/259
+[#260]: https://github.com/localmelo/localmelo/pull/260
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

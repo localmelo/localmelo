@@ -628,12 +628,13 @@ class TurnRenderer:
                 self._held = ""
             if answer and _same_display_text(answer, shown):
                 continue
-            self.out.print(
-                Text(
-                    f"{self.symbols.queued} partial reply ({label})",
-                    style="muted",
+            if self.developer:  # the text says enough outside developer mode
+                self.out.print(
+                    Text(
+                        f"{self.symbols.queued} partial reply ({label})",
+                        style="muted",
+                    )
                 )
-            )
             self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
             printed = shown
         if self.live is not None:
@@ -766,7 +767,7 @@ class TurnRenderer:
         self._held = ""
         streamed = self._claim_stream(data.get("step"))
         if text:
-            if streamed:
+            if streamed and self.developer:
                 self.out.print(
                     Text(
                         f"{self.symbols.queued} partial reply (tool call)",
@@ -1394,6 +1395,7 @@ class TurnRenderer:
             model = self._backend().model
             if (
                 self._buffered
+                and self.developer  # a new user has no use for the reasoning format
                 and result.status == "completed"
                 and model not in self._noted
             ):
