@@ -147,7 +147,11 @@ Type `/` and the commands show under the input box with what each does;
 type more letters to narrow them, delete letters to widen them again (the list
 closes when the `/` is deleted), Tab or Enter to take one. Esc closes the list
 until your next edit; moving the cursor alone does not open it. The same goes
-for the file names after an `@`. The everyday
+for the file names after an `@`. The list has no background block: the names
+are in your text colour, their descriptions muted, the chosen row has the `❯`
+and moss band every list has, and the names stand under the text you typed. At
+most eight rows show, with a slim bar at the right when there are more. A
+command's argument (`/model NAME`) uses the same list. The everyday
 commands come first, and are the menu's first screen: `/model`, `/new`,
 `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
 the command does and, where it needs one, its argument (`/attach PATH`).
@@ -360,7 +364,8 @@ happens without the explicit `/copy` command.
   step (`step 4`, never against `--steps`), the attempt from the second
   one, the phase with its cycle and the tests seen. When the line is narrow
   the hint goes first, then the tokens, and in developer mode the facts are
-  cut with `…`. The second row
+  cut with `…`. Text the model sends that is held until it is complete adds no
+  row: the first row already says `Thinking`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
   10:00`. For a task melo has run before, a third row shows the past runs the
@@ -530,7 +535,8 @@ reasoning, which a per-model hint in `config.toml` declares:
 The hint is `explicit` (a leading `<think>` starts reasoning), `closing_only`
 (everything before `</think>` is reasoning) or `none` (tags are literal text).
 A model with no hint keeps the conservative rule: content is held until the
-reply ends, so the live area shows `✻ thinking…` rather than text. In
+reply ends, so the live area shows its one spinner row (`Thinking…`) rather
+than text. In
 developer mode, after its first whole reply melo says so once: `This model's
 replies appear when complete until its reasoning format is set (see Streamed
 replies).` A new user never sees that note. A server
@@ -580,8 +586,10 @@ of the input box, and your draft stays:
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
-- `1` allows this call, `2` allows the tool for the rest of the session,
-  and `3` opens a field for a reason (at most 500 characters) that the
+- `1` allows this call, `2` allows the tool's routine calls for the rest of
+  the session (a call that installs, downloads, changes files outside the
+  folder or does anything else
+  [high-impact](tools-mcp.md#high-impact-calls) still asks), and `3` opens a field for a reason (at most 500 characters) that the
   model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.
@@ -652,6 +660,7 @@ Panels, lists and bars use the same colours:
 |---|---|
 | The approval panel | an amber frame with its title bold; the chosen answer `❯ 1. Yes` on a moss band; a diff's added rows on a teal band and removed rows on a red one |
 | Every list (`/model`, `/sessions`, the setup questions, the attach question, Ctrl+O's steps) | the title bold, the chosen row on a moss band with one `❯`, the current model's `✓` teal |
+| The list under the input box (`/`, `@`, an argument) | no background; names in your text colour, descriptions muted, the chosen row on the moss band with one `❯`; a slim bar in the rule colour only when there are more rows than the eight shown |
 | A line of keys (`↑↓ select · enter confirm · esc stop the turn`) | the keys in your text colour, their words muted (plain at 16 colours, never dim) |
 | The live row | the spinner moss, what melo does in your text colour, the time and tokens muted; while an approval waits, an amber `⚠` and bold words |
 | The status bar | the model bold, the folder gold, the rest muted, a rule between the zones |

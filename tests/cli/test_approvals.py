@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import re
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     DenyAllPolicy,
 )
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import ToolTier
 from localmelo.support.cli import edits, theme
 from localmelo.support.cli.approvals import (
@@ -29,7 +31,7 @@ from localmelo.support.cli.approvals import (
 )
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
-from localmelo.support.sessions.approvals import RememberingPolicy
+from localmelo.support.sessions.approvals import RememberingPolicy, RoutineOnlyPolicy
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
     CTRL_C,
@@ -72,7 +74,12 @@ def _request(
             "asks before running commands or changing files · allowed this session: "
             "file writes, mcp__files__read, shell commands",
         ),
-        ("auto", ["shell_exec"], "runs commands and changes files without asking"),
+        (
+            "auto",
+            ["shell_exec"],
+            "runs routine commands without asking; asks before installs, "
+            "downloads and changes outside the folder",
+        ),
         ("deny", [], "never runs commands or changes files"),
         ("yolo", [], "runs everything without asking (--yolo)"),
     ],
@@ -737,12 +744,33 @@ def test_the_modes_wrap_the_policy() -> None:
     assert isinstance(approvals.snapshots.inner, RememberingPolicy)
     approvals.set_mode("auto")
     assert approvals.policy() is approvals.snapshots
-    assert isinstance(approvals.snapshots.inner, AllowAllPolicy)
+    assert isinstance(approvals.snapshots.inner, RoutineOnlyPolicy)
+    assert approvals.snapshots.inner.inner is approvals._policy
     approvals.set_mode("deny")
     policy = approvals.policy()
     assert isinstance(policy, DenyAllPolicy)
     assert policy.reason == "approvals are set to deny"
     assert Approvals(ask, "yolo").policy() is None
+
+
+async def test_auto_mode_asks_before_a_high_impact_call() -> None:
+    asked: list[ApprovalRequest] = []
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request)
+        return ApprovalDecision(False, "no")
+
+    approvals = Approvals(ask, "auto")
+    policy = approvals.policy()
+    assert policy is not None
+    pip = dataclasses.replace(
+        _request("shell_exec", command="pip install x"),
+        review=ActionReview("high", ("install",), ("Installs x with pip.",)),
+    )
+    ls = dataclasses.replace(_request(), review=ActionReview("routine"))
+    assert await policy.decide(ls) == ApprovalDecision(True, origin="policy")
+    assert await policy.decide(pip) == ApprovalDecision(False, "no")
+    assert asked == [pip]
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:

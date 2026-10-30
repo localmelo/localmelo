@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- High-impact calls ask even inside a session grant. Before an approval
+  policy decides, each `shell_exec`, `python_exec` and `file_write` call is
+  reviewed by fixed rules (the shell command split, the Python code parsed;
+  nothing runs) as routine, high-impact or undecided. Installing software or
+  a project's packages, creating an environment, downloading installers,
+  large files or anything outside the workspace, running downloaded code,
+  writing or deleting outside the workspace, setting up something that runs
+  later, using passwords or keys, changing system settings, opening a network
+  service, sending files out and running code built at run time are
+  high-impact. "Allow for this chat" now covers routine calls only: a
+  high-impact or undecided call asks every time and is never granted, and the
+  terminal's `auto` mode asks for them too. A call that would change
+  localmelo itself (an install into the Python that runs it, a write under
+  `~/.cache/localmelo`) is denied without asking. A denied high-impact call
+  tells the model why melo asked. Direct, `--brief` and `--yolo` runs are not
+  reviewed ([#290]).
+
 - A worker's shell and Python write only inside its workspace on macOS. In a
   `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
   `python_exec`, the brief's checks included, start under a `sandbox-exec`
@@ -54,6 +71,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
+  replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
+  it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
+  add something (the streamed text, the running tool, the past runs) stay ([#289]).
 
 - A reply that is only the model's unfinished thinking is never shown as the
   answer. When a thinking model stopped before its end-of-thinking mark, a
@@ -1227,6 +1249,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The command list under the input box is in the terminal's colours. Typing `/`, `@` or a
+  command's argument showed a grey block (prompt_toolkit's default, black text on grey bars);
+  the list now has no background: names in your text colour, their descriptions muted, and the
+  chosen row on the same moss band with one `❯` as every other list, with the names standing
+  under the text you typed. The scrollbar is a slim rule-coloured bar and appears only when
+  there are more rows than the eight shown. Without the exact background the chosen row is
+  moss and bold, and with `NO_COLOR` it is in reverse video ([#289]).
+
 - The fixed system section of a request no longer has the line `Prefix: fixed-prefix-v2`.
   The model read the layout's internal name as an instruction and spent a reply deciding
   whether to start its answers with it. The date line stays, and `prefix_cache.version` in a
@@ -2230,6 +2260,8 @@ earlier milestones.
 [#285]: https://github.com/localmelo/localmelo/pull/285
 [#287]: https://github.com/localmelo/localmelo/pull/287
 [#288]: https://github.com/localmelo/localmelo/pull/288
+[#289]: https://github.com/localmelo/localmelo/pull/289
+[#290]: https://github.com/localmelo/localmelo/pull/290
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
