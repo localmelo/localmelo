@@ -43,6 +43,8 @@
 
 只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续。否则运行以 `gate_stopped` 结束。使用 `--reflection-gate utility` 时，也就是现有默认判定方式出现前的行为，反思还必须估计再次尝试的收益超过成本和重复风险：根据它自己的估计计算的效用分数必须达到 0.1。[评测](../project/evaluations.md#reflection-gate)在编程练习上比较了两种判定和不使用反思的运行。
 
+开发者设置 `--reflection-gate patient` 与 `flags` 只有一处不同：选择 `continue`、可行且具体但不新的下一步，仍会开始下一次尝试，每次运行一次。第二次这样的反思会像 `flags` 一样结束运行，反思的 `recommended_avoids` 照常传给下一次尝试。使用它以及使用 `answer_on_stop` 时，反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符。
+
 关于反思的更多说明：
 
 - 只带着最新的反思继续：每次反思替换上一条。默认情况下，反思只作为一条普通消息加入对话一次，因此较早的那条会留到它随旧轮次一起被丢弃；使用 `--cache-layout v2` 时，它会被重建为每个请求的最后一条消息，提示中只有最新的一条。超过约 2,000 个字符的反思会被截短以适应预算，决定不变：先删去列表末尾的条目，再截短摘要末尾。使用 `--reflection-gate utility` 时，超长反思会直接结束运行，除非它选择了 `done`。

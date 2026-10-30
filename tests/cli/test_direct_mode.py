@@ -213,12 +213,14 @@ class TestFlags:
             if action.dest == "reflection_gate"
         ]
         assert action.option_strings == ["--reflection-gate"]
-        assert action.choices == ["flags", "utility"]
+        assert action.choices == ["flags", "utility", "patient"]
         assert action.default is None  # AgentOptions decides: "flags"
         assert action.help == (
             "After a reflection, start the next attempt when it chooses continue "
             "and its three checks hold (flags, default), or also require its "
-            "utility score to reach 0.1 (utility, the behavior before this option)"
+            "utility score to reach 0.1 (utility, the behavior before this option), "
+            "or as flags, but once per run also when the next step is not novel "
+            "(patient)"
         )
 
     @pytest.mark.parametrize(("value", "seconds"), [("600", 600.0), ("0.5", 0.5)])
@@ -710,7 +712,13 @@ class TestJsonOutput:
             field.name
             for field in dataclasses.fields(RunResult)
             if field.name
-            not in ("memory_stats", "context_budget", "prefix_cache", "confinement")
+            not in (
+                "memory_stats",
+                "context_budget",
+                "prefix_cache",
+                "confinement",
+                "answered_on_stop",
+            )
         ] + ["localmelo_version"]
         assert record.pop("localmelo_version") == "v-test"
         assert record == outcome.to_dict()

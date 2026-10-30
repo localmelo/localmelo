@@ -41,7 +41,8 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `attempt_policy` | `"reflect"` | `"reflect"`: attempts with a reflection after each. `"none"`: one attempt. |
 | `steps_per_attempt` | `10` | The most steps per attempt, with `"reflect"`. |
 | `max_attempts` | `5` | The most attempts per run, with `"reflect"`. |
-| `reflection_gate` | `"flags"` | `"flags"` or `"utility"`, with `"reflect"`; see [Reflection](../concepts/how-it-works.md#reflection). |
+| `reflection_gate` | `"flags"` | `"flags"`, `"utility"` or `"patient"`, with `"reflect"`; see [Reflection](../concepts/how-it-works.md#reflection). |
+| `answer_on_stop` | `False` | `True`: a run that ends `gate_stopped` or `budget_exhausted` with no answer makes one more request, without tools, for the answer from the evidence gathered; see [Run results](run-results.md#statuses). |
 | `tool_exposure` | `"retrieve"` | `"retrieve"` or `"all"`; see [How tools are offered](tools.md#how-tools-are-offered). |
 | `builtins` | `None` | The built-in tools to register: `None` for the mode's default set, an empty collection for none, or a collection of names. |
 | `memory` | `True` | `False` turns long-term memory off. |

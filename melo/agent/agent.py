@@ -663,6 +663,27 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     return fitted
 
 
+# The lists of a reflection that reflection_gate="patient" and answer_on_stop
+# cap, the most items each keeps and the most characters of an item.
+REFLECTION_CAPPED_LISTS = ("useful_evidence", "failed_hypotheses", "recommended_avoids")
+REFLECTION_LIST_ITEMS = 8
+REFLECTION_ITEM_CHARS = 300
+
+
+def _cap_reflection_lists(entry: ReflectionEntry) -> ReflectionEntry:
+    """*entry* with each of :data:`REFLECTION_CAPPED_LISTS` kept to its cap.
+
+    A list keeps its first :data:`REFLECTION_LIST_ITEMS` items, each cut to
+    :data:`REFLECTION_ITEM_CHARS` characters at a word boundary (see
+    :func:`_shorten`). *entry* itself is not changed.
+    """
+    capped = dataclasses.replace(entry)
+    for name in REFLECTION_CAPPED_LISTS:
+        items = getattr(entry, name)[:REFLECTION_LIST_ITEMS]
+        setattr(capped, name, [_shorten(item, REFLECTION_ITEM_CHARS) for item in items])
+    return capped
+
+
 # Characters of a withheld tool result that stay visible to the model. A
 # result left less room than this in its turn is withheld, not cut.
 WITHHELD_PREVIEW_CHARS = 200
@@ -874,7 +895,10 @@ NO_CHANGE_PUSH = (
 
 
 def _gate_stop_reason(
-    decision: ReflectionDecision, gate: ReflectionGate = "flags"
+    decision: ReflectionDecision,
+    gate: ReflectionGate = "flags",
+    *,
+    patient: bool = False,
 ) -> str | None:
     """The first check of the continuation gate that *decision* fails.
 
@@ -882,6 +906,8 @@ def _gate_stop_reason(
     ``action_not_continue``, ``not_feasible``, ``not_concrete``,
     ``not_novel`` and, with ``"utility"`` only, ``utility_below_threshold``.
     ``None`` when every check holds, so that the next attempt may start.
+    With ``"patient"`` and *patient* true (the run's one allowance is
+    unspent), a decision that is not novel passes that check.
     """
     if decision.recommended_action != "continue":
         return "action_not_continue"
@@ -889,7 +915,7 @@ def _gate_stop_reason(
         return "not_feasible"
     if not decision.next_step_is_concrete:
         return "not_concrete"
-    if not decision.next_step_is_novel:
+    if not decision.next_step_is_novel and not (gate == "patient" and patient):
         return "not_novel"
     if gate == "utility" and _utility(decision) < CONTINUATION_UTILITY_THRESHOLD:
         return "utility_below_threshold"
@@ -925,6 +951,7 @@ def _stop_reason(
     out_of: str,
     *,
     brief: bool = False,
+    patient: bool = False,
 ) -> str | None:
     """Why the run does not go on after a reflection, ``None`` if it does.
 
@@ -932,7 +959,8 @@ def _stop_reason(
     *out_of* is the boundary's error (``""`` when another attempt can
     start). The one place that decides: ``continue_run`` is whether this
     is ``None``. In a *brief* run (``AgentOptions.brief_probe``) a
-    ``continue`` goes on whatever the gate's flags say.
+    ``continue`` goes on whatever the gate's flags say. *patient* is
+    :func:`_gate_stop_reason`'s.
     """
     if decision is None:
         return "unreadable_reply" if out_of else None
@@ -942,7 +970,7 @@ def _stop_reason(
         return _OUT_OF_REASONS[out_of]
     if brief and decision.recommended_action == "continue":
         return None
-    return _gate_stop_reason(decision, gate)
+    return _gate_stop_reason(decision, gate, patient=patient)
 
 
 def _providers_from_config(
@@ -1152,6 +1180,10 @@ class _RunState:
     # The confinement's refused writes when the run started.
     refused_writes_base: int = 0
     fixed_tools: list[ToolDef] | None = None
+    # reflection_gate="patient": whether the run's one non-novel continue is spent.
+    patience_spent: bool = False
+    # answer_on_stop: whether result is the answer of the extra request.
+    answered_on_stop: bool = False
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none, and the result of a
     # final boundary whose reflection is unreadable (reflection_gate="flags").
@@ -1902,7 +1934,8 @@ class Agent:
             ),
             reflection_prompt=(
                 LEAN_REFLECTION_PROMPT
-                if self.options.lean_output and self.options.reflection_gate == "flags"
+                if self.options.lean_output
+                and self.options.reflection_gate != "utility"
                 else REFLECTION_PROMPT
             ),
             identity=self.options.identity or "",
@@ -4641,7 +4674,7 @@ class Agent:
         with ``"utility"`` it reads ``stop`` as a reply without a JSON
         object does.
         """
-        flags = self.options.reflection_gate == "flags"
+        flags = self.options.reflection_gate != "utility"
         short_window = self.hippo.working.get_window()
         task_query = run.task_query_msg if run is not None else None
         sent, skipped = _replay_plan(
@@ -4767,6 +4800,8 @@ class Agent:
             entry, decision = self._reflection_from_object(
                 data, attempt_id, failure_type
             )
+            if self.options.reflection_gate == "patient" or self.options.answer_on_stop:
+                entry = _cap_reflection_lists(entry)
             entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
             decision.tried_memory = entry
             if run is not None and self._notes_mode:
@@ -5197,7 +5232,9 @@ class Agent:
           With ``attempt_policy="reflect"`` the last reflection's best
           effort, if any, is the result, or the latest planning text when
           that reflection was unreadable (``reflection_gate="flags"``, see
-          :meth:`_run_reflective_attempts`);
+          :meth:`_run_reflective_attempts`). With ``answer_on_stop``, a
+          ``gate_stopped`` or ``budget_exhausted`` run with no result asks
+          once more for one (see :meth:`_answer_on_stop`);
         - ``context_budget_exceeded``: the pinned request cannot fit the
           configured input budget, or the smaller overflow retry was refused;
         - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
@@ -5504,6 +5541,8 @@ class Agent:
                         await self._run_single_attempt(task, query, run)
                     else:
                         await self._run_reflective_attempts(task, query, run)
+                    if self.options.answer_on_stop:
+                        await self._answer_on_stop(task, run)
             except _ToolSetupError as exc:
                 # Reported in the result, not a crash: no traceback.
                 logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
@@ -6260,6 +6299,7 @@ class Agent:
                 else None
             ),
             confinement=self._confinement_record(run),
+            answered_on_stop=run.answered_on_stop,
         )
 
     def _confinement_record(self, run: _RunState) -> dict[str, Any] | None:
@@ -6289,6 +6329,8 @@ class Agent:
             "timeout_s": opts.timeout_s,
             "tools": sorted(tool.name for tool in self.hippo.list_tools()),
         }
+        if opts.answer_on_stop:
+            config["answer_on_stop"] = True
         if opts.window_eviction != "slide":
             config["window_eviction"] = opts.window_eviction
         if opts.reflect_tool_guard:
@@ -6314,6 +6356,43 @@ class Agent:
             config["admit_on_outcome"] = opts.admit_on_outcome
             config["keep_decision_text"] = opts.keep_decision_text
         return config
+
+    async def _answer_on_stop(self, task: TaskRecord, run: _RunState) -> None:
+        """``answer_on_stop``: one more request for the answer a stopped run lacks.
+
+        Only for a run that ended ``gate_stopped`` or ``budget_exhausted``
+        with a blank result. The request (:meth:`Chat.final_answer`) carries
+        the working window and the latest reflection. A non-blank reply
+        becomes the run's result (its ``<think>`` block removed), the status
+        stays, and ``RunResult.answered_on_stop`` is true. A request that
+        fails, or a blank reply, leaves the run as it was.
+        """
+        if run.status not in ("gate_stopped", "budget_exhausted") or run.result.strip():
+            return
+        # The reflection comes as its own block: leave out the request and reply
+        # of its exchange and the message that carries it in the window.
+        shown = {id(run.reflection_msg), *map(id, self.chat.reflect_exchange)}
+        window = [
+            msg for msg in self.hippo.working.get_window() if id(msg) not in shown
+        ]
+        try:
+            reply = await self.chat.final_answer(
+                window, task.query, self.hippo.working.get_reflections()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not ask for an answer on stop for task %s: %s",
+                task.task_id,
+                _exception_text(exc),
+            )
+            return
+        reply = _split_inline_reasoning(reply)
+        answer = reply.content.strip()
+        if not answer:
+            return
+        run.result = answer
+        run.answered_on_stop = True
+        run.answer_thinking = reply.thinking
 
     async def _run_reflective_attempts(
         self, task: TaskRecord, query: str, run: _RunState
@@ -6415,9 +6494,18 @@ class Agent:
             if reflection is not None:
                 entry, decision = reflection
             # None for a reply with no reflection, only with "flags".
+            patient = opts.reflection_gate == "patient" and not run.patience_spent
             stop_reason = _stop_reason(
-                decision, opts.reflection_gate, out_of, brief=run.brief
+                decision, opts.reflection_gate, out_of, brief=run.brief, patient=patient
             )
+            if (
+                patient
+                and stop_reason is None
+                and decision is not None
+                and not run.brief
+                and not decision.next_step_is_novel
+            ):
+                run.patience_spent = True  # this attempt rests on the allowance
             continue_run = stop_reason is None
             verdict = GateVerdict(
                 opts.reflection_gate,
