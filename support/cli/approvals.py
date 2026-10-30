@@ -235,9 +235,28 @@ def _tool_panel(
         lines = _lines(shown(content))
         body = [("", row) for row in _numbered(lines, width)]
         return PanelText("Change a file?", header, body, escaped_any)
+    if tool.startswith("browser:"):
+        site = shown(str(arguments.get("site") or tool[len("browser:") :]))
+        said = f"melo wants to open {site} in Safari and read it."
+        note = (
+            "Safari opens it in its own automation window; your sign-ins are not used."
+        )
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Open a website?", f"{site}{mark} · read only", body, escaped_any
+        )
     text = json.dumps(dict(arguments), indent=2, ensure_ascii=False, default=str)
     body = [("", row) for row in _wrapped(shown(text).split("\n"), width)]
     return PanelText(f"Call {shown(tool)}?", f"{shown(tool)}{mark}", body, escaped_any)
+
+
+def session_option(request: ApprovalRequest) -> str:
+    """The label of the answer that allows *request* for the rest of the session."""
+    if request.tool_name.startswith("browser:"):
+        site = str(request.arguments.get("site") or "this site")
+        return f"Yes, and allow {site} for the rest of this chat"
+    return f"Yes, and allow every {request.tool_name} call in this session"
 
 
 def session_warning(tool: str, workspace: str) -> list[str]:
@@ -428,6 +447,15 @@ def approval_words(mode: Mode, grants: Iterable[str]) -> str:
     return _MODE_WORDS[mode]
 
 
+class _AutoPolicy(RoutineOnlyPolicy):
+    """Auto mode: routine calls run unasked, but a website still asks (once per site per chat)."""
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        if request.tool_name.startswith("browser:"):
+            return await self.inner.decide(request)
+        return await super().decide(request)
+
+
 class Approvals:
     """The session's approval mode and policy, which keeps the grants."""
 
@@ -450,7 +478,7 @@ class Approvals:
         if self.mode == "deny":
             return DenyAllPolicy(DENY_REASON)
         auto = self.mode == "auto"
-        self.snapshots.inner = RoutineOnlyPolicy(self._policy) if auto else self._policy
+        self.snapshots.inner = _AutoPolicy(self._policy) if auto else self._policy
         return self.snapshots
 
     def set_mode(self, mode: Literal["ask", "auto", "deny"]) -> None:

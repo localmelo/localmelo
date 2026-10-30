@@ -622,6 +622,14 @@ class Chat:
         self._plan: _PlanSnapshot | None = None
         self.reset_stats()
 
+    def add_system_notes(self, notes: Sequence[str]) -> None:
+        """Add *notes* to every later planning request's system prompt.
+
+        Called once, when the agent's tool providers have started, so the
+        notes are the same on every step of every run and the prefix cache holds.
+        """
+        self.system_notes = (*self.system_notes, *notes)
+
     def begin_prefix(self) -> contextvars.Token[tuple[object, str] | None]:
         date = local_date_line() if self.fixed_prefix else ""
         return PREFIX_RUN.set((self, date) if date else None)

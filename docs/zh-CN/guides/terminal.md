@@ -107,6 +107,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
 | `/status [all]` | 用五行说明 melo 是否就绪：模型及其服务器，后面是 `✓ answers`（或 `✗ does not answer (connection refused). Start it, then /status checks again.`），文件夹，会话，用文字写出的审批行为，以及上下文用了多少（`8% used (2.6k of 32k tokens)`，不知道上限时为 `2.6k tokens used`）。`/status all`，以及开发者模式下的 `/status`，改为打印每一行：模型和服务器（`reachable` 或不可达的原因）、工作区及其边界、带 ID 的会话、审批模式和授权、工具、记忆（含工作窗口及其大小的原因，如 `64 (local server)`）、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；开发者模式显示所有行）、文件和版本。比终端宽的一行会在其文字下面续行。其他任何参数都会显示 `✗ Use /status or /status all.`。 |
+| `/browser [on\|off]` | melo 是否可以在 Safari 中读取网页：说明浏览是否开启，检查 Safari 是否有响应（没有时说明要打开什么）并列出本次对话允许的网站；然后用列表开启或关闭（`on` 和 `off` 跳过列表；选择会保存，对话在新的 Agent 上继续）。见[用 melo 浏览网页](browsing.md)。 |
 | `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
 | `/retry` | 重新运行最近一个已完成轮次，即使恢复会话后也保留存储的原始输入文本。只有尚未撤销该轮时才先撤销；之前的轮次和文件仍保持原有更改。 |
 | `/model [name\|number]` | 单独使用时打开服务器的对话模型列表（嵌入和重排模型不在其中），当前模型标 `✓`，服务器说明已在内存中的模型标 `(loaded)`。输入即可筛选，↑ ↓ 移动，Enter 切换并将该模型保存为默认值，Esc 保留当前模型。指定服务器列表中的 ID 或编号时（尚未列出则 melo 先列出），从下一条消息起切换到该模型，并将其保存为默认值。没有列表可选时（云端 API），`/model` 会说明这一点，`/model NAME` 仍可切换。 |

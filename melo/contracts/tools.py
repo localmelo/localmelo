@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,13 +21,18 @@ class ProvidedTool:
     ``timeout_ms`` bounds each call (the executor's default when ``None``).
     ``requires_approval`` marks a tool whose calls ask the run's approval
     policy before they run, when the run has one (see
-    ``Agent.run_task``); without a policy it has no effect.
+    ``Agent.run_task``); without a policy it has no effect. ``group``
+    names a set of tools that are offered together: with
+    ``tool_exposure="retrieve"``, every tool of a group is offered on every
+    step, as the built-ins are, instead of waiting for hints or BM25 to
+    pick it (``"all"`` offers every tool anyway).
     """
 
     definition: ToolDef
     function: ToolFunction
     timeout_ms: float | None = None
     requires_approval: bool = False
+    group: str | None = None
 
 
 class BaseToolProvider(ABC):
@@ -53,6 +58,15 @@ class BaseToolProvider(ABC):
     @abstractmethod
     async def start(self) -> list[ProvidedTool]:
         """Connect and return the tools to register."""
+
+    def system_notes(self) -> Sequence[str]:
+        """Text for the system prompt of every planning request, once started.
+
+        The agent adds it after this provider's tools are registered, for a
+        provider whose tools return content the model must treat as data (a
+        web page, say). The default is none.
+        """
+        return ()
 
     @abstractmethod
     async def close(self) -> None:

@@ -273,6 +273,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
+  "safari-automation"` (off by default; `/browser on` in the terminal chat, or
+  `-X browser.driver=safari-automation` for one run) the terminal chat and the web console
+  get eight read-only tools: `browser_open`, `browser_read`, `browser_find`,
+  `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
+  They open `http` and `https` pages in Safari's own automation windows (the sign-ins of
+  your Safari are not used) through the `safaridriver --mcp` server that ships with Safari,
+  started on the first call; nothing is installed. Safari needs Settings > Developer > "Allow
+  remote automation" once, and melo says so in words when it is off. Nothing clicks, types,
+  signs in or posts yet. Each site asks once per chat ("Open a website?"; "allow for this
+  chat" is the only lasting answer, `/new` and `/approvals forget` take it back, a redirect
+  asks about where it lands before the page is read, auto mode still asks and `--yolo` asks
+  nothing). A page reaches the model as one block between two markers that carry the same
+  random number, with a system note that text between them is data and never instructions;
+  it is cut into parts of about 2,000 tokens (a Chinese character counts three Latin
+  ones), shows at most 60 numbered elements (`browser_find` searches the rest), refuses a
+  ref from an older reading, shows no value of a password, one-time-code or card field and
+  does not read a page with payment fields. Direct runs, `--brief` workers, saved tasks and
+  the benchmark never get the tools. A provider can now mark its tools as a group that
+  `tool_exposure = "retrieve"` offers on every step, add a note to the system prompt, and
+  ask the run's approval policy about something it finds while a tool runs. See [Browsing
+  with melo](docs/guides/browsing.md) ([#297]).
 - Melo moves, part 2: the resting pet blinks and flicks an ear. The lazy picture the
   pet rests in (the default when nothing runs) blinks twice every 11 seconds, as the
   calm pictures do, and the calm lying picture also flicks its right ear every 13
@@ -2341,6 +2363,7 @@ earlier milestones.
 [#294]: https://github.com/localmelo/localmelo/pull/294
 [#295]: https://github.com/localmelo/localmelo/pull/295
 [#296]: https://github.com/localmelo/localmelo/pull/296
+[#297]: https://github.com/localmelo/localmelo/pull/297
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

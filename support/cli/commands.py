@@ -76,6 +76,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
         "show",
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
+    Command("browser", (), "[on|off]", "Show or switch web browsing in Safari", "show"),
     Command("mcp", (), "", "Show the MCP servers", True),
 )
 

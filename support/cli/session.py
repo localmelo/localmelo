@@ -38,7 +38,7 @@ from localmelo.melo.schema import RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
-from localmelo.support.cli import commands, usershell
+from localmelo.support.cli import browsing, commands, usershell
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
@@ -842,6 +842,8 @@ class CliSession:
             await self.retry()
         elif name == "mcp":
             self.mcp()
+        elif name == "browser":
+            await browsing.command(self, arguments)
 
     async def _attach_file(self, arguments: str) -> None:
         try:
@@ -1352,6 +1354,7 @@ class CliSession:
         self.navigation.mark = SessionMark(0, 0)
         self.agent.load_conversation([])
         self.approvals.reset()
+        browsing.forget(self)
         self.title = ""
         self.renderer.context_tokens = 0
         self.renderer.new_session()
@@ -1522,9 +1525,13 @@ class CliSession:
             title="Choose a model",
         )
 
-    async def _switch(self, model: str, *, url: str | None) -> bool:
+    async def _switch(
+        self, model: str, *, url: str | None, note: str | None = None
+    ) -> bool:
         """Move the conversation to a new Agent on *model*, then save it.
 
+        With *note*, the switch is not a model change: *note* is printed in
+        place of the saved-model line (``/browser`` rebuilds the Agent).
         False when it failed. The session stays "switching" until the
         switch is complete: a message sent meanwhile would start on the old
         model. Esc cancels only the start of the new Agent.
@@ -1566,7 +1573,10 @@ class CliSession:
             if self.runner is not None and self.runner.session_id is not None:
                 await self.store.update_session(self.runner.session_id, model=model)
             await self.factory.close(old)
-            await self._report_switch(done)
+            if note is None:
+                await self._report_switch(done)
+            else:
+                self.out.print(self._text(note, "ok"))
             return True
         finally:
             self._state, self.activity, self._work = "idle", None, None

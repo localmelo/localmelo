@@ -84,6 +84,7 @@ tables of the chosen backends.
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
+| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and the web console eight read-only tools that open pages in Safari's automation windows (asks once per site per chat; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[memory]` table that is all defaults is not written. Its one key,
@@ -434,6 +435,8 @@ enable_thinking = false
   `extra_body = { think = false }` turns that off.
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
+
+A `[browser]` table whose driver is `off` is not written.
 
 ## MCP servers
 

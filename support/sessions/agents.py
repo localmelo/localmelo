@@ -209,6 +209,7 @@ async def build_session_agent(
     reasoning_field: str | None = None,
     retrieval_extra_body: Mapping[str, Any] | None = None,
     mcp_config: str | None = None,
+    browser_driver: str = "off",
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
@@ -227,6 +228,9 @@ async def build_session_agent(
     an explicit options object takes precedence. *reasoning_field* overrides
     the config's replay key, except Ollama's fixed native key. The retrieval
     extra body applies only to retrieve requests and is never saved.
+    *browser_driver* names the browser the Agent may read web pages in (see
+    :mod:`localmelo.support.browser`); ``off`` gives it no browser tools. Only
+    the surfaces that ask a person (the terminal chat and the console) pass it.
 
     *wrap_llm* and *wrap_embedding* are called with the provider the builder
     made, and the Agent is made with what they return, so the provider its
@@ -251,6 +255,12 @@ async def build_session_agent(
             "retrieval_extra_body needs an llm/auto retriever outside legacy"
         )
     providers = load_mcp_providers(mcp_config) if mcp_config else []
+    if browser_driver != "off":
+        from localmelo.support.browser import provider_for
+
+        browser = provider_for(browser_driver)
+        if browser is not None:
+            providers.append(browser)
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False

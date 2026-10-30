@@ -24,7 +24,8 @@ module, so the executor can use it without an import cycle.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
 
@@ -145,6 +146,15 @@ class ApprovalPolicy(Protocol):
     """Decides whether a marked tool call may run (see the module docstring)."""
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
+
+
+# Set around each tool call of a run that has a policy: asks that policy about
+# something the tool found out while it ran, such as the site a redirect led
+# to. The arguments are the tool name the policy sees (a grant of the run
+# covers that name), the arguments to show and a one-line preview. It raises
+# like the policy does; unset (no policy) means nobody is asked.
+ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
+TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
 
 class AllowAllPolicy:
