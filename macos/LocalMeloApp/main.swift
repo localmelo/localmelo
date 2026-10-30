@@ -59,7 +59,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         statusView = StatusView(portrait: Bundle.main.image(forResource: "melo"))
         statusView.frame = content.bounds
         statusView.autoresizingMask = [.width, .height]
-        statusView.onAction = { [weak self] action in self?.perform(action) }
+        statusView.onAction = { [weak self] action in self?.handle(action) }
         content.addSubview(statusView)
         window.contentView = content
         window.delegate = self
@@ -93,7 +93,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         statusItem.menu = appMenu.copy() as? NSMenu
     }
 
-    private func perform(_ action: FailureAction) {
+    private func handle(_ action: FailureAction) {
         switch action {
         case .tryAgain: startGateway()
         case .openLog: openLog()
