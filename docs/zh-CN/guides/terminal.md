@@ -178,11 +178,22 @@ from-the-child
 ### 一轮的输出
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
-- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
+- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。对于 melo 以前运行过的任务，第三行显示进度行会显示的过去运行及其步骤：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。它在会话的第一轮显示，开发者模式下每一轮都显示。
 - **思考。**显示 `✻ Thought for 1.2s`，只有一行。`/thinking on` 和开发者模式会再显示思考的前 3 行（`/verbose` 为 40 行），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及输出的第一行，同一行末尾显示 `+N lines (/expand T.C)`（若只剩一行则直接显示该行，不显示计数）。只有标记带颜色（`✓` 绿色，`✗` 红色，`⊘` 在深色终端为黄色、其他情况为粗体）；这一行的其余部分是默认颜色，耗时和标签是暗色。失败的调用，或运行后以非 0 退出码结束的命令，最多显示 3 行，失败时第一行为红色；开发者模式对每次调用显示 3 行，`/verbose` 显示 20 行并附上调用参数。图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试：每轮一行，服务器无法连接时这一行会保留它的 URL（`↻ Could not reach URL; trying again in 1 s`），延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会先输出尽力生成的结果，再用平实的话说明发生了什么、该怎么做：`✗ Could not reach the model server at URL.`，其下是 `Start it, then /retry.`。第一行是共享表中该状态的标题（`Ran out of steps (30).`、`Stopped: the same calls kept repeating.`），并附上有帮助的原因（URL、模型、失败检查的错误）；第二行是操作建议，使用默认颜色。页脚此时显示 `✻ Stopped after 14s` 而不是 `Worked for`，且不显示为零的工具调用次数。直接模式仍在标准错误上输出 `melo: run ended with status …` 这一行。
+- **更改的文件。**用 `file_write` 写过文件的一轮，会在页脚下方多出一行安静的提示，让你不必逐个查看工具块，就知道它动过哪些文件：
+
+  ```text
+  ✓ file_write  hello.py (15 chars) · 0.0s · allowed
+    └ new file, 1 line
+  ● I saved hello.py. Run it with python hello.py.
+  ✻ Worked for 4.7s · 1 tool call · ↓ 50 tokens
+    Changed hello.py (+1)
+  ```
+
+  多个文件时显示为 `Changed hello.py (+1), README.md (+3 −1)`：路径相对于 melo 工作的文件夹，每个文件后面是这一轮在其中增加和删除的行数。最多显示三个名字，其后是 `and 2 more`；终端较窄时显示得更少，并且不会换行。同一个文件写了两次只算一次，比较的是这一轮开始时的文件和结束时的文件；写回原样的文件不会列出。没有可统计或可比较的内容时，名字单独显示、不带行数：新建的空文件、melo 无法比较的文件（太大或不是文本），以及 `--yolo` 轮次中的所有文件（没有人事先读取过旧文件）。这一行来自这一轮自己的 `file_write` 调用：被拒绝的写入（审批被拒绝，或路径在文件夹之外）和失败的写入不会列出，shell 命令或脚本更改的文件也不会列出，因为 melo 从不扫描文件夹。这一轮没有更改任何文件，或者你停止了它（被停止的轮次没有页脚）时，不会输出这一行。开发者模式显示同样的这一行。
 
 <a id="the-status-bar"></a>
 
