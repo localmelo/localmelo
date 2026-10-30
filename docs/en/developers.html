@@ -61,17 +61,10 @@
 
       <section class="section" id="repository">
         <h2>The repository</h2>
-        <p>
-          The directory that holds <code>pyproject.toml</code> is the
-          <code>localmelo</code> package itself: <code>package-dir</code> maps
-          it to <code>localmelo</code>, and <code>packages.find</code> looks one
-          level up. There is no <code>localmelo/localmelo/</code> directory, so
-          <code>melo/agent/agent.py</code> is imported as
-          <code>localmelo.melo.agent.agent</code> and
-          <code>support/config.py</code> as <code>localmelo.support.config</code>.
-          Do not create a nested one, and keep the clone named
-          <code>localmelo</code>.
-        </p>
+        <ul>
+          <li>The folder that holds <code>pyproject.toml</code> is the <code>localmelo</code> package itself; there is no <code>localmelo/localmelo/</code>.</li>
+          <li><code>melo/agent/agent.py</code> is imported as <code>localmelo.melo.agent.agent</code>; keep the clone named <code>localmelo</code>.</li>
+        </ul>
         <figure class="terminal">
           <figcaption class="terminal-title">Layout</figcaption>
           <pre><code>localmelo/
@@ -99,111 +92,64 @@
             Markdown pages and the website.
           </li>
         </ul>
-        <p>
-          <strong>The core does not import <code>support/</code>.</strong> The
-          one bridge is <code>Agent(config=...)</code>, which builds the
-          providers through <code>support/backends</code> when it is called.
-          <code>tests/test_layering.py</code> reads the AST of every module
-          under <code>melo/</code> and fails on an import of
-          <code>support/</code> in any form: plain, relative or through
-          <code>importlib.import_module</code>. The test records two allowed
-          imports: <code>Config</code>, imported only for type checking, and
-          <code>get_backend</code>, imported inside
-          <code>_providers_from_config</code> when an <code>Agent</code> is
-          built from a <code>Config</code>. It also holds a table of other
-          rules: the terminal UI's libraries (<code>prompt_toolkit</code> and
-          <code>rich</code>) stay out of the core and the backends, and the
-          sessions and the terminal UI stay clear of the gateway. If you need
-          code from <code>support/</code> in the core, push a contract into
-          <code>melo/contracts/</code> instead.
-        </p>
+        <p><strong>The core does not import <code>support/</code>.</strong> The one bridge is <code>Agent(config=...)</code>.</p>
+        <ul>
+          <li><code>tests/test_layering.py</code> fails on any import of <code>support/</code> under <code>melo/</code>: plain, relative or through <code>importlib</code>.</li>
+          <li>It allows two: <code>Config</code> for type checking, and <code>get_backend</code> inside <code>_providers_from_config</code>.</li>
+          <li><code>prompt_toolkit</code> and <code>rich</code> stay out of the core and the backends; sessions and the terminal UI stay clear of the gateway.</li>
+          <li>Need code from <code>support/</code> in the core? Push a contract into <code>melo/contracts/</code>.</li>
+        </ul>
       </section>
 
       <section class="section" id="setup">
         <h2>Set up</h2>
-        <p>
-          You need Python 3.11 or later, Git and <a href="https://docs.astral.sh/uv/">uv</a>.
-          Node (the version in <code>.nvmrc</code>) is needed only for the web
-          workspace's JavaScript tests.
-        </p>
+        <p>You need Python 3.11 or later, Git and <a href="https://docs.astral.sh/uv/">uv</a>; Node (the version in <code>.nvmrc</code>) only for the console's JavaScript tests.</p>
         <figure class="terminal">
           <figcaption class="terminal-title">Development setup</figcaption>
           <pre><code>git clone https://github.com/localmelo/localmelo.git
 cd localmelo                 # keep this name: the package is built from it
 uv sync --extra dev --extra gateway</code></pre>
         </figure>
-        <p>
-          <code>uv</code> creates <code>.venv/</code> from the committed
-          <code>uv.lock</code>, with Python 3.13 as pinned in
-          <code>.python-version</code>; localmelo itself supports Python 3.11
-          or later. <code>--extra dev</code> adds pytest, ruff, black, mypy and
-          pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn for
-          <code>melo serve</code>.
-        </p>
-        <p>
-          Optionally install the hooks with <code>uv run pre-commit install</code>.
-          They run <code>ruff --fix</code>, <code>black</code>, <code>mypy</code>
-          and the whole pytest suite on every commit. A failed commit is
-          usually a real test break, not a hook to skip.
-        </p>
+        <ul>
+          <li><code>uv</code> builds <code>.venv/</code> from <code>uv.lock</code>, with Python 3.13 from <code>.python-version</code>; localmelo supports 3.11 or later.</li>
+          <li><code>--extra dev</code> adds pytest, ruff, black, mypy and pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn.</li>
+          <li><code>uv run pre-commit install</code> adds hooks that run ruff, black, mypy and the whole suite on every commit.</li>
+        </ul>
       </section>
 
       <section class="section" id="running">
         <h2>Run the CLI</h2>
-        <p>
-          <code>melo</code> lands in <code>.venv/bin/</code> and is not on your
-          PATH. Inside the clone, run it through uv:
-        </p>
+        <p><code>melo</code> lands in <code>.venv/bin/</code>, not on your PATH. Inside the clone, run it through uv:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">From the checkout</figcaption>
           <pre><code>uv run melo "What is 6*7?"
 uv run melo serve</code></pre>
         </figure>
-        <p>
-          Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.
-          A run needs a model server: pass
-          <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code> (the old
-          spellings <code>--base-url</code> and <code>--chat-model</code> still
-          work), or run <code>uv run melo setup</code> once to save a
-          configuration. Point <code>HOME</code> at a temporary directory for a
-          run or a test that must not read or write your own
-          <code>~/.cache/localmelo</code>.
-        </p>
+        <ul>
+          <li>Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.</li>
+          <li>A run needs a model server: pass <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>, or run <code>uv run melo setup</code> once.</li>
+          <li>Point <code>HOME</code> at a temporary folder so a run never touches your own <code>~/.cache/localmelo</code>.</li>
+        </ul>
       </section>
 
       <section class="section" id="tests">
         <h2>Tests</h2>
-        <p>
-          While you work, run only the tests your change affects.
-          <code>pytest-testmon</code> records what each test covers, and after
-          its first full run it runs just the affected tests:
-        </p>
+        <p>While you work, run only the tests your change affects; <code>pytest-testmon</code> picks them:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">While working</figcaption>
           <pre><code>uv run pytest --testmon -q</code></pre>
         </figure>
-        <p>
-          Before you send a pull request, run the whole offline suite once, in
-          parallel:
-        </p>
+        <p>Before you send a pull request, run the whole offline suite once, in parallel:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">Before a pull request</figcaption>
           <pre><code>uv run pytest -n auto -q</code></pre>
         </figure>
-        <p>
-          It needs no model server and sends no request to one. A few CLI tests
-          serve a fake API on loopback to exercise timeouts and cancellation.
-          To run one directory directly, name it:
-          <code>uv run pytest tests/agent -q</code>.
-        </p>
-        <p>
-          Every test runs with <code>HOME</code> in a temporary directory. A
-          test that resolves the real home, or that writes under the real
-          <code>~/.cache/localmelo</code>, fails instead of touching your
-          config, memory, sessions or call logs. Writing the real cache is
-          never allowed; a test that genuinely needs the real home is marked
-          <code>@pytest.mark.allow_real_cache</code>.
-        </p>
+        <ul>
+          <li>The suite needs no model server and sends no request to one; a few CLI tests serve a fake API on loopback.</li>
+          <li>To run one folder, name it: <code>uv run pytest tests/agent -q</code>.</li>
+          <li>Every test runs with <code>HOME</code> in a temporary folder; one that writes the real <code>~/.cache/localmelo</code> fails.</li>
+          <li>A test that genuinely needs the real home is marked <code>@pytest.mark.allow_real_cache</code>.</li>
+        </ul>
         <div class="table-wrap">
           <table>
             <thead>
@@ -226,29 +172,20 @@ uv run melo serve</code></pre>
             </tbody>
           </table>
         </div>
-        <p>
-          The web workspace's JavaScript has its own tests. They need Node (the
-          version in <code>.nvmrc</code>), and pytest does not run them:
-        </p>
+        <p>The console's JavaScript has its own tests; they need Node, and pytest does not run them:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">JavaScript tests</figcaption>
           <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
         </figure>
-        <p>
-          Tests that talk to a real model server are opt-in. A plain run sends
-          no chat request, not even to the server you develop against:
-        </p>
+        <p>Tests that talk to a real model server are opt-in; a plain run sends no chat request:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">Real-backend smoke tests</figcaption>
           <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
         </figure>
-        <p>
-          They send a chat request to Ollama on <code>127.0.0.1:11434</code> and
-          to MLC LLM on <code>127.0.0.1:8400</code>, and skip the server that
-          does not answer. <code>tests/smoke/core_loop_test.py</code> runs
-          longer memory scenarios against real servers; see its
-          <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.
-        </p>
+        <ul>
+          <li>They ask Ollama on <code>127.0.0.1:11434</code> and MLC LLM on <code>127.0.0.1:8400</code>, and skip a server that does not answer.</li>
+          <li><code>tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
+        </ul>
       </section>
 
       <section class="section" id="lint">
@@ -421,7 +358,7 @@ uv run mypy .</code></pre>
           <li>
             Keep one focused change per pull request. For a larger change,
             open an issue first; the roadmap is
-            <a href="https://github.com/localmelo/localmelo/issues/2">#2</a>.
+            <a href="https://github.com/localmelo/localmelo/issues/2">the roadmap issue</a>.
           </li>
           <li>
             A behaviour change needs tests. Never weaken or delete an existing
@@ -450,32 +387,20 @@ uv run mypy .</code></pre>
 
       <section class="section" id="docs">
         <h2>Docs and the website</h2>
-        <p>
-          The Markdown pages in <code>docs/</code> are English only; GitHub
-          Pages publishes the <code>docs/</code> folder of <code>main</code>.
-          The website pages are in <code>docs/en/</code> and
-          <code>docs/zh-CN/</code>: an English page and its Chinese twin share
-          element ids, sections and order, and keep code blocks identical. A
-          page in <code>docs/</code> links to files outside it with absolute
-          <code>github.com</code> URLs, so the links work on GitHub and on the
-          rendered site alike.
-        </p>
-        <p>
-          To add a Markdown page, add it to the index in
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md</a>.
-          A website page goes into both languages and into the navigation of
-          every page.
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">docs/maintaining.md</a>
-          has the layout, the publishing and the translation glossary.
-        </p>
+        <ul>
+          <li>GitHub Pages publishes the <code>docs/</code> folder of <code>main</code>; the website pages are in <code>docs/en/</code> and <code>docs/zh-CN/</code>.</li>
+          <li>An English page and its Chinese twin share ids, sections, order, code and pictures.</li>
+          <li>Website pages and the READMEs follow <a href="https://github.com/localmelo/localmelo/blob/main/docs/STYLE.md#pages-people-read">Pages people read</a>: short points, pictures first, no PR numbers.</li>
+          <li>Pictures go in <code>docs/assets/img/</code> as WebP, at most 1280 pixels wide.</li>
+          <li>A page in <code>docs/</code> links outside it with absolute <code>github.com</code> URLs.</li>
+        </ul>
+        <p>A new Markdown page goes into the index in <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md</a>; <a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">Maintaining the docs</a> has the layout and the glossary.</p>
         <p>Preview the website locally:</p>
         <figure class="terminal">
           <figcaption class="terminal-title">Preview</figcaption>
           <pre><code>python3 -m http.server 8080 --bind 127.0.0.1 --directory docs</code></pre>
         </figure>
-        <p>
-          Then open <code>http://127.0.0.1:8080/en/</code>.
-        </p>
+        <p>Then open <code>http://127.0.0.1:8080/en/</code>.</p>
       </section>
 
       <section class="section" id="design">
