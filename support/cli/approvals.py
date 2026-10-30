@@ -295,10 +295,11 @@ class TerminalApprover:
         future: asyncio.Future[ApprovalDecision] = (
             asyncio.get_running_loop().create_future()
         )
+        # A grant never covers a high-impact call, whatever the caller says.
         offered = offers_grant(request.review)
         self.pending = PendingApproval(
             request=request,
-            offer_session=offered if offer_session is None else offer_session,
+            offer_session=offered and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,

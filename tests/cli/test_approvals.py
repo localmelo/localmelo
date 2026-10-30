@@ -256,6 +256,12 @@ async def test_option_two_does_nothing_when_not_offered() -> None:
     assert not asking.done()
     approver.answer("once")
     assert await asking == ApprovalDecision(True)
+    # A caller that asks for the session choice does not get it either.
+    asking = asyncio.ensure_future(approver.ask(_reviewed(_PIP), offer_session=True))
+    await asyncio.sleep(0)
+    assert approver.pending is not None and not approver.pending.offer_session
+    approver.answer("deny")
+    assert await asking == ApprovalDecision(False)
 
 
 async def test_a_reason_is_kept_to_500_characters() -> None:
@@ -1045,7 +1051,9 @@ async def test_the_high_impact_panel_shows_why_and_answers_by_position(
         await app.wait(lambda: "Reason (optional" in app.text())
         app.type(ESC)
         await app.wait(lambda: "Reason (optional" not in app.text(), timeout_s=3)
-        app.type("1")
+        app.type("\x1b[A")  # up: Yes, the only other choice
+        await app.wait(lambda: "❯ 1. Yes" in app.text(), timeout_s=3)
+        app.type(ENTER)
         assert await asyncio.wait_for(asking, 3) == ApprovalDecision(True)
 
 
