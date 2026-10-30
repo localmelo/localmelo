@@ -95,7 +95,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a note. And a chat asked "which day does my reading group meet?" recalled nothing
   though an earlier turn said it: the words were compared as written, so "meet" did not
   match "meets" and only 2 of the 4 content words matched. A plural, "-ing" or "-ed"
-  ending is now ignored when words are compared ([#NN]).
+  ending is now ignored when words are compared ([#310]).
 
 - A chat says plainly what it remembers and answers in the script you write in. Asked about
   memory, melo had described how the system around it works ("retrieved context and
@@ -346,7 +346,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   candidates and the items used), also when nothing is recalled, and the stored turn's
   result repeats it as `memory_recall`. A failed query embedding is no longer tried a
   second time within the same search. See
-  [How recall finds notes](docs/concepts/memory.md#memory-across-chats) ([#NN]).
+  [How recall finds notes](docs/concepts/memory.md#memory-across-chats) ([#310]).
 - The panel beside a chat. The web console (and so the macOS app) shows Melo on
   the right of the chat: his portrait, which rests, works, waits or cheers with
   what runs, one status line (`Connected · <model> on <server>`, `Working on 2
@@ -2462,6 +2462,7 @@ earlier milestones.
 [#306]: https://github.com/localmelo/localmelo/pull/306
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
+[#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
