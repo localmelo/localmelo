@@ -359,6 +359,18 @@ export function statusText(status, cause = "", error = "") {
   return {word: unknown, severity: "warn", title: unknown};
 }
 
+/**
+ * Which of Melo's faces a reply carries: `idle` on every reply but the newest, and on the newest its turn's state
+ * as a still picture: `working` while it runs, `waiting` while an approval is open, then `done`, or `error` for any
+ * end the console words as a warning or an error. A turn the person stopped is not a failure: `idle`.
+ */
+export function turnFace(turn, {newest = false, pending = 0} = {}) {
+  if (!newest) return "idle";
+  if (!turn.finishedAt) return pending > 0 ? "waiting" : "working";
+  const {severity} = statusText(turn.status, turn.cause, turn.error);
+  return severity === "ok" ? "done" : severity === "stopped" ? "idle" : "error";
+}
+
 const STATUS_MARK = {ok: "✓", error: "✗", warn: "⚠", stopped: "■"};
 
 /** The glyph of a status line, as the terminal draws it (`support/cli/theme.py`). */

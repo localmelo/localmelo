@@ -48,6 +48,7 @@ import {
   statusText,
   toolState,
   turnDuration,
+  turnFace,
   unreachableUrl,
   workSummary,
 } from "./turns.mjs";
@@ -915,7 +916,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
-  const nodes = turns.map((turn) => turnNode(turn));
+  const nodes = turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", earlierLoading ? "Loading earlier turns…" : "Show earlier turns", loadEarlier);
     earlier.disabled = earlierLoading;
@@ -986,11 +987,11 @@ async function loadEarlier() {
   }
 }
 
-function turnNode(turn) {
+function turnNode(turn, newest = false) {
   const section = el("section", "turn");
   if (turn.undone) section.classList.add("undone");
   section.dataset.turnId = turn.id || String(turn.turn);
-  section.append(userNode(turn), assistantNode(turn));
+  section.append(userNode(turn), assistantNode(turn, newest));
   return section;
 }
 
@@ -1009,15 +1010,20 @@ function userNode(turn) {
   return article;
 }
 
-function assistantNode(turn) {
+function assistantNode(turn, newest = false) {
   const article = el("article", "msg assistant");
   const label = el("div", "assistant-label");
+  // The newest reply's face shows its turn's state, a still picture; older replies keep the idle face.
+  const face = turnFace(turn, { newest, pending: S.view?.pending.size ?? 0 });
   const icon = document.createElement("img");
   icon.className = "brand-icon";
-  icon.src = "/assets/icon_small.png";
+  icon.src = `/assets/akita/face-${face}.png`;
+  icon.dataset.face = face;
   icon.width = 28;
   icon.height = 28;
-  icon.alt = "";
+  // The live row, the work box and the failure card word every state, so the face is decoration there. A
+  // finished answer with no work box above it has nothing else saying the turn is done.
+  icon.alt = face === "done" && shownItems(turn).length === 0 ? "Done" : "";
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));

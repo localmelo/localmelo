@@ -294,7 +294,6 @@ def test_build_assembles_locked_runtime_and_swift(
         "__main__.py",
         "melo/__init__.py",
         "support/__init__.py",
-        "support/gateway/static/melo.png",
         "tests/smoke/data/scenarios.json",
     ):
         path = root / file
@@ -344,7 +343,6 @@ def test_build_assembles_locked_runtime_and_swift(
     build_app.build(output)
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
-    assert (output / "Contents/Resources/melo.png").is_file()  # the starting view
     # The committed icon and menu-bar logo are copied, the icon under the name the plist gives.
     resources = output / "Contents/Resources"
     assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"

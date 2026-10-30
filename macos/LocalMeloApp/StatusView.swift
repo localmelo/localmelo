@@ -21,29 +21,36 @@ enum Palette {
     static let badgeRing = pair(0xffffff, 0x1c1c1e)
 }
 
-/// Melo's picture as a framed print: its paper tile reads as the print, not as a
-/// bright patch, when the window is dark.
-final class PortraitView: NSView {
-    private let image: NSImage
+/// Melo's sitting portrait in the mood the window is in. The pictures are transparent with a thin cream rim, so
+/// they stand on the console's canvas in light and dark with no frame or tile. It is decoration: the title below
+/// says the same in words, so VoiceOver skips it.
+final class PortraitView: NSImageView {
+    private let pictures: URL?
+    private var images: [PetState: NSImage] = [:]
+    private(set) var state: PetState = .sitWorking
 
-    init(_ image: NSImage) {
-        self.image = image
+    /// `pictures` is the `akita` folder of the bundle's resources.
+    init(pictures: URL?) {
+        self.pictures = pictures
         super.init(frame: .zero)
+        imageScaling = .scaleProportionallyUpOrDown
         setAccessibilityElement(false)
+        show(.sitWorking)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 96, height: 128) }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let frame = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
-        NSGraphicsContext.saveGraphicsState()
-        frame.addClip()
-        image.draw(in: bounds)
-        NSGraphicsContext.restoreGraphicsState()
-        NSColor.separatorColor.setStroke()
-        frame.stroke()
+    /// The 2x file at the canvas's size; with no picture (a run outside the bundle) the portrait takes no room.
+    func show(_ next: PetState) {
+        state = next
+        if images[next] == nil,
+           let url = pictures?.appendingPathComponent("\(next.folder)/\(next.fileName(scale: 2))"),
+           let image = NSImage(contentsOf: url) {
+            image.size = portraitSize
+            images[next] = image
+        }
+        image = images[next]
+        isHidden = image == nil
     }
 }
 
@@ -62,7 +69,13 @@ final class StatusView: NSView {
     private let working = NSStackView()
     private let actions = NSStackView()
 
-    init(portrait: NSImage?) {
+    private let portraitView: PortraitView
+
+    /// The sitting picture on show.
+    var portrait: PetState { portraitView.state }
+
+    init(pictures: URL?) {
+        portraitView = PortraitView(pictures: pictures)
         super.init(frame: .zero)
         title.font = .systemFont(ofSize: 22, weight: .semibold)
         title.textColor = Palette.ink
@@ -80,13 +93,11 @@ final class StatusView: NSView {
         working.addArrangedSubview(spinner)
         working.addArrangedSubview(step)
         actions.spacing = 8
-        var views: [NSView] = portrait.map { [PortraitView($0)] } ?? []
-        views += [title, working, reason, actions]
-        let column = NSStackView(views: views)
+        let column = NSStackView(views: [portraitView, title, working, reason, actions])
         column.orientation = .vertical
         column.alignment = .centerX
         column.spacing = 8
-        if let first = views.first as? PortraitView { column.setCustomSpacing(24, after: first) }
+        column.setCustomSpacing(24, after: portraitView)
         column.setCustomSpacing(24, after: reason)
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
@@ -98,7 +109,7 @@ final class StatusView: NSView {
             column.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 32),
             column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -32),
         ])
-        showStarting(step: startStepText(portKnown: false, ready: false))
+        showStarting(step: startStepText(portKnown: false, ready: false), ready: false)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -110,7 +121,9 @@ final class StatusView: NSView {
         dirtyRect.fill()
     }
 
-    func showStarting(step text: String) {
+    /// `ready` is true once the gateway is up and the console is loading: Melo stops working and waits calmly.
+    func showStarting(step text: String, ready: Bool) {
+        portraitView.show(startPortrait(failed: false, ready: ready))
         title.stringValue = "Starting localmelo…"
         step.stringValue = text
         working.isHidden = false
@@ -126,6 +139,7 @@ final class StatusView: NSView {
     }
 
     func showFailure(_ notice: FailureNotice) {
+        portraitView.show(startPortrait(failed: true, ready: false))
         spinner.stopAnimation(nil)
         title.stringValue = notice.title
         reason.stringValue = notice.reason

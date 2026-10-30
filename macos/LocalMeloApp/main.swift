@@ -75,7 +75,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 1050, height: 720))
-        statusView = StatusView(portrait: Bundle.main.image(forResource: "melo"))
+        statusView = StatusView(pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"))
         statusView.frame = content.bounds
         statusView.autoresizingMask = [.width, .height]
         statusView.onAction = { [weak self] action in self?.handle(action) }
@@ -152,7 +152,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func showStep() {
-        statusView.showStarting(step: startStepText(portKnown: port != 0, ready: ready))
+        statusView.showStarting(step: startStepText(portKnown: port != 0, ready: ready), ready: ready)
     }
 
     private func showConsole() {

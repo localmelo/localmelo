@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>localmelo · Workspace</title>
-    <link rel="icon" type="image/png" sizes="64x64" href="/assets/icon_small.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/akita/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/akita/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/assets/akita/favicon-64.png" />
     <script src="/assets/theme-init.js"></script>
     <link rel="stylesheet" href="/assets/workspace.css" />
     <script type="module" src="/assets/workspace.js"></script>
@@ -13,7 +15,7 @@
   <body>
     <main class="lock-screen" id="lock-screen" aria-labelledby="lock-title">
       <div class="lock-card">
-        <div class="lock-brand"><img src="/assets/icon_small.png" width="32" height="32" alt="" /> <strong>localmelo</strong></div>
+        <div class="lock-brand"><img src="/assets/akita/face-idle.png" width="32" height="32" alt="" /> <strong>localmelo</strong></div>
         <h1 id="lock-title" tabindex="-1">Sign in to localmelo</h1>
         <p>In a terminal, run <code>melo console</code>. It opens this page signed in.</p>
         <p id="lock-status" role="status" aria-live="polite"></p>
@@ -24,7 +26,7 @@
         <div class="brand">
           <img
             class="brand-icon"
-            src="/assets/icon_small.png"
+            src="/assets/akita/face-idle.png"
             width="32"
             height="32"
             alt=""
@@ -136,9 +138,9 @@
           <div class="welcome" id="welcome">
             <img
               class="welcome-mascot"
-              src="/assets/melo.png"
-              width="96"
-              height="128"
+              src="/assets/akita/sit-idle.png"
+              width="108"
+              height="140"
               alt="Melo, the localmelo Akita mascot"
             />
             <h1>What would you like to work on?</h1>
@@ -158,7 +160,9 @@
         <div class="composer-area">
           <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" hidden></div>
           <div id="approval-bar" class="approval-bar" role="status" hidden>
-            <span>melo is waiting for your answer</span>
+            <span class="approval-note"
+              ><img src="/assets/akita/face-waiting.png" width="24" height="24" alt="" /><span>melo is waiting for your answer</span></span
+            >
             <button type="button" id="approval-go" class="outline-button">Review</button>
           </div>
           <form class="composer" id="composer">

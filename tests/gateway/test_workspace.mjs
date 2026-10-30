@@ -21,7 +21,7 @@ const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
   formatBytes, formatDuration, formatPast, formatTokens, liveFacts, newTurn,
   newView, nextAction, reflectionLine, runElapsed, serverAddress, shownItems, splitThinking, statusMark, statusText,
-  toolElapsed, toolState, unreachableUrl, workSummary, holdText,
+  toolElapsed, toolState, turnFace, unreachableUrl, workSummary, holdText,
 } = turns;
 
 // What a provider says when it cannot connect (`support/providers/_http.py`).
@@ -336,6 +336,25 @@ test('a status\'s words come from status_text', () => {
   assert.deepEqual(statusText('crashed', 'crash').title, 'Interrupted: melo stopped unexpectedly');
   assert.deepEqual(statusText('provider_error').title, 'Could not get an answer from the model server');
   assert.deepEqual(statusText('brand_new'), {word: 'brand_new', severity: 'warn', title: 'brand_new'});
+});
+
+test('Melo\'s face: idle on older replies, the turn\'s state on the newest', () => {
+  const {turn, push} = fullTurn();
+  const face = (options) => turnFace(turn, options);
+  assert.equal(face({}), 'idle', 'a reply that is not the newest is always idle');
+  assert.equal(face({newest: true}), 'working');
+  assert.equal(face({newest: true, pending: 1}), 'waiting', 'an open approval wins over work');
+  assert.equal(face({pending: 1}), 'idle');
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  assert.equal(face({newest: true, pending: 0}), 'done');
+  assert.equal(face({}), 'idle', 'a finished reply stops showing its state once a newer one exists');
+  const ended = (status, cause = 'run', error = '') => turnFace({finishedAt: 1, status, cause, error}, {newest: true});
+  for (const status of ['failed', 'stuck', 'budget_exhausted', 'timeout', 'provider_error', 'setup_error', 'crashed']) {
+    assert.equal(ended(status), 'error', status);
+  }
+  assert.equal(ended('cancelled', 'user_stop'), 'idle', 'a stop the person asked for is not a failure');
+  assert.equal(ended('cancelled', 'shutdown'), 'error', 'an interruption they did not ask for is');
+  assert.equal(ended('provider_error', 'run', 'cannot reach the model server at http://127.0.0.1:8000/v1. (x)'), 'error');
 });
 
 test('an approval tag follows the call\'s end', () => {
@@ -1647,6 +1666,42 @@ test('the work box of a failed turn has no retry line, and no box at all when th
   push('notice', {kind: 'budget', message: 'The attempt used its step budget.', step: 2, attempt: 1, detail: {}});
   assert.match(flatten(h.run('assistantNode(turn)')), /used its step budget/);
   assert.doesNotMatch(flatten(h.run('assistantNode(turn)')), /retrying in 4 s/);
+});
+
+test('the newest reply shows its turn\'s face, older replies the idle face, and the face is decoration where words say the state', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {
+      turns: [turnRow({id: 'one', turn: 1}), turnRow({id: 'two', turn: 2, status: 'provider_error', answer: '', result: {error: 'e'}})],
+      has_earlier: false, replay_from: 10,
+    },
+  }));
+  await h.run('init()');
+  const faces = () => Array.from(h.element('messages').children, (section) => {
+    const icon = findNode(section, (node) => node.tag === 'img');
+    return [icon.dataset.face, icon.src, icon.alt];
+  });
+  const idle = ['idle', '/assets/akita/face-idle.png', ''];
+  assert.deepEqual(faces(), [idle, ['error', '/assets/akita/face-error.png', '']]);
+
+  const emit = (id, turn, type, data) => h.stream().emit({id, turn, ts: 50 + id, type, data});
+  emit(20, 3, 'turn.started', {turn: 3, turn_id: 'three', user_text: 'Run', client_request_id: 'k3'});
+  assert.deepEqual(faces(), [idle, idle, ['working', '/assets/akita/face-working.png', '']], 'only the newest reply follows its turn');
+  emit(21, 3, 'tool.started', {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}});
+  emit(22, 3, 'approval.requested', {request_id: 'go', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}});
+  assert.equal(faces()[2][0], 'waiting');
+  emit(23, 3, 'approval.resolved', {request_id: 'go', call_id: 'c', tool_name: 'shell_exec', outcome: 'allowed'});
+  assert.equal(faces()[2][0], 'working', 'the face goes back to work once the approval is answered');
+  emit(24, 3, 'tool.finished', {call_id: 'c', name: 'shell_exec', status: 'success', output: '/tmp'});
+  emit(25, 3, 'run.finished', {result: {status: 'completed', result: 'Done here.', duration_s: 1, n_tool: 1, steps: 1}});
+  emit(26, 3, 'turn.finished', {turn: 3, turn_id: 'three', status: 'completed', cause: 'run', error: ''});
+  assert.deepEqual(faces()[2], ['done', '/assets/akita/face-done.png', ''], 'the work box says the turn is done');
+
+  emit(30, 4, 'turn.started', {turn: 4, turn_id: 'four', user_text: 'Hi', client_request_id: 'k4'});
+  emit(31, 4, 'run.finished', {result: {status: 'completed', result: 'Hello.', duration_s: 1, n_tool: 0, steps: 1}});
+  emit(32, 4, 'turn.finished', {turn: 4, turn_id: 'four', status: 'completed', cause: 'run', error: ''});
+  const [, , third, fourth] = faces();
+  assert.equal(third[0], 'idle', 'the previous newest reply goes back to the idle face');
+  assert.deepEqual(fourth, ['done', '/assets/akita/face-done.png', 'Done'], 'a bare answer has no words for the state, so its face has them');
 });
 
 test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {

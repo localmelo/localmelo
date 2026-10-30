@@ -45,6 +45,16 @@ class ShellAssets(HTMLParser):
             self.paths.append(str(attributes["src"]))
 
 
+class ImageTags(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.images: list[dict[str, str | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "img":
+            self.images.append(dict(attrs))
+
+
 class IconLinks(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -178,6 +188,53 @@ async def test_icon_links_point_at_images_large_enough_for_their_use(
             assert min(width, height) >= 180, icon
 
 
+async def test_melo_s_pictures_in_the_shell_are_sharp_and_say_only_what_words_do_not(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    tags = ImageTags()
+    tags.feed(page.text)
+    shown = {
+        str(image["src"]): image
+        for image in tags.images
+        if str(image["src"]).startswith("/assets/akita/")
+    }
+    assert set(shown) == {
+        "/assets/akita/sit-idle.png",  # the empty chat
+        "/assets/akita/face-idle.png",  # the brand, in the sidebar and on the lock screen
+        "/assets/akita/face-waiting.png",  # the approval bar
+    }
+    for path, image in shown.items():
+        data = (await client.get(path)).content
+        wide, tall = struct.unpack(">II", data[16:24])
+        width, height = int(str(image["width"])), int(str(image["height"]))
+        # A 2x file shown at half its size or less is sharp on a Retina screen, and in the right shape.
+        assert wide >= 2 * width and wide * height == tall * width, path
+        # Words already say it where the face sits; only the portrait names itself.
+        assert (image["alt"] == "") == (path != "/assets/akita/sit-idle.png"), path
+    assert (
+        shown["/assets/akita/sit-idle.png"]["width"],
+        shown["/assets/akita/sit-idle.png"]["height"],
+    ) == ("108", "140")
+    assert shown["/assets/akita/face-waiting.png"]["width"] == "24"
+    assert "melo is waiting for your answer" in page.text
+    # The tab icon is the idle face at the three sizes a browser asks for.
+    icons = IconLinks()
+    icons.feed(page.text)
+    assert [(i["sizes"], i["href"]) for i in icons.icons] == [
+        ("16x16", "/assets/akita/favicon-16.png"),
+        ("32x32", "/assets/akita/favicon-32.png"),
+        ("64x64", "/assets/akita/favicon-64.png"),
+    ]
+
+
+def test_the_faces_and_the_portrait_are_not_clipped_to_a_rounded_tile() -> None:
+    # The pictures are cut-outs with ears and a tail at their corners: a radius would trim them.
+    for group, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _stylesheet()):
+        if re.search(r"\.(brand-icon|welcome-mascot|approval-note)\b", group):
+            assert "border-radius" not in body, group.strip()
+
+
 async def test_chat_url_placeholder_matches_the_omlx_hint(
     client: httpx.AsyncClient,
 ) -> None:
@@ -269,8 +326,12 @@ async def test_the_shell_loads_the_same_assets_as_before(
     parser = ShellAssets()
     parser.feed(page.text)
     assert set(parser.paths) == {
-        "/assets/icon_small.png",
-        "/assets/melo.png",
+        "/assets/akita/face-idle.png",
+        "/assets/akita/face-waiting.png",
+        "/assets/akita/favicon-16.png",
+        "/assets/akita/favicon-32.png",
+        "/assets/akita/favicon-64.png",
+        "/assets/akita/sit-idle.png",
         "/assets/theme-init.js",
         "/assets/workspace.css",
         "/assets/workspace.js",

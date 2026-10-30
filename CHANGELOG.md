@@ -201,6 +201,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo the Akita puppy is now the face of the app's first window and of the web console, in the
+  app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
+  portrait instead of the framed print: working while the server starts and signs in, calm once
+  it is ready, with a drooping ear when it cannot start. The console's empty chat shows the
+  same portrait, every reply carries Melo's face (the newest reply shows how its turn is going:
+  working, wide-eyed while an approval waits, happy when done, a drooping ear when it ended with
+  a warning or an error; older replies and a turn you stopped keep the calm face), the approval
+  bar shows the wide-eyed face, and the sidebar, the sign-in screen and the tab icon (16, 32 and
+  64 px) show the calm one. The pictures are still, so Reduce Motion needs nothing, and they
+  keep their outline on both themes and at phone width. Faces are decoration with empty alt text
+  where words already say the state; a finished answer with no work box above it names its
+  face `Done`. The console's nine pictures (150 KB) are copies of the app's own, written by the
+  same script (`uv run --with pillow python scripts/build_pet_assets.py --console-only` copies
+  them again), and the two logo files they replace are gone from the page's assets. ([#275])
+
 - Melo the Akita lies on your desktop when you put the macOS app away. Close the window,
   minimize it or hide the app and a small Melo appears at the bottom right, above the Dock,
   over other windows and on every Space, without taking the keyboard. It rests lazily while
@@ -2144,6 +2159,7 @@ earlier milestones.
 [#272]: https://github.com/localmelo/localmelo/pull/272
 [#273]: https://github.com/localmelo/localmelo/pull/273
 [#274]: https://github.com/localmelo/localmelo/pull/274
+[#275]: https://github.com/localmelo/localmelo/pull/275
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

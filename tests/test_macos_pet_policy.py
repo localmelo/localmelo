@@ -56,6 +56,25 @@ def test_the_states_are_the_pictures_the_build_ships() -> None:
         assert (ROOT / f"macos/art/akita/{folder}/{state}@2x.png").is_file()
 
 
+def test_the_first_window_shows_the_portrait_at_the_canvas_of_the_sitting_pictures() -> (
+    None
+):
+    pictures = json.loads((ROOT / "macos/art/akita/anchors.json").read_text())
+    canvases = {
+        tuple(pictures["pictures"][name]["canvas"])
+        for name in ("sit-idle", "sit-working", "sit-waiting", "sit-done", "sit-error")
+    }
+    assert canvases == {(108, 140)}
+    assert (
+        "let portraitSize = CGSize(width: 108, height: 140)"
+        in (APP / "PetPolicy.swift").read_text()
+    )
+    # The picture is decoration beside the title that says the same in words, and no longer a framed print.
+    status = (APP / "StatusView.swift").read_text()
+    assert "setAccessibilityElement(false)" in status
+    assert "melo.png" not in status and "NSBezierPath" not in status
+
+
 @darwin
 def test_the_mood_follows_the_health_reply_and_the_quiet_clock(tmp_path: Path) -> None:
     run_swift(
@@ -150,6 +169,14 @@ precondition(PetState.lieIdle.fileName(scale: 1) == "lie-idle.png")
 precondition(PetState.sleepBack.fileName(scale: 2) == "sleep-back@2x.png")
 precondition(PetState.sleepBack.fileName(scale: 3) == "sleep-back@2x.png")
 precondition(PetState.allCases.filter { $0.isAsleep } == [.sleepFront, .sleepSide, .sleepBack])
+
+// The first window's portrait: working while the server starts and signs in, calm once it is ready, the
+// drooping ear when it cannot go on (a failure before or after the console had loaded alike).
+precondition(startPortrait(failed: false, ready: false) == .sitWorking)
+precondition(startPortrait(failed: false, ready: true) == .sitIdle)
+precondition(startPortrait(failed: true, ready: false) == .sitError)
+precondition(startPortrait(failed: true, ready: true) == .sitError)
+precondition(startPortrait(failed: false, ready: true).fileName(scale: 2) == "sit-idle@2x.png")
 """,
     )
 
