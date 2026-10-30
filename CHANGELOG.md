@@ -949,6 +949,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The web console is easier to read, in light and dark: no text under 12px, text
+  at 4.5:1 contrast or better, field, composer and focus edges at 3:1 or better,
+  a 2px focus ring on the composer, muted lines in Tasks and Workers drawn muted,
+  and undone turns in a readable grey instead of faded. Colours, sizes and radii
+  come from tokens in `workspace.css`, and the dark palette is written once. The
+  level and send buttons lose their native `title` tooltips and keep their
+  `aria-label`. ([#NN])
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that
