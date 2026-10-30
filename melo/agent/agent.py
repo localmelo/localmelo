@@ -56,9 +56,13 @@ from localmelo.melo.agent._chat import (
     BUDGET_ACCOUNTING,
     BUDGET_HOOK,
     CALL_RECORDER,
+    LEAN_REFLECTION_PROMPT,
+    LEAN_SYSTEM_PROMPT,
     PREFIX_RUN,
     PREFIX_VERSION,
+    REFLECTION_PROMPT,
     RETRY_HOOK,
+    SYSTEM_PROMPT,
     CallTelemetry,
     Chat,
     RequestStats,
@@ -1794,6 +1798,20 @@ class Agent:
             fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
             tool_guard=self.options.reflect_tool_guard,
             window_reflection=self._reflection_in_window,
+            # lean_output keeps the full system prompt in the compress modes,
+            # whose note before each tool call is text between tool calls, and
+            # the full reflection prompt under the utility gate, which reads
+            # the estimates the lean one leaves out.
+            system_prompt=(
+                LEAN_SYSTEM_PROMPT
+                if self.options.lean_output and not instruction
+                else SYSTEM_PROMPT
+            ),
+            reflection_prompt=(
+                LEAN_REFLECTION_PROMPT
+                if self.options.lean_output and self.options.reflection_gate == "flags"
+                else REFLECTION_PROMPT
+            ),
         )
 
         names = (

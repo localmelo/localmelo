@@ -2377,6 +2377,10 @@ def _build_direct_mode_agent(
     memory directory that *options* name is created just before the Agent is
     built, after every refusal, so a refused run leaves no directory behind
     (see :func:`_make_memory_dir`).
+
+    A task given on the command line runs with ``lean_output`` when the config
+    (``[agent] lean_output``, or ``-X agent.lean_output=true``) says so; the
+    ``melo ""`` loop does not.
     """
     if parser is None:
         parser = _build_parser()
@@ -2464,6 +2468,12 @@ def _build_direct_mode_agent(
         config_value_error("[agent] brief_items must be a boolean")
     if getattr(args, "brief_items", None) is None and budget_cfg.agent.brief_items:
         options = dataclasses.replace(options, brief_items=True)
+
+    if not isinstance(budget_cfg.agent.lean_output, bool):
+        config_value_error("[agent] lean_output must be a boolean")
+    # A task given on the command line (--brief included), not the `melo ""` loop.
+    if budget_cfg.agent.lean_output and "".join(args.query):
+        options = dataclasses.replace(options, lean_output=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint
