@@ -1594,6 +1594,11 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   overflow-wrap: anywhere;
   line-height: 1.7;
 }
+.work-group > .thinking-body {
+  padding: 9px 13px;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
 .reflection-body .muted {
   color: var(--muted);
 }

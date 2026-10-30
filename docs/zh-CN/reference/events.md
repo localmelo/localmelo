@@ -140,7 +140,7 @@ asyncio.run(main())
 | `note` | 在压缩模式中，当笔记、反思的笔记或尝试摘要进入仅驻留 RAM 的笔记存储时。 | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | 每次工具调用交给执行器之前，也包括之后被检查拒绝的调用。 | `step`, `call_id`, `name`, `arguments`, `preview` |
 | `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
-| `notice` | 一次尝试结束时、模型给出空回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
+| `notice` | 一次尝试结束时、模型给出空回复或只含未完成思考的回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | 召回块进入请求时：在 `start`、`attempt`、`step`，或由 `recall` 工具触发。 | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | 在一次尝试之后的反思开始之前。 | `attempt`, `failure_type` |
 | `reflection` | 反思的效果确定之后。 | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
@@ -178,7 +178,7 @@ asyncio.run(main())
 
 - `step`：回复所属的步骤。
 - `content`：回复的文本。
-- `thinking`：服务器在正文之外发送的推理，否则为 `""`。兼容 OpenAI 的服务器以 `reasoning_content` 或 `reasoning` 发送，Ollama 以 `thinking` 发送。Ollama 的提供方还会把它放在 `content` 的开头，作为一个 `<think>` 块；没有推理解析器的服务器只把它留在那里。
+- `thinking`：服务器在正文之外发送的推理，否则为 `""`。兼容 OpenAI 的服务器以 `reasoning_content` 或 `reasoning` 发送，Ollama 以 `thinking` 发送。Ollama 的提供方还会把它放在 `content` 的开头，作为一个 `<think>` 块；没有推理解析器的服务器只把它留在那里。只含未完成思考的回复（见 `unfinished_answer` 通知）的全部正文都在这里，`content` 为 `""`。
 - `tool_calls`：回复中的调用，每个都是 `{id, name, arguments, preview}`。`preview` 与 `tool.started` 上的相同。
 - `usage`：回复的整数 token 计数，例如 `prompt_tokens`；服务器没有发送时为 `{}`。兼容 OpenAI 的服务器发送它们时，其中还包括 `cached_tokens`（来自 `prompt_tokens_details`）和 `reasoning_tokens`（来自 `completion_tokens_details`），在请求要求服务器返回用量（`stream_options.include_usage`）时，流式回复也包含它们。服务器未发送的计数不在 `usage` 中，因此缺少 `cached_tokens` 表示“未报告”，绝不是 0。`reflection` 事件的 `usage` 同样包含它们（对其各个请求求和）；运行的 `RunResult.usage` 保留三个标准计数。
 - `prefix`：本次请求中有多少内容与该运行较早的某个请求（规划或反思）已经发送过的内容相同，以便把缓存未命中追溯到发生了变化的部分；运行的第一个请求为 `null`。智能体根据它发送的消息和工具计算该值，而请求体无论有没有它都相同。它是一个对象：
@@ -275,6 +275,7 @@ CLI 在其计划行出现之前会忽略此事件；会话运行器会保存它�
 | `stuck` | 因相同的工具调用或错误重复出现，一次尝试结束。 | `The same tool calls or errors repeated; the attempt ends.` | `{}` |
 | `budget` | 因一次尝试用完了它的步数上限，该尝试结束。 | `The attempt used its step budget.` | `{}` |
 | `empty_reply` | 模型给出了空回复，localmelo 要求它继续。连续第二次空回复会让运行以 `failed` 结束，且不发出通知。 | `The model returned an empty reply; asking it to continue.` | `{"count": <empty replies in a row>}` |
+| `unfinished_answer` | 回复只含模型未完成的思考（见[工作原理](../concepts/how-it-works.md)）：它的 `assistant.message` 把正文放在 `thinking` 中，`content` 为空，localmelo 再问一次。它按空回复计数；如果它会是连续第二次，运行改以 `failed` 结束，错误为 `melo did not finish an answer`，且不发出通知。 | `The model's reply ended inside its thinking; asking it for its answer.` | `{}` |
 | `no_change` | 仅在 `--brief` 运行中：在一次尝试边界，下一次尝试开始时发现工作区与运行开始时相比没有变化（`git status`、`git diff HEAD` 和未跟踪文件的哈希相同；在 git 树之外从不发生）。下一次尝试会加入一行用户消息 "Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue."，若反思有 next_promising_directions，则以 "Start with: <first next_promising_directions of the reflection>" 结尾。当一次尝试中连续 6 个步骤里哈希自上一次变化（或开始）以来都没有变化时，同样的 kind 带上 `scope: "step"` 出现；此时加入的一行是 "You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue."。 | `Nothing has changed in the workspace yet.` | `{}`（边界）或 `{"scope": "step"}` |
 | `brief_check` | 仅在 `--brief` 运行中（`AgentOptions.brief_check`）：在运行会以 `completed` 结束之前，关卡运行了简报中的一条 `Check:` 命令。 | `The task's check passed.`、`The task's check failed.` 或 `The task's check was refused and did not run.` | `{"round", "command", "exit_code", "duration_s", "refused", "output_tail"}`：`round` 从 1 开始计数关卡的运行次数（在最后一次尝试结束前两步运行的检查也计入）；`command` 已脱敏；`output_tail` 是检查输出的最后 20 行，已脱敏，最多 4,000 个字符；对于被拒绝的检查或没有退出状态的检查（超时），`exit_code` 为 `null`；`refused` 是被拒绝的检查未能运行的原因，否则为 `""`。 |
 | `brief_check_failed` | 关卡放弃：检查失败且已没有重试机会（每次运行允许两次）、没有可供重试的步骤或尝试，或检查被拒绝。运行以 `completed` 结束。 | `The task's check still fails; the run ends completed with failing tests.` | `{"retries": <retries used>}` |
@@ -395,7 +396,7 @@ asyncio.run(main())
 
 - **一次开始，一次结束。** 每个通过参数检查的运行都会先发出 `run.started`（`seq` 为 1），最后发出 `run.finished`。无论状态如何，二者各只发出一次，即使第二次取消打断了收尾也是如此。
 - **工具调用成对出现。** 每个 `tool.started` 之后，都恰好跟着一个具有相同 `call_id` 的 `tool.finished`，且它出现在下一个 `tool.started`、`step.started` 或 `run.finished` 之前，无论状态如何。回复中因运行在其之前停止而从未开始的调用，不会有工具事件：它只出现在 `assistant.message` 的 `tool_calls` 中。
-- **步骤内的顺序。** 先是 `step.started`；然后是规划请求的 `retry` 通知；接着是 `assistant.message`（除非规划失败）；随后是工具事件对，按调用顺序排列；最后是 `stuck`、`budget` 或 `empty_reply` 通知。在默认的 `attempt_policy="reflect"` 下，结束一次尝试的通知之后紧跟 `reflection.started`、反思请求的 `retry` 通知，以及 `reflection`，除非其中某个请求失败或运行被取消。若为 `"none"`，则之后紧跟 `run.finished`。`no_change` 通知在该 `reflection` 之后出现，即下一次尝试开始时。直接回答的 `brief_check` 通知紧跟其 `assistant.message`；`done` 反思的通知则出现在其 `reflection` 事件之前，当失败的检查推翻了 `done` 时，该事件会显示 `continue_run: true` 和 `stop_reason: null`。
+- **步骤内的顺序。** 先是 `step.started`；然后是规划请求的 `retry` 通知；接着是 `assistant.message`（除非规划失败）；随后是工具事件对，按调用顺序排列；最后是 `stuck`、`budget`、`empty_reply` 或 `unfinished_answer` 通知。在默认的 `attempt_policy="reflect"` 下，结束一次尝试的通知之后紧跟 `reflection.started`、反思请求的 `retry` 通知，以及 `reflection`，除非其中某个请求失败或运行被取消。若为 `"none"`，则之后紧跟 `run.finished`。`no_change` 通知在该 `reflection` 之后出现，即下一次尝试开始时。直接回答的 `brief_check` 通知紧跟其 `assistant.message`；`done` 反思的通知则出现在其 `reflection` 事件之前，当失败的检查推翻了 `done` 时，该事件会显示 `continue_run: true` 和 `stop_reason: null`。
 - **进度与其报告的内容一致。** 设置 `progress=True` 时，`run.progress` 紧接在 `run.started` 之后出现，紧接在每个 `step.started`、`tool.finished`（针对已返回的调用）、`reflection.started` 和 `stuck` 通知之后出现，并紧接在 `state` 为 `ended` 的 `run.finished` 之前出现，在所有路径上都是如此。若不设置 `progress=True`，运行的事件与 `run.progress` 出现之前完全相同。
 - **计数与运行相符。** `step.started` 事件的数量就是 `RunResult.steps`，`tool.started` 事件的数量就是 `RunResult.n_tool`。`run.finished` 的 `result` 等于 `run_task` 返回的（或本会返回的）`RunResult` 的 `to_dict()`。运行中的 `assistant.message` 和 `reflection` 事件的 `usage` 加起来，等于 `RunResult.usage` 的 token 计数（`prompt_tokens`、`completion_tokens`、`total_tokens`）。显式推理模式还会在 `RunResult.usage` 中放入 `reasoning_chars`；服务器报告时还会有 `cached_tokens` 或 `reasoning_tokens`，这些都不由任何事件携带。在下列情况下，事件的数量会少于运行的计数，因为回复被计入却没有任何事件携带它：
   - 回复到达之后，结果检查抛出异常，这使运行以 `crashed` 结束；

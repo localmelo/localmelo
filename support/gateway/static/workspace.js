@@ -50,6 +50,7 @@ import {
   toolState,
   turnDuration,
   turnFace,
+  UNFINISHED_ANSWER,
   unreachableUrl,
   workSummary,
 } from "./turns.mjs";
@@ -1116,7 +1117,9 @@ function failureHint(turn, can, error) {
     case "budget_exhausted": return ["melo used all its steps before it finished.", ...own].join(" ");
     case "timeout": return ["The run took too long and was stopped.", ...own].join(" ");
     case "stuck": return "melo repeated itself. Rephrase the request, or try again.";
-    case "failed": return "Try again, or rephrase the request.";
+    case "failed": return error === UNFINISHED_ANSWER
+      ? "The model's reply held only its thinking. Try again, or rephrase the request."
+      : "Try again, or rephrase the request.";
     case "gate_stopped": return "melo judged that another attempt would not help. Rephrase the request, or try again.";
     case "context_budget_exceeded": return "This chat no longer fits the model's context window. Start a new chat, or shorten the request.";
     case "setup_error": return "An MCP server failed to start. Show tools lists what is set up; fix it, then try again.";
@@ -1165,7 +1168,7 @@ function statusNode(turn) {
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
-  if (!stopped && error && !serverUnreachable(turn.status, error)) {
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -1202,20 +1205,34 @@ async function retryTurn(turn) {
   }
 }
 
-function workGroup(turn) {
+// The box around a turn's items: a disclosure under its summary line, or the bare items
+// when the turn has no line to show (a finished chat turn without tool calls or reasoning).
+function workBox(summary, open) {
+  if (!summary) return el("div", "work-group plain");
   const group = el("details", "work-group");
+  group.open = open;
+  group.append(el("summary", "work-summary", summary));
+  return group;
+}
+
+function workGroup(turn) {
   const open =
     !turn.finishedAt ||
     (S.view?.pending.size ?? 0) > 0 ||
     turn.userToggledGroup ||
     turn.status !== "completed";
-  group.open = open;
-  group.append(el("summary", "work-summary", workSummary(turn, { held: heldOf(turn) })));
-  group.addEventListener("toggle", () => {
-    if (group.open !== open) turn.userToggledGroup = group.open;
-  });
+  const summary = workSummary(turn, { held: heldOf(turn) });
+  const group = workBox(summary, open);
+  // A finished turn without tool calls is one line over its reasoning: the reasoning is the
+  // group's body, not a second "Thought" disclosure inside it.
+  const inline = Boolean(turn.finishedAt) && summary === "Thought";
+  if (group.tagName === "DETAILS") {
+    group.addEventListener("toggle", () => {
+      if (group.open !== open) turn.userToggledGroup = group.open;
+    });
+  }
   for (const item of shownItems(turn)) {
-    group.append(itemNode(item, turn));
+    group.append(itemNode(item, turn, { inline }));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
     if (request) group.append(approvalCard(request));
   }
@@ -1233,6 +1250,7 @@ function itemNode(item, turn, context = {}) {
     case "tool":
       return toolCard(item, turn, context);
     case "thinking": {
+      if (context.inline) return el("div", "thinking-body", item.text);
       const card = el("details", "thinking");
       card.open = item.expanded === true;
       const duration =
@@ -2151,9 +2169,10 @@ function turnWork(turn, sessionId, render, empty) {
   const nodes = [];
   if (empty) nodes.push(el("p", "muted", empty));
   else {
-    const group = el("details", "work-group"); group.open = true;
-    group.append(el("summary", "work-summary", workSummary(turn, {})));
-    for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render}));
+    const summary = workSummary(turn, {});
+    const group = workBox(summary, true);
+    const inline = Boolean(turn.finishedAt) && summary === "Thought";
+    for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
     nodes.push(group);
   }
   if (turn.answer) nodes.push(answerNode(turn.answer));

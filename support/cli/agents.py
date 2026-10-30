@@ -184,6 +184,7 @@ class AgentFactory:
                 reasoning_field=self._reasoning_field,
                 retrieval_extra_body=self._retrieval_extra_body,
                 mcp_config=mcp_config,
+                identify=True,
             )
         cfg = self._cfg
         if url is not None:
@@ -198,6 +199,7 @@ class AgentFactory:
             reasoning_field=self._reasoning_field,
             retrieval_extra_body=self._retrieval_extra_body,
             mcp_config=mcp_config,
+            identify=True,
         )
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:

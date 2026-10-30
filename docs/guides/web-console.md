@@ -79,7 +79,11 @@ for you to send or change, and step aside once there is text.
    row while it runs, and the final answer with `Copy response`. Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline, and the pictures the turn made show under the answer
-   (see [Pictures in the answer](#pictures-in-the-answer)).
+   (see [Pictures in the answer](#pictures-in-the-answer)). A turn that answers without tool calls shows its
+   time once, in the line under the answer; its reasoning, when it has some,
+   opens under a `Thought` line. Chats tell the model that it is melo from
+   localmelo and which model and server it runs on, so asking "who are you?"
+   names them (see [What melo says about itself](terminal.md#what-melo-says-about-itself)).
 4. A status row sits above the composer: the same segments as the terminal's
    developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
@@ -400,6 +404,14 @@ network connection, then try again.` and the link stays **Open model settings**,
 since there is no address to change. A run that ended this way also leaves the
 retry lines out of its work box, which the card already says; while it is still
 retrying they show.
+
+A reply that is only the model's unfinished thinking never shows as the
+answer: it is a folded thinking item in the work box, with the line `The
+model's reply ended inside its thinking; asking it for its answer.`, and the
+model is asked once more. When the second reply has no answer either, the card's
+title is `melo did not finish an answer`, the hint `The model's reply held only
+its thinking. Try again, or rephrase the request.`, and the filled button
+**Try again**.
 
 ## Persistence and limits
 
