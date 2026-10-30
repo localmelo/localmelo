@@ -1065,7 +1065,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   folder (`localmelo-workspace`) instead of the model, which every chat shared, and an accent
   dot before the title marks a chat that waits for an approval; developer mode shows the model
   first and the folder after it. Direct mode's stdout and stderr, JSON, exit codes and requests
-  are unchanged. ([#NN])
+  are unchanged. ([#257])
 - The console and the app use plain words by default. The settings call the server **Model
   server** and its address **Server address**, with `The address your model server prints when
   it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the
@@ -1077,7 +1077,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console shows its Locked screen, and always in developer mode (the page now carries `data-mode`
   and `data-locked` on its root element for the app to read). Developer mode keeps every word it
   shows today: **Chat backend**, **Chat API URL**, `Running on your backend`, the badge and the
-  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#NN])
+  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#257])
 - The console and the app point the right way when the model server is down. In the console, a
   run that could not reach the server now says `Could not reach the model server` and asks
   `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the
@@ -1089,7 +1089,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   on its own shows `Its background service quit unexpectedly. Try Again starts it again; Open
   Log shows what happened.` instead of `The gateway was terminated by signal 9.`; the signal or
   exit status goes to `gateway.log`. The provider's error text, direct mode's stdout and stderr,
-  JSON, exit codes and requests are unchanged. ([#NN])
+  JSON, exit codes and requests are unchanged. ([#257])
 - The macOS app builds with the Command Line Tools when the full Xcode is not
   installed. The Swift host is compiled with the developer folder that
   `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
@@ -1877,6 +1877,7 @@ earlier milestones.
 [#251]: https://github.com/localmelo/localmelo/pull/251
 [#254]: https://github.com/localmelo/localmelo/pull/254
 [#255]: https://github.com/localmelo/localmelo/pull/255
+[#257]: https://github.com/localmelo/localmelo/pull/257
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
