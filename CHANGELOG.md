@@ -1098,7 +1098,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   developer mode only, and the approval header names the tool and the folder
   (`shell_exec · in ~/demo-project`); developer mode keeps the permission tier
   (`shell_exec · exec · in ~/demo-project`). Direct mode's stdout and stderr, JSON, exit
-  codes and requests are unchanged ([#NN]).
+  codes and requests are unchanged ([#260]).
 - With no model server running, the first run says exactly how to start one. With nothing
   saved and nothing answering on the usual ports, the first run of `melo` offered
   `http://127.0.0.1:8000/v1` as the server URL, and Enter looped on `✗ …: connection
@@ -1116,7 +1116,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server runs, so the model appears once the server starts (nothing is asked while the
   card is hidden or the tab is). `GET /api/setup/detect` gains `start` in every answer.
   The model servers guide gains a short Ollama section. Direct mode's stdout and stderr,
-  JSON, exit codes and requests are unchanged ([#NN]).
+  JSON, exit codes and requests are unchanged ([#260]).
 - `melo serve` before any setup asks what the first run asks. With no config file and
   a terminal it printed `Welcome to localmelo.` and opened the eight-way backend menu with
   MLC as the default, even while a model server ran on this computer. Outside developer
@@ -1126,7 +1126,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server found while a backend is saved. The startup lines name the model and its server
   (`Model: Qwen3-8B-4bit on oMLX`) where they named a backend key (`Chat: vllm`); the
   `Gateway:` line, which the macOS app reads, is unchanged. The gateway's API, direct
-  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#260]).
 - Coming back to a chat in the terminal reads plainly. The exit line says
   `◆ Saved "What is this project?". Continue it with: melo -c` when the chat is the
   newest of the folder melo ran in, and still gives `Resume it with: melo -r ID`
@@ -1986,6 +1986,7 @@ earlier milestones.
 [#257]: https://github.com/localmelo/localmelo/pull/257
 [#258]: https://github.com/localmelo/localmelo/pull/258
 [#259]: https://github.com/localmelo/localmelo/pull/259
+[#260]: https://github.com/localmelo/localmelo/pull/260
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
