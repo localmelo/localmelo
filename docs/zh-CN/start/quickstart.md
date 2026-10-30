@@ -58,6 +58,8 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 
 答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
 
+不带 `--chat-model` 时，melo 会先询问服务器有哪些模型，使用其唯一的对话模型，或服务器说明已在内存中的那一个。有多个对话模型且不知道哪个在内存中时，它会以退出码 2 停止并列出这些模型，因为请求一个尚未加载的模型可能让服务器加载一个很大的模型：请传入 `--chat-model <id>`。
+
 使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx) 时，填写它的 URL 和模型文件夹的名称：
 
 ```bash

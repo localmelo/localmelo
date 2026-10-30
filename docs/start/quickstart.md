@@ -71,6 +71,12 @@ The answer is printed on stdout, and the command exits with code 0
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
 
+Without `--chat-model`, melo first asks the server which models it has and
+uses its only chat model, or the one the server says is in memory. With
+several chat models and none known to be in memory it stops with exit code 2
+and lists them, because asking for a model that is not loaded can make the
+server load a large one: pass `--chat-model <id>`.
+
 With [oMLX](../guides/model-servers.md#serve-a-model-with-omlx), use its URL
 and the name of a model folder:
 

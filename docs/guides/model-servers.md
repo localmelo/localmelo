@@ -77,11 +77,12 @@ explains why. To use it instead of Ollama:
 
    oMLX loads the model on its first request, which can take a minute for a
    large model. If that request times out, add `--request-timeout 600`.
-   Name the model with `--chat-model` when you give a task: without it melo
-   requests a model called `default`. `melo --base-url http://127.0.0.1:8000/v1`
-   without a task opens the interactive UI on the only chat model oMLX lists
-   or on its one loaded model; with several chat models and not exactly one
-   loaded, it exits 2, lists them and asks for `--chat-model <id>`.
+   Without `--chat-model`, melo asks oMLX which models it has and uses the
+   only chat model or the one that is loaded, for a task and for
+   `melo --base-url http://127.0.0.1:8000/v1` without a task (the interactive
+   UI); with several chat models and not exactly one loaded, it exits 2, lists
+   them and asks for `--chat-model <id>`. Name the model with `--chat-model`
+   to skip that lookup.
 
 To make oMLX your default, run `melo` in a terminal before any configuration
 is saved: it finds oMLX on port 8000, lists its models and saves the one you

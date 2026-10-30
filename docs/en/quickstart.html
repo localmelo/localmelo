@@ -498,14 +498,14 @@ brew install jundot/omlx/omlx</code></pre>
             <p>
               oMLX loads the model on its first request, which can take a
               minute for a large model. If that request times out, add
-              <code>--request-timeout 600</code>. Name the model with
-              <code>--chat-model</code> when you give a task: without it melo
-              requests a model called <code>default</code>.
-              <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
-              task opens the interactive UI on the only chat model oMLX lists or
-              on its one loaded model; with several chat models and not exactly
+              <code>--request-timeout 600</code>. Without
+              <code>--chat-model</code>, melo asks oMLX which models it has and
+              uses the only chat model or the one that is loaded, for a task and
+              for <code>melo --base-url http://127.0.0.1:8000/v1</code> without a
+              task (the interactive UI); with several chat models and not exactly
               one loaded, it exits 2, lists them and asks for
-              <code>--chat-model &lt;id&gt;</code>.
+              <code>--chat-model &lt;id&gt;</code>. Name the model with
+              <code>--chat-model</code> to skip that lookup.
             </p>
           </li>
         </ol>

@@ -235,7 +235,7 @@ brew install jundot/omlx/omlx</code></pre>
           <li>
             <p>用这个 ID 运行一个任务：</p>
             <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
-            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。给出任务时请用 <code>--chat-model</code> 指定模型：不指定时 melo 会请求名为 <code>default</code> 的模型。不带任务运行 <code>melo --base-url http://127.0.0.1:8000/v1</code>，会使用 oMLX 唯一的对话模型或唯一已加载的模型打开交互式界面；有多个对话模型、且不是恰好一个已加载时，以退出码 2 结束，列出这些模型，并要求使用 <code>--chat-model &lt;id&gt;</code>。</p>
+            <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。不指定 <code>--chat-model</code> 时，melo 会询问 oMLX 有哪些模型，并使用唯一的对话模型或已加载的那一个，对任务和不带任务的 <code>melo --base-url http://127.0.0.1:8000/v1</code>（交互式界面）都是如此；有多个对话模型、且不是恰好一个已加载时，以退出码 2 结束，列出这些模型，并要求使用 <code>--chat-model &lt;id&gt;</code>。用 <code>--chat-model</code> 指定模型可以跳过这次查询。</p>
           </li>
         </ol>
         <p>要把 oMLX 设为默认：在还没有任何配置时，在终端里运行 <code>melo</code>，它会在 8000 端口找到 oMLX，列出模型并保存你选的那个；<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">首次运行（英文）</a>展示了整个过程。oMLX 在第一个请求到达时才加载模型，因此列出的模型不一定在内存中，加载大模型可能要几分钟。所以设置按下面的方式选择；列出多个对话模型时，它会向 oMLX 询问哪些模型已加载（<code>GET /v1/models/status</code>，最多等一秒）：</p>
