@@ -111,25 +111,52 @@ private func counted(_ n: Int, _ noun: String) -> String {
     "\(n) \(noun)\(n == 1 ? "" : "s")"
 }
 
-/// The quit dialog's text. Quitting stops the gateway and so its chats and
-/// tasks; runs and terminal chats belong to other processes and go on.
+/// The quit dialog's text: what quitting stops, in the words people use for it. Quitting stops the
+/// gateway and so its chats and tasks; runs and terminal chats belong to other processes and go on.
 func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
-    let generic = "Quitting stops the gateway and any running tasks."
+    let generic = "Quitting stops anything that is running."
     guard let counts = counts else {
-        return statusKnown ? generic : "The task status is unavailable. " + generic
+        return statusKnown ? generic : "Could not check what is running. " + generic
     }
     let stops = [(counts.tasks, "task"), (counts.chats, "chat")]
         .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
     let goes = [(counts.runs, "run"), (counts.terminal, "terminal chat")]
         .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
     var text = generic
-    if !stops.isEmpty {
-        let verb = counts.tasks + counts.chats == 1 ? "is" : "are"
-        text = "\(stops.joined(separator: " and ")) \(verb) running. "
-            + "Quitting stops the gateway and everything running in it."
+    if stops.count == 1 {
+        text = "Quitting stops \(stops[0])."
+    } else if stops.count > 1 {
+        text = "Quitting stops what is running: \(stops.joined(separator: " and "))."
     }
     if !goes.isEmpty { text += " Not affected: \(goes.joined(separator: " and "))." }
     return text
+}
+
+/// What the console page says about itself that the app's menu needs: `data-mode` and `data-locked` on
+/// its root element (set by `refreshMode` and `lock` in workspace.js).
+struct PageState: Equatable {
+    var developer = false
+    var locked = false
+}
+
+let pageStateScript = """
+JSON.stringify({mode: document.documentElement.dataset.mode || '', locked: document.documentElement.dataset.locked === '1'})
+"""
+
+/// The page's state from `pageStateScript`'s answer; anything else (no page yet, damaged text) is the default.
+func pageState(_ json: String?) -> PageState {
+    guard let data = json?.data(using: .utf8),
+          let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return PageState() }
+    return PageState(developer: body["mode"] as? String == "developer", locked: body["locked"] as? Bool == true)
+}
+
+/// Sign-in attempts that may fail in a row (they retry twice a second) before the menu offers "Sign In Again".
+let signInFailureLimit = 4
+
+/// "Sign In Again" is for a sign-in that failed: the app's own attempts keep failing, or the console shows
+/// its Locked screen. Developer mode always has it.
+func offersSignIn(failures: Int, page: PageState) -> Bool {
+    page.developer || page.locked || failures >= signInFailureLimit
 }
 
 func ownsListener(_ pids: [Int32]?, child: Int32) -> Bool {
@@ -220,7 +247,14 @@ func failureNotice(reason: String, ready: Bool) -> FailureNotice {
                   reason: reason, actions: FailureAction.allCases)
 }
 
-func gatewayExitMessage(status: Int32, signalled: Bool) -> String {
+/// What the window says when the gateway quits on its own: no signal or status, which mean nothing to
+/// most people and go to the log. `detail` is a fact worth saying, such as who holds the port now.
+func gatewayExitMessage(detail: String = "") -> String {
+    "Its background service quit unexpectedly.\(detail) Try Again starts it again; Open Log shows what happened."
+}
+
+/// The same exit as the log records it.
+func gatewayExitLogLine(status: Int32, signalled: Bool) -> String {
     signalled ? "The gateway was terminated by signal \(status)." : "The gateway exited (status \(status))."
 }
 

@@ -1113,6 +1113,40 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   status row and `GET /api/sessions/{id}/status`: their payload is unchanged. Direct
   mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
 
+- The console is easier on a phone. Under 700 px (or on a touch screen) the header drops the
+  model chip while it only names the model, which the composer already shows, so a chat's
+  title is no longer cut to two words; the chip stays when it warns (`Model offline`, `No
+  model`). `Enter to send · Shift + Enter for a new line` and `⌘ K` are hidden there, and the
+  next steps of a failed turn (Try again, Change the server address, Copy error) are outlined
+  buttons at least 44 px tall instead of text links. In the sidebar, a chat's second line is its
+  folder (`localmelo-workspace`) instead of the model, which every chat shared, and an accent
+  dot before the title marks a chat that waits for an approval; developer mode shows the model
+  first and the folder after it. Direct mode's stdout and stderr, JSON, exit codes and requests
+  are unchanged. ([#257])
+- The console and the app use plain words by default. The settings call the server **Model
+  server** and its address **Server address**, with `The address your model server prints when
+  it starts, such as http://127.0.0.1:8000/v1.` and `Changes apply to your next message.`; the
+  list of models says `Lists the models this server offers.` A running chat reads `Working…`
+  beside Stop, the status row drops its `step N`, and the sidebar's **LOCAL** badge is gone. In
+  the macOS app the quit dialog says `Quitting stops 1 chat.` (or `Quitting stops what is
+  running: 2 tasks and 1 chat.`) and no longer mentions the gateway, and **Sign In Again** is
+  left out of the menus until it helps: after four failed sign-in attempts in a row, while the
+  console shows its Locked screen, and always in developer mode (the page now carries `data-mode`
+  and `data-locked` on its root element for the app to read). Developer mode keeps every word it
+  shows today: **Chat backend**, **Chat API URL**, `Running on your backend`, the badge and the
+  step. Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged. ([#257])
+- The console and the app point the right way when the model server is down. In the console, a
+  run that could not reach the server now says `Could not reach the model server` and asks
+  `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the
+  red line that repeated the error, and the work box's retry line, are gone, and the provider's
+  own text stays under Details. The filled button is **Try again** (**Continue** when the run had
+  used tools), and **Change the server address** is a link beside it; a hosted model reads
+  `Check your network connection, then try again.` and keeps **Open model settings**. A server
+  that answered with an error keeps its card as before. In the macOS app, a gateway that quits
+  on its own shows `Its background service quit unexpectedly. Try Again starts it again; Open
+  Log shows what happened.` instead of `The gateway was terminated by signal 9.`; the signal or
+  exit status goes to `gateway.log`. The provider's error text, direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged. ([#257])
 - The macOS app builds with the Command Line Tools when the full Xcode is not
   installed. The Swift host is compiled with the developer folder that
   `DEVELOPER_DIR` names when it is set, else `/Applications/Xcode.app`, else the
@@ -1900,6 +1934,7 @@ earlier milestones.
 [#251]: https://github.com/localmelo/localmelo/pull/251
 [#254]: https://github.com/localmelo/localmelo/pull/254
 [#255]: https://github.com/localmelo/localmelo/pull/255
+[#257]: https://github.com/localmelo/localmelo/pull/257
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
