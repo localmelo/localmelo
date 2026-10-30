@@ -1028,6 +1028,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Reflections survive two more one-character slips in their JSON. With the default
+  `reflection_gate flags`, a reply that holds no reflection already gets one repair of
+  the `{...}` the decoder rejects (a `]` or `}` that no opener matches, a comma before a
+  closer, raw line breaks and tabs in strings). It now also gets one for a backslash
+  before a character that JSON has no escape for, such as `\;` in a string (the
+  backslash is doubled, so the text reads as the two characters `\;`), and for an array
+  that the next key breaks off (a `]` is inserted before the comma that precedes that
+  key). A repair changes the text at the decoder's error and nowhere else and counts
+  only when the result holds an object with a valid `recommended_action`; a reply that
+  needs two repairs, a second invalid escape included, stays unreadable. The
+  `reflection` event's `repaired` can now also be `invalid_escape` or `unclosed_array`.
+  In a replay of 72 reflection replies from a benchmark run, 4 stayed unreadable after
+  the earlier repair and 2 do now (a tool call, and a list written without its opening
+  bracket). Fewer reflections are asked for again; request bodies are unchanged. ([#NN])
+
 - The web console starts with fewer choices. In default mode the header shows the
   running chip and a model chip (the model's name, "Model offline" or "No model")
   that opens settings. The chat's level (P2), Details and the GPU-lock line are for
