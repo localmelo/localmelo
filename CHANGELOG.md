@@ -155,7 +155,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
-- oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#NN]).
+- oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#237]).
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
 - Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
@@ -979,7 +979,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (a `--base-url` run is unaffected). On macOS the no-server hint names `omlx serve` before
   `ollama serve`. A model that oMLX serves under an alias is marked `(loaded)` and can be the
   default under the alias, because its status reply names the alias (`model_alias`). The requests
-  of `melo --base-url … --chat-model …` runs are unchanged ([#NN]).
+  of `melo --base-url … --chat-model …` runs are unchanged ([#237]).
 
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
@@ -1498,6 +1498,7 @@ earlier milestones.
 [#231]: https://github.com/localmelo/localmelo/pull/231
 [#232]: https://github.com/localmelo/localmelo/pull/232
 [#236]: https://github.com/localmelo/localmelo/pull/236
+[#237]: https://github.com/localmelo/localmelo/pull/237
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
