@@ -189,7 +189,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   approval to answer (`sessions.pending_approvals` counted open chats only and named
   none). The build draws `LocalMelo.icns` from one SVG mark, `macos/mark.svg`, with
   `sips` and `iconutil` and names it in the plist, so the Dock and every dialog show it
-  instead of the generic icon. The item's text title (`localmelo · N`) is gone. ([#NN])
+  instead of the generic icon. The item's text title (`localmelo · N`) is gone. ([#241])
 
 - One command builds and installs the macOS app on this Mac. `uv run python
   scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
@@ -1615,6 +1615,7 @@ earlier milestones.
 [#238]: https://github.com/localmelo/localmelo/pull/238
 [#239]: https://github.com/localmelo/localmelo/pull/239
 [#240]: https://github.com/localmelo/localmelo/pull/240
+[#241]: https://github.com/localmelo/localmelo/pull/241
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
