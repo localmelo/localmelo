@@ -829,7 +829,8 @@ def test_saving_settings_never_writes_an_x_setting(
     client: TestClient, isolated_config: Path
 ) -> None:
     _saved_cfg()
-    config.set_overrides({"cli.stream": True, "ui.mode": "developer"})
+    # Streaming is on by default: the override must be off to differ from it.
+    config.set_overrides({"cli.stream": False, "ui.mode": "developer"})
     first = client.get("/api/settings").json()
     assert first["mode"] == "developer"  # this process runs with the setting
     resp = client.put("/api/settings", json=_put_body(first["revision"]))
@@ -842,7 +843,7 @@ def test_saving_settings_never_writes_an_x_setting(
     )
     assert resp.status_code == 200 and "[ui]" not in isolated_config.read_text()
     config.set_overrides({})
-    assert config.load().ui.mode == "default" and config.load().cli.stream is False
+    assert config.load().ui.mode == "default" and config.load().cli.stream is True
 
 
 def test_saving_without_a_mode_does_not_write_a_ui_table(
