@@ -24,6 +24,11 @@ class StreamDisplay(Protocol):
     ahead of the stored ``step.started`` event); ``opened`` starts one attempt;
     a retry opens again. ``held`` says text arrived but none is releasable yet;
     ``content`` carries a safe delta; ``closed`` ends the attempt, once.
+
+    A display may also define ``whole()``. The agent calls it, between
+    ``opened`` and ``closed``, when the server sent the reply whole although a
+    stream was asked for (``StreamFragment.whole``); a display without it is
+    simply not told.
     """
 
     reasoning_tags: ReasoningTags | None

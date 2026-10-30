@@ -8,6 +8,7 @@ from typing import Any
 from localmelo.melo.schema import RunResult
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.render import (
+    SERVER_WHOLE,
     STREAM_BUFFERED,
     STREAM_LIVE_LINES,
     LiveState,
@@ -299,3 +300,73 @@ def test_a_reply_that_streamed_or_has_a_hint_is_not_noted() -> None:
     out, renderer = _renderer({"stub-model": "none"})
     _reply(renderer, "Hello there\n")
     assert STREAM_BUFFERED not in " ".join(out.text().split())
+
+
+def _whole(renderer: TurnRenderer, text: str = "Hello there") -> None:
+    """One planning request that the server answered whole, then the turn's end."""
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.whole()
+    feed.closed()
+    _event(renderer, "assistant.message", content=text, tool_calls=[])
+    _finish(renderer, result=text)
+
+
+def _said(out: RecordingOut, words: str) -> int:
+    return " ".join(out.text().split()).count(words)
+
+
+def test_a_server_that_sends_replies_whole_is_noted_once() -> None:
+    for tags in (None, {"stub-model": "none"}):  # the model's hint does not matter
+        out, renderer = _renderer(tags)
+        _whole(renderer)
+        assert _said(out, SERVER_WHOLE) == 1
+        renderer.begin_turn("again")
+        _whole(renderer, "Hello again")
+        assert _said(out, SERVER_WHOLE) == 1
+        assert out.text().count("● Hello again") == 1
+
+
+def test_the_whole_reply_note_is_one_dim_line_after_the_footer() -> None:
+    out, renderer = _renderer()
+    _whole(renderer)
+    lines = out.text().splitlines()
+    note = [n for n, line in enumerate(lines) if SERVER_WHOLE in line]
+    assert len(note) == 1
+    assert lines[note[0] - 1].startswith("✻ Worked for")
+    assert lines[note[0]].startswith("· ") and lines[note[0]].count("·") == 1
+    assert "Worked for" not in lines[note[0]]
+
+
+def test_the_note_that_a_model_has_no_hint_is_not_added_to_it() -> None:
+    out, renderer = _renderer()  # no hint: a reply released whole would say so too
+    _whole(renderer)
+    assert _said(out, STREAM_BUFFERED) == 0
+
+
+def test_a_reply_that_streamed_does_not_say_the_server_sends_replies_whole() -> None:
+    out, renderer = _renderer({"stub-model": "none"})
+    _reply(renderer, "line one\n", "line two\n")
+    assert _said(out, SERVER_WHOLE) == 0
+
+
+def test_the_whole_reply_note_waits_for_a_turn_that_completes() -> None:
+    out, renderer = _renderer()
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.whole()
+    feed.closed()
+    _finish(renderer, status="failed")
+    assert _said(out, SERVER_WHOLE) == 0
+    renderer.begin_turn("again")
+    _whole(renderer)
+    assert _said(out, SERVER_WHOLE) == 1
+
+
+def test_a_whole_reply_shows_nothing_live_before_it_is_complete() -> None:
+    _, renderer = _renderer()
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.whole()
+    assert "thinking" in _rows(renderer.live).lower()  # type: ignore[arg-type]
+    assert SERVER_WHOLE not in _rows(renderer.live)  # type: ignore[arg-type]

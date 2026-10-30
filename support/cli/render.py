@@ -95,6 +95,11 @@ STREAM_BUFFERED: Final = (
     "(see Streamed replies)."
 )
 
+# What a server that does not stream means for the replies of this session.
+SERVER_WHOLE: Final = (
+    "This server sends replies whole; melo shows them when they are complete."
+)
+
 _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
 _POST_FAILED: Final = re.compile(r"^POST \S+ failed (?:with )?")
 # The longest reason a run's end shows after its title.
@@ -355,6 +360,9 @@ class StreamFeed:
     def content(self, delta: str) -> None:
         self._renderer.stream_content(delta)
 
+    def whole(self) -> None:
+        self._renderer.stream_whole()
+
     def closed(self) -> None:
         self._renderer.stream_closed()
 
@@ -399,6 +407,10 @@ class TurnRenderer:
         self._stream_chunks = 0
         self._buffered = False
         self._noted: set[str] = set()
+        # Whether this turn's server sent a reply whole after a stream was
+        # asked for, and whether the session was told so (once).
+        self._whole = False
+        self._whole_told = False
         self._backend = backend
         self._clock = clock
         self.live: LiveState | None = None
@@ -470,6 +482,7 @@ class TurnRenderer:
         self._stream_step = 0
         self._stream_open = False
         self._buffered = False
+        self._whole = False
         self._turn += 1
         self._call_number = 0
 
@@ -524,6 +537,10 @@ class TurnRenderer:
             self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
             self.live.stream_held = False
             self.live.activity = "Replying"
+
+    def stream_whole(self) -> None:
+        """The server sent the reply whole after a stream was asked for."""
+        self._whole = True
 
     def stream_closed(self) -> None:
         self._stream_open = False
@@ -1286,6 +1303,11 @@ class TurnRenderer:
             ):
                 self._noted.add(model)  # once per model, after its first whole reply
                 self.out.print(_marked(symbols.dot, "muted", Text(STREAM_BUFFERED)))
+            if self._whole and result.status == "completed" and not self._whole_told:
+                self._whole_told = True  # once per session, after the first one
+                self.out.print(
+                    _marked(symbols.dot, "muted", Text(SERVER_WHOLE, style="muted"))
+                )
 
     def _print_run_end(self, status: str, error: str, cause: str = "") -> None:
         """What happened to a run that did not complete, then what to do."""

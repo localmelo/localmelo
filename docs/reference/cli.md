@@ -553,9 +553,11 @@ These options apply to `melo` without a task.
   hint tells the UI how the model frames reasoning; a model with no hint shows
   its reply when complete. The UI draws only redacted released text in the live
   area, labels provisional text that did not become the final answer, and prints
-  the final answer once. A provider without streaming sends a complete reply.
-  Direct mode and stdin-closed runs never stream. See
-  [Streamed replies](../guides/terminal.md#streamed-replies).
+  the final answer once. A provider without streaming sends a complete reply,
+  and so does a server that ignores a streamed request or closes the stream
+  before sending anything: melo uses its whole reply, asks it once more without
+  streaming when needed, and says so once. Direct mode and stdin-closed runs
+  never stream. See [Streamed replies](../guides/terminal.md#streamed-replies).
 - Text attachments in the interactive UI: `/attach PATH` stages one file
   (quote paths with spaces), `/attachments` lists staged files, and `/detach N`
   or `/detach all` removes them. Explicit selection from `@` file completion

@@ -208,7 +208,9 @@ from-the-child
 
 ### 流式回复
 
-交互式界面会在模型写出回复的同时把它流式显示出来，而且这是默认行为：它向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。`/stream off` 为之后的轮次关闭流式，`melo -X cli.stream=false` 只关闭这一次运行，`melo config set cli.stream false` 则永久关闭。无法响应流式请求的模型服务器会让每一轮都失败，并显示 `Could not get an answer from the model server: Streaming response ended before completion`；请为它关闭流式。
+交互式界面会在模型写出回复的同时把它流式显示出来，而且这是默认行为：它向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。`/stream off` 为之后的轮次关闭流式，`melo -X cli.stream=false` 只关闭这一次运行，`melo config set cli.stream false` 则永久关闭。
+
+不支持流式输出的模型服务器无需任何设置。当它用一个普通的 JSON 响应体回答流式请求，或在发出任何内容之前就关闭了流时，melo 会使用这个回复（或不带流式、把同一个问题再发送一次），并且在 melo 退出之前不再请求该服务器流式输出。此时回复在完成后才会显示，与 `/stream off` 时相同，melo 会只说明一次：`This server sends replies whole; melo shows them when they are complete.` 如果流在已经收到部分回复之后中断，仍然是错误：`Could not get an answer from the model server: Streaming response ended before completion`。
 
 回复能否边写边显示，取决于模型如何标记推理，这由 `config.toml` 中按模型设置的提示声明：
 

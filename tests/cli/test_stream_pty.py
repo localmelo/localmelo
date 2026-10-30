@@ -15,6 +15,7 @@ from pathlib import Path
 import pyte
 import pytest
 
+from localmelo.support.cli.render import SERVER_WHOLE
 from localmelo.tests.cli.test_e2e_pty import Melo
 from localmelo.tests.fixtures.stub_llm import StubServer, load_scenarios
 
@@ -245,4 +246,61 @@ def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
     text = screen(term)
     assert text.count("● Streaming line one.") == 1
     assert "partial reply" not in text
+    assert term.quit() == 0
+
+
+def _asked_to_stream(server: StubServer) -> list[bool]:
+    """Per planning request the server saw, whether it asked for a stream."""
+    return [request.get("stream") is True for request in server.requests]
+
+
+@pytest.mark.parametrize(
+    "scenario,reply,asked",
+    [
+        # One JSON body answers the first request; the second turn does not ask.
+        ("stream_ignored", "This reply came whole, in one body.", [True, False]),
+        # The first request is asked again at once; the second turn does not ask.
+        (
+            "stream_closed",
+            "This reply needed a second request.",
+            [True, False, False],
+        ),
+    ],
+    ids=["ignores stream", "closes the stream at once"],
+)
+def test_a_server_that_does_not_stream_still_answers_every_turn_and_says_so_once(
+    streamed: Callable[..., Melo],
+    servers: list[StubServer],
+    scenario: str,
+    reply: str,
+    asked: list[bool],
+) -> None:
+    """With streaming on by default, neither server fails a turn."""
+    term = streamed(scenario, hint=None, stream=None)
+    term.see("Ask melo")
+    term.type("plain please\r")
+    term.see("Worked for")
+    first = " ".join(screen(term).split())
+    assert first.count(f"● {reply}") == 1
+    assert first.count(SERVER_WHOLE) == 1
+    assert "Could not get an answer" not in first
+    assert "reasoning format is set" not in first  # the other whole-reply note
+    term.type("plain again\r")
+    term.read_until(lambda out: out.count(b"Worked for") >= 2)
+    text = " ".join(screen(term).split())
+    assert text.count(f"● {reply}") == 2
+    assert text.count(SERVER_WHOLE) == 1  # once, not once per turn
+    assert _asked_to_stream(servers[0]) == asked
+    assert term.quit() == 0
+
+
+def test_a_stream_that_breaks_after_part_of_a_reply_is_not_asked_again(
+    streamed: Callable[..., Melo], servers: list[StubServer]
+) -> None:
+    term = streamed("stream_drop")
+    term.see("Ask melo")
+    term.type("drop please\r")
+    term.see("Could not get an answer from the model server: Streaming response")
+    assert SERVER_WHOLE not in " ".join(screen(term).split())
+    assert all(_asked_to_stream(servers[0]))  # no request without streaming
     assert term.quit() == 0

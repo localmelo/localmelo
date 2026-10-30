@@ -1065,7 +1065,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   replies).`). `/stream on` and `/stream off` answer `Streaming on.` and `Streaming off.`
   with that sentence (they said `Live streaming on · conservative until declared.`).
   `/stream off`, `melo -X cli.stream=false` and `melo config set cli.stream false` turn
-  it off. Direct mode, workers and the gateway never stream: their requests, output and
+  it off. A model server that does not stream still answers every turn: a reply it sends
+  as one JSON body is used as it is, and a stream that closes before it sent anything is
+  asked for again once without streaming. The provider then stops asking that server to
+  stream, and melo says so once (`This server sends replies whole; melo shows them when
+  they are complete.`). A stream that breaks after part of a reply arrived still fails the
+  turn. Direct mode, workers and the gateway never stream: their requests, output and
   exit codes are unchanged ([#NN]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,

@@ -412,9 +412,17 @@ default: it asks the provider for a streamed planning reply and draws only text
 the release filter has already redacted, in the live area, at the app's redraw
 rate; it never writes raw deltas to the terminal. `/stream off` turns it off
 for later turns, `melo -X cli.stream=false` for one run, and
-`melo config set cli.stream false` for good. A model server that cannot answer
-a streamed request fails each turn with `Could not get an answer from the model
-server: Streaming response ended before completion`; turn streaming off for it.
+`melo config set cli.stream false` for good.
+
+A model server that does not stream needs no setting. When it answers a
+streamed request with one ordinary JSON body, or closes the stream before it
+sends anything, melo uses that reply (or asks the same question once more,
+without streaming) and does not ask that server to stream again until melo
+quits. The reply then shows when it is complete, as it does with `/stream off`,
+and melo says so once: `This server sends replies whole; melo shows them when
+they are complete.` A stream that breaks after part of a reply has arrived is
+still an error: `Could not get an answer from the model server: Streaming
+response ended before completion`.
 
 Whether a reply shows as it is written depends on how its model frames
 reasoning, which a per-model hint in `config.toml` declares:
