@@ -131,14 +131,6 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> Non
         await asyncio.sleep(0.01)
 
 
-def release_later(gate: Any, call: Any, seconds: float) -> asyncio.Task[None]:
-    async def release() -> None:
-        await asyncio.sleep(seconds)
-        gate.finish(call)
-
-    return asyncio.create_task(release())
-
-
 # ── The payload (R16, R28) ──
 
 
@@ -197,21 +189,56 @@ async def test_off_leaves_the_page_payload_as_before(
 # ── The 600 s clock (R17) ──
 
 
+class ClockBox:
+    """A monotonic clock the test advances by hand, in microseconds."""
+
+    def __init__(self) -> None:
+        self.mono_us = 1_000_000
+        self.wall_us = 1_700_000_000_000_000
+
+    def __call__(self) -> Any:
+        from localmelo.support.scheduler import Clock
+
+        return Clock(self.mono_us, self.wall_us)
+
+    def advance(self, seconds: float) -> None:
+        self.mono_us += round(seconds * 1_000_000)
+        self.wall_us += round(seconds * 1_000_000)
+
+
+@pytest.mark.parametrize("slow_start_s", [0.0, 0.5], ids=["prompt", "slow-start"])
 async def test_a_hold_does_not_trip_the_run_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow_start_s: float
 ) -> None:
     manager, _ = make_manager(tmp_path, monkeypatch, policy="fcfs", n_srv=1)
+    # The run's timeout counts the gate's time, which stands still until the
+    # test moves it: how slowly this machine gets the run to its first model
+    # call (the slow start, a real delay longer than the timeout) costs the
+    # timeout nothing, and only the hold is measured.
+    clock = ClockBox()
+    gate = manager._gate
+    gate._clock = clock
+    timeout = 0.2
     try:
         session_id = await create(manager)
-        holder = manager._gate.submit("background")
-        release = release_later(manager._gate, holder, 0.4)
-        try:
-            response = await manager.run(session_id, "hello", timeout=0.2)
-        finally:
-            await release
+        agent = manager._sessions[session_id].agent
+        run_task = agent.run_task
+
+        async def slow_run_task(*args: Any, **kwargs: Any) -> RunResult:
+            await asyncio.sleep(slow_start_s)
+            return await run_task(*args, **kwargs)
+
+        monkeypatch.setattr(agent, "run_task", slow_run_task)
+        holder = gate.submit("background")
+        run = asyncio.create_task(manager.run(session_id, "hello", timeout=timeout))
+        # The call is really held when the hold is on the gate; a hold five
+        # times the timeout long is then over before the call is let through.
+        await wait_until(lambda: gate.held(session_id) != "", timeout=60.0)
+        clock.advance(5 * timeout)
+        gate.finish(holder)
+        response = await asyncio.wait_for(run, 60.0)
         assert response["answer"] == "Hello"
-        # The call really was held, so the timeout path was exercised.
-        assert manager._gate.held_seconds(session_id) >= 0.3
+        assert gate.held_seconds(session_id) >= 5 * timeout
     finally:
         await manager.close_all()
 
@@ -248,23 +275,6 @@ async def test_a_hold_that_starts_near_the_timeout_still_does_not_fire(
         assert manager._gate.held_seconds(session_id) >= 0.1
     finally:
         await manager.close_all()
-
-
-class ClockBox:
-    """A monotonic clock the test advances by hand, in microseconds."""
-
-    def __init__(self) -> None:
-        self.mono_us = 1_000_000
-        self.wall_us = 1_700_000_000_000_000
-
-    def __call__(self) -> Any:
-        from localmelo.support.scheduler import Clock
-
-        return Clock(self.mono_us, self.wall_us)
-
-    def advance(self, seconds: float) -> None:
-        self.mono_us += round(seconds * 1_000_000)
-        self.wall_us += round(seconds * 1_000_000)
 
 
 async def test_a_hold_wakes_when_the_focus_window_expires(
