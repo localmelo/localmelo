@@ -192,6 +192,22 @@ def _context_text(snap: UsageSnapshot) -> str:
     )
 
 
+def context_summary(snap: UsageSnapshot, last_prompt: int = 0) -> str:
+    """How full the context is, in words: ``8% used (2.6k of 32k tokens)``.
+
+    Without a measured request it falls back on *last_prompt*, the prompt of the
+    last request (what the status bar's ``ctx`` shows), and without that says so.
+    """
+    measured = _measured(snap)
+    limit = _count((snap.context or {}).get("input_limit"))
+    if measured and limit:
+        used = f"{format_tokens(measured)} of {format_tokens(limit)} tokens"
+        return f"{_percent(measured, limit)} used ({used})"
+    if measured or last_prompt:
+        return f"{format_tokens(measured or last_prompt)} tokens used"
+    return "not measured yet"
+
+
 def usage_lines(
     snap: UsageSnapshot,
     *,

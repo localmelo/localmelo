@@ -414,6 +414,18 @@ def test_a_dropped_context_gives_its_room_back_to_the_workspace() -> None:
     assert _bar_line(30) == "  stub-model · ~/demo-pro… ask"
 
 
+def test_a_bar_without_a_mode_gives_its_room_to_the_rest() -> None:
+    # The cells and the gap kept for "ask" are the folder's: it is not cut at 41 columns.
+    assert _bar_line(41, "") == "  stub-model · ~/demo-project · ctx 120  "
+    assert "~/demo-proj… · ctx 120" in _bar_line(41)
+
+
+@pytest.mark.parametrize("width", [16, 20, 25, 30, 37, 39, 41, 60])
+def test_a_bar_without_a_mode_never_overflows(width: int) -> None:
+    line = _bar_line(width, "")
+    assert cells(line) == width and not line.strip().startswith("…"), line
+
+
 @pytest.mark.parametrize("width", [16, 20, 22, 25, 27, 30, 40])
 def test_the_status_bar_never_overflows_or_shows_a_bare_ellipsis(width: int) -> None:
     for mode in ("ask", "⚠ YOLO: no approvals"):

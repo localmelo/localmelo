@@ -332,6 +332,27 @@ def test_keys_lists_every_key_once_and_marks_one_run_only(
     assert "chat_backend" not in names and "cli.reasoning_tags" not in names
 
 
+@pytest.mark.parametrize(
+    ("backend", "window", "said"),
+    [
+        ("vllm", None, "64 (local server)"),
+        ("openai", None, "20 (cloud)"),
+        ("vllm", 32, "32"),
+    ],
+)
+def test_keys_and_get_show_the_window_with_its_reason(
+    capsys: pytest.CaptureFixture[str], backend: str, window: int | None, said: str
+) -> None:
+    cfg = config.Config(chat_backend=backend)
+    cfg.agent.window_messages = window
+    config.save(cfg)
+    default = "20 (cloud)" if backend == "openai" else "64 (local server)"
+    row = _config(["keys", "window_messages"], capsys)[1].splitlines()[1]
+    source = "file" if window else "default"
+    assert " ".join(row.split()) == f"agent.window_messages {said} {default} {source}"
+    assert _config(["get", "agent.window_messages"], capsys)[:2] == (0, said + "\n")
+
+
 def test_keys_with_no_match_says_so(capsys: pytest.CaptureFixture[str]) -> None:
     code, out, err = _config(["keys", "zzz"], capsys)
     assert (code, out) == (1, "") and "no setting matches 'zzz'" in err

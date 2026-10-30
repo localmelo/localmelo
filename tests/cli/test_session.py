@@ -29,7 +29,7 @@ from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.picker import ModelRow
 from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.session import STOP_REASON, CliSession
-from localmelo.support.cli.theme import UNICODE
+from localmelo.support.cli.theme import ASCII, UNICODE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -1462,7 +1462,7 @@ async def test_status_shows_the_facts(
     session, out = setup.session, setup.out
     session.enter("hello")
     await setup.idle()
-    session.enter("/status")
+    session.enter("/status all")
     await _until(lambda: "version    melo " in out.text())
     text = out.text()
     assert "model      m1 · " in text and " · reachable" in text
@@ -1470,7 +1470,7 @@ async def test_status_shows_the_facts(
     assert "session    'hello' · " in text and " · 1 turn" in text
     assert "approvals  ask · allowed in this session: none" in text
     assert "tools      4 built-in (3 ask first)" in text
-    assert "memory     2 of 64 messages · " in text
+    assert "memory     2 of 64 (local server) messages · " in text
     assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text
     assert "version    melo " in text
@@ -1497,14 +1497,19 @@ async def test_status_names_the_server_by_what_its_listing_says(
     session, out = setup.session, setup.out
     assert setup.factory.backend.label == "OpenAI-compatible server"
     session.enter("/status")
+    await _until(lambda: "context    " in out.text())
+    assert f"model      m1 · {label} · {URL} · ✓ answers" in out.text()
+    assert setup.factory.backend.label == label
+    session.enter("/status all")
     await _until(lambda: "version    melo " in out.text())
     assert f"model      m1 · {label} · {URL} · reachable" in out.text()
-    assert setup.factory.backend.label == label
 
 
-@pytest.mark.parametrize("cap", [20, 64])
+@pytest.mark.parametrize(
+    ("cap", "shown"), [(20, "20 messages"), (64, "64 (local server) messages")]
+)
 async def test_memory_and_status_show_the_window_cap_the_agent_has(
-    setup: Setup, monkeypatch: pytest.MonkeyPatch, cap: int
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, cap: int, shown: str
 ) -> None:
     async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
         return ["m1"]
@@ -1516,8 +1521,8 @@ async def test_memory_and_status_show_the_window_cap_the_agent_has(
     await session.agent.start()
     session.enter("/memory")
     await _until(lambda: f"Working memory: 0 of {cap} messages" in out.text())
-    session.enter("/status")
-    await _until(lambda: f"memory     0 of {cap} messages" in out.text())
+    session.enter("/status all")  # 64 is the local server's default, 20 a choice
+    await _until(lambda: f"memory     0 of {shown}" in out.text())
 
 
 async def test_status_hides_the_rows_with_nothing_to_say_until_they_have_data(
@@ -1528,7 +1533,7 @@ async def test_status_hides_the_rows_with_nothing_to_say_until_they_have_data(
 
     monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
     session, out = setup.session, setup.out
-    session.enter("/status")
+    session.enter("/status all")
     await _until(lambda: "version    melo " in out.text())
     text = out.text()
     assert not any(
@@ -1542,7 +1547,7 @@ async def test_status_hides_the_rows_with_nothing_to_say_until_they_have_data(
             "data": {"usage": {"prompt_tokens": 400, "cached_tokens": 300}},
         }
     )
-    session.enter("/status")
+    session.enter("/status all")
     await _until(lambda: out.text().count("version    melo ") == 2)
     assert "cache      last request 75% cached" in out.text()
 
@@ -1573,6 +1578,119 @@ async def test_status_prints_the_usage_rows(
     session.enter("/status")
     await _until(lambda: out.text().count("version    melo ") == 2)
     assert "last request 75% cached (300 of 400 prompt tokens)" in out.text()
+
+
+async def _listing(monkeypatch: pytest.MonkeyPatch, error: Exception | None) -> None:
+    """Make /status's model listing succeed, or fail with *error*."""
+
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        if error is not None:
+            raise error
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+
+
+async def test_status_answers_first_in_five_rows(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _listing(monkeypatch, None)
+    session, out = setup.session, setup.out
+    session.enter("/status")
+    await _until(lambda: "context    " in out.text())
+    assert "\nsession    new\n" in out.text()
+    session.enter("hello")
+    await setup.idle()
+    session.enter("/status")
+    await _until(lambda: out.text().count("context    ") == 2)
+    assert out.text().strip().splitlines()[-5:] == [
+        f"model      m1 · OpenAI-compatible server · {URL} · ✓ answers",
+        "folder     ~/work",
+        'session    "hello" · 1 turn',
+        "approvals  asks before running commands or changing files",
+        "context    not measured yet",
+    ]
+    session.enter("/status nope")
+    await _until(lambda: "✗ Use /status or /status all." in out.text())
+
+
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [
+        (
+            DiscoveryError("connection refused", reachable=False),
+            "✗ does not answer (connection refused). Start it, then /status checks again.",
+        ),
+        (
+            DiscoveryError("HTTP 500", reachable=True),
+            "✗ replied with an error (HTTP 500).",
+        ),
+    ],
+)
+async def test_status_says_when_the_server_does_not_answer(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, error: Exception, said: str
+) -> None:
+    await _listing(monkeypatch, error)
+    setup.session.enter("/status")
+    await _until(lambda: "context    " in setup.out.text())
+    rows = setup.out.text().split("model      ")[1].split("\nfolder ")[0].split("\n")
+    # Longer than a row at 80 columns: it continues under itself, not at column 0.
+    assert len(rows) > 1 and all(row.startswith(" " * 11) for row in rows[1:])
+    assert " ".join(map(str.strip, rows)) == (
+        f"m1 · OpenAI-compatible server · {URL} · {said}"
+    )
+
+
+async def test_status_has_no_state_for_a_server_it_cannot_list(setup: Setup) -> None:
+    cloud = url_backend(
+        "", "gpt-4o", source="config"
+    )  # a vendor's API: no URL, no list
+    setup.factory.backend = replace(cloud, key="openai", label="OpenAI")
+    setup.session.enter("/status")
+    await _until(lambda: "context    " in setup.out.text())
+    assert "\nmodel      gpt-4o · OpenAI\n" in setup.out.text()
+
+
+async def test_status_draws_ascii_only_in_ascii_mode(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _listing(monkeypatch, None)
+    monkeypatch.setattr(setup.session.renderer, "symbols", ASCII)
+    setup.session.enter("/status")
+    await _until(lambda: "context    " in setup.out.text())
+    assert setup.out.text().isascii() and f"{URL} - + answers" in setup.out.text()
+
+
+async def test_status_all_wraps_its_rows_under_their_labels(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _listing(monkeypatch, DiscoveryError("connection refused", reachable=False))
+    session = setup.session
+    session.out = narrow = RecordingOut(40)
+    session.enter("/status all")
+    await _until(lambda: "version    melo " in narrow.text())
+    rows = narrow.text().strip().splitlines()
+    labels = ["model", "workspace", "fence", "session", "approvals", "tools"]
+    labels += ["memory", "limits", "files", "version"]
+    assert all(len(row) <= 40 for row in rows)
+    assert all(row.startswith(" " * 11) or row.split()[0] in labels for row in rows)
+    assert sum(not row.startswith(" ") for row in rows) == len(labels)
+    assert "not reachable: connection refused" in " ".join(map(str.strip, rows))
+
+
+async def test_the_status_bar_names_the_approval_mode_only_when_it_is_not_ask(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.status_bar().mode == ""  # ask is what everyone expects
+    for mode in ("auto", "deny"):
+        session.approvals.set_mode(mode)  # type: ignore[arg-type]
+        assert session.status_bar().mode == mode
+    session.approvals.set_mode("ask")
+    session.developer = True
+    assert session.status_bar().mode == "ask"
+    session.approvals.mode = "yolo"
+    assert session.status_bar().mode == "⚠ YOLO: no approvals"
 
 
 async def test_retry_runs_the_last_turn_again(setup: Setup) -> None:

@@ -64,6 +64,13 @@ def _value(key: settings.Key, cfg: config.Config) -> Any:
     return config.overrides().get(key.name, key.default)
 
 
+def _shown(key: settings.Key, value: Any, cfg: config.Config) -> str:
+    """*value* as ``keys`` and ``get`` print it; an unset window with the one it falls back to."""
+    if key.name == "agent.window_messages" and value is None:
+        return config.window_default_label(cfg.chat_backend)
+    return settings.show(value)
+
+
 def _keys(pattern: str) -> int:
     read = _read()
     if read is None:
@@ -82,8 +89,8 @@ def _keys(pattern: str) -> int:
         rows.append(
             (
                 key.name,
-                settings.show(_value(key, cfg)),
-                settings.show(key.default),
+                _shown(key, _value(key, cfg), cfg),
+                _shown(key, key.default, cfg),
                 source + note,
             )
         )
@@ -101,7 +108,7 @@ def _get(name: str) -> int:
     read = _read()
     if read is None:
         return 1
-    print(settings.show(_value(key, read[0])))
+    print(_shown(key, _value(key, read[0]), read[0]))
     return 0
 
 

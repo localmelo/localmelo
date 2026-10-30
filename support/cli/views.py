@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import accumulate
 from typing import Final
 
 from rich.console import Group, RenderableType
@@ -134,6 +135,26 @@ def workspace_warning(workspace: str, symbols: Symbols) -> str | None:
             "every file in it."
         )
     return None
+
+
+def hang(label: str, value: Text, width: int) -> Text:
+    """A labelled row: *label* in the label column, *value* wrapped under itself.
+
+    What does not fit the rest of the row continues on the next rows, indented to
+    where the value began, so nothing wraps back to the first column. The style
+    and spans of *value* are kept.
+    """
+    rows = wrap_words(value.plain, max(8, width - _LABEL_CELLS))
+    out = Text()
+    for number, part in enumerate(value.divide(accumulate(map(len, rows[:-1])))):
+        if number:  # a break just before a space leaves it to open the next row
+            part = part[len(part.plain) - len(part.plain.lstrip(" ")) :]
+        out.append(
+            ("\n" + " " * _LABEL_CELLS) if number else pad_cells(label, _LABEL_CELLS),
+            value.style or None,
+        )
+        out.append_text(part)
+    return out
 
 
 Parts = Sequence[tuple[str, str]]

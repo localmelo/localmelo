@@ -1028,6 +1028,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `/status` says whether melo is ready, in five rows: the model and its server with
+  `✓ answers` (or `✗ does not answer (connection refused). Start it, then /status checks
+  again.`), the folder, the session, what the approvals do in words (`asks before running
+  commands or changing files`) and how full the context is (`8% used (2.6k of 32k tokens)`).
+  `/status all`, and `/status` in developer mode, print every row as before, with two
+  differences: a row longer than the terminal continues under its text instead of at the
+  first column, and the memory row names the window with its reason (`64 (local server)`).
+  The status bar names the approval mode only when it is not `ask`, which gives the
+  other segments that room. `melo config keys` and `melo config get` show an unset
+  `agent.window_messages` as the window it falls back to (`64 (local server)` or
+  `20 (cloud)`) instead of `unset`. Direct mode's stdout and stderr, JSON, exit codes and
+  requests are unchanged ([#NN]).
+
 - `/model` is a list to pick from. Alone, it opens the server's chat models under
   the input box: type to filter, ↑ ↓ to move, Enter to switch and save the model as
   the default, Esc to keep the current one. `✓` marks the current model, `(loaded)`

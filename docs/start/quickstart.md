@@ -193,7 +193,7 @@ melo 0.1.0 · qwen3:8b (/model to change)
 Try: What is this project? · / commands · ctrl+d quit
 ```
 
-The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` shows the server, tools, memory and session.
+The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
 If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one

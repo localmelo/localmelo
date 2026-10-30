@@ -186,10 +186,10 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## What changes
 
-- The memory row of `/status` and of developer mode's banner names the backend
-  and model, for example
+- The memory row of `/status all` (and of `/status` in developer mode) and of
+  developer mode's banner names the backend and model, for example
   `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
-  (`oMLX` where the config file says `omlx`). Without one, `/status` says
+  (`oMLX` where the config file says `omlx`). Without one, `/status all` says
   `no long-term memory (no embedding backend)` and the banner says
   `no long-term memory · melo setup adds one` (or
   `--embedding-base-url adds one` in a `--url` session; the first run
@@ -208,9 +208,9 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## Check it works
 
-- Start `melo` in a terminal and type `/status`: its memory row names the
+- Start `melo` in a terminal and type `/status all`: its memory row names the
   embedding model.
-- Once `/status` is available, its `memory` row comes from the same text.
+- The `memory` row of `/status all` comes from the same text.
 - Run a task that uses a tool, end it, then run a related task. Persistence
   can make admitted entries available to later runs; recall also depends on
   the mode, enabled triggers and relevant matches. See
