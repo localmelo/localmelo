@@ -268,7 +268,9 @@ def test_an_undeclared_model_holds_its_text_until_the_reply_ends(
     term = streamed("stream_slow", hint=None)
     term.see("Ask melo")
     term.type("stream please\r")
-    term.see("✻ thinking…")
+    assert term.read_until(lambda _out: "Thinking…" in screen(term), 30)
+    shown = screen(term)  # the spinner row alone says it: no second row repeats it
+    assert "thinking…" not in shown and "Streaming line one." not in shown
     assert "Streaming line one." not in term.text()  # held, not drawn
     term.see("Worked for")
     text = screen(term)

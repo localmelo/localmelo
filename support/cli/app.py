@@ -49,7 +49,6 @@ from prompt_toolkit.layout.controls import (
     GetLinePrefixCallable,
     UIContent,
 )
-from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import (
     Processor,
     Transformation,
@@ -69,7 +68,11 @@ from localmelo.support.cli.approvals import (
     panel_text,
     session_warning,
 )
-from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
+from localmelo.support.cli.completion import (
+    AttachmentCompletion,
+    CompletionList,
+    SlashCompleter,
+)
 from localmelo.support.cli.picker import (
     ChoicePicker,
     ListPicker,
@@ -545,7 +548,7 @@ class InteractiveApp:
                         lambda: not self._panel_open() and self.picker is None
                     ),
                 ),
-                CompletionsMenu(max_height=COMPLETION_ROWS, scroll_offset=1),
+                CompletionList(symbols, max_rows=COMPLETION_ROWS),
                 ConditionalContainer(
                     Window(FormattedTextControl(self._hint_fragments), height=1),
                     filter=Condition(self._hint_visible),
