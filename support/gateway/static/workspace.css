@@ -40,6 +40,8 @@ button:disabled {
   /* Rows of a diff: what a file write removes and adds. Text and numbers keep 4.5:1 on both. */
   --diff-del: light-dark(#fbe9e6, #3b2420);
   --diff-add: light-dark(#e5f2e3, #213424);
+  /* A card that waits for the person: amber's quiet ground. */
+  --warn-tint: light-dark(#fdf6e8, #2b2618);
   --control: light-dark(#82877a, #767d6c);
   --line: light-dark(#e1e3db, #33372f);
   --primary: var(--ink);
@@ -281,6 +283,53 @@ button:hover:not(:disabled) {
   padding: 13px 10px;
   color: var(--muted);
   font-size: 12px;
+}
+/* ── The main chat, pinned, and its side chats hanging from it ── */
+.main-chat-slot { margin: 0 0 6px; }
+.session-item.main-chat .session-info { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
+.main-face { flex: 0 0 28px; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--raised); box-shadow: 0 0 0 1px var(--line); object-fit: contain; }
+.session-item.main-chat.active .main-face { background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.main-text { display: grid; flex: 1; min-width: 0; }
+.main-text .session-title { font-size: var(--text-body); font-weight: 600; }
+.main-when { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; color: var(--muted); font-size: var(--text-caption); white-space: nowrap; }
+.main-when .attention-dot { margin: 0; }
+.attention-dot.waits { background: var(--warn); }
+/* The thread: side chats sit under the main chat's face, on one quiet line. */
+.session-list.nested { margin-left: 23px; padding-left: 6px; border-left: 1px solid var(--line); }
+.list-day { margin: 12px 4px 2px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; }
+.list-day:first-child { margin-top: 2px; }
+.header-trail { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.header-parent { flex: none; border: 0; background: none; padding: 0; color: var(--accent); font-size: 13px; }
+.header-parent:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+.header-parent::after { content: "›"; margin-left: 6px; color: var(--muted); text-decoration: none; display: inline-block; }
+.welcome > .welcome-link { margin-top: -10px; }
+.welcome-link a { color: var(--accent); font-size: var(--text-small); }
+/* Cards: what a side chat or a task sent back. Events, so they sit apart from the turns. */
+.day-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; }
+.day-divider::before, .day-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.main-card { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; max-width: 600px; margin: 0 0 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.main-card[data-state="waiting"] { border-color: var(--warn); background: var(--warn-tint); }
+.main-card-mark { grid-row: span 2; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--tint); color: var(--ok); font-weight: 700; }
+.main-card[data-state="waiting"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.main-card[data-state="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
+.main-card-text { min-width: 0; }
+.main-card-title { margin: 3px 0 0; font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
+.main-card-line { margin: 2px 0 0; color: var(--ink-2); font-size: var(--text-small); overflow-wrap: anywhere; }
+.main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
+.main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
+@media (min-width: 701px) and (max-width: 1179px) {
+  .session-list.nested { margin-left: 0; padding-left: 0; border-left: 0; }
+  :is(.list-day, .main-text, .main-when) { display: none; }
+  .session-item.main-chat .session-info { justify-content: center; padding: 0; background: none; }
+  .session-item.main-chat .session-info::before { content: none; }
+  .main-face { flex-basis: 40px; width: 40px; height: 40px; }
+}
+@media (max-width: 700px), (pointer: coarse) {
+  .header-parent, .main-card-foot .link-button { min-height: 44px; }
+}
+@media (max-width: 700px) {
+  .main-card { margin-bottom: 16px; }
 }
 .sidebar-bottom {
   padding-top: 14px;
