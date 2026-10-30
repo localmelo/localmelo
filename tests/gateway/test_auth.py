@@ -426,7 +426,7 @@ def test_corrupt_token_requires_explicit_cli_rotation(tmp_path: Path) -> None:
     with pytest.raises(ValueError) as error:
         GatewayAuth(path)
     assert str(path / "token") in str(error.value)
-    assert "melo --gateway-rotate-token" in str(error.value)
+    assert "melo console --reset" in str(error.value)
     assert "corrupt-secret" not in str(error.value)
     result = subprocess.run(
         [sys.executable, "-m", "localmelo", "--gateway-rotate-token"],

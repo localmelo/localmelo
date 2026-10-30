@@ -368,7 +368,7 @@ def run_interactive(
     # Step 4: the MCP config, --mcp-config first, else the config file's key.
     requested = getattr(args, "mcp_config", None)
     mcp_config = requested or config.load().mcp_config or None
-    mcp_source = "--mcp-config" if requested else ("mcp_config" if mcp_config else "")
+    mcp_source = "--mcp" if requested else ("mcp_config" if mcp_config else "")
     mcp_servers: list[Any] = []
     if mcp_config is not None:
         from localmelo.support.mcp import McpConfigError, load_mcp_config

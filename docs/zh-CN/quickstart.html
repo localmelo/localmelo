@@ -194,7 +194,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 melo -u http://127.0.0.1:8000/v1
 melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/attach PATH</code> 把一个工作区文本文件（最大 256 KiB）暂存到下一条消息，<code>/attachments</code> 和 <code>/detach N|all</code> 列出和移除已暂存的文件，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
+          <li>输入 <code>/</code> 查看命令（<code>/help</code> 列出常用命令，<code>/help all</code> 列出全部）：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/attach PATH</code> 把一个工作区文本文件（最大 256 KiB）暂存到下一条消息，<code>/attachments</code> 和 <code>/detach N|all</code> 列出和移除已暂存的文件，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
           <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前轮次。</li>
           <li>melo 在当前文件夹中工作（<code>-w DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>

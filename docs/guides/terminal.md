@@ -124,12 +124,14 @@ run does).
 ### Commands
 
 Type `/` and the commands show under the input box with what each does;
-type more letters to narrow them, Tab or Enter to take one. The list starts
-with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
+type more letters to narrow them, Tab or Enter to take one. The everyday
+commands come first, and are the menu's first screen: `/model`, `/new`,
+`/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`. Each line says what
+the command does and, where it needs one, its argument (`/attach PATH`).
 
 | Command | What it does |
 |---|---|
-| `/help [command]` | The commands and keys, or one command's details. |
+| `/help [command]` | The everyday commands in three groups (Conversation, Model, Help), the `!` line and how to see more. `/help all`, and `/help` in developer mode, list every command and the keys; `/help NAME` gives one command's details. A row longer than the terminal continues under its description. |
 | `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
 | `/attachments` | List staged files and their numbers. |
 | `/detach N\|all` | Remove the numbered staged file or all staged files. |

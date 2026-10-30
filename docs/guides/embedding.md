@@ -192,7 +192,7 @@ See [Mix backends](model-servers.md#mix-backends).
   (`oMLX` where the config file says `omlx`). Without one, `/status all` says
   `no long-term memory (no embedding backend)` and the banner says
   `no long-term memory · melo setup adds one` (or
-  `--embedding-base-url adds one` in a `--url` session; the first run
+  `-X endpoint.embedding_url=URL adds one` in a `--url` session; the first run
   has just said how, so its banner omits it). This row describes the embedding
   configuration, not whether explicit modes can use text-only long-term
   memory.

@@ -475,7 +475,7 @@ LISTED = ["stub-model", "qwen3-8b", "llama-3.1"]
         ("/he", "\t", "/help"),
         ("/model q", "\t", "/model qwen3-8b"),
         ("/model ll", "\x1b[B", "/model llama-3.1"),
-        ("/", "\x1b[B\x1b[B", "/backend"),
+        ("/", "\x1b[B\x1b[B", "/new"),
     ],
 )
 async def test_enter_takes_the_picked_completion(
@@ -588,7 +588,7 @@ async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
         ("/he\t", "/help"),
         ("/mo\t", "/model"),
         ("/\t", "/model"),
-        ("/\t\t", "/backend"),
+        ("/\t\t", "/new"),
     ],
 )
 async def test_tab_completes_at_once_before_the_menu_shows(

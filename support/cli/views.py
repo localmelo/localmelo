@@ -103,7 +103,7 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
         if backend.memory_told:
             return "no long-term memory"
         if backend.key == "openai-compatible":
-            return "no long-term memory · --embedding-base-url adds one"
+            return "no long-term memory · -X endpoint.embedding_url=URL adds one"
         return "no long-term memory · melo setup adds one"
     # The model id can come from a server's listing; never draw its escapes.
     return f"long-term memory · {clean_output(backend.embedding)}"
@@ -137,20 +137,20 @@ def workspace_warning(workspace: str, symbols: Symbols) -> str | None:
     return None
 
 
-def hang(label: str, value: Text, width: int) -> Text:
-    """A labelled row: *label* in the label column, *value* wrapped under itself.
+def hang(label: str, value: Text, width: int, indent: int = _LABEL_CELLS) -> Text:
+    """A labelled row: *label* in *indent* cells, *value* wrapped under itself.
 
     What does not fit the rest of the row continues on the next rows, indented to
     where the value began, so nothing wraps back to the first column. The style
     and spans of *value* are kept.
     """
-    rows = wrap_words(value.plain, max(8, width - _LABEL_CELLS))
+    rows = wrap_words(value.plain, max(8, width - indent))
     out = Text()
     for number, part in enumerate(value.divide(accumulate(map(len, rows[:-1])))):
         if number:  # a break just before a space leaves it to open the next row
             part = part[len(part.plain) - len(part.plain.lstrip(" ")) :]
         out.append(
-            ("\n" + " " * _LABEL_CELLS) if number else pad_cells(label, _LABEL_CELLS),
+            ("\n" + " " * indent) if number else pad_cells(label, indent),
             value.style or None,
         )
         out.append_text(part)

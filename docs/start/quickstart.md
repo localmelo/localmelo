@@ -345,7 +345,8 @@ melo --url http://127.0.0.1:8000/v1
 melo --url http://127.0.0.1:8000/v1 --model YOUR_MODEL_ID
 ```
 
-- Type `/` for the commands: `/model` opens a list of the server's models to
+- Type `/` for the commands (`/help` lists the everyday ones, `/help all` every
+  one): `/model` opens a list of the server's models to
   switch to one, `/backend` switches to another server (both saved as the
   default, except in a `melo --url` session), `/new` starts over,
   `/exit` or Ctrl+D leaves.

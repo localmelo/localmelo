@@ -76,11 +76,11 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。列表以 `/model`、`/backend`、`/new`、`/status`、`/help` 和 `/exit` 开头。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
 
 | 命令 | 作用 |
 |---|---|
-| `/help [command]` | 显示命令和按键，或某个命令的详情。 |
+| `/help [command]` | 分三组（Conversation、Model、Help）显示常用命令、`!` 一行和查看更多的办法。`/help all`，以及开发者模式下的 `/help`，列出所有命令和按键；`/help NAME` 给出某个命令的详情。比终端宽的一行会在其说明下面续行。 |
 | `/attach PATH` | 暂存一个工作区文本文件；路径含空格时请加引号。 |
 | `/attachments` | 列出已暂存的文件及其编号。 |
 | `/detach N\|all` | 移除指定编号的已暂存文件，或移除全部已暂存文件。 |

@@ -1028,6 +1028,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `/help` and the `/` menu start with the everyday commands. `/help` prints eight of them
+  in three groups (Conversation, Model, Help), the `!` line and `/help all lists every
+  command and key.`; `/help all` (and `/help` in developer mode) lists every command and the
+  keys, and `/help NAME` explains one. The menu opens on those eight (`/model`, `/new`,
+  `/status`, `/help`, `/exit`, `/undo`, `/copy`, `/retry`) and shows each command's name
+  alone, with its argument written into the description where one is needed: its name
+  column used to be as wide as `/approvals [ask|auto|deny|forget [tool]]`, which cut
+  every description at 80 columns. A row longer than the terminal continues under its
+  description instead of at the first column. Hints that named a retired spelling name
+  the new one: `--mcp FILE` in `/mcp`, `-X endpoint.embedding_url=URL` in the memory
+  row of developer mode's banner, and `melo console --reset` when the gateway's token
+  is invalid. Direct mode's stdout and stderr, JSON, exit codes and requests are
+  unchanged ([#NN]).
+
 - `/status` says whether melo is ready, in five rows: the model and its server with
   `✓ answers` (or `✗ does not answer (connection refused). Start it, then /status checks
   again.`), the folder, the session, what the approvals do in words (`asks before running

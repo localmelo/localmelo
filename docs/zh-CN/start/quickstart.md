@@ -258,7 +258,7 @@ melo --url http://127.0.0.1:8000/v1
 melo --url http://127.0.0.1:8000/v1 --model YOUR_MODEL_ID
 ```
 
-- 输入 `/` 查看命令：`/model` 打开服务器的模型列表并切换模型，`/backend` 切换到另一个服务器（两者都会保存为默认值，`melo --url` 会话除外），`/new` 重新开始，`/exit` 或 Ctrl+D 退出。
+- 输入 `/` 查看命令（`/help` 列出常用命令，`/help all` 列出全部）：`/model` 打开服务器的模型列表并切换模型，`/backend` 切换到另一个服务器（两者都会保存为默认值，`melo --url` 会话除外），`/new` 重新开始，`/exit` 或 Ctrl+D 退出。
 - melo 运行 shell 命令、Python 代码或写入文件前会询问：按 `1` 允许，按 `2` 在本会话中允许该工具，按 `3` 拒绝并告诉 melo 原因。Esc 停止当前轮次。
 - melo 在当前文件夹中工作（`--workspace DIR` 可选择其他文件夹）：文件工具限制在该文件夹内；命令和 Python 可以访问其他文件，因此 melo 会先询问。
 

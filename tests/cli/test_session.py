@@ -357,7 +357,10 @@ async def test_commands_and_messages(setup: Setup) -> None:
     assert session.enter("/nope") == ""
     assert "Unknown command /nope. /help lists the commands." in setup.out.text()
     assert session.enter("/help") is None
-    await _until(lambda: "/backend [url]" in setup.out.text())
+    await _until(lambda: "/help all lists every command" in setup.out.text())
+    assert "/backend" not in setup.out.text()
+    assert session.enter("/help all") is None
+    await _until(lambda: "/backend " in setup.out.text())
 
 
 async def test_commands_that_need_an_idle_session_are_refused_during_a_turn(
@@ -1719,6 +1722,7 @@ async def test_retry_with_nothing_to_retry_says_so(setup: Setup) -> None:
 async def test_mcp_without_a_config_explains_how_to_add_one(setup: Setup) -> None:
     setup.session.enter("/mcp")
     await _until(lambda: "No MCP servers." in setup.out.text())
+    assert "start melo with --mcp FILE" in " ".join(setup.out.text().split())
 
 
 async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:

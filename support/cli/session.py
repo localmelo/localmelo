@@ -741,7 +741,14 @@ class CliSession:
 
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":
-            self.out.print(commands.help_text(arguments, self.renderer.symbols))
+            self.out.print(
+                commands.help_text(
+                    arguments,
+                    self.renderer.symbols,
+                    everything=self.developer,
+                    width=self.out.width,
+                )
+            )
         elif name == "attach":
             await self._attach_file(arguments)
         elif name == "attachments":
@@ -1199,7 +1206,7 @@ class CliSession:
             self.out.print(
                 self._text(
                     "No MCP servers. Name a config file with mcp_config in "
-                    "config.toml, or start melo with --mcp-config FILE "
+                    "config.toml, or start melo with --mcp FILE "
                     "(the mcpServers JSON format)."
                 )
             )
