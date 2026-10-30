@@ -1,7 +1,7 @@
 › Print the numbers from 1 to 3000.
 
   No approvals for this turn (--yolo).
-✓ shell_exec  seq 1 3000 · 0.1s
+✓ $ shell_exec  seq 1 3000 · 0.1s
   └ 1
     2
     3

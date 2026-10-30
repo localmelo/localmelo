@@ -3,14 +3,14 @@
 ✻ Thought for 0.1s
   Let me see what is here.
 ● I will inspect the project.
-✓ shell_exec  ls -1 · 0.1s · auto-allowed
+✓ $ shell_exec  ls -1 · 0.1s · auto-allowed
     {
       "command": "ls -1"
     }
   └ Makefile
     notes.txt
 ● Checking the build.
-✓ shell_exec  make check · 0.1s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.1s · exit 2 · auto-allowed
     {
       "command": "make check"
     }
@@ -18,17 +18,17 @@
     false
 
     make: *** [check] Error 1
-✗ file_read  notes.md · 0.2s
+✗ → file_read  notes.md · 0.2s
     {
       "path": "notes.md"
     }
   └ [Errno 2] No such file or directory: '/home/me/demo-project/notes.md'
-✓ file_read  notes.txt · 0.2s
+✓ → file_read  notes.txt · 0.2s
     {
       "path": "notes.txt"
     }
   └ buy milk
-✓ file_write  summary.md (9 chars) · 0.2s · allowed
+✓ ± file_write  summary.md (9 chars) · 0.2s · allowed
     {
       "path": "summary.md",
       "content": "buy milk\n"
@@ -56,7 +56,7 @@
 
 › Run the check again.
 
-✓ shell_exec  make check · 0.3s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.3s · exit 2 · auto-allowed
     {
       "command": "make check"
     }
@@ -64,7 +64,7 @@
     false
 
     make: *** [check] Error 1
-✓ shell_exec  make check · 0.4s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.4s · exit 2 · auto-allowed
     {
       "command": "make check"
     }
@@ -72,7 +72,7 @@
     false
 
     make: *** [check] Error 1
-✓ shell_exec  make check · 0.4s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.4s · exit 2 · auto-allowed
     {
       "command": "make check"
     }

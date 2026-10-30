@@ -2,17 +2,17 @@
 
   No approvals for this turn (--yolo).
 ● I will look at the project first.
-✓ shell_exec  ls -1 · 0.1s
+✓ $ shell_exec  ls -1 · 0.1s
     {
       "command": "ls -1"
     }
   └ notes.txt
-✓ file_read  notes.txt · 0.1s
+✓ → file_read  notes.txt · 0.1s
     {
       "path": "notes.txt"
     }
   └ buy milk
-✓ file_write  summary.md (9 chars) · 0.2s
+✓ ± file_write  summary.md (9 chars) · 0.2s
     {
       "path": "summary.md",
       "content": "buy milk\n"

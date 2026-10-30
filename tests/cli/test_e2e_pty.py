@@ -232,7 +232,7 @@ def test_a_file_write_waits_for_the_answer(
     ).read_text() == "remember the milk\n"
     assert "file_write  notes.txt" in term.text() and "allowed" in term.text()
     # The line under the footer, from the real result and the approval's snapshot.
-    term.see("Changed notes.txt (+1)")
+    term.see("Changed + notes.txt (+1)")
     assert term.quit() == 0
 
 

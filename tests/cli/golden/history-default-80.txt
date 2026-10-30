@@ -2,20 +2,20 @@
 
 ✻ Thought for 0.1s
 ● I will inspect the project.
-✓ shell_exec  ls -1 · 0.1s · auto-allowed
+✓ $ shell_exec  ls -1 · 0.1s · auto-allowed
   └ Makefile
     notes.txt
 ● Checking the build.
-✓ shell_exec  make check · 0.1s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.1s · exit 2 · auto-allowed
   └ [exit code 2]
     false
 
     make: *** [check] Error 1
-✗ file_read  notes.md · 0.2s
+✗ → file_read  notes.md · 0.2s
   └ [Errno 2] No such file or directory: '/home/me/demo-project/notes.md'
-✓ file_read  notes.txt · 0.2s
+✓ → file_read  notes.txt · 0.2s
   └ buy milk
-✓ file_write  summary.md (9 chars) · 0.2s · allowed
+✓ ± file_write  summary.md (9 chars) · 0.2s · allowed
   └ Written 9 bytes to /home/me/demo-project/summary.md
 ● The project is in good shape.
 
@@ -39,17 +39,17 @@
 
 › Run the check again.
 
-✓ shell_exec  make check · 0.3s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.3s · exit 2 · auto-allowed
   └ [exit code 2]
     false
 
     make: *** [check] Error 1
-✓ shell_exec  make check · 0.4s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.4s · exit 2 · auto-allowed
   └ [exit code 2]
     false
 
     make: *** [check] Error 1
-✓ shell_exec  make check · 0.4s · exit 2 · auto-allowed
+✗ $ shell_exec  make check · 0.4s · exit 2 · auto-allowed
   └ [exit code 2]
     false
 

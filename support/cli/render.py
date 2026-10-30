@@ -17,7 +17,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
 from rich.console import (
     Console,
@@ -31,6 +31,7 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
+from localmelo.melo.checker.tiers import BUILTIN_TIERS
 from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
@@ -91,6 +92,9 @@ ECHO_LINES: Final = 6
 CHANGED_NAMES: Final = 3
 # Tools whose running line shows the session's time limit.
 LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
+# A tool's kind by its permission tier; a tool the session does not know is
+# drawn as the cautious default, write.
+KINDS: Final = {"read": "read", "write": "write", "exec": "run", "network": "network"}
 
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
 
@@ -434,6 +438,10 @@ class TurnRenderer:
         self._whole_told = False
         self._backend = backend
         self._clock = clock
+        # Each tool's permission tier by name (the session sets the lookup);
+        # read again when a name is not known yet.
+        self.tool_tiers: Callable[[], Mapping[str, str]] | None = None
+        self._tiers: dict[str, str] = {}
         self.live: LiveState | None = None
         # The latest run.progress of this session, for /progress.
         self.progress: Mapping[str, Any] | None = None
@@ -1084,21 +1092,31 @@ class TurnRenderer:
                 )
             )
 
+    def kind(self, name: str) -> str:
+        """The kind of the tool *name*: read, write, run or network, from its tier."""
+        if name not in self._tiers and self.tool_tiers is not None:
+            self._tiers = dict(self.tool_tiers())
+        tier = self._tiers.get(name) or BUILTIN_TIERS.get(name, "write")
+        return KINDS.get(tier, "write")
+
     def _header(
         self, symbol: str, style: str, name: str, preview: str, meta: list[str]
     ) -> Text:
-        """``<symbol> <name>  <preview> · <meta> · ...``, cut to the width.
+        """``<symbol> <kind> <name>  <preview> · <meta> · ...``, cut to the width.
 
+        The kind's glyph and the name take the kind's color (a read fades).
         The preview gives way to the meta, except to a long last part that
         carries free text (a denial's reason, a block's error), which is cut
         at the line's end; a fixed tag such as ``allowed by a session
         grant`` always shows whole.
         """
         width = self.out.width
+        kind = self.kind(name)
+        glyph = getattr(self.symbols, f"kind_{kind}")
         name = plain(name)
         dot = f" {self.symbols.dot} "
         meta = [part for part in meta if part]
-        start = f"{symbol} {name}  "
+        start = f"{symbol} {glyph} {name}  "
         shown, _ = escape_arguments(" ".join(preview.split("\n")))
         fixed = sum(cells(dot + part) for part in meta[:-1])
         last = cells(dot + meta[-1]) if meta else 0
@@ -1110,12 +1128,12 @@ class TurnRenderer:
         head = Text(style="muted" if style == "muted" else "")
         head.append(symbol, style=style)
         head.append(" ")
-        head.append(name, style="tool")
+        head.append(f"{glyph} {name}", style=f"kind_{kind}")
         if shown and room >= 4:
             head.append("  " + cut_cells(shown, room, self.symbols.ellipsis))
         for part in meta:
             head.append(dot, style="muted")
-            head.append(part, style="warn" if part.startswith("exit ") else "muted")
+            head.append(part, style="error" if part.startswith("exit ") else "muted")
         head.no_wrap = True
         head.truncate(width, overflow="ellipsis")
         return head
@@ -1152,15 +1170,18 @@ class TurnRenderer:
             return self._header(symbols.blocked, "blocked", name, preview, [tag])
         meta = [duration]
         exit_code = data.get("exit_code")
+        nonzero = isinstance(exit_code, int) and exit_code != 0
         if status == "success":
-            symbol, style, body = symbols.ok, "ok", output
-            if isinstance(exit_code, int) and exit_code != 0:
+            # A command that exits nonzero ran (the event says success), but
+            # its row reads as a failure: the thing to notice in a turn.
+            symbol, style = (symbols.failed, "error") if nonzero else (symbols.ok, "ok")
+            body = output
+            if nonzero:
                 meta.append(f"exit {exit_code}")
         else:
             symbol, style = symbols.failed, "error"
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
-        nonzero = isinstance(exit_code, int) and exit_code != 0
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
         if status == "success" and snapshot is not None:
             parts.append(self._change_body(snapshot))
@@ -1177,7 +1198,7 @@ class TurnRenderer:
                 body,
                 ref=ref,
                 limit=self._output_limit(failed=nonzero or status != "success"),
-                first_style="error" if status != "success" else "",
+                first_style="error" if nonzero or status != "success" else "",
             )
         )
         images = _image_lines(data.get("images"), self.symbols)
@@ -1232,25 +1253,27 @@ class TurnRenderer:
         else:  # written again: the first write's "before" stays
             known.after = after
 
-    def _changes(self) -> list[tuple[str, tuple[int, int] | None]]:
-        """The files the turn changed with their lines added and removed, when known.
+    def _changes(self) -> list[Change]:
+        """The files the turn changed, each new or modified, with its lines added and removed.
 
         Net of the turn: the file as the turn found it against as it left it. A file
-        written back as it was is not listed.
+        written back as it was is not listed. A file no approval read first has no
+        known state and no counts.
         """
-        changes: list[tuple[str, tuple[int, int] | None]] = []
+        changes: list[Change] = []
         for path, written in self._written.items():
-            counts = None
+            counts, state = None, ""
             if written.before is not None:
                 _, added, removed = edits.diff(written.before, written.after)
                 if not (added or removed or written.created):
                     continue
                 counts = (added, removed) if added or removed else None
-            changes.append((display_path(path, self._root), counts))
+                state = "new" if written.created else "modified"
+            changes.append(Change(display_path(path, self._root), counts, state))
         return changes
 
     def changed_line(self) -> Text | None:
-        """``  Changed hello.py (+1), README.md (+3 −1)``, or ``None`` when no file changed."""
+        """``  Changed + hello.py (+1), ~ README.md (+3 −1)``, or ``None`` when none changed."""
         return changed_text(self._changes(), self.out.width, self.symbols)
 
     def _change_body(self, snapshot: Snapshot) -> Text:
@@ -1262,12 +1285,11 @@ class TurnRenderer:
         target = snapshot.target
         if not target.exists:
             count = len(snapshot.new.splitlines())
-            return Text(
-                f"  {self.symbols.connector} new file, {count} line"
-                + ("" if count == 1 else "s"),
-                no_wrap=True,
-                overflow="ellipsis",
-            )
+            body = Text(no_wrap=True, overflow="ellipsis")
+            body.append(f"  {self.symbols.connector} ", style="muted")
+            body.append("new file", style="file_new")
+            body.append(f", {count} line" + ("" if count == 1 else "s"), style="muted")
+            return body
         if not target.diffable:
             # No text was read (too large, binary, not regular): no counts
             # are known, and the panel said why.
@@ -1279,11 +1301,11 @@ class TurnRenderer:
             )
         rows, _, _ = edits.diff(target.text or "", snapshot.new)
         body = Text(no_wrap=True, overflow="ellipsis")
-        body.append(
-            f"  {self.symbols.connector} +{snapshot.added} "
-            f"{self.symbols.minus}{snapshot.removed} lines",
-            style="muted",
-        )
+        body.append(f"  {self.symbols.connector} ", style="muted")
+        body.append(f"+{snapshot.added}", style="ok_text")
+        body.append(" ")
+        body.append(f"{self.symbols.minus}{snapshot.removed}", style="error")
+        body.append(" lines", style="muted")
         if self.verbose:
             width = max(1, self.out.width - 6)
             for row in rows:
@@ -1454,42 +1476,69 @@ def _one_line(line: str, width: int, symbols: Symbols) -> Text:
     )
 
 
-def _counts(counts: tuple[int, int] | None, symbols: Symbols) -> str:
+class Change(NamedTuple):
+    """A file the turn changed: its path, lines added and removed, and its state.
+
+    *state* is ``new``, ``modified``, or ``""`` when it is not known.
+    """
+
+    path: str
+    counts: tuple[int, int] | None = None
+    state: str = ""
+
+
+def _counts(counts: tuple[int, int] | None, symbols: Symbols) -> Text:
     """`` (+3 −1)``: the lines a file gained and lost; empty when they are not known."""
-    parts: list[str] = []
-    if counts is not None:
-        added, removed = counts
-        if added:
-            parts.append(f"+{added}")
-        if removed:
-            parts.append(f"{symbols.minus}{removed}")
-    return f" ({' '.join(parts)})" if parts else ""
+    added, removed = counts or (0, 0)
+    parts = [(f"+{added}", "ok_text")] if added else []
+    parts += [(f"{symbols.minus}{removed}", "error")] if removed else []
+    text = Text()
+    if parts:
+        text.append(" (", style="muted")
+        for number, (part, style) in enumerate(parts):
+            text.append(" " if number else "", style="muted")
+            text.append(part, style=style)
+        text.append(")", style="muted")
+    return text
+
+
+# A changed file as the line draws it: its name, counts, and state mark and style.
+_Entry = tuple[str, Text, tuple[str, str] | None]
 
 
 def changed_text(
-    changes: Sequence[tuple[str, tuple[int, int] | None]], width: int, symbols: Symbols
+    changes: Sequence[Change], width: int, symbols: Symbols
 ) -> Text | None:
     """The line under a footer that names a turn's changed files, within *width* cells.
 
-    ``  Changed hello.py (+1), README.md (+3 −1)``: at most :data:`CHANGED_NAMES`
-    names, then ``and N more``. The names are the default color, since they are what a
-    person looks for, and the words and counts around them are dim. A line that is too
-    wide gives up names before it cuts one; the first path that still does not fit is
-    cut in the middle, so its file name stays, after its counts have gone if it must.
-    ``None`` when nothing changed.
+    ``  Changed + hello.py (+1), ~ README.md (+3 −1)``: each file's state (``+``
+    new, ``~`` modified; none when not known) and its name in the state's color,
+    at most :data:`CHANGED_NAMES` of them, then ``and N more``. The words around
+    them are dim. A line that is too wide gives up names before it cuts one; the
+    first path that still does not fit is cut in the middle, so its file name
+    stays, after its counts have gone if it must. ``None`` when nothing changed.
     """
     if not changes:
         return None
-    entries = [(plain(path), _counts(counts, symbols)) for path, counts in changes]
+    marks = {
+        "new": (symbols.file_new, "file_new"),
+        "modified": (symbols.file_modified, "file_mod"),
+    }
+    entries = [
+        (plain(change.path), _counts(change.counts, symbols), marks.get(change.state))
+        for change in changes
+    ]
 
-    def line(shown: Sequence[tuple[str, str]], more: int) -> Text:
+    def line(shown: Sequence[_Entry], more: int) -> Text:
         text = Text("  ", no_wrap=True, overflow="ellipsis")
         text.append("Changed ", style="muted")
-        for number, (name, counts) in enumerate(shown):
+        for number, (name, counts, mark) in enumerate(shown):
             if number:
                 text.append(", ", style="muted")
-            text.append(name)
-            text.append(counts, style="muted")
+            if mark is not None:
+                text.append(f"{mark[0]} ", style=mark[1])
+            text.append(name, style=mark[1] if mark else "")
+            text.append_text(counts)
         if more:
             text.append(f" and {more} more", style="muted")
         return text
@@ -1498,15 +1547,15 @@ def changed_text(
         text = line(entries[:count], len(entries) - count)
         if cells(text.plain) <= width:
             return text
-    name, counts = entries[0]
+    name, counts, mark = entries[0]
     more = len(entries) - 1
     file_name = name.rpartition("/")[2]
-    for kept in (counts, ""):  # the counts go before the file name is cut
-        room = width - cells(line([("", kept)], more).plain)
+    for kept in (counts, Text()):  # the counts go before the file name is cut
+        room = width - cells(line([("", kept, mark)], more).plain)
         cut = cut_middle(name, max(1, room), symbols.ellipsis)
         if cut.endswith(file_name):
             break
-    text = line([(cut, kept)], more)
+    text = line([(cut, kept, mark)], more)
     text.truncate(width, overflow="ellipsis")
     return text
 

@@ -245,6 +245,10 @@ class CliSession:
         self.status_line = status_line
         self._default_stream = stream
         self.renderer.reasoning_tags = dict(reasoning_tags or {})
+        # A tool row's kind comes from the tool's tier.
+        self.renderer.tool_tiers = lambda: {
+            tool.name: tool.tier for tool in self.agent.list_tools()
+        }
         self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None

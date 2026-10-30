@@ -266,7 +266,6 @@ class Palette:
         return Theme(
             {
                 **{name: self.look(name).rich() for name in NAMES},
-                "tool": "bold",
                 "shell": "magenta",
                 "yolo": "white on red",
                 # Inline code: bold, without rich's black background.
@@ -387,6 +386,15 @@ class Symbols:
     dot: str
     ellipsis: str
     rule: str
+    # A tool's kind, by its permission tier (memory is reserved).
+    kind_read: str
+    kind_write: str
+    kind_run: str
+    kind_network: str
+    kind_memory: str
+    # A changed file's state: new, modified (deleted is reserved: minus).
+    file_new: str
+    file_modified: str
     spinner: tuple[str, ...]
 
 
@@ -412,6 +420,13 @@ UNICODE: Final = Symbols(
     dot="·",
     ellipsis="…",
     rule="─",
+    kind_read="→",
+    kind_write="±",
+    kind_run="$",
+    kind_network="@",
+    kind_memory="◇",
+    file_new="+",
+    file_modified="~",
     spinner=("·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"),
 )
 
@@ -437,6 +452,13 @@ ASCII: Final = Symbols(
     dot="-",
     ellipsis="...",
     rule="-",
+    kind_read=">",
+    kind_write="~",
+    kind_run="$",
+    kind_network="@",
+    kind_memory="&",
+    file_new="+",
+    file_modified="~",
     spinner=("-", "\\", "|", "/"),
 )
 
@@ -463,6 +485,9 @@ def _ascii_table() -> dict[int, str]:
         "dot",
         "ellipsis",
         "rule",
+        "kind_read",
+        "kind_write",
+        "kind_memory",
     ):
         table[ord(getattr(UNICODE, name))] = getattr(ASCII, name)
     return table
