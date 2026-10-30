@@ -402,6 +402,14 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         if let failed = child, failed.isRunning {""",
         "        for item in signInItems { item.isHidden = !show }\n": '        for item in signInItems { item.isHidden = !show }\n        record("signin-item offered=\\(show)")\n',
         "    private func showStep() {": '    private func showStep() {\n        record("step " + startStepText(portKnown: port != 0, ready: ready))',
+        "        statusView.showStarting(step: startStepText(portKnown: port != 0, ready: ready), ready: ready)": (
+            "        statusView.showStarting(step: startStepText(portKnown: port != 0, ready: ready), ready: ready)\n"
+            '        record("portrait " + statusView.portrait.rawValue)'
+        ),
+        "        statusView.showFailure(failureNotice(reason: text, ready: ready))": (
+            "        statusView.showFailure(failureNotice(reason: text, ready: ready))\n"
+            '        record("failure-portrait " + statusView.portrait.rawValue)'
+        ),
         "        window.makeFirstResponder(webView)": '        window.makeFirstResponder(webView)\n        record("shown")',
         "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         record("loaded " + (webView.url?.absoluteString ?? ""))
@@ -1165,6 +1173,36 @@ def test_each_step_shows_until_the_console_has_loaded(
             )
         ]
         assert order == sorted(order), events
+
+
+def test_the_first_window_shows_melo_in_the_mood_of_each_step(
+    app: Path, tmp_path: Path
+) -> None:
+    with running(app, tmp_path, "correct") as (process, _):
+        events = wait_for(tmp_path / "events", "shown", process)
+        lines = events.splitlines()
+        moods = [
+            (line.removeprefix("step "), lines[at + 1])
+            for at, line in enumerate(lines)
+            if line.startswith("step ")
+        ]
+        assert moods == [
+            ("Starting the local server", "portrait sit-working"),
+            ("Signing in", "portrait sit-working"),
+            ("Opening your workspace", "portrait sit-idle"),
+        ], events
+
+
+def test_a_start_that_fails_shows_melo_with_the_drooping_ear(
+    app: Path, tmp_path: Path
+) -> None:
+    process = launch(app, tmp_path, "wrong-quit")
+    try:
+        events = wait_for(tmp_path / "events", "failure-portrait", process)
+        assert "failure-portrait sit-error" in events
+        process.wait(timeout=15)  # the host clicks Quit by itself
+    finally:
+        stop(process, tmp_path)
 
 
 def test_try_again_starts_a_new_gateway_after_a_collision(
