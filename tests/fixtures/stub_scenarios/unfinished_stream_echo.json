@@ -1,0 +1,12 @@
+{
+  "sequential": true,
+  "replies": [
+    {
+      "stream": {
+        "reasoning": ["The user just said hello. ", "I'll keep it simple and friendly."],
+        "chunks": ["The user just said hello. I'll keep it simple and friendly."]
+      }
+    },
+    {"reasoning": "A greeting; answer it.", "content": "Hello! What can I do for you?"}
+  ]
+}

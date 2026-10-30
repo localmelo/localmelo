@@ -11,7 +11,7 @@
 | 状态 | 退出码 | 含义 |
 |---|---|---|
 | `completed` | 0 | 模型给出了最终答案，或者一次反思判定任务已完成。 |
-| `failed` | 2 | 某项检查拒绝了运行，或者模型连续两次给出空回复。 |
+| `failed` | 2 | 某项检查拒绝了运行，或者模型连续两次给出没有回答的回复。 |
 | `gate_stopped` | 2 | 在一次尝试之后，反思决定不再继续。 |
 | `budget_exhausted` | 2 | 运行用完了所有步骤或尝试次数，却没有最终答案。 |
 | `context_budget_exceeded` | 2 | 固定的请求放不进配置的输入预算，或者缩小后的重试仍然溢出。 |
@@ -25,7 +25,7 @@
 细节：
 
 - **`completed`。** 当反思判定任务已完成时，答案是它的尽力结果；如果那是空的，就是该次运行中模型写下的最新文本。
-- **`failed`。** 错误说明是哪项检查拒绝了运行，例如 `Plan check failed: Prompt too large: <n> chars` 或 `Response check failed: …`。既没有工具调用也没有文本的回复是空回复：localmelo 要求模型继续并重新规划，这一步照常计数。连续两次空回复会以错误 `empty replies` 结束运行。
+- **`failed`。** 错误说明是哪项检查拒绝了运行，例如 `Plan check failed: Prompt too large: <n> chars` 或 `Response check failed: …`。既没有工具调用也没有文本的回复是空回复：localmelo 要求模型继续并重新规划，这一步照常计数。连续两次空回复会以错误 `empty replies` 结束运行。只含未完成思考的回复（见[工作原理](../concepts/how-it-works.md)）作为思考保存，并按空回复计数；其中有这种回复的连续两次会以错误 `melo did not finish an answer` 结束，思考绝不会成为 `result`。
 - **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n> (stop reason: <code>)`。`reflection` 事件总是带有停止原因和决定的各项标志（见[事件](../../reference/events.md#reflection)）。使用 `--reflection-gate utility` 时，读不懂的反思也会结束运行；超过大小限制的反思同样如此，除非它选择了 `done`。
 - **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。本来不含反思的回复会对其 JSON 中一处常见小错误尝试一次修补：没有开括号与之匹配的 `]` 或 `}`、闭合括号之前的逗号、字符串内原始的换行符、回车符和制表符、JSON 没有对应转义的字符前的反斜杠（如 `\;`），或被下一个键打断而没有闭合的数组（见[事件](events.md#reflection)中的 `repaired`）。除这一个反斜杠或 `]` 之外，不会补全或插入任何内容，需要两处修补的回复仍然读不懂。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象；若回复含有解码器拒绝的 JSON，再多一行引用解码器的错误。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。使用 `--reflection-gate utility` 时，任何 JSON 对象都算可读，不做修补也不引用错误；第二次回复若没有 JSON 对象，则以 `gate_stopped` 结束运行：回复无法读取时错误是 `Could not parse reflection response`，是有效 JSON 但不是对象时是 `Reflection response was not a JSON object`。如果没有剩余尝试，运行反而以 `budget_exhausted` 结束。
 - **`budget_exhausted`。** 错误是 `Max steps reached` 或 `Max attempts reached`。使用 `--attempt-policy reflect` 时，最后一次反思仍可选择 `done`；否则它的尽力结果成为 `result`。

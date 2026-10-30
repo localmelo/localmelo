@@ -1,0 +1,44 @@
+{
+  "sequential": true,
+  "replies": [
+    {
+      "reasoning": "The user greets me. I could look at the workspace first.",
+      "tool_calls": [
+        {
+          "name": "list_files",
+          "arguments": {
+            "depth": 2
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 871,
+        "completion_tokens": 83,
+        "completion_tokens_details": {
+          "reasoning_tokens": 55
+        }
+      }
+    },
+    {
+      "content": "The workspace is empty. The user just said hello again, so it is only a greeting. I'll keep it simple and friendly.",
+      "usage": {
+        "prompt_tokens": 916,
+        "completion_tokens": 253,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "reasoning": "A greeting; answer it.",
+      "content": "Hello! The folder is empty. What would you like to make?",
+      "usage": {
+        "prompt_tokens": 960,
+        "completion_tokens": 30,
+        "completion_tokens_details": {
+          "reasoning_tokens": 6
+        }
+      }
+    }
+  ]
+}

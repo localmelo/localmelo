@@ -44,7 +44,12 @@ from rich.text import Text
 from rich.theme import Theme
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS
-from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
+from localmelo.melo.schema import (
+    UNFINISHED_ANSWER_ERROR,
+    ReasoningTags,
+    RunResult,
+    split_thinking,
+)
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
@@ -455,6 +460,8 @@ def run_end(
         headline, action = _server_end(error, backend)
     elif status == "failed" and error == "empty replies":
         headline, action = "The model returned only empty replies", _ACTIONS["failed"]
+    elif status == "failed" and error == UNFINISHED_ANSWER_ERROR:
+        headline, action = UNFINISHED_ANSWER_ERROR, _ACTIONS["failed"]
     else:
         headline, action = status_text(status, cause).title, _ACTIONS.get(status, "")
         if status == "budget_exhausted" and steps:
@@ -896,8 +903,11 @@ class TurnRenderer:
         text = clean_output(text).strip()
         if not isinstance(calls, list) or not calls:
             # The last message may be the answer: hold it until the end
-            # says whether to print it (section 3).
+            # says whether to print it (section 3). One with no text (only
+            # thinking, #278) leaves no provisional copy behind either.
             self._held = text
+            if not text:
+                self._claim_stream(data.get("step"))
             return
         self._held = ""
         streamed = self._claim_stream(data.get("step"))
@@ -1059,7 +1069,7 @@ class TurnRenderer:
                 self.live.activity = "Retrying"
                 self.live.retry_until = self._clock() + delay if delay > 0 else 0.0
             return
-        if kind == "empty_reply":
+        if kind in ("empty_reply", "unfinished_answer"):
             line = Text(f"{self.symbols.dot} {message}", style="muted")
         else:
             line = Text(f"{self.symbols.warn} {message}", style="warn")

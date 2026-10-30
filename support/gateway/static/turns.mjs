@@ -347,10 +347,16 @@ export function serverAddress(url) {
   }
 }
 
+// The error of a run whose replies stayed unfinished thinking (`UNFINISHED_ANSWER_ERROR` in `melo/schema.py`).
+export const UNFINISHED_ANSWER = "melo did not finish an answer";
+
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
   if (serverUnreachable(status, error)) {
     return {...STATUS_TEXT.provider_error, title: "Could not reach the model server"};
+  }
+  if (status === "failed" && error === UNFINISHED_ANSWER) {
+    return {...STATUS_TEXT.failed, title: UNFINISHED_ANSWER};
   }
   const found =
     STATUS_TEXT[`${status}|${cause}`] ?? STATUS_TEXT[status] ?? null;

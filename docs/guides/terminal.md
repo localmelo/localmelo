@@ -371,8 +371,10 @@ happens without the explicit `/copy` command.
 - **Notices and reflections.** `↻` marks a retry: one line a turn, which for
   a server that cannot be reached keeps its URL
   (`↻ Could not reach URL; trying again in 1 s`), with its delay counting
-  down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
-  notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
+  down in the live area; `·` an empty reply, or a reply that was only
+  unfinished thinking (`· The model's reply ended inside its thinking; asking
+  it for its answer.`), which prints as `✻ Thought for …` and never as the
+  answer; `⚠` a stuck or spent-budget notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
   Read the test before editing. (2.3s)`; `/verbose` adds its summary and
   whole rationale, and `asked twice` when it was; an unreadable one says
   whether the run continues.
@@ -513,7 +515,12 @@ replies).` A new user never sees that note. A server
 that sends reasoning in a field of its own streams without a hint, and that
 field is never drawn as content; `/thinking on` shows its excerpt. The same
 hint splits the completed reply, so the stream and the stored answer do not
-disagree.
+disagree. The hint also says whether a reply stopped inside its thinking:
+with `closing_only`, a reply without `</think>` is unfinished thinking. Such
+a reply's held text is never released, provisional text of it is dropped,
+and it prints as thinking; melo asks the model once more, and a second reply
+without an answer ends the turn with `melo did not finish an answer.` and
+`/retry, or try another model.`
 
 Streamed text is provisional. If the reply becomes a tool call, a retry,
 a run that fails, or a stop, melo closes the live text and prints it once,

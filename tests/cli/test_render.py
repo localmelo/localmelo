@@ -569,6 +569,13 @@ _UNREACHABLE = (
         ),
         (
             "failed",
+            "melo did not finish an answer",
+            "⚠",
+            "melo did not finish an answer.",
+            "/retry, or try another model.",
+        ),
+        (
+            "failed",
             "post_plan refused",
             "⚠",
             "A check stopped the run: post_plan refused.",
@@ -1420,6 +1427,42 @@ def test_an_empty_reply_is_a_dim_notice() -> None:
         attempt=1,
     )
     assert "· The model returned an empty reply; asking it to continue." in turn.text()
+
+
+def test_unfinished_thinking_is_folded_and_its_notice_is_dim() -> None:
+    """#278: the stored reply has no content, only thinking; nothing of it is
+    held as the answer, and the notice that asks again is dim."""
+    turn = Turn()
+    feed = turn.renderer.stream_feed()  # a server that streamed it as content
+    feed.step(1)
+    feed.opened()
+    feed.content("The user just said hello. I'll keep it simple and friendly.")
+    feed.closed()
+    turn.event(
+        "assistant.message",
+        step=1,
+        content="",
+        thinking="The user just said hello. I'll keep it simple and friendly.",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.5,
+    )
+    turn.event(
+        "notice",
+        kind="unfinished_answer",
+        message="The model's reply ended inside its thinking; asking it for its answer.",
+        detail={},
+        step=1,
+        attempt=1,
+    )
+    text = turn.text()
+    assert "Thought for" in text and "keep it simple" not in text
+    assert (
+        "· The model's reply ended inside its thinking; asking it for its answer."
+        in text
+    )
+    assert turn.renderer._held == "" and turn.renderer._stream_texts == {}
 
 
 def test_a_budget_and_a_stuck_notice_are_warnings() -> None:

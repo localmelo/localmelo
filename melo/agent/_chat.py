@@ -37,7 +37,12 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
-from localmelo.melo.schema import EMPTY_REPLY_LABEL, Message, ToolDef
+from localmelo.melo.schema import (
+    EMPTY_REPLY_LABEL,
+    Message,
+    ToolDef,
+    unfinished_thinking,
+)
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import ReflectionEntry
@@ -597,6 +602,10 @@ class Chat:
         self.on_context_budget: Callable[[dict[str, Any]], None] | None = None
         self._accounting: RequestAccounting | None = None
         self.last_call: CallTelemetry | None = None
+        # How this model's replies end their thinking, as seen so far (see
+        # unfinished), and whether the latest planning reply was unfinished.
+        self.framing_seen: str | None = None
+        self.last_unfinished = False
         self._sent: list[tuple[int, str, Fingerprint]] = []
         self._sent_count = 0
         self._plan: _PlanSnapshot | None = None
@@ -845,6 +854,13 @@ class Chat:
         self.stats.add_usage(response.usage)
         self.stats.reasoning_chars += len(response.thinking)
         self.stats.add_details(full_usage)
+        if kind == "plan":
+            self.last_unfinished = self.unfinished(response)
+        lowered = response.content.lower()
+        if reasoning_key:
+            self.framing_seen = "field"
+        elif "</think>" in lowered and "<think>" not in lowered:
+            self.framing_seen = self.framing_seen or "closing_only"
         if self.fixed_prefix and kind in ("plan", "reflect"):
             reported = (
                 full_usage if full_usage is not None else response.usage or {}
@@ -892,6 +908,30 @@ class Chat:
                 recall=recall or None,
             )
         return response
+
+    def unfinished(self, reply: Message) -> bool:
+        """Whether planning *reply* is only unfinished thinking (#278).
+
+        See :func:`~localmelo.melo.schema.unfinished_thinking`: a planning
+        reply is streamed when the turn has a stream display; the framing is
+        the turn's declared one (the display's), else the one this
+        provider's replies have shown (:attr:`framing_seen`); the reasoning
+        tokens are those of the provider's ``last_usage``, ``None`` when it
+        has no count.
+        """
+        if reply.tool_calls:
+            return False
+        display = STREAM_DISPLAY.get()
+        declared = display.reasoning_tags if display is not None else None
+        usage = getattr(self.llm, "last_usage", None)
+        tokens = usage.get("reasoning_tokens") if isinstance(usage, dict) else None
+        return unfinished_thinking(
+            reply.content,
+            reply.thinking,
+            framing=declared or self.framing_seen,
+            reasoning_tokens=tokens if isinstance(tokens, int) else None,
+            streamed=display is not None,
+        )
 
     async def _send(
         self,
@@ -975,7 +1015,8 @@ class Chat:
                 raise ProviderError("Streaming response ended without a reply")
             if filter is not None:
                 _, tail = filter.finish()
-                if saw_text and tail:
+                # Held text of a reply that is only unfinished thinking stays held.
+                if saw_text and tail and not self.unfinished(reply):
                     display.content(tail)
             if whole:
                 tell = getattr(display, "whole", None)

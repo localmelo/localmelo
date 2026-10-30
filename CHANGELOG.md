@@ -45,6 +45,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A reply that is only the model's unfinished thinking is never shown as the
+  answer. When a thinking model stopped before its end-of-thinking mark, a
+  server could return the thinking as the reply's text, and a greeting got the
+  model's notes to itself as its answer. localmelo now tells such a reply by
+  facts, never by its wording: a `<think>` that is never closed, no answer
+  with reasoning tokens counted, a streamed reply that repeats the server's
+  reasoning, or no thinking and no `</think>` from a model whose thinking ends
+  with a mark (declared in `[cli.reasoning_tags]`, or seen from a server that
+  sends reasoning in a field of its own and counted none in this reply). The text becomes the reply's thinking,
+  folded in the terminal and the console, and the model is asked once more
+  (one extra request, with the notice `unfinished_answer`); a second reply
+  without an answer ends the run `failed` with `melo did not finish an
+  answer`, with `/retry` in the terminal and **Try again** in the console.
+  Direct runs and workers report that error instead of returning the thinking
+  as the result ([#NN]).
+
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
   not be decoded, so it was asked for again, and a second failure lost the

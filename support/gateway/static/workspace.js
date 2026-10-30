@@ -49,6 +49,7 @@ import {
   toolState,
   turnDuration,
   turnFace,
+  UNFINISHED_ANSWER,
   unreachableUrl,
   workSummary,
 } from "./turns.mjs";
@@ -1097,7 +1098,9 @@ function failureHint(turn, can, error) {
     case "budget_exhausted": return ["melo used all its steps before it finished.", ...own].join(" ");
     case "timeout": return ["The run took too long and was stopped.", ...own].join(" ");
     case "stuck": return "melo repeated itself. Rephrase the request, or try again.";
-    case "failed": return "Try again, or rephrase the request.";
+    case "failed": return error === UNFINISHED_ANSWER
+      ? "The model's reply held only its thinking. Try again, or rephrase the request."
+      : "Try again, or rephrase the request.";
     case "gate_stopped": return "melo judged that another attempt would not help. Rephrase the request, or try again.";
     case "context_budget_exceeded": return "This chat no longer fits the model's context window. Start a new chat, or shorten the request.";
     case "setup_error": return "An MCP server failed to start. Show tools lists what is set up; fix it, then try again.";
@@ -1146,7 +1149,7 @@ function statusNode(turn) {
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
-  if (!stopped && error && !serverUnreachable(turn.status, error)) {
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
