@@ -3,7 +3,10 @@
 Find the message you see, then read its cause and fix. A run that did not
 complete names its status in the line
 `melo: run ended with status <status>: <error>`, or in the `status` field of
-the JSON line.
+the JSON line. The interactive UI says the same in plain words, as
+`✗ Could not reach the model server at URL.` with what to do under it; the
+sections below are titled by the line of a task, and their causes and fixes
+apply to both.
 
 ## Install
 

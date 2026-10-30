@@ -2,7 +2,7 @@
 
 # 故障排除
 
-找到你看到的消息，然后阅读它的原因和修复方法。未完成的运行会在 `melo: run ended with status <status>: <error>` 这一行中，或在 JSON 行的 `status` 字段中，给出它的状态。
+找到你看到的消息，然后阅读它的原因和修复方法。未完成的运行会在 `melo: run ended with status <status>: <error>` 这一行中，或在 JSON 行的 `status` 字段中，给出它的状态。交互式界面用平实的话说明同样的事，例如 `✗ Could not reach the model server at URL.`，并在其下写出该怎么做；下面各节按任务输出的那一行命名，其原因和修复对两者都适用。
 
 <a id="install"></a>
 

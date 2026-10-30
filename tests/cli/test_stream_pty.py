@@ -173,7 +173,7 @@ def test_a_stream_that_breaks_before_the_end_is_labelled(
     term.see("Ask melo")
     term.type("drop please\r")
     term.see("partial reply (not the final answer)")
-    term.see("provider_error")
+    term.see("Could not get an answer from the model server: Streaming response")
     assert term.quit() == 0
 
 

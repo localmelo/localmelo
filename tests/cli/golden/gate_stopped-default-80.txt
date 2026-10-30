@@ -5,8 +5,9 @@
   └ (no output)
 ⚠ The attempt used its step budget.
 ✻ Reflected after attempt 1: continue · Trying the same command again would tel…
-⚠ melo: run ended with status gate_stopped: Trying the same command again would…
+⚠ Stopped after reflection: Trying the same command again would tell us nothing
+  new.
   melo judged that another attempt would not help. Rephrase the request, or
   /retry.
-✻ Worked for 0.1s · 1 tool call · ↓ 40 tokens
+✻ Stopped after 0.1s · 1 tool call · ↓ 40 tokens
 

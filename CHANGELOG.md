@@ -985,6 +985,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   wrapping it. `--developer` (or `[ui] mode = "developer"`) keeps the box
   ([#NN]).
 
+- Errors in the terminal say what happened and what to do, in plain words. A run that does
+  not complete used to end with `✗ melo: run ended with status provider_error: cannot reach
+  the model server at …`, cut at 80 columns, and a dim hint under it. It now reads
+  `✗ Could not reach the model server at URL.` with `Start it, then /retry.` under it in the
+  default color; every other status uses its title with the reason that helps (`Ran out of
+  steps (30).`, `Stopped: the same calls kept repeating.`) and one action. The footer after
+  a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
+  and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
+  line, JSON, exit codes and requests are unchanged ([#NN]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`

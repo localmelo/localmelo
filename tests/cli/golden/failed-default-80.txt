@@ -2,9 +2,9 @@
 
   No approvals for this turn (--yolo).
 ◌ ?  {} · not run
-⚠ melo: run ended with status failed: Response check failed: Empty tool name in…
-  A check stopped the run (the reason is above); /retry, or try another model.
-✻ Worked for 0.1s · 0 tool calls · ↓ 4 tokens
+⚠ A check stopped the run: Response check failed: Empty tool name in response.
+  /retry, or try another model.
+✻ Stopped after 0.1s · ↓ 4 tokens
 
 › Say it again.
 
@@ -12,7 +12,7 @@
 · The model returned an empty reply; asking it to continue.
 ✻ Thought for 0.1s
   hmm
-⚠ melo: run ended with status failed: empty replies
-  The model returned only empty replies; /retry, or try another model.
-✻ Worked for 0.1s · 0 tool calls
+⚠ The model returned only empty replies.
+  /retry, or try another model.
+✻ Stopped after 0.1s
 

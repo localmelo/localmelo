@@ -1,7 +1,7 @@
 › Check the demo project.
 
   No approvals for this turn (--yolo).
-✗ melo: run ended with status crashed: RuntimeError: boom
-  This is a bug in localmelo; the log is ~/.cache/localmelo/logs/cli.log.
-✻ Worked for 0.1s · 0 tool calls
+✗ Something went wrong inside localmelo: RuntimeError: boom.
+  This is a bug; the log is ~/.cache/localmelo/logs/cli.log.
+✻ Stopped after 0.1s
 

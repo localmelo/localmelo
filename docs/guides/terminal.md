@@ -82,9 +82,9 @@ short commit (`melo 0.1.0 (baab21e)`); `melo --version` prints the same line.
 When the model is not the saved default, a row after the folder gives the
 server's URL and where it comes from (`from --base-url (not saved)`,
 `not saved; melo asks again next time`) and, when melo took the one model the
-server says is loaded out of several, `the loaded one of N; /model lists
-them`. A server that does not answer gets the warning below the welcome
-instead. `/status` calls the server `oMLX` when the config file says `omlx` or
+server says is loaded out of several,
+`the loaded one of N; /model lists them`. A server that does not answer gets
+the warning below the welcome instead. `/status` calls the server `oMLX` when the config file says `omlx` or
 a model listing of the server did, and otherwise `OpenAI-compatible server`
 (Ollama, MLC LLM and SGLang keep their names). Developer mode's box has a
 model row with that name; a saved server is listed after the box, so the box
@@ -352,15 +352,24 @@ happens without the explicit `/copy` command.
   and images print as `▪ image/png · 312 KB · not shown`. Escape
   sequences in the output are removed, so a tool cannot move the cursor,
   set the title or write the clipboard.
-- **Notices and reflections.** `↻` marks a retry, with its delay counting
+- **Notices and reflections.** `↻` marks a retry: one line a turn, which for
+  a server that cannot be reached keeps its URL
+  (`↻ Could not reach URL; trying again in 1 s`), with its delay counting
   down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
   notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
   Read the test before editing. (2.3s)`; `/verbose` adds its summary and
   whole rationale, and `asked twice` when it was; an unreadable one says
   whether the run continues.
 - **The answer** prints as Markdown after `●`. A run that did not complete
-  prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
-  `Is the model server running at URL?` for a server that does not answer.
+  prints its best effort, then what happened and what to do, in plain words:
+  `✗ Could not reach the model server at URL.` and, under it,
+  `Start it, then /retry.` The first line is the status's title from the
+  shared table (`Ran out of steps (30).`,
+  `Stopped: the same calls kept repeating.`) with the reason that helps (the
+  URL, the model, the error of a failed check), and the second is the action,
+  in the default color. The footer then reads `✻ Stopped after 14s` instead of
+  `Worked for`, without a count of zero tool calls. Direct mode keeps its
+  `melo: run ended with status …` line on stderr.
 
 ### The status bar
 
@@ -596,9 +605,9 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   or reranking model is tagged `(embedding)` or `(reranking)` and is never
   the default. With several chat models, a loaded one is marked `(loaded)` and
   is the default; when the server does not say which are loaded, the prompt is
-  `Model:` with no default and Enter alone asks again (`Type the number of the
-  model to use. …`). Without a terminal an empty answer then exits 2 with an
-  error. `/backend` asks the same way. A server that lists only embedding or
+  `Model:` with no default and Enter alone asks again
+  (`Type the number of the model to use. …`). Without a terminal an empty
+  answer then exits 2 with an error. `/backend` asks the same way. A server that lists only embedding or
   reranking models is shown the same way, with a line saying that chat needs a
   chat model. The hints are wrapped to the terminal's width at word boundaries.
 - An Ollama server, one that answers `GET /api/version` with
