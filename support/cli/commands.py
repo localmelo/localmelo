@@ -35,7 +35,7 @@ class Command:
     def line(self, spelling: str = "") -> str:
         """The summary for *spelling* (the name by default), naming the others.
 
-        ``/clear``'s row says ``(also /new)``, and ``/new``'s ``(also /clear)``.
+        ``/exit``'s row says ``(also /quit, ctrl+d)``, and ``/quit``'s ``(also /exit, ctrl+d)``.
         """
         spelling = spelling or self.name
         others = [f"/{name}" for name in (self.name, *self.aliases) if name != spelling]
@@ -48,13 +48,14 @@ class Command:
 # the menu, whose name column is as wide as the longest name, cuts none at 80 columns.
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("model", (), "[name]", "Pick a model, or /model NAME (saved)", False),
-    Command("new", ("clear",), "", "Start a new chat", False),
+    Command("new", (), "", "Start a new chat; /clear also clears the screen", False),
     Command("status", (), "[all]", "Check the model; /status all shows more", True),
     Command("help", (), "[command]", "Show commands; /help all lists every one", True),
     Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
     Command("undo", (), "", "Forget the last turn (files stay changed)", False),
     Command("copy", (), "[turn]", "Copy a stored answer to the clipboard", True),
     Command("retry", (), "", "Run the last turn again", False),
+    Command("clear", (), "", "Start a new chat and clear the screen", False),
     Command("backend", (), "[url]", "Switch to another model server (saved)", False),
     Command("attach", (), "PATH", "Stage a text file: /attach PATH", False),
     Command("attachments", (), "", "List staged text files", False),

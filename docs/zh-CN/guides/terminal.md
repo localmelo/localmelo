@@ -84,7 +84,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，删除字母则重新放宽范围（删掉 `/` 后列表关闭），按 Tab 或 Enter 选择。Esc 会关闭列表，直到你下一次编辑；仅移动光标不会打开它。`@` 后的文件名同理。这个列表没有背景色块：名称用你的文字颜色，说明为暗淡色，选中的行和其他列表一样，带 `❯` 并衬在苔绿色色带上，名称与你输入的文字对齐。最多显示八行，更多时右侧出现一条细细的滚动条。命令的参数（`/model NAME`）用同一个列表。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，删除字母则重新放宽范围（删掉 `/` 后列表关闭），按 Tab 或 Enter 选择。Esc 会关闭列表，直到你下一次编辑；仅移动光标不会打开它。`@` 后的文件名同理。这个列表没有背景色块：名称用你的文字颜色，说明为暗淡色，选中的行和其他列表一样，带 `❯` 并衬在苔绿色色带上，名称与你输入的文字对齐。最多显示八行，更多时右侧出现一条细细的滚动条。命令的参数（`/model NAME`）用同一个列表。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`；`/clear` 紧随其后。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
 
 | 命令 | 作用 |
 |---|---|
@@ -92,7 +92,8 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/attach PATH` | 暂存一个工作区文本文件；路径含空格时请加引号。 |
 | `/attachments` | 列出已暂存的文件及其编号。 |
 | `/detach N\|all` | 移除指定编号的已暂存文件，或移除全部已暂存文件。 |
-| `/new`（也可用 `/clear`） | 开始新聊天：模型忘记当前对话，本聊天的授权结束。开头会画一条 `── New chat ──` 分隔线。 |
+| `/new` | 开始新聊天：模型忘记当前对话，本聊天的授权结束。开头会画一条 `── New chat ──` 分隔线，上面的页面保留。 |
+| `/clear` | 在空白屏幕上执行 `/new`：模型忘记当前对话、授权结束，与 `/new` 相同；随后清空屏幕和滚动历史，并在顶部重新画出欢迎信息，输入框在其下方。设置了 `NO_COLOR`、`TERM=dumb` 或输出不是终端时，不写任何转义码，`/clear` 的行为与 `/new` 相同。 |
 | `/sessions [filter]` | 在当前文件夹中选择已保存的聊天；输入文字筛选，Tab 切换到所有文件夹，↑ ↓ 选择，Enter 恢复，Esc 关闭。 |
 | `/resume [id\|title]` | 按 ID、ID 前缀（至少四个字符）或完整标题恢复；不带参数时打开选择器。 |
 | `/title [text]` | 显示或设置 1–200 个字符的标题。首条消息之前设置的标题会保留到聊天被保存时。 |
@@ -115,7 +116,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/exit`（也可用 `/quit`） | 退出；先停止正在运行的轮次。 |
 
 - 执行的命令会像消息一样回显在滚动缓冲区中（`› /model 2`），后面跟着输出。被拒绝的命令不会回显，`/exit` 不输出任何内容。
-- 轮次运行期间，`/new`、`/sessions`、`/resume`、`/undo`、`/retry`、`/model` 和 `/backend` 会被拒绝：草稿保留，并显示提示 `/model is not available while a turn runs (esc stops it).`；等该轮结束后再次按 Enter。
+- 轮次运行期间，`/new`、`/clear`、`/sessions`、`/resume`、`/undo`、`/retry`、`/model` 和 `/backend` 会被拒绝：草稿保留，并显示提示 `/model is not available while a turn runs (esc stops it).`；等该轮结束后再次按 Enter。
 - `/model` 只能在服务器列出的模型之间切换。未列出的名称会被拒绝，不会切换或保存任何内容：`✗ URL lists no model named 'NAME'. /model lists them.`；超出列表范围的编号也会被拒绝：`✗ Type a number from 1 to N, or a model id.` 只有没有列表时（服务器没有响应，或使用云端 API），`/model NAME` 才会仍然切换到指定模型；服务器没有响应时会先显示 `⚠ Could not list the models (REASON); switching anyway.`。
 - 保存行为：`/model` 保留已配置的后端并更改其模型。`/backend` 在服务器以 Ollama 的方式响应（`GET /api/version`）时将其保存为 `ollama` 后端，模型列表把 oMLX 标为所有者时保存为 `omlx`，否则保存为 `vllm`；它写入 `chat_backend` 和对应表中的 `chat_url`、`chat_model`，并保留其余配置：嵌入、`request_timeout_s` 和 `extra_body`；会话按保存后的配置运行。在 `melo --url URL` 会话中，它们只为当前会话切换，除非 melo 询问了 `Save URL · MODEL as the default backend?`（仅当配置文件尚不存在时询问）且你回答了是。首次运行的问题中选择 `s`（仍然启动）后，`/model` 和 `/backend` 会像首次运行一样保存服务器。
 - 模型启动失败时保留当前模型（`✗ Could not start NAME: …`）。新服务器没有响应或没有列出模型时，`/backend` 保留当前服务器：`✗ Could not reach URL: connection refused. Still using URL.`
@@ -172,7 +173,7 @@ from-the-child
 
 ### 查看、撤销或复制对话
 
-`/title` 可以在发送任何消息前为聊天命名；它本身不会创建已保存的会话。第一轮创建会话时才会应用所选标题。`/new` 或成功恢复会话会清除未保存的标题。轮次运行期间可以更改标题，但切换会话期间不能更改。
+`/title` 可以在发送任何消息前为聊天命名；它本身不会创建已保存的会话。第一轮创建会话时才会应用所选标题。`/new`、`/clear` 或成功恢复会话会清除未保存的标题。轮次运行期间可以更改标题，但切换会话期间不能更改。
 
 `/undo` 从模型恢复后的工作窗口中移除最近一个已完成轮次，并将原始输入的消息保留在输入历史记录（↑）中。它不会撤销 shell 命令、Python 代码或文件编辑。在另一个窗口中，运行中的轮次会阻止撤销；命令保留在草稿中。撤销提交后，Esc 无法回滚：操作会完成并输出 `Undid …` 行，忙碌提示会要求等待，而不会声称 Esc 能取消操作。预览只使用输入的第一行，按终端单元格宽度截断，不会再添加一个句点。
 
@@ -263,7 +264,7 @@ from-the-child
 
 提示是 `explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域只显示那一行转圈的 `Thinking…`，而不显示文本。在开发者模式下，它的第一条完整回复之后，melo 会说明一次：`This model's replies appear when complete until its reasoning format is set (see Streamed replies).` 新用户看不到这条说明。把推理放在单独字段里发送的服务器无需提示就能流式显示，该字段绝不会作为正文绘制；`/thinking on` 会显示它的摘录。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。这个提示还说明回复是否停在了思考中：声明为 `closing_only` 时，没有 `</think>` 的回复就是未完成的思考。这种回复被保留的文本绝不会释放，它的临时文本会被丢弃，它显示为思考；melo 再问模型一次，第二个回复仍没有回答时，这一轮以 `melo did not finish an answer.` 和 `/retry, or try another model.` 结束。
 
-流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，开发者模式下标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。不支持流式的提供方会发送完整回复，照常打印。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
+流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，开发者模式下标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。不支持流式的提供方会发送完整回复，照常打印。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 和 `/clear` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
 
 <a id="approvals"></a>
 
@@ -380,7 +381,7 @@ melo 如何选择：
 
 直接运行 `melo` 会开始新聊天；只有第一条消息才会保存它。状态栏在聊天有标题之前显示 `New chat`。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新聊天；在启动选择器中按 Esc 也会开始新聊天，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：回顾会点出选中的聊天（`◆ Resumed "TITLE"`，开发者模式的方框把它标为 `"TITLE" (resumed)`）；按 Esc 或列表为空时显示新聊天横幅。`-c` 和 `-r` 不能同时使用，也不能与任务或 `melo serve` 同用。
 
-选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。它的标题行说明各个按键（`Resume a chat · ~/demo-project · tab: this folder or all · esc close`）；文件夹路径太长时从中间截断，按键提示始终保留。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。网页控制台的 Workers 视图会在 **Terminal chats** 下以只读方式显示你的这些聊天，读取时会对其脱敏（保存的副本不会被脱敏）；控制台不能修改它们，也不能向它们发送消息。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果聊天之前在另一个文件夹中工作过，会显示提示。
+选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。它的标题行说明各个按键（`Resume a chat · ~/demo-project · tab: this folder or all · esc close`）；文件夹路径太长时从中间截断，按键提示始终保留。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。网页控制台的 Workers 视图会在 **Terminal chats** 下以只读方式显示你的这些聊天，读取时会对其脱敏（保存的副本不会被脱敏）；控制台不能修改它们，也不能向它们发送消息。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 和 `/clear` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果聊天之前在另一个文件夹中工作过，会显示提示。
 
 横幅之后的回顾以纯文本显示存储的脱敏副本中最近三个符合条件的轮次：你的消息在 `›` 之后，每个回答只在开头有一个 `●`，去掉 Markdown 标记和空行，最多四行，标记下方的行缩进对齐。标题下方的一行说明有几个轮次回到了模型的记忆中（`1 turn is back in the model's memory.`）；开发者模式还会说明它们的工具调用怎么样了。`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息／回答配对，不包含工具步骤；`"window"` 恢复已保存的工作记忆检查点及之后的配对，没有可用检查点时退回配对模式。在 `config.toml` 中设置此项；无效值会在界面中产生警告并使用配对模式，但不会在直接模式输出中增加警告。回顾中的计数反映淘汰后的恢复窗口，而不是存储的轮次总数。
 

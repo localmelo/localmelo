@@ -88,6 +88,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `/clear` clears the screen. In the terminal it was another spelling of `/new`: it started a
+  new chat and printed a `New chat` rule under the whole page. Now `/clear` is a command of
+  its own: after the same reset (conversation, approvals, display preferences) it wipes the
+  screen and its scrollback and draws the welcome again at the top, with the input box below
+  it; `/new` keeps the page and the rule as before. `/new` says in the menu and in `/help`
+  what `/clear` adds, and `/clear` has its own row in the menu and in `/help all`. With
+  `NO_COLOR`, `TERM=dumb` or output that is not a terminal, no escape code is written and
+  `/clear` does what `/new` does ([#NN]).
+
 - Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
   replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
   it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that

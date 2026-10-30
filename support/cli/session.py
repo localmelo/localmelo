@@ -234,8 +234,11 @@ class CliSession:
         developer: bool = False,
         pricing: Mapping[str, Mapping[str, float]] | None = None,
         work: WorkBeside | None = None,
+        welcome: Callable[[], None] | None = None,
     ) -> None:
         self.developer = developer
+        # Draws the welcome again after /clear (launch owns what it shows).
+        self.welcome = welcome
         # [pricing.<model>] for a cloud backend's session cost.
         self.pricing = dict(pricing or {})
         # The gateway's tasks beside the chat (none: the bar has no work zone).
@@ -427,7 +430,12 @@ class CliSession:
                     )
                 )
                 return ""
-            if self._attachments and command.name in ("new", "resume", "sessions"):
+            if self._attachments and command.name in (
+                "new",
+                "clear",
+                "resume",
+                "sessions",
+            ):
                 return "Detach staged files before switching chats."
             allowed = command.during_turn is True or (
                 command.during_turn == "show" and not arguments
@@ -444,6 +452,7 @@ class CliSession:
                 "retry",
                 "undo",
                 "new",
+                "clear",
                 "attach",
                 "attachments",
                 "detach",
@@ -812,8 +821,10 @@ class CliSession:
         elif name in ("exit", "quit"):
             if self.app is not None:
                 self.app.exit()
-        elif name in ("new", "clear"):
+        elif name == "new":
             await self.new()
+        elif name == "clear":
+            await self.clear()
         elif name == "model":
             await self.model(arguments)
         elif name == "backend":
@@ -1347,6 +1358,21 @@ class CliSession:
 
     async def new(self) -> None:
         """``/new``: start over, grants and display preferences included."""
+        await self._start_over()
+        self._print_new_chat_rule()
+
+    async def clear(self) -> None:
+        """``/clear``: ``/new`` on a cleared screen, the welcome drawn again.
+
+        Where the terminal takes no escape codes it is ``/new``, rule included.
+        """
+        await self._start_over()
+        if not self.out.clear_screen():
+            self._print_new_chat_rule()
+        elif self.welcome is not None:
+            self.welcome()
+
+    async def _start_over(self) -> None:
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
@@ -1359,6 +1385,8 @@ class CliSession:
         self.renderer.context_tokens = 0
         self.renderer.new_session()
         self.stream = self._default_stream
+
+    def _print_new_chat_rule(self) -> None:
         label = " New chat "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule
