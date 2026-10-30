@@ -10,13 +10,19 @@ Grants and pending requests live in memory only: a restart forgets both.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import math
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
+)
+from localmelo.melo.contracts.review import covered_by_grant, offers_grant
 
 AskFunction = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 
@@ -28,11 +34,14 @@ RESOLVED_IDS_KEPT: Final = 256
 class RememberingPolicy:
     """An approval policy that asks through *ask* and keeps session grants.
 
-    A tool granted for the session runs without asking
+    A routine call of a tool granted for the session runs without asking
     (``ApprovalDecision(True, origin="session")``); any other call is
     asked about, and an answer that allows with ``remember`` grants the
-    tool's name. Grants are per tool name and per policy object, and never
-    stored.
+    tool's name. A grant covers routine calls only: a high-impact or
+    undecided call (see :mod:`localmelo.melo.contracts.review`) is asked
+    about every time, and a ``remember`` on a high-impact one is dropped,
+    so it allows that call and grants nothing. Grants are per tool name and
+    per policy object, and never stored.
     """
 
     def __init__(self, ask: AskFunction) -> None:
@@ -51,9 +60,11 @@ class RememberingPolicy:
             self._granted.discard(tool_name)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        if request.tool_name in self._granted:
+        if request.tool_name in self._granted and covered_by_grant(request.review):
             return ApprovalDecision(True, origin="session")
         decision = await self._ask(request)
+        if isinstance(decision, ApprovalDecision) and not offers_grant(request.review):
+            decision = dataclasses.replace(decision, remember=False)
         if (
             isinstance(decision, ApprovalDecision)
             and decision.allow
@@ -61,6 +72,23 @@ class RememberingPolicy:
         ):
             self._granted.add(request.tool_name)
         return decision
+
+
+class RoutineOnlyPolicy:
+    """Runs routine calls unasked and leaves every other call to *inner*.
+
+    The terminal's auto mode: a routine call (or one nothing reviewed) is
+    allowed with origin ``policy``; a high-impact or undecided one goes to
+    *inner*, which asks.
+    """
+
+    def __init__(self, inner: ApprovalPolicy) -> None:
+        self.inner = inner
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        if covered_by_grant(request.review):
+            return ApprovalDecision(True, origin="policy")
+        return await self.inner.decide(request)
 
 
 @dataclass

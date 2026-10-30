@@ -587,8 +587,10 @@ of the input box, and your draft stays:
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
-- `1` allows this call, `2` allows the tool for the rest of the session,
-  and `3` opens a field for a reason (at most 500 characters) that the
+- `1` allows this call, `2` allows the tool's routine calls for the rest of
+  the session (a call that installs, downloads, changes files outside the
+  folder or does anything else
+  [high-impact](tools-mcp.md#high-impact-calls) still asks), and `3` opens a field for a reason (at most 500 characters) that the
   model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.

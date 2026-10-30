@@ -17,9 +17,9 @@ Rules for a policy's :meth:`ApprovalPolicy.decide`:
   exception, raises a ``CancelledError`` while the run is not being
   cancelled, or returns something other than an :class:`ApprovalDecision`.
 
-This module imports only the standard library and :mod:`localmelo.melo.schema`,
-which imports no other localmelo module, so the executor can use it without
-an import cycle.
+This module imports only the standard library, :mod:`localmelo.melo.schema`
+and :mod:`localmelo.melo.contracts.review`, which import no other localmelo
+module, so the executor can use it without an import cycle.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
 
+from localmelo.melo.contracts.review import ActionReview, because
 from localmelo.melo.schema import ToolTier
 
 # Who decided: the person asked ("user"), a grant for the rest of the
@@ -46,6 +47,15 @@ DENIAL_ENDING: Final = (
 # "<Type>: <message>".
 APPROVAL_FAILED: Final = "Approval failed, so the call did not run: {error}"
 
+# After the review clause of a high-impact call: a person's denial, and a
+# policy's.
+ASK_INSTEAD: Final = (
+    "If the task needs it, say in your answer what for and ask the user."
+)
+WITHOUT_IT: Final = (
+    "Finish what you can without it, and say in your answer what you would need."
+)
+
 # Characters of a denial's reason that its text keeps.
 DENIAL_REASON_CHARS: Final = 500
 
@@ -62,7 +72,9 @@ class ApprovalRequest:
     is a deep copy of exactly what will run, file paths resolved;
     ``preview`` is its one-line summary; ``workspace_root`` the agent's
     root, or ``None``; ``tier`` the tool's permission tier, or ``None``
-    when a caller built the request itself. An agent always fills it.
+    when a caller built the request itself. An agent always fills it, and
+    ``review``: what the checker's rules found in the call (#279). A
+    session grant covers only a call whose review is routine (or ``None``).
     """
 
     request_id: str
@@ -73,6 +85,7 @@ class ApprovalRequest:
     preview: str
     workspace_root: str | None
     tier: ToolTier | None = None
+    review: ActionReview | None = None
 
 
 @dataclass(frozen=True)
@@ -161,12 +174,14 @@ class DenyAllPolicy:
         return ApprovalDecision(False, self.reason, origin="policy")
 
 
-def denial_text(decision: ApprovalDecision) -> str:
+def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) -> str:
     """The text the model reads for a call that *decision* denied.
 
     A reason is stripped of surrounding whitespace and of a final ``.``,
     and keeps at most :data:`DENIAL_REASON_CHARS` characters. A timeout's
-    text ignores the reason. ``ValueError`` if *decision* allows the call.
+    text ignores the reason. For a high-impact *review*, the text says
+    what the call does and what to do instead. ``ValueError`` if
+    *decision* allows the call.
     """
     if decision.allow:
         raise ValueError("denial_text needs a decision that denies the call")
@@ -180,6 +195,11 @@ def denial_text(decision: ApprovalDecision) -> str:
     if reason.endswith("."):
         reason = reason[:-1].rstrip()
     reason = reason[:DENIAL_REASON_CHARS]
-    if not reason:
-        return f"{who} denied this call. {DENIAL_ENDING}"
-    return f"{who} denied this call: {reason}. {DENIAL_ENDING}"
+    text = (
+        f"{who} denied this call: {reason}." if reason else f"{who} denied this call."
+    )
+    if review is None or review.verdict != "high" or not review.reasons:
+        return f"{text} {DENIAL_ENDING}"
+    if decision.origin == "user":
+        return f"{text} melo asked because it {because(review)}. {DENIAL_ENDING} {ASK_INSTEAD}"
+    return f"{text} It {because(review)}. {DENIAL_ENDING} {WITHOUT_IT}"
