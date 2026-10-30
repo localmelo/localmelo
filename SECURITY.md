@@ -44,9 +44,31 @@ those tools can do.
   `list_files` inside that directory: paths are resolved before the check, a symlink
   that points out is refused, and so is anything but a regular file.
   Without a workspace root there is no fence.
-- **`shell_exec` and `python_exec` are not fenced.** With a workspace root
-  they start in it, and `python_exec` runs in a child process, but both can
-  reach any path you can. An approval policy is their only control.
+- **`shell_exec` and `python_exec` are not fenced in chats.** With a
+  workspace root they start in it, and `python_exec` runs in a child process,
+  but both can reach any path you can. An approval policy is their only
+  control. The terminal UI, the web console, the app and other direct runs
+  work this way.
+- **Worker runs write only in their workspace (macOS).** In a worker run
+  (`melo worker BRIEF`, `--brief`) with a workspace, and in a saved task,
+  `shell_exec` and `python_exec` start under a `sandbox-exec` profile that
+  refuses every file write outside the workspace, whatever the command does
+  (`cd` elsewhere, a child `git` or Python). The exceptions are the caches
+  the project's tools write (uv's cache, black's cache, npm's cache), a few
+  devices (`/dev/null`, the terminal, the standard streams), and, when the
+  workspace is a linked git worktree, its own git directory and the
+  repository's object store, so `git status`, `git diff` and `git add` work
+  while a commit to a branch and every file of the main checkout stay out of
+  reach. `TMPDIR`, `TMP` and `TEMP` point at `.melo-tmp` in the workspace.
+  Reads and the network are **not** confined: a worker can still read any
+  file you can and reach any host. A refused write keeps the system's error
+  (`Operation not permitted`) and gains a line that says writing outside the
+  workspace is not allowed in this run; the run's record counts refused
+  writes. When the profile cannot be applied (no `sandbox-exec`, or melo
+  already runs inside a sandbox that refuses another), the run stops before
+  its first command. On other systems a worker runs unconfined, and its
+  record says so. `-X agent.confine_writes=false` (or `[agent]
+  confine_writes = false`) turns confinement off.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;

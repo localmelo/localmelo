@@ -117,7 +117,8 @@ inspects and controls gateway tasks; it requires the local gateway to be running
 > Tools run with your account's permissions, and there is no sandbox: the
 > model can run shell commands and Python code, and read or write any file you
 > can. The gateway requires authentication and refuses non-loopback binds, but
-> its token does not protect against malicious processes under your own OS user. See [SECURITY.md](SECURITY.md) and
+> its token does not protect against malicious processes under your own OS user. On macOS, a worker run
+> (`melo worker`) and a saved task can write only in their workspace; reads and the network stay open. See [SECURITY.md](SECURITY.md) and
 > [what the checks do](docs/guides/tools-mcp.md#what-the-checks-do).
 
 ## Contributing

@@ -25,6 +25,7 @@ from localmelo.melo.executor.process_gate import (
     gate_supported,
     gated_exec,
 )
+from localmelo.melo.executor.sandbox import WriteConfinement
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -162,6 +163,7 @@ async def _run_shell(
     stdin: int | None = None,
     timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
+    confinement: WriteConfinement | None = None,
 ) -> tuple[str, int]:
     """Run *command* in a shell; return its output and its exit status.
 
@@ -172,9 +174,16 @@ async def _run_shell(
     its process group, and ``TimeoutError("Command timed out after <limit>
     s")`` is raised. The shell gets the environment of
     :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
-    never this process's own.
+    never this process's own. With *confinement*, the shell starts under its
+    profile with its temporary folder, and the output starts with its line
+    for refused writes (see :meth:`WriteConfinement.note`).
     """
     limit = SHELL_TIMEOUT_S if timeout_s is None else timeout_s
+    argv = ["/bin/sh", "-c", command]
+    env = child_env(tool_env)
+    if confinement is not None:
+        argv = confinement.argv(argv)
+        env.update(confinement.env())
     # A new session puts the shell and everything it starts in one process
     # group, which is killed as a whole when the command times out or the
     # call is cancelled (the executor's timeout, the run's timeout_s).
@@ -182,24 +191,25 @@ async def _run_shell(
     if record is None or not gate_supported():
         if record is not None:
             _require_incomplete_entry()
-        proc = await asyncio.create_subprocess_shell(
-            command,
+        # argv is what create_subprocess_shell runs: /bin/sh -c command.
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
-            env=child_env(tool_env),
+            env=env,
             start_new_session=True,
         )
     else:
         proc = await _gated_or_fallback(
-            ["/bin/sh", "-c", command],
+            argv,
             record=record,
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
-            env=child_env(tool_env),
+            env=env,
         )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=limit)
@@ -212,7 +222,10 @@ async def _run_shell(
         await _kill_process_group(proc)
         raise
     assert proc.returncode is not None  # communicate() waits for the exit
-    return _output_text(stdout, stderr), proc.returncode
+    text = _output_text(stdout, stderr)
+    if confinement is not None:
+        text = confinement.note(text) + text
+    return text, proc.returncode
 
 
 def _output_text(stdout: bytes, stderr: bytes) -> str:
@@ -331,23 +344,30 @@ async def _python_exec(code: str) -> str:
 
 def builtins_with_env(
     tool_env: Mapping[str, str],
+    confinement: WriteConfinement | None = None,
 ) -> dict[str, ToolFunction]:
     """The unrooted ``shell_exec`` and ``python_exec``, with *tool_env* added.
 
     The functions of :data:`BUILTINS` give their child the environment of
     :func:`~localmelo.melo.executor.env.child_env` and nothing from this
     process beyond the allowlist; these add the run's own variables, such
-    as ``AgentOptions.tool_env``, on top. The dict goes where
+    as ``AgentOptions.tool_env``, on top, and start under *confinement*
+    when it is given (see :func:`rooted_builtins`). The dict goes where
     :func:`rooted_builtins` does (see
     :func:`~localmelo.melo.executor.register_builtins`).
     """
 
     async def shell_exec(command: str) -> str:
-        text, _ = await _run_shell(command, stdin=subprocess.DEVNULL, tool_env=tool_env)
+        text, _ = await _run_shell(
+            command,
+            stdin=subprocess.DEVNULL,
+            tool_env=tool_env,
+            confinement=confinement,
+        )
         return text
 
     async def python_exec(code: str) -> str:
-        return await _run_python(code, tool_env=tool_env)
+        return await _run_python(code, tool_env=tool_env, confinement=confinement)
 
     return {"shell_exec": shell_exec, "python_exec": python_exec}
 
@@ -445,6 +465,7 @@ async def _run_python(
     *,
     cwd: str | None = None,
     tool_env: Mapping[str, str] | None = None,
+    confinement: WriteConfinement | None = None,
 ) -> str:
     """Run *code* in a child Python, in *cwd* (``None``: this directory).
 
@@ -464,34 +485,38 @@ async def _run_python(
     :data:`TOOL_EXIT_CODE`. A non-zero exit raises ``RuntimeError("Python
     exited with code <n>")``, followed by a colon, a line break and the
     last :data:`_PYTHON_ERROR_TAIL` characters of its output when there is
-    any; zero returns the output, stdout then stderr.
+    any; zero returns the output, stdout then stderr. *confinement* applies
+    as it does to :func:`_run_shell`; its line comes before the output.
     """
     if not sys.executable:
         raise RuntimeError("No Python interpreter is available for python_exec")
+    argv = [sys.executable, "-c", _python_wrapper()]
+    env = child_env(tool_env)
+    if confinement is not None:
+        argv = confinement.argv(argv)
+        env.update(confinement.env())
     record = PROCESS_RECORD.get()
     if record is None or not gate_supported():
         if record is not None:
             _require_incomplete_entry()
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            _python_wrapper(),
+            *argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
-            env=child_env(tool_env),
+            env=env,
             start_new_session=True,
         )
     else:
         proc = await _gated_or_fallback(
-            [sys.executable, "-c", _python_wrapper()],
+            argv,
             record=record,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
-            env=child_env(tool_env),
+            env=env,
         )
     try:
         stdout, stderr = await proc.communicate(code.encode("utf-8", "surrogatepass"))
@@ -501,12 +526,13 @@ async def _run_python(
     assert proc.returncode is not None  # communicate() waits for the exit
     _record_exit_code(proc.returncode)
     text = _output_text(stdout, stderr)
+    note = "" if confinement is None else confinement.note(text)
     if proc.returncode:
         message = f"Python exited with code {proc.returncode}"
         if text:
-            message = f"{message}:\n{text[-_PYTHON_ERROR_TAIL:]}"
+            message = f"{message}:\n{note}{text[-_PYTHON_ERROR_TAIL:]}"
         raise RuntimeError(message)
-    return text
+    return note + text
 
 
 # ── Built-ins with a workspace root ──
@@ -517,6 +543,7 @@ def rooted_builtins(
     *,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
+    confinement: WriteConfinement | None = None,
 ) -> dict[str, tuple[ToolFunction, float | None]]:
     """The built-ins that work in the workspace *root*, by tool name.
 
@@ -564,7 +591,12 @@ def rooted_builtins(
     they record its status in :data:`TOOL_EXIT_CODE`. Both children get
     the environment of :func:`~localmelo.melo.executor.env.child_env` with
     *tool_env* on top, never this process's own: a secret in the agent's
-    environment reaches neither, unless *tool_env* names it.
+    environment reaches neither, unless *tool_env* names it. With
+    *confinement* (see :mod:`~localmelo.melo.executor.sandbox`), both start
+    under its profile, which refuses a file write outside the workspace,
+    with ``TMPDIR``, ``TMP`` and ``TEMP`` on its temporary folder, and the
+    text of a call that reports a refused write starts with a line that
+    says so (after ``[exit code <n>]``).
     """
     root = os.path.realpath(root)
     shell_timeout_ms = (
@@ -578,15 +610,21 @@ def rooted_builtins(
         "list_files": (_rooted_list_files(root), None),
         "file_write": (_rooted_file_write(root), None),
         "shell_exec": (
-            _rooted_shell_exec(root, tool_timeout_s, tool_env),
+            _rooted_shell_exec(root, tool_timeout_s, tool_env, confinement),
             shell_timeout_ms,
         ),
-        "python_exec": (_rooted_python_exec(root, tool_env), python_timeout_ms),
+        "python_exec": (
+            _rooted_python_exec(root, tool_env, confinement),
+            python_timeout_ms,
+        ),
     }
 
 
 def _rooted_shell_exec(
-    root: str, tool_timeout_s: float | None, tool_env: Mapping[str, str] | None
+    root: str,
+    tool_timeout_s: float | None,
+    tool_env: Mapping[str, str] | None,
+    confinement: WriteConfinement | None = None,
 ) -> ToolFunction:
     async def shell_exec(command: str) -> str:
         text, returncode = await _run_shell(
@@ -595,6 +633,7 @@ def _rooted_shell_exec(
             stdin=subprocess.DEVNULL,
             timeout_s=tool_timeout_s,
             tool_env=tool_env,
+            confinement=confinement,
         )
         _record_exit_code(returncode)
         if returncode:
@@ -605,9 +644,15 @@ def _rooted_shell_exec(
     return shell_exec
 
 
-def _rooted_python_exec(root: str, tool_env: Mapping[str, str] | None) -> ToolFunction:
+def _rooted_python_exec(
+    root: str,
+    tool_env: Mapping[str, str] | None,
+    confinement: WriteConfinement | None = None,
+) -> ToolFunction:
     async def python_exec(code: str) -> str:
-        return await _run_python(code, cwd=root, tool_env=tool_env)
+        return await _run_python(
+            code, cwd=root, tool_env=tool_env, confinement=confinement
+        )
 
     return python_exec
 

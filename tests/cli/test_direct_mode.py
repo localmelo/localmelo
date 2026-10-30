@@ -709,7 +709,8 @@ class TestJsonOutput:
         assert list(record) == [
             field.name
             for field in dataclasses.fields(RunResult)
-            if field.name not in ("memory_stats", "context_budget", "prefix_cache")
+            if field.name
+            not in ("memory_stats", "context_budget", "prefix_cache", "confinement")
         ] + ["localmelo_version"]
         assert record.pop("localmelo_version") == "v-test"
         assert record == outcome.to_dict()

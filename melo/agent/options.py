@@ -255,6 +255,22 @@ class AgentOptions:
       or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
       ``-X agent.lean_output=true``; the interactive UI and the gateway never
       do. Default false: requests are as they were before the option.
+    - ``confine_writes``: when true, the ``shell_exec`` and ``python_exec``
+      children start, on macOS, under a ``sandbox-exec`` profile that
+      refuses every file write outside the workspace (the
+      ``workspace_root``, else this process's directory), except in the
+      caches the project's tools write and, for a linked git worktree, its
+      own git directory and the object store (see
+      :mod:`~localmelo.melo.executor.sandbox`); reads and the network stay
+      open. ``TMPDIR``, ``TMP`` and ``TEMP`` point at ``.melo-tmp`` in the
+      workspace, and a call's text that reports a refused write starts with
+      a line that says so; ``RunResult.confinement`` counts them. When it
+      cannot be applied (``sandbox-exec`` missing, or a sandbox that
+      refuses another), the Agent raises ``ConfinementError`` before any
+      tool runs. Elsewhere than macOS nothing is confined and
+      ``RunResult.confinement`` says so. The CLI sets it for ``--brief``
+      runs and the gateway for saved tasks, unless ``[agent]
+      confine_writes`` is false. Default false: nothing changes.
     """
 
     context_window: int | None = None
@@ -307,6 +323,7 @@ class AgentOptions:
     window_messages: int = LOCAL_WINDOW_MESSAGES
     brief_items: bool = False
     lean_output: bool = False
+    confine_writes: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -419,6 +436,7 @@ class AgentOptions:
             "typed_assertions",
             "brief_items",
             "lean_output",
+            "confine_writes",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

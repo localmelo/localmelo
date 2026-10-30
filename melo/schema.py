@@ -497,6 +497,12 @@ class RunResult:
     reasoning modes (see :meth:`Agent.run_task`), and is ``None`` in
     ``legacy``; :meth:`to_dict` leaves the key out then, so a legacy JSON
     line keeps the shape it had before R2.
+
+    ``confinement`` is set only for a run whose options turn on
+    ``confine_writes``: ``{"writes": "confined", "refused_writes": N}``,
+    N being the writes outside the workspace that this run's shell and
+    Python reported refused, or ``{"writes": "not_confined", "reason":
+    ...}``. :meth:`to_dict` leaves it out when it is ``None``.
     """
 
     task_id: str
@@ -516,6 +522,7 @@ class RunResult:
     memory_stats: dict[str, Any] | None = None
     context_budget: list[dict[str, Any]] | None = None
     prefix_cache: dict[str, Any] | None = None
+    confinement: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -530,6 +537,8 @@ class RunResult:
             del data["context_budget"]
         if data.get("prefix_cache") is None:
             del data["prefix_cache"]
+        if data.get("confinement") is None:
+            del data["confinement"]
         return data
 
 

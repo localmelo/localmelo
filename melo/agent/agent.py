@@ -108,9 +108,13 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     Executor,
+    WriteConfinement,
     call_preview,
+    confine,
+    platform_note,
     register_builtins,
 )
+from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
@@ -1138,6 +1142,8 @@ class _RunState:
     steps: int = 0
     attempts: int = 0
     n_tool: int = 0
+    # The confinement's refused writes when the run started.
+    refused_writes_base: int = 0
     fixed_tools: list[ToolDef] | None = None
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none, and the result of a
@@ -1627,6 +1633,13 @@ class Agent:
         # Resolved first, so that a bad root raises before anything, such as
         # the memory directory, is created.
         workspace_root = _resolve_workspace_root(self.options.workspace_root)
+        # Then confinement, which raises ConfinementError when it is on and
+        # cannot be applied (see AgentOptions.confine_writes).
+        self._confinement: WriteConfinement | None = None
+        if self.options.confine_writes:
+            env = child_env(self.options.tool_env)
+            folder = workspace_root or os.path.realpath(os.getcwd())
+            self._confinement = confine(folder, env)
         self._tool_providers: tuple[BaseToolProvider, ...] = tuple(tool_providers)
         # Tool setup (_ensure_tools) runs once, under this lock. It ends
         # either ready or failed; a failure is kept as its error text.
@@ -1831,6 +1844,7 @@ class Agent:
             harness_only=(
                 {"shell_exec"} if self.options.brief_check is not None else ()
             ),
+            confinement=self._confinement,
         )
         # The names of the built-ins registered above (see list_tools), and
         # R5's recall tool when its trigger is on. It is not a builtin_names()
@@ -5208,6 +5222,9 @@ class Agent:
             brief=self.options.brief_probe is not None,
             place=place,
             limits=self._limits() if progress else None,
+            refused_writes_base=(
+                0 if self._confinement is None else self._confinement.refused
+            ),
         )
         prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
@@ -6078,7 +6095,17 @@ class Agent:
                 if self.options.fixed_prefix
                 else None
             ),
+            confinement=self._confinement_record(run),
         )
+
+    def _confinement_record(self, run: _RunState) -> dict[str, Any] | None:
+        """``RunResult.confinement`` for *run* (see AgentOptions.confine_writes)."""
+        if not self.options.confine_writes:
+            return None
+        if self._confinement is None:
+            return {"writes": "not_confined", "reason": platform_note()}
+        refused = self._confinement.refused - run.refused_writes_base
+        return {"writes": "confined", "refused_writes": refused}
 
     def _run_config(self) -> dict[str, Any]:
         """The effective configuration that ``RunResult.config`` reports."""

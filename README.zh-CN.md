@@ -79,7 +79,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ## 安全
 
 > [!WARNING]
-> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关要求身份验证并拒绝非回环监听，但令牌无法防御同一操作系统用户下的恶意进程。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/guides/tools-mcp.md#what-the-checks-do)。
+> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关要求身份验证并拒绝非回环监听，但令牌无法防御同一操作系统用户下的恶意进程。在 macOS 上，worker 运行（`melo worker`）和保存的任务只能在自己的工作区内写文件；读取和网络不受限制。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/guides/tools-mcp.md#what-the-checks-do)。
 
 ## 参与贡献
 

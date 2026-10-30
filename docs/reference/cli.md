@@ -820,6 +820,41 @@ pass changes nothing; a failure sends the same message as the gate and uses one
 of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
 line behaves as before, and the model's own account of its checks is still only that.
 
+<a id="confined-writes"></a>
+
+**Writes stay in the workspace (macOS; `[agent] confine_writes`, on by default).**
+A worker's `shell_exec` and `python_exec` children, the checks included, start
+under a `sandbox-exec` profile that refuses every file write outside the workspace
+(`--workspace`, else the current folder), whatever the command does: `cd ..` and a
+write, `uv run` in another checkout and a child `git` or Python are all refused.
+Writes are allowed in the workspace, in `.melo-tmp` there (`TMPDIR`, `TMP` and
+`TEMP` point at it; a `.gitignore` in it keeps it out of `git status`, and it stays
+with the workspace), in uv's cache (`UV_CACHE_DIR`, else `~/.cache/uv`), black's
+(`~/Library/Caches/black`) and npm's (`~/.npm`), in `/dev/null`, `/dev/zero`, the
+terminal, the standard streams, `/dev/fd` and pseudo-terminals, and, when the
+workspace is a linked git worktree, in its own git directory and the repository's
+`objects`: `git status`, `diff` and `add` work, a commit to a branch is refused,
+and the main checkout's files stay unwritable. `uv run`, `uv sync`, `pytest`,
+`ruff`, `black`, `mypy` and `npm` were measured to need nothing else. Reads and
+the network are not confined. macOS's `mktemp` with no template writes in the
+system's temporary folder and is refused; `mktemp "$TMPDIR/x.XXXXXX"` works. A
+refused write keeps its error and gains a first line (after `[exit code N]`):
+
+```text
+melo: writing outside the workspace is not allowed in this run (refused: /Users/me/outside.txt); write in /Users/me/project, and put scratch files in $TMPDIR.
+```
+
+`run.confinement` in the result counts them: `{"writes": "confined",
+"refused_writes": 1}`. When the profile cannot be applied (`sandbox-exec` is
+missing, or melo runs inside a sandbox that refuses another), the worker stops
+before its first command with a `startup_error` and the line `writes cannot be
+confined to the workspace: <why>; set agent.confine_writes to false to run without
+it (-X agent.confine_writes=false for one run)`. On other systems the run goes on
+unconfined, and `run.confinement` is `{"writes": "not_confined", "reason": ...}`.
+`-X agent.confine_writes=false` turns it off for one run; then the result has no
+`confinement` key. Runs without `--brief`, the interactive UI, the web console and
+the app are not confined.
+
 <a id="brief-items"></a>
 
 **Experimental: `--brief-items on` (`[agent] brief_items = true`, off by default).**

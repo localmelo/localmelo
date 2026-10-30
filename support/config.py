@@ -177,6 +177,9 @@ class AgentConfig:
     )
     # Experimental: direct runs ask for fewer output tokens (AgentOptions.lean_output).
     lean_output: bool = False
+    # Worker runs (--brief) and saved tasks: shell_exec and python_exec write only
+    # in the workspace on macOS (AgentOptions.confine_writes); false turns it off.
+    confine_writes: bool = True
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -505,6 +508,8 @@ class Config:
             errors.append("[agent] brief_items must be a boolean")
         if not isinstance(self.agent.lean_output, bool):
             errors.append("[agent] lean_output must be a boolean")
+        if not isinstance(self.agent.confine_writes, bool):
+            errors.append("[agent] confine_writes must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -1198,6 +1203,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.captured_history
         or cfg.agent.brief_items
         or cfg.agent.lean_output
+        or cfg.agent.confine_writes != defaults.confine_writes
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -1226,6 +1232,8 @@ def save(cfg: Config) -> None:
             lines.append("brief_items = true")
         if cfg.agent.lean_output:
             lines.append("lean_output = true")
+        if cfg.agent.confine_writes != defaults.confine_writes:
+            lines.append(f"confine_writes = {_toml_value(cfg.agent.confine_writes)}")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
