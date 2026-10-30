@@ -19,6 +19,7 @@ import { workerHistory } from "./worker-history.mjs";
 import { setupTasks } from "./tasks.mjs";
 import { setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
+import { setupModelCard } from "./setup-card.mjs";
 import {
   activity,
   applyEvent,
@@ -51,6 +52,7 @@ const LIST_POLL_MS = 4000;
 const S = {
   health: null,
   authenticated: false,
+  ready: false, // The first load has chosen what to show, so the welcome is not a guess.
   machine: null,
   sessions: [],
   activeId: null,
@@ -67,6 +69,7 @@ const S = {
 };
 
 const input = $("input");
+const COMPOSER_PLACEHOLDER = input.placeholder;
 let noticeTimer = null;
 let sessionListSnapshot = "";
 let messageSnapshot = "";
@@ -317,10 +320,15 @@ function pendingOutbox() {
   return S.outbox[S.activeId ?? "new"] ?? null;
 }
 
-/** Whether the welcome screen offers "Connect a model": no model is configured, or the configured server is known to be down. */
+/** Whether no model can answer yet: none is configured, or the configured server is known to be down. */
 function needsModel(health) {
   if (!health) return false;
   return health.configured === false || health.model_server?.reachable === false;
+}
+
+/** Whether the welcome shows the setup card: a model is needed (or being connected), and no chat is open. */
+function setupShown() {
+  return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
 }
 
 function syncUI() {
@@ -348,8 +356,13 @@ function syncUI() {
   const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
   setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : (!S.online ? "Could not reach the gateway. Check that the gateway is running." : ""));
   storeBanner.hidden = !storeBanner.textContent;
+  const setup = setupShown();
+  setupCard.show(setup);
+  $("welcome").classList.toggle("needs-model", setup);
+  input.disabled = setup;
+  input.placeholder = setup ? "Connect a model to start" : COMPOSER_PLACEHOLDER;
   const modelBanner = $("model-banner");
-  setTextIfChanged(modelBanner, S.health?.configured === false ? "No model is configured yet. Open connection settings to connect one." : "");
+  setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? "No model is configured yet. Open connection settings to connect one." : "");
   modelBanner.hidden = !modelBanner.textContent;
   refreshStreamNotice();
   $("header-model").textContent = session
@@ -370,13 +383,13 @@ function syncUI() {
         : "New chat";
   $("connection-dot").classList.toggle("offline", !S.online);
   $("model-btn").textContent = model?.name ? `${model.name}  ⌄` : "Choose a model  ⌄";
-  $("setup-btn").hidden = !needsModel(S.health);
   $("send-btn").hidden = !!turn;
   $("stop-btn").hidden = !turn;
   $("stop-btn").disabled = !turn || S.cancelling.has(turn.id);
   $("stop-btn").textContent = turn && S.cancelling.has(turn.id) ? "■ Stopping…" : "■ Stop";
   const sending = pendingOutbox();
   $("send-btn").disabled =
+    setup ||
     !S.online ||
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
@@ -2091,6 +2104,16 @@ function openSettings() {
   drawer.close();
   return showSettings();
 }
+const setupCard = setupModelCard({
+  root: $("setup-card"),
+  api,
+  openSettings,
+  connected: async () => {
+    setHealth(await api("/health"));
+    syncUI();
+    input.focus();
+  },
+});
 
 // ── The clock ──
 
@@ -2217,6 +2240,8 @@ async function init() {
       api("/health").then((body) => { setHealth(body); syncUI(); }).catch(() => {});
     }
   }, LIST_POLL_MS);
+  S.ready = true;
+  syncUI();
   // The first load is done: a screenshot harness (and a curious person) can
   // tell the page is wired before they type into it.
   document.documentElement.dataset.ready = "1";
@@ -2240,7 +2265,7 @@ input.addEventListener("input", () => {
   resizeInput();
   syncUI();
 });
-for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn", "setup-btn"]) {
+for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn"]) {
   const node = $(id);
   if (id === "new-btn") node.addEventListener("click", () => newChat());
   else node.addEventListener("click", openSettings);

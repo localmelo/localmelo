@@ -14,6 +14,7 @@ import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
+import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -370,6 +371,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupTasks \} from "\.\/tasks\.mjs";\n/m, '')
   .replace(/^import \{ setupStatusRow \} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
+  .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -549,7 +551,8 @@ function harness(routes, {mobile = false} = {}) {
     setupTasks,
     setupStatusRow,
     setupRunning,
-    setupSettings: () => async () => {},
+    setupModelCard,
+    setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     document,
     location: {hash: '', pathname: '/', search: ''},
@@ -1087,24 +1090,117 @@ test('status banners do not rewrite unchanged live text', async () => {
   assert.equal(writes['model-banner'], 0);
 });
 
-test('Connect a model is offered only when no model is set up or the configured server cannot be reached', async () => {
-  const welcome = async (patch) => {
-    const h = harness(baseRoutes({'GET /health': {...health, ...patch}}));
+// ── The setup card on the welcome ──
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const nothing = {state: 'none', name: '', backend: '', url: '', models: [], loaded: [], suggested: null, problem: ''};
+const omlx = {...nothing, state: 'found', name: 'oMLX', backend: 'vllm', url: 'http://127.0.0.1:8000/v1', models: ['qwen3-8b'], loaded: ['qwen3-8b'], suggested: 'qwen3-8b'};
+const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
+const press = async (node, label) => { await findNode(node, (n) => n.textContent === label).click(); await tick(); };
+
+/** A first run: nothing saved, the card detecting; the first PUT saves, and health then says so. */
+async function firstRun(detected, routes = {}) {
+  let saved = false;
+  const h = harness(baseRoutes({
+    'GET /health': () => ({...health, configured: saved}),
+    'GET /setup/detect': detected,
+    'GET /settings': {chat_backend: '', embedding_backend: '', workspace: '~/ws', revision: 'rev0'},
+    'PUT /settings': () => { saved = true; return {}; },
+    'POST /settings/test': {ok: true},
+    ...routes,
+  }));
+  h.context.location.hash = '#/new';
+  await h.run('init()');
+  await tick();
+  return h;
+}
+
+test('the setup card shows, and asks what is on this Mac, only while no model can answer', async () => {
+  for (const [patch, wanted, why] of [
+    [{model_server: server(true)}, false, 'A reachable model needs no setup'],
+    [{configured: false}, true, 'No model is configured'],
+    [{model_server: server(false)}, true, 'The configured server cannot be reached'],
+    [{model_server: server(null)}, false, 'A probe that has not answered yet is not a failure'],
+    [{model_server: null}, false, 'A cloud backend has no local server to probe'],
+  ]) {
+    const h = harness(baseRoutes({'GET /health': {...health, ...patch}, 'GET /setup/detect': nothing}));
     h.context.location.hash = '#/new';
     await h.run('init()');
-    return h;
-  };
-  const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
-  const connected = await welcome({model_server: server(true)});
-  assert.equal(connected.element('welcome').hidden, false);
-  assert.equal(connected.element('setup-btn').hidden, true, 'A reachable model needs no setup');
-  assert.equal((await welcome({configured: false})).element('setup-btn').hidden, false, 'No model is configured');
-  assert.equal((await welcome({model_server: server(false)})).element('setup-btn').hidden, false, 'The configured server cannot be reached');
-  assert.equal((await welcome({model_server: server(null)})).element('setup-btn').hidden, true, 'A probe that has not answered yet is not a failure');
-  assert.equal((await welcome({model_server: null})).element('setup-btn').hidden, true, 'A cloud backend has no local server to probe');
-  connected.state().health = {...health, model_server: server(false)};
-  connected.run('syncUI()');
-  assert.equal(connected.element('setup-btn').hidden, false, 'The next health answer shows it');
+    assert.equal(h.element('setup-card').hidden, !wanted, why);
+    assert.equal(h.net.callsTo('/setup/detect').length, wanted ? 1 : 0, why);
+    assert.equal(h.element('welcome').classList.contains('needs-model'), wanted, why);
+    assert.equal(h.element('input').disabled, wanted, why);
+  }
+  const chat = harness(baseRoutes({'GET /health': {...health, configured: false}, 'GET /setup/detect': nothing}));
+  await chat.run('init()');
+  assert.equal(chat.element('setup-card').hidden, true, 'An open chat has no setup card');
+  assert.equal(chat.net.callsTo('/setup/detect').length, 0);
+});
+
+test('Use this model saves the server that was found, tests it, and the welcome is ready without opening settings', async () => {
+  const h = await firstRun(omlx);
+  const card = h.element('setup-card');
+  assert.match(h.text('setup-card'), /Found oMLX on this Mac.*127\.0\.0\.1:8000.*qwen3-8b Loaded/);
+  assert.equal(h.element('input').placeholder, 'Connect a model to start');
+  assert.equal(h.element('send-btn').disabled, true);
+  await press(card, 'Use this model');
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/settings')).map((call) => `${call.method} ${call.path}`), ['GET /settings', 'PUT /settings', 'POST /settings/test']);
+  const sections = {vllm: {chat_url: 'http://127.0.0.1:8000/v1', chat_model: 'qwen3-8b'}};
+  const candidate = {chat_backend: 'vllm', embedding_backend: 'none', workspace: '~/ws', sections};
+  assert.deepEqual(h.net.calls.find((call) => call.method === 'PUT').body, {...candidate, revision: 'rev0'}, 'The PUT carries the loaded revision');
+  assert.deepEqual(h.net.callsTo('/settings/test')[0].body, candidate);
+  assert.equal(card.hidden, true);
+  assert.equal(h.element('input').disabled, false);
+  assert.equal(h.context.settingsOpened, undefined, 'Settings never opened');
+});
+
+test('with several models and none known loaded the card lists them and waits for a pick', async () => {
+  const h = await firstRun({...omlx, name: '', models: ['a-7b', 'b-8b'], loaded: [], suggested: null});
+  const card = h.element('setup-card');
+  const rows = [];
+  const walk = (node) => { if (node.type === 'radio') rows.push(node); (node.children ?? []).forEach(walk); };
+  walk(card);
+  assert.match(h.text('setup-card'), /Found a model server on this Mac.*Pick the model to use.*a-7b.*b-8b.*can take minutes/);
+  const use = findNode(card, (node) => node.textContent === 'Use this model');
+  assert.deepEqual(rows.map((row) => row.checked), [false, false], 'Nothing is picked for the user');
+  assert.equal(use.disabled, true);
+  rows[1].checked = true;
+  rows[1].listeners.change[0]();
+  assert.equal(use.disabled, false);
+  await use.click();
+  await tick();
+  assert.equal(h.net.calls.find((call) => call.method === 'PUT').body.sections.vllm.chat_model, 'b-8b');
+});
+
+test('a key, no server and a failed test are worded plainly, and Check again asks again', async () => {
+  let answer = {...nothing, state: 'needs_key', url: 'http://127.0.0.1:8000/v1', problem: 'HTTP 401'};
+  const h = await firstRun(() => answer);
+  assert.match(h.text('setup-card'), /A model server needs an API key.*127\.0\.0\.1:8000 asks for a key.*Allow inference without API key/);
+  answer = nothing;
+  await press(h.element('setup-card'), 'Check again');
+  assert.match(h.text('setup-card'), /No model server is running on this Mac.*Start oMLX or Ollama, then check again/);
+  assert.equal(findNode(h.element('setup-card'), (node) => node.textContent === 'Read the quickstart').href, 'https://localmelo.github.io/localmelo/en/quickstart.html');
+  await press(h.element('setup-card'), 'Enter a server address…');
+  assert.equal(h.context.settingsOpened, 1);
+  answer = omlx;
+  await press(h.element('setup-card'), 'Check again');
+  assert.equal(h.net.callsTo('/setup/detect').length, 3);
+  assert.match(h.text('setup-card'), /Found oMLX/);
+});
+
+test('a failed test keeps the card up, also after health says a model is set, until it passes', async () => {
+  let reply = {ok: false, error: 'chat probe failed: HTTP 401\nsecond line'};
+  const h = await firstRun(omlx, {'POST /settings/test': () => reply});
+  await press(h.element('setup-card'), 'Use this model');
+  assert.match(h.text('setup-card'), /Could not connect to oMLX.*chat probe failed: HTTP 401(?!.*second line)/);
+  h.state().health = {...health, configured: true};
+  h.run('syncUI()');
+  assert.equal(h.element('setup-card').hidden, false, 'The saved choice does not hide the failure');
+  assert.equal(h.element('input').disabled, true);
+  reply = {ok: true};
+  await press(h.element('setup-card'), 'Try again');
+  assert.equal(h.element('setup-card').hidden, true);
+  assert.equal(h.element('input').disabled, false);
 });
 
 test('setup failure offers the details drawer tools action', async () => {

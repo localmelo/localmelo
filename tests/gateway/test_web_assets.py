@@ -433,3 +433,15 @@ def test_muted_text_has_a_rule_and_undone_turns_do_not_fade() -> None:
 def test_shell_buttons_have_no_native_title_tooltips() -> None:
     page = (webapp._STATIC / "index.html").read_text(encoding="utf-8")
     assert not re.findall(r"<button\b[^>]*\btitle=", page)
+
+
+async def test_setup_card_module_is_served_and_the_shell_has_its_card(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/setup-card.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "setupModelCard" in response.text
+    page = await client.get("/")
+    assert re.search(r'<section\b[^>]*\bid="setup-card"[^>]*\bhidden\b', page.text)
+    assert "setup-btn" not in page.text and "POSSIBILITY" not in page.text
