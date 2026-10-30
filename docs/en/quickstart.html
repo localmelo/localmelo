@@ -182,16 +182,18 @@ pip install -e ".[gateway]"</code></pre>
         </p>
         <p>
           For a local server, run <code>melo</code> in a terminal. With no
-          configuration yet, it looks for a model server on this computer
-          (oMLX on port 8000, Ollama on 11434), asks for its URL (press Enter
-          to accept the one it found) and for a model from the server's list,
-          saves
+          configuration yet, it first says what it needs, a model server on
+          this computer. It then looks for one (oMLX on port 8000, Ollama on
+          11434), asks for its URL (press Enter to accept the one it found)
+          and for a model from the server's list, which shows chat models
+          first and tags an embedding or reranking model, saves
           <code>~/.cache/localmelo/config.toml</code> and opens the
           interactive UI:
         </p>
         <pre><code>$ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Model server URL [http://127.0.0.1:11434/v1]:
+Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
@@ -200,7 +202,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
+│ memory     no long-term memory                                           │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit</code></pre>

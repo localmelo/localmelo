@@ -175,9 +175,9 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     if setup.saved:
         chosen = _configured(config.load(), args.chat_model, args)
         if isinstance(chosen, Choice):
-            return replace(
-                chosen, backend=replace(chosen.backend, source="saved"), checked=True
-            )
+            # The first run just said how long-term memory is added, if it is off.
+            backend = replace(chosen.backend, source="saved", memory_told=True)
+            return replace(chosen, backend=backend, checked=True)
         return chosen
     from localmelo.support.cli.agents import url_backend
 

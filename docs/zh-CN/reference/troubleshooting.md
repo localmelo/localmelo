@@ -98,7 +98,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-[r]etry, [s]tart without saving, [q]uit [r]:
+Enter tries again · s starts without saving · q quits:
 ```
 
 - **原因：** 对该 URL 的 `GET /v1/models` 失败。`connection refused`：那里没有进程在监听；`HTTP 401` 或 `HTTP 403`：服务器需要 API 密钥，而 localmelo 不会向本地服务器发送密钥；`it lists no models`：服务器尚未提供任何模型。

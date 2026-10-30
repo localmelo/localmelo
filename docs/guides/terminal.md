@@ -553,8 +553,9 @@ model, it asks once more whether to use it. Later runs go straight in.
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
-Model server URL [http://127.0.0.1:8000/v1]:
+Server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
 No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
@@ -583,14 +584,16 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
-- A server that lists several models shows them as a numbered list and asks
-  `Model [N]:`; type a number or an id. With several chat models, a loaded
-  one is marked `(loaded)` and is the default; when the server does not say
-  which are loaded, the prompt is `Model:` with no default and Enter alone
-  asks again (`Type the number of the model to use. …`). Without a terminal
-  an empty answer then exits 2 with an error. `/backend` asks the same
-  way. A server that lists only such models is shown the same
-  way, with a line saying that chat needs a chat model.
+- A server that lists several models shows them as a numbered list, chat
+  models first, and asks `Model [N]:`; type a number or an id. An embedding
+  or reranking model is tagged `(embedding)` or `(reranking)` and is never
+  the default. With several chat models, a loaded one is marked `(loaded)` and
+  is the default; when the server does not say which are loaded, the prompt is
+  `Model:` with no default and Enter alone asks again (`Type the number of the
+  model to use. …`). Without a terminal an empty answer then exits 2 with an
+  error. `/backend` asks the same way. A server that lists only embedding or
+  reranking models is shown the same way, with a line saying that chat needs a
+  chat model. The hints are wrapped to the terminal's width at word boundaries.
 - An Ollama server, one that answers `GET /api/version` with
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
   `[ollama]` table's `chat_url` and `chat_model`; the banner then says
@@ -611,16 +614,17 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
-  `[r]etry, [s]tart without saving, [q]uit [r]:`. `r` asks for the URL again, with
-  the one you typed as the default; `s` asks `Model name [default]:` and
-  opens the UI without saving (`Not saved: melo asks again next time.`);
-  `q` exits with code 0. The reasons are `connection refused`,
+  `Enter tries again · s starts without saving · q quits:`. Enter asks for the
+  URL again, with the one you typed as the default; `s` asks
+  `Model name [default]:` and opens the UI without saving
+  (`Not saved: melo asks again next time.`); `q` exits with code 0. The reasons are `connection refused`,
   `no answer in 5 s`, `HTTP 401` or `HTTP 403` with
   `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`,
   another `HTTP` status (a redirect names its target, which melo does not
   follow), `the reply is not a model list`, `the reply could not be read`,
   `not a URL` and `it lists no models`.
 - An option is chosen by its first letter, so `s`, `start` and
-  `start without saving` are the same answer; another answer asks again.
+  `start without saving` are the same answer (and `r` or `retry` is Enter);
+  another answer asks again.
 - Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;
   Ctrl+C prints the same and exits with 130.

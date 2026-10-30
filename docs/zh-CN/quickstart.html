@@ -110,10 +110,11 @@ pip install -e ".[gateway]"</code></pre>
       <section class="section" id="save-a-configuration">
         <h2>保存配置</h2>
         <p>配置文件会保存后端设置，这样 <code>melo</code>、<code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>--base-url</code>。</p>
-        <p>使用本地服务器时，在终端里运行 <code>melo</code>。还没有配置时，它会在本机查找模型服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），询问服务器地址（按回车接受找到的地址），再从服务器列出的模型里选一个，保存 <code>~/.cache/localmelo/config.toml</code>，然后打开交互式界面：</p>
+        <p>使用本地服务器时，在终端里运行 <code>melo</code>。还没有配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问服务器地址（按回车接受找到的地址），再从服务器列出的模型里选一个（列表先列对话模型，嵌入或重排模型会加标签），保存 <code>~/.cache/localmelo/config.toml</code>，然后打开交互式界面：</p>
         <pre><code>$ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Model server URL [http://127.0.0.1:11434/v1]:
+Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
@@ -122,7 +123,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
+│ memory     no long-term memory                                           │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit</code></pre>

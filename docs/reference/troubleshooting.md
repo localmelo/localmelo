@@ -116,7 +116,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-[r]etry, [s]tart without saving, [q]uit [r]:
+Enter tries again · s starts without saving · q quits:
 ```
 
 - **Cause:** `GET /v1/models` on that URL failed. `connection refused`:

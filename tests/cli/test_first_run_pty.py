@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from localmelo.support.backends import discovery
 from localmelo.tests.cli.test_direct_mode_process import (
     FakeChatServer,
     _env,
@@ -70,16 +71,14 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
 
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(
-            lambda out: b"Model server URL [" in out, 30
-        ), term.output
+        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Model: " in out, 30), term.output
         term.type(b"\r")  # no model is known to be loaded: Enter alone asks again
         assert term.read_until(
             lambda out: b"Type the number of the model to use." in out, 30
         ), term.output
-        term.type(b"3\r")
+        term.type(b"2\r")  # chat-a, chat-b, then the embedding model
         assert term.read_until(
             lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
             30,
@@ -94,7 +93,16 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.close()
 
     text = _text(term)
+    assert text.startswith("melo uses a model server on this computer (")
     assert f"Found a model server at {url} (3 models).\n" in text
+    # The chat models come first; the embedding model is tagged.
+    assert "[1] chat-a\n" in text and "[2] chat-b\n" in text
+    assert "[3] nomic-embed-text  (embedding)\n" in text
+    # The hint is wrapped at a word boundary to the 100 columns of this terminal.
+    rows = text.split("\n")
+    start = next(i for i, row in enumerate(rows) if "Type the number" in row)
+    hint = " ".join(row.strip() for row in rows[start : start + 2])
+    assert hint == discovery.NO_DEFAULT_HINT
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
     assert f"chat-b · {label} · {url}" in text
     assert "saved as the default" in text
@@ -117,7 +125,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     # A new process has listed nothing yet; the file alone names the server.
     assert f"chat-b · {label} · {url}" in text
     assert f"long-term memory · {label} · nomic-embed-text" in text
-    assert "Model server URL" not in text
+    assert "Server URL" not in text
 
 
 def test_a_base_url_with_several_models_and_none_known_loaded_exits_2(

@@ -652,6 +652,12 @@ def test_the_banner_without_an_embedding_names_the_wizard() -> None:
     assert "│ memory     no long-term memory · melo --reconfigure adds one" in text
 
 
+def test_the_banner_after_the_first_run_does_not_repeat_how_to_add_memory() -> None:
+    text = _banner(key="vllm", label="vLLM", memory_told=True)
+    assert "│ memory     no long-term memory " in text
+    assert "adds one" not in text
+
+
 def test_the_banner_cleans_an_embedding_model_id() -> None:
     text = _banner(key="vllm", label="vLLM", embedding="vllm · bad\x1b[31m")
     assert "\x1b" not in text and "31m" not in text and "bad" in text

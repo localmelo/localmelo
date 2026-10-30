@@ -60,7 +60,9 @@ class BackendInfo:
     that is not the config's; *source* is ``config`` or a key of
     :data:`SOURCE_TEXT`. *listed* is the number of models the server
     listed when melo chose the one it says is loaded, else 0. *key_env* names a
-    cloud vendor's key variable.
+    cloud vendor's key variable. *memory_told* says the first run just told
+    the user that long-term memory is off and how to add it, so the banner
+    does not say it again.
     """
 
     key: str
@@ -71,6 +73,7 @@ class BackendInfo:
     source: str = "config"
     listed: int = 0
     key_env: str = ""
+    memory_told: bool = False
 
     @property
     def local(self) -> bool:
@@ -95,6 +98,8 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
     if not memory:
         return "long-term memory off (--memory off)"
     if not backend.embedding:
+        if backend.memory_told:
+            return "no long-term memory"
         if backend.key == "openai-compatible":
             return "no long-term memory · --embedding-base-url adds one"
         return "no long-term memory · melo --reconfigure adds one"

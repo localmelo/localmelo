@@ -8,23 +8,24 @@
 
 ## 首次运行
 
-在没有配置文件的终端中运行 `melo`，它会询问模型服务器的 URL 和对话模型，保存答案，然后打开交互式界面。如果服务器还列出了嵌入模型，它会询问一次是否使用。下面的例子中，oMLX 在 8000 端口运行，提供三个模型，第二个已加载：
+在没有配置文件的终端中运行 `melo`，它会询问模型服务器的 URL 和对话模型，保存答案，然后打开交互式界面。如果服务器还列出了嵌入模型，它会询问一次是否使用。下面的例子中，oMLX 在 8000 端口运行，提供三个模型，第一个对话模型已加载：
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (3 models).
-Model server URL [http://127.0.0.1:8000/v1]:
+Server URL [http://127.0.0.1:8000/v1]:
 Models on http://127.0.0.1:8000/v1:
-  [1] Qwen3-Embedding-0.6B
-  [2] Qwen3-8B-4bit  (loaded)
-  [3] Qwen3-32B-4bit
-Model [2]:
+  [1] Qwen3-8B-4bit  (loaded)
+  [2] Qwen3-32B-4bit
+  [3] Qwen3-Embedding-0.6B  (embedding)
+Model [1]:
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
 Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
-- 如果本机服务器在端口 8000、8400、11434 或 30000 上列出模型，提示中会填入它的 URL；有对话模型的服务器排在最前。列出服务器模型时发送 `GET /v1/models`。有多个对话模型时，设置还会询问哪些模型已在内存中：用 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），各等一秒，不带密钥；已加载的模型会标上 `(loaded)`，第一个作为默认值，没有已加载的模型时没有默认值，请输入编号。保存选择时会发送一次 `GET /api/version`，以区分 Ollama 服务器；回答 `y` 则会发送一次 `POST /v1/embeddings`，探测提供的模型。
+- 如果本机服务器在端口 8000、8400、11434 或 30000 上列出模型，提示中会填入它的 URL；有对话模型的服务器排在最前。列出服务器模型时发送 `GET /v1/models`。列表先列对话模型；嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。有多个对话模型时，设置还会询问哪些模型已在内存中：用 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），各等一秒，不带密钥；已加载的模型会标上 `(loaded)`，第一个作为默认值，没有已加载的模型时没有默认值，请输入编号。保存选择时会发送一次 `GET /api/version`，以区分 Ollama 服务器；回答 `y` 则会发送一次 `POST /v1/embeddings`，探测提供的模型。
 - 只有列表中包含对话模型以外的嵌入模型时才会询问嵌入问题。回答 `y` 会保存三个嵌入值：对话后端的键、其 URL 和提供的模型。探测失败、回答 `n` 或没有候选模型时，会像以前一样保存 `embedding_backend = "none"`。
 - Ollama 服务器（响应 `GET /api/version` 的服务器）保存为 `ollama` 后端，oMLX 服务器（它的模型列表把 oMLX 标为每个模型的所有者）保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，文件中的其他设置保持不变。`omlx` 是 `vllm` 后端的另一个名字，所以设置仍在 `[vllm]` 表中。没有嵌入时，写入：
 

@@ -965,6 +965,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The first run explains itself. With no config file, `melo` first says what it needs
+  (`melo uses a model server on this computer (oMLX, Ollama, LM Studio…).`) and asks
+  `Server URL` (it said `Model server URL`). The model list shows chat models first;
+  an embedding or reranking model is tagged `(embedding)` or `(reranking)` and is never
+  the default (there is still no default among several chat models when the server does
+  not say which is loaded). The hints wrap to the terminal's width at word boundaries
+  instead of breaking inside a word, a failed check asks `Enter tries again · s starts
+  without saving · q quits:` (it asked `[r]etry, [s]tart without saving, [q]uit [r]:`),
+  and the first banner no longer says how to add long-term memory right after you
+  declined it. The saved config and every machine output are unchanged ([#NN]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`

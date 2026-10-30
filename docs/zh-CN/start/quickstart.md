@@ -131,12 +131,13 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--base-url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表先列对话模型；嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Model server URL [http://127.0.0.1:11434/v1]:
+Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
@@ -145,7 +146,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
+│ memory     no long-term memory                                           │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit
