@@ -45,16 +45,16 @@ omlx serve --model-dir ~/models --port 8000
 在第二个终端里运行一个任务：
 
 ```bash
-melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
 
 在其他系统上，或者你更喜欢 [Ollama](https://ollama.com) 时，先运行 `ollama pull qwen3:8b` 下载模型，然后运行：
 
 ```bash
-melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
+melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
-在终端里运行 `melo` 可以对话。第一次运行时，它会找到正在运行的服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），自动选择模型或询问你要用哪一个，并保存配置；`melo --serve` 启动网关；在终端运行 `melo --gateway-login`，并在 60 秒内打开一次性链接。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。
+在终端里运行 `melo` 可以对话。第一次运行时，它会找到正在运行的服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），自动选择模型或询问你要用哪一个，并保存配置；`melo serve` 启动网关；在终端运行 `melo console`，并在 60 秒内打开一次性链接。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。`-u` 和 `-m` 是 `--url` 和 `--model` 的字母写法；旧写法（`--base-url`、`--chat-model`、`--serve`、`--reconfigure`、`--gateway-login`）仍然可用，完整对照见[旧写法对应的新写法](docs/reference/cli.md#old-spelling-to-new)。
 
 ## 了解更多
 

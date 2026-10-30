@@ -72,16 +72,16 @@ explains why. To use it instead of Ollama:
 5. Run a task with that id:
 
    ```bash
-   melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+   melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
    ```
 
    oMLX loads the model on its first request, which can take a minute for a
    large model. If that request times out, add `--request-timeout 600`.
-   Without `--chat-model`, melo asks oMLX which models it has and uses the
+   Without `--model`, melo asks oMLX which models it has and uses the
    only chat model or the one that is loaded, for a task and for
-   `melo --base-url http://127.0.0.1:8000/v1` without a task (the interactive
+   `melo --url http://127.0.0.1:8000/v1` without a task (the interactive
    UI); with several chat models and not exactly one loaded, it exits 2, lists
-   them and asks for `--chat-model <id>`. Name the model with `--chat-model`
+   them and asks for `--model <id>`. Name the model with `--model`
    to skip that lookup.
 
 To make oMLX your default, run `melo` in a terminal before any configuration
@@ -107,7 +107,7 @@ like this, and with several chat models it asks oMLX which are loaded
   mark such a model.
 
 With a configuration saved already, run step 5 first, so that the model is
-loaded, then `melo --reconfigure`: in default mode it offers the server it
+loaded, then `melo setup`: in default mode it offers the server it
 finds with the first run's questions. In the full menu (after `n`, or with
 `--developer`), choose oMLX or vLLM (`3`) as the chat backend, enter
 `http://127.0.0.1:8000/v1` and the model id, and choose `5` (None) as the
@@ -168,7 +168,7 @@ enable_thinking = false
 ```
 
 - `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
-  name, or the alias set for it in oMLX. `--chat-model ID` replaces it for
+  name, or the alias set for it in oMLX. `--model ID` replaces it for
   one run.
 - [First run](configure.md#first-run) writes the `chat_backend`, `chat_url` and
   `chat_model` lines: run `melo` in a terminal with no config file, while

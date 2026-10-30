@@ -8,24 +8,28 @@ login on macOS.
 ## Start the gateway
 
 ```bash
-melo --serve
+melo serve
 ```
 
-- When there is no config file yet, `melo --serve` runs the setup wizard
+The old spellings (`melo --serve`, `--daemon`, `--gateway-login`,
+`--gateway-rotate-token`, `--enable-playground`, `--allow-unconfigured`) still
+work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new)
+lists them.
+
+- When there is no config file yet, `melo serve` runs the setup wizard
   first; see [Configuration](configure.md#set-up-with-the-wizard).
   Without a terminal it cannot ask, so it prints
-  `melo: no backend is configured; run melo --reconfigure in a terminal`
+  `melo: no backend is configured; run melo setup in a terminal`
   and exits with code 1.
-- `melo --serve --allow-unconfigured` starts the gateway without running
+- `melo serve --force` starts the gateway without running
   the wizard even when no backend is configured or the config file has
   validation errors, so a client or the web console can inspect
   `GET /api/health` and save a configuration through `PUT /api/settings`.
-  It cannot be combined with `--reconfigure`.
-- `--base-url` and `--chat-model` are usage errors with `--serve`: the
+- `--url` and `--model` are usage errors with `melo serve`: the
   gateway uses the config file.
 - It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
   file. `--host` and `--port` change them for one run, as in
-  `melo --serve --port 9401`.
+  `melo serve --port 9401`.
 - It prints the backends and its addresses:
 
   ```text
@@ -34,7 +38,7 @@ melo --serve
     Embedding: none
     Gateway: http://127.0.0.1:8401
     Web UI:  http://127.0.0.1:8401/
-    Sign in: run melo --gateway-login --port 8401 in another terminal
+    Sign in: run melo console -p 8401 in another terminal
   ```
 
 - Starting does not contact the model server. Run a task to check it.
@@ -45,11 +49,11 @@ melo --serve
 > [!WARNING]
 > The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
 
-Start the gateway, then run `melo --gateway-login` in a terminal and open the
+Start the gateway, then run `melo console` in a terminal and open the
 printed single-use link within 60 seconds. For a nondefault port, add
 `--port PORT`. Do not share the link. The page exchanges its fragment for an
 HttpOnly, SameSite=Strict cookie valid for up to 30 days and removes the
-fragment. Run `melo --gateway-rotate-token` to replace the private token file.
+fragment. Run `melo console --reset` to replace the private token file.
 All gateways using that file reject old credentials; revocation of open event
 streams takes effect within about 250 ms. One event already being sent may
 still complete.
@@ -134,9 +138,9 @@ makes larger requests: leave out `session_id` for an unrelated task.
 ## Run the gateway at login (macOS)
 
 ```bash
-melo --daemon install
-melo --daemon status
-melo --daemon uninstall
+melo serve install
+melo serve status
+melo serve uninstall
 ```
 
 - `install` writes `~/Library/LaunchAgents/ai.localmelo.gateway.plist` and
@@ -151,7 +155,7 @@ melo --daemon uninstall
   `pid`.
 - Save a configuration before `install`, with `melo` or the setup wizard in
   a terminal. The service cannot answer questions: without a config file it
-  writes `melo: no backend is configured; run melo --reconfigure in a terminal`
+  writes `melo: no backend is configured; run melo setup in a terminal`
   to `gateway.stderr.log` each time launchd starts it.
 - launchd starts the service without your shell's environment variables, so
   cloud API keys and `LOCALMELO_PERSIST_MEMORY` are missing. Use a local
@@ -161,7 +165,7 @@ melo --daemon uninstall
 ## Stop the gateway
 
 - In its terminal, press Ctrl+C.
-- For the background service, run `melo --daemon uninstall`. A plain `kill`
+- For the background service, run `melo serve uninstall`. A plain `kill`
   does not help: launchd starts the gateway again.
 
 Stopping closes every session, a session running a task included: if one is

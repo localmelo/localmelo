@@ -25,7 +25,7 @@ and `Melo · 3` when three things run, counting the console's chats, tasks, dire
 console's header chip), read with the app's 2-second health check. The quit dialog names what would stop, for example
 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`; direct runs and terminal chats
 belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the listener is a melo background
-service, `melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
+service, `melo serve status` checks it and `melo serve uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
 
 The app sends a random launch identifier to its child and checks it on a `GET /` probe, and again on main-frame page

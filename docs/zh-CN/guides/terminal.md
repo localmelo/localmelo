@@ -15,7 +15,7 @@
 │ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1                    │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
+│ memory     no long-term memory · melo setup adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit
@@ -41,7 +41,7 @@
 ```text
 melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Run one task:      melo "your task"
-  Start the gateway: melo --serve
+  Start the gateway: melo serve
 ```
 
 <a id="which-model-server"></a>
@@ -50,12 +50,12 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 按以下顺序使用第一项适用的配置：
 
-1. `--reconfigure`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整的后端菜单。不带任务时，不能与 `--base-url` 同用。
-2. `--base-url URL`：使用该服务器，不使用配置文件。模型使用 `--chat-model` 指定的模型，否则使用 `GET URL/models` 列出的唯一对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型），再否则使用服务器说明已加载的那一个对话模型；有多个且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。任务、`--brief` 和 `melo ""` 在第一个请求之前以同样的方式选择模型（见[命令行参考](../reference/cli.md#general)）。没有 `/v1` 的 URL 会通过 `URL/v1/models` 获取列表，如果该地址有响应，界面也会使用 `URL/v1`。服务器没有响应模型列表请求或没有列出模型时，模型为 `default`，横幅下方的警告会说明原因。没有配置文件时会询问一次 `Save URL · MODEL as the default backend? [Y/n]`；按 Enter 保存，与首次运行相同。
-3. 已保存的后端；若指定 `--chat-model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
+1. `melo setup`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整的后端菜单。不带任务时，不能与 `--url` 同用。
+2. `--url URL`：使用该服务器，不使用配置文件。模型使用 `--model` 指定的模型，否则使用 `GET URL/models` 列出的唯一对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型），再否则使用服务器说明已加载的那一个对话模型；有多个且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--model <id>`。任务、`melo worker` 和 `melo ""` 在第一个请求之前以同样的方式选择模型（见[命令行参考](../reference/cli.md#general)）。没有 `/v1` 的 URL 会通过 `URL/v1/models` 获取列表，如果该地址有响应，界面也会使用 `URL/v1`。服务器没有响应模型列表请求或没有列出模型时，模型为 `default`，横幅下方的警告会说明原因。没有配置文件时会询问一次 `Save URL · MODEL as the default backend? [Y/n]`；按 Enter 保存，与首次运行相同。
+3. 已保存的后端；若指定 `--model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. 没有已保存的后端：先回答[首次运行](#first-run)的问题，然后打开界面。
 
-横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --base-url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了服务器报告已加载的那个，还会显示 `the loaded one of N; /model lists them`。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，服务器称为 `oMLX`，否则称为 `OpenAI-compatible server`（Ollama、MLC LLM 和 SGLang 保持各自的名称）；已保存的服务器在横幅显示之后才列出模型，所以横幅显示的是配置文件所写的名称；本次运行已经列出过该服务器时（首次运行就是如此）除外。
+横幅标题显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。横幅显示模型和服务器；当它们不是保存的后端时，第二行会说明来源（`from --url (not saved)`、`saved as the default`）。如果 melo 从多个模型中选了服务器报告已加载的那个，还会显示 `the loaded one of N; /model lists them`。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，服务器称为 `oMLX`，否则称为 `OpenAI-compatible server`（Ollama、MLC LLM 和 SGLang 保持各自的名称）；已保存的服务器在横幅显示之后才列出模型，所以横幅显示的是配置文件所写的名称；本次运行已经列出过该服务器时（首次运行就是如此）除外。
 
 <a id="keys"></a>
 
@@ -105,7 +105,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
 | `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；`--developer` 显示所有行）、文件和版本。 |
-| `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp-config` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
+| `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
 | `/retry` | 重新运行最近一个已完成轮次，即使恢复会话后也保留存储的原始输入文本。只有尚未撤销该轮时才先撤销；之前的轮次和文件仍保持原有更改。 |
 | `/model [name\|number]` | 单独使用时显示当前模型和服务器列出的模型。指定列表中的 ID 或编号时（尚未列出则 melo 先列出），从下一条消息起切换到该模型，并将其保存为默认值。 |
 | `/backend [url]` | 切换到另一台模型服务器：询问 URL（Enter 保留当前值）和列表中的模型，用 `GET /models` 检查服务器，切换并将两者保存为默认值（服务器以 Ollama 的方式响应时保存为 `ollama`，模型列表把 oMLX 标为所有者时保存为 `omlx`，否则保存为 `vllm`）。 |
@@ -114,7 +114,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 - 执行的命令会像消息一样回显在滚动缓冲区中（`› /model 2`），后面跟着输出。被拒绝的命令不会回显，`/exit` 不输出任何内容。
 - 轮次运行期间，`/new`、`/sessions`、`/resume`、`/undo`、`/retry`、`/model` 和 `/backend` 会被拒绝：草稿保留，并显示提示 `/model is not available while a turn runs (esc stops it).`；等该轮结束后再次按 Enter。
 - `/model` 只能在服务器列出的模型之间切换。未列出的名称会被拒绝，不会切换或保存任何内容：`✗ URL lists no model named 'NAME'. /model lists them.`；超出列表范围的编号也会被拒绝：`✗ Type a number from 1 to N, or a model id.` 只有没有列表时（服务器没有响应，或使用云端 API），`/model NAME` 才会仍然切换到指定模型；服务器没有响应时会先显示 `⚠ Could not list the models (REASON); switching anyway.`。
-- 保存行为：`/model` 保留已配置的后端并更改其模型。`/backend` 在服务器以 Ollama 的方式响应（`GET /api/version`）时将其保存为 `ollama` 后端，模型列表把 oMLX 标为所有者时保存为 `omlx`，否则保存为 `vllm`；它写入 `chat_backend` 和对应表中的 `chat_url`、`chat_model`，并保留其余配置：嵌入、`request_timeout_s` 和 `extra_body`；会话按保存后的配置运行。在 `melo --base-url URL` 会话中，它们只为当前会话切换，除非 melo 询问了 `Save URL · MODEL as the default backend?`（仅当配置文件尚不存在时询问）且你回答了是。首次运行的问题中选择 `s`（仍然启动）后，`/model` 和 `/backend` 会像首次运行一样保存服务器。
+- 保存行为：`/model` 保留已配置的后端并更改其模型。`/backend` 在服务器以 Ollama 的方式响应（`GET /api/version`）时将其保存为 `ollama` 后端，模型列表把 oMLX 标为所有者时保存为 `omlx`，否则保存为 `vllm`；它写入 `chat_backend` 和对应表中的 `chat_url`、`chat_model`，并保留其余配置：嵌入、`request_timeout_s` 和 `extra_body`；会话按保存后的配置运行。在 `melo --url URL` 会话中，它们只为当前会话切换，除非 melo 询问了 `Save URL · MODEL as the default backend?`（仅当配置文件尚不存在时询问）且你回答了是。首次运行的问题中选择 `s`（仍然启动）后，`/model` 和 `/backend` 会像首次运行一样保存服务器。
 - 模型启动失败时保留当前模型（`✗ Could not start NAME: …`）。新服务器没有响应或没有列出模型时，`/backend` 保留当前服务器：`✗ Could not reach URL: connection refused. Still using URL.`
 - 以 `/` 和小写名称开头，后接空格或消息结束的文本是命令；未知名称会显示 `Unknown command /NAME. /help lists the commands.` 并保留草稿。`/etc/hosts is broken` 是一条消息。要发送看起来以命令开头的消息，请在开头加一个空格。
 
@@ -184,7 +184,7 @@ from-the-child
 ### 一轮的输出
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
-- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示运行信息：步骤（`step 4`，不与 `--max-steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期、已见到的测试和时间；后面是输出 token 数和 `esc to stop`。行宽不足时先省略提示，再省略 token 数，信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
+- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期、已见到的测试和时间；后面是输出 token 数和 `esc to stop`。行宽不足时先省略提示，再省略 token 数，信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
 - **思考。**显示 `✻ Thought for 1.2s`，然后显示思考的前 3 行（使用 `/verbose` 时为 40 行，使用 `/thinking off` 时不显示），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及最多 3 行输出（使用 `/verbose` 时为 20 行），之后显示 `… +N lines (/expand T.C)`（若只剩一行则直接显示该行）。`/verbose` 还显示调用参数，图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
@@ -232,7 +232,7 @@ stream = true
 
 ### 审批
 
-`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。（交互式界面加载 `--mcp-config` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
+`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。（交互式界面加载 `--mcp` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
@@ -282,7 +282,7 @@ melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文�
 
 ### 会话和文件
 
-直接运行 `melo` 会开始新会话；只有第一条消息才会创建会话记录。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新会话；在启动选择器中按 Esc 也会开始新会话，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：选中的聊天标为 `"TITLE" (resumed)`；按 Esc 或列表为空时显示新会话横幅。`-c` 和 `-r` 不能同时使用，也不能与任务、`--serve` 或 `--daemon` 同用。
+直接运行 `melo` 会开始新会话；只有第一条消息才会创建会话记录。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新会话；在启动选择器中按 Esc 也会开始新会话，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：选中的聊天标为 `"TITLE" (resumed)`；按 Esc 或列表为空时显示新会话横幅。`-c` 和 `-r` 不能同时使用，也不能与任务或 `melo serve` 同用。
 
 选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。网页控制台的 Workers 视图会在 **Terminal chats** 下以只读方式显示你的这些聊天，读取时会对其脱敏（保存的副本不会被脱敏）；控制台不能修改它们，也不能向它们发送消息。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果会话之前在另一个文件夹中工作过，会显示提示。
 
@@ -303,8 +303,8 @@ $ melo
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Model server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo --reconfigure.
-Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo setup.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 如果服务器也列出了嵌入模型：
