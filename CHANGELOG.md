@@ -177,6 +177,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The first task in the web console shows the folder melo works in, and lets you pick
+  another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
+  panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
+  in the macOS app, "Show in Finder". In the app "Choose a folder…" opens the system's
+  folder panel; in a browser it opens a path field. The pick goes out with the first
+  message as `workspace` in `POST /api/sessions` (a chat in the default folder sends the
+  same request as before), and a chat's folder shows in its header ("In ~/notes";
+  developer mode adds it after the model). Three one-line starters under the composer
+  ("Summarize the files in this folder", "Plan a small project with me", "Explain a piece
+  of code") replace the three cards. ([#NN])
+
 - The web console connects the model server that already runs on this Mac in one
   step. While no model is set up (or the configured server is down) and no chat
   is open, the welcome shows a setup card in place of the banner and the starters:

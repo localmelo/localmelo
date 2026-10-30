@@ -146,26 +146,6 @@
               A quiet space to think, build, and explore with your own model.
             </p>
             <section class="setup-card" id="setup-card" aria-labelledby="setup-title" aria-live="polite" tabindex="-1" hidden></section>
-            <div class="suggestions">
-              <button
-                data-prompt="Help me plan a small coding project. Ask me about the goal first."
-              >
-                <span aria-hidden="true">⌘</span><strong>Build something</strong
-                ><span>Turn an idea into a plan</span>
-              </button>
-              <button
-                data-prompt="Explain a technical concept step by step. Ask me which topic I want to explore."
-              >
-                <span aria-hidden="true">✧</span><strong>Explore an idea</strong
-                ><span>Make the complex feel simple</span>
-              </button>
-              <button
-                data-prompt="Help me review a piece of code for correctness and clarity. Ask me to paste the code."
-              >
-                <span aria-hidden="true">↗</span><strong>Take a closer look</strong
-                ><span>Review code and find a way forward</span>
-              </button>
-            </div>
           </div>
           <div
             id="messages"
@@ -190,6 +170,24 @@
               aria-describedby="composer-hint"
             ></textarea>
             <div class="composer-toolbar">
+              <div class="folder-picker" id="folder-picker" hidden>
+                <button type="button" class="folder-chip" id="folder-btn" aria-expanded="false" aria-controls="folder-menu" aria-describedby="folder-full">
+                  <span id="folder-text">In folder</span><span aria-hidden="true">⌄</span>
+                </button>
+                <span class="sr-only" id="folder-full"></span>
+                <div class="folder-menu" id="folder-menu" role="group" aria-labelledby="folder-menu-title" hidden>
+                  <p class="folder-menu-title" id="folder-menu-title">Where melo reads and writes files</p>
+                  <div id="folder-list"></div>
+                  <button type="button" class="folder-action" id="folder-choose">Choose a folder…</button>
+                  <div class="folder-path" id="folder-path-row" hidden>
+                    <label class="sr-only" for="folder-path">Folder path</label>
+                    <input id="folder-path" placeholder="~/Documents/notes" spellcheck="false" autocomplete="off" aria-describedby="folder-path-hint" />
+                    <button type="button" class="secondary-button" id="folder-use">Use folder</button>
+                    <p class="field-hint" id="folder-path-hint">Use an absolute path or a path beginning with ~/.</p>
+                  </div>
+                  <button type="button" class="folder-action" id="folder-finder" hidden>Show in Finder</button>
+                </div>
+              </div>
               <button type="button" id="model-btn" class="model-button">
                 Choose a model <span aria-hidden="true">⌄</span></button
               ><span class="composer-spacer"></span><span id="run-status" role="status"></span
@@ -212,6 +210,11 @@
               </button>
             </div>
           </form>
+          <div class="starters" id="starters" role="group" aria-label="Ways to start" hidden>
+            <button type="button" data-prompt="Summarize the files in this folder. Tell me what is here and what each part is for.">Summarize the files in this folder</button>
+            <button type="button" data-prompt="Plan a small project with me. Ask me about the goal first.">Plan a small project with me</button>
+            <button type="button" data-prompt="Explain a piece of code. Ask me to paste the code first.">Explain a piece of code</button>
+          </div>
           <p class="composer-hint" id="composer-hint">
             Enter to send · Shift + Enter for a new line
             <span id="composer-note">Runs through your configured backend</span>

@@ -551,41 +551,7 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
 }
-.suggestions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 32px auto 0;
-  text-align: left;
-}
-.suggestions button {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  padding: 17px 15px;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.suggestions button:hover {
-  background: var(--soft);
-}
-.suggestions button > span:first-child {
-  font-size: var(--text-title);
-  margin-bottom: 9px;
-  color: var(--accent);
-}
-.suggestions strong {
-  font-size: var(--text-small);
-  font-weight: 500;
-}
-.suggestions button > span:last-child {
-  font-size: var(--text-caption);
-  color: var(--muted);
-  line-height: 1.5;
-}
-.welcome.needs-model > h1, .welcome.needs-model > #welcome-description, .welcome.needs-model > .suggestions { display: none; }
+.welcome.needs-model > h1, .welcome.needs-model > #welcome-description { display: none; }
 .setup-card { display: grid; gap: var(--space-3); max-width: 440px; margin: var(--space-2) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
 .setup-card h2 { margin: 0; font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
 .setup-card p { margin: 0; font-size: var(--text-small); line-height: 18px; color: var(--ink-2); }
@@ -836,6 +802,28 @@ button:hover:not(:disabled) {
 .composer-spacer {
   flex: 1;
 }
+/* The folder a new chat works in: a chip in the toolbar, the panel it opens above it, and the starters under the composer. */
+.folder-picker { position: relative; min-width: 0; }
+.folder-chip { display: flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 3px var(--space-2); background: none; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
+.folder-chip > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.folder-chip:hover, .folder-chip[aria-expanded="true"] { background: var(--soft); }
+.folder-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: 20; width: min(360px, 80vw); max-height: 60dvh; overflow-y: auto; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.folder-menu-title { margin: 0; padding: var(--space-2) var(--space-2) var(--space-1); font-size: var(--text-caption); color: var(--ink-3); }
+#folder-list { margin-bottom: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); }
+.folder-item, .folder-action { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 7px var(--space-2); background: none; border: 0; border-radius: var(--radius-control); font-size: var(--text-small); text-align: left; }
+.folder-item:hover, .folder-action:hover { background: var(--soft); }
+.folder-mark { flex: 0 0 var(--space-4); color: var(--accent); }
+.folder-item-text { display: grid; min-width: 0; }
+.folder-item-name, .folder-item-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-item-where, .folder-tag { font-size: var(--text-caption); color: var(--ink-3); }
+.folder-tag { margin-left: auto; }
+.folder-path { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-1) var(--space-2) var(--space-2); }
+.folder-path input { flex: 1; min-width: 0; padding: var(--space-2); background: var(--canvas); color: var(--ink); border: 1px solid var(--control); border-radius: var(--radius-control); font-size: var(--text-body); }
+.folder-path input[aria-invalid="true"] { border-color: var(--error); }
+.folder-path .field-hint { flex: 1 0 100%; margin: 0; }
+.starters { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); max-width: 800px; margin: var(--space-3) auto 0; }
+.starters button { padding: 6px var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink-2); font-size: var(--text-small); }
+.starters button:hover { background: var(--soft); }
 .send-button {
   width: 32px;
   height: 32px;
@@ -1054,12 +1042,6 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
     padding-left: 22px;
     padding-right: 22px;
   }
-  .suggestions {
-    gap: 8px;
-  }
-  .suggestions button {
-    padding: 13px 10px;
-  }
   .welcome {
     padding-top: 32px;
   }
@@ -1145,26 +1127,16 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
     margin-left: auto;
     margin-right: auto;
   }
-  .suggestions {
-    margin-top: 28px;
-    gap: 8px;
-  }
-  .suggestions button {
-    padding: 13px 10px;
-    min-width: 0;
-  }
-  .suggestions button > span:last-child {
-    display: none;
-  }
-  .suggestions button > span:first-child {
-    margin-bottom: 4px;
-  }
   .composer-area {
     padding: 10px 16px max(12px, env(safe-area-inset-bottom));
   }
   .composer {
     padding: 14px 14px 10px;
   }
+  .composer-toolbar { position: relative; }
+  .folder-picker { position: static; }
+  .folder-menu { right: 0; width: auto; }
+  .starters { flex-direction: column; align-items: stretch; }
   .composer-hint > span {
     display: none;
   }
@@ -1201,6 +1173,7 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 @media (pointer: coarse), (max-width: 700px) {
   .send-button { width: 44px; height: 44px; }
   .stop-button, .connection-chip, .running-chip, .level-chip, .level-item, .icon-button { min-height: 44px; }
+  .folder-chip, .folder-item, .folder-action, .starters button { min-height: 44px; }
   .icon-button { min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {

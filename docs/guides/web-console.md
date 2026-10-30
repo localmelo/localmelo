@@ -37,6 +37,18 @@ model chip (the model's name, `Model offline` or `No model`) that opens settings
 to see in them. [Developer mode](#developer-mode) shows all of it. Everything stays in the
 page, hidden.
 
+A new chat shows where melo will work before you send anything. The chip in the composer reads
+`In localmelo-workspace` and opens a panel with the default folder (`[gateway] workspace`, else
+`~/localmelo-workspace`), the folders of your recent chats (newest first, four at most),
+**Choose a folder…** and, in the [macOS app](macos-app.md), **Show in Finder**. In a browser
+**Choose a folder…** opens a path field (a full path, or one that starts with `~/`), and in the app
+the system's folder panel. File tools stay inside the folder; shell commands and Python start there.
+The pick goes out with the first message as `workspace` in `POST /api/sessions` (a chat in the
+default folder sends none), stays for the next new chat, and shows in the chat's header (`In ~/notes`;
+developer mode adds it after the model). Three one-line starters under the composer (**Summarize
+the files in this folder**, **Plan a small project with me**, **Explain a piece of code**) fill it
+for you to send or change, and step aside once there is text.
+
 1. Use **Settings** (**Connection settings** in developer mode) to choose the chat
    backend, model and workspace. With nothing saved the dialog opens on a blank **Choose a server…**, and its
    fields, **Discover models**, **Test connection** and **Save** wait until you

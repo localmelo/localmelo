@@ -15,6 +15,7 @@ import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
+import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -383,6 +384,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
+  .replace(/^import \{ setupFolderPicker \} from "\.\/folder\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -427,6 +429,10 @@ function makeElement(tag, id = '') {
     removeEventListener() {},
     closest(selector) {
       if (selector === '.sidebar' && element.id === 'sidebar') return element;
+      if (selector === '.folder-picker') {
+        for (let node = element; node; node = node.parentElement) if (node.id === 'folder-picker') return node;
+        return null;
+      }
       if (selector === '.work-group') {
         let parent = element.parentElement;
         while (parent && !parent.classList.contains('work-group')) parent = parent.parentElement;
@@ -567,6 +573,7 @@ function harness(routes, {mobile = false} = {}) {
     setupStatusRow,
     setupRunning,
     setupModelCard,
+    setupFolderPicker,
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     document,
@@ -2811,7 +2818,7 @@ test('the Tasks header names Tasks, not the open chat, and the chat comes back',
   h.context.location.hash = '#/s/a';
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(h.element('header-title').textContent, 'Chat about novels');
-  assert.equal(h.element('header-model').textContent, 'Qwen-7B');
+  assert.equal(h.element('header-model').textContent, 'Qwen-7B · ~/w', 'Developer mode names the model, then the chat\'s folder');
 });
 test('Tasks hands the header to Workers and back without the chat', async () => {
   const h = harness(baseRoutes({'GET /tasks': {tasks: [taskRow('t1')]}, 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
@@ -3197,4 +3204,179 @@ test('the level menu is a menu button: focus enters it, arrows move, Escape retu
   await menu.children[3].listeners.click[0]();
   assert.equal(h.net.callsTo('/sessions/a/level')[0].body.level, 4);
   assert.equal(focused(), button, 'Choosing a level returns to the button');
+});
+
+// ── The first task's folder: a chip in the composer, its panel, the header, the starters ──
+
+// Fresh objects each time: the page keeps and changes the list it was given.
+const folderSessions = () => [
+  session('a', {workspace: '/Users/me/demo', workspace_label: '~/demo', updated_at: 5}),
+  session('b', {workspace: '/Users/me/notes', workspace_label: '~/notes', updated_at: 9}),
+  session('c', {workspace: '/Users/me/localmelo-workspace', workspace_label: '~/localmelo-workspace', updated_at: 7}),
+  session('d', {workspace: '/Users/me/demo', workspace_label: '~/demo', updated_at: 3}),
+];
+const created = session('n', {title: 'Do the thing'});
+const folderRoutes = (extra = {}) => defaultMode({
+  'GET /settings': {mode: 'default', workspace: '~/localmelo-workspace'},
+  'GET /sessions': () => ({sessions: folderSessions(), machine: null, has_more: false}),
+  'POST /sessions': {status: 201, body: {session: created, turn_id: 'turn-1', turn: turnRow()}},
+  'GET /sessions/n': {session: created, pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0},
+  'GET /sessions/n/turns?limit=10': {turns: [turnRow({client_request_id: 'first'})], has_earlier: false, replay_from: 0},
+  ...extra,
+});
+/** The page on a new chat. index.html starts the panel's parts hidden; the double has no markup. */
+async function newChat(routes = folderRoutes()) {
+  const h = harness(routes);
+  for (const id of ['folder-picker', 'folder-menu', 'folder-path-row', 'folder-finder', 'starters']) h.element(id).hidden = true;
+  h.context.location.hash = '#/new';
+  await h.run('init()');
+  return h;
+}
+const folderItems = (h) => h.element('folder-list').children;
+const posts = (h) => h.net.calls.filter((call) => call.method === 'POST' && call.path === '/sessions');
+/** The app's message handler: `choose` answers `picked`, `reveal` answers `revealed`; the messages are kept. */
+function appBridge(h, picked, revealed = true) {
+  const messages = [];
+  h.context.webkit = {messageHandlers: {localmeloFolder: {postMessage: async (message) => { messages.push(message); return message.action === 'choose' ? picked : revealed; }}}};
+  return messages;
+}
+
+test('the folders on offer are the default, the pick, then the recent ones, newest first and each once', () => {
+  const offer = (current = null, limit) => folderChoices({sessions: folderSessions(), fallback: '~/localmelo-workspace', current, limit}).map((c) => [c.kind, c.label, c.current]);
+  assert.deepEqual(offer(), [['default', '~/localmelo-workspace', true], ['recent', '~/notes', false], ['recent', '~/demo', false]], 'The default is not listed again, nor a folder twice');
+  assert.deepEqual(offer('/Users/me/notes').map((c) => c[2]), [false, true, false]);
+  assert.deepEqual(offer('/tmp/x').slice(0, 2), [['default', '~/localmelo-workspace', false], ['pick', '/tmp/x', true]], 'A pick no chat has is still offered, checked');
+  assert.equal(offer(null, 1).length, 2, 'The recent list stops at the limit');
+  assert.deepEqual(['~/localmelo-workspace', '~/a/b/', '/', ''].map(folderName), ['localmelo-workspace', 'b', '/', '']);
+});
+
+test('a new chat names the folder it works in, in both modes; a chat, and a page with no model, do not', async () => {
+  for (const mode of ['default', 'developer']) {
+    const h = await newChat(folderRoutes({'GET /settings': {mode, workspace: '~/localmelo-workspace'}}));
+    assert.deepEqual([h.element('folder-picker').hidden, h.text('folder-text'), h.text('folder-full')], [false, 'In localmelo-workspace', '~/localmelo-workspace'], mode);
+    assert.equal(h.net.callsTo('/settings').length, 1, 'The folder comes with the mode, in the one read at boot');
+  }
+  const chat = harness(folderRoutes());
+  await chat.run('init()');
+  const none = await newChat(folderRoutes({'GET /health': {...health, configured: false}, 'GET /setup/detect': nothing}));
+  assert.deepEqual([chat, none].flatMap((page) => [page.element('folder-picker').hidden, page.element('starters').hidden]), [true, true, true, true], 'A chat, and the setup card, come first');
+});
+
+test('the panel lists the default and recent folders; a pick goes out with the first message and stays', async () => {
+  const h = await newChat();
+  const chip = h.element('folder-btn');
+  chip.click();
+  assert.deepEqual([h.element('folder-menu').hidden, chip.attributes['aria-expanded']], [false, 'true']);
+  assert.deepEqual(folderItems(h).map(flatten), ['✓ localmelo-workspace ~/localmelo-workspace Default', 'notes ~/notes', 'demo ~/demo']);
+  assert.deepEqual(folderItems(h).map((item) => item.dataset.folderRecent), [undefined, '/Users/me/notes', '/Users/me/demo'], 'A recent folder carries its real path');
+  folderItems(h)[1].click();
+  assert.deepEqual([h.element('folder-menu').hidden, h.context.document.activeElement, h.text('folder-text')], [true, chip, 'In notes']);
+  h.element('input').value = 'Do the thing';
+  await h.run('send()');
+  assert.equal(posts(h)[0].body.workspace, '/Users/me/notes', 'POST /api/sessions carries the chosen workspace');
+  h.run('newChat()');
+  assert.equal(h.text('folder-text'), 'In notes', 'A pick stays for the next new chat');
+  chip.click();
+  folderItems(h)[0].click();
+  h.element('input').value = 'Again';
+  await h.run('send()');
+  assert.deepEqual(Object.keys(posts(h)[1].body), ['turn'], 'In the default folder the request is what it was');
+});
+
+test('Escape, a click outside and opening a chat close the panel; a click inside does not', async () => {
+  const h = await newChat();
+  const menu = h.element('folder-menu');
+  menu.parentElement = h.element('folder-picker');
+  h.element('folder-list').parentElement = menu;
+  const open = () => { if (menu.hidden) h.element('folder-btn').click(); };
+  open();
+  h.documentListeners.click[0]({target: folderItems(h)[0]});
+  assert.equal(menu.hidden, false);
+  h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}});
+  assert.deepEqual([menu.hidden, h.context.document.activeElement], [true, h.element('folder-btn')]);
+  open();
+  h.documentListeners.click[0]({target: h.element('input')});
+  assert.equal(menu.hidden, true);
+  open();
+  h.context.location.hash = '#/s/a';
+  await h.windowListeners.hashchange[0]();
+  assert.equal(menu.hidden, true);
+});
+
+test('in a browser "Choose a folder…" asks for a path, takes a full one and never sends the message', async () => {
+  const h = await newChat();
+  const field = h.element('folder-path');
+  const enter = (value) => {
+    field.value = value;
+    let prevented = false;
+    field.listeners.keydown[0]({key: 'Enter', isComposing: false, preventDefault() { prevented = true; }});
+    return prevented;
+  };
+  h.element('input').value = 'draft';
+  h.element('folder-btn').click();
+  h.element('folder-choose').click();
+  assert.deepEqual([h.element('folder-finder').hidden, h.element('folder-path-row').hidden, h.context.document.activeElement], [true, false, field], 'A path field, and no Finder');
+  assert.equal(enter('Documents/notes'), true, 'Enter in the field never reaches the composer\'s form');
+  assert.deepEqual([field.attributes['aria-invalid'], h.state().newWorkspace], ['true', null], 'A path that is not full is refused');
+  enter('  ~/Documents/notes  ');
+  assert.deepEqual([h.state().newWorkspace, h.text('folder-text'), h.element('folder-menu').hidden], ['~/Documents/notes', 'In notes', true]);
+  assert.deepEqual([h.element('input').value, posts(h).length], ['draft', 0], 'The message is still a draft');
+  h.element('folder-btn').click();
+  assert.deepEqual([h.element('folder-path-row').hidden, field.value, field.attributes['aria-invalid']], [true, '', undefined], 'The field starts closed and clean each time');
+  assert.equal(h.text('folder-list').split(' notes ')[0].includes('✓'), true, 'The pick is offered, checked');
+  h.element('folder-choose').click();
+  enter('~/localmelo-workspace');
+  assert.equal(h.state().newWorkspace, null, 'The default typed out is the default');
+});
+
+test('in the app the panel takes only the path the system returns, and Finder shows the chip\'s folder', async () => {
+  const h = await newChat();
+  const messages = appBridge(h, '/Users/me/Projects/site');
+  h.element('folder-btn').click();
+  assert.equal(h.element('folder-finder').hidden, false);
+  await h.element('folder-finder').click();
+  assert.deepEqual([messages.at(-1), h.element('folder-menu').hidden], [{action: 'reveal', path: '~/localmelo-workspace'}, true], 'The default folder as the settings name it');
+  h.element('folder-btn').click();
+  await h.element('folder-choose').click();
+  assert.deepEqual([messages.at(-1), h.element('folder-path-row').hidden, h.state().newWorkspace, h.text('folder-text')], [{action: 'choose'}, true, '/Users/me/Projects/site', 'In site']);
+  h.element('folder-btn').click();
+  await h.element('folder-finder').click();
+  assert.deepEqual(messages.at(-1), {action: 'reveal', path: '/Users/me/Projects/site'});
+  for (const answer of [null, 'relative/path', {path: '/etc'}]) {
+    const other = await newChat();
+    appBridge(other, answer);
+    other.element('folder-btn').click();
+    await other.element('folder-choose').click();
+    assert.equal(other.state().newWorkspace, null, `${JSON.stringify(answer)} is not a folder the person picked`);
+  }
+  const missing = await newChat();
+  appBridge(missing, null, false);
+  missing.element('folder-btn').click();
+  await missing.element('folder-finder').click();
+  assert.match(missing.text('notice'), /could not open this folder in Finder/);
+  assert.equal(missing.element('folder-menu').hidden, false, 'The panel stays, so another folder can be chosen');
+});
+
+test('a chat\'s header names its folder: alone in default mode, after the model in developer mode', async () => {
+  const subtitle = async (routes, folder) => {
+    const h = harness(routes);
+    await h.run('init()');
+    Object.assign(h.state().sessions[0], {workspace_label: folder});
+    Object.assign(h.state().view.session, {workspace_label: folder});
+    h.run('syncUI()');
+    return h.text('header-model');
+  };
+  assert.deepEqual([await subtitle(folderRoutes(), '~/w'), await subtitle(baseRoutes(), '~/w')], ['In ~/w', 'Qwen-27B · ~/w']);
+  assert.deepEqual([await subtitle(folderRoutes(), ''), await subtitle(baseRoutes(), '')], ['Qwen-27B', 'Qwen-27B'], 'A chat without a folder keeps the model');
+});
+
+test('the starters show on an empty new chat, step aside for text, and fill the composer without sending', async () => {
+  const h = await newChat();
+  assert.equal(h.element('starters').hidden, false);
+  h.run('usePrompt("Plan a small project with me. Ask me about the goal first.")');
+  assert.deepEqual([h.element('input').value, h.element('starters').hidden, h.context.document.activeElement], ['Plan a small project with me. Ask me about the goal first.', true, h.element('input')]);
+  assert.deepEqual([h.element('send-btn').disabled, posts(h).length], [false, 0], 'The prefill is ready to send, not sent');
+  h.element('input').value = '';
+  h.run('syncUI()');
+  assert.equal(h.element('starters').hidden, false, 'An emptied composer brings them back');
 });
