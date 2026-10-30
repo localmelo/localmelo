@@ -119,6 +119,15 @@ async def test_the_fixed_prefix_is_the_same_on_every_turn(
         assert later["tools"] == bodies[0]["tools"]
 
 
+async def test_the_earlier_layout_also_sends_the_lean_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    options: dict[str, Any] = {"lean_output": True, "fixed_prefix": False}
+    _, bodies, _ = await _run(tmp_path, monkeypatch, **options)
+    assert bodies[0]["messages"][0]["content"].startswith(LEAN_SYSTEM_PROMPT)
+    assert bodies[1]["messages"][0]["content"].startswith(LEAN_REFLECTION_PROMPT)
+
+
 async def test_the_utility_gate_keeps_the_full_reflection_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
