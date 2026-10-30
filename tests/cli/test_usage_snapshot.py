@@ -8,6 +8,7 @@ from typing import Any
 from localmelo.support.usage_snapshot import (
     TaskCounts,
     UsageSnapshot,
+    context_summary,
     status_segments,
     usage_lines,
 )
@@ -217,3 +218,17 @@ def test_tasks_segment_only_with_a_task_store() -> None:
     assert status_segments(snap, local=True, now=T0, tasks=held) == [
         "tasks 0 running 0 queued 1 held"
     ]
+
+
+def test_the_context_summary_says_how_full_the_context_is_in_words() -> None:
+    def summary(events: list[dict[str, Any]], last: int = 0) -> str:
+        snap = UsageSnapshot()
+        for event in events:
+            snap.observe(event)
+        return context_summary(snap, last)
+
+    assert summary([]) == "not measured yet"
+    assert summary([budget(2600, 32000)]) == "8% used (2.6k of 32k tokens)"
+    assert summary([budget(2600, None)]) == "2.6k tokens used"
+    assert summary([], 1800) == "1.8k tokens used"  # the status bar's last request
+    assert summary([budget(2600, 32000)], 1800) == "8% used (2.6k of 32k tokens)"

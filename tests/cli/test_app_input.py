@@ -414,6 +414,18 @@ def test_a_dropped_context_gives_its_room_back_to_the_workspace() -> None:
     assert _bar_line(30) == "  stub-model · ~/demo-pro… ask"
 
 
+def test_a_bar_without_a_mode_gives_its_room_to_the_rest() -> None:
+    # The cells and the gap kept for "ask" are the folder's: it is not cut at 41 columns.
+    assert _bar_line(41, "") == "  stub-model · ~/demo-project · ctx 120  "
+    assert "~/demo-proj… · ctx 120" in _bar_line(41)
+
+
+@pytest.mark.parametrize("width", [16, 20, 25, 30, 37, 39, 41, 60])
+def test_a_bar_without_a_mode_never_overflows(width: int) -> None:
+    line = _bar_line(width, "")
+    assert cells(line) == width and not line.strip().startswith("…"), line
+
+
 @pytest.mark.parametrize("width", [16, 20, 22, 25, 27, 30, 40])
 def test_the_status_bar_never_overflows_or_shows_a_bare_ellipsis(width: int) -> None:
     for mode in ("ask", "⚠ YOLO: no approvals"):
@@ -463,7 +475,7 @@ LISTED = ["stub-model", "qwen3-8b", "llama-3.1"]
         ("/he", "\t", "/help"),
         ("/model q", "\t", "/model qwen3-8b"),
         ("/model ll", "\x1b[B", "/model llama-3.1"),
-        ("/", "\x1b[B\x1b[B", "/backend"),
+        ("/", "\x1b[B\x1b[B", "/new"),
     ],
 )
 async def test_enter_takes_the_picked_completion(
@@ -576,7 +588,7 @@ async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
         ("/he\t", "/help"),
         ("/mo\t", "/model"),
         ("/\t", "/model"),
-        ("/\t\t", "/backend"),
+        ("/\t\t", "/new"),
     ],
 )
 async def test_tab_completes_at_once_before_the_menu_shows(

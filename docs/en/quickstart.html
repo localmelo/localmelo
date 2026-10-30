@@ -212,7 +212,8 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           The first row shows the package version, and on a git checkout the
           short commit, as in <code>melo 0.1.0 (baab21e)</code>;
           <code>melo --version</code> prints the same line and exits 0.
-          <code>/status</code> shows the server, tools, memory and session.
+          <code>/status</code> checks that the model answers and shows the folder, session,
+          approvals and context use; <code>/status all</code> adds the tools, memory, limits and files.
         </p>
         <p>
           Type a message and press Enter, or <code>/exit</code> to leave. From
@@ -374,7 +375,8 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 melo -u http://127.0.0.1:8000/v1
 melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>Type <code>/</code> for the commands: <code>/model</code> lists
+          <li>Type <code>/</code> for the commands (<code>/help</code> lists the everyday
+            ones, <code>/help all</code> every one): <code>/model</code> lists
             the server's models and switches to one, <code>/backend</code>
             switches to another server (both saved as the default),
             <code>/verbose</code> and <code>/thinking</code> add or leave out

@@ -25,10 +25,10 @@ Try: What is this project? · / commands · ctrl+d quit
 ────────────────────────────────────────────────────────────────────────────
 › Ask melo · / for commands
 ────────────────────────────────────────────────────────────────────────────
-  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?         ask
+  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?
 ```
 
-欢迎信息共三行：版本和模型（并说明如何更换模型）；melo 工作的文件夹；以及一件可以试试的事，后面是命令和退出的按键。只有当模型不是保存的默认模型时，才会另起一行显示模型的服务器。警告紧随其后；服务器、工具、记忆和会话见 `/status`。开发者模式（`--developer`，或 `[ui] mode = "developer"`）下，欢迎信息是列出所有行的方框。
+欢迎信息共三行：版本和模型（并说明如何更换模型）；melo 工作的文件夹；以及一件可以试试的事，后面是命令和退出的按键。只有当模型不是保存的默认模型时，才会另起一行显示模型的服务器。警告紧随其后；`/status` 会检查模型是否有回应，并显示文件夹、会话、审批和上下文用量。开发者模式（`--developer`，或 `[ui] mode = "developer"`）下，欢迎信息是列出所有行的方框。
 
 它需要终端：标准输入和标准输出都必须是终端，且 `TERM` 不能是 `dumb`。否则 `melo` 会向标准错误输出以下内容，并以退出码 2 退出：
 
@@ -76,11 +76,11 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。列表以 `/model`、`/backend`、`/new`、`/status`、`/help` 和 `/exit` 开头。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
 
 | 命令 | 作用 |
 |---|---|
-| `/help [command]` | 显示命令和按键，或某个命令的详情。 |
+| `/help [command]` | 分三组（Conversation、Model、Help）显示常用命令、`!` 一行和查看更多的办法。`/help all`，以及开发者模式下的 `/help`，列出所有命令和按键；`/help NAME` 给出某个命令的详情。比终端宽的一行会在其说明下面续行。 |
 | `/attach PATH` | 暂存一个工作区文本文件；路径含空格时请加引号。 |
 | `/attachments` | 列出已暂存的文件及其编号。 |
 | `/detach N\|all` | 移除指定编号的已暂存文件，或移除全部已暂存文件。 |
@@ -98,7 +98,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
-| `/status` | 显示模型、服务器及其可达性、工作区及其边界、会话、审批、工具、记忆、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；`--developer` 显示所有行）、文件和版本。 |
+| `/status [all]` | 用五行说明 melo 是否就绪：模型及其服务器，后面是 `✓ answers`（或 `✗ does not answer (connection refused). Start it, then /status checks again.`），文件夹，会话，用文字写出的审批行为，以及上下文用了多少（`8% used (2.6k of 32k tokens)`，不知道上限时为 `2.6k tokens used`）。`/status all`，以及开发者模式下的 `/status`，改为打印每一行：模型和服务器（`reachable` 或不可达的原因）、工作区及其边界、带 ID 的会话、审批模式和授权、工具、记忆（含工作窗口及其大小的原因，如 `64 (local server)`）、限制、用量块（cache、context、steps、tasks：一行有数据后才出现；开发者模式显示所有行）、文件和版本。比终端宽的一行会在其文字下面续行。其他任何参数都会显示 `✗ Use /status or /status all.`。 |
 | `/mcp` | 显示 MCP 服务器、它们的工具和命令行，以及来源文件（`--mcp` 或 `mcp_config`）；失败后 MCP 关闭的原因；没有文件时如何指定文件。 |
 | `/retry` | 重新运行最近一个已完成轮次，即使恢复会话后也保留存储的原始输入文本。只有尚未撤销该轮时才先撤销；之前的轮次和文件仍保持原有更改。 |
 | `/model [name\|number]` | 单独使用时打开服务器的对话模型列表（嵌入和重排模型不在其中），当前模型标 `✓`，服务器说明已在内存中的模型标 `(loaded)`。输入即可筛选，↑ ↓ 移动，Enter 切换并将该模型保存为默认值，Esc 保留当前模型。指定服务器列表中的 ID 或编号时（尚未列出则 melo 先列出），从下一条消息起切换到该模型，并将其保存为默认值。没有列表可选时（云端 API），`/model` 会说明这一点，`/model NAME` 仍可切换。 |
@@ -192,7 +192,7 @@ from-the-child
 在模型和工作区之后从左到右，每一段只在有数据时出现：
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.      ask
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.
 ```
 
 - `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
@@ -201,8 +201,8 @@ from-the-child
 - `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。开发者模式显示它们，默认模式不显示。
 - `tasks 1 running 2 queued`：仅在能访问任务存储时出现；有任务在等待（例如等待审批）时追加 `1 held`。
 
-状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
-`/status` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
+状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。审批模式只在不是 `ask` 时显示在右端（`auto`、`deny`，或 `⚠ YOLO: no approvals` 警告）；开发者模式始终显示。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
+`/status all` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
 
 <a id="streamed-replies"></a>
 

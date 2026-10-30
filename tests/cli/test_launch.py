@@ -539,7 +539,7 @@ def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
     assert plain.backend.embedding == ""
     assert (
         memory_text(plain.backend, memory=True)
-        == "no long-term memory · --embedding-base-url adds one"
+        == "no long-term memory · -X endpoint.embedding_url=URL adds one"
     )
 
 

@@ -132,7 +132,9 @@ dot. `melo -h all` lists the keys with their defaults.
   [FILTER]` lists every key with its value, default and source (default, file or `-X`),
   `melo config get KEY` prints one, and `melo config set KEY VALUE` checks a key and
   saves it. An unknown key names the nearest ones; a name that is an option,
-  such as `agent.max_steps`, says to use that option (`-s N (--steps)`).
+  such as `agent.max_steps`, says to use that option (`-s N (--steps)`). An unset
+  `agent.window_messages` shows the window it falls back to and why (`64 (local server)`,
+  `20 (cloud)`) in `keys` and `get`.
 - Whatever writes the file (`/model`, the console's settings page, `melo config set`)
   writes what the file had, never a `-X` value.
 

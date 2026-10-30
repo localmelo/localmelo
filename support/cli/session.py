@@ -35,12 +35,18 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import RunResult
+from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli import commands, usershell
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
-from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
+from localmelo.support.cli.approvals import (
+    Approvals,
+    Mode,
+    TerminalApprover,
+    approval_words,
+)
 from localmelo.support.cli.attachments import (
     Attachment,
 )
@@ -62,6 +68,7 @@ from localmelo.support.cli.session_tools import SessionTools
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
+from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
 from localmelo.support.progress_line import run_elapsed, wall_range
 from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.display import (
@@ -82,7 +89,11 @@ from localmelo.support.sessions.store import (
     title_from_text,
 )
 from localmelo.support.sessions.sync import SessionMark
-from localmelo.support.usage_snapshot import status_segments, usage_lines
+from localmelo.support.usage_snapshot import (
+    context_summary,
+    status_segments,
+    usage_lines,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +283,11 @@ class CliSession:
         context = self.renderer.context_tokens
         mode = self.approvals.mode
         yolo = mode == "yolo"
+        shown: str = mode
+        if yolo:
+            shown = f"{self.renderer.symbols.warn} YOLO: no approvals"
+        elif mode == "ask" and not self.developer:
+            shown = ""  # what everyone expects needs no word
         segments: tuple[str, ...] = ()
         if self.status_line == "auto":
             segments = tuple(
@@ -292,7 +308,7 @@ class CliSession:
             context=f"ctx {format_tokens(context)}" if context else "",
             segments=segments,
             title=self.title or "New session",
-            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else mode,
+            mode=shown,
             mode_style="class:yolo" if yolo else "class:muted",
         )
 
@@ -725,7 +741,14 @@ class CliSession:
 
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":
-            self.out.print(commands.help_text(arguments, self.renderer.symbols))
+            self.out.print(
+                commands.help_text(
+                    arguments,
+                    self.renderer.symbols,
+                    everything=self.developer,
+                    width=self.out.width,
+                )
+            )
         elif name == "attach":
             await self._attach_file(arguments)
         elif name == "attachments":
@@ -760,7 +783,7 @@ class CliSession:
         elif name == "approvals":
             self.approvals_command(arguments)
         elif name == "status":
-            await self.status()
+            await self.status(arguments)
         elif name == "retry":
             await self.retry()
         elif name == "mcp":
@@ -959,91 +982,107 @@ class CliSession:
                 )
             )
 
-    async def status(self) -> None:
-        """``/status``: the model, workspace, session, approvals, tools, memory, limits, usage, files."""
+    def _row(self, label: str, value: str | Text, style: str | None = None) -> None:
+        """One ``/status`` row; a value too long for it continues under itself."""
+        text = value if isinstance(value, Text) else self._text(value, style)
+        self.out.print(hang(label, text, self.out.width))
+
+    async def status(self, arguments: str = "") -> None:
+        """``/status``: whether the model answers, the folder, session, approvals and context.
+
+        ``/status all``, and ``/status`` in developer mode, print every row:
+        the workspace's fence, tools, memory, limits, usage, files and version.
+        """
         from localmelo.support.cli.render import LOG_PATH
         from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
         from localmelo.support.sessions.display import display_version
 
+        word = arguments.strip().lower()
+        if word not in ("", "all"):
+            self.out.print(self._text("✗ Use /status or /status all.", style="error"))
+            return
         backend = self.factory.backend
-        state = "not checked"
-        if self.factory.listable():
+        checked = self.factory.listable()
+        failure: discovery.DiscoveryError | None = None
+        if checked:
             try:
                 await discovery.list_models(
                     discovery.OPENAI_COMPATIBLE, backend.base_url, timeout_s=2
                 )
-                state = "reachable"
             except discovery.DiscoveryError as exc:
-                state = f"not reachable: {exc}" if not exc.reachable else str(exc)
+                failure = exc
             self.factory.relabel()  # the listing may have said the server is oMLX
             backend = self.factory.backend
-        where = home_label(self.agent.workspace_root or "")
-        source = "" if backend.source == "config" else f" · {backend.source}"
-        self.out.print(
-            self._text(
-                f"model      {backend.model} · {backend.label} · "
-                f"{redact_secrets(backend.base_url or backend.label)[0]} · "
-                f"{state}{source}"
-            )
-        )
-        self.out.print(self._text(f"workspace  {where}"))
-        self.out.print(
-            self._text(
-                "fence      file tools stay here; commands and Python can reach "
-                "other files",
-                "muted",
-            )
-        )
         turns = []
         if self.runner is not None and self.runner.session_id is not None:
             turns = await self.store.list_turns(self.runner.session_id)
+        where = home_label(self.agent.workspace_root or "")
+        url = redact_secrets(backend.base_url or backend.label)[0]
+        if not (self.developer or word == "all"):
+            self._short_status(backend, where, len(turns), checked, failure)
+            return
+        state = "not checked"
+        if checked:
+            state = "reachable"
+            if failure is not None:
+                state = (
+                    str(failure) if failure.reachable else f"not reachable: {failure}"
+                )
+        source = "" if backend.source == "config" else f" · {backend.source}"
+        self._row(
+            "model", f"{backend.model} · {backend.label} · {url} · {state}{source}"
+        )
+        self._row("workspace", where)
+        self._row(
+            "fence",
+            "file tools stay here; commands and Python can reach other files",
+            "muted",
+        )
         title = self.title or "New session"
         session_id = self.runner.session_id if self.runner is not None else ""
         short = (session_id or "")[:12]
         count = len(turns)
-        self.out.print(
-            self._text(
-                f"session    {title!r} · {short or 'new'} · {count} turn"
-                + ("" if count == 1 else "s")
-            )
+        self._row(
+            "session",
+            f"{title!r} · {short or 'new'} · {count} turn"
+            + ("" if count == 1 else "s"),
         )
         grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
-        self.out.print(
-            self._text(
-                f"approvals  {self.approvals.mode} · allowed in this session: {grants}"
-            )
+        self._row(
+            "approvals", f"{self.approvals.mode} · allowed in this session: {grants}"
         )
         tools = self.agent.list_tools()
         builtin = [tool for tool in tools if tool.source == "builtin"]
         provided = [tool for tool in tools if tool.source == "provided"]
         asking = sum(1 for tool in builtin if tool.requires_approval)
-        self.out.print(
-            self._text(
-                f"tools      {len(builtin)} built-in ({asking} ask first)"
-                + (f" · {len(provided)} MCP" if provided else "")
-            )
+        self._row(
+            "tools",
+            f"{len(builtin)} built-in ({asking} ask first)"
+            + (f" · {len(provided)} MCP" if provided else ""),
         )
         messages = len(self.agent.conversation())
         window = self.agent.options.window_messages
+        if window == config.default_window_messages(backend.key):
+            window_text = f"{window} ({config.window_reason(backend.key)})"
+        else:
+            window_text = str(window)
         embedding = backend.embedding
-        self.out.print(
-            self._text(
-                f"memory     {messages} of {window} messages · "
-                + (
-                    f"long-term memory · {embedding}"
-                    if embedding
-                    else "no long-term memory (no embedding backend)"
-                )
-            )
+        self._row(
+            "memory",
+            f"{messages} of {window_text} messages · "
+            + (
+                f"long-term memory · {embedding}"
+                if embedding
+                else "no long-term memory (no embedding backend)"
+            ),
         )
         options = self.agent.options
         limit = format_duration(SESSION_TOOL_TIMEOUT_S)
-        self.out.print(
-            self._text(
-                f"limits     {options.max_steps} steps a turn, "
-                f"{options.steps_per_attempt} an attempt, "
-                f"{options.max_attempts} attempts · commands stop after {limit}"
-            )
+        self._row(
+            "limits",
+            f"{options.max_steps} steps a turn, "
+            f"{options.steps_per_attempt} an attempt, "
+            f"{options.max_attempts} attempts · commands stop after {limit}",
         )
         for row in usage_lines(
             self.renderer.usage,
@@ -1052,7 +1091,7 @@ class CliSession:
             steps=lambda payload: _progress_lines(payload, self.renderer.symbols),
             hide_empty=not self.developer,
         ):
-            self.out.print(self._text(row))
+            self._row(row[:11], row[11:])
         files = [getattr(self.store, "path", ""), LOG_PATH]
         if os.environ.get("LOCALMELO_PERSIST_MEMORY") == "1" or getattr(
             self.agent.options, "memory_dir", None
@@ -1065,8 +1104,46 @@ class CliSession:
                 os.path.join(memory_dir, "history.db"),
             ]
         files = [home_label(str(path)) for path in files if path]
-        self.out.print(self._text("files      " + " · ".join(files)))
-        self.out.print(self._text(f"version    melo {display_version()}"))
+        self._row("files", " · ".join(files))
+        self._row("version", f"melo {display_version()}")
+
+    def _short_status(
+        self,
+        backend: BackendInfo,
+        where: str,
+        turns: int,
+        checked: bool,
+        failure: discovery.DiscoveryError | None,
+    ) -> None:
+        """The five rows of ``/status``; only the mark of the model's row has a color."""
+        url = redact_secrets(backend.base_url)[0] if backend.base_url else ""
+        model = [backend.model, backend.label, url]
+        if backend.source not in ("config", "saved"):
+            model.append(SOURCE_TEXT.get(backend.source, backend.source))
+        parts: list[tuple[str, str | None]] = [
+            (" · ".join(p for p in model if p), None)
+        ]
+        if checked and failure is None:
+            parts += [(" · ", None), ("✓", "ok"), (" answers", None)]
+        elif failure is not None:
+            said = (
+                f" replied with an error ({failure})."
+                if failure.reachable
+                else f" does not answer ({failure}). Start it, then /status checks again."
+            )
+            parts += [(" · ", None), ("✗", "error"), (said, None)]
+        row = Text()
+        for piece, style in parts:
+            row.append_text(self._text(piece, style))
+        self._row("model", row)
+        self._row("folder", where)
+        title = " ".join(self.title.split())
+        count = f"{turns} turn" + ("" if turns == 1 else "s") if turns else "new"
+        self._row("session", f'"{title}" · {count}' if title else count)
+        mode, grants = self.approvals.mode, self.approvals.allowed_tools
+        self._row("approvals", approval_words(mode, grants))
+        usage, last = self.renderer.usage, self.renderer.context_tokens
+        self._row("context", context_summary(usage, last))
 
     async def retry(self) -> None:
         """``/retry``: re-run the newest turn, undoing it only when still live."""
@@ -1129,7 +1206,7 @@ class CliSession:
             self.out.print(
                 self._text(
                     "No MCP servers. Name a config file with mcp_config in "
-                    "config.toml, or start melo with --mcp-config FILE "
+                    "config.toml, or start melo with --mcp FILE "
                     "(the mcpServers JSON format)."
                 )
             )

@@ -17,8 +17,9 @@ from typing import Final, Literal
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from localmelo.support.cli.text import pad_cells
+from localmelo.support.cli.text import cells
 from localmelo.support.cli.theme import UNICODE, Symbols, in_symbols
+from localmelo.support.cli.views import hang
 
 
 @dataclass(frozen=True)
@@ -42,23 +43,27 @@ class Command:
         return f"{self.summary} (also {', '.join(others)})" if others else self.summary
 
 
+# The everyday commands come first: they head the menu, whose first screen is eight
+# rows. A summary has at most 60 cells and says its argument where one is needed, so
+# the menu, whose name column is as wide as the longest name, cuts none at 80 columns.
 COMMANDS: Final[tuple[Command, ...]] = (
-    Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
-    Command("backend", (), "[url]", "Switch to another model server (saved)", False),
+    Command("model", (), "[name]", "Pick a model, or /model NAME (saved)", False),
     Command("new", ("clear",), "", "Start a new session", False),
-    Command("status", (), "", "Show the model, session, tools and limits", True),
-    Command("help", (), "[command]", "Show commands and keys", True),
+    Command("status", (), "[all]", "Check the model; /status all shows more", True),
+    Command("help", (), "[command]", "Show commands; /help all lists every one", True),
     Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
-    Command("attach", (), "PATH", "Stage a text file from the workspace", False),
+    Command("undo", (), "", "Forget the last turn (files stay changed)", False),
+    Command("copy", (), "[turn]", "Copy a stored answer to the clipboard", True),
+    Command("retry", (), "", "Run the last turn again", False),
+    Command("backend", (), "[url]", "Switch to another model server (saved)", False),
+    Command("attach", (), "PATH", "Stage a text file: /attach PATH", False),
     Command("attachments", (), "", "List staged text files", False),
-    Command("detach", (), "N|all", "Remove a staged text file", False),
+    Command("detach", (), "N|all", "Remove a staged file: /detach N or all", False),
     Command("sessions", (), "[filter]", "Pick a session to resume", False),
     Command("resume", (), "[id|title]", "Resume a session", False),
     Command("title", (), "[text]", "Show or set the session title", True),
-    Command("undo", (), "", "Forget the last turn (files stay changed)", False),
     Command("usage", (), "", "Show recorded tokens, tools and time", True),
     Command("memory", (), "", "Show what the model remembers", True),
-    Command("copy", (), "[turn]", "Copy a stored answer to the clipboard", True),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
     Command("stream", (), "[on|off]", "Toggle live streamed replies", True),
@@ -67,17 +72,23 @@ COMMANDS: Final[tuple[Command, ...]] = (
         "approvals",
         (),
         "[ask|auto|deny|forget [tool]]",
-        "Show or switch how tools are approved",
+        "Show or switch approvals: ask, auto, deny, forget",
         "show",
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("mcp", (), "", "Show the MCP servers", True),
-    Command("retry", (), "", "Run the last turn again", False),
+)
+
+# What /help shows without "all": three groups of the commands a new user needs.
+HELP_GROUPS: Final = (
+    ("Conversation", ("new", "retry", "undo", "copy")),
+    ("Model", ("model", "status")),
+    ("Help", ("help", "exit")),
 )
 
 KEYS: Final = (
     "enter send (queues during a turn) · alt+enter, ctrl+j or \\ enter: new line",
-    "↑↓ history · ctrl+r search · tab complete",
+    "{arrows} history · ctrl+r search · tab complete",
     "esc stop the turn · ctrl+c clear, stop or quit · ctrl+d quit",
     "! command runs it in your shell, not through the model (! alone: details)",
 )
@@ -106,8 +117,20 @@ def parse_command(text: str) -> tuple[Command | None, str, str] | None:
     return find(name), name, arguments
 
 
-def help_text(topic: str = "", symbols: Symbols = UNICODE) -> RenderableType:
-    """``/help``: every command and the keys, or one command's details."""
+def help_text(
+    topic: str = "",
+    symbols: Symbols = UNICODE,
+    *,
+    everything: bool = False,
+    width: int = 80,
+) -> RenderableType:
+    """``/help``: the everyday commands, ``/help all`` every command and the keys, or one's details.
+
+    *everything* (developer mode) makes the bare ``/help`` the long one. A row too
+    long for *width* continues under its description.
+    """
+    if topic == "all":
+        everything, topic = True, ""
     if topic:
         command = find(topic.lstrip("/"))
         if command is None:
@@ -120,14 +143,25 @@ def help_text(topic: str = "", symbols: Symbols = UNICODE) -> RenderableType:
         ]
         usage = f"/{command.name} {command.args}".rstrip()
         return Text(f"{usage}\n  {command.line()}\n  During a turn: {during}")
-    lines: list[Text] = [Text("Commands", style="bold")]
-    for command in COMMANDS:
-        usage = f"/{command.name} {command.args}".rstrip()
-        line = Text("  " + pad_cells(usage, 20) + "  ")
-        line.append(command.line(), style="muted")
-        lines.append(line)
-    lines.append(Text("Input", style="bold"))
-    lines += [Text("  " + in_symbols(keys, symbols), style="muted") for keys in KEYS]
+    groups = list(HELP_GROUPS)
+    if everything:
+        named = {name for _, names in HELP_GROUPS for name in names}
+        groups.append(("More", tuple(c.name for c in COMMANDS if c.name not in named)))
+    column = max(cells(f"/{name}") for _, names in groups for name in names) + 2
+    lines: list[Text] = []
+    for title, names in groups:
+        lines.append(Text(title, style="bold"))
+        for name in names:
+            command = find(name)
+            assert command is not None
+            row = Text(command.line())
+            lines.append(hang(f"  /{name}", row, width, 2 + column))
+    keys = [in_symbols(k.format(arrows=symbols.arrows), symbols) for k in KEYS]
+    if everything:
+        lines.append(Text("Input", style="bold"))
+    else:
+        keys = [keys[-1], "/help all lists every command and key."]
+    lines += [hang("", Text(key), width, 2) for key in keys]
     return Group(*lines)
 
 

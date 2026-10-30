@@ -192,6 +192,16 @@ def default_window_messages(backend: str) -> int:
     return SHORT_TERM_MAX if backend in _CLOUD_SECTIONS else LOCAL_WINDOW_MESSAGES
 
 
+def window_reason(backend: str) -> str:
+    """Why the default window of *backend* is what it is: ``cloud`` or ``local server``."""
+    return "cloud" if backend in _CLOUD_SECTIONS else "local server"
+
+
+def window_default_label(backend: str) -> str:
+    """The default window with its reason: ``64 (local server)`` or ``20 (cloud)``."""
+    return f"{default_window_messages(backend)} ({window_reason(backend)})"
+
+
 @dataclass
 class RetrievalConfig:
     """The ``[retrieval]`` table: R5's recall defaults for direct runs."""
