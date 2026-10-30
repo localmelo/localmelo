@@ -161,6 +161,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One command builds and installs the macOS app on this Mac. `uv run python
+  scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
+  developer account), puts it in `~/Applications/LocalMelo.app` and links
+  `~/.local/bin/melo` to its launcher, then says in three plain lines what happened
+  and what to do next. An earlier copy is replaced only when its bundle id is
+  `org.localmelo.app`; another app of that name is refused. The link is made only when
+  no other `melo` is on `PATH`, and an existing `melo` is never replaced. `--uninstall`
+  removes the app and the link. The verified Python archive is cached in
+  `~/Library/Caches/LocalMelo` and hashed on every use, and build tools print only when
+  they fail. The bundled Python is compiled to bytecode before signing (the standalone
+  archive has none), so `melo --version` from the bundle takes 0.29 s instead of 0.96 s
+  (median of three runs) and nothing writes bytecode into the signed bundle, at the cost
+  of 63 MB (120 to 183 MB). ([#NN])
+
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,
   `not yet` or `no file named`) from the files `git status` shows edited since the

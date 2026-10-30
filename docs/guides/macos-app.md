@@ -1,20 +1,26 @@
 # macOS development app
 
-The arm64 development bundle is an unsigned local prototype, not a notarized release or a
-Homebrew cask. It needs macOS, the release Xcode at `/Applications/Xcode.app`, `uv`, and network
-access to obtain the pinned standalone Python and locked dependencies at build time. It does not
-install, start or download a model server. No signing identities or Xcode settings are changed.
+The arm64 development app is a local prototype for the Mac that builds it, not a notarized release or a Homebrew cask. It is signed ad hoc, so no Apple developer account is needed. It needs macOS, the release Xcode at `/Applications/Xcode.app`, `uv`, and network access to obtain the pinned standalone Python and locked dependencies at build time. It does not install, start or download a model server. No signing identities or Xcode settings are changed.
 
-From a checkout named `localmelo`, build to a new path:
+From a checkout named `localmelo`, one command builds the app and installs it for your user, with no admin rights:
+
+```bash
+uv run python scripts/build_macos_app.py --install
+```
+
+It says in plain words what it did and what to do next: open LocalMelo from Spotlight or from `~/Applications`. The app goes to `~/Applications/LocalMelo.app`, replacing an earlier copy only when its bundle id is `org.localmelo.app`; any other app of that name is refused and left alone. `~/.local/bin/melo` is linked to the app's launcher only when no other `melo` is on `PATH`; an existing `melo` is never replaced, and if `~/.local/bin` is not on your `PATH` the output gives the line to add. Run the command again, after quitting LocalMelo, to upgrade in place. The pinned Python archive is cached in `~/Library/Caches/LocalMelo` and checked against its SHA-256 on every use. To remove the app and the link, and nothing else (your settings and chats stay in `~/.cache/localmelo`):
+
+```bash
+uv run python scripts/build_macos_app.py --uninstall
+```
+
+To build without installing, give a new path:
 
 ```bash
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway
-extra into the bundle, compiles the Swift host with release Xcode, and includes a relocatable
-`Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and
-SHA-256 checked before extraction; wheel hashes are checked against the lock file.
+The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with release Xcode, compiles the bundled Python to bytecode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The bytecode is hash-based and never checks the source, and neither the launcher nor a direct run of the bundled interpreter writes more of it, so the signature stays valid. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
 
 Until the console has loaded, the window shows a native starting view: Melo's picture, `Starting localmelo…` and a
 spinner beside a line that names the step (`Starting the local server`, `Signing in`, `Opening your workspace`). If the
