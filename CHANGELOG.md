@@ -88,6 +88,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A chat says plainly what it remembers and answers in the script you write in. Asked about
+  memory, melo had described how the system around it works ("retrieved context and
+  reflections", "cannot write to long-term memory") and had answered in traditional characters
+  to a user who wrote in simplified ones. The identity paragraph of terminal, console and app
+  chats now says that melo remembers the recent messages of this chat and nothing from other
+  chats, or, when memory is kept between runs and can be recalled, also the short notes
+  localmelo keeps on this computer (in `legacy` reasoning what melo did with its tools and what
+  it learned from failed attempts; in the explicit modes what you told it or asked it to
+  remember and what it found or decided); that melo keeps no notes of its own and files in the
+  folder are not memory; to answer a memory question in one or two plain sentences without
+  describing internals; and to reply in the language and script you write in, simplified or
+  traditional Chinese for example (this replaces "Answer in the user's language."). Direct runs,
+  workers and the benchmark send no identity and are unchanged ([#305]).
+
 - `/clear` clears the screen. In the terminal it was another spelling of `/new`: it started a
   new chat and printed a `New chat` rule under the whole page. Now `/clear` is a command of
   its own: after the same reset (conversation, approvals, display preferences) it wipes the
@@ -2374,6 +2388,7 @@ earlier milestones.
 [#296]: https://github.com/localmelo/localmelo/pull/296
 [#297]: https://github.com/localmelo/localmelo/pull/297
 [#304]: https://github.com/localmelo/localmelo/pull/304
+[#305]: https://github.com/localmelo/localmelo/pull/305
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.support.sessions.identity import config_identity, url_identity
+from localmelo.support.sessions.identity import (
+    config_identity,
+    kept_across_chats,
+    url_identity,
+)
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -319,9 +323,13 @@ async def build_session_agent(
 
             llm, embedding = _providers_from_config(cfg)
     if identify and agent_options.identity is None:
-        identity = url_identity(base_url, model) if base_url else None
-        if cfg is not None and not base_url:
-            identity = config_identity(cfg)
+        identity = None
+        if base_url:
+            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
+            identity = url_identity(base_url, model, kept)
+        elif cfg is not None:
+            kept = kept_across_chats(agent_options, has_embedding=cfg.has_embedding)
+            identity = config_identity(cfg, kept)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:
         if not from_config:

@@ -4,9 +4,10 @@ A model that is told nothing answers "who are you?" with the identity it was
 trained with. The chat surfaces (the terminal chat, the console and the app)
 therefore give their Agent one paragraph for its system prompt
 (``AgentOptions.identity``): melo from localmelo, the model it runs on, the
-server that serves it and whether that server is on this computer. The
-builders here make the paragraph from the backend an Agent is built on, so a
-model switch (a new Agent) names the new model from the next turn.
+server that serves it and whether that server is on this computer, what it
+remembers, and to answer in the user's language and script. The builders here
+make the paragraph from the backend and the memory settings an Agent is built
+on, so a model switch (a new Agent) names the new model from the next turn.
 """
 
 from __future__ import annotations
@@ -14,10 +15,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
+from localmelo.melo.agent.agent import _resolve_memory_dir
 from localmelo.support.backends import discovery
 from localmelo.support.loopback import is_loopback
 
 if TYPE_CHECKING:
+    from localmelo.melo.agent import AgentOptions
     from localmelo.support.config import Config
 
 # The chat backends of servers on this computer or on the user's network, as
@@ -32,8 +35,35 @@ IDENTITY_TEXT: Final = (
     "If the user asks who or what you are, say that you are melo from "
     "localmelo and name {named}. The model only powers you: never present "
     "yourself as the model's own assistant or as made by its maker.\n"
-    "Answer in the user's language. For a greeting or a question you can "
+    "{memory}\n"
+    "Reply in the language and script the user writes in (for example "
+    "simplified or traditional Chinese). For a greeting or a question you can "
     "answer directly, reply without using tools."
+)
+
+# What a chat remembers: its own messages, and across chats only what the
+# Agent's long-term store keeps (see kept_across_chats). The model answers
+# from this text, not from how the memory works.
+MEMORY_TEXT: Final = (
+    "{remembers} You keep no notes of your own, and files in the user's "
+    "folder are not memory. If asked what you remember, answer in one or two "
+    "plain sentences and do not describe how your memory works inside."
+)
+_THIS_CHAT: Final = "You remember the recent messages of this chat"
+_ALONE: Final = _THIS_CHAT + ", and nothing from other chats."
+_ACROSS: Final = (
+    _THIS_CHAT + ". Across chats you remember only what localmelo keeps on this "
+    "computer: {kept}. It brings back what matches the user's question."
+)
+# What the long-term store keeps (melo/agent/agent.py): legacy writes a note
+# per tool step and the lessons of failed attempts; the other modes write what
+# the user states or asks to be remembered and what a run found or decided.
+KEPT_LEGACY: Final = (
+    "short notes on what you did with your tools and what you learned from "
+    "failed attempts"
+)
+KEPT_TYPED: Final = (
+    "what the user tells you or asks you to remember, and what you found or decided"
 )
 
 # What the server's generic name reads as in a sentence.
@@ -55,14 +85,38 @@ def host_of(url: str) -> str:
         return ""
 
 
-def identity_text(model: str | None, server: str, *, local: bool, url: str = "") -> str:
+def kept_across_chats(options: AgentOptions, *, has_embedding: bool) -> str:
+    """What an Agent made with *options* keeps for later chats; ``""`` for nothing.
+
+    The long-term store outlives the chat only when the Agent persists memory
+    (``memory_dir`` or ``LOCALMELO_PERSIST_MEMORY``), memory is on, and it can
+    recall: legacy needs an embedding provider, the other modes read the store
+    as text unless the retriever is off. Without that the Agent keeps this
+    chat's messages only.
+    """
+    legacy = options.reasoning == "legacy"
+    if (
+        not options.memory
+        or _resolve_memory_dir(options) is None
+        or not (has_embedding or not legacy)
+        or (not legacy and options.retriever == "off")
+    ):
+        return ""
+    return KEPT_LEGACY if legacy else KEPT_TYPED
+
+
+def identity_text(
+    model: str | None, server: str, *, local: bool, url: str = "", kept: str = ""
+) -> str:
     """The identity paragraph for a chat on *model*, served by *server*.
 
     *model* is ``None``, empty or ``default`` when the model's name is not
     known; the paragraph then names the server only. *local* says the
     backend is a server of the user's (not a cloud provider): it is "on this
     computer" when *url* points to this computer or nowhere, and "at <host>"
-    when it points elsewhere. A cloud provider has no place to name.
+    when it points elsewhere. A cloud provider has no place to name. *kept* is
+    what the Agent keeps across chats (:func:`kept_across_chats`); ``""`` says
+    it keeps this chat's messages only.
     """
     name = _clean(model or "")
     server = _clean(server)
@@ -77,15 +131,18 @@ def identity_text(model: str | None, server: str, *, local: bool, url: str = "")
     else:
         running = f"You are running on the model {name}, served by {server}{where}."
         named = "the model you run on"
-    return IDENTITY_TEXT.format(running=running, named=named)
+    memory = MEMORY_TEXT.format(remembers=_ACROSS.format(kept=kept) if kept else _ALONE)
+    return IDENTITY_TEXT.format(running=running, named=named, memory=memory)
 
 
-def url_identity(url: str, model: str | None) -> str:
+def url_identity(url: str, model: str | None, kept: str = "") -> str:
     """The identity of a chat on the OpenAI-compatible server at *url*."""
-    return identity_text(model, discovery.server_name(url), local=True, url=url)
+    return identity_text(
+        model, discovery.server_name(url), local=True, url=url, kept=kept
+    )
 
 
-def config_identity(cfg: Config) -> str:
+def config_identity(cfg: Config, kept: str = "") -> str:
     """The identity of a chat on *cfg*'s chat backend and model."""
     from localmelo.support.backends.registry import get_backend
 
@@ -97,5 +154,9 @@ def config_identity(cfg: Config) -> str:
         server = key
     url = getattr(section, "chat_url", "") or getattr(section, "base_url", "")
     return identity_text(
-        getattr(section, "chat_model", ""), server, local=key in LOCAL_BACKENDS, url=url
+        getattr(section, "chat_model", ""),
+        server,
+        local=key in LOCAL_BACKENDS,
+        url=url,
+        kept=kept,
     )

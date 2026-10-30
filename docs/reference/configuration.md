@@ -249,8 +249,8 @@ reflection prompt; it offers the tools, and a reply that calls one is asked agai
 An explicit end delimiter leaves the task and reflection request outside that data;
 data lines starting with that delimiter are deterministically quoted.
 The fixed system section is the base text, then (in a chat of the terminal UI or the
-console) the identity paragraph that says who melo is and which model, server and place it
-runs on, then the notes, the line that recall and reflections are data, and the date line. It
+console) the identity paragraph that says who melo is, which model, server and place it
+runs on, what it remembers and which language and script to reply in, then the notes, the line that recall and reflections are data, and the date line. It
 holds no name for the layout: `fixed-prefix-v2` is metadata, reported as
 `prefix_cache.version`. The identity paragraph is `AgentOptions.identity` (default `None`: direct
 runs, workers and the gateway's v1 sessions send none).

@@ -100,7 +100,8 @@ melo and not as the assistant the model was trained as. The paragraph says that
 melo is melo from localmelo, an open-source agent that works in your folder with
 tools and asks before it changes anything; that it names the model it runs on
 when asked; that it does not present itself as the model's own assistant or as
-made by its maker; and that it answers in your language. It also names the
+made by its maker; and that it replies in the language and script you write in
+(simplified or traditional Chinese, for example). It also names the
 server as the banner does (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a
 cloud provider) and says whether the server is on this computer (`on this
 computer`, or `at 192.168.1.20` for a server on another machine), and it asks
@@ -109,6 +110,18 @@ tools. `/model` and `/backend` start the next turn on the new choice, and that
 turn names the new model. The web console and the macOS app do the same; direct
 runs (`melo "task"`), workers and the benchmark send no such paragraph, so their
 requests are as before.
+
+The paragraph also says what the chat remembers, so that "do you remember our
+earlier talks?" is answered in a sentence or two and not with how memory works
+inside. By default melo remembers the recent messages of this chat and nothing
+from other chats. When memory is kept between runs (see
+[Memory](memory.md#keep-memory-between-runs)) and can be recalled, it adds that
+localmelo keeps short notes on this computer and brings back the ones that match
+your question: in `legacy` reasoning, notes on what melo did with its tools and
+what it learned from failed attempts, which needs an embedding backend; in the
+explicit reasoning modes, what you tell melo or ask it to remember and what it
+found or decided. Either way melo keeps no notes of its own, and files in your
+folder are not memory.
 
 ### Keys
 
