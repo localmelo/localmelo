@@ -618,8 +618,8 @@ These options apply to `melo` without a task.
   the default browser when stdin and stdout are terminals on this computer (no
   `SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY`; `BROWSER` picks the browser). It
   prints the one-use sign-in link, to a terminal only, when no browser starts
-  or over SSH. Exit 2 when stdout is not a terminal (nothing is printed), exit 1
-  when nothing listens on the port.
+  or over SSH. Exit 2 when stdout is not a terminal (a message on stderr, nothing on stdout),
+  exit 1 when nothing listens on the port.
   `melo --gateway-rotate-token` rotates the shared local gateway token.
   The gateway refuses non-loopback binds and requires authentication; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).

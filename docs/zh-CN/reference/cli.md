@@ -386,7 +386,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 - 没有任务时，`--host` 和 `--port` 需要 `--serve`、`--daemon`、`--gateway-login` 或 `--gateway-rotate-token` 之一。
 - 没有终端且没有配置文件时，`melo --serve` 会在 stderr 上打印一行并以退出码 1 退出，与 launchd 下的行为一致：`melo: no backend is configured; run melo setup in a terminal`。没有终端时，`--reconfigure` 仍会运行设置向导，并从标准输入读取答案，因此脚本可以通过管道输入。`--allow-unconfigured` 同时跳过设置向导和启动时校验，因此 `melo --serve --allow-unconfigured` 可以在没有配置文件的情况下启动；它不能与 `--reconfigure` 同用，也不能不带 `--serve` 使用。
 - 在设置向导的问题处按 Ctrl-D 会打印 `Setup cancelled.` 并以退出码 0 退出；按 Ctrl+C 会打印相同内容，并以 130 退出。
-- `melo --gateway-login [--port PORT]`（即 `melo console`）在 stdin 和 stdout 都是本机终端时（没有 `SSH_CONNECTION`、`SSH_CLIENT`、`SSH_TTY`），用默认浏览器打开网页控制台（`BROWSER` 可指定浏览器）。没有浏览器能启动或通过 SSH 时，它只向终端输出一次性登录链接。stdout 不是终端时退出码为 2（不输出任何内容），该端口上没有网关在监听时退出码为 1。`melo --gateway-rotate-token` 轮换共享的本地网关令牌。网关拒绝非回环地址的绑定，并要求认证；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。
+- `melo --gateway-login [--port PORT]`（即 `melo console`）在 stdin 和 stdout 都是本机终端时（没有 `SSH_CONNECTION`、`SSH_CLIENT`、`SSH_TTY`），用默认浏览器打开网页控制台（`BROWSER` 可指定浏览器）。没有浏览器能启动或通过 SSH 时，它只向终端输出一次性登录链接。stdout 不是终端时退出码为 2（stderr 上有一行提示，stdout 上不输出任何内容），该端口上没有网关在监听时退出码为 1。`melo --gateway-rotate-token` 轮换共享的本地网关令牌。网关拒绝非回环地址的绑定，并要求认证；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。
 
 <a id="usage-errors"></a>
 
