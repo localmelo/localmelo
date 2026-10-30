@@ -55,6 +55,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
+  replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
+  it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
+  add something (the streamed text, the running tool, the past runs) stay ([#NN]).
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
   not be decoded, so it was asked for again, and a second failure lost the
@@ -1168,6 +1172,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The command list under the input box is in the terminal's colours. Typing `/`, `@` or a
+  command's argument showed a grey block (prompt_toolkit's default, black text on grey bars);
+  the list now has no background: names in your text colour, their descriptions muted, and the
+  chosen row on the same moss band with one `❯` as every other list, with the names standing
+  under the text you typed. The scrollbar is a slim rule-coloured bar and appears only when
+  there are more rows than the eight shown. Without the exact background the chosen row is
+  moss and bold, and with `NO_COLOR` it is in reverse video ([#NN]).
 - The terminal's new look, part 2: panels, lists, the status bar and the welcome. The approval
   panel has an amber frame with its title bold, the chosen answer sits on a moss band, and a
   diff's added and removed rows are banded. Every list (the setup questions, the attach

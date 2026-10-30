@@ -366,6 +366,22 @@ class Palette:
                 # A key's words beside it: muted, but never dim (dim reads at
                 # 2.4:1 on a light terminal), so plain at 16 colours.
                 "faint": muted.pt() if self.hues else "",
+                # The completion list. prompt_toolkit applies a more precise
+                # class after a less precise one, so each of its own classes is
+                # reset here: no block, names in the body's ink, descriptions
+                # muted, the chosen row as in a picker, a slim bar in the rule
+                # colour.
+                "completion-menu": "noinherit",
+                "completion-menu.completion.current": (
+                    f"noinherit {self.band('selection', 'accent')}"
+                ),
+                "completion-menu.meta.completion": f"noinherit {muted.pt()}",
+                "completion-menu.meta.completion.current": (
+                    f"noinherit {self.band('selection', 'muted')} nobold"
+                ),
+                "completion-menu.multi-column-meta": f"noinherit {muted.pt()}",
+                "scrollbar.background": "noinherit",
+                "scrollbar.button": f"noinherit {self.look('rule').pt()}",
             }
         )
 
