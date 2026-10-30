@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import SHORT_TERM_MAX, Message
 from localmelo.support.cli.session_views import memory_view
 from localmelo.support.cli.theme import ASCII
 
@@ -74,6 +74,7 @@ def test_ascii_memory_clipping_keeps_ascii_markers_and_cell_width(setup: Setup) 
         memory_view(
             [Message("user", "x" * 100)],
             setup.factory.backend,
+            window_max=SHORT_TERM_MAX,
             memory=True,
             loaded=None,
             width=40,
