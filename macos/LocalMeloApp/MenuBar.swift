@@ -9,15 +9,20 @@ final class MenuBar {
     /// way to the chat or task that waits.
     let runningLine = NSMenuItem.sectionHeader(title: "")
     let waitingLine: NSMenuItem
+    /// Brings Melo back after "Hide Melo": shown only while Melo is hidden.
+    let showPetLine: NSMenuItem
     private let divider = NSMenuItem.separator()
     private let plain: NSImage?
     private let badged: NSImage?
     private var wasWaiting = false
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
-    init(menu: NSMenu, waiting: Selector) {
+    init(menu: NSMenu, waiting: Selector, showPet: Selector) {
         let logo = MenuBar.logo()
         waitingLine = NSMenuItem(title: "Waiting for your approval", action: waiting, keyEquivalent: "")
+        showPetLine = NSMenuItem(title: "Show Melo", action: showPet, keyEquivalent: "")
+        showPetLine.isHidden = true
+        menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.title == "Open localmelo" } ?? -1) + 1)
         plain = MenuBar.image(logo, badge: false)
         badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }

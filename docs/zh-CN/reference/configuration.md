@@ -65,7 +65,7 @@ chat_model = "qwen3:8b"
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
-| `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件加入 `cache`、`ctx` 和 `tasks` 段（开发者模式还有 `step` 段），没有数据的段隐藏。`"off"`：状态栏保持原样（模型、工作区、上一次请求的 `ctx`、标题）。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
+| `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏的资源区根据已收到的事件显示 `cache`、`ctx` 和 `tasks` 数字，没有数据的隐藏。`"off"`：状态栏保留各区但不显示这些数字（模型、工作区、运行区：标题或运行中轮次的步骤，以及上一次请求的 `ctx`）。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
 | `colors` | `[cli]` | `"auto"` | 交互式界面的颜色数量：`"auto"`（根据 `COLORTERM` 和 `TERM`）、`"16"`、`"256"` 或 `"truecolor"`。`NO_COLOR` 仍会关闭颜色。开发者设置：`-X cli.colors=256` 只用于本次运行。其他值会警告并回退。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `background` | `[cli]` | `"auto"` | 交互式界面所用的终端背景：`"auto"`（先询问终端，再看 `COLORFGBG`），什么都不回答的终端（tmux、screen、ssh）可设为 `"dark"` 或 `"light"`。开发者设置：`-X cli.background=light`。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `reasoning_tags` | `[cli]` | 未设置 | 一张 `MODEL = "explicit" \| "closing_only" \| "none"` 表：某模型回复的可信分帧声明；`stream = false` 时也会用它切分完整回复。没有条目的模型使用保守规则（内容一直保留到回复结束）。目前需要手工设置，引导流程还不会询问它。 |

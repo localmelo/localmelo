@@ -190,6 +190,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo the Akita lies on your desktop when you put the macOS app away. Close the window,
+  minimize it or hide the app and a small Melo appears at the bottom right, above the Dock,
+  over other windows and on every Space, without taking the keyboard. It rests lazily while
+  nothing runs, works, waits for your approval, is happy when a run is done, looks sad when
+  one did not finish and sleeps in a different pose after a quiet minute, all from the
+  health check the app already makes. Click it to open the window (or the chat that waits
+  for you), drag it anywhere (it remembers its place on each screen), right-click it for
+  Open localmelo, Hide Melo and Quit localmelo; Hide Melo is remembered and **Show Melo** in
+  the menu-bar menu brings it back. It breathes, bobs when work starts, hops when it waits
+  and wags when a run is done, with Core Animation only: all of that stops under Reduce
+  Motion, in Low Power Mode, when the Mac runs hot, and when Melo is covered or the screen
+  sleeps. VoiceOver reads its mood when Melo is focused; the menu-bar item still announces a wait, Melo stays silent so it is not read twice. The Dock icon now opens the window
+  again after it was closed. ([#272])
+
 - Melo the Akita puppy gets pictures, a mood policy and a place in `GET /api/health`, the
   first step towards a desktop pet. `macos/art/akita` holds 14 transparent pictures, each at
   1x and `@2x` (1.17 MB): nine for a pet (lying, resting lazily, three sleeping poses), five
@@ -1128,6 +1142,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The terminal's new look, part 2: panels, lists, the status bar and the welcome. The approval
+  panel has an amber frame with its title bold, the chosen answer sits on a moss band, and a
+  diff's added and removed rows are banded. Every list (the setup questions, the attach
+  question, `/model`, `/sessions`) draws its chosen row on a band with one `❯` and the current
+  model's `✓` in teal; key lines name their keys in your text colour with the words muted.
+  The live row's spinner is moss and its words your text colour. The status bar is split into
+  zones that keep their place, model and folder │ the run │ cache and context; while a turn
+  runs, the run zone gives its steps in brief, `2/~8 · ctrl+o steps` (`~`: the task took 8
+  steps before) or `step 2`, and on a narrow terminal the cache and context go first. Ctrl+O
+  lists the turn's steps (each call's tool, target, status and time, then the steps still to
+  come), during the turn or after it. At 256 colours or more and 80 columns or more, the
+  welcome stands beside Melo's head with its ears, in half blocks computed from the pet's
+  face picture. A command in an error's advice (`/retry`) is drawn as a command. `NO_COLOR`
+  and `LOCALMELO_ASCII=1` keep every meaning; direct mode, workers, JSON, stream-json, events
+  and exit codes are unchanged.
+  ([#273])
 - The terminal's colour tells kinds of output apart (part 1 of its new look). Each tool row
   shows its kind before the name, in the kind's colour: `→` reads (muted, so they fade), `±`
   writes, `$` commands and code, `@` network. A command that exits with another code than 0
@@ -2100,6 +2130,8 @@ earlier milestones.
 [#266]: https://github.com/localmelo/localmelo/pull/266
 [#268]: https://github.com/localmelo/localmelo/pull/268
 [#271]: https://github.com/localmelo/localmelo/pull/271
+[#272]: https://github.com/localmelo/localmelo/pull/272
+[#273]: https://github.com/localmelo/localmelo/pull/273
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

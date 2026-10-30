@@ -16,7 +16,7 @@ from localmelo.melo.contracts.approvals import (
     DenyAllPolicy,
 )
 from localmelo.melo.schema import ToolTier
-from localmelo.support.cli import edits
+from localmelo.support.cli import edits, theme
 from localmelo.support.cli.approvals import (
     APPROVAL_KEY_GUARD_S,
     Approvals,
@@ -28,6 +28,7 @@ from localmelo.support.cli.approvals import (
     session_warning,
 )
 from localmelo.support.cli.render import LiveState
+from localmelo.support.cli.text import cells
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
@@ -403,10 +404,24 @@ async def test_the_warning_and_the_key_line_are_default_text_not_dim(
     async with running_app(approver=approver, clock=lambda: now[0]) as app:
         asking = asyncio.ensure_future(approver.ask(_request()))
         await app.wait(lambda: "Run a shell command?" in app.text())
-        rows = {part[1]: part[0] for part in app.ui._panel_fragments()}
-        for needle in ('"Allow every" lets', "Commands can reach", "↑↓ select"):
+        fragments = app.ui._panel_fragments()
+        rows = {part[1]: part[0] for part in fragments}
+        for needle in ('"Allow every" lets', "Commands can reach"):
             [style] = [style for text, style in rows.items() if needle in text]
             assert style == "", needle  # dim reads at 2.4:1 on a light terminal
+        # The key line: each key in the body's ink, its words faint, which is
+        # plain (never dim) where the palette has no muted colour.
+        start = next(i for i, part in enumerate(fragments) if part[1] == "↑↓")
+        keys = fragments[start : start + 4]
+        assert [part[0] for part in keys] == [
+            "class:key",
+            "class:faint",
+            "class:faint",
+            "class:key",
+        ]
+        assert "".join(part[1] for part in keys) == "↑↓ select · enter"
+        light16 = theme.Palette("16", "light").pt_style
+        assert not light16.get_attrs_for_style_str("class:faint").dim
         now[0] += APPROVAL_KEY_GUARD_S + 0.1
         app.type("1")
         await asyncio.wait_for(asking, 3)
@@ -849,3 +864,39 @@ async def test_a_new_file_left_alone_while_the_panel_waits_is_allowed(
         _request("file_write", path=str(path), content="mine\n")
     )
     assert decision.allow
+
+
+async def test_the_frame_is_warn_its_title_bold_the_choice_a_band_and_a_diff_banded(
+    now: list[float], tmp_path: Any
+) -> None:
+    path = tmp_path / "todo.md"
+    path.write_text("a\nb\n", encoding="utf-8")
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(
+            approver.ask(_request("file_write", path=str(path), content="a\nc\n"))
+        )
+        await app.wait(lambda: "Change a file?" in app.text())
+        parts = app.ui._panel_fragments()
+        assert parts[:2] == [("class:frame", "╭─ "), ("class:title", "Change a file?")]
+        assert all(
+            style == "class:frame" for style, text, *_ in parts if text in ("│ ", " │")
+        )
+        added = [p for p in parts if p[0] == "class:diff_add" and "+ c" in p[1]]
+        removed = [p for p in parts if p[0] == "class:diff_remove" and "b" in p[1]]
+        assert added and removed
+        # The band fills the panel's inner width: 80 columns less the frame.
+        row = next(i for i, p in enumerate(parts) if p in added)
+        assert cells(parts[row][1] + parts[row + 1][1]) == 76
+        chosen = [p for p in parts if p[0].startswith("class:chosen")]
+        assert ("class:chosen class:accent", "❯") in chosen
+        assert cells("".join(p[1] for p in chosen)) == 80
+        now[0] += APPROVAL_KEY_GUARD_S + 0.1
+        app.type("3")
+        await app.wait(lambda: "Reason" in app.text())
+        # While a reason is typed, its answer keeps the accent, with no band.
+        parts = app.ui._panel_fragments()
+        assert not any(p[0].startswith("class:chosen") for p in parts)
+        assert any(p[0] == "class:accent" and "3. No" in p[1] for p in parts)
+        app.type("\r")
+        await asyncio.wait_for(asking, 3)

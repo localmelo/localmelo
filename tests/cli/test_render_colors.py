@@ -392,3 +392,32 @@ def test_the_guard_keeps_the_hue_and_moves_only_what_needs_it() -> None:
     assert ONE_DARK.on_raised("accent").fg == Colour("#b5cf9f")
     # No fill, no move.
     assert SOLARIZED.on_raised("muted") == SOLARIZED.look("muted")
+
+
+# ── Commands in what melo says ──
+
+
+def test_a_slash_command_in_the_error_screen_is_drawn_as_a_command() -> None:
+    turn = Turn(base_url="http://127.0.0.1:9/v1")
+    printed: list[Any] = []
+    record = turn.out.print
+
+    def keep(*items: Any) -> None:
+        printed.extend(items)
+        record(*items)
+
+    turn.out.print = keep  # type: ignore[method-assign]
+    turn.finish("provider_error", error="Cannot reach http://127.0.0.1:9/v1")
+    assert "/retry tries again." in turn.text()
+    [action] = [
+        item.renderable
+        for item in printed
+        if isinstance(getattr(item, "renderable", None), Text)
+        and "/retry" in item.renderable.plain
+    ]
+    # The URL's path is not a command.
+    assert _roles(action) == {"/status": "command", "/retry": "command"}
+    palette = Palette("truecolor", "dark")
+    drawn = _drawn(palette, action, "/retry")
+    assert _hex(drawn) == "#b5cf9f" and drawn.bold  # the accent, bold
+    assert _drawn(palette, action, "checks").color is None

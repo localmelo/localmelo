@@ -47,13 +47,30 @@ uv run --with pillow python scripts/make_app_icons.py
 
 Pillow is fetched for that one run; it is not a dependency of localmelo, and `iconutil`, which ships with macOS, packs the icon.
 
-Melo, the localmelo mascot, is an Akita puppy in the pictures the bundle carries under `Contents/Resources/akita`: nine for a desktop pet (lying, resting lazily, and in three sleeping poses), five sitting ones for the starting view, small faces and the favicon sizes, each at 1x and `@2x`. The app does not draw them yet. Like the icon they are committed files, in `macos/art/akita` (1.17 MB, transparent PNGs with a thin cream rim so the outline still shows on a dark desktop), and the build copies the folder as it is. `anchors.json` gives every picture's canvas, ground line and centre in points, so that a change of pose does not jump. The art masters stay outside the repository; to make the pictures again from them, on a Mac:
+Melo, the localmelo mascot, is an Akita puppy, and when you put the app away Melo lies on your desktop. Close the window, minimize it or hide the app (Command-H) and a small Melo appears at the bottom right of the screen, above the Dock. It stays above other windows and on every Space (it does not ask to appear over a full-screen app), is not in the Dock or in Command-Tab, and never takes the keyboard from the app you are using. It goes away when the window comes back, whether you open it from the Dock, the menu bar, Spotlight or by clicking Melo.
+
+What Melo looks like says what localmelo is doing, from the same 2-second health check the menu-bar item uses:
+
+| Melo | Meaning |
+|---|---|
+| Flopped on its belly, half-closed eyes | Resting: nothing runs. This is the default. |
+| Glancing up with its tongue out, a small bob when work starts | Working: a chat, task, run or terminal chat runs. |
+| Wide sparkling eyes and a small round mouth, a small hop when it starts | Waiting for your approval. |
+| Happy closed eyes and an open smile, a short wag | Done: a run just ended well (for 6 seconds). |
+| Sad brows and a frown | The last run did not finish (for 10 seconds), or localmelo stopped. |
+| Asleep on its side, belly-down or on its back | Nothing has happened for a minute; the pose changes every 3 minutes, and touching Melo wakes it. |
+
+Click Melo to open the window, or, while it waits for an approval, the chat or task that needs your answer. Drag it anywhere; it remembers its place for each screen, snaps onto the bottom edge when you drop it near, and comes back on screen when the screens change. Right-click (or Control-click) for **Open localmelo**, **Hide Melo** and **Quit localmelo**. **Hide Melo** hides it for good, across launches, and **Show Melo** then appears in the menu-bar menu, as the one way back (Melo shows again the next time the window is put away). What it remembers is in `~/Library/Application Support/LocalMelo/pet.json`: whether it is hidden, the screen it was last on and its spot on each screen.
+
+Melo breathes slowly while it lies there, bobs when work starts, hops when it waits, wags when a run is done, and changes pictures with a short cross-fade (a slower one between sleeping poses). All of this is Core Animation, so the app does no drawing of its own: no timer runs for Melo, and its mood is worked out again when a health reply, a touch or a change of window comes in. Melo stops moving, and each mood shows its still picture, under Reduce Motion (pictures then swap without a fade), in Low Power Mode, when the Mac runs hot, while Melo is covered or hidden, and while the screen sleeps. VoiceOver reads Melo as a button that names its mood (`Melo, resting. Nothing running.`, `Melo, working. 2 running.`, `Melo, waiting for your approval.`, `Melo, done.`, `Melo, the last run did not finish.`, `Melo, localmelo stopped.`) and says nothing aloud when a wait starts: the menu-bar item already announces it, so VoiceOver does not read it twice.
+
+The pictures are in the bundle under `Contents/Resources/akita`: nine for the desktop pet (lying, resting lazily, and in three sleeping poses), five sitting ones for the starting view, small faces and the favicon sizes, each at 1x and `@2x`. Like the icon they are committed files, in `macos/art/akita` (1.17 MB, transparent PNGs with a thin cream rim so the outline still shows on a dark desktop), and the build copies the folder as it is. `anchors.json` gives every picture's canvas, ground line and centre in points, so that a change of pose does not jump. The art masters stay outside the repository; to make the pictures again from them, on a Mac:
 
 ```bash
 uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
 ```
 
-`picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script. Pillow is fetched for that run only, and two runs give the same bytes. `GET /api/health` now also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); the app's policy for Melo reads it to show a run that just finished.
+`picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script. Pillow is fetched for that run only, and two runs give the same bytes. `GET /api/health` now also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it to show a run that just finished.
 
 Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
 startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
