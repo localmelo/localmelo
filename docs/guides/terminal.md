@@ -390,18 +390,18 @@ happens without the explicit `/copy` command.
     Changed hello.py (+1)
   ```
 
-  Several files read `Changed hello.py (+1), README.md (+3 −1)`: paths relative to
-  the folder melo works in, each with the lines the turn added and removed in it. At
-  most three names show, then `and 2 more`; a narrow terminal shows fewer and never
-  wraps. A file written twice counts once, the file as the turn found it against the
-  file as it left it, and a file written back as it was is left out. A name stands
-  alone, with no counts, for a new empty file, a file melo could not compare (too
-  large, or not text) and every file of a `--yolo` turn, since nothing read the old
-  file first. The line comes from the turn's own `file_write` calls: a write that was
-  denied or refused (a path outside the folder) is not listed, and neither is a file
-  that a shell command or a script changed, because melo never scans the folder.
-  Nothing prints when the turn changed no file, or when you stop it (a stopped turn
-  has no footer). Developer mode shows the same line.
+  Several files read `Changed hello.py (+1), README.md (+3 −1)`: paths relative to the
+  folder melo works in, each with the lines the turn added and removed in it. At most
+  three names show, then `and 2 more`; a narrow terminal shows fewer and never wraps. A
+  file written twice counts once, the file as the turn found it against the file as it
+  left it, and a file written back as it was is left out. A name stands alone, with no
+  counts, when there is nothing to count or compare: a new empty file, a file melo could
+  not compare (too large, or not text) and every file of a `--yolo` turn, where nothing
+  read the old file first. The line comes from the turn's own `file_write` calls: a
+  write that was denied or refused (a path outside the folder) is not listed, and
+  neither is a file that a shell command or a script changed, because melo never scans
+  the folder. Nothing prints when the turn changed no file, or when you stop it (a
+  stopped turn has no footer). Developer mode shows the same line.
 
 ### The status bar
 
