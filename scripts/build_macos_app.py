@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the LocalMelo macOS app; with --install, also put it on this Mac.
+"""Build the localmelo macOS app; with --install, also put it on this Mac.
 
 The app is signed ad hoc, so no Apple developer account is needed. It is made for the
 Mac that builds it.
@@ -330,7 +330,7 @@ def install() -> str:
     # Build beside the target, so the last step is a rename and a failure changes nothing.
     scratch = Path(tempfile.mkdtemp(prefix=".LocalMelo-", dir=target.parent))
     try:
-        print("Building LocalMelo. This can take a minute.", flush=True)
+        print("Building localmelo. This can take a minute.", flush=True)
         build(scratch / "LocalMelo.app")
         upgraded = check_target(target)  # it may have been opened meanwhile
         if upgraded:
@@ -353,7 +353,7 @@ def install() -> str:
     if other:
         command = (
             f"Your own melo command ({str(other).replace(str(Path.home()), '~')}) was left "
-            "alone. To use LocalMelo's instead, remove it and run this command again."
+            "alone. To use localmelo's instead, remove it and run this command again."
         )
     elif melo_on_path():
         command = "The melo command is ready in Terminal: melo --version"
@@ -363,9 +363,9 @@ def install() -> str:
             "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc"
         )
     return (
-        f"LocalMelo is {'updated' if upgraded else 'installed'} in ~/Applications, "
+        f"localmelo is {'updated' if upgraded else 'installed'} in ~/Applications, "
         "the Applications folder in your home folder.\n"
-        "Next: open LocalMelo from Spotlight (Command-Space, then type LocalMelo) or from that folder.\n"
+        "Next: open localmelo from Spotlight (Command-Space, then type localmelo) or from that folder.\n"
         + command
     )
 
@@ -381,11 +381,11 @@ def uninstall() -> str:
     if present:
         shutil.rmtree(target)
     removed = [
-        *(["LocalMelo from ~/Applications"] if present else []),
+        *(["localmelo from ~/Applications"] if present else []),
         *(["the melo command from ~/.local/bin"] if linked else []),
     ]
     if not removed:
-        return "LocalMelo is not installed in ~/Applications, so there is nothing to remove."
+        return "localmelo is not installed in ~/Applications, so there is nothing to remove."
     return (
         f"Removed {' and '.join(removed)}.\n"
         "Your settings and chats were not touched; they stay in ~/.cache/localmelo."
