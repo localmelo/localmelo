@@ -280,7 +280,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   one way, 4 the other, back in 420 ms) while the head stays. The other lying pictures
   do not flick an ear: their heads are separate drawings that do not lie on the
   no-ear picture. Both are Core Animation in the app (no timer) and
-  stop under the same conditions as the other moves ([#NN]).
+  stop under the same conditions as the other moves ([#296]).
 
 - Pictures that tools return reach a model that can see. A screenshot from an MCP server used to
   reach the model only as a line such as `[1 image: sha256:... image/jpeg]`. With
@@ -2340,6 +2340,7 @@ earlier milestones.
 [#293]: https://github.com/localmelo/localmelo/pull/293
 [#294]: https://github.com/localmelo/localmelo/pull/294
 [#295]: https://github.com/localmelo/localmelo/pull/295
+[#296]: https://github.com/localmelo/localmelo/pull/296
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
