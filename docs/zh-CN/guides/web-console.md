@@ -50,14 +50,22 @@
 <a id="the-panel-beside-a-chat"></a>
 ## 对话旁的面板
 
-对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Approvals**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。Approvals 和 Scheduled 说明它们将来会列出什么；目前能用的是 Activity 和 Memory。
+对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。Scheduled 说明它将来会列出什么；目前能用的是 Activity、Workers 和 Memory。
+
+面板显示属于当前打开的对话的内容。侧边对话的面板列出这个对话自己的活动和它启动的 worker；主对话的面板，以及没有打开任何对话时的面板，列出今天的全部内容。Melo 的状态行也跟随对话：在侧边对话里，它说明这个对话在做什么。打开另一个对话会重新读取列表。
 
 **Activity** 分为两部分，读取自 [`GET /api/activity`](../../reference/api-v2.md#get-apiactivity)（英文）：页面的健康轮询发现正在运行的内容有变化时读取，此外每 30 秒读取一次。
 
 - **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，画像处于休息状态并会眨眼。
-- **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。**All tasks** 和 **All worker runs** 打开对应的视图。
+- **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。
+
+结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。
+
+请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
 选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用文字表示的优先级（**Now**、**Today**、**Normal**、**Whenever**、**If idle**；开发者模式加上 P0 到 P4），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
+
+**Workers** 列出上述范围内的 worker：当前对话启动的任务，运行中的在前，然后是今天完成的。每一行有标题、用文字表示的状态（`Working`、`Waiting for your approval`、`Waiting to start`、`Paused`、`Done`、`Failed`、`Stopped`）、时间，已完成的 worker 还有一行结果。选中一个 worker，会展开它实时的步骤，完成后展开它的历史，并提供 **Pause** 或 **Resume**、**Stop** 和优先级，与 Activity 相同。主对话的 Workers 还会列出记录为会话的 worker 运行，例如 `melo worker`。没有 worker 时，标签页会说明它们何时出现（`This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.`）。底部的 **All tasks** 和 **All worker runs** 打开对应的视图。
 
 窗口宽度达到 1180 px 时，面板宽 340 px。窗口在 700 到 1180 px 之间时，对话列表变成一列首字母圆标（把指针停在圆标上可看到对话标题），面板保留。窄于 900 px 时，面板变成底部弹出的面板：页眉里的脸部标签（两项在运行、一项在等待时显示 `2 · !`）从底部打开它；按 Esc、点按背景或向下拖动它的把手即可关闭。[macOS 应用](macos-app.md)现在以 1280 × 800 打开，三栏可以并排放下。
 

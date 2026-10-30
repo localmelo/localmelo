@@ -58,9 +58,10 @@
 
       <section class="section" id="repository">
         <h2>仓库</h2>
-        <p>
-          包含 <code>pyproject.toml</code> 的目录本身就是 <code>localmelo</code> 软件包：<code>package-dir</code> 把它映射为 <code>localmelo</code>，<code>packages.find</code> 则向上查找一层。因此没有 <code>localmelo/localmelo/</code> 这样的目录，<code>melo/agent/agent.py</code> 的导入名是 <code>localmelo.melo.agent.agent</code>，<code>support/config.py</code> 的导入名是 <code>localmelo.support.config</code>。不要再建一层嵌套目录，并保持克隆目录名为 <code>localmelo</code>。
-        </p>
+        <ul>
+          <li>包含 <code>pyproject.toml</code> 的目录本身就是 <code>localmelo</code> 包；没有 <code>localmelo/localmelo/</code>。</li>
+          <li><code>melo/agent/agent.py</code> 以 <code>localmelo.melo.agent.agent</code> 导入；克隆目录请保持名为 <code>localmelo</code>。</li>
+        </ul>
         <figure class="terminal">
           <figcaption class="terminal-title">目录结构</figcaption>
           <pre><code>localmelo/
@@ -84,50 +85,49 @@
             <code>tests/</code> 与这两部分一一对应。<code>docs/</code> 里是 Markdown 页面和网站。
           </li>
         </ul>
-        <p>
-          <strong>核心不导入 <code>support/</code>。</strong>唯一的桥梁是 <code>Agent(config=...)</code>：调用时它通过 <code>support/backends</code> 构建提供方。<code>tests/test_layering.py</code> 会读取 <code>melo/</code> 下每个模块的 AST，任何形式的 <code>support/</code> 导入都会让它失败：普通的、相对路径的，或者通过 <code>importlib.import_module</code> 的。测试记录了两个允许的例外：<code>Config</code>，只用于类型检查；以及 <code>get_backend</code>，在根据 <code>Config</code> 构建 <code>Agent</code> 时于 <code>_providers_from_config</code> 中导入。它还记录了一组其他规则：终端界面的库（<code>prompt_toolkit</code> 和 <code>rich</code>）不能进入核心和后端；会话和终端界面不能依赖网关。如果核心需要 <code>support/</code> 里的代码，请把契约放进 <code>melo/contracts/</code>。
-        </p>
+        <p><strong>核心不导入 <code>support/</code>。</strong>唯一的桥是 <code>Agent(config=...)</code>。</p>
+        <ul>
+          <li><code>tests/test_layering.py</code> 在 <code>melo/</code> 下发现任何形式（普通、相对或通过 <code>importlib</code>）导入 <code>support/</code> 时失败。</li>
+          <li>它允许两处：仅用于类型检查的 <code>Config</code>，以及 <code>_providers_from_config</code> 内部的 <code>get_backend</code>。</li>
+          <li><code>prompt_toolkit</code> 和 <code>rich</code> 不进入核心和后端；会话和终端界面不依赖网关。</li>
+          <li>核心需要 <code>support/</code> 里的代码时，把契约放进 <code>melo/contracts/</code>。</li>
+        </ul>
       </section>
 
       <section class="section" id="setup">
         <h2>开发环境</h2>
-        <p>
-          你需要 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。只有网页工作区的 JavaScript 测试需要 Node（版本见 <code>.nvmrc</code>）。
-        </p>
+        <p>你需要 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>；只有控制台的 JavaScript 测试需要 Node（版本见 <code>.nvmrc</code>）。</p>
         <figure class="terminal">
           <figcaption class="terminal-title">开发环境</figcaption>
           <pre><code>git clone https://github.com/localmelo/localmelo.git
 cd localmelo                 # keep this name: the package is built from it
 uv sync --extra dev --extra gateway</code></pre>
         </figure>
-        <p>
-          <code>uv</code> 会根据提交的 <code>uv.lock</code> 创建 <code>.venv/</code>，Python 版本按 <code>.python-version</code> 固定为 3.13；localmelo 本身支持 Python 3.11 或更高版本。<code>--extra dev</code> 会安装 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 会安装 <code>melo serve</code> 需要的 FastAPI 和 uvicorn。
-        </p>
-        <p>
-          也可以运行 <code>uv run pre-commit install</code> 安装钩子。每次提交时，它们会运行 <code>ruff --fix</code>、<code>black</code>、<code>mypy</code> 和完整的 pytest 测试。提交失败通常意味着测试真的出了问题，而不是应该跳过钩子。
-        </p>
+        <ul>
+          <li><code>uv</code> 根据 <code>uv.lock</code> 创建 <code>.venv/</code>，使用 <code>.python-version</code> 中的 Python 3.13；localmelo 支持 3.11 或更高版本。</li>
+          <li><code>--extra dev</code> 加入 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 加入 FastAPI 和 uvicorn。</li>
+          <li><code>uv run pre-commit install</code> 安装的钩子会在每次提交时运行 ruff、black、mypy 和完整测试。</li>
+        </ul>
       </section>
 
       <section class="section" id="running">
         <h2>运行命令行</h2>
-        <p>
-          <code>melo</code> 会被安装到 <code>.venv/bin/</code>，不在 PATH 中。在克隆目录里通过 uv 运行：
-        </p>
+        <p><code>melo</code> 安装在 <code>.venv/bin/</code>，不在 PATH 上。在克隆目录里通过 uv 运行：</p>
         <figure class="terminal">
           <figcaption class="terminal-title">在克隆目录中运行</figcaption>
           <pre><code>uv run melo "What is 6*7?"
 uv run melo serve</code></pre>
         </figure>
-        <p>
-          在其他目录运行时，请指明克隆目录：<code>uv run --project DIR melo …</code>。一次运行需要模型服务器：传入 <code>-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>（旧写法 <code>--base-url</code> 和 <code>--chat-model</code> 仍然可用），或者先运行一次 <code>uv run melo setup</code> 保存配置。如果某次运行或某个测试不能读写你自己的 <code>~/.cache/localmelo</code>，请把 <code>HOME</code> 指向一个临时目录。
-        </p>
+        <ul>
+          <li>在其他地方，指明克隆目录：<code>uv run --project DIR melo …</code>。</li>
+          <li>运行需要模型服务器：传入 <code class="wrap">-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>，或者先运行一次 <code>uv run melo setup</code>。</li>
+          <li>把 <code>HOME</code> 指向临时文件夹，运行就不会动到你自己的 <code>~/.cache/localmelo</code>。</li>
+        </ul>
       </section>
 
       <section class="section" id="tests">
         <h2>测试</h2>
-        <p>
-          开发时只运行受改动影响的测试。<code>pytest-testmon</code> 会记录每个测试覆盖了哪些代码，第一次完整运行之后，就只运行受影响的测试：
-        </p>
+        <p>开发时只运行受改动影响的测试；由 <code>pytest-testmon</code> 挑选：</p>
         <figure class="terminal">
           <figcaption class="terminal-title">开发时</figcaption>
           <pre><code>uv run pytest --testmon -q</code></pre>
@@ -139,12 +139,12 @@ uv run melo serve</code></pre>
           <figcaption class="terminal-title">提交 pull request 之前</figcaption>
           <pre><code>uv run pytest -n auto -q</code></pre>
         </figure>
-        <p>
-          它不需要模型服务器，也不会向任何模型服务器发送请求。少数命令行测试会在本机回环地址上启动一个假的 API，用来测试超时和取消。要直接运行某个目录，请指明它：<code>uv run pytest tests/agent -q</code>。
-        </p>
-        <p>
-          每个测试都在临时目录中的 <code>HOME</code> 下运行。测试如果解析到真实的家目录，或写入真实的 <code>~/.cache/localmelo</code>，会直接失败，不会碰到你的配置、记忆、会话或调用日志。真实的缓存永远不允许写入；确实需要真实家目录的测试用 <code>@pytest.mark.allow_real_cache</code> 标记。
-        </p>
+        <ul>
+          <li>整套测试不需要模型服务器，也不向它发请求；少数命令行测试会在回环地址上提供一个模拟 API。</li>
+          <li>只运行一个文件夹时写出它的名字：<code class="wrap">uv run pytest tests/agent -q</code>。</li>
+          <li>每个测试都以临时文件夹作为 <code>HOME</code>；写入真实 <code>~/.cache/localmelo</code> 的测试会失败。</li>
+          <li>确实需要真实主目录的测试标记为 <code class="wrap">@pytest.mark.allow_real_cache</code>。</li>
+        </ul>
         <div class="table-wrap">
           <table>
             <thead>
@@ -167,23 +167,20 @@ uv run melo serve</code></pre>
             </tbody>
           </table>
         </div>
-        <p>
-          网页工作区的 JavaScript 有自己的测试。它们需要 Node（版本见 <code>.nvmrc</code>），pytest 不会运行它们：
-        </p>
+        <p>控制台的 JavaScript 有自己的测试；它们需要 Node，pytest 不运行它们：</p>
         <figure class="terminal">
           <figcaption class="terminal-title">JavaScript 测试</figcaption>
           <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
         </figure>
-        <p>
-          需要连接真实模型服务器的测试是手动开启的。普通的 pytest 运行不会发送任何对话请求，连你正在开发时用的服务器也不会：
-        </p>
+        <p>连接真实模型服务器的测试需要手动开启；普通运行不发送任何对话请求：</p>
         <figure class="terminal">
           <figcaption class="terminal-title">真实后端的冒烟测试</figcaption>
           <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
         </figure>
-        <p>
-          它们会向 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM 发送对话请求，并跳过没有响应的服务器。<code>tests/smoke/core_loop_test.py</code> 会在真实服务器上运行更长的记忆场景，详见它的<a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">说明（英文）</a>。
-        </p>
+        <ul>
+          <li>它们询问 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM，跳过没有响应的服务器。</li>
+          <li><code class="wrap">tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
+        </ul>
       </section>
 
       <section class="section" id="lint">
@@ -281,13 +278,13 @@ uv run mypy .</code></pre>
         <h2>提交和 pull request</h2>
         <ul>
           <li>
-            提交信息写成 <code>[Area] Imperative summary</code>，例如 <code>[Agent] Sort the retrieved extra tools by name</code>。常用的领域包括 CLI、Agent、Executor、Memory、Tests、Docs、Gateway、Backends、Sessions 和 Scheduler。
+            提交信息写成 <code>[Area] Imperative summary</code>，例如 <code class="wrap">[Agent] Sort the retrieved extra tools by name</code>。常用的领域包括 CLI、Agent、Executor、Memory、Tests、Docs、Gateway、Backends、Sessions 和 Scheduler。
           </li>
           <li>
             pull request 的标题要加类型，例如 <code>[Feature][CLI] …</code> 或 <code>[Bug][Memory] …</code>。
           </li>
           <li>
-            一个 pull request 只做一件事。改动较大时，请先开一个 issue；路线图见 <a href="https://github.com/localmelo/localmelo/issues/2">#2</a>。
+            一个 pull request 只做一件事。改动较大时，请先开一个 issue；路线图见<a href="https://github.com/localmelo/localmelo/issues/2">路线图 issue</a>。
           </li>
           <li>
             行为改动需要测试。不要为了让改动通过而削弱或删除已有的测试；如果确实要改测试，请在 pull request 里说明原因。
@@ -306,12 +303,14 @@ uv run mypy .</code></pre>
 
       <section class="section" id="docs">
         <h2>文档和网站</h2>
-        <p>
-          <code>docs/</code> 中的 Markdown 页面只有英文；GitHub Pages 发布的是 <code>main</code> 分支的 <code>docs/</code> 目录。网站页面在 <code>docs/en/</code> 和 <code>docs/zh-CN/</code> 中：英文页面和它的中文版本共用相同的元素 id、相同的章节和顺序，代码块保持一致。<code>docs/</code> 中的页面用绝对的 <code>github.com</code> 地址链接目录之外的文件，这样在 GitHub 上和渲染后的网站上都能打开。
-        </p>
-        <p>
-          添加 Markdown 页面时，请把它加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md（英文）</a>的索引。网站页面要在两种语言中各加一份，并加入每个页面的导航。<a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">docs/maintaining.md（英文）</a>里说明了目录结构、发布方式和翻译规范。
-        </p>
+        <ul>
+          <li>GitHub Pages 发布 <code>main</code> 分支的 <code>docs/</code> 文件夹；网站页面在 <code>docs/en/</code> 和 <code>docs/zh-CN/</code> 中。</li>
+          <li>英文页面和它的中文对应页共用 id、章节、顺序、代码和图片。</li>
+          <li>网站页面和 README 遵循<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/STYLE.md#给人阅读的页面">给人阅读的页面</a>：短要点、先图后文、不写 PR 编号。</li>
+          <li>图片放在 <code>docs/assets/img/</code>，WebP 格式，宽度不超过 1280 像素。</li>
+          <li><code>docs/</code> 中的页面链接到外部文件时使用绝对的 <code>github.com</code> 地址。</li>
+        </ul>
+        <p>新的 Markdown 页面要加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/README.md">docs/zh-CN/README.md</a> 的索引；<a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">维护文档（英文）</a>说明了结构和术语表。</p>
         <p>在本地预览网站：</p>
         <figure class="terminal">
           <figcaption class="terminal-title">预览</figcaption>

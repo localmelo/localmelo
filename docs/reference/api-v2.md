@@ -186,29 +186,49 @@ output or log the header; same-user processes can still read the token file.
 
 What ran today, for the panel beside a chat: the console's chats, the
 scheduler's tasks, and the worker runs and terminal chats of the CLI file
-(read-only, a terminal chat redacted), one row per session.
+(read-only, a terminal chat redacted), one row per session. With `session_id` it
+follows one chat, and each row lists the approvals its session asked for.
 
 ```bash
-{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- "http://127.0.0.1:8401/api/activity?since=$(date -v0H -v0M -v0S +%s)"
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- "http://127.0.0.1:8401/api/activity?since=$(date -v0H -v0M -v0S +%s)&session_id=742f96513ef3"
 ```
 
 ```json
 {
   "since": 1793332800.0,
+  "scope": "chat",
   "rows": [
-    {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Slides for the 3 pm meeting", "state": "running",
-     "activity": "Writing slides.md", "icon": "write", "result": "", "at": 1793376000.2, "level": 2},
-    {"kind": "run", "id": "c44733ec77e5", "title": "Check the build", "state": "done",
-     "activity": "", "icon": "run", "result": "All 412 tests passed.", "at": 1793370000.5, "turns": 1}
+    {"kind": "chat", "id": "742f96513ef3", "title": "add the meeting date to the notes", "state": "waiting",
+     "activity": "Waiting for your approval", "icon": "wait", "result": "", "at": 1793399003.68,
+     "approvals": [{"id": "8c64f46b27384316a9e407bb52b4e6bc", "what": "Write notes.txt", "answer": "waiting",
+                    "at": 1793399003.69}],
+     "turns": 1}
   ],
   "more": false,
   "unavailable": []
 }
 ```
 
+Without `session_id` (or with the main chat's) the same call lists the whole day, with rows such as:
+
+```json
+[
+  {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Slides for the 3 pm meeting", "state": "running",
+   "activity": "Writing slides.md", "icon": "write", "result": "", "at": 1793376000.2, "approvals": [], "level": 2},
+  {"kind": "run", "id": "c44733ec77e5", "title": "Check the build", "state": "done",
+   "activity": "", "icon": "run", "result": "All 412 tests passed.", "at": 1793370000.5, "approvals": [], "turns": 1}
+]
+```
+
 - `since` (seconds since the epoch) starts the day; it defaults to the
   gateway's local midnight, must not be in the future (`400 invalid_request`),
   and reaches back a week at most.
+- `session_id` (at most 128 characters) is the chat the panel has open. For a
+  side chat, `scope` is `chat` and the rows are that chat's own row and the
+  tasks it started (a task's `front_id`); an unknown id is a side chat with
+  nothing of its own. For the main chat (a session of kind `front`, or one with
+  `main: true` in its `meta`), and with no `session_id`, `scope` is `all` and
+  the rows are the whole day, worker runs and terminal chats included.
 - A row is a session's newest turn that runs or ended at or after `since` (a
   turn that still runs is in, however early it began), or a task changed since
   then or not finished. `state` is `running`, `waiting` (an approval waits),
@@ -220,10 +240,21 @@ scheduler's tasks, and the worker runs and terminal chats of the CLI file
   the kind of its last tool call (`done` without one, `failed` or `stopped`).
   `at` is when it ended (a live row: when it started; a task: its last change),
   `turns` how many of a chat's turns started that day, `level` a task's
-  priority (0 to 5).
+  priority (0 to 5). A result is always plain words: a run's own marker reads
+  `Stopped before answering` or `Ended without an answer`, a path reads `Made a
+  picture` or the file's name, and code gives way to the first sentence around
+  it (`Wrote some code` when there is none).
+- `approvals` lists what the row's session asked to do today, oldest first, at
+  most 20: `{id, what, answer, at}`. `what` is the call in plain words (`Write
+  slides.md`, `Run the tests`, `Run a command`; never a command line, code or
+  text), `at` when it was asked, and `answer` is `waiting`, `allowed once`,
+  `allowed for this chat`, `allowed automatically`, `denied`, `no answer` (it
+  timed out) or `withdrawn` (the turn ended first). A `waiting` request of a
+  chat or task is answered with `POST /api/approvals/{id}`, as the chat's card
+  does. The rows of runs and terminal chats are redacted like the rest.
 - Live rows come first, then the rest newest first, at most 100; `more` is
   `true` when some were left out. A source that cannot be read adds no rows and
-  is named in `unavailable` (`chats`, `tasks`, `runs`).
+  is named in `unavailable` (`chats`, `tasks`, `runs`, `approvals`).
 
 ## GET /api/settings
 

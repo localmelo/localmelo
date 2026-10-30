@@ -11,6 +11,7 @@ from localmelo.support.sessions.display import (
     ActivityText,
     activity_text,
     event_activity,
+    request_words,
 )
 
 
@@ -126,3 +127,28 @@ def test_the_newest_events_say_what_a_turn_does() -> None:
     assert words([event("recall")]) == "Remembering"
     assert words([event("turn.finished"), started]) is None
     assert event_activity([]) == ActivityText("Thinking", "think")
+
+
+@pytest.mark.parametrize(
+    "tool, arguments, words",
+    [
+        (
+            "file_write",
+            {"path": "/w/talk/slides.md", "content": "secret"},
+            "Write slides.md",
+        ),
+        ("file_read", {}, "Read a file"),
+        ("list_files", {"path": "/w"}, "Look through the folder"),
+        ("shell_exec", {"command": "rm -rf ~/x --token abc"}, "Run a command"),
+        ("shell_exec", {"command": "uv run pytest"}, "Run the tests"),
+        ("python_exec", {"code": "print(1)"}, "Run Python"),
+        ("browser_open", {"url": "https://www.example.com/a"}, "Read example.com"),
+        ("browser_screenshot", {}, "Look at the page"),
+        ("mcp__calendar__list_events", {}, "Use a tool"),
+        ("", None, "Thinking"),
+    ],
+)
+def test_an_approval_puts_the_call_as_a_request_without_its_command_or_text(
+    tool: str, arguments: Any, words: str
+) -> None:
+    assert request_words(tool, arguments, root="/w") == words

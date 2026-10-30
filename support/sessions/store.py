@@ -1755,6 +1755,38 @@ class SessionStore:
             StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
         ]
 
+    async def approval_events(
+        self, session_ids: Collection[str], since: float, *, limit: int = 1000
+    ) -> list[StoredEvent]:
+        """The ``approval.*`` events of *session_ids* stamped at or after *since*.
+
+        The newest *limit* (1..1000), in id order. A session's index is walked
+        for them, so a caller passes the few sessions it lists, not every one.
+        """
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        ids = list(session_ids)
+        if not ids:
+            return []
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT id, session_id, turn, event FROM events "
+                f"WHERE session_id IN ({', '.join('?' * len(ids))}) "
+                "AND type IN ('approval.requested', 'approval.resolved') "
+                "AND json_extract(event, '$.ts') >= ? ORDER BY id DESC LIMIT ?",
+                (*ids, since, limit),
+            )
+        return [
+            StoredEvent(row[0], row[1], row[2], json.loads(row[3]))
+            for row in reversed(rows)
+        ]
+
     async def day_turns(
         self, since: float, kinds: Collection[str], *, limit: int = 100
     ) -> list[DayTurn]:

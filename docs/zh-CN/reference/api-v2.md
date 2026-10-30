@@ -89,29 +89,44 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/activity
 
-今天运行过的内容，供对话旁的面板使用：控制台的对话、调度器的任务，以及命令行文件中的 worker 运行和终端对话（只读，终端对话已脱敏），每个会话一行。
+今天运行过的内容，供对话旁的面板使用：控制台的对话、调度器的任务，以及命令行文件中的 worker 运行和终端对话（只读，终端对话已脱敏），每个会话一行。带 `session_id` 时跟随一个对话，每一行还列出它的会话请求过的审批。
 
 ```bash
-{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- "http://127.0.0.1:8401/api/activity?since=$(date -v0H -v0M -v0S +%s)"
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- "http://127.0.0.1:8401/api/activity?since=$(date -v0H -v0M -v0S +%s)&session_id=742f96513ef3"
 ```
 
 ```json
 {
   "since": 1793332800.0,
+  "scope": "chat",
   "rows": [
-    {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Slides for the 3 pm meeting", "state": "running",
-     "activity": "Writing slides.md", "icon": "write", "result": "", "at": 1793376000.2, "level": 2},
-    {"kind": "run", "id": "c44733ec77e5", "title": "Check the build", "state": "done",
-     "activity": "", "icon": "run", "result": "All 412 tests passed.", "at": 1793370000.5, "turns": 1}
+    {"kind": "chat", "id": "742f96513ef3", "title": "add the meeting date to the notes", "state": "waiting",
+     "activity": "Waiting for your approval", "icon": "wait", "result": "", "at": 1793399003.68,
+     "approvals": [{"id": "8c64f46b27384316a9e407bb52b4e6bc", "what": "Write notes.txt", "answer": "waiting",
+                    "at": 1793399003.69}],
+     "turns": 1}
   ],
   "more": false,
   "unavailable": []
 }
 ```
 
+不带 `session_id`（或带主对话的）时，同一个调用列出一整天，行例如：
+
+```json
+[
+  {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Slides for the 3 pm meeting", "state": "running",
+   "activity": "Writing slides.md", "icon": "write", "result": "", "at": 1793376000.2, "approvals": [], "level": 2},
+  {"kind": "run", "id": "c44733ec77e5", "title": "Check the build", "state": "done",
+   "activity": "", "icon": "run", "result": "All 412 tests passed.", "at": 1793370000.5, "approvals": [], "turns": 1}
+]
+```
+
 - `since`（自纪元起的秒数）是这一天的开始；默认是网关所在电脑的本地午夜，不能是将来的时间（`400 invalid_request`），最多往回一周。
-- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。
-- 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`）。
+- `session_id`（最多 128 个字符）是面板当前打开的对话。对于侧边对话，`scope` 为 `chat`，行是该对话自己的一行和它启动的任务（任务的 `front_id`）；未知的 id 视为没有任何内容的侧边对话。对于主对话（类型为 `front` 的会话，或 `meta` 里有 `main: true` 的会话），以及不带 `session_id` 时，`scope` 为 `all`，行是一整天的内容，包括 worker 运行和终端对话。
+- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。
+- `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令行、代码或文本），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
+- 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`、`approvals`）。
 
 ## GET /api/settings
 

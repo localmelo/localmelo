@@ -269,6 +269,15 @@ class WorkerReader(SessionStore):
         chat, _ = await self._chat_workspace(session_id)
         return [redact_event(event, {}) for event in events] if chat else events
 
+    async def approval_events(
+        self, session_ids: Collection[str], since: float, *, limit: int = 1000
+    ) -> list[StoredEvent]:
+        """The approval events, redacted as every terminal read is; none before the file exists."""
+        if not os.path.exists(self.path):
+            return []
+        events = await super().approval_events(session_ids, since, limit=limit)
+        return [redact_event(event, {}) for event in events]
+
     async def get_session(self, session_id: str) -> SessionInfo | None:
         if not os.path.exists(self.path):
             return None
