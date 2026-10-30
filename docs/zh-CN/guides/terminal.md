@@ -83,7 +83,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 ### 命令
 
-输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，按 Tab 或 Enter 选择。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
+输入 `/` 后，命令及其作用会显示在输入框下方；继续输入字母可缩小范围，删除字母则重新放宽范围（删掉 `/` 后列表关闭），按 Tab 或 Enter 选择。Esc 会关闭列表，直到你下一次编辑；仅移动光标不会打开它。`@` 后的文件名同理。常用命令排在最前，也就是菜单的第一屏：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。每一行写明命令的作用，需要参数的命令还写明参数（`/attach PATH`）。
 
 | 命令 | 作用 |
 |---|---|

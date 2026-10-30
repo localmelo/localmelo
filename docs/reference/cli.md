@@ -854,7 +854,13 @@ it (-X agent.confine_writes=false for one run)`. On other systems the run goes o
 unconfined, and `run.confinement` is `{"writes": "not_confined", "reason": ...}`.
 `-X agent.confine_writes=false` turns it off for one run; then the result has no
 `confinement` key. Runs without `--brief`, the interactive UI, the web console and
-the app are not confined.
+the app are not confined, unless the developer setting `[agent] confine_direct_runs
+= true` (`-X agent.confine_direct_runs=true` for one run; off by default) is on: a
+task given on the command line and the `melo ""` loop then get the same
+confinement, with the workspace the same, and a run that cannot be confined stops
+before its first command with `melo: error: writes cannot be confined to the
+workspace: <why>; set agent.confine_direct_runs to false to run without it
+(-X agent.confine_direct_runs=false for one run)` and exit code 1.
 
 <a id="brief-items"></a>
 

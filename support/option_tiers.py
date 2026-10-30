@@ -119,7 +119,10 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
 }
 
 # Experimental settings that have no option: the issue that decides each.
-EXPERIMENTAL_KEYS: dict[str, str] = {"agent.lean_output": "#183"}
+EXPERIMENTAL_KEYS: dict[str, str] = {
+    "agent.lean_output": "#183",
+    "agent.confine_direct_runs": "#183",
+}
 
 # Long option name -> tier, for every option the parser has.
 OPTION_TIERS: dict[str, str] = {
