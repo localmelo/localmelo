@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from localmelo.support.backends import discovery
 from localmelo.tests.cli.test_direct_mode_process import (
     FakeChatServer,
     _env,
@@ -32,11 +33,11 @@ _ESCAPES = re.compile(
 )
 
 
-def _melo(home: Path, server: FakeChatServer) -> Terminal:
+def _melo(home: Path, server: FakeChatServer, *args: str) -> Terminal:
     env = _env(home)
     env["LOCALMELO_DETECT_URLS"] = server.base_url
     env["TERM"] = "xterm-256color"  # whatever terminal runs the tests
-    term = Terminal([sys.executable, "-I", "-m", "localmelo"], env, home)
+    term = Terminal([sys.executable, "-I", "-m", "localmelo", *args], env, home)
     fcntl.ioctl(term._master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
     return term
 
@@ -70,16 +71,14 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
 
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(
-            lambda out: b"Model server URL [" in out, 30
-        ), term.output
+        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
         term.type(b"\r")
         assert term.read_until(lambda out: b"Model: " in out, 30), term.output
         term.type(b"\r")  # no model is known to be loaded: Enter alone asks again
         assert term.read_until(
             lambda out: b"Type the number of the model to use." in out, 30
         ), term.output
-        term.type(b"3\r")
+        term.type(b"2\r")  # chat-a, chat-b, then the embedding model
         assert term.read_until(
             lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
             30,
@@ -88,16 +87,27 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"hi\r")
         assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
+        term.type(b"/status\r")  # the welcome no longer names the server
+        assert term.read_until(lambda out: b"version    melo" in out, 30), term.output
         term.type(b"/exit\r")
         assert _exit_code(term) == 0, term.output
     finally:
         term.close()
 
     text = _text(term)
+    assert text.startswith("melo uses a model server on this computer (")
     assert f"Found a model server at {url} (3 models).\n" in text
+    # The chat models come first; the embedding model is tagged.
+    assert "[1] chat-a\n" in text and "[2] chat-b\n" in text
+    assert "[3] nomic-embed-text  (embedding)\n" in text
+    # The hint is wrapped at a word boundary to the 100 columns of this terminal.
+    rows = text.split("\n")
+    start = next(i for i, row in enumerate(rows) if "Type the number" in row)
+    hint = " ".join(row.strip() for row in rows[start : start + 2])
+    assert hint == discovery.NO_DEFAULT_HINT
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
-    assert f"chat-b · {label} · {url}" in text
-    assert "saved as the default" in text
+    assert "chat-b (/model to change)" in text and "Try: What is this project?" in text
+    assert f"model      chat-b · {label} · {url}" in text
     assert chat_server.bodies[0]["model"] == "chat-b"
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
     assert f'chat_backend = "{key}"' in saved
@@ -106,7 +116,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     assert 'embedding_model = "nomic-embed-text"' in saved
 
     chat_server.models = []  # the second run lists nothing and asks nothing
-    term = _melo(tmp_path, chat_server)
+    term = _melo(tmp_path, chat_server, "--developer")  # the box names the server
     try:
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"/exit\r")
@@ -117,7 +127,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     # A new process has listed nothing yet; the file alone names the server.
     assert f"chat-b · {label} · {url}" in text
     assert f"long-term memory · {label} · nomic-embed-text" in text
-    assert "Model server URL" not in text
+    assert "Server URL" not in text
 
 
 def test_a_base_url_with_several_models_and_none_known_loaded_exits_2(

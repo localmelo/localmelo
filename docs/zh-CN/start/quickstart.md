@@ -131,27 +131,22 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--base-url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表先列对话模型；嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
 
 ```text
 $ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Model server URL [http://127.0.0.1:11434/v1]:
+Server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
-╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
-│            saved as the default                                          │
-│ workspace  ~/demo-project                                                │
-│ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory · melo --reconfigure adds one             │
-│ session    new                                                           │
-╰──────────────────────────────────────────────────────────────────────────╯
-  / commands · esc stop · ctrl+d quit
+melo 0.1.0 · qwen3:8b (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
 ```
 
-标题显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。
+第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 显示服务器、工具、记忆和会话。
 
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 服务器保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
 

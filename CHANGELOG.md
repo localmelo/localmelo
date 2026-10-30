@@ -1031,6 +1031,35 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   tools or Copy details). Tool rows use ✓ ✗ ⊘ ◌ and a live dot, the offline banner
   has "Try again", and the selected chat has an accent bar. ([#NN])
 
+- The first run explains itself. With no config file, `melo` first says what it needs
+  (`melo uses a model server on this computer (oMLX, Ollama, LM Studio…).`) and asks
+  `Server URL` (it said `Model server URL`). The model list shows chat models first;
+  an embedding or reranking model is tagged `(embedding)` or `(reranking)` and is never
+  the default (there is still no default among several chat models when the server does
+  not say which is loaded). The hints wrap to the terminal's width at word boundaries
+  instead of breaking inside a word, a failed check asks `Enter tries again · s starts
+  without saving · q quits:` (it asked `[r]etry, [s]tart without saving, [q]uit [r]:`),
+  and the first banner no longer says how to add long-term memory right after you
+  declined it. The saved config and every machine output are unchanged ([#240]).
+
+- The welcome starts the conversation. The interactive UI opens with three rows,
+  `melo 0.1.0 · MODEL (/model to change)`, the folder, and `Try: What is this project? ·
+  / commands · ctrl+d quit`, with the warnings under them (it was a box of model,
+  workspace, tools, memory and session). The model's server shows in a row of its own
+  only when the model is not the saved default; tools, memory and session are in
+  `/status`. A narrow terminal drops the least needed parts of a row whole instead of
+  wrapping it. `--developer` (or `[ui] mode = "developer"`) keeps the box
+  ([#240]).
+
+- Errors in the terminal say what happened and what to do, in plain words. A run that does
+  not complete used to end with `✗ melo: run ended with status provider_error: cannot reach
+  the model server at …`, cut at 80 columns, and a dim hint under it. It now reads
+  `✗ Could not reach the model server at URL.` with `Start it, then /retry.` under it in the
+  default color; every other status uses its title with the reason that helps (`Ran out of
+  steps (30).`, `Stopped: the same calls kept repeating.`) and one action. The footer after
+  a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
+  and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
+  line, JSON, exit codes and requests are unchanged ([#240]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being
@@ -1608,6 +1637,7 @@ earlier milestones.
 [#237]: https://github.com/localmelo/localmelo/pull/237
 [#238]: https://github.com/localmelo/localmelo/pull/238
 [#239]: https://github.com/localmelo/localmelo/pull/239
+[#240]: https://github.com/localmelo/localmelo/pull/240
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

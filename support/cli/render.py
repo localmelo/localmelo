@@ -51,7 +51,6 @@ from localmelo.support.sessions.display import (
     format_bytes,
     format_duration,
     format_tokens,
-    status_line,
     status_text,
 )
 from localmelo.support.sessions.store import (
@@ -82,6 +81,9 @@ LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
 
 _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
+_POST_FAILED: Final = re.compile(r"^POST \S+ failed (?:with )?")
+# The longest reason a run's end shows after its title.
+REASON_CHARS: Final = 240
 # Markdown that starts a block: a fence, a heading, a list, a quote, a table.
 _BLOCK_START: Final = re.compile(r"\s*(```|~~~|#|[-*+] |\d+[.)] |>|\|)")
 _FAILED_WITH: Final = re.compile(r"failed: (\w+)")
@@ -194,79 +196,110 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     return ""
 
 
-def status_hint(
-    status: str, error: str, backend: BackendInfo, cause: str = ""
-) -> str | None:
-    """The hint under the status line of *status*, or None (U2a.1's commands)."""
+# What a person does next, by status; a status that is not here has no action.
+_ACTIONS: Final = {
+    "setup_error": "/mcp shows why.",
+    "failed": "/retry, or try another model.",
+    "gate_stopped": (
+        "melo judged that another attempt would not help. "
+        "Rephrase the request, or /retry."
+    ),
+    "context_budget_exceeded": (
+        "Reduce the task or increase the configured context window; then /retry."
+    ),
+    "budget_exhausted": (
+        "/retry tries again; for more steps, quit and run melo -c --max-steps 60."
+    ),
+    "stuck": "Rephrase the request, or /retry.",
+}
+# The statuses whose error is a sentence worth showing after the title.
+_WITH_REASON: Final = frozenset(
+    {"failed", "gate_stopped", "setup_error", "context_budget_exceeded", "crashed"}
+)
+
+
+def _reason(error: str) -> str:
+    """*error* as one cleaned line without the request it came from, cut short."""
+    text = _POST_FAILED.sub("", plain(error))
+    if len(text) > REASON_CHARS:
+        text = text[: REASON_CHARS - 1] + "…"
+    return text
+
+
+def _server_end(error: str, backend: BackendInfo) -> tuple[str, str]:
+    """The end of a run whose model server failed: what happened, what to do."""
     url = backend.base_url or backend.label
+    where = f"the model server at {url}" if backend.base_url else backend.label
+    http = _HTTP_STATUS.search(error)
+    code = int(http.group(1)) if http else 0
+    failed = _FAILED_WITH.search(error)
+    name = failed.group(1) if failed and not http else ""
+    # ConnectError is the pre-"cannot reach" text of older saved runs.
+    if error.startswith(UNREACHABLE_PREFIX) or name in (
+        "ConnectError",
+        "ConnectTimeout",
+    ):
+        fix = "Start it" if backend.local else "Check the network"
+        return f"Could not reach {where}.", f"{fix}, then /retry."
+    if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
+        return (
+            "The model server did not answer in time.",
+            "It may still be loading the model. /retry tries again.",
+        )
+    if code == 404:
+        action = "Check the name (/model lists the models it has)."
+        if backend.key == "ollama":
+            action += f" ollama pull {backend.model} fetches it."
+        return f"The model server does not know the model '{backend.model}'.", action
+    if code == 400:
+        return (
+            f"The model server refused the request: {_reason(error)}",
+            "If it says the model does not support tools, choose one that does.",
+        )
+    if code in (401, 403):
+        if backend.local:
+            return (
+                "The model server requires an API key.",
+                "localmelo sends none to local servers. Turn the key off in the "
+                'server (oMLX: "Allow inference without API key").',
+            )
+        key = backend.key_env or "its key variable"
+        return (
+            f"The server refused the key in {key}.",
+            "melo --reconfigure changes the backend.",
+        )
+    return (
+        f"Could not get an answer from the model server: {_reason(error)}",
+        f"/status checks {where}; /retry tries again.",
+    )
+
+
+def run_end(
+    status: str, error: str, backend: BackendInfo, cause: str = "", steps: int = 0
+) -> tuple[str, str]:
+    """What a run that did not complete says: what happened, then what to do.
+
+    The words are the title of ``STATUS_TEXT`` with the reason that helps (the
+    server's URL, the model, the step limit, the error of a few statuses); the
+    action may be empty. Direct mode keeps its own machine line.
+    """
     if status == "provider_error":
-        http = _HTTP_STATUS.search(error)
-        code = int(http.group(1)) if http else 0
-        failed = _FAILED_WITH.search(error)
-        name = failed.group(1) if failed and not http else ""
-        # ConnectError is the pre-"cannot reach" text of older saved runs.
-        unreachable = error.startswith(UNREACHABLE_PREFIX)
-        if unreachable or name in ("ConnectError", "ConnectTimeout"):
-            return f"Is the model server running at {url}? /status checks again."
-        if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
-            return (
-                "The model server did not answer in time; it may still be "
-                "loading the model. /retry tries again."
+        headline, action = _server_end(error, backend)
+    elif status == "failed" and error == "empty replies":
+        headline, action = "The model returned only empty replies", _ACTIONS["failed"]
+    else:
+        headline, action = status_text(status, cause).title, _ACTIONS.get(status, "")
+        if status == "budget_exhausted" and steps:
+            headline += f" ({steps})"
+        if status in _WITH_REASON and cause != "crash" and (reason := _reason(error)):
+            headline += f": {reason}"
+        if status == "crashed":
+            action = (
+                "The process was killed or the computer lost power. /retry runs it again."
+                if cause == "crash"
+                else f"This is a bug; the log is {LOG_PATH}."
             )
-        if code == 404:
-            hint = (
-                f"The server does not know the model '{backend.model}'; check the "
-                "name (/model lists the models it has)."
-            )
-            if backend.key == "ollama":
-                hint += f" ollama pull {backend.model} fetches it."
-            return hint
-        if code == 400:
-            return (
-                "The server refused the request; if it says the model does not "
-                "support tools, choose one that does."
-            )
-        if code in (401, 403):
-            if backend.local:
-                return (
-                    "The server requires an API key; localmelo sends none to local "
-                    'servers. Turn the key off in the server (oMLX: "Allow '
-                    'inference without API key").'
-                )
-            return (
-                f"The server refused the key in {backend.key_env or 'its key variable'}; "
-                "melo --reconfigure changes the backend."
-            )
-        return f"/status checks the model server at {url}; /retry tries again."
-    if status == "setup_error":
-        return "A tool server failed to start; /mcp shows why."
-    if status == "failed":
-        if error == "empty replies":
-            return (
-                "The model returned only empty replies; /retry, or try another model."
-            )
-        return "A check stopped the run (the reason is above); /retry, or try another model."
-    if status == "gate_stopped":
-        return (
-            "melo judged that another attempt would not help. "
-            "Rephrase the request, or /retry."
-        )
-    if status == "context_budget_exceeded":
-        return "Reduce the task or increase the configured context window; then /retry."
-    if status == "budget_exhausted":
-        return (
-            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps."
-        )
-    if status == "stuck":
-        return "The model repeated itself; rephrase the request, or /retry."
-    if status == "crashed":
-        if cause == "crash":
-            return (
-                "melo stopped before this turn finished (the process was killed "
-                "or the computer lost power). /retry runs it again."
-            )
-        return f"This is a bug in localmelo; the log is {LOG_PATH}."
-    return None
+    return (headline if headline.endswith("…") else headline.rstrip(".") + "."), action
 
 
 def stopped_line(cause: str, symbols: Symbols) -> Text:
@@ -360,6 +393,9 @@ class TurnRenderer:
         self._finished = False
         self._tool_count = 0
         self._stop_cause = ""
+        # The turn's step limit, and whether its retry line has printed.
+        self._max_steps = 0
+        self._retry_noted = False
         # An assistant message without tool calls, until the next step or
         # the end of the run decides whether it prints (section 3).
         self._held = ""
@@ -401,6 +437,8 @@ class TurnRenderer:
         self._cancelled_pending = False
         self._tool_count = 0
         self._stop_cause = ""
+        self._max_steps = 0
+        self._retry_noted = False
         self._held = ""
         self._stream_texts = {}
         self._stream_step = 0
@@ -594,6 +632,7 @@ class TurnRenderer:
     # ── Events ──
 
     def _on_run_started(self, data: Mapping[str, Any]) -> None:
+        self._max_steps = _int(data.get("max_steps"), 0)
         if data.get("approval") is False:
             self.out.print(
                 Text("  No approvals for this turn (--yolo).", style="muted")
@@ -738,16 +777,19 @@ class TurnRenderer:
         if kind == "retry":
             if not self._stream_open:  # else the next attempt already closed it
                 self._flush_stream("retrying")
-            line = Text(f"{self.symbols.retry} {message}", style="muted")
-            line.truncate(self.out.width, overflow="ellipsis")
-            self.out.print(line)
-            if self.live is not None:
-                detail = data.get("detail")
-                delay = (
-                    _float(detail.get("delay_s"))
-                    if isinstance(detail, Mapping)
-                    else 0.0
+            detail = data.get("detail")
+            delay = (
+                _float(detail.get("delay_s")) if isinstance(detail, Mapping) else 0.0
+            )
+            if not self._retry_noted:  # later retries show in the live row
+                self._retry_noted = True
+                line = Text(
+                    f"{self.symbols.retry} {self._retry_text(message, delay)}",
+                    style="muted",
                 )
+                line.truncate(self.out.width, overflow="ellipsis")
+                self.out.print(line)
+            if self.live is not None:
                 self.live.activity = "Retrying"
                 self.live.retry_until = self._clock() + delay if delay > 0 else 0.0
             return
@@ -757,6 +799,23 @@ class TurnRenderer:
             line = Text(f"{self.symbols.warn} {message}", style="warn")
         line.truncate(self.out.width, overflow="ellipsis")
         self.out.print(line)
+
+    def _retry_text(self, message: str, delay: float) -> str:
+        """The retry notice's words; a server that cannot be reached keeps its URL.
+
+        The notice's own text is ``Model request failed; retrying in 1 s: cannot
+        reach the model server at URL. Start it, … (ConnectError: …)``, which a
+        row of 80 cells cuts before the URL ends. The row gives up its wait
+        before it gives up the URL.
+        """
+        url = self._backend().base_url
+        if UNREACHABLE_PREFIX not in message or not url:
+            return message
+        wait = f"; trying again in {delay:g} s" if delay > 0 else ""
+        text = f"Could not reach {url}{wait}"
+        if cells(text) > self.out.width - cells(self.symbols.retry) - 1:
+            return f"Could not reach {url}"
+        return text
 
     def _on_reflection_started(self, data: Mapping[str, Any]) -> None:
         if self.live is not None:
@@ -886,22 +945,7 @@ class TurnRenderer:
                 stopped_line(cause or self._stop_cause or "user_stop", self.symbols)
             )
         elif status:
-            # A crash is a bug only when the run raised it; a crash cause
-            # means the process stopped (section 3's severity table).
-            severe = status_text(status, cause).severity == "error"
-            mark = self.symbols.failed if severe else self.symbols.warn
-            line = Text(
-                f"{mark} {status_line(status, plain(error))}",
-                style="error" if severe else "warn",
-                no_wrap=True,
-                overflow="ellipsis",
-            )
-            line.truncate(self.out.width, overflow="ellipsis")
-            self.out.print(line)
-            hint = status_hint(status, error, self._backend(), cause)
-            hint = hint if hint is None else clean_output(hint)
-            if hint:
-                self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
+            self._print_run_end(status, error, cause)
 
     def clear_session(self) -> None:
         """Forget calls, progress and numbering, retaining display preferences on resume."""
@@ -918,6 +962,8 @@ class TurnRenderer:
         self._cancelled_pending = False
         self._tool_count = 0
         self._stop_cause = ""
+        self._max_steps = 0
+        self._retry_noted = False
 
     def new_session(self) -> None:
         """Start a new conversation with the default display preferences."""
@@ -1157,31 +1203,38 @@ class TurnRenderer:
                     else markdown("Best effort: " + answer)
                 )
                 self.out.print(_marked(symbols.assistant, "", effort))
-            # A run that crashes as it runs is a bug (cause run): an error.
-            severe = status_text(result.status).severity == "error"
-            mark = symbols.failed if severe else symbols.warn
-            line = Text(
-                f"{mark} {status_line(result.status, plain(result.error))}",
-                style="error" if severe else "warn",
-                no_wrap=True,
-                overflow="ellipsis",
-            )
-            line.truncate(self.out.width, overflow="ellipsis")
-            self.out.print(line)
-            hint = status_hint(result.status, result.error, self._backend())
-            hint = hint if hint is None else clean_output(hint)
-            if hint:
-                self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
+            self._print_run_end(result.status, result.error)
         if footer:
             self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
 
+    def _print_run_end(self, status: str, error: str, cause: str = "") -> None:
+        """What happened to a run that did not complete, then what to do."""
+        # A crash is a bug only when the run raised it; a crash cause means
+        # the process stopped (section 3's severity table).
+        severe = status_text(status, cause).severity == "error"
+        style = "error" if severe else "warn"
+        headline, action = run_end(
+            status, error, self._backend(), cause, self._max_steps
+        )
+        mark = self.symbols.failed if severe else self.symbols.warn
+        self.out.print(_marked(mark, style, Text(clean_output(headline), style=style)))
+        if action:
+            self.out.print(Padding(Text(clean_output(action)), (0, 0, 0, 2)))
+
     def footer(self, result: RunResult) -> str:
-        """``✻ Worked for 14s · 1 tool call · ↓ 412 tokens``, on one line."""
+        """``✻ Worked for 14s · 1 tool call · ↓ 412 tokens``, on one line.
+
+        A run that did not complete reads ``Stopped after 14s``, and a count of
+        zero tool calls is left out.
+        """
         calls = result.n_tool or self._tool_count
+        done = result.status == "completed"
         parts = [
-            f"{self.symbols.thought} Worked for {format_duration(result.duration_s)}",
-            f"{calls} tool call" + ("" if calls == 1 else "s"),
+            f"{self.symbols.thought} {'Worked for' if done else 'Stopped after'} "
+            f"{format_duration(result.duration_s)}",
         ]
+        if done or calls:
+            parts.append(f"{calls} tool call" + ("" if calls == 1 else "s"))
         tokens = self.live.output_tokens if self.live is not None else 0
         token_part = (
             self.symbols.output_tokens.format(format_tokens(tokens)) if tokens else ""
