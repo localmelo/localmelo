@@ -338,9 +338,10 @@ happens without the explicit `/copy` command.
   cut with `…`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
-  10:00`. On a session's first turn, a third row shows the past runs the
-  progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
-  ✓`.
+  10:00`. For a task melo has run before, a third row shows the past runs the
+  progress line would, with the steps they took: `last time 6 steps, 2m10s:
+  Run ls ✓ · Read app.py ✓`. It shows on a session's first turn, and in
+  developer mode on every turn.
 - **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
   mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
   width. An intermediate message prints as Markdown after `●`; the

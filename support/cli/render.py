@@ -148,7 +148,8 @@ class LiveState:
     attempt: int = 1
     # The latest run.progress data; None before one (facts from step.started).
     progress: Mapping[str, Any] | None = None
-    # The session's first turn: only then may the past-runs row show.
+    # The session's first turn: outside developer mode only then may the
+    # past-runs row show.
     first_turn: bool = False
     output_tokens: int = 0
     tool: str = ""
@@ -1638,9 +1639,10 @@ def live_rows(
     phase or tests). When the width is short, whole parts go: the hint, then
     the tokens, then ``format_line`` leaves out its own parts and cuts the rest
     with ``…`` (section 3). Row 2, while a tool runs, is its name, preview,
-    clock and limit. Row 3, on a session's first turn with past runs, is
-    the progress line's past facts and items (section 3). *frame* fixes the
-    spinner's frame (``LOCALMELO_SPINNER_FRAME``).
+    clock and limit. Row 3, with past runs, is the progress line's past facts
+    and items (section 3): on a session's first turn, and in developer mode on
+    every turn. *frame* fixes the spinner's frame
+    (``LOCALMELO_SPINNER_FRAME``).
     """
     dot = f" {symbols.dot} "
     if live.finished:
@@ -1729,7 +1731,9 @@ def live_rows(
         shown = cut_cells(preview, room, symbols.ellipsis) if room >= 4 else ""
         line = cut_cells(start + shown + dot + clock, width, symbols.ellipsis)
         rows.append([("class:muted", line)])
-    if live.first_turn and isinstance(live.progress, Mapping):
+    # The row of past runs and their steps: a session's first turn, and in
+    # developer mode every turn.
+    if (live.first_turn or developer) and isinstance(live.progress, Mapping):
         basis = live.progress.get("basis")
         match = basis.get("match") if isinstance(basis, Mapping) else None
         if live.progress.get("past") is not None and match != "new":

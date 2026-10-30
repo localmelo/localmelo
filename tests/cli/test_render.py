@@ -1739,6 +1739,44 @@ def test_the_past_row_hides_on_a_later_turn_or_a_new_match() -> None:
     assert len(live_rows(live, 5.0, 80, UNICODE, frame=0)) == 1
 
 
+def test_developer_mode_shows_the_plan_row_on_every_turn() -> None:
+    live = LiveState(
+        activity="Thinking",
+        started=0.0,
+        step=1,
+        attempt=1,
+        first_turn=False,
+        progress=_past_progress(),
+    )
+    rows = live_rows(live, 5.0, 80, UNICODE, frame=0, developer=True)
+    assert len(rows) == 2
+    assert rows[1] == [("class:muted", "last time 4 steps, 10s: ls ✓")]
+    # The default mode keeps the row for the first turn of a session.
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0)) == 1
+    live.first_turn = True
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0)) == 2
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0, developer=True)) == 2
+
+
+def test_the_plan_row_still_needs_past_runs_in_developer_mode() -> None:
+    live = LiveState(activity="Thinking", started=0.0, step=1, attempt=1)
+    # No run.progress yet.
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0, developer=True)) == 1
+    # A task that is new has no steps to show.
+    live.progress = _past_progress(match="new")
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0, developer=True)) == 1
+    live.progress = {**_past_progress(), "past": None, "items": None}
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0, developer=True)) == 1
+
+
+def test_a_later_turn_shows_the_plan_its_own_run_progress_reports() -> None:
+    turn = Turn(developer=True)  # begin_turn(): not the session's first turn
+    assert turn.renderer.live is not None and not turn.renderer.live.first_turn
+    turn.event("run.progress", **_past_progress())
+    rows = live_rows(turn.renderer.live, 105.0, 80, UNICODE, frame=0, developer=True)
+    assert [row[0][1] for row in rows[1:]] == ["last time 4 steps, 10s: ls ✓"]
+
+
 def test_a_stale_turn_takes_its_status_from_turn_finished() -> None:
     text = (
         Turn()

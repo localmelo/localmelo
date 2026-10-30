@@ -190,6 +190,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   A turn that changed no file prints nothing, and developer mode shows the same line.
   Direct mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
 
+- Developer mode shows the plan of a task melo has run before on every turn. The row of
+  past runs and the steps they took (`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`)
+  showed on the first turn of a session only; in developer mode it now shows on every turn
+  that has past runs to show, and the default mode keeps it on the first turn. Direct
+  mode's stderr line, JSON, exit codes and requests are unchanged ([#NN]).
+
 - The first task in the web console shows the folder melo works in, and lets you pick
   another. In a new chat the composer has a chip, "In localmelo-workspace", that opens a
   panel with the default folder, the folders of your recent chats, "Choose a folder…" and,
