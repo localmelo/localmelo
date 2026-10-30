@@ -192,7 +192,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   where its panel goes on the screen. `GET /api/health` gains `status.recent`: how the
   newest finished chat turn, task, run or terminal turn ended (`done`, `failed` or
   `stopped`) and how many seconds ago, or `null`. The app does not draw the pet yet.
-  ([#NN])
+  ([#271])
 
 - The web console shows what a file write replaces before you allow it. The approval card
   for a write of text over an existing file now asks "Replace notes.txt?", counts the lines
@@ -2086,6 +2086,7 @@ earlier milestones.
 [#265]: https://github.com/localmelo/localmelo/pull/265
 [#266]: https://github.com/localmelo/localmelo/pull/266
 [#268]: https://github.com/localmelo/localmelo/pull/268
+[#271]: https://github.com/localmelo/localmelo/pull/271
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
