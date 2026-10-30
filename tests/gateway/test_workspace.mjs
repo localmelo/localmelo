@@ -115,6 +115,32 @@ test('a held reply is flushed before the next step, or by the run end', () => {
   assert.equal(turn.answer, 'The same words.');
 });
 
+// #278: the agent stores a reply that is only unfinished thinking with its text as thinking and no content.
+const UNFINISHED = "The user just said hello. I'll keep it simple and friendly.";
+
+test('a reply that is only unfinished thinking is folded, and the answer is the next reply', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: UNFINISHED, tool_calls: []});
+  push('notice', {kind: 'unfinished_answer', message: "The model's reply ended inside its thinking; asking it for its answer.", detail: {}});
+  push('step.started', {step: 2, attempt: 1});
+  push('assistant.message', {step: 2, content: 'Hello! What can I do for you?', tool_calls: []});
+  push('run.finished', {result: {status: 'completed', result: 'Hello! What can I do for you?', duration_s: 3, n_tool: 0, steps: 2}});
+  assert.deepEqual(turn.items.filter((item) => item.kind === 'thinking').map((item) => item.text), [UNFINISHED]);
+  assert.ok(!turn.items.some((item) => item.kind === 'assistant_text' && item.text.includes('keep it simple')));
+  assert.equal(turn.answer, 'Hello! What can I do for you?');
+});
+
+test('a turn that never finished an answer says so plainly and offers Try again first', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: UNFINISHED, tool_calls: []});
+  push('run.finished', {result: {status: 'failed', result: '', error: turns.UNFINISHED_ANSWER, duration_s: 3, n_tool: 0, steps: 2}});
+  assert.equal(turn.answer, '');
+  assert.equal(turns.UNFINISHED_ANSWER, 'melo did not finish an answer');
+  assert.deepEqual(statusText('failed', 'run', turns.UNFINISHED_ANSWER), {word: 'Failed', severity: 'warn', title: 'melo did not finish an answer'});
+  assert.equal(statusText('failed', 'run', 'empty replies').title, 'A check stopped the run', 'other failures keep their words');
+  assert.equal(nextAction('failed', 'run', turns.UNFINISHED_ANSWER), 'retry');
+});
+
 test('a tool call runs, asks for approval and finishes', () => {
   const {view, turn, push} = fullTurn();
   push('assistant.message', {step: 1, content: '', tool_calls: [{id: 'call-1', name: 'shell_exec', arguments: {command: 'ls'}, preview: 'ls'}]});
@@ -1707,6 +1733,20 @@ test('an unreachable server gets a plain title, one hint, Try again first, and i
   assert.equal(flatten(part(answered, 'failure-title')), '✗ Could not get an answer from the model server');
   assert.equal(part(answered, 'failure-error').textContent, 'POST /chat/completions returned HTTP 500: out of memory', 'a server that answered keeps its message');
   assert.equal(findNode(answered, (node) => node.className === 'primary-button').textContent, 'Open model settings');
+});
+
+test('a turn that never finished an answer has a plain title, no repeated error line and Try again first', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = turns.newTurn(turnRow({status: 'failed', result: {error: turns.UNFINISHED_ANSWER, n_tool: 0}}));
+  h.state().view.turns = [turn];
+  h.context.turn = turn;
+  const card = h.run('statusNode(turn)');
+  const part = (name) => findNode(card, (node) => node.className === name);
+  assert.equal(flatten(part('failure-title')), '⚠ melo did not finish an answer');
+  assert.equal(part('failure-error'), null, 'the title already says it');
+  assert.equal(part('failure-hint').textContent, "The model's reply held only its thinking. Try again, or rephrase the request.");
+  assert.equal(findNode(card, (node) => node.className === 'primary-button').textContent, 'Try again');
 });
 
 test('the work box of a failed turn has no retry line, and no box at all when that was all it held', async () => {
