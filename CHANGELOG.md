@@ -39,7 +39,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server says is loaded; otherwise they ask for a number or an id and Enter
   alone asks again (an empty answer with no terminal is an error).
   `melo --base-url URL` without `--chat-model` picks the one loaded model, or
-  exits 2 with the list and `Pass --chat-model <id>`. ([#NN])
+  exits 2 with the list and `Pass --chat-model <id>`. ([#231])
 - The welcome screen's "Connect a model" button shows only when no model is configured or the configured server cannot be reached. With a reachable model, the welcome screen shows just the suggestions ([#230]).
 
 - `/memory` and `/status` in the terminal, and the console's details drawer, show the session's own working-window cap (`window_messages`) instead of always 20 ([#230]).
@@ -1456,6 +1456,7 @@ earlier milestones.
 [#227]: https://github.com/localmelo/localmelo/pull/227
 [#228]: https://github.com/localmelo/localmelo/pull/228
 [#230]: https://github.com/localmelo/localmelo/pull/230
+[#231]: https://github.com/localmelo/localmelo/pull/231
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
