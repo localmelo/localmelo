@@ -3,10 +3,6 @@ import Darwin
 import Foundation
 import WebKit
 
-// The port is fixed for this development build. Tests may choose a different
-// non-reserved port via the environment, without changing the user's config.
-let defaultPort = 8401
-
 final class ConsoleWebView: WKWebView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
@@ -23,6 +19,7 @@ final class ConsoleWebView: WKWebView {
 final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var statusView: StatusView!
     private var statusItem: NSStatusItem!
     private var child: Process?
     private var timer: Timer?
@@ -39,31 +36,32 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var signInAttempts = 0
     // Instance collision check, not authentication against another local process.
     private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-    private var port = defaultPort
+    // The gateway picks its own port (`--port 0`) and prints it; 0 until then.
+    private var port = 0
     private var logHandle: FileHandle?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        if let override = ProcessInfo.processInfo.environment["LOCALMELO_APP_PORT"] {
-            guard let value = Int(override), (1...65535).contains(value) else {
-                fail("Invalid LOCALMELO_APP_PORT.")
-                return
-            }
-            port = value
-        }
         createWindow()
         createMenu()
         startGateway()
     }
 
     private func createWindow() {
-        webView = ConsoleWebView(frame: .zero)
-        webView.navigationDelegate = self
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "LocalMelo"
-        window.contentView = webView
+        window.title = "localmelo"
+        window.backgroundColor = Palette.canvas
+        // The status view covers the window until the console has loaded, and comes back
+        // when it cannot: the window never shows an empty web view.
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1050, height: 720))
+        statusView = StatusView(portrait: Bundle.main.image(forResource: "melo"))
+        statusView.frame = content.bounds
+        statusView.autoresizingMask = [.width, .height]
+        statusView.onAction = { [weak self] action in self?.handle(action) }
+        content.addSubview(statusView)
+        window.contentView = content
         window.delegate = self
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -72,10 +70,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createMenu() {
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Open LocalMelo", action: #selector(openWindow), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Open localmelo", action: #selector(openWindow), keyEquivalent: "")
         appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit LocalMelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let root = NSMenu()
         let entry = NSMenuItem()
         entry.submenu = appMenu
@@ -91,8 +89,36 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         root.addItem(editEntry)
         NSApp.mainMenu = root
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "Melo"
+        statusItem.button?.title = menuTitle(nil)
         statusItem.menu = appMenu.copy() as? NSMenu
+    }
+
+    private func handle(_ action: FailureAction) {
+        switch action {
+        case .tryAgain: startGateway()
+        case .openLog: openLog()
+        case .quit: NSApp.terminate(nil)
+        }
+    }
+
+    private var logsDirectory: URL {
+        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
+        return home.appendingPathComponent("Library/Logs/LocalMelo", isDirectory: true)
+    }
+
+    private func openLog() {
+        let log = logsDirectory.appendingPathComponent("gateway.log")
+        let target = FileManager.default.fileExists(atPath: log.path) ? log : logsDirectory
+        if !NSWorkspace.shared.open(target) { NSSound.beep() }
+    }
+
+    private func showStep() {
+        statusView.showStarting(step: startStepText(portKnown: port != 0, ready: ready))
+    }
+
+    private func showConsole() {
+        statusView.hide()
+        window.makeFirstResponder(webView)
     }
 
     @objc private func openWindow() {
@@ -122,6 +148,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // lsof identifies the kernel's listener, not just a response at that port.
     private func listenerPIDs(completion: @escaping ([Int32]?) -> Void) {
         let port = self.port
+        guard port != 0 else { return completion([]) }
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -174,25 +201,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
     }
 
+    // Also what Try Again runs: a new child, with nothing kept from an earlier one.
     private func startGateway() {
-        listenerPIDs { [weak self] listeners in self?.startGateway(listeners: listeners) }
-    }
-
-    private func startGateway(listeners: [Int32]?) {
-        guard let listeners = listeners else {
-            fail("Cannot inspect port \(port). The gateway was not started.")
-            return
-        }
-        guard listeners.isEmpty else {
-            fail("Port \(port) is already in use by process \(listeners.map(String.init).joined(separator: ", ")). Stop the listener or choose another port. For the melo service, use melo --daemon status and melo --daemon uninstall.")
-            return
-        }
+        stopping = false
+        ready = false
+        checking = false
+        healthAuthenticated = false
+        browserLoginCode = nil
+        nextLoginAttempt = Date()
+        port = 0
+        showStep()
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
             fail("The bundled gateway is missing.")
             return
         }
-        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
-        let logs = home.appendingPathComponent("Library/Logs/LocalMelo", isDirectory: true)
+        let logs = logsDirectory
         do {
             try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
             let path = logs.appendingPathComponent("gateway.log")
@@ -210,16 +233,17 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["--serve", "--allow-unconfigured", "--host", "127.0.0.1", "--port", String(port)]
+        process.arguments = ["--serve", "--allow-unconfigured", "--host", "127.0.0.1", "--port", "0"]
         var environment = ProcessInfo.processInfo.environment
         environment["LOCALMELO_APP_INSTANCE"] = instance
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = logHandle
+        let output = Pipe()
+        process.standardOutput = output
         process.standardError = logHandle
         process.terminationHandler = { [weak self] process in
             RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
-                guard let self = self else { return }
+                guard let self = self, self.child === process else { return }
                 self.timer?.invalidate()
                 self.tearDownWebView()
                 guard !self.stopping, !self.quitPending else { return }
@@ -227,7 +251,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     let holders = (pids ?? []).filter { $0 != process.processIdentifier }
                     let detail = holders.isEmpty ? "" : " Port \(self.port) is held by process \(holders.map(String.init).joined(separator: ", "))."
                     let exit = gatewayExitMessage(status: process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
-                    self.fail("\(exit)\(detail) See ~/Library/Logs/LocalMelo/gateway.log.", title: self.ready ? "LocalMelo gateway stopped" : "LocalMelo could not start")
+                    self.fail("\(exit)\(detail)")
                 }
             }
         }
@@ -235,9 +259,33 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             fail("Cannot start the bundled gateway: \(error.localizedDescription)")
             return
         }
+        readStartup(output, of: process)
         child = process
         deadline = Date().addingTimeInterval(20)
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkReady() }
+    }
+
+    // The gateway binds a free port first and then prints "Gateway: http://HOST:PORT".
+    // Keep reading after that line so the child never blocks on a full pipe, and
+    // write everything to the log, where its output went before.
+    private func readStartup(_ output: Pipe, of process: Process) {
+        let log = logHandle
+        var startup = StartupOutput()
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            try? log?.write(contentsOf: data)
+            if let port = startup.append(data) {
+                DispatchQueue.main.async {
+                    guard let self = self, self.child === process, self.port == 0 else { return }
+                    self.port = port
+                    self.showStep()
+                }
+            }
+        }
     }
 
     private func checkReady() {
@@ -246,10 +294,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             timer?.invalidate()
             stopping = true
             kill(child.processIdentifier, SIGTERM)
-            fail("Gateway did not become ready on port \(port). See ~/Library/Logs/LocalMelo/gateway.log.")
+            fail(port == 0 ? "The gateway did not report its port." : "Gateway did not become ready on port \(port).")
             return
         }
-        guard !checking else { return }
+        guard port != 0, !checking else { return }
         if !healthAuthenticated && Date() < nextLoginAttempt { return }
         checking = true
         listenerPIDs { [weak self] pids in
@@ -396,7 +444,6 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 }
                 guard !self.ready || reload else { return }
                 guard let code = self.browserLoginCode else { return }
-                let replacing = self.ready
                 self.browserLoginCode = nil
                 self.ready = true
                 self.timer?.invalidate()
@@ -408,25 +455,25 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     string: "http://127.0.0.1:\(self.port)/?auth=\(self.signInAttempts)#login=\(code)&instance=\(self.instance)"
                 ) else { return }
                 self.sendWhenOwned(child: child) {
-                    if replacing {
-                        // A fresh web view avoids a stalled second navigation that
-                        // WebKit can leave uncommitted after the first page loaded.
-                        self.loadConsole(url)
-                    } else {
-                        self.webView.load(URLRequest(url: url))
-                    }
+                    self.loadConsole(url)
                 }
             }
         }.resume()
     }
 
+    // A fresh web view each time avoids a stalled second navigation that WebKit can
+    // leave uncommitted after the first page loaded. It loads under the status view
+    // and is shown once the page has loaded.
     private func loadConsole(_ url: URL) {
-        let frame = webView?.frame ?? .zero
-        tearDownWebView()
-        let view = ConsoleWebView(frame: frame)
+        if webView != nil { tearDownWebView() }
+        guard let content = window.contentView else { return }
+        let view = ConsoleWebView(frame: content.bounds)
+        view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
+        view.underPageBackgroundColor = Palette.canvas
+        content.addSubview(view, positioned: .below, relativeTo: statusView)
         webView = view
-        window.contentView = view
+        showStep()
         view.load(URLRequest(url: url))
     }
 
@@ -449,10 +496,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func tearDownWebView() {
-        guard let view = webView else { return }
-        view.stopLoading()
-        view.navigationDelegate = nil
-        window.contentView = NSView()
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.removeFromSuperview()
         webView = nil
     }
 
@@ -485,6 +531,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             tearDownWebView()
             return
         }
+        showConsole()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
@@ -531,7 +578,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 // Always ask: a turn can start while the health request is in flight.
                 do {
                     let alert = NSAlert()
-                    alert.messageText = "Quit LocalMelo?"
+                    alert.messageText = "Quit localmelo?"
                     alert.informativeText = quitMessage(counts, statusKnown: running != nil)
                     alert.addButton(withTitle: "Quit and Stop")
                     alert.addButton(withTitle: "Cancel")
@@ -572,16 +619,25 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         RunLoop.main.add(timeout, forMode: .modalPanel)
     }
 
-    private func fail(_ text: String, title: String = "LocalMelo could not start") {
+    // Shows the problem in the window, with Try Again, Open Log and Quit. Nothing here
+    // ends the app: the child is stopped, and a new one starts only on Try Again.
+    // `stopping` keeps callbacks still in flight from the failed child from going on.
+    private func fail(_ text: String) {
         stopping = true
         timer?.invalidate()
+        healthTimer?.invalidate()
         tearDownWebView()
-        let alert = NSAlert()
-        alert.alertStyle = .critical
-        alert.messageText = title
-        alert.informativeText = text
-        alert.runModal()
-        NSApp.terminate(nil)
+        if let failed = child, failed.isRunning {
+            kill(failed.processIdentifier, SIGTERM)
+            // A gateway that ignored SIGTERM would keep the session store from the next start.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                if failed.isRunning { kill(failed.processIdentifier, SIGKILL) }
+            }
+        }
+        child = nil
+        statusItem.button?.title = menuTitle(nil)
+        statusView.showFailure(failureNotice(reason: text, ready: ready))
+        openWindow()
     }
 }
 

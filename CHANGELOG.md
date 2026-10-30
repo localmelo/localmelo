@@ -162,6 +162,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One command builds and installs the macOS app on this Mac. `uv run python
+  scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
+  developer account), puts it in `~/Applications/LocalMelo.app` and links
+  `~/.local/bin/melo` to its launcher, then says in three plain lines what happened
+  and what to do next. An earlier copy is replaced only when its bundle id is
+  `org.localmelo.app`; another app of that name is refused. The link is made only when
+  no other `melo` is on `PATH` (the checkout's own does not count), and an existing
+  `melo` is never replaced. `--uninstall` removes the app and the link. The verified
+  Python archive is cached in `~/Library/Caches/LocalMelo` and hashed on every use, and
+  build tools print only when they fail. The bundled Python is compiled to bytecode
+  before signing (the standalone archive has none), so `melo --version` from the bundle
+  takes 0.29 s instead of 0.96 s (median of three runs) and nothing writes bytecode into
+  the signed bundle, at the cost of 63 MB (120 to 183 MB). ([#238])
+
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,
   `not yet` or `no file named`) from the files `git status` shows edited since the
@@ -965,6 +979,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app's window says what is happening. Until the console has loaded it
+  shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
+  `Signing in`, `Opening your workspace`) instead of an empty web view, and its
+  background matches the console's, so a dark window no longer flashes white. When
+  the gateway cannot start, does not start within 20 seconds or stops, the same
+  view gives the reason and offers Try Again (a new gateway), Open Log and Quit;
+  these problems no longer show a dialog and close the app ([#238]).
+
+- The macOS app starts its gateway with `--port 0` and reads the port from the
+  gateway's startup line (`Gateway: http://127.0.0.1:PORT`) instead of using a
+  fixed port. It can no longer collide with another gateway, the background
+  service or the ports other work reserves, so `LOCALMELO_APP_PORT` and the
+  "port in use" check before the start are gone. The gateway's output still goes
+  to `~/Library/Logs/LocalMelo/gateway.log`, and the 20-second start deadline now
+  also covers the wait for that line ([#238]).
+
+- The macOS app calls itself localmelo wherever it names itself: the window title, the
+  Dock and the app menu, the menu-bar item (`localmelo`, or `localmelo · 3` while three
+  things run, where it read `Melo`), the menu entries, the quit dialog and the
+  output of `--install` and `--uninstall`, as its starting view and failure view
+  already did. `LocalMelo.app` stays the file name and the bundle id stays
+  `org.localmelo.app` ([#238]).
+
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
   `vLLM (local endpoint)`). The banner, `/status` and the web console's model row call a `vllm`
@@ -1499,6 +1536,7 @@ earlier milestones.
 [#232]: https://github.com/localmelo/localmelo/pull/232
 [#236]: https://github.com/localmelo/localmelo/pull/236
 [#237]: https://github.com/localmelo/localmelo/pull/237
+[#238]: https://github.com/localmelo/localmelo/pull/238
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
