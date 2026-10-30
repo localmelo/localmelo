@@ -127,24 +127,31 @@ No model server is running yet. To start one with oMLX:
   in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`.
 - **Fix:** run the commands melo prints (oMLX on a Mac, Ollama elsewhere; they
   are the ones in the [model servers guide](../guides/model-servers.md)), then
-  press Enter to check again. A server on another port: type its address.
-  `q` quits without saving. The web console's setup card shows the same
-  commands and looks again by itself.
+  choose `Check again` in the list under them. A server on another port:
+  choose `Enter an address` and type it. `Quit` (or Esc) quits without
+  saving. The web console's setup card shows the same commands and looks
+  again by itself.
 
 ### A model server cannot be used at the first run
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-Enter tries again · s starts without saving · q quits:
+ What now?
+ ❯ 1. Try again
+   2. Start without saving
+   3. Quit
 ```
+
+Piped, the last three rows are one line, `Enter tries again · s starts without
+saving · q quits:`.
 
 - **Cause:** `GET /v1/models` on that URL failed. `connection refused`:
   nothing listens there; `HTTP 401` or `HTTP 403`: the server wants an API
   key, which localmelo does not send to local servers; `it lists no
   models`: the server serves no model yet.
 - **Fix:** start the server, check its port and the `/v1` at the end of
-  the URL, then press Enter to try again. In oMLX, turn on
-  **Allow inference without API key**. `q` quits without saving.
+  the URL, then choose `Try again`. In oMLX, turn on
+  **Allow inference without API key**. `Quit` (or Esc) quits without saving.
 
 ### Configuration errors
 
@@ -211,16 +218,22 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: chat probe failed: …
-  [r]etry, [s]ave anyway, [N]o [N]:
+ The check failed. What now?
+   1. Try again
+   2. Save anyway
+ ❯ 3. Cancel setup
 ```
+
+Piped, the list is one line, `[r]etry, [s]ave anyway, [N]o [N]:`.
 
 - **Cause:** the wizard's test request failed. The server is not running,
   the URL or model is wrong, or the API key is missing. For a local server,
   an HTTP 401 or 403 adds a note: localmelo sends no API key to local
   servers.
-- **Fix:** correct the problem, then type `r`: the wizard asks for the URL
-  and model again, with what you typed as the defaults. Enter saves
-  nothing (`Setup cancelled — config not saved.`). A failed check of the
+- **Fix:** correct the problem, then choose `Try again`: the wizard asks for
+  the URL and model again, with what you typed as the defaults. `Cancel
+  setup` (selected first) and Esc save nothing (`Setup cancelled — config
+  not saved.`). A failed check of the
   embedding server does not stop the setup: the wizard saves with
   embedding off.
 

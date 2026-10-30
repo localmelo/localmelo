@@ -55,8 +55,8 @@ The first of these that applies:
 
 1. `melo setup`: the setup wizard, then the backend it saved. In default
    mode it first offers the model server it finds on this computer (`Found a
-   model server at …`, `Use it? [Y/n]:`) with the first run's questions; the
-   full backend menu follows only after `n`, with `--developer`, or when none is
+   model server at …`, `Use this model server?`) with the first run's questions; the
+   full backend menu follows only after `Use another server`, in developer mode, or when none is
    found while a backend is saved (with nothing saved, it prints the commands
    that start a server). Without a task it cannot be combined with `--url`.
 2. `--url URL`: that server, without the config file. The model is
@@ -68,9 +68,10 @@ The first of these that applies:
    (see the [command-line reference](../reference/cli.md#general)). A URL without `/v1` is listed at `URL/v1/models`, and when that
    answers the UI uses `URL/v1` too. When the server does not answer the
    list, or lists no model, the model is `default` and a warning under the
-   banner says why. With no config file it asks once
-   `Save URL · MODEL as the default backend? [Y/n]`; Enter saves it, as the
-   first run does.
+   banner says why. With no config file it asks once, as a
+   [list](#questions-are-lists), `Save URL · MODEL as the default backend?`:
+   `Save it` is selected, so Enter saves it, as the first run does; `Not now`
+   or Esc saves nothing.
 3. The saved backend, with `--model` in place of its model for this
    session. Nothing is checked before the UI opens: after the banner, melo
    lists the server's models once (`GET /models`) and warns when the server
@@ -267,9 +268,11 @@ from-the-child
   history. `/attach !` attaches a redacted snapshot of the last output (its
   last 256 KiB, without text a terminal never showed: concealed text and
   anything before a screen clear; a cut start drops its partial first line) to
-  your next message. It always prints the exact snapshot and asks `[y/N]`
-  (default No), even when nothing was redacted; nothing is attached unless you
-  say yes. Once attached, the snapshot is stored with the session like any
+  your next message. It always prints the exact snapshot and asks
+  `Attach this output?` (`Attach this redacted snapshot?` when something was
+  redacted) as a [list](#questions-are-lists) that starts on `Don't attach
+  it`, even when nothing was redacted; nothing is attached unless you choose
+  `Attach it` (Esc does not attach). Once attached, the snapshot is stored with the session like any
   [`/attach PATH`](#attach-text-files) file, unencrypted.
 - **Refused when busy.** During a turn, an approval, a session switch or another
   command, `! ...` is refused (`! runs only when melo is idle`) and the draft
@@ -658,22 +661,55 @@ model, it asks once more whether to use it. Later runs go straight in.
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
-Use it? [Y/n]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
 Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
-With a server that lists an embedding model too:
+Between the second and third lines melo asks `Use this model server?` as a
+list (see [Questions are lists](#questions-are-lists)); the list is erased once
+you answer. With a server that lists an embedding model too, one more list
+asks `Use nomic-embed-text for long-term memory?` (`Use it`, `Leave it off`).
+
+#### Questions are lists
+
+On a terminal (stdin and stdout, `TERM` not `dumb`) every question with a
+fixed set of answers is a list, as the tool approval and `/model` are:
 
 ```text
-Use nomic-embed-text for long-term memory? [Y/n]:
+ Use this model server?
+ ❯ 1. Use it
+   2. Use another server
+ ↑↓ select · enter confirm · esc cancel
 ```
+
+↑ ↓ move, Enter confirms the selected row, and a number key (1 to 9) chooses
+that row at once. The safe or recommended answer is selected first, and Esc
+gives the answer named at the end of the key line (`esc cancel` ends the
+setup, as Ctrl+C does; `esc not now`, `esc leave it off` and `esc don't attach
+it` decline). There is no filter field: the lists are short, and letters
+typed in them do nothing. Ctrl+C prints `Setup cancelled.` and exits with 130,
+Ctrl+D exits with 0, as at a typed question. The questions are:
+`Use this model server?`; `Use <model> for long-term memory?`; `What now?` after
+a URL that cannot be used (`Try again`, `Start without saving`, `Quit`; Esc
+quits); `No model server found. What now?` (`Check again`, `Enter an address`
+which then asks `Server URL […]:`, `Quit`; Esc quits); `Save URL · MODEL as
+the default backend?`; the wizard's backend lists, `Save these settings?`
+(`Save and continue`, `Cancel setup`) and `The check failed. What now?` (`Try
+again`, `Save anyway`, `Cancel setup`, selected first, as `[N]` was); and, in
+the UI, `Attach this output?`. Text questions (`Server URL`, `Model name`,
+`Base URL`) stay text. Without a terminal (answers piped in, a script, a test)
+no list is drawn and each question reads the typed answer it always did
+(`Use it? [Y/n]:`, `Enter tries again · s starts without saving · q quits:`,
+`[r]etry, [s]ave anyway, [N]o [N]:`, a number for a backend, Enter for the
+default). A direct run (`melo "task"`, `--output-format json`) never asks a
+question.
 
 - melo looks for a server on this computer with `GET /v1/models` on
   `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000
   (SGLang), and offers the first that lists a model: Enter says yes to
-  `Use it? [Y/n]:`, and `n` asks `Server URL […]:` with that URL, for another.
+  `Use this model server?` (Enter takes `Use it`; `Use another server` asks
+  `Server URL […]:` with that URL, for another).
   The model list is requested; with several chat
   models, so are `GET /v1/models/status` (oMLX) and `GET /api/ps` (Ollama),
   which say which models are loaded. Saving the choice asks
@@ -695,12 +731,15 @@ Use nomic-embed-text for long-term memory? [Y/n]:
 
   Put a model in its own folder of ~/models first. The guide shows how:
   https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
-  Press Enter to check again, type an address, or q to quit:
   ```
 
-  Enter looks at the same ports again and, when a server answers, goes on as
-  above (`✗ No model server found yet (looked at ports …).` when none does).
-  An address typed instead is checked like a URL, below; `q` exits with code 0.
+  A list follows, `No model server found. What now?`. `Check again` (selected)
+  looks at the same ports again and, when a server answers, goes on as above
+  (`✗ No model server found yet (looked at ports …).` when none does);
+  `Enter an address` asks `Server URL [http://127.0.0.1:8000/v1]:` and checks
+  what you type like a URL, below; `Quit` (or Esc) exits with code 0. With the
+  answers piped in, the line is `Press Enter to check again, type an address,
+  or q to quit:`.
   `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated
   list, which Enter looks at; an empty value turns the search off, and melo
   then asks `Server URL [http://127.0.0.1:8000/v1]:`.
@@ -720,7 +759,7 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   the default; when the server does not say which are loaded, the prompt is
   `Model:` with no default and Enter alone asks again
   (`Type the number of the model to use. …`), and without a terminal an empty
-  answer exits 2 with an error. `/backend` asks with numbers. A server that
+  answer exits 2 with an error. `/backend` shows the same list (`Choose a model`; Esc changes nothing). A server that
   lists only embedding or reranking models is shown the same way, with a line
   saying that chat needs a chat model. The hints are wrapped to the terminal's
   width at word boundaries.
@@ -734,27 +773,28 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   use the `[vllm]` table's `chat_url` and `chat_model`. The file's other
   settings are kept.
 - When the server lists an embedding model other than the chosen chat model,
-  melo asks `Use <model> for long-term memory? [Y/n]:`, recommending
-  Qwen3-Embedding first. `y` sends one `POST /v1/embeddings` probe and saves
+  melo asks `Use <model> for long-term memory?` (piped: `[Y/n]:`), recommending
+  Qwen3-Embedding first. `Use it` sends one `POST /v1/embeddings` probe and saves
   `embedding_backend = "<chat key>"` with that table's `embedding_url` (the
-  chat URL) and `embedding_model`. `n`, a failed probe, or no candidate
+  chat URL) and `embedding_model`. `Leave it off` (or Esc), a failed probe, or no candidate
   saves `embedding_backend = "none"` and says that memory is off
   (`Long-term memory is off; melo setup turns it on.`); `melo setup` also names
   how to add a model, `ollama pull qwen3-embedding:0.6b` for an Ollama server
   and `Serve Qwen3-Embedding-0.6B on it` otherwise. See
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
-  `✗ URL: connection refused.`, and asks
-  `Enter tries again · s starts without saving · q quits:`. Enter asks for the
-  URL again, with the one you typed as the default; `s` asks
-  `Model name [default]:` and opens the UI without saving
-  (`Not saved: melo asks again next time.`); `q` exits with code 0. The reasons are `connection refused`,
+  `✗ URL: connection refused.`, and asks `What now?` (piped:
+  `Enter tries again · s starts without saving · q quits:`). `Try again`
+  (selected) asks for the URL again, with the one you typed as the default;
+  `Start without saving` asks `Model name [default]:` and opens the UI without
+  saving (`Not saved: melo asks again next time.`); `Quit` (or Esc) exits with
+  code 0. The reasons are `connection refused`,
   `no answer in 5 s`, `HTTP 401` or `HTTP 403` with
   `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`,
   another `HTTP` status (a redirect names its target, which melo does not
   follow), `the reply is not a model list`, `the reply could not be read`,
   `not a URL` and `it lists no models`.
-- An option is chosen by its first letter, so `s`, `start` and
+- Piped, an option is chosen by its first letter, so `s`, `start` and
   `start without saving` are the same answer (and `r` or `retry` is Enter);
   another answer asks again.
 - Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;

@@ -103,17 +103,22 @@ No model server is running yet. To start one with oMLX:
 ```
 
 - **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`。
-- **修复：** 运行 melo 输出的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](../guides/model-servers.md)中的一致），然后按 Enter 再次检查。服务器在其他端口时，输入它的地址。按 `q` 退出且不保存。网页控制台的设置卡片显示同样的命令，并自动再次寻找。
+- **修复：** 运行 melo 输出的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](../guides/model-servers.md)中的一致），然后在它们下面的列表中选择 `Check again`。服务器在其他端口时，选择 `Enter an address` 并输入它的地址。选择 `Quit`（或按 Esc）退出且不保存。网页控制台的设置卡片显示同样的命令，并自动再次寻找。
 
 ### A model server cannot be used at the first run
 
 ```text
 ✗ http://127.0.0.1:8000/v1: connection refused.
-Enter tries again · s starts without saving · q quits:
+ What now?
+ ❯ 1. Try again
+   2. Start without saving
+   3. Quit
 ```
 
+通过管道输入时，后三行合为一行：`Enter tries again · s starts without saving · q quits:`。
+
 - **原因：** 对该 URL 的 `GET /v1/models` 失败。`connection refused`：那里没有进程在监听；`HTTP 401` 或 `HTTP 403`：服务器需要 API 密钥，而 localmelo 不会向本地服务器发送密钥；`it lists no models`：服务器尚未提供任何模型。
-- **修复：** 启动服务器，检查其端口和 URL 末尾的 `/v1`，然后按 Enter 重试。在 oMLX 中，打开 **Allow inference without API key**。按 `q` 退出且不保存。
+- **修复：** 启动服务器，检查其端口和 URL 末尾的 `/v1`，然后选择 `Try again`。在 oMLX 中，打开 **Allow inference without API key**。选择 `Quit`（或按 Esc）退出且不保存。
 
 ### Configuration errors
 
@@ -164,11 +169,16 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: chat probe failed: …
-  [r]etry, [s]ave anyway, [N]o [N]:
+ The check failed. What now?
+   1. Try again
+   2. Save anyway
+ ❯ 3. Cancel setup
 ```
 
+通过管道输入时，列表是一行：`[r]etry, [s]ave anyway, [N]o [N]:`。
+
 - **原因：** 设置向导的测试请求失败。服务器没有运行，URL 或模型有误，或者缺少 API 密钥。对于本地服务器，HTTP 401 或 403 会附带一条说明：localmelo 不会向本地服务器发送 API 密钥。
-- **修复：** 纠正问题，然后输入 `r`：向导会再次询问 URL 和模型，并以你之前输入的内容作为默认值。按 Enter 则不保存任何内容（`Setup cancelled — config not saved.`）。嵌入服务器检查失败不会中止设置：向导会在关闭嵌入的情况下保存。
+- **修复：** 纠正问题，然后选择 `Try again`：向导会再次询问 URL 和模型，并以你之前输入的内容作为默认值。`Cancel setup`（默认选中）和 Esc 不保存任何内容（`Setup cancelled — config not saved.`）。嵌入服务器检查失败不会中止设置：向导会在关闭嵌入的情况下保存。
 
 网关的 HTTP 401 表示其 bearer 令牌或浏览器会话缺失或无效。请在终端中运行 `melo console` 重新登录：它会在浏览器中打开控制台；通过 SSH 或没有浏览器能启动时，它会输出新的一次性链接。需要时加上 `--port PORT`。对于 API 客户端，请使用私有的网关令牌；轮换令牌会使现有的浏览器会话失效。见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
 

@@ -106,6 +106,9 @@ class FakeApp:
         # What /model's picker is shown, and what the person picks, in turn.
         self.offered: list[tuple[list[ModelRow], str, str]] = []
         self.picks: list[str | None] = []
+        # Where the highlight starts and the title, for each of those lists.
+        self.started: list[tuple[str | None, str]] = []
+        self.asked: list[tuple[str, list[str], int, int]] = []
         self.exited = False
         self.bells = 0
         self.invalidated = 0
@@ -127,10 +130,24 @@ class FakeApp:
         return default if answer == "" else answer
 
     async def choose_model(
-        self, rows: list[ModelRow], *, where: str, current: str
+        self,
+        rows: list[ModelRow],
+        *,
+        where: str,
+        current: str,
+        start: str | None = "",
+        title: str = "Switch model",
     ) -> str | None:
         self.offered.append((list(rows), where, current))
+        self.started.append((current if start == "" else start, title))
         return self.picks.pop(0)
+
+    async def pick(
+        self, title: str, options: list[str], *, default: int, escape: int
+    ) -> int:
+        """A list question, answered from the same script: ``y`` is the first row."""
+        self.asked.append((title, list(options), default, escape))
+        return 0 if self.answers.pop(0) in ("y", "yes") else escape
 
 
 class Setup:
@@ -517,9 +534,13 @@ async def test_a_model_that_cannot_start_keeps_the_old_one(setup: Setup) -> None
 
 async def test_backend_asks_checks_switches_and_saves(setup: Setup) -> None:
     session = setup.session
-    setup.app.answers = ["http://127.0.0.1:9", "2"]
+    setup.app.answers = ["http://127.0.0.1:9"]
+    setup.app.picks = ["m2"]
     setup.factory.listed = ["embed-x", "m2"]
     await session.backend("")
+    [(rows, where, _)] = setup.app.offered  # the chat model only, as at the first run
+    assert [row.id for row in rows] == ["m2"] and where == "http://127.0.0.1:9"
+    assert setup.app.started == [("m2", "Choose a model")]
     assert session.factory.backend.base_url == URL  # /v1 added once it listed
     assert session.factory.backend.model == "m2"
     assert setup.factory.saved == [(URL, "m2")]
@@ -529,12 +550,15 @@ async def test_backend_asks_checks_switches_and_saves(setup: Setup) -> None:
 async def test_backend_with_several_models_and_none_known_loaded_has_no_default(
     setup: Setup,
 ) -> None:
-    setup.app.answers = ["http://127.0.0.1:9", "", "1"]
+    setup.app.answers = ["http://127.0.0.1:9"]
+    setup.app.picks = ["big"]
     setup.factory.listed = ["big", "small"]
     await setup.session.backend("")
     text = setup.out.text()
-    assert "1. big\n" in text and "(loaded)" not in text
-    assert discovery.NO_DEFAULT_HINT in " ".join(text.split())
+    [(rows, _, _)] = setup.app.offered
+    assert [(row.id, row.loaded) for row in rows] == [("big", False), ("small", False)]
+    assert setup.app.started == [(None, "Choose a model")]  # nothing highlighted
+    assert discovery.LOAD_COST_NOTE in " ".join(text.split())
     assert setup.factory.saved == [(URL, "big")]
 
 
@@ -545,11 +569,23 @@ async def test_backend_marks_the_loaded_model_and_defaults_to_it(
         return discovery.LoadedModels(frozenset({"small"}), True)
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
-    setup.app.answers = ["http://127.0.0.1:9", ""]
+    setup.app.answers = ["http://127.0.0.1:9"]
+    setup.app.picks = ["small"]
     setup.factory.listed = ["big", "small"]
     await setup.session.backend("")
-    assert "2. small  (loaded)\n" in setup.out.text()
+    [(rows, _, _)] = setup.app.offered
+    assert [(row.id, row.loaded) for row in rows] == [("big", False), ("small", True)]
+    assert setup.app.started == [("small", "Choose a model")]  # the loaded one
+    assert discovery.LOAD_COST_NOTE not in " ".join(setup.out.text().split())
     assert setup.factory.saved == [(URL, "small")]
+
+
+async def test_closing_the_backend_model_list_changes_nothing(setup: Setup) -> None:
+    setup.app.answers = ["http://127.0.0.1:9"]
+    setup.app.picks = [None]
+    setup.factory.listed = ["big", "small"]
+    await setup.session.backend("")
+    assert setup.factory.saved == [] and setup.factory.backend.model == "m1"
 
 
 async def test_backend_that_cannot_be_reached_changes_nothing(setup: Setup) -> None:
@@ -1945,6 +1981,26 @@ async def test_attach_bang_attaches_the_last_output_only_when_asked(
     [attached] = turn.attachments
     assert attached.name.startswith("shell output: ") and secret not in attached.name
     assert attached.text.strip() == "ok\n[redacted]"  # exactly what was shown
+
+
+async def test_the_attach_question_is_a_list_that_starts_on_not_attaching(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    for command, title in (
+        ("! echo ok", "Attach this output?"),
+        (f"! echo ok; echo {secret}", "Attach this redacted snapshot?"),
+    ):
+        assert session.enter(command) is None
+        await setup.idle()
+        setup.app.asked.clear()
+        setup.app.answers.append("n")
+        assert session.enter("/attach !") is None
+        await setup.idle()
+        # Safe answer first and on esc: "Don't attach it", the second row.
+        assert setup.app.asked == [(title, ["Attach it", "Don't attach it"], 1, 1)]
+        assert session.attachment_line == ""
 
 
 async def test_a_command_without_output_leaves_nothing_to_attach(

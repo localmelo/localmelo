@@ -329,8 +329,9 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
     melo: Callable[..., Melo], tmp_path: Path, stub: StubServer
 ) -> None:
     term = melo("--base-url", stub.base_url, configured=False)
-    term.see("as the default backend? [Y/n]")
-    term.type("n\r")
+    term.see("as the default backend?")
+    term.type("\x1b[B")  # Not now
+    term.type("\r")
     term.see("Ask melo")
     assert "stub-model (/model to change)" in term.text()
     assert f"{stub.base_url} · from --url (not saved)" in term.text()

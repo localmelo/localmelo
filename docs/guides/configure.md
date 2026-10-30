@@ -13,20 +13,21 @@ oMLX runs on port 8000 with three models, and the first chat model is loaded:
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (3 models).
-Use it? [Y/n]:
  Choose a model · http://127.0.0.1:8000/v1
  Filter ›
  ❯ Qwen3-8B-4bit  (loaded)
    Qwen3-32B-4bit
  2 models · enter chooses · esc cancels
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
-Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
-  30000 is the one offered (`Use it? [Y/n]:`; `n` asks for another URL); one
-  with a chat model comes first. Listing a
+  30000 is the one offered (a list, `Use this model server?`, with `Use it`
+  selected; `Use another server` asks for another URL); one with a chat model
+  comes first. Every question with a fixed set of answers is a list like this
+  one on a terminal: ↑ ↓ or a number move, Enter confirms, Esc takes the safe
+  answer (see [Questions are lists](terminal.md#questions-are-lists)). Listing a
   server's models sends `GET /v1/models`. On a terminal the models are a list
   to choose from (type to filter, ↑ ↓ to move, Enter to choose, Esc to
   cancel; the list is erased once you choose) with the chat models only, as
@@ -39,11 +40,13 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   loaded ones `(loaded)` and makes the first the default (highlighted), and
   with none loaded there is no default: nothing is highlighted, so move to a
   model with ↑ ↓ (or type a number, piped). Saving the choice asks
-  `GET /api/version` once, to tell an Ollama server apart, and a `y` sends
-  one `POST /v1/embeddings` probe of the offered model.
-- The embedding question is asked only when the list holds an embedding
-  model other than the chat model. `y` saves three embedding values: the
-  chat backend's key, its URL and the offered model. A failed probe, `n`, or
+  `GET /api/version` once, to tell an Ollama server apart, and `Use it` for
+  the embedding question sends one `POST /v1/embeddings` probe of the offered
+  model.
+- The embedding question (`Use <model> for long-term memory?`) is asked only
+  when the list holds an embedding model other than the chat model. `Use it`
+  saves three embedding values: the chat backend's key, its URL and the
+  offered model. A failed probe, `Leave it off` (or Esc), or
   no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
   `ollama` backend, an oMLX server (its model listing names oMLX as the owner
@@ -72,7 +75,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   chat_model = "Qwen3-8B-4bit"
   ```
 
-  A `y` writes the chat backend's embedding fields instead of `"none"`:
+  `Use it` writes the chat backend's embedding fields instead of `"none"`:
 
   ```toml
   chat_backend = "omlx"
@@ -91,11 +94,12 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
   a trailing `/v1`.
 
 - With no server running, it prints the commands that start one (oMLX on a Mac,
-  Ollama elsewhere) and looks again each time you press Enter; the web console's
-  setup card shows the same commands and looks again every three seconds.
+  Ollama elsewhere) and asks `No model server found. What now?` (`Check
+  again`, `Enter an address`, `Quit`); the web console's setup card shows the
+  same commands and looks again every three seconds.
 - A server that does not answer, refuses the request without an API key,
-  or lists no models is named with the reason, and you can retry, start
-  without saving or quit. localmelo never asks for an API key for a local
+  or lists no models is named with the reason, and you can try again, start
+  without saving or quit (a list, `What now?`). localmelo never asks for an API key for a local
   server.
 - The [command-line reference](terminal.md#first-run) has every prompt and
   reason.
@@ -118,8 +122,9 @@ one setup that has no command-word form), starts the gateway. Press Ctrl+C to
 stop the gateway.
 
 In default mode, `melo setup` starts as the first
-run does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`. The
-full menu follows only after `n`, with `--developer`, or when no server is found
+run does: it prints `Found a model server at …` and asks `Use this model
+server?`. The full menu follows only after `Use another server`, in developer mode (`[ui] mode = "developer"`;
+`melo config set ui.mode developer` saves it), or when no server is found
 while a backend is saved. With nothing saved and no server running, it prints the
 commands that start one instead. `melo serve` before any setup does the same.
 
@@ -135,9 +140,11 @@ commands that start one instead. `melo serve` before any setup does the same.
   read falls back to those five silently; the end-of-wizard check reports a
   dead server.
 - When the chat server's check fails, the wizard prints `Probe failed: …`
-  and asks `[r]etry, [s]ave anyway, [N]o [N]:`. `r` asks for the URL and
-  model again, with what you typed as the defaults; `s` saves anyway;
-  Enter or `N` saves nothing.
+  and asks `The check failed. What now?` as a list: `Try again` asks for the
+  URL and model again, with what you typed as the defaults; `Save anyway`
+  saves; `Cancel setup`, selected first, and Esc save nothing. Piped, the
+  question is `[r]etry, [s]ave anyway, [N]o [N]:` and `r`, `s` and `N` or
+  Enter answer it.
 - An HTTP 401 or 403 from a local server adds a note: localmelo sends no
   API key to local servers. In oMLX, turn on
   **Allow inference without API key**.

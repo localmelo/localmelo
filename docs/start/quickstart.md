@@ -165,7 +165,8 @@ and the gateway work without `--url`.
 For a local server, run `melo` in a terminal. With no configuration yet, it
 first says what it needs, a model server on this computer. It then looks for
 one (oMLX on port 8000, Ollama on 11434), asks whether to use the one it found
-(`Use it? [Y/n]:`, Enter says yes) and for a model from the server's list, saves
+(`Use this model server?`, a list: Enter takes the selected `Use it`) and for a
+model from the server's list, saves
 `~/.cache/localmelo/config.toml` and opens the interactive UI. The models are
 a list to choose from with the arrow keys (type to filter, Enter to choose,
 Esc to cancel), chat models only; with the answers piped in they are numbered
@@ -184,7 +185,6 @@ empty answer is an error). With one chat model there is nothing to choose:
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Use it? [Y/n]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
@@ -198,13 +198,21 @@ The first row shows the package version, and on a git checkout the short commit,
 With no model server running, `melo` prints this computer's commands for
 starting one (oMLX on a Mac, Ollama elsewhere, the ones in the
 [model servers guide](../guides/model-servers.md)) and asks
-`Press Enter to check again, type an address, or q to quit:`. Start the server
-in another terminal, then press Enter; melo installs and starts nothing itself.
+`No model server found. What now?` with `Check again`, `Enter an address` and
+`Quit` (piped: `Press Enter to check again, type an address, or q to quit:`).
+Start the server in another terminal, then choose `Check again`; melo installs
+and starts nothing itself.
 
 If the server also lists an embedding model, the first run adds one question,
-`Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
-embeddings probe. Type a message and press Enter, or `/exit` to leave. From
-then on, `melo` goes straight in and `melo "<task>"` uses the saved server.
+`Use <model> for long-term memory?`, and `Use it` (selected first) saves it
+after one embeddings probe.
+
+Every question with a fixed set of answers is a list on a terminal: ↑ ↓ or a
+number move, Enter confirms, Esc takes the safe answer, and the list is erased
+once you answer (see [Questions are lists](../guides/terminal.md#questions-are-lists)).
+Piped answers and scripts keep the typed questions (`Use it? [Y/n]:`).
+
+Type a message and press Enter, or `/exit` to leave. From then on, `melo` goes straight in and `melo "<task>"` uses the saved server.
 The server here is Ollama, so it is saved as the `ollama` backend; an oMLX
 server is saved as `omlx` and any other OpenAI-compatible server as `vllm`,
 the key for those. See
@@ -223,17 +231,17 @@ melo setup
 melo serve
 ```
 
-In default mode `melo setup` first offers the server it finds (`Use it? [Y/n]:`);
-answer `n` for the full menu, which developer mode
+In default mode `melo setup` first offers the server it finds (`Use this model
+server?`); choose `Use another server` for the full menu, which developer mode
 (`melo config set ui.mode developer`) shows at once. The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (`3`). |
+| `Chat backend` | Your server type, such as `2. Ollama (local endpoint)`: move with ↑ ↓ and press Enter, or press the number (piped: type it). The saved backend is selected first, else MLC (`1`). For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
-| `Save and continue?` | Press Enter (yes) to save and continue. |
-| `Embedding backend` | `5` for `None (no long-term memory)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first as the default; choosing one is enough. |
+| `Save these settings?` | Press Enter on `Save and continue`, or choose `Cancel setup` (piped: `Save and continue? [Y]:`). |
+| `Embedding backend` | `5. None (no long-term memory)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first selected; choosing one is enough. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
 For a cloud API, choose the vendor. The wizard then asks for
@@ -246,17 +254,20 @@ OpenAI-compatible one.
 
 Next, the wizard sends a short test request to each server
 (`Probing backends ...`). If the chat server does not answer, it prints
-`Probe failed: …` and asks `[r]etry, [s]ave anyway, [N]o [N]:`; `r` asks for
-the URL and model again, and pressing Enter saves nothing. If only the
+`Probe failed: …` and asks `The check failed. What now?` with `Try again`,
+`Save anyway` and `Cancel setup` (piped: `[r]etry, [s]ave anyway, [N]o [N]:`);
+`Try again` asks for the URL and model again, and Enter, which takes the
+selected `Cancel setup`, saves nothing. If only the
 embedding server fails, the wizard saves with embedding off and says so. On
 success it prints `Config saved to …`, the path of
 `~/.cache/localmelo/config.toml`, and opens the interactive UI; leave it with
 Ctrl+D. Then `melo serve` starts the gateway on `http://127.0.0.1:8401`, and
 it keeps running in this terminal. In default mode `melo setup` starts with the
 first run's question: it prints `Found a model server at …` and asks
-`Use it? [Y/n]:`. The full menu above follows only after `n`, in developer
-mode, or when no server is found while a backend is saved; with nothing saved,
-it prints the commands that start a server instead.
+`Use this model server?`. The full menu above follows only after
+`Use another server`, in developer mode, or when no server is found while a
+backend is saved; with nothing saved, it prints the commands that start a
+server instead.
 
 ## Start the gateway
 

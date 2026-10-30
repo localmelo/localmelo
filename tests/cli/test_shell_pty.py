@@ -209,8 +209,8 @@ def test_output_stays_out_of_the_next_model_request_unless_attached(
     term.see("/attach ! shows")
     _ready(term, "/attach ! shows")
     term.type("/attach !\r")
-    term.see("Attach this output? [y/N]")  # the exact output is shown first
-    term.type("y\r")
+    term.see("Attach this output?")  # the exact output is shown first
+    term.type("1")  # "Attach it": the list starts on "Don't attach it"
     term.see("✓ Attached shell output: echo ATTACH_ME_MARK")
     _ready(term, "Attached: shell output")
     sent = len(stub.requests)
