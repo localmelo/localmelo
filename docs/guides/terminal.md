@@ -145,7 +145,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
-| `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
+| `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, `omlx` when its model listing names oMLX, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
 - A command that runs is echoed in the scrollback as a message is
@@ -165,7 +165,8 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
   server did not answer.
 - Saving: `/model` keeps the configured backend and changes its model.
   `/backend` saves the server as the `ollama` backend when it answers like
-  Ollama (`GET /api/version`), else as `vllm`; it writes `chat_backend` and
+  Ollama (`GET /api/version`), as `omlx` when its model listing names oMLX,
+  else as `vllm`; it writes `chat_backend` and
   that table's `chat_url` and `chat_model`, and keeps the rest of the
   config: embedding, `request_timeout_s` and `extra_body`; the session runs
   on the config as saved. In a `melo --base-url URL` session they switch for
@@ -594,9 +595,10 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
   `[ollama]` table's `chat_url` and `chat_model`; the banner then says
   Ollama, and chat requests use Ollama's native API with its 300 s timeout.
-  Any other OpenAI-compatible server, oMLX included, is saved as
-  `chat_backend = "vllm"` (the key for any OpenAI-compatible server), with
-  its `[vllm]` table's `chat_url` and `chat_model`. The file's other
+  An oMLX server (its model listing names oMLX as the owner of every model)
+  is saved as `chat_backend = "omlx"`, and any other OpenAI-compatible server
+  as `chat_backend = "vllm"` (the key for any OpenAI-compatible server); both
+  use the `[vllm]` table's `chat_url` and `chat_model`. The file's other
   settings are kept.
 - When the server lists an embedding model other than the chosen chat model,
   melo asks `Use <model> for long-term memory? [Y/n]:`, recommending

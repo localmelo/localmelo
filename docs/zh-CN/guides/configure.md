@@ -26,7 +26,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 
 - 如果本机服务器在端口 8000、8400、11434 或 30000 上列出模型，提示中会填入它的 URL；有对话模型的服务器排在最前。列出服务器模型时发送 `GET /v1/models`。有多个对话模型时，设置还会询问哪些模型已在内存中：用 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），各等一秒，不带密钥；已加载的模型会标上 `(loaded)`，第一个作为默认值，没有已加载的模型时没有默认值，请输入编号。保存选择时会发送一次 `GET /api/version`，以区分 Ollama 服务器；回答 `y` 则会发送一次 `POST /v1/embeddings`，探测提供的模型。
 - 只有列表中包含对话模型以外的嵌入模型时才会询问嵌入问题。回答 `y` 会保存三个嵌入值：对话后端的键、其 URL 和提供的模型。探测失败、回答 `n` 或没有候选模型时，会像以前一样保存 `embedding_backend = "none"`。
-- Ollama 服务器（响应 `GET /api/version` 的服务器）保存为 `ollama` 后端，其他 OpenAI 兼容服务器（包括 oMLX）保存为 `vllm`，文件中的其他设置保持不变。没有嵌入时，写入：
+- Ollama 服务器（响应 `GET /api/version` 的服务器）保存为 `ollama` 后端，oMLX 服务器（它的模型列表把 oMLX 标为每个模型的所有者）保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，文件中的其他设置保持不变。`omlx` 是 `vllm` 后端的另一个名字，所以设置仍在 `[vllm]` 表中。没有嵌入时，写入：
 
   ```toml
   # an Ollama server
@@ -39,8 +39,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   ```
 
   ```toml
-  # oMLX or any other OpenAI-compatible server
-  chat_backend = "vllm"
+  # an oMLX server (another OpenAI-compatible server: "vllm")
+  chat_backend = "omlx"
   embedding_backend = "none"
 
   [vllm]
@@ -51,8 +51,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   回答 `y` 时，会写入对话后端的嵌入字段，而不是 `"none"`：
 
   ```toml
-  chat_backend = "vllm"
-  embedding_backend = "vllm"
+  chat_backend = "omlx"
+  embedding_backend = "omlx"
 
   [vllm]
   chat_url = "http://127.0.0.1:8000/v1"
@@ -61,7 +61,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   embedding_model = "Qwen3-Embedding-0.6B"
   ```
 
-  `ollama` 后端通过 Ollama 原生 API 对话，请求超时为 300 秒；`vllm` 使用 120 秒。Ollama 的 `chat_url` 带不带 `/v1` 都可以：版本端点在根路径查询，对话请求会去掉末尾的 `/v1`。
+  `ollama` 后端通过 Ollama 原生 API 对话，请求超时为 300 秒；`vllm` 和 `omlx` 使用 120 秒。Ollama 的 `chat_url` 带不带 `/v1` 都可以：版本端点在根路径查询，对话请求会去掉末尾的 `/v1`。
 
 - 服务器无响应、因没有 API 密钥而拒绝请求，或没有列出模型时，会指出是哪个服务器，并给出原因；你可以重试、不保存直接启动或退出。localmelo 从不询问本地服务器的 API 密钥。
 - [命令行参考](terminal.md#first-run)列出了所有提示和原因。

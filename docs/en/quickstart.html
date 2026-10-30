@@ -214,8 +214,9 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
           then on, <code>melo</code> goes straight in and
           <code>melo "&lt;task&gt;"</code> uses the saved server. The server
           here is Ollama, so it is saved as the <code>ollama</code> backend;
-          oMLX and any other OpenAI-compatible server are saved as
-          <code>vllm</code>, the key for those. When the server lists an
+          an oMLX server is saved as <code>omlx</code> and any other
+          OpenAI-compatible server as <code>vllm</code>, the key for those.
+          When the server lists an
           embedding model, the first run asks one more question,
           <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>. See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>

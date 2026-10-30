@@ -37,8 +37,11 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   chat backend's key, its URL and the offered model. A failed probe, `n`, or
   no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
-  `ollama` backend, and any other OpenAI-compatible server, oMLX included,
-  as `vllm`, and keeps the file's other settings. With no embedding it writes:
+  `ollama` backend, an oMLX server (its model listing names oMLX as the owner
+  of every model) as `omlx`, and any other OpenAI-compatible server as
+  `vllm`, and keeps the file's other settings. `omlx` is another name for the
+  `vllm` backend, so the settings stay in the `[vllm]` table. With no
+  embedding it writes:
 
   ```toml
   # an Ollama server
@@ -51,8 +54,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   ```
 
   ```toml
-  # oMLX or any other OpenAI-compatible server
-  chat_backend = "vllm"
+  # an oMLX server (another OpenAI-compatible server: "vllm")
+  chat_backend = "omlx"
   embedding_backend = "none"
 
   [vllm]
@@ -63,8 +66,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   A `y` writes the chat backend's embedding fields instead of `"none"`:
 
   ```toml
-  chat_backend = "vllm"
-  embedding_backend = "vllm"
+  chat_backend = "omlx"
+  embedding_backend = "omlx"
 
   [vllm]
   chat_url = "http://127.0.0.1:8000/v1"
@@ -74,7 +77,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   ```
 
   The `ollama` backend chats on Ollama's native API with a 300 s request
-  timeout; `vllm` uses 120 s. A `chat_url` with or without `/v1` works for
+  timeout; `vllm` and `omlx` use 120 s. A `chat_url` with or without `/v1` works for
   Ollama: its version endpoint is asked at the root, and chat requests drop
   a trailing `/v1`.
 

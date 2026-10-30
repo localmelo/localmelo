@@ -100,8 +100,8 @@ oMLX's own, usually the folder name. Then add its embedding fields to the
 `[vllm]` table that holds oMLX's chat settings:
 
 ```toml
-chat_backend = "vllm"
-embedding_backend = "vllm"
+chat_backend = "omlx"
+embedding_backend = "omlx"
 
 [vllm]
 chat_url = "http://127.0.0.1:8000/v1"

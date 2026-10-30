@@ -973,7 +973,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   server` otherwise (they said `vLLM`); `--base-url` sessions use the same two names (the second
   was `OpenAI-compatible`), and so do the backend's error messages. `chat_backend = "omlx"` and
   `embedding_backend = "omlx"` are accepted as another spelling of `vllm`: they load as the same
-  backend and are saved as written. On macOS the no-server hint names `omlx serve` before
+  backend and are saved as written. First-run setup (and `--reconfigure` and `/backend`) saves
+  `omlx` for a server whose model listing names oMLX, and its embedding model the same way, so
+  every banner says oMLX from the start; an older version rejects that key in a config-based run
+  (a `--base-url` run is unaffected). On macOS the no-server hint names `omlx serve` before
   `ollama serve`. A model that oMLX serves under an alias is marked `(loaded)` and can be the
   default under the alias, because its status reply names the alias (`model_alias`). The requests
   of `melo --base-url … --chat-model …` runs are unchanged ([#NN]).

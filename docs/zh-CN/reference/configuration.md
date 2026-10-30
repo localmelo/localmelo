@@ -26,7 +26,7 @@ chat_model = "qwen3:8b"
 
 | 键 | 表 | 默认值 | 说明 |
 |---|---|---|---|
-| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `vllm`，或写成 `omlx`；它会按 `vllm` 加载，并按原样保存。必需。 |
+| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。必需。 |
 | `embedding_backend` | 顶层 | 未设置 | `mlc`、`ollama`、`vllm`、`sglang` 或 `none`；`omlx` 会被当作 `vllm`。必需。 |
 | `request_timeout_s` | 顶层 | 未设置 | 对话请求超时，以秒计；见[对话请求超时](#chat-request-timeout)。 |
 | `chat_url` | 本地后端 | 未设置 | 模型服务器的 URL。 |

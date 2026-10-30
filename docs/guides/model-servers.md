@@ -139,21 +139,23 @@ another spelling of `vllm` ([details](model-servers.md#omlx)).
 
 [oMLX](https://github.com/jundot/omlx) is a supported local server. Its API
 is OpenAI-compatible, and the `vllm` key stands for any OpenAI-compatible
-server, vLLM's own included. So oMLX has no backend of its own: first-run
-setup saves `chat_backend = "vllm"`, and a file may spell it
-`chat_backend = "omlx"` (and `embedding_backend = "omlx"`), which loads as
-the same backend, with its settings in the `[vllm]` table, and is saved back
-as written. The banner, `/status` and the web console call the server oMLX
-when the file says `omlx` or a model listing of the server did (oMLX names
-itself as the owner of every model it lists), and otherwise an
-OpenAI-compatible server. A saved server is listed after the banner is
-printed, so the banner shows what the file says, unless the run already
-listed the server, as the first run does.
+server, vLLM's own included. So oMLX has no backend of its own: it is the
+`vllm` backend, and the config file spells it `omlx`. First-run setup saves
+`chat_backend = "omlx"` for a server whose model listing names oMLX as the
+owner of its models (oMLX does, on every model it lists), and
+`embedding_backend = "omlx"` when it uses that server's embedding model; any
+other server is saved as `vllm`. Both spellings load as the same backend, with
+its settings in the `[vllm]` table, and are saved back as written. The banner,
+`/status` and the web console call the server oMLX when the file says `omlx`
+or a model listing of the server did, and otherwise an OpenAI-compatible
+server. A file that says `vllm` is named after the first listing, which the
+check after the banner makes; the banner itself shows what the file says,
+unless the run already listed the server.
 [Serve a model with oMLX](model-servers.md#serve-a-model-with-omlx) shows how
 to start it.
 
 ```toml
-chat_backend = "vllm"
+chat_backend = "omlx"
 embedding_backend = "none"
 request_timeout_s = 600
 
@@ -171,7 +173,7 @@ enable_thinking = false
 - [First run](configure.md#first-run) writes the `chat_backend`, `chat_url` and
   `chat_model` lines: run `melo` in a terminal with no config file, while
   oMLX runs. When it offers an embedding model it also writes
-  `embedding_backend = "vllm"` with that table's `embedding_url` and
+  `embedding_backend = "omlx"` with that table's `embedding_url` and
   `embedding_model`. Add the other lines by hand.
 - `request_timeout_s = 600` gives oMLX time to load the model when a
   request finds it unloaded; see [Chat request timeout](../reference/configuration.md#chat-request-timeout).
@@ -179,7 +181,7 @@ enable_thinking = false
   each step faster. Leave it out to keep thinking on. oMLX applies it unless
   the model's settings in oMLX force `enable_thinking`.
 - For long-term memory, oMLX can also serve an embedding model from the
-  same directory: set `embedding_backend = "vllm"` and add
+  same directory: set `embedding_backend = "omlx"` and add
   `embedding_url = "http://127.0.0.1:8000/v1"` and
   `embedding_model = "<its id>"` to `[vllm]`. oMLX's `GET /v1/models`
   gives ids but no type, so it cannot tell an embedding model from a chat

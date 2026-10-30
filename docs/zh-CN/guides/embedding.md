@@ -72,8 +72,8 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 `GET /v1/models` 返回 ID 但不返回类型，因此无法告诉你哪些 ID 是嵌入模型：上面的嵌入请求才是检查。模型 ID 由 oMLX 决定，通常是文件夹名称。然后把嵌入字段添加到保存 oMLX 对话设置的 `[vllm]` 表中：
 
 ```toml
-chat_backend = "vllm"
-embedding_backend = "vllm"
+chat_backend = "omlx"
+embedding_backend = "omlx"
 
 [vllm]
 chat_url = "http://127.0.0.1:8000/v1"

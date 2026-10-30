@@ -27,7 +27,7 @@ tables of the chosen backends.
 
 | Key | Table | Default | Description |
 |---|---|---|---|
-| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `vllm`, or `omlx`, which loads as `vllm` and is saved as written. Required. |
+| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. Required. |
 | `embedding_backend` | top level | not set | `mlc`, `ollama`, `vllm`, `sglang` or `none`; `omlx` is accepted as `vllm`. Required. |
 | `request_timeout_s` | top level | not set | Chat request timeout in seconds; see [Chat request timeout](#chat-request-timeout). |
 | `chat_url` | local backend | not set | The model server's URL. |

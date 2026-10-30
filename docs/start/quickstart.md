@@ -198,8 +198,9 @@ If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
 embeddings probe. Type a message and press Enter, or `/exit` to leave. From
 then on, `melo` goes straight in and `melo "<task>"` uses the saved server.
-The server here is Ollama, so it is saved as the `ollama` backend; oMLX and
-any other OpenAI-compatible server are saved as `vllm`, the key for those. See
+The server here is Ollama, so it is saved as the `ollama` backend; an oMLX
+server is saved as `omlx` and any other OpenAI-compatible server as `vllm`,
+the key for those. See
 [First run](../guides/configure.md#first-run) and
 [Set up an embedding model](../guides/embedding.md).
 
