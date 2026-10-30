@@ -65,6 +65,8 @@ CACHE_LAYOUTS = ("v2", "v3")
 TOOL_IMAGES = ("auto", "on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
+# How memory across chats finds notes: see MemoryConfig.retriever.
+MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
@@ -260,11 +262,16 @@ class MemoryConfig:
 
     ``across_chats`` keeps notes of what the user says about themselves and an
     index of every chat, and recalls them in the chats (not in direct runs or
-    workers); it is on unless the file turns it off.
+    workers); it is on unless the file turns it off. ``retriever`` is how a
+    chat message finds its notes: ``auto`` (words, and meaning too when an
+    embedding model is set up), ``bm25`` (words only), ``embedding`` (words and
+    meaning; an embedding model is required) or ``llm`` (words pick candidates
+    and the chat model chooses among them, with no embedding calls).
     """
 
     admit_on_outcome: bool = False
     across_chats: bool = True
+    retriever: str = "auto"  # auto | bm25 | embedding | llm
 
 
 @dataclass
@@ -430,6 +437,13 @@ class Config:
             emb_errors = self._validate_embedding_backend()
             errors.extend(emb_errors)
 
+        if self.memory.retriever == "embedding" and not self.has_embedding:
+            errors.append(
+                '[memory] retriever = "embedding" needs an embedding model, and '
+                "none is set up. Run 'melo setup' to add one, or use "
+                '"auto", "bm25" or "llm".'
+            )
+
         # -- Chat request timeout --
         errors.extend(self._validate_request_timeout())
 
@@ -447,12 +461,18 @@ class Config:
         return [] if problem is None else [f"[gateway] workspace: {problem}"]
 
     def _validate_memory(self) -> list[str]:
-        """``[memory]`` holds bools."""
-        return [
+        """``[memory]`` holds bools and a known retriever."""
+        errors = [
             f"[memory] {name} must be a bool, got {value!r}"
             for name in ("admit_on_outcome", "across_chats")
             if not isinstance(value := getattr(self.memory, name), bool)
         ]
+        if self.memory.retriever not in MEMORY_RETRIEVERS:
+            errors.append(
+                f"[memory] retriever {self.memory.retriever!r} is not "
+                f"recognised. Must be one of {MEMORY_RETRIEVERS}."
+            )
+        return errors
 
     def _validate_browser(self) -> list[str]:
         """``[browser] driver`` names a driver."""
@@ -1357,6 +1377,8 @@ def save(cfg: Config) -> None:
             lines.append("admit_on_outcome = true")
         if not cfg.memory.across_chats:
             lines.append("across_chats = false")
+        if cfg.memory.retriever != "auto":
+            lines.append(f"retriever = {_toml_string(cfg.memory.retriever)}")
         lines.append("")
 
     if cfg.browser != BrowserConfig():

@@ -2,7 +2,9 @@
 
 BM25 always runs, over words and CJK characters and bigrams; with an embedding
 model, cosine similarity over the vectors joins it, and reciprocal rank fusion
-(k = :data:`RRF_K`) merges the two lists. An item takes part in a list only
+(k = :data:`RRF_K`) merges the two lists (:func:`ranked`; :func:`pick` keeps the
+best few). The ``llm`` retriever asks :func:`ranked` for loose BM25 candidates
+and lets the chat model choose among them. An item takes part in a list only
 above that list's bar: most of the question's content words for BM25,
 :data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
@@ -14,7 +16,7 @@ from __future__ import annotations
 import math
 import time
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -155,22 +157,25 @@ class Corpus:
         return {key for key in self.items if key.startswith(prefix)}
 
 
-def rank(
+def ranked(
     corpus: Corpus,
     query: str,
     query_vector: np.ndarray | None,
     embed_model: str,
     *,
     now: float,
-    records: int,
-    docs: int,
     exclude_session: str = "",
+    coverage: float = MIN_COVERAGE,
 ) -> list[Item]:
-    """The best items for *query*: at most *records* records and *docs* documents."""
+    """The items that pass the bars for *query*, best first.
+
+    *coverage* is the share of the question's content words an item must hold
+    to join the BM25 list; a small one lets loose candidates through.
+    """
     wanted = gate_terms(query)
     lists: list[list[str]] = []
     if wanted:
-        need = max(1, math.ceil(MIN_COVERAGE * len(wanted)))
+        need = max(1, math.ceil(coverage * len(wanted)))
         hits = corpus.index.search(query, len(corpus.items))
         lists.append([k for k, _ in hits if len(wanted & corpus.terms[k]) >= need])
     if query_vector is not None:
@@ -196,17 +201,22 @@ def rank(
             score *= 0.5 ** (age_days / HALF_LIFE_DAYS)
         rows.append((score, item.is_record, item))
     rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    kept = [item for _, is_record, item in rows if is_record][:records]
+    return [item for _, _, item in rows]
+
+
+def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:
+    """From *items*, best first: at most *records* records and *docs* documents."""
+    kept = [item for item in items if item.is_record][:records]
     # A record already says what the turn it came from said.
     said = {(item.session_id, item.turn) for item in kept}
     per_session: Counter[str] = Counter()
-    for _, is_record, item in rows:
-        if is_record or (item.session_id, item.turn) in said:
+    for item in items:
+        if item.is_record or (item.session_id, item.turn) in said:
             continue
         if per_session[item.session_id] < PER_SESSION and per_session.total() < docs:
             per_session[item.session_id] += 1
             kept.append(item)
-    order = {id(item): n for n, (_, _, item) in enumerate(rows)}
+    order = {id(item): n for n, item in enumerate(items)}
     return sorted(kept, key=lambda item: order[id(item)])
 
 

@@ -10,7 +10,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import AgentOptions
-from localmelo.support import config
+from localmelo.support import config, config_cli
 from localmelo.support.config import Config, MemoryConfig, save
 
 from .test_reasoning_flags import _error_line, _main, _parse, _write_config
@@ -145,3 +145,71 @@ def test_memory_across_chats_is_on_unless_the_file_turns_it_off(tmp_path: Path) 
         assert config.load().memory == MemoryConfig(across_chats=False)
     cfg.memory = MemoryConfig(across_chats="no")  # type: ignore[arg-type]
     assert "[memory] across_chats must be a bool, got 'no'" in cfg.validate()
+
+
+def test_memory_retriever_is_auto_saved_only_when_set_and_checked(
+    tmp_path: Path,
+) -> None:
+    assert MemoryConfig().retriever == "auto"
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.memory = MemoryConfig(retriever="llm")
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        save(cfg)
+    assert '[memory]\nretriever = "llm"\n' in path.read_text()
+    with mock.patch.object(config, "CONFIG_PATH", str(path)):
+        assert config.load().memory == MemoryConfig(retriever="llm")
+    cfg.memory = MemoryConfig(retriever="vectors")
+    assert any(
+        "[memory] retriever 'vectors' is not recognised" in e for e in cfg.validate()
+    )
+    assert cfg.setting_errors() == [
+        "[memory] retriever 'vectors' is not recognised. Must be one of "
+        "('auto', 'bm25', 'embedding', 'llm')."
+    ]
+
+
+@pytest.mark.parametrize("mode", ["auto", "bm25", "llm"])
+def test_only_the_embedding_retriever_needs_an_embedding_model(mode: str) -> None:
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.memory = MemoryConfig(retriever=mode)
+    assert not [e for e in cfg.validate() if "embedding model" in e]
+
+
+def test_the_embedding_retriever_without_a_model_fails_at_setup_in_plain_words() -> (
+    None
+):
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.memory = MemoryConfig(retriever="embedding")
+    (problem,) = [e for e in cfg.validate() if "embedding model" in e]
+    assert problem == (
+        '[memory] retriever = "embedding" needs an embedding model, and none is '
+        'set up. Run \'melo setup\' to add one, or use "auto", "bm25" or "llm".'
+    )
+    with pytest.raises(config.ConfigError, match="needs an embedding model"):
+        cfg.validate_or_raise()
+    cfg.vllm.embedding_url = "http://127.0.0.1:9/v1"
+    cfg.vllm.embedding_model = "embed"
+    cfg.embedding_backend = "vllm"
+    assert not [e for e in cfg.validate() if "embedding model" in e]
+
+
+def test_x_sets_the_memory_retriever_and_only_the_developer_help_lists_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    key = "memory.retriever"
+    cli._parse(["-X", f"{key}=llm", "--base-url", "http://127.0.0.1:1/v1", "q"])
+    assert config.overrides() == {key: "llm"}
+    assert config.load().memory.retriever == "llm"
+    assert config_cli.main(["keys", "retriever", "-X", f"{key}=llm"]) == 0
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
+    assert [key, '"llm"', '"auto"', "-X"] in rows
+    developer = cli._build_parser(developer=True).format_help()
+    assert any(
+        line.startswith(f"  {key} ") and line.endswith("(#299)")
+        for line in developer.splitlines()
+    )
+    assert key not in cli._build_parser(developer=False).format_help()

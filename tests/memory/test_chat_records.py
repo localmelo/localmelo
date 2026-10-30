@@ -141,7 +141,10 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
     )
     assert [w.text for w in found.remembered] == ["You prefer short answers."]
     assert found.refused and found.block == ""
-    assert found.event() == {
+    data = found.event()
+    assert data is not None
+    data.pop("recall")  # its numbers are pinned in test_chat_retriever.py
+    assert data == {
         "used": [],
         "remembered": [
             {

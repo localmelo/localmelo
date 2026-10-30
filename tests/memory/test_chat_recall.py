@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import BLOCK_CHARS, BLOCK_HEADER, chat_label
@@ -85,10 +87,13 @@ async def _turn(store: SessionStore, title: str, session_id: str | None = None):
 
 
 async def build(
-    tmp_path: Path, store: SessionStore, embedding: FakeEmbedding | None
+    tmp_path: Path,
+    store: SessionStore,
+    embedding: FakeEmbedding | None,
+    settings: Callable[[], Config | None] = lambda: None,
 ) -> tuple[ChatMemory, dict[str, str]]:
     """A memory holding SAID as records and TURNS as documents; key -> item key."""
-    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    memory = ChatMemory(settings, directory=str(tmp_path / "memory"))
     if embedding is not None:
         memory.embedding = lambda: (embedding, embedding.model)  # type: ignore[method-assign]
     keys: dict[str, str] = {}
