@@ -1858,6 +1858,25 @@ test('the newest reply shows its turn\'s face, older replies the idle face, and 
   assert.deepEqual(fourth, ['done', '/assets/akita/face-done.png', 'Done'], 'a bare answer has no words for the state, so its face has them');
 });
 
+test('only the idle face blinks: it sits in a wrapper whose CSS fades the eyes-closed patch in, and the other faces stay still', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {
+      turns: [turnRow({id: 'one', turn: 1}), turnRow({id: 'two', turn: 2, status: 'provider_error', answer: '', result: {error: 'e'}})],
+      has_earlier: false, replay_from: 10,
+    },
+  }));
+  await h.run('init()');
+  const [older, newest] = Array.from(h.element('messages').children);
+  const wrapper = findNode(older, (node) => node.className === 'blinks face');
+  assert.ok(wrapper, 'an older reply keeps the idle face, and it blinks');
+  assert.equal(wrapper.children.length, 1, 'the wrapper holds the face and nothing else: the patch is CSS');
+  assert.equal(wrapper.children[0].dataset.face, 'idle');
+  assert.equal(wrapper.children[0].src, '/assets/akita/face-idle.png');
+  assert.equal(findNode(newest, (node) => String(node.className).includes('blinks')), null, 'an error face has no patch');
+  const label = findNode(older, (node) => node.className === 'assistant-label');
+  assert.equal(label.children[0], wrapper, 'the face keeps its place before the name');
+});
+
 test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');

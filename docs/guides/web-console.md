@@ -156,16 +156,18 @@ folder.
 ## Melo in the page
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
-app and in a browser alike. Every picture is a still image: the page moves
-nothing, so Reduce Motion needs no special case.
+app and in a browser alike. The pictures are still images, except that the calm
+portrait and the calm (idle) face blink: an eyes-closed patch, laid over the
+picture, fades in twice every 11 seconds. It is CSS only, with no script, and
+under `prefers-reduced-motion: reduce` the page shows the still picture.
 
 - **Empty chat.** Melo sits above *What would you like to work on?* with its calm
-  face.
+  face, and blinks.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
   reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
   while an approval waits, happy when it is done, and with a drooping ear when
   it ended with a warning or an error. A turn you stopped is not a failure and
-  keeps the calm face, and so does every older reply.
+  keeps the calm face, and so does every older reply; the calm face blinks.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
   wide-eyed face.
 - **Brand and tab.** The sidebar and the sign-in screen show the calm face, and
@@ -181,8 +183,8 @@ The pictures are transparent PNGs with a thin cream rim. On the light canvas the
 navy outline sets Melo off (at least 12:1 against the console's light surfaces);
 on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
 bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
-`face-idle.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
-`face-error.png` and `favicon-16.png`, `-32` and `-64`): 150 KB in all, copies of
+`sit-idle-blink.png`, `face-idle.png`, `face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
+`face-error.png` and `favicon-16.png`, `-32` and `-64`): 155 KB in all, copies of
 the app's own pictures in `macos/art/akita` made by the same script (see the
 [macOS app guide](macos-app.md)), and net 70 KB more
 than before, because the two logos `melo.png` and `icon_small.png` (80 KB) left

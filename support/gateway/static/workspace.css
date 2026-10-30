@@ -605,6 +605,35 @@ button:hover:not(:disabled) {
   overflow-wrap: anywhere;
   font-size: var(--text-reading);
 }
+/* A picture that blinks: its eyes-closed patch, laid over it as the ::after's background, fades in twice in an 11 s
+   loop (CSS only, no script). Without the animation (Reduce Motion, below) the patch stays clear: the still picture. */
+.blinks {
+  position: relative;
+  display: block;
+  width: fit-content;
+  flex-shrink: 0;
+}
+.blinks::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: center / contain no-repeat;
+  opacity: 0;
+  pointer-events: none;
+  animation: melo-blink 11s linear infinite;
+}
+.blinks.portrait { margin: 0 auto 16px; }
+.blinks.portrait .welcome-mascot { margin: 0 auto; }
+.blinks.portrait::after { background-image: url(/assets/akita/sit-idle-blink.png); }
+.blinks.face::after { background-image: url(/assets/akita/face-idle-blink.png); }
+/* Blinks at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing). */
+@keyframes melo-blink {
+  0%, 38.18% { opacity: 0; }
+  38.73%, 39% { opacity: 1; }
+  39.64%, 87.27% { opacity: 0; }
+  87.82%, 88.09% { opacity: 1; }
+  88.73%, 100% { opacity: 0; }
+}
 .assistant-label {
   font-size: var(--text-caption);
   font-weight: 600;
