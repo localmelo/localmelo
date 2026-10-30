@@ -171,3 +171,22 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 - **故障时默认拒绝。** 引发错误或不返回决策的策略会以 `Approval failed, so the call did not run: <ExceptionType>: <message>` 拒绝调用。
 - **再次检查。** 在工作区根目录下，策略允许文件工具调用后会再次解析路径。如果此时路径解析到其他位置，例如策略决策期间符号链接取代了文件，会以 `Path '<path>' changed while waiting for approval; the call did not run.` 拒绝。
 - 没有策略时，这些工具无需询问即可运行。
+
+<a id="high-impact-calls"></a>
+
+### 高影响调用
+
+在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分，Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。以下调用属于高影响：
+
+- 安装软件或软件包，恢复项目的软件包（`uv sync`、`npm ci`、`pip install -r`），或创建编程环境（`python -m venv`、`uv venv`、`conda create`）；
+- 下载安装程序、大文件（压缩包、wheel、模型权重）或把任何文件下载到工作区以外，或运行从互联网下载的代码（`curl … | sh`、`get-pip.py`）；
+- 在工作区以外写入或删除文件，删除工作区本身或其 `.git`，或丢弃工作（`git reset --hard`、`git clean -x`、强制推送）；
+- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
+- 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
+
+规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。
+
+- **会话授权只覆盖常规调用。** “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）让该工具的常规调用无需询问即可运行。同一工具的高影响或无法判定的调用每次都会询问；对它选择会话授权只允许这一次调用，不会授权该工具。终端的 `auto` 模式运行常规调用，其余调用会先询问。
+- **永不更改 localmelo 本身。** 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …`
+- **模型会读到原因。** 拒绝高影响调用时，文本会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.`
+- **限制。** 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。审批卡片和终端面板暂时还不显示原因。

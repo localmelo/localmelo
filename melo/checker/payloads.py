@@ -66,6 +66,22 @@ class ExecutorResultPayload:
     images: list[ImagePart] = field(default_factory=list)
 
 
+@dataclass
+class ActionReviewPayload:
+    """One call about to run, for the action review (``Checker.review_action``).
+
+    ``home``, ``executable`` and ``prefix`` default to the running process's
+    (``~``, ``sys.executable``, ``sys.prefix``); tests set them.
+    """
+
+    tool_name: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    workspace_root: str | None = None
+    home: str = ""
+    executable: str = ""
+    prefix: str = ""
+
+
 # ── Memory boundary ──
 
 

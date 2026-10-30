@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Collection
 from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
 from localmelo.melo.checker.payloads import (
+    ActionReviewPayload,
     ExecutorResultPayload,
     GatewayIngressPayload,
     MemoryCandidatePayload,
@@ -25,6 +27,9 @@ from localmelo.melo.checker.validators import (
     validate_tool_resolution,
 )
 from localmelo.melo.schema import CheckResult, Message, ToolCall, ToolDef, ToolTier
+
+if TYPE_CHECKING:
+    from localmelo.melo.contracts.review import ActionReview
 
 
 def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
@@ -129,6 +134,17 @@ class Checker:
         if refusal is not None:
             return CheckResult(allowed=False, reason=refusal)
         return CheckResult(allowed=True)
+
+    def review_action(self, payload: ActionReviewPayload) -> ActionReview:
+        """Classify a call before an approval policy decides (#279).
+
+        A session grant covers only a routine call; see
+        :mod:`localmelo.melo.contracts.review`. Imported here: the rules use
+        the contracts package, which imports the executor, which imports this.
+        """
+        from localmelo.melo.checker.review import review_action
+
+        return review_action(payload)
 
     # ── Structured boundary validators ──
 

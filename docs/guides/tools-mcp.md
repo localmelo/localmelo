@@ -330,3 +330,49 @@ tier is only a label: it asks when its `register` call sets the mark.
   decided, is refused with
   `Path '<path>' changed while waiting for approval; the call did not run.`
 - Without a policy, these tools run without asking.
+
+### High-impact calls
+
+Before the policy decides, the checker reviews each `shell_exec`,
+`python_exec` and `file_write` call with fixed rules: a command is split as
+the shell splits it, Python code is parsed (nothing runs), and a local script
+the call runs is read once. A call is **routine**, **high-impact** or
+**undecided**. It is high-impact when it:
+
+- installs software or packages, or restores a project's packages
+  (`uv sync`, `npm ci`, `pip install -r`), or creates a programming
+  environment (`python -m venv`, `uv venv`, `conda create`);
+- downloads an installer, a large file (an archive, a wheel, model weights)
+  or anything to a place outside the workspace, or runs code downloaded from
+  the internet (`curl … | sh`, `get-pip.py`);
+- writes or deletes files outside the workspace, deletes the workspace or its
+  `.git`, or discards work (`git reset --hard`, `git clean -x`, a force-push);
+- sets up something that runs later (launchd, `crontab`, shell startup files,
+  git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain
+  (reads too), changes system settings or uses `sudo`, opens a network service
+  that other computers can reach, or sends a file from outside the workspace
+  or an email;
+- changes localmelo itself, or runs code built at run time (`exec` of
+  computed text, `eval "$x"`).
+
+A call is undecided when the rules cannot read what it does: a command,
+program or path built at run time, a POST that sends data, `git push`.
+
+- **A session grant covers routine calls only.** "Allow for this chat" (in
+  the terminal, "Yes, and allow every … call in this session") lets routine
+  calls of that tool run without asking. A high-impact or undecided call of
+  the same tool asks every time; allowing it for the session allows that one
+  call and grants nothing. The terminal's `auto` mode runs routine calls and
+  asks before the others.
+- **localmelo itself is never changed.** A call that installs into the Python
+  that runs localmelo or writes under `~/.cache/localmelo` or the app is
+  denied without asking, with
+  `The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …`
+- **The model reads why.** A denial of a high-impact call says what the call
+  does, for example
+  `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.`
+- **Limits.** The rules read the literal text of a call; code that builds
+  what it runs at run time is undecided, and a call the rules miss still runs
+  under a grant. Direct runs, `--brief` runs and `--yolo` have no policy, so
+  nothing is reviewed there. The approval card and the terminal panel do not
+  show the reasons yet.

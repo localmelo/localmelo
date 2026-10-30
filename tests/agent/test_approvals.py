@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import CALL_NOT_STARTED, Message, ToolCall, ToolDef
 
@@ -530,6 +531,7 @@ class TestRequest:
             preview=f"{target} (5 chars)",
             workspace_root=None,
             tier="write",
+            review=ActionReview("routine"),
         )
         assert deploy_request == ApprovalRequest(
             request_id=deploy_request.request_id,
@@ -540,6 +542,7 @@ class TestRequest:
             preview='{"target":"prod"}',
             workspace_root=None,
             tier="write",
+            review=ActionReview("routine"),
         )
         assert (again.run_id, again.call_id) == (second.task_id, "call_d")
         ids = [request.request_id for request in policy.requests]
@@ -580,6 +583,7 @@ class TestRequest:
             preview=f"{resolved} (2 chars)",
             workspace_root=agent.workspace_root,
             tier="write",
+            review=ActionReview("routine"),
         )
         assert agent.workspace_root == os.path.realpath(root)
         [started] = recorder.of("run.started")

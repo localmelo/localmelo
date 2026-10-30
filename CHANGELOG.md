@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- High-impact calls ask even inside a session grant. Before an approval
+  policy decides, each `shell_exec`, `python_exec` and `file_write` call is
+  reviewed by fixed rules (the shell command split, the Python code parsed;
+  nothing runs) as routine, high-impact or undecided. Installing software or
+  a project's packages, creating an environment, downloading installers,
+  large files or anything outside the workspace, running downloaded code,
+  writing or deleting outside the workspace, setting up something that runs
+  later, using passwords or keys, changing system settings, opening a network
+  service, sending files out and running code built at run time are
+  high-impact. "Allow for this chat" now covers routine calls only: a
+  high-impact or undecided call asks every time and is never granted, and the
+  terminal's `auto` mode asks for them too. A call that would change
+  localmelo itself (an install into the Python that runs it, a write under
+  `~/.cache/localmelo`) is denied without asking. A denied high-impact call
+  tells the model why melo asked. Direct, `--brief` and `--yolo` runs are not
+  reviewed ([#290]).
+
 - A worker's shell and Python write only inside its workspace on macOS. In a
   `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
   `python_exec`, the brief's checks included, start under a `sandbox-exec`
@@ -2247,6 +2264,7 @@ earlier milestones.
 [#287]: https://github.com/localmelo/localmelo/pull/287
 [#288]: https://github.com/localmelo/localmelo/pull/288
 [#289]: https://github.com/localmelo/localmelo/pull/289
+[#290]: https://github.com/localmelo/localmelo/pull/290
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
