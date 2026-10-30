@@ -312,6 +312,10 @@ NO_DEFAULT_MODEL: Final = (
     "several models are served and none is known to be loaded, so there is "
     "no default; answer with a number or a model id"
 )
+# Said when the status route answered 401 or 403, as it does to a listing.
+NO_STATUS_KEY_NOTE: Final = (
+    "The server did not say which models are loaded (it needs a key for that)."
+)
 
 
 def is_chat_model(model: str) -> bool:
@@ -338,6 +342,71 @@ def pick_model(
     if running and (len(running) == 1 or not unique):
         return running[0]
     return None
+
+
+@dataclass(frozen=True)
+class ModelChoice:
+    """The model to ask a ``--base-url`` server for, and what its list said.
+
+    *url* is normalised once the server answered there. *model* is None when
+    the list has several chat models and none is known to be loaded
+    (:meth:`refusal` says so), or when there is no usable list, which *reason*
+    then explains (:meth:`warning`).
+    """
+
+    url: str
+    model: str | None
+    models: tuple[str, ...] = ()
+    loaded: LoadedModels = LoadedModels()
+    reason: str = ""
+
+    def refusal(self) -> str:
+        """Why no model was chosen: several are served and none is known loaded.
+
+        When the status route needed a key, a line says so before the hint.
+        """
+        names = "".join(
+            f"\n  {name}{'  (loaded)' if name in self.loaded.ids else ''}"
+            for name in self.models
+        )
+        note = f"\n{NO_STATUS_KEY_NOTE}" if self.loaded.needs_key else ""
+        return (
+            f"{self.url} serves several models and it is not known which one is "
+            f"loaded:{names}{note}\nPass --chat-model <id>."
+        )
+
+    def warning(self, hint: str = "") -> str:
+        """The list could not be used, so the model ``default`` is asked for."""
+        return (
+            f"Could not list the models at {self.url} ({self.reason}); "
+            f"asking for the model 'default'{hint}."
+        )
+
+
+async def choose_model(
+    url: str, chat_model: str | None, *, list_anyway: bool = False
+) -> ModelChoice:
+    """The model for *url*: *chat_model*, else the server's list decides.
+
+    The list is asked for only without *chat_model* (or with *list_anyway*).
+    The model is then the only chat model or the one the server says is loaded
+    (see :func:`pick_model`); the status lookup is made only between several.
+    Loading a model can take minutes and tens of GB, so none is guessed.
+    """
+    models: list[str] = []
+    reason = ""
+    if not chat_model or list_anyway:
+        try:
+            models = await list_models(OPENAI_COMPATIBLE, url)
+        except DiscoveryError as exc:
+            reason = str(exc)
+        else:
+            url, reason = normalize_url(url), "" if models else "it lists no models"
+    loaded = LoadedModels()
+    if not chat_model and sum(map(is_chat_model, models)) > 1:
+        loaded = await loaded_models(url)
+    model = chat_model or pick_model(models, loaded, unique=True)
+    return ModelChoice(url, model, tuple(models), loaded, reason)
 
 
 # Families that serve embeddings but whose ids do not say "embed".

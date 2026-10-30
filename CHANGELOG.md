@@ -31,6 +31,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo --serve` writes its startup lines, the port that `--port 0` picked
+  included, as soon as they are printed when stdout is a pipe or a file. They
+  used to wait in the buffer until the server exited, so a script or a log
+  reader could not find the port while it ran ([#236]).
+
 - Setup never picks a model silently when several are served and none is known
   to be loaded. On a server whose status route needs a key (it answers 401) the
   first run used to default to the first listed model, which could be a large
@@ -40,6 +45,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   alone asks again (an empty answer with no terminal is an error).
   `melo --base-url URL` without `--chat-model` picks the one loaded model, or
   exits 2 with the list and `Pass --chat-model <id>`. ([#231])
+- A direct run with `--base-url` and no `--chat-model` (`melo --base-url URL -- "task"`,
+  `--brief` and `melo ""`) no longer asks a server for the model `default`, which a
+  server that loads models on demand can read as any model, a large one that is not
+  in memory included. It lists the server's models first and chooses as the interactive
+  UI does: the only chat model, or the one the server says is loaded. With several and
+  none known to be loaded it exits 2 with the list and `Pass --chat-model <id>` (and, when
+  the status route answered 401, a line saying the server needs a key for that); with
+  `--brief` that is a `startup_error` result whose `exit_code` is 2. A server that cannot
+  be listed still gets `default`, with one warning line on stderr in text output. With
+  `--chat-model` nothing changes: no list request, the same requests. ([#236])
 - The welcome screen's "Connect a model" button shows only when no model is configured or the configured server cannot be reached. With a reachable model, the welcome screen shows just the suggestions ([#230]).
 
 - `/memory` and `/status` in the terminal, and the console's details drawer, show the session's own working-window cap (`window_messages`) instead of always 20 ([#230]).
@@ -1465,6 +1480,7 @@ earlier milestones.
 [#230]: https://github.com/localmelo/localmelo/pull/230
 [#231]: https://github.com/localmelo/localmelo/pull/231
 [#232]: https://github.com/localmelo/localmelo/pull/232
+[#236]: https://github.com/localmelo/localmelo/pull/236
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
