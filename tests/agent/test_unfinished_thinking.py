@@ -51,7 +51,6 @@ ECHOED = "The workspace is empty. The user just said hello again, so it is only 
         ("", "", None, 0, False),
         # The server repeated its reasoning as content (a stream only).
         ("The same  words.", "The same words.", None, 0, True),
-        ("The same words.", "The same words.", "streamed-off", 0, False),
         ("Hello!", "A greeting.", "field", 0, False),
         # A framing that ends thinking with a mark, and no mark.
         (GREETING, "", "field", 0, True),
@@ -70,17 +69,19 @@ def test_the_rule_reads_facts_of_the_reply(
     tokens: int | None,
     unfinished: bool,
 ) -> None:
-    streamed = framing != "streamed-off"
     assert (
         unfinished_thinking(
-            content,
-            thinking,
-            framing=None if not streamed else framing,
-            reasoning_tokens=tokens,
-            streamed=streamed,
+            content, thinking, framing=framing, reasoning_tokens=tokens, streamed=True
         )
         is unfinished
     )
+
+
+def test_only_a_streamed_reply_that_repeats_its_reasoning_is_unfinished() -> None:
+    # oMLX sends unfinished thinking again as content only at the end of a stream.
+    words = ("The same words.", "The same words.")
+    assert unfinished_thinking(*words, framing=None, streamed=True)
+    assert not unfinished_thinking(*words, framing=None, streamed=False)
 
 
 def test_the_thinking_of_an_unfinished_reply_keeps_each_text_once() -> None:
