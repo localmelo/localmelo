@@ -177,6 +177,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The macOS app's menu bar says when melo needs you, and the app has an icon. The
+  menu-bar item is Melo's head (a template image the system tints for light and dark)
+  with the number of running things beside it, and a dot beside the head while a chat
+  or a task waits for your answer to a tool approval; it shows at the next 2-second
+  health check. VoiceOver and the tooltip say it in words (`localmelo, 3 running`,
+  `localmelo, waiting for your approval`), and the start of a wait is announced. The
+  menu starts with what runs and, while an approval waits, "Waiting for your approval",
+  which opens that chat or task; "Settings…" (Command-comma) opens the console's
+  settings. `GET /api/health` gains `status.waiting`, the chats and tasks with an
+  approval to answer (`sessions.pending_approvals` counted open chats only and named
+  none). The build draws `LocalMelo.icns` from one SVG mark, `macos/mark.svg`, with
+  `sips` and `iconutil` and names it in the plist, so the Dock and every dialog show it
+  instead of the generic icon. The item's text title (`localmelo · N`) is gone. ([#241])
+
 - One command builds and installs the macOS app on this Mac. `uv run python
   scripts/build_macos_app.py --install` builds the app, signs it ad hoc (no Apple
   developer account), puts it in `~/Applications/LocalMelo.app` and links
@@ -1624,6 +1638,7 @@ earlier milestones.
 [#238]: https://github.com/localmelo/localmelo/pull/238
 [#239]: https://github.com/localmelo/localmelo/pull/239
 [#240]: https://github.com/localmelo/localmelo/pull/240
+[#241]: https://github.com/localmelo/localmelo/pull/241
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

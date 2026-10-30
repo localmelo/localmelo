@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -40,6 +43,7 @@ func record(_ text: String) {
 var quitPhase = 0
 var didSignInAgain = false
 var didRetry = false
+var didClickItems = false
 """
 
 FAKE_GATEWAY = r"""import http.server, json, os, pathlib, sys, threading, time
@@ -140,6 +144,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif mode == "quit":
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":1}}'
                 status = 200
+            elif mode == "menubar":
+                # What the menu bar reads: the test writes `status.json` to change it.
+                shown = home / "status.json"
+                running = {"chats": 0, "tasks": 0, "runs": 0, "terminal": 0}
+                state = {"running": running, "waiting": []}
+                if shown.exists():
+                    state.update(json.loads(shown.read_text()))
+                body = json.dumps({"api": 2, "status": state, "sessions": {"store": "ok", "store_error": "", "running": 0}}).encode()
+                status = 200
             else:
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":0}}'
                 status = 200
@@ -155,7 +168,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.headers.get("X-LocalMelo-Instance") is None:
             (home / "requested-page").write_text("yes")
-        page = '<html><body id="test-page">test page</body></html>'
+        page = ('<html><body id="test-page"><button id="settings-btn" '
+                'onclick="document.body.dataset.settings=\'open\'">Settings</button>test page</body></html>')
         body = page.encode()
         if mode == "handoff-probe" and self.path == "/":
             handoff()
@@ -218,6 +232,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
+    shutil.copy(ROOT / "macos/mark.svg", bundle / "Resources/mark.svg")
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         "        webView = nil": '        webView = nil\n        record("removed")',
@@ -244,8 +259,33 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         record("loaded " + (webView.url?.absoluteString ?? ""))
         let items = NSApp.mainMenu?.items.first?.submenu?.items.map { $0.title }.filter { !$0.isEmpty } ?? []
-        record("names window=" + window.title + " status=" + (statusItem.button?.title ?? "")
+        let button = menuBar.statusItem.button
+        record("names window=" + window.title + " status=" + (button?.title ?? "")
+               + " label=" + (button?.accessibilityLabel() ?? "") + " template=" + String(button?.image?.isTemplate ?? false)
                + " menu=" + items.joined(separator: ","))
+        let wired = menuBar.statusItem.menu?.items.filter { !$0.isSeparatorItem && !$0.isHidden && $0.action != nil }.map { item in
+            item.title + "/" + item.keyEquivalent + "/"
+                + String(item.action.flatMap { NSApp.target(forAction: $0, to: item.target, from: item) } != nil)
+        } ?? []
+        record("status-menu " + wired.joined(separator: "|"))
+        if ProcessInfo.processInfo.environment["TEST_CLICK"] == "1" && !didClickItems {
+            didClickItems = true
+            func click(_ item: NSMenuItem?) {
+                if let item = item, let action = item.action { _ = NSApp.sendAction(action, to: item.target, from: item) }
+            }
+            click(menuBar.waitingLine)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                webView.evaluateJavaScript("location.hash") { value, _ in
+                    record("route " + String(describing: value ?? "nil"))
+                    click(self.menuBar.statusItem.menu?.items.first { $0.title == "Settings…" })
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        webView.evaluateJavaScript("document.body.dataset.settings ?? 'unset'") { value, _ in
+                            record("settings " + String(describing: value ?? "nil"))
+                        }
+                    }
+                }
+            }
+        }
         if let menu = NSApp.mainMenu?.items.last?.submenu {
             record("edit " + menu.items.map { $0.title + ":" + $0.keyEquivalent }.joined(separator: ","))
         }
@@ -299,6 +339,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             }
             performSignIn(100)
         }""",
+        "                self.menuBar.show(menuBarState(data))\n": r"""                self.menuBar.show(menuBarState(data))
+                let item = self.menuBar.statusItem.button
+                record("menubar t=\(Date().timeIntervalSince1970) title=\(item?.title ?? "") label=\(item?.accessibilityLabel() ?? "") "
+                       + "template=\(item?.image?.isTemplate ?? false) width=\(item?.image?.size.width ?? 0) "
+                       + "waiting=\(!self.menuBar.waitingLine.isHidden) line=\(self.menuBar.runningLine.isHidden ? "" : self.menuBar.runningLine.title)")
+""",
         "    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {": '    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {\n        record("quit-request")',
         '                    alert.addButton(withTitle: "Cancel")': """                    alert.addButton(withTitle: "Cancel")
                     record("quit-prompt")
@@ -349,6 +395,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "swiftc",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
+            str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(main),
             "-o",
             str(executable),
@@ -476,9 +523,15 @@ def test_the_window_and_menus_call_the_app_localmelo(app: Path, tmp_path: Path) 
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "names ", process)
         line = next(x for x in events.splitlines() if x.startswith("names "))
+        # Nothing is known yet, so the item is the mark alone, named for VoiceOver.
         assert line == (
-            "names window=localmelo status=localmelo"
-            " menu=Open localmelo,Sign In Again,Quit localmelo"
+            "names window=localmelo status= label=localmelo template=true"
+            " menu=Open localmelo,Settings…,Sign In Again,Quit localmelo"
+        )
+        # Every entry of the item's menu reaches the app; Settings… answers to Command-comma.
+        wired = next(x for x in events.splitlines() if x.startswith("status-menu "))
+        assert wired == (
+            "status-menu Open localmelo//true|Settings…/,/true|Sign In Again//true|Quit localmelo/q/true"
         )
 
 
@@ -486,6 +539,99 @@ def test_sign_in_again_menu_item_is_wired(app: Path, tmp_path: Path) -> None:
     with running(app, tmp_path, "correct") as (process, _):
         events = wait_for(tmp_path / "events", "signin-menu ", process)
         assert "signin-menu signInAgain resolved" in events
+
+
+def item_now(
+    path: Path, process: subprocess.Popen[bytes], label: str
+) -> dict[str, str]:
+    """The menu-bar item's state, once the latest health read left it saying `label`."""
+    fields = ["t", "title", "label", "template", "width", "waiting", "line"]
+    pattern = re.compile(
+        r"menubar t=(\S+) title=(.*?) label=(.*?) template=(\S+) width=(\S+) waiting=(\S+) line=(.*)"
+    )
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        lines = path.read_text().splitlines() if path.exists() else []
+        found = [x for x in lines if x.startswith("menubar ")]
+        if found and f" label={label} template=" in found[-1]:
+            match = pattern.fullmatch(found[-1])
+            assert match, found[-1]
+            return dict(zip(fields, match.groups(), strict=True))
+        assert process.poll() is None, f"host exited early: {process.returncode}"
+        time.sleep(0.1)
+    pytest.fail(f"the item never said {label!r}; events={path.read_text()!r}")
+
+
+def test_the_menu_bar_item_follows_the_health_and_an_approval_shows_in_one_poll(
+    app: Path, tmp_path: Path
+) -> None:
+    status, events = tmp_path / "status.json", tmp_path / "events"
+    with running(app, tmp_path, "menubar") as (process, _):
+        idle = item_now(events, process, "localmelo, nothing running")
+        assert (idle["title"], idle["template"], idle["width"]) == ("", "true", "18.0")
+        assert (idle["waiting"], idle["line"]) == ("false", "Nothing running")
+        status.write_text(
+            json.dumps({"running": {"chats": 2, "tasks": 1, "runs": 0, "terminal": 0}})
+        )
+        busy = item_now(events, process, "localmelo, 3 running")
+        assert (busy["title"], busy["width"], busy["waiting"], busy["line"]) == (
+            "3",
+            "18.0",
+            "false",
+            "3 running",
+        )
+        asked = time.time()
+        status.write_text(
+            json.dumps(
+                {
+                    "running": {"chats": 2, "tasks": 1, "runs": 0, "terminal": 0},
+                    "waiting": [{"kind": "chat", "id": "chat-1"}],
+                }
+            )
+        )
+        waiting = item_now(events, process, "localmelo, waiting for your approval")
+        # The dot makes the template image wider; the count stays beside it.
+        assert (waiting["title"], waiting["template"], waiting["width"]) == (
+            "3",
+            "true",
+            "23.0",
+        )
+        assert (waiting["waiting"], waiting["line"]) == ("true", "3 running")
+        first = next(
+            x
+            for x in events.read_text().splitlines()
+            if "label=localmelo, waiting" in x
+        )
+        assert (
+            0 <= float(first.split()[1][2:]) - asked < 3.5
+        ), "one 2-second poll, and a margin"
+        status.write_text("{}")  # answered: the item goes quiet again
+        assert (
+            item_now(events, process, "localmelo, nothing running")["waiting"]
+            == "false"
+        )
+
+
+def test_waiting_and_settings_items_reach_the_page(app: Path, tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text(
+        json.dumps(
+            {
+                "running": {"chats": 1, "tasks": 0, "runs": 0, "terminal": 0},
+                "waiting": [{"kind": "chat", "id": "chat-1"}],
+            }
+        )
+    )
+    process = launch(
+        app, tmp_path, "menubar", TEST_CLICK="1"
+    )  # the host clicks both items
+    try:
+        events = wait_for(tmp_path / "events", "settings ", process)
+        assert "route #/s/chat-1" in events  # the waiting chat, as a link to it opens
+        assert (
+            "settings open" in events
+        )  # the console's own Settings button was pressed
+    finally:
+        stop(process, tmp_path)
 
 
 @pytest.mark.parametrize("mode", ["handoff-probe", "handoff-health"])

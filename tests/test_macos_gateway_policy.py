@@ -69,9 +69,7 @@ precondition(runningCounts(Data(#"{"api":2}"#.utf8)) == nil)
 precondition(runningCounts(health(#"{"chats":-1,"tasks":0,"runs":0,"terminal":0}"#)) == nil)
 precondition(runningCounts(health(#"{"chats":"1","tasks":0,"runs":0,"terminal":0}"#)) == nil)
 precondition(runningCounts(Data("not json".utf8)) == nil)
-precondition(menuTitle(none) == "localmelo")
-precondition(menuTitle(nil) == "localmelo")
-precondition(menuTitle(busy) == "localmelo · 7")
+precondition(menuTitle(.idle) == "" && menuTitle(.unknown) == "" && menuTitle(.running(7)) == "7")
 precondition(quitMessage(busy, statusKnown: true)
     == "2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it. "
     + "Not affected: 1 run and 3 terminal chats.")
@@ -185,6 +183,51 @@ precondition(late.actions == [.tryAgain, .openLog, .quit])
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_menu_bar_state_words_and_route_come_from_health(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+func health(_ running: String, waiting: String = "[]") -> Data {
+    Data((#"{"api":2,"status":{"running":"# + running + #","tasks":{},"items":[],"waiting":"# + waiting + #"}}"#).utf8)
+}
+let none = #"{"chats":0,"tasks":0,"runs":0,"terminal":0}"#
+let busy = #"{"chats":1,"tasks":2,"runs":1,"terminal":3}"#
+let chat = #"[{"kind":"chat","id":"3f9c0d2a"}]"#
+let both = #"[{"kind":"task","id":"t-1"},{"kind":"chat","id":"3f9c0d2a"}]"#
+
+// State: idle, running with the console chip's count, or waiting; a held task is not running.
+precondition(menuBarState(health(none)) == .idle)
+precondition(menuBarState(health(busy)) == .running(7))
+precondition(menuBarState(health(busy, waiting: chat)) == .waiting(running: 7))
+precondition(menuBarState(health(none, waiting: both)) == .waiting(running: 0))
+precondition(menuBarState(Data(#"{"api":2}"#.utf8)) == .unknown)
+precondition(menuBarState(Data("not json".utf8)) == .unknown)
+// A list that is missing or damaged never makes the item claim a wait.
+precondition(menuBarState(Data((#"{"status":{"running":"# + none + #"}}"#).utf8)) == .idle)
+precondition(menuBarState(health(none, waiting: #"{"kind":"chat"}"#)) == .idle)
+
+// The words: the count beside the mark, VoiceOver's label and the menu's first line.
+let states: [MenuBarState] = [.unknown, .idle, .running(1), .running(3), .waiting(running: 0), .waiting(running: 2)]
+precondition(states.map(menuTitle) == ["", "", "1", "3", "", "2"])
+precondition(states.map(menuBarLabel) == [
+    "localmelo", "localmelo, nothing running", "localmelo, 1 running", "localmelo, 3 running",
+    "localmelo, waiting for your approval", "localmelo, waiting for your approval"])
+precondition(states.map(menuStatusLine) == [nil, "Nothing running", "1 running", "3 running", "Nothing running", "2 running"])
+
+// The route opens the first chat or task that waits.
+precondition(waitingRoute(health(busy, waiting: chat)) == "#/s/3f9c0d2a")
+precondition(waitingRoute(health(busy, waiting: both)) == "#/tasks/t-1")
+precondition(waitingRoute(health(busy)) == nil && waitingRoute(Data("{}".utf8)) == nil)
+// An id or kind the console would not open is left out, so a route is safe to hand to the page.
+let long = String(repeating: "a", count: 129)
+let odd = #"[{"kind":"chat","id":"a b"},{"kind":"chat","id":"../x"},{"kind":"chat","id":""},"#
+    + #"{"kind":"chat","id":""# + long + #""},{"kind":"run","id":"r1"},{"kind":"task"},{"kind":"chat","id":"ok.1:2-3_x"}]"#
+precondition(waitingItems(health(none, waiting: odd)) == [WaitingItem(kind: "chat", id: "ok.1:2-3_x")])
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
     subprocess.run(
         [
@@ -193,6 +236,7 @@ def test_real_host_typechecks() -> None:
             "-typecheck",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
+            str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(ROOT / "macos/LocalMeloApp/main.swift"),
         ],
         env={
