@@ -1,8 +1,10 @@
-"""The cache settings' defaults: the new default request, and the opt-out that keeps the old one.
+"""The cache settings' defaults: the new default request, and the opt-outs that keep the old ones.
 
-``fixed_prefix``, ``window_eviction`` and ``reflect_tool_guard`` default to
-``True``, ``"chunk"`` and ``True``. The legacy goldens run with the opt-out
-values; the golden here is the same scripted run with the defaults.
+``fixed_prefix``, ``window_eviction``, ``reflect_tool_guard``, ``cache_layout`` and
+``window_messages`` default to ``True``, ``"chunk"``, ``True``, ``"v3"`` and 64 (a
+local server's window). The legacy goldens run with the opt-out values; the goldens
+here are the same scripted run with the defaults, and with only the layout and the
+window opted out.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ DEFAULTS: dict[str, Any] = {
     "fixed_prefix": True,
     "window_eviction": "chunk",
     "reflect_tool_guard": True,
+    "cache_layout": "v3",
+    "window_messages": 64,
 }
 SENTENCE = "Answer with the JSON object only; do not call any tool."
 
@@ -43,7 +47,12 @@ def test_the_defaults_of_the_options_and_of_the_config() -> None:
     options = AgentOptions()
     assert {name: getattr(options, name) for name in DEFAULTS} == DEFAULTS
     config = AgentConfig()
-    assert {name: getattr(config, name) for name in DEFAULTS} == DEFAULTS
+    # The config leaves the window unset: the backend decides it (see
+    # tests/cli/test_cache_layout_config.py).
+    assert {name: getattr(config, name) for name in DEFAULTS} == {
+        **DEFAULTS,
+        "window_messages": None,
+    }
 
 
 def test_the_opt_out_values_are_the_earlier_defaults() -> None:
@@ -51,6 +60,8 @@ def test_the_opt_out_values_are_the_earlier_defaults() -> None:
         "fixed_prefix": False,
         "window_eviction": "slide",
         "reflect_tool_guard": False,
+        "cache_layout": "v2",
+        "window_messages": 20,
     }
     options = AgentOptions(**LEGACY_CACHE_OPTIONS)
     assert dataclasses.replace(options, **DEFAULTS) == AgentOptions()
@@ -74,28 +85,26 @@ async def test_the_default_run_matches_its_golden(
 ) -> None:
     document = await _run_scenario(tmp_path, monkeypatch, **DEFAULTS)
     check_golden(GOLDEN / "openai_reflection_continues.json", document)
-
-
-async def test_the_named_defaults_of_the_layout_and_the_window_send_the_same_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    document = await _run_scenario(
-        tmp_path, monkeypatch, **DEFAULTS, cache_layout="v2", window_messages=20
-    )
-    check_golden(GOLDEN / "openai_reflection_continues.json", document)
-
-
-async def test_the_v3_run_matches_its_golden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    document = await _run_scenario(tmp_path, monkeypatch, **DEFAULTS, cache_layout="v3")
-    check_golden(GOLDEN / "openai_reflection_continues_v3.json", document)
     requests: Any = document["requests"]
     assert len(requests) == 3
     reflect, after = requests[1], requests[2]
     assert after["messages"][: len(reflect["messages"])] == reflect["messages"]
     result: Any = document["result"]
-    assert result["config"]["cache_layout"] == "v3"
+    assert (result["config"]["cache_layout"], result["config"]["window_messages"]) == (
+        "v3",
+        64,
+    )
+
+
+async def test_the_layout_and_window_opt_outs_match_their_golden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opt_outs = {"cache_layout": "v2", "window_messages": 20}
+    document = await _run_scenario(tmp_path, monkeypatch, **{**DEFAULTS, **opt_outs})
+    check_golden(GOLDEN / "openai_reflection_continues_v2.json", document)
+    result: Any = document["result"]
+    assert "cache_layout" not in result["config"]
+    assert "window_messages" not in result["config"]
 
 
 async def test_the_default_reflection_request_offers_the_tools_and_asks_for_json(

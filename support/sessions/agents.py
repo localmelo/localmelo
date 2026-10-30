@@ -47,15 +47,26 @@ CACHE_SETTINGS: Final = (
 
 
 def configured_cache_options(
-    cfg: Config | None, options: AgentOptions, keep: Collection[str] = ()
+    cfg: Config | None,
+    options: AgentOptions,
+    keep: Collection[str] = (),
+    *,
+    backend: str | None = None,
 ) -> AgentOptions:
-    """*options* with the config's cache settings, except the names in *keep*."""
+    """*options* with the config's cache settings, except the names in *keep*.
+
+    A window that the config leaves unset is the default of *backend*, the key
+    of the server the run talks to (``openai-compatible`` for a URL); it is
+    ``cfg.chat_backend`` when None.
+    """
     if cfg is None:
         return options
+    values = {name: getattr(cfg.agent, name) for name in CACHE_SETTINGS}
+    values["window_messages"] = cfg.agent.window_for(backend or cfg.chat_backend)
     changes = {
-        name: getattr(cfg.agent, name)
-        for name in CACHE_SETTINGS
-        if name not in keep and getattr(options, name) != getattr(cfg.agent, name)
+        name: value
+        for name, value in values.items()
+        if name not in keep and getattr(options, name) != value
     }
     return dataclasses.replace(options, **changes) if changes else options
 
@@ -115,6 +126,8 @@ def configured_session_options(
         )
         if name not in explicit
     }
+    if "window_messages" in fields:
+        fields["window_messages"] = cfg.agent.window_for(cfg.chat_backend)
     if fields.get("reasoning", options.reasoning) != "legacy":
         for name, key in (
             ("retriever", "retriever"),
