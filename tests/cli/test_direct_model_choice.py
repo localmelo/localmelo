@@ -153,7 +153,7 @@ def _refusal(*names: str) -> str:
 
 def test_the_only_chat_model_is_requested(melo: Melo) -> None:
     server = FakeServer(["bge-embed", "Qwen3-8B"])
-    run = melo(server, "--base-url", URL, "task")
+    run = melo(server, "--base-url", URL, "--", "task")
     assert (run.code, run.err) == (0, "")
     assert server.models_sent == {"Qwen3-8B"}
     assert server.gets == ["/v1/models"]  # one chat model: no status lookup
@@ -162,7 +162,7 @@ def test_the_only_chat_model_is_requested(melo: Melo) -> None:
 def test_the_loaded_model_of_several_is_requested(melo: Melo) -> None:
     status = {"models": [{"id": BIG, "loaded": False}, {"id": SMALL, "loaded": True}]}
     server = FakeServer([BIG, SMALL], status=status)
-    run = melo(server, "--base-url", URL, "task")
+    run = melo(server, "--base-url", URL, "--", "task")
     assert (run.code, run.err) == (0, "")
     assert server.models_sent == {SMALL}  # never the one that is not in memory
 
@@ -182,7 +182,7 @@ def test_several_models_and_none_known_loaded_exit_2_with_the_list(
     melo: Melo, status: int | dict[str, Any] | None, says_key: bool
 ) -> None:
     server = FakeServer([BIG, SMALL], status=status)
-    run = melo(server, "--base-url", URL, "task")
+    run = melo(server, "--base-url", URL, "--", "task")
     assert run.code == 2 and run.out == ""
     assert run.err.startswith("melo: error: " + _refusal(BIG, SMALL).split("\n  ")[0])
     assert "\n  " + BIG in run.err and "\n  " + SMALL in run.err
@@ -203,7 +203,7 @@ def test_the_loop_is_refused_the_same_way(melo: Melo) -> None:
 def test_a_usage_error_comes_before_any_request(melo: Melo) -> None:
     server = FakeServer([BIG, SMALL])
     # Only the builder refuses a retriever that has no embedding provider.
-    argv = ["--reasoning", "compress", "--retriever", "embedding", "task"]
+    argv = ["--reasoning", "compress", "--retriever", "embedding", "--", "task"]
     run = melo(server, "--base-url", URL, *argv)
     assert run.code == 2 and "embedding needs an embedding provider" in run.err
     assert server.seen == []
@@ -224,7 +224,7 @@ def test_a_usage_error_comes_before_any_request(melo: Melo) -> None:
 def test_an_unlisted_server_gets_default_and_one_warning_line(
     melo: Melo, server: FakeServer, reason: str, output: list[str]
 ) -> None:
-    run = melo(server, "--base-url", URL, *output, "task")
+    run = melo(server, "--base-url", URL, *output, "--", "task")
     assert run.code == 0
     assert run.err == (
         f"melo: warning: Could not list the models at {URL} ({reason}); "
@@ -235,7 +235,7 @@ def test_an_unlisted_server_gets_default_and_one_warning_line(
 
 def test_json_output_has_no_warning_and_still_asks_for_default(melo: Melo) -> None:
     server = FakeServer([], listing=503)
-    run = melo(server, "--base-url", URL, "--output-format", "json", "task")
+    run = melo(server, "--base-url", URL, "--output-format", "json", "--", "task")
     assert (run.code, run.err) == (0, "")
     assert json.loads(run.out)["status"] == "completed" and run.out.count("\n") == 1
     assert server.models_sent == {"default"}
@@ -254,8 +254,8 @@ def test_a_named_model_sends_no_listing_request(
     monkeypatch.setattr(cli, "_direct_model", refused)
     server = FakeServer([BIG, SMALL], status=OMLX_ALL)
     task = {
-        "text": ["task"],
-        "json": ["--output-format", "json", "task"],
+        "text": ["--", "task"],
+        "json": ["--output-format", "json", "--", "task"],
         "brief": ["--brief", _brief(tmp_path)],
     }[mode]
     run = melo(server, "--base-url", URL, "--chat-model", "M", *task)

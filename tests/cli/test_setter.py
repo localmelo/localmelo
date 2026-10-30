@@ -157,8 +157,14 @@ def test_a_setting_after_the_separator_is_task_text() -> None:
 
 
 def test_a_setting_first_makes_the_next_word_a_task_not_a_command() -> None:
-    assert _namespace(["-X", "cli.stream=true", "serve"])["query"] == ["serve"]
+    assert _namespace(["-X", "cli.stream=true", "--", "serve"])["query"] == ["serve"]
     assert config.overrides() == {"cli.stream": True}
+    # A lone word without `--` is refused (test_command_words.py); a longer task is not.
+    assert _namespace(["-X", "cli.stream=true", "serve", "the", "docs"])["query"] == [
+        "serve",
+        "the",
+        "docs",
+    ]
 
 
 def test_a_setting_works_with_a_command_word(tmp_path: Path) -> None:

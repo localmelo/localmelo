@@ -7,13 +7,15 @@ exactly as they do; ``task`` runs the ``melo-task`` client and ``config`` is new
 A word counts only as the first argument and only as an exact match: ``melo "serve
 the docs"`` (one quoted argument) and ``melo -- serve the docs`` are tasks. Unquoted
 extra words (``melo setup a venv``) end in a hint and exit 2, so a typo never starts
-a model run.
+a model run. So does a task that is just one of the words, typed after options
+(``melo -u URL serve``): the refusal says where the word goes.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import sys
 from collections.abc import Callable, Sequence
 from typing import NoReturn
@@ -21,6 +23,8 @@ from typing import NoReturn
 COMMANDS = ("setup", "config", "serve", "console", "task", "worker", "import")
 DAEMON_ACTIONS = ("install", "uninstall", "status")
 TASK_VERBS = ("new", "list", "show", "pause", "resume", "stop", "follow", "level")
+# The words that run with nothing after them (the others need a file, a verb or a key).
+_RUN_ALONE = ("setup", "serve", "console")
 
 # (usage, description, options, example) for ``melo COMMAND -h``.
 _HELP = {
@@ -113,6 +117,35 @@ def refuse(word: str, rest: Sequence[str]) -> NoReturn:
     sys.stderr.write(
         f'melo: "{word}" is a melo command. '
         f"To run this as a task, quote it: melo {quoted}\n"
+    )
+    raise SystemExit(2)
+
+
+def refuse_after_options(query: Sequence[str], typed: Sequence[str]) -> None:
+    """Exit 2 when the task is one command word that follows options and no ``--``.
+
+    ``melo -u URL -m x serve`` would run an agent task whose whole text is ``serve``.
+    That is a command in the wrong place far more often than a task, so say where the
+    word goes and how to give it as a task. A longer task, an option value
+    (``melo -w serve "fix it"``) and anything after ``--`` are not affected. The example
+    keeps the user's settings that have no option of their own (``gateway.port``), which
+    every word that runs alone takes, and leaves out what that word cannot take.
+    """
+    if len(query) != 1 or query[0] not in COMMANDS or "--" in typed:
+        return
+    from localmelo.support import settings
+
+    word = query[0]
+    keys = settings.catalog()
+    given: list[str] = []
+    for pair in settings.scan(typed)[1]:
+        key = keys.get(pair.partition("=")[0].strip())
+        if key is not None and not key.flag:
+            given += ["-X", pair]
+    example = shlex.join(["melo", word, *(given if word in _RUN_ALONE else [])])
+    sys.stderr.write(
+        f"melo: {word} is a command: put it first, as in {example}.\n"
+        f'To give melo the task "{word}", write melo -- {word}.\n'
     )
     raise SystemExit(2)
 

@@ -1932,8 +1932,9 @@ def _build_parser(
 def _parse(argv: Sequence[str]) -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     """The parser and the checked namespace of a command line (words included)."""
     from localmelo.support import settings
-    from localmelo.support.command_words import expand
+    from localmelo.support.command_words import expand, refuse_after_options
 
+    typed = list(argv)
     argv = settings.expand(expand(argv))
     legacy = _build_parser(direct_only=True)
     try:
@@ -1984,6 +1985,8 @@ def _parse(argv: Sequence[str]) -> tuple[argparse.ArgumentParser, argparse.Names
     elif args.output_format == "stream-json":
         parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
+    if args.brief is None:  # a brief's own text is the task, whatever it says
+        refuse_after_options(args.query, typed)
     return parser, args
 
 
