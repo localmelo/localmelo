@@ -892,6 +892,84 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   assert.equal(box.attributes['aria-label'], 'Command');
 });
 
+// A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).
+const replacing = (diff, target = {}) => ({
+  request_id: 'replace', tool_name: 'file_write', arguments: {path: '/w/notes.txt', content: 'remember the milk\n'},
+  arguments_complete: true, workspace_label: '~/w',
+  target: {path_label: 'notes.txt', exists: true, size_bytes: 125, diff, ...target},
+});
+const diffRow = (kind, line, text) => ({kind, line, text});
+const cardTexts = (card) => ({
+  title: findNode(card, (node) => node.className === 'approval-title').textContent,
+  caption: findNode(card, (node) => node.className === 'approval-caption').textContent,
+});
+
+test('a write over a file shows what it replaces, numbered, with signs that colour does not carry alone', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const rows = [
+    diffRow('removed', 1, 'Meeting notes'), diffRow('removed', 2, ''), diffRow('removed', 3, '- Ship the CSV summary'),
+    diffRow('added', 1, 'remember the milk'), diffRow('gap', null, ''), diffRow('context', 9, '<b>kept</b>'),
+  ];
+  h.context.request = replacing({added: 1, removed: 3, rows, note: ''});
+  const card = h.run('approvalCard(request)');
+  assert.deepEqual(cardTexts(card), {title: 'Replace notes.txt?', caption: '3 lines removed, 1 added · file_write'});
+  const box = findNode(card, (node) => node.className === 'approval-content approval-diff');
+  assert.equal(findNode(card, (node) => node.className === 'approval-content'), null, 'the new text alone is replaced by the diff');
+  assert.deepEqual([box.tabIndex, box.attributes.role, box.attributes['aria-label']], [0, 'group', 'Changes to notes.txt']);
+  assert.deepEqual(box.children.map((row) => row.className), [
+    'diff-row diff-removed', 'diff-row diff-removed', 'diff-row diff-removed', 'diff-row diff-added', 'diff-row diff-gap', 'diff-row diff-context',
+  ]);
+  assert.deepEqual(box.children.filter((row) => row.className !== 'diff-row diff-gap').map((row) => row.children.map((part) => part.textContent)), [
+    ['1', '−', 'Meeting notes'], ['2', '−', ''], ['3', '−', '- Ship the CSV summary'], ['1', '+', 'remember the milk'], ['9', ' ', '<b>kept</b>'],
+  ]);
+  assert.deepEqual(box.children.map((row) => row.children[2].tag), ['del', 'del', 'del', 'ins', 'span', 'span']);
+  assert.equal(box.children[4].attributes.role, 'separator', 'the skipped lines are one named stop for a screen reader');
+  assert.equal(box.children[5].children[2].innerHTML, '', 'a line is text, never markup');
+});
+
+test('the counts read as a sentence and an unchanged file has no box', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  for (const [added, removed, caption] of [
+    [3, 0, '3 lines added · file_write'], [0, 1, '1 line removed · file_write'], [1, 1, '1 line removed, 1 added · file_write'],
+    [0, 0, 'No changes · file_write'],
+  ]) {
+    const rows = added || removed ? [diffRow(removed ? 'removed' : 'added', 1, 'x')] : [];
+    h.context.request = replacing({added, removed, rows, note: ''});
+    const card = h.run('approvalCard(request)');
+    assert.equal(cardTexts(card).caption, caption);
+    assert.equal(findNode(card, (node) => String(node.className).startsWith('approval-content')) === null, rows.length === 0);
+  }
+});
+
+test('a long diff shows its first 20 rows and Show all counts the lines, not the skipped-line marks', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const rows = Array.from({length: 30}, (_, i) => diffRow(i === 10 ? 'gap' : 'removed', i === 10 ? null : i + 1, `old ${i}`));
+  h.context.request = replacing({added: 0, removed: 29, rows, note: ''});
+  const card = h.run('approvalCard(request)');
+  const diffRows = () => findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content approval-diff').children.length;
+  assert.equal(diffRows(), 20);
+  const more = findNode(card, (node) => String(node.textContent).startsWith('Show all'));
+  assert.equal(more.textContent, 'Show all 29 lines');
+  more.click();
+  assert.equal(diffRows(), 30);
+  assert.equal(findNode(h.run('approvalCard(request)'), (node) => String(node.textContent).startsWith('Show all')), null);
+});
+
+test('a file that cannot be compared says why and still shows the new text', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const note = 'melo cannot show what this replaces: the file is not text.';
+  h.context.request = replacing({added: 0, removed: 0, rows: [], note}, {path_label: 'logo.bin', size_bytes: 3200000});
+  const card = h.run('approvalCard(request)');
+  assert.deepEqual(cardTexts(card), {title: 'Replace logo.bin (3.2 MB)?', caption: 'file_write'});
+  assert.equal(findNode(card, (node) => node.className === 'approval-note').textContent, note);
+  const box = findNode(card, (node) => node.className === 'approval-content');
+  assert.deepEqual([box.textContent, box.attributes['aria-label']], ['remember the milk\n', 'File content']);
+});
+
 test('the card has a filled answer, an outlined grant and a quiet deny, and says what the grant covers', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');

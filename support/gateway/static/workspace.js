@@ -1264,6 +1264,34 @@ const chatApproval = {
   reload: (id) => refreshApproval(S.activeId, id),
 };
 
+// "5 lines removed, 1 added": the size of what a file write replaces.
+function diffSummary({added, removed}) {
+  const lines = (count) => `${count} ${count === 1 ? "line" : "lines"}`;
+  if (!added && !removed) return "No changes";
+  if (!removed) return `${lines(added)} added`;
+  return added ? `${lines(removed)} removed, ${added} added` : `${lines(removed)} removed`;
+}
+
+// The rows of a diff, numbered, each with a sign so that colour is not the only cue; the removed
+// and added text sit in del and ins, which a screen reader names.
+function diffBox(rows) {
+  const box = el("div", "approval-content approval-diff");
+  for (const row of rows) {
+    const line = el("div", `diff-row diff-${row.kind}`);
+    if (row.kind === "gap") {
+      line.setAttribute("role", "separator");
+      line.setAttribute("aria-label", "Unchanged lines skipped");
+      line.append(el("span", "diff-num"), el("span", "diff-sign"), el("span", "diff-text", "…"));
+    } else {
+      const tag = row.kind === "removed" ? "del" : row.kind === "added" ? "ins" : "span";
+      const sign = {removed: "−", added: "+", context: " "}[row.kind];
+      line.append(el("span", "diff-num", String(row.line)), el("span", "diff-sign", sign), el(tag, "diff-text", row.text));
+    }
+    box.append(line);
+  }
+  return box;
+}
+
 function approvalCard(request, view = chatApproval) {
   const id = String(request.request_id);
   let state = approvalStates.get(id);
@@ -1287,6 +1315,8 @@ function approvalCard(request, view = chatApproval) {
   let content = JSON.stringify(args, null, 2);
   let covers = `using ${tool}`;
   let what = "Arguments";
+  let diff = null; // What a file write replaces, when the gateway could compare.
+  let why = ""; // Why it could not, in words.
   if (tool === "shell_exec") {
     what = "Command";
     title = `Run this command in ${folder}?`;
@@ -1303,20 +1333,26 @@ function approvalCard(request, view = chatApproval) {
     content = String(args.content ?? "");
     what = "File content";
     covers = "writing files";
-    caption = target ? tool : `${tool} · checking the file`;
-    title = !target ? `Write ${path}?` : target.exists ? `Replace ${path} (${formatBytes(target.size_bytes)})?` : `Create ${path}?`;
+    if (target?.diff?.note) why = target.diff.note;
+    else diff = target?.diff ?? null;
+    if (diff) what = `Changes to ${path}`;
+    caption = !target ? `${tool} · checking the file` : diff ? `${diffSummary(diff)} · ${tool}` : tool;
+    title = !target ? `Write ${path}?` : !target.exists ? `Create ${path}?` : diff ? `Replace ${path}?` : `Replace ${path} (${formatBytes(target.size_bytes)})?`;
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
-  const lines = content.split("\n");
+  if (why) card.append(el("p", "approval-note", why));
+  const lines = diff ? diff.rows : content.split("\n");
   const canFold = tool === "python_exec" || tool === "file_write";
+  const shown = !canFold || state.showAll ? lines : lines.slice(0, 20);
   // A long command scrolls inside its box: make the box reachable and named for a keyboard user.
-  const body = el("pre", "approval-content", !canFold || state.showAll ? content : lines.slice(0, 20).join("\n"));
+  const body = diff ? diffBox(shown) : el("pre", "approval-content", shown.join("\n"));
   body.tabIndex = 0;
   body.setAttribute("role", "group");
   body.setAttribute("aria-label", what);
-  card.append(body);
+  if (shown.length) card.append(body);
   if (canFold && !state.showAll && lines.length > 20) {
-    card.append(button("link-button", `Show all ${lines.length} lines`, () => {
+    const count = diff ? lines.filter((row) => row.kind !== "gap").length : lines.length;
+    card.append(button("link-button", `Show all ${count} lines`, () => {
       state.showAll = true;
       view.rerender();
     }));

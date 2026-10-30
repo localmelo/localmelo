@@ -279,6 +279,16 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
+- 对已有文件写入文本的 `file_write`，其 `target` 还带有 `diff`，即这次写入会替换的内容；它在生成响应时读取，显示方式与终端的审批面板相同。新文件或没有文本的调用，`target` 没有 `diff`。
+
+  ```json
+  {"path_label": "todo.md", "exists": true, "size_bytes": 86, "diff": {"added": 1, "removed": 1, "rows": [{"kind": "context", "line": 2, "text": ""}, {"kind": "context", "line": 3, "text": "- [x] Read data.csv"}, {"kind": "removed", "line": 4, "text": "- [ ] Add a --json flag to app.py"}, {"kind": "added", "line": 4, "text": "- [x] Add a --json flag to app.py"}, {"kind": "context", "line": 5, "text": "- [ ] Test empty files"}], "note": ""}}
+  ```
+
+  - `added` 和 `removed` 统计行数。`rows` 是有变化的行，每侧各带两行上下文，相距较远的变化之间有一个 `gap` 行。`kind` 为 `removed`、`added`、`context` 或 `gap`；`line` 对 `removed` 行是旧行号，对其他行是新行号，`gap` 行为 `null`；`text` 是不含行尾的该行文本，从不截断。
+  - 每一行中的密钥都会脱敏，与已保存的事件相同：密钥读作 `[redacted]`。各行取自文本本身，所以只有密钥不同的一行，仍是一个 `removed` 行和一个 `added` 行。
+  - 差异要么完整，要么没有。melo 无法比较时，`rows` 为空，`note` 用文字说明原因：文件不是文本、无法读取、不是常规文件或超过 200 KB（200,000 字节）；新文本超过 200,000 个字符；会有超过 1,000 行变化；或者文件或新文本中含有私钥。其他情况下 `note` 为 `""`，`rows` 为空表示文件已经是这段新文本。
+  - `diff` 仅用于显示。审批的其他字段、回答及其规则与没有它时相同。
 
 ## GET /api/sessions/{id}/turns
 

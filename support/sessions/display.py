@@ -155,6 +155,9 @@ def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
     and ``fstat``, as the CLI panel's diff reads them: a final symlink is not
     followed and a FIFO never blocks. ``exists`` is false only for a missing
     path; any other failure to open counts as existing, with size 0.
+
+    A write of text over an existing file adds ``"diff"``, what it replaces,
+    from :func:`~localmelo.support.sessions.edits.approval_diff`.
     """
     if request.get("tool_name") != "file_write":
         return None
@@ -165,7 +168,18 @@ def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
     root = request.get("workspace_root")
     label = display_path(path, root if isinstance(root, str) else None)
     exists, size = file_facts(path)
-    return {"path_label": label, "exists": exists, "size_bytes": size}
+    target: dict[str, Any] = {
+        "path_label": label,
+        "exists": exists,
+        "size_bytes": size,
+    }
+    content = arguments.get("content")
+    if exists and isinstance(content, str):
+        # Imported here: edits reads file_facts from this module.
+        from localmelo.support.sessions import edits
+
+        target["diff"] = edits.approval_diff(path, content)
+    return target
 
 
 def file_facts(path: str) -> tuple[bool, int]:

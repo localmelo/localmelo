@@ -177,6 +177,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web console shows what a file write replaces before you allow it. The approval card
+  for a write of text over an existing file now asks "Replace notes.txt?", counts the lines
+  ("5 lines removed, 1 added") and lists them as numbered − and + rows with two lines of
+  context, as the terminal's panel does, with a secret read as `[redacted]`. A file that is
+  not text, cannot be read or is over 200 KB, a change of more than 1,000 rows and a private
+  key are told in a line, and the card keeps its old title with the file's size and the new
+  text. `GET /api/sessions/{id}` and the task routes carry the comparison as `target.diff` of a
+  pending approval; nothing else in the approval changes, and no answer works differently.
+  The terminal's file-edit helpers moved to `support/sessions/edits.py` for it, and
+  `support/cli/edits.py` re-exports them. ([#NN])
+
 - Experimental `lean_output` setting for fewer output tokens in direct runs (#183), off by
   default and with no flag: `[agent] lean_output = true` in the config file, or
   `-X agent.lean_output=true` for one run (`melo config keys lean` lists it, and `melo -h all`

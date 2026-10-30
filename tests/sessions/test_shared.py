@@ -527,6 +527,40 @@ def test_approval_target_does_not_follow_a_final_symlink_or_open_a_fifo(
     assert piped == {"path_label": "pipe", "exists": True, "size_bytes": 0}
 
 
+def test_approval_target_shows_what_a_write_replaces(tmp_path: Path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("buy milk\nbuy tea\n", encoding="utf-8")
+
+    def target(name: str, content: object) -> dict[str, object] | None:
+        return display.approval_target(
+            {
+                "tool_name": "file_write",
+                "arguments": {"path": str(tmp_path / name), "content": content},
+                "workspace_root": str(tmp_path),
+            }
+        )
+
+    found = target("notes.txt", "buy milk\nbuy bread\n")
+    assert found is not None
+    assert found["diff"] == {
+        "added": 1,
+        "removed": 1,
+        "rows": [
+            {"kind": "context", "line": 1, "text": "buy milk"},
+            {"kind": "removed", "line": 2, "text": "buy tea"},
+            {"kind": "added", "line": 2, "text": "buy bread"},
+        ],
+        "note": "",
+    }
+    # A new file replaces nothing, and a call without text has nothing to compare.
+    assert target("new.txt", "x") == {
+        "path_label": "new.txt",
+        "exists": False,
+        "size_bytes": 0,
+    }
+    assert "diff" not in (target("notes.txt", None) or {})
+
+
 def test_the_displayed_version_is_the_package_version_then_the_commit() -> None:
     with (
         mock.patch.object(display, "localmelo_version", return_value="baab21e"),
