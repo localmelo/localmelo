@@ -32,13 +32,13 @@ from prompt_toolkit.layout import (
     UIControl,
     Window,
 )
-from prompt_toolkit.output import ColorDepth
 
 from localmelo.support.cli.text import cells, cut_cells, cut_middle
 from localmelo.support.cli.theme import (
     PT_STYLE,
     Symbols,
     in_symbols,
+    pt_color_depth,
     symbols_for,
     wants_no_color,
 )
@@ -535,7 +535,7 @@ def run_inline(
             full_screen=False,
             erase_when_done=True,
             mouse_support=False,
-            color_depth=ColorDepth.DEPTH_1_BIT if no_color else None,
+            color_depth=pt_color_depth(no_color),
         )
         app.ttimeoutlen = 0.1  # Esc waits this long for a key that makes it Alt+key
         holder.append(app)

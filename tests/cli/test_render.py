@@ -21,7 +21,7 @@ from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import RecordingOut, TerminalOut
 from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
-from localmelo.support.cli.theme import ASCII, UNICODE, Symbols, rich_theme
+from localmelo.support.cli.theme import ASCII, UNICODE, Palette, Symbols
 from localmelo.support.cli.views import BackendInfo, banner
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.store import StoredEvent
@@ -143,7 +143,7 @@ def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
         )
         .text()
     )
-    assert "✓ shell_exec  ls -1 · 0.1s · allowed for the session\n" in text
+    assert "✓ $ shell_exec  ls -1 · 0.1s · allowed for the session\n" in text
     assert (
         "  └ app.py\n    notes.txt\n    tests\n    … +2 lines (/expand 1.1)\n" in text
     )
@@ -161,7 +161,7 @@ FIVE = "app.py\ndata.csv\nnotes.txt\ntodo.md\ntests"
 
 def test_a_success_shows_one_output_line_and_the_marker_shares_its_row() -> None:
     text = Turn().tool("shell_exec", "ls -1", output=FIVE).text()
-    assert "✓ shell_exec  ls -1 · 0.1s\n  └ app.py · +4 lines (/expand 1.1)\n" in text
+    assert "✓ $ shell_exec  ls -1 · 0.1s\n  └ app.py · +4 lines (/expand 1.1)\n" in text
     assert "data.csv" not in text
 
 
@@ -268,7 +268,8 @@ def test_only_the_mark_of_a_tool_row_is_colored(
     assert header.style == ""  # no base style: the row stays the default color
     colored = [span for span in header.spans if span.style == style]
     assert [(span.start, span.end) for span in colored] == [(0, 1)]
-    assert {span.style for span in header.spans} <= {style, "tool", "muted", "warn"}
+    # The kind's glyph and the name carry the kind; the rest is meta.
+    assert {span.style for span in header.spans} <= {style, "kind_run", "muted"}
 
 
 def test_a_call_that_did_not_run_stays_dim_as_a_whole() -> None:
@@ -276,20 +277,29 @@ def test_a_call_that_did_not_run_stays_dim_as_a_whole() -> None:
     assert header.style == "muted"
 
 
-def test_a_nonzero_exit_of_a_command_that_ran_is_a_tag_not_a_failure() -> None:
-    text = (
-        Turn()
-        .tool(
-            "shell_exec",
-            "pytest -q tests",
-            output="[exit code 1]\n....F\nFAILED tests/test_app.py",
-            exit_code=1,
-            duration_s=4.1,
-        )
-        .text()
+def test_a_nonzero_exit_reads_as_a_failure_while_the_event_says_success() -> None:
+    turn = Turn().tool(
+        "shell_exec",
+        "pytest -q tests",
+        output="[exit code 1]\n....F\nFAILED tests/test_app.py",
+        exit_code=1,
+        duration_s=4.1,
     )
-    assert "✓ shell_exec  pytest -q tests · 4.1s · exit 1\n" in text
+    text = turn.text()
+    assert "✗ $ shell_exec  pytest -q tests · 4.1s · exit 1\n" in text
     assert "  └ [exit code 1]\n" in text
+    # The record keeps what the event said: the command ran.
+    assert turn.renderer.tool_outputs[-1].status == "success"
+    header = _header_text(
+        Turn(), output="F", exit_code=1, duration_s=4.1, preview="pytest"
+    )
+    styles = {header.plain[s.start : s.end]: s.style for s in header.spans}
+    assert styles["✗"] == "error" and styles["exit 1"] == "error"
+    body = _block(Turn(), output="F..\nmore", exit_code=1)[-1]
+    assert isinstance(body, Text)
+    assert [body.plain[s.start : s.end] for s in body.spans if s.style == "error"] == [
+        "F.."
+    ]
 
 
 def test_a_failed_call_shows_its_error_then_its_output() -> None:
@@ -305,7 +315,7 @@ def test_a_failed_call_shows_its_error_then_its_output() -> None:
         )
         .text()
     )
-    assert "✗ python_exec  import app · 0.2s\n" in text
+    assert "✗ $ python_exec  import app · 0.2s\n" in text
     assert "  └ Python exited with code 1:\n    Traceback" in text
 
 
@@ -360,7 +370,7 @@ def test_a_denial_shows_its_reason() -> None:
         )
         .text()
     )
-    assert "⊘ file_write  todo.md (68 chars) · denied: keep the item first\n" in text
+    assert "⊘ ± file_write  todo.md (68 chars) · denied: keep the item first\n" in text
 
 
 def test_a_blocked_call_without_an_approval_names_the_block() -> None:
@@ -376,7 +386,7 @@ def test_a_blocked_call_without_an_approval_names_the_block() -> None:
     )
     line = next(row for row in text.split("\n") if row.startswith("⊘"))
     assert line.startswith(
-        "⊘ file_read  /etc/hosts · blocked: Path '/etc/hosts' is outside"
+        "⊘ → file_read  /etc/hosts · blocked: Path '/etc/hosts' is outside"
     )
     assert cells(line) == 80 and line.endswith("…")
 
@@ -392,8 +402,8 @@ def test_a_stopped_call_and_a_withdrawn_one() -> None:
         approval={"allowed": False, "origin": "withdrawn"},
     )
     text = turn.text()
-    assert "◌ shell_exec  pytest -q · stopped after 4.2s\n" in text
-    assert "◌ file_write  a.txt · not run\n" in text
+    assert "◌ $ shell_exec  pytest -q · stopped after 4.2s\n" in text
+    assert "◌ ± file_write  a.txt · not run\n" in text
 
 
 def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
@@ -427,8 +437,8 @@ def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
     )
     text = turn.text()
     assert (
-        text.index("◌ shell_exec  ls · stopped after 0.5s")
-        < text.index("◌ file_read  tests/test_app.py · not run")
+        text.index("◌ $ shell_exec  ls · stopped after 0.5s")
+        < text.index("◌ → file_read  tests/test_app.py · not run")
         < text.index("■ Stopped")
     )
 
@@ -846,7 +856,7 @@ def test_the_ascii_symbols() -> None:
     turn.finish(result="done")
     text = turn.text()
     assert "> What is in this folder?" in text
-    assert "+ shell_exec  ls - 0.1s\n  | a\n" in text
+    assert "+ $ shell_exec  ls - 0.1s\n  | a\n" in text
     assert "* done" in text
 
 
@@ -1111,7 +1121,7 @@ def test_a_tool_name_from_the_model_is_cleaned() -> None:
     turn.finish("cancelled")
     text = turn.text()
     assert "\x1b" not in text and "PWNED" not in text
-    assert "✗ evil  {}" in text and "◌ never" in text
+    assert "✗ ± evil  {}" in text and "◌ ± never" in text
 
 
 def test_model_ids_in_the_banner_are_cleaned() -> None:
@@ -1147,7 +1157,9 @@ def test_a_best_effort_keeps_its_code_block() -> None:
     lines = text.split("\n")
     assert "● Best effort:" in lines
     code = lines.index(next(line for line in lines if "def f(x):" in line))
-    assert lines[code + 1].strip() == "return x * 2"
+    # Without a fill, a gutter marks the code (a panel would need the background).
+    assert lines[code].lstrip().startswith("│ def f(x):")
+    assert lines[code + 1].lstrip().removeprefix("│").strip() == "return x * 2"
     assert lines[code + 1].index("return") > lines[code].index("def")
 
 
@@ -2202,7 +2214,7 @@ def _after_footer(text: str) -> list[str]:
 @pytest.mark.parametrize("developer", [False, True])
 def test_a_turn_that_wrote_a_file_lists_it_under_the_footer(developer: bool) -> None:
     text = Writes(developer=developer).write("hello.py", 'print("hello")\n').done()
-    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+    assert _after_footer(text) == ["  Changed + hello.py (+1)"]
     # Under the footer and nowhere else.
     assert text.count("Changed") == 1
 
@@ -2211,33 +2223,35 @@ def test_several_files_list_their_counts_and_a_removal_has_a_minus() -> None:
     old = "# demo\n\nOld.\n"
     new = "# demo\n\nNew.\nMore.\nAnd more.\n"
     text = Writes().write("hello.py", "x\n").write("README.md", new, old=old).done()
-    assert _after_footer(text) == ["  Changed hello.py (+1), README.md (+3 −1)"]
+    assert _after_footer(text) == ["  Changed + hello.py (+1), ~ README.md (+3 −1)"]
     # A file that only lost lines shows the minus alone.
     text = Writes().write("notes.txt", "a\n", old="a\nb\nc\n").done()
-    assert _after_footer(text) == ["  Changed notes.txt (−2)"]
+    assert _after_footer(text) == ["  Changed ~ notes.txt (−2)"]
 
 
 def test_the_line_is_ascii_in_an_ascii_terminal() -> None:
     writes = Writes(symbols=ASCII).write("README.md", "b\nc\n", old="a\n")
-    assert _after_footer(writes.done()) == ["  Changed README.md (+2 -1)"]
+    assert _after_footer(writes.done()) == ["  Changed ~ README.md (+2 -1)"]
 
 
 def test_at_most_three_names_then_and_n_more() -> None:
     writes = Writes()
     for name in ("a.py", "b.py", "c.py"):
         writes.write(name, "x\n")
-    assert _after_footer(writes.done()) == ["  Changed a.py (+1), b.py (+1), c.py (+1)"]
+    assert _after_footer(writes.done()) == [
+        "  Changed + a.py (+1), + b.py (+1), + c.py (+1)"
+    ]
     writes = Writes()
     for name in ("a.py", "b.py", "c.py", "d.py"):
         writes.write(name, "x\n")
     assert _after_footer(writes.done()) == [
-        "  Changed a.py (+1), b.py (+1), c.py (+1) and 1 more"
+        "  Changed + a.py (+1), + b.py (+1), + c.py (+1) and 1 more"
     ]
     writes = Writes()
     for name in ("a.py", "b.py", "c.py", "d.py", "e.py", "f.py"):
         writes.write(name, "x\n")
     assert _after_footer(writes.done()) == [
-        "  Changed a.py (+1), b.py (+1), c.py (+1) and 3 more"
+        "  Changed + a.py (+1), + b.py (+1), + c.py (+1) and 3 more"
     ]
 
 
@@ -2288,13 +2302,13 @@ def test_a_write_that_did_not_succeed_is_not_listed(refused: dict[str, Any]) -> 
     assert "Changed" not in text
     # Beside a write that worked, only that one is listed.
     both = Writes().write("../outside.txt", "x\n", **refused).write("hello.py", "x\n")
-    assert _after_footer(both.done()) == ["  Changed hello.py (+1)"]
+    assert _after_footer(both.done()) == ["  Changed + hello.py (+1)"]
 
 
 def test_a_failed_or_stopped_run_still_lists_the_files_it_wrote() -> None:
     text = Writes().write("hello.py", "x\n").done("failed", error="the model broke")
     assert "✻ Stopped after" in text
-    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+    assert _after_footer(text) == ["  Changed + hello.py (+1)"]
 
 
 def test_paths_are_relative_to_the_workspace(
@@ -2308,7 +2322,7 @@ def test_paths_are_relative_to_the_workspace(
     outside = f"{tmp_path}/notes/todo.md"
     writes.write(outside, "x\n")
     assert _after_footer(writes.done()) == [
-        "  Changed src/app.py (+1), docs/guide.md (+1), ~/notes/todo.md (+1)"
+        "  Changed + src/app.py (+1), + docs/guide.md (+1), + ~/notes/todo.md (+1)"
     ]
 
 
@@ -2316,12 +2330,12 @@ def test_a_file_written_twice_counts_its_net_change() -> None:
     writes = Writes()
     writes.write("app.py", "a\nb\n")  # a new file: +2
     writes.write("app.py", "a\nb\nc\n", old="a\nb\n")  # then written again: +1
-    assert _after_footer(writes.done()) == ["  Changed app.py (+3)"]
+    assert _after_footer(writes.done()) == ["  Changed + app.py (+3)"]
     # Over an old file the counts are against the file as the turn found it.
     writes = Writes()
     writes.write("app.py", "b\nc\n", old="a\nb\n")
     writes.write("app.py", "b\nd\n", old="b\nc\n")
-    assert _after_footer(writes.done()) == ["  Changed app.py (+1 −1)"]
+    assert _after_footer(writes.done()) == ["  Changed ~ app.py (+1 −1)"]
 
 
 def test_a_file_that_ends_as_it_began_is_not_listed() -> None:
@@ -2335,7 +2349,7 @@ def test_a_file_that_ends_as_it_began_is_not_listed() -> None:
 
 def test_a_new_empty_file_is_listed_without_counts() -> None:
     text = Writes().write("tests/__init__.py", "").done()
-    assert _after_footer(text) == ["  Changed tests/__init__.py"]
+    assert _after_footer(text) == ["  Changed + tests/__init__.py"]
 
 
 def test_a_run_with_no_approvals_names_the_file_without_counts() -> None:
@@ -2368,7 +2382,7 @@ def test_the_files_come_from_the_turns_calls_and_the_folder_is_never_scanned(
         monkeypatch.setattr(os, name, scanned)
     monkeypatch.setattr(Path, "iterdir", scanned)
     text = Writes().write("hello.py", "x\n").done()
-    assert _after_footer(text) == ["  Changed hello.py (+1)"]
+    assert _after_footer(text) == ["  Changed + hello.py (+1)"]
 
 
 @pytest.mark.parametrize("width", [80, 60, 44, 30])
@@ -2387,17 +2401,19 @@ def test_the_line_never_wraps_or_runs_past_the_width(width: int) -> None:
 
 
 def test_names_give_way_before_a_name_is_cut() -> None:
-    writes = Writes(width=44)
+    writes = Writes(width=46)
     for name in ("a.py", "b.py", "c.py", "d.py", "e.py"):
         writes.write(name, "x\n")
-    # Three names and "and 2 more" take 53 cells; two names and "and 3 more", 41.
-    assert _after_footer(writes.done()) == ["  Changed a.py (+1), b.py (+1) and 3 more"]
+    # Three names and "and 2 more" take 59 cells; two names and "and 3 more", 45.
+    assert _after_footer(writes.done()) == [
+        "  Changed + a.py (+1), + b.py (+1) and 3 more"
+    ]
 
 
 def test_one_long_path_is_cut_in_the_middle_and_keeps_its_file_name() -> None:
     long = "src/components/settings/panels/ThemeSwitcher.tsx"
     [row] = _after_footer(Writes(width=44).write(long, "a\n").done())
-    assert row.startswith("  Changed src/") and "…" in row
+    assert row.startswith("  Changed + src/") and "…" in row
     assert row.endswith("ThemeSwitcher.tsx (+1)") and cells(row) <= 44, row
     # In an ASCII terminal the cut uses three dots.
     [row] = _after_footer(Writes(width=44, symbols=ASCII).write(long, "a\n").done())
@@ -2411,41 +2427,52 @@ def test_a_long_first_path_loses_its_counts_before_its_file_name() -> None:
     for name in ("a.py", "b.py", "c.py", "d.py"):
         writes.write(name, "x\n")
     [row] = _after_footer(writes.done())
-    assert row == "  Changed src/…/ThemeSwitcher.tsx and 4 more"
+    assert row == "  Changed + sr…/ThemeSwitcher.tsx and 4 more"
     assert cells(row) <= 44
 
 
-def test_the_names_are_the_default_color_on_a_light_terminal() -> None:
+def test_the_names_carry_their_state_at_full_strength_on_a_light_terminal() -> None:
     from rich.console import Console
 
     writes = Writes().write("SUMMARY.md", "a\n").write("todo.md", "b\n", old="a\n")
     line = writes.turn.renderer.changed_line()
     assert line is not None
     console = Console(
-        theme=rich_theme("light"), force_terminal=True, color_system="standard"
+        theme=Palette("16", "light").rich_theme,
+        force_terminal=True,
+        color_system="standard",
     )
-    for name in ("SUMMARY.md", "todo.md"):
-        style = line.get_style_at_offset(console, line.plain.index(name))
-        # Not dim, no color: the terminal's own text color at full strength.
-        assert style.color is None and not style.dim, name
+    # A new file is green; a modified one is bold (yellow is not safe on light).
+    for name, mark, color, bold in (
+        ("SUMMARY.md", "+", "green", None),
+        ("todo.md", "~", None, True),
+    ):
+        for part in (mark, name):
+            at = line.plain.index(f"{mark} {name}") + (0 if part == mark else 2)
+            style = line.get_style_at_offset(console, at)
+            assert not style.dim, name
+            assert (style.color.name if style.color else None) == color, name
+            assert style.bold == bold, name
     # Only the words around the names are quiet.
     assert line.get_style_at_offset(console, 3).dim
 
 
-def test_the_line_has_no_color_to_lose_under_no_color() -> None:
+def test_the_line_keeps_each_state_mark_under_no_color() -> None:
     line = Writes().write("hello.py", "x\n").turn.renderer.changed_line()
     assert line is not None
     output = Vt100_Output(
         io.StringIO(), lambda: Size(rows=24, columns=80), term="xterm"
     )
+    color = r"\x1b\[[0-9;]*(?:3\d|9\d|4\d|10\d)m"
     for no_color in (True, False):
         drawn = TerminalOut(output, no_color=no_color).render(line)
-        assert not re.search(r"\x1b\[[0-9;]*(?:3\d|9\d|4\d|10\d)m", drawn), drawn
-        assert re.sub(r"\x1b\[[0-9;]*m", "", drawn).strip() == "Changed hello.py (+1)"
+        assert bool(re.search(color, drawn)) is not no_color, drawn
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", drawn).strip()
+        assert plain == "Changed + hello.py (+1)"
 
 
 def test_a_file_name_cannot_act_on_the_terminal() -> None:
     name = "a\x1b]0;PWNED\x07b.txt"
     text = Writes().write(name, "x\n").done()
     assert "\x1b" not in text and "\x07" not in text
-    assert _after_footer(text) == ["  Changed ab.txt (+1)"]
+    assert _after_footer(text) == ["  Changed + ab.txt (+1)"]

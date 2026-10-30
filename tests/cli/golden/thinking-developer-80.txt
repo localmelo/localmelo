@@ -3,12 +3,12 @@
   No approvals for this turn (--yolo).
 ✻ Thought for 0.1s
   The notes are in this folder.
-✓ shell_exec  ls -1 · 0.1s
+✓ $ shell_exec  ls -1 · 0.1s
   └ notes.txt
 ✻ Thought for 0.1s
   I should read the notes.
 ● Reading notes.txt.
-✓ file_read  notes.txt · 0.1s
+✓ → file_read  notes.txt · 0.1s
   └ buy milk
 ✻ Thought for 0.1s
   The answer is ready.

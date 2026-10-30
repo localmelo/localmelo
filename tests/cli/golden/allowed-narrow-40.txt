@@ -1,17 +1,17 @@
 › Run the check once.
 
-✓ shell_exec  echo one · 0.1s · allowed
+✓ $ shell_exec  echo o… · 0.1s · allowed
   └ one
-✓ shell_exec · 0.1s · allowed for the s…
+✓ $ shell_exec · 0.1s · allowed for the…
   └ two
-✓ shell_exec · 0.2s · allowed by a sess…
+✓ $ shell_exec · 0.2s · allowed by a se…
   └ three
 ● All three commands ran.
 ✻ Worked for 0.2s · 3 tool calls
 
 › Run it again in auto mode.
 
-✓ shell_exec  ech… · 0.2s · auto-allowed
+✓ $ shell_exec · 0.2s · auto-allowed
   └ four
 ● The command ran without asking:
   approvals are set to auto.

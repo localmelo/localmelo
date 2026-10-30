@@ -2,11 +2,11 @@
 
   No approvals for this turn (--yolo).
 * I will look at the project first.
-+ shell_exec  ls -1 - 0.1s
++ $ shell_exec  ls -1 - 0.1s
   | notes.txt
-+ file_read  notes.txt - 0.1s
++ > file_read  notes.txt - 0.1s
   | buy milk
-+ file_write  summary.md (9 chars) - 0.2s
++ ~ file_write  summary.md (9 chars) - 0.2s
   | Written 9 bytes to /home/me/demo-project/summary.md
 * summary.md now holds what notes.txt says: buy milk.
 * Worked for 0.2s - 3 tool calls - 58 tokens out

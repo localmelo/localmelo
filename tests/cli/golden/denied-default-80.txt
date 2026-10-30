@@ -1,12 +1,12 @@
 › Clean the build directory.
 
-⊘ shell_exec  rm -rf build · denied: It would delete the build directory.
+⊘ $ shell_exec  rm -rf build · denied: It would delete the build directory.
 ● I did not delete the build directory.
 ✻ Worked for 0.1s · 1 tool call · ↓ 24 tokens
 
 › Run the check.
 
-⊘ shell_exec  true · denied by policy: approvals are set to deny
+⊘ $ shell_exec  true · denied by policy: approvals are set to deny
 ● That command did not run either.
 ✻ Worked for 0.2s · 1 tool call · ↓ 22 tokens
 

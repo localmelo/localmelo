@@ -1,5 +1,5 @@
 › Run the check.
 
-◌ shell_exec  true · not run
+◌ $ shell_exec  true · not run
 ■ Stopped · /retry runs it again
 

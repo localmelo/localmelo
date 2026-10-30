@@ -1,7 +1,7 @@
 › Run the check.
 
   No approvals for this turn (--yolo).
-✓ shell_exec  true · 0.1s
+✓ $ shell_exec  true · 0.1s
   └ (no output)
 ● The check ran without asking.
 ✻ Worked for 0.1s · 1 tool call · ↓ 22 tokens
