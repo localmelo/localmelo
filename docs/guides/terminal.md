@@ -395,8 +395,8 @@ happens without the explicit `/copy` command.
   (`↻ Could not reach URL; trying again in 1 s`), with its delay counting
   down in the live area; `·` an empty reply, or a reply that was only
   unfinished thinking (`· The model's reply ended inside its thinking; asking
-  it for its answer.`), which prints as `✻ Thought for …` and never as the
-  answer; `⚠` a stuck or spent-budget notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
+  it for its answer.`), which prints as thinking (`✻ Thought`) and never as
+  the answer; `⚠` a stuck or spent-budget notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
   Read the test before editing. (2.3s)`; `/verbose` adds its summary and
   whole rationale, and `asked twice` when it was; an unreadable one says
   whether the run continues.

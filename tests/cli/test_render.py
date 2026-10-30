@@ -1457,7 +1457,7 @@ def test_unfinished_thinking_is_folded_and_its_notice_is_dim() -> None:
         attempt=1,
     )
     text = turn.text()
-    assert "Thought for" in text and "keep it simple" not in text
+    assert "✻ Thought" in text and "keep it simple" not in text
     assert (
         "· The model's reply ended inside its thinking; asking it for its answer."
         in text
