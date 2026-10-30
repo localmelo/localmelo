@@ -67,7 +67,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 在终端里运行 `melo` 可以对话。第一次运行时，它会找到正在运行的服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），自动选择模型或询问你要用哪一个，并保存配置；`melo serve` 启动网关并在浏览器中打开网页控制台（`melo console` 可再次打开）。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。`-u` 和 `-m` 是 `--url` 和 `--model` 的字母写法；旧写法（`--base-url`、`--chat-model`、`--serve`、`--reconfigure`、`--gateway-login`）仍然可用，完整对照见[旧写法对应的新写法](docs/reference/cli.md#old-spelling-to-new)。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/localmelo/localmelo/pr-assets/NN/readme-terminal.png" alt="深色终端中的 melo：欢迎信息旁的 Melo 的脸、一轮的工具调用行、等待审批的文件修改，以及分区的状态栏" width="720">
+  <img src="docs/assets/terminal.webp" alt="深色终端中的 melo：欢迎信息旁的 Melo 的头、一轮的工具调用行、等待审批的文件修改，以及分区的状态栏" width="720">
 </p>
 
 ## 了解更多

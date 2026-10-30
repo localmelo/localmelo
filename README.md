@@ -95,7 +95,7 @@ also honor the saved reasoning mode (default `legacy`). The separate
 inspects and controls gateway tasks; it requires the local gateway to be running.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/localmelo/localmelo/pr-assets/NN/readme-terminal.png" alt="melo in a dark terminal: Melo's face beside the welcome, a turn's tool rows, a file change waiting for approval, and the status bar in zones" width="720">
+  <img src="docs/assets/terminal.webp" alt="melo in a dark terminal: Melo's head beside the welcome, a turn's tool rows, a file change waiting for approval, and the status bar in zones" width="720">
 </p>
 
 ## Learn more
