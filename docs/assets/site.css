@@ -1377,3 +1377,11 @@ a.group:hover {
     align-items: start;
   }
 }
+
+.conn.planned {
+  stroke-dasharray: 2 4;
+}
+
+.legend-line.dotted {
+  background: repeating-linear-gradient(90deg, var(--diagram-line) 0, var(--diagram-line) 2px, transparent 2px, transparent 6px);
+}
