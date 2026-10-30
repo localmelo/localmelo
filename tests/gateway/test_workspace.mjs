@@ -383,11 +383,69 @@ test('the work group\'s summary follows the turn\'s end', () => {
   assert.equal(workSummary(turn), 'Worked for 14s · 1 tool call · 1 failed');
 
   const thought = newTurn({turn: 1, status: 'completed', started_at: 0, finished_at: 1.2, result: {duration_s: 1.2}});
-  assert.equal(workSummary(thought), 'Thought for 1.2s');
+  assert.equal(workSummary(thought), '', 'a turn without tool calls or reasoning has no line; its footer gives the time');
+  thought.items = [{kind: 'thinking', text: 'a greeting', durationS: 1.2}];
+  assert.equal(workSummary(thought), 'Thought', 'with reasoning to open the line gives no time, which the footer repeats');
+  thought.items.push({kind: 'assistant_text', text: 'Hello.'});
+  assert.equal(workSummary(thought), 'Thought');
+  assert.doesNotMatch(workSummary({...thought, status: 'failed'}), /^Thought/, 'a turn that did not complete keeps its ending');
 
   const stopped = newTurn({turn: 1, status: 'cancelled', cause: 'user_stop', started_at: 10, finished_at: 16, result: {duration_s: 6, n_tool: 2}});
   stopped.items = [{kind: 'tool', status: 'success'}, {kind: 'tool', status: 'success'}];
   assert.equal(workSummary(stopped), 'Stopped after 6.0s · 2 tool calls');
+});
+
+test('a finished chat turn without tool calls shows its time once, in the footer', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'Hello!', thinking: 'a greeting, answer it', tool_calls: [], usage: {completion_tokens: 161}, duration_s: 2.0});
+  push('run.finished', {result: {status: 'completed', result: 'Hello!', duration_s: 2, n_tool: 0, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const reply = h.run('assistantNode(turn)');
+  const group = findNode(reply, (node) => node.className === 'work-group');
+  assert.equal(group.tag, 'details');
+  assert.equal(findNode(group, (node) => node.className === 'work-summary').textContent, 'Thought');
+  assert.equal(findNode(group, (node) => node.className === 'thinking-body').textContent, 'a greeting, answer it', 'the reasoning is the group\'s body');
+  assert.equal(findNode(group, (node) => node.className === 'thinking'), null, 'not a second Thought inside the Thought');
+  const text = flatten(reply);
+  assert.equal(text.match(/2\.0s/g)?.length, 1, 'the turn\'s time appears once');
+  assert.match(text, /2\.0s · 1 step · 161 tokens/);
+  assert.doesNotMatch(text, /Thought for/);
+});
+
+test('a finished chat turn without tool calls or reasoning has no summary line at all', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'Hello!', thinking: '', tool_calls: [], usage: {}, duration_s: 2.0});
+  push('run.finished', {result: {status: 'completed', result: 'Hello!', duration_s: 2, n_tool: 0, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  assert.equal(findNode(h.run('assistantNode(turn)'), (node) => node.className === 'work-group'), null);
+  // Items without reasoning (a notice) are listed bare, with no empty summary over them.
+  turn.items.push({kind: 'notice', noticeKind: 'budget', message: 'The attempt used its step budget.'});
+  const group = findNode(h.run('assistantNode(turn)'), (node) => String(node.className).startsWith('work-group'));
+  assert.equal(group.tag, 'div');
+  assert.equal(findNode(group, (node) => node.tag === 'summary'), null);
+  assert.match(flatten(group), /used its step budget/);
+});
+
+test('a turn with tool calls keeps its group, its time and its thinking cards', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: 'look first', tool_calls: [{id: 'call-1', name: 'file_read', arguments: {}, preview: 'a'}], usage: {}, duration_s: 1.8});
+  push('tool.started', {step: 1, call_id: 'call-1', name: 'file_read', arguments: {}, preview: 'a'});
+  push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_read', status: 'success', error_category: 'none', output: 'x', output_chars: 1, error: '', duration_s: 0.1, images: [], approval: null, exit_code: null});
+  push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 14, n_tool: 1, steps: 2}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const group = findNode(h.run('assistantNode(turn)'), (node) => node.className === 'work-group');
+  assert.equal(findNode(group, (node) => node.className === 'work-summary').textContent, 'Worked for 14s · 1 tool call');
+  assert.equal(findNode(group, (node) => node.className === 'thinking').tag, 'details');
+  assert.match(flatten(group), /Thought for 1\.8s/);
 });
 
 test('tool output is cleaned and thinking is split as the terminal does', () => {

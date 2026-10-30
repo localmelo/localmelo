@@ -51,6 +51,12 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 欢迎信息的第一行显示软件包版本；在 git 检出中还会显示短提交号（`melo 0.1.0 (baab21e)`），`melo --version` 输出同一行。当模型不是保存的默认模型时，文件夹之后的一行会给出服务器的 URL 及来源（`from --url (not saved)`、`not saved; melo asks again next time`）；如果 melo 从多个模型中选了服务器报告已加载的那个，还会显示 `the loaded one of N; /model lists them`。服务器没有响应时，欢迎信息下方会显示警告。配置文件写 `omlx`，或服务器的模型列表显示它是 oMLX 时，`/status` 把服务器称为 `oMLX`，否则称为 `OpenAI-compatible server`（Ollama、MLC LLM 和 SGLang 保持各自的名称）。开发者模式的方框有一行模型信息，写的就是这个名称；已保存的服务器在方框显示之后才列出模型，所以方框显示的是配置文件所写的名称；本次运行已经列出过该服务器时（首次运行就是如此）除外。
 
+<a id="what-melo-says-about-itself"></a>
+
+### melo 如何介绍自己
+
+每个对话都会先告诉模型它是谁，这样问“你是谁？”时，回答的是 melo，而不是模型原本被训练成的那个助手。这段说明告诉模型：它是 localmelo 的 melo，一个开源智能体，在你的文件夹里用工具工作，改动任何东西之前先询问你；被问到时说出它运行在哪个模型上；不要把自己说成该模型原本的助手，也不要说自己是模型开发方做的；用你的语言回答。这段说明还会像横幅那样写出服务器的名称（`oMLX`、`Ollama`、`OpenAI-compatible server`，或云服务商的名称），并说明它是否在本机（`on this computer`；在另一台机器上的服务器则是 `at 192.168.1.20`）。`/model` 和 `/backend` 会让下一轮改用新的选择，那一轮会说出新的模型。这段说明还会要求模型对问候，或可以直接回答的问题，不使用工具直接回答。Web 控制台和 macOS 应用的做法相同；直接运行（`melo "task"`）、worker 和基准测试不发送这段说明，所以它们的请求和以前一样。
+
 <a id="keys"></a>
 
 ### 按键
@@ -180,7 +186,7 @@ from-the-child
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
 - **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。对于 melo 以前运行过的任务，第三行显示进度行会显示的过去运行及其步骤：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。它在会话的第一轮显示，开发者模式下每一轮都显示。
-- **思考。**显示 `✻ Thought for 1.2s`，只有一行。`/thinking on` 和开发者模式会再显示思考的前 3 行（`/verbose` 为 40 行），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
+- **思考。**显示 `✻ Thought for 1.2s`，只有一行。以没有任何工具调用的回复结束的一轮显示 `✻ Thought`，因为回答下方的页脚已经给出了那段时间。`/thinking on` 和开发者模式会再显示思考的前 3 行（`/verbose` 为 40 行），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；接着是工具的类别（`→` 读取，`±` 写入，`$` 运行，`@` 网络）和名称；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`，并以红色 `✗` 标记，尽管调用确实运行了（`grep` 以 1 退出并不代表失败）；审批结果；以及输出的第一行，同一行末尾显示 `+N lines (/expand T.C)`（若只剩一行则直接显示该行，不显示计数）。标记带结果的颜色，类别符号和名称带类别的颜色（读取是暗淡色，所以读取会淡出），耗时和标签是暗淡色；见[终端颜色](#terminal-colours)。失败的调用，或运行后以非 0 退出码结束的命令，最多显示 3 行，第一行为红色；开发者模式对每次调用显示 3 行，`/verbose` 显示 20 行并附上调用参数。图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试：每轮一行，服务器无法连接时这一行会保留它的 URL（`↻ Could not reach URL; trying again in 1 s`），延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会先输出尽力生成的结果，再用平实的话说明发生了什么、该怎么做：`✗ Could not reach the model server at URL.`，其下是 `Start it, then /retry.`。第一行是共享表中该状态的标题（`Ran out of steps (30).`、`Stopped: the same calls kept repeating.`），并附上有帮助的原因（URL、模型、失败检查的错误）；第二行是操作建议，使用默认颜色。页脚此时显示 `✻ Stopped after 14s` 而不是 `Worked for`，且不显示为零的工具调用次数。直接模式仍在标准错误上输出 `melo: run ended with status …` 这一行。

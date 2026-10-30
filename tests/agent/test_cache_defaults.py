@@ -114,7 +114,11 @@ async def test_the_default_reflection_request_offers_the_tools_and_asks_for_json
     plan, reflect = document["requests"][0], document["requests"][1]  # type: ignore[index]
     assert reflect["tools"] == plan["tools"]
     assert reflect["messages"][-1]["content"].endswith(SENTENCE)
-    assert "Prefix: fixed-prefix-v2" in plan["messages"][0]["content"]
+    system = plan["messages"][0]["content"]
+    # The date line closes the fixed section; the layout's name is metadata
+    # (``prefix_cache.version``), not a line the model reads.
+    assert system.endswith("\nDate: 2026-10-28 (UTC-04:00)")
+    assert "Prefix:" not in system and "fixed-prefix" not in system
 
 
 async def test_the_opt_out_values_send_the_requests_of_the_earlier_defaults(

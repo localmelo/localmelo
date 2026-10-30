@@ -1825,6 +1825,7 @@ class Agent:
                 if self.options.lean_output and self.options.reflection_gate == "flags"
                 else REFLECTION_PROMPT
             ),
+            identity=self.options.identity or "",
         )
 
         names = (
