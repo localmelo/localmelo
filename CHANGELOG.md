@@ -378,7 +378,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   status stays, `result` is that answer, and the JSON record gains
   `"answered_on_stop": true`. With either on, a reflection keeps at most 8 items
   of at most 300 characters in its evidence, failed-hypotheses and avoid lists.
-  Everything else is unchanged ([#NN]).
+  Everything else is unchanged ([#311]).
 
 - Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
   "safari-automation"` (off by default; `/browser on` in the terminal chat, or
@@ -2476,7 +2476,7 @@ earlier milestones.
 [#306]: https://github.com/localmelo/localmelo/pull/306
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#311]: https://github.com/localmelo/localmelo/pull/311
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
