@@ -58,7 +58,7 @@ extension App {
         petDriven = true
         func state(_ tag: String) {
             let frame = pet.panel.frame
-            record("pet \(tag) shown=\(pet.isShown) window=\(window.isVisible) label=\(pet.view.accessibilityLabel() ?? "")"
+            record("pet \(tag) onscreen=\(pet.isShown) window=\(window.isVisible) label=\(pet.view.accessibilityLabel() ?? "")"
                    + " frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))"
                    + " level=\(pet.panel.level == .floating) hidden=\(pet.hiddenByPerson) offered=\(!menuBar.showPetLine.isHidden)"
                    + " key=\(pet.panel.isKeyWindow) breathing=\(pet.motion.picture.animation(forKey: "breath") != nil)")
@@ -488,7 +488,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         }""",
         # Where the pet is after each health reply, for the tests that follow it.
         "                self.pet.update(health: data, stopped: false)\n": r"""                self.pet.update(health: data, stopped: false)
-                record("pet-poll shown=\(self.pet.isShown) label=\(self.pet.view.accessibilityLabel() ?? "")"
+                record("pet-poll onscreen=\(self.pet.isShown) label=\(self.pet.view.accessibilityLabel() ?? "")"
                        + " help=\(self.pet.view.accessibilityHelp() ?? "") tip=\(self.pet.view.toolTip ?? "")")
 """,
         "        showConsole()\n    }\n": "        showConsole()\n        drivePet()\n    }\n",
@@ -853,7 +853,7 @@ def test_waiting_and_settings_items_reach_the_page(app: Path, tmp_path: Path) ->
 
 
 PET_STATE = re.compile(
-    r"pet (\S+) shown=(\S+) window=(\S+) label=(.*?) frame=(-?\d+),(-?\d+),(\d+),(\d+)"
+    r"pet (\S+) onscreen=(\S+) window=(\S+) label=(.*?) frame=(-?\d+),(-?\d+),(\d+),(\d+)"
     r" level=(\S+) hidden=(\S+) offered=(\S+) key=(\S+) breathing=(\S+)"
 )
 
@@ -1032,7 +1032,9 @@ def test_melo_s_words_follow_the_health_reply(app: Path, tmp_path: Path) -> None
     try:
         wait_for(events, "pet closed ", process, timeout=30)
         for reply, label, help_text in steps:
-            marker = f"pet-poll shown=true label={label} help={help_text} tip={label}"
+            marker = (
+                f"pet-poll onscreen=true label={label} help={help_text} tip={label}"
+            )
             seen = events.read_text().count(marker)
             status.write_text(json.dumps(reply))
             wait_for(events, marker, process, timeout=15, count=seen + 1)
