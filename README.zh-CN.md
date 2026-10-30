@@ -34,13 +34,27 @@ source .venv/bin/activate
 
 ## 快速开始
 
-启动一个模型服务器（这里以 [Ollama](https://ollama.com) 为例，先运行 `ollama pull qwen3:8b`），然后运行一个任务：
+启动一个模型服务器，然后运行一个任务。在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，推荐使用本地服务器 [oMLX](https://github.com/jundot/omlx)。把每个模型放进 `~/models` 下各自的文件夹（文件夹名就是模型 ID；[模型服务器指南](docs/zh-CN/guides/model-servers.md#serve-a-model-with-omlx)说明了如何下载模型），然后安装 oMLX 并提供这个文件夹：
+
+```bash
+brew tap jundot/omlx https://github.com/jundot/omlx
+brew install jundot/omlx/omlx
+omlx serve --model-dir ~/models --port 8000
+```
+
+在第二个终端里运行一个任务：
+
+```bash
+melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+```
+
+在其他系统上，或者你更喜欢 [Ollama](https://ollama.com) 时，先运行 `ollama pull qwen3:8b` 下载模型，然后运行：
 
 ```bash
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ```
 
-在终端里运行 `melo` 可以对话，第一次运行时会保存配置；`melo --serve` 启动网关；在终端运行 `melo --gateway-login`，并在 60 秒内打开一次性链接。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。
+在终端里运行 `melo` 可以对话。第一次运行时，它会找到正在运行的服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），自动选择模型或询问你要用哪一个，并保存配置；`melo --serve` 启动网关；在终端运行 `melo --gateway-login`，并在 60 秒内打开一次性链接。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。
 
 ## 了解更多
 

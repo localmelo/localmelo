@@ -964,6 +964,8 @@ class CliSession:
                 state = "reachable"
             except discovery.DiscoveryError as exc:
                 state = f"not reachable: {exc}" if not exc.reachable else str(exc)
+            self.factory.relabel()  # the listing may have said the server is oMLX
+            backend = self.factory.backend
         where = home_label(self.agent.workspace_root or "")
         source = "" if backend.source == "config" else f" · {backend.source}"
         self.out.print(

@@ -12,11 +12,14 @@ A scenario is a JSON file ``<name>.json``::
     {"models": [...], "match": [...], "replies": [...], "sequential": false}
 
 Every key is optional but ``replies``. ``GET /v1/models`` lists the
-scenario's models (``["stub-model"]`` by default). A request picks its
-scenario by its path (``/s/<name>/v1/...``), else by its newest user
-message (a scenario whose ``match`` holds that text), else the default one
-(``--scenario``, or ``POST /__scenario {"name": ...}``). The reply is the
-scenario's reply numbered by the assistant messages after that user
+scenario's models (``["stub-model"]`` by default). With ``"omlx": [{"id",
+"model_alias", "loaded"}, ...]`` the server answers as oMLX does: the listing
+names each model by its alias (else its id) with ``owned_by`` ``omlx``, and
+``GET /v1/models/status`` reports the ids, aliases and loaded flags. A
+request picks its scenario by its path (``/s/<name>/v1/...``), else by its
+newest user message (a scenario whose ``match`` holds that text), else the
+default one (``--scenario``, or ``POST /__scenario {"name": ...}``). The reply
+is the scenario's reply numbered by the assistant messages after that user
 message, so a retried request gets the same reply; the last one repeats.
 With ``"sequential": true`` the scenario counts its requests instead.
 
@@ -160,12 +163,25 @@ class StubServer:
                 self.wfile.write(data)
 
             def do_GET(self) -> None:  # noqa: N802
-                if not self.path.rstrip("/").endswith("/models"):
+                path = self.path.rstrip("/")
+                scenario = server.scenarios.get(
+                    server._scenario_for(self.path, None), {}
+                )
+                omlx = scenario.get("omlx")
+                if omlx is not None and path.endswith("/models/status"):
+                    self._json(200, {"models": omlx})
+                    return
+                if not path.endswith("/models"):
                     self._json(404, {"error": "not found"})
                     return
-                name = server._scenario_for(self.path, None)
-                models = server.scenarios.get(name, {}).get("models", ["stub-model"])
-                self._json(200, {"object": "list", "data": [{"id": m} for m in models]})
+                if omlx is not None:
+                    data = [
+                        {"id": m.get("model_alias") or m["id"], "owned_by": "omlx"}
+                        for m in omlx
+                    ]
+                else:
+                    data = [{"id": m} for m in scenario.get("models", ["stub-model"])]
+                self._json(200, {"object": "list", "data": data})
 
             def do_POST(self) -> None:  # noqa: N802
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))

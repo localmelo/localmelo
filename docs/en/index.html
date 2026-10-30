@@ -87,12 +87,21 @@ source .venv/bin/activate</code></pre>
           from it.
         </p>
         <p>
-          Start a model server, for example <a href="https://ollama.com">Ollama</a>
-          with a model pulled by <code>ollama pull qwen3:8b</code>, and run a
-          task. The answer is printed on stdout.
+          Start a model server and run a task. On a Mac with Apple silicon,
+          <a href="https://github.com/jundot/omlx">oMLX</a> is the recommended
+          local server: serve a folder of models with
+          <code>omlx serve --model-dir ~/models --port 8000</code> (the
+          <a href="./quickstart.html#serve-a-model-with-omlx">quickstart</a>
+          has the steps). On other systems, use
+          <a href="https://ollama.com">Ollama</a> with a model pulled by
+          <code>ollama pull qwen3:8b</code>. The answer is printed on stdout.
         </p>
         <figure class="terminal">
-          <figcaption class="terminal-title">Run a task</figcaption>
+          <figcaption class="terminal-title">Run a task with oMLX</figcaption>
+          <pre><code>melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        </figure>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Run a task with Ollama</figcaption>
           <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
         </figure>
         <div class="masthead-actions">
@@ -114,7 +123,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">
             <strong>Model servers</strong>
-            <span>Connect to Ollama, oMLX, MLC LLM, vLLM or SGLang servers that you run, or to the OpenAI, Anthropic, Google Gemini or NVIDIA API.</span>
+            <span>Connect to oMLX (recommended on a Mac with Apple silicon), Ollama, MLC LLM, vLLM or SGLang servers that you run, or to the OpenAI, Anthropic, Google Gemini or NVIDIA API.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>Gateway and web workspace</strong>
