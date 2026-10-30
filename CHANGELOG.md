@@ -99,7 +99,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   line saying what was kept (`melo kept from this message: “Call me Ray.” (saved; nothing
   else to save)`), or that part of it looked like a password or key, was not kept and must
   not be written anywhere. The page shows nothing new. Direct runs, workers and the
-  benchmark are unchanged ([#NN]).
+  benchmark are unchanged ([#313]).
 
 - Memory across chats keeps and finds more of what you say. "My reading group meets on
   Tuesdays." and "我的猫叫团子。" were not kept as notes, because only "my ... is" sentences
@@ -2512,6 +2512,7 @@ earlier milestones.
 [#309]: https://github.com/localmelo/localmelo/pull/309
 [#311]: https://github.com/localmelo/localmelo/pull/311
 [#312]: https://github.com/localmelo/localmelo/pull/312
+[#313]: https://github.com/localmelo/localmelo/pull/313
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
