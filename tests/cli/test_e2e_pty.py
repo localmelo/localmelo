@@ -422,6 +422,23 @@ def test_yolo_runs_tools_without_asking(
     assert term.quit() == 0
 
 
+def test_a_yolo_file_write_is_named_without_counts(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo("--yolo")
+    term.see("⚠ YOLO: no approval")
+    term.type("write the notes\r")
+    term.see("I wrote notes.txt.")
+    assert term.quit() == 0
+    assert (
+        tmp_path / "demo-project" / "notes.txt"
+    ).read_text() == "remember the milk\n"
+    # Nobody was asked, so nothing read the file first: its name stands alone.
+    rows = [row.rstrip() for row in term.text().splitlines()]
+    assert "  Changed notes.txt" in rows
+    assert "Changed notes.txt (" not in term.text()
+
+
 def test_a_history_file_that_cannot_be_opened_is_not_fatal(
     melo: Callable[..., Melo], tmp_path: Path
 ) -> None:
