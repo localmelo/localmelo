@@ -125,6 +125,12 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 发给模型的副本只保存在内存中：历史记录和工作窗口只保留注明图片的那一行（会话仍像以前一样为控制台保存图片）。会话重新打开后，在工具返回新图片之前不会发送任何图片。
 - 工具不返回图片的运行，在每种模式下发送的请求都完全相同。
 
+<a id="browsing"></a>
+
+## 浏览
+
+在 Mac 上，melo 可以在 Safari 里阅读网页。浏览默认关闭，并且在这第一部分里是只读的。在终端聊天里用 `/browser on` 打开它（或用 `melo -X browser.driver=safari-automation` 只对一次运行生效），并在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。之后终端聊天和网页控制台会得到八个工具（`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`），它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次，`auto` 模式同样会问；它不会点击、输入、登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。[浏览指南](browsing.md)有设置步骤、melo 在那里能做和不能做的事，以及故障排查。
+
 <a id="what-the-checks-do"></a>
 
 ## 检查的作用
