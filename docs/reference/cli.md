@@ -663,6 +663,7 @@ of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
 line behaves as before, and the model's own account of its checks is still only that.
 
 <a id="brief-items"></a>
+
 **Experimental: `--brief-items on` (`[agent] brief_items = true`, off by default).**
 A brief with several numbered items and a weak check can end `completed passed`
 with one item untouched. With the option on, the harness reads the brief's
