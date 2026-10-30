@@ -1115,7 +1115,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   options (`melo -X gateway.port=9000 serve`) is refused, and the message says where
   it goes; `melo -- serve` gives the task "serve". A key named like an option
   (`-X agent.max_steps=5`) is refused, and the message says to use `-s N (--steps)`.
-  ([#NN])
+  ([#242])
 
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
@@ -1639,6 +1639,7 @@ earlier milestones.
 [#239]: https://github.com/localmelo/localmelo/pull/239
 [#240]: https://github.com/localmelo/localmelo/pull/240
 [#241]: https://github.com/localmelo/localmelo/pull/241
+[#242]: https://github.com/localmelo/localmelo/pull/242
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
