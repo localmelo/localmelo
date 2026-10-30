@@ -17,7 +17,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
+import shutil
+import stat
+import tempfile
+import uuid
+from base64 import b64encode
 from typing import Any, cast
 
 from localmelo.melo.executor.models import ToolOutput
@@ -61,9 +67,13 @@ REQUIRED = ("open", "script")
 # tool with one parameter gets the value there whatever it is called.
 ARG_NAMES = {
     "url": ("url", "uri", "address"),
-    "script": ("script", "javascript", "code", "expression", "source"),
-    "tab": ("tab_id", "tabId", "tab", "id", "handle", "window", "index"),
+    "script": ("expression", "script", "javascript", "code", "source"),
+    "tab": ("handle", "tab_uuid", "tab_id", "tabId", "tab", "id", "window", "index"),
+    "save_path": ("savePath", "save_path", "path"),
 }
+# A picture is a PNG file Safari saves where melo says, and no larger than this.
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+MAX_SHOT_BYTES = 10 * 1024 * 1024
 KINDS = ("link", "button", "textbox", "checkbox", "select")
 SECRETS = ("password", "code", "card")
 SETTLE_S = 15.0
@@ -209,6 +219,9 @@ class SafariAutomationDriver:
         self._tools: dict[str, McpTool] = {}
         self._current: str | None = None
         self._returns: bool | None = None  # whether scripts need a leading "return"
+        self._shots: str | None = (
+            None  # melo's private folder for pictures Safari saves
+        )
 
     @property
     def tool_names(self) -> list[str]:
@@ -243,6 +256,11 @@ class SafariAutomationDriver:
     async def close(self) -> None:
         client, self._client = self._client, None
         self._current = None
+        shots, self._shots = self._shots, None
+        if shots is not None:
+            shutil.rmtree(
+                shots, ignore_errors=True
+            )  # the folder melo made, and only it
         if client is not None:
             await client.close()
 
@@ -412,10 +430,20 @@ class SafariAutomationDriver:
             raise BrowserError(
                 "A password, code or card field has focus, so melo took no picture."
             )
-        out = await self._call("shot")
-        if out.images:
-            return Shot(out.images[0].mime_type, out.images[0].data)
-        raise BrowserError("Safari's screenshot tool returned no picture melo can use.")
+        # Safari saves the picture to a file and answers with text only. melo
+        # names the file, in a folder only it can enter, reads that path and
+        # never one it finds in the reply, and deletes the file whatever happens.
+        if self._shots is None:
+            self._shots = tempfile.mkdtemp(prefix="melo-safari-")  # mode 0700
+        path = os.path.join(self._shots, f"{uuid.uuid4().hex}.png")
+        try:
+            out = await self._call("shot", save_path=path)
+            if out.images:
+                return Shot(out.images[0].mime_type, out.images[0].data)
+            return _read_picture(path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)  # a link is removed, never followed
 
     async def blank(self, tab: str | None) -> None:
         await self._focus(tab)
@@ -423,6 +451,21 @@ class SafariAutomationDriver:
 
     def _has(self, key: str) -> bool:
         return TOOL_NAMES[key] in self._tools
+
+
+def _read_picture(path: str) -> Shot:
+    """The PNG at *path*, the file melo asked Safari to save: a regular file, never a link."""
+    problem = "Safari's screenshot tool saved no picture melo can use."
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise BrowserError(problem) from None
+    with os.fdopen(fd, "rb") as handle:
+        regular = stat.S_ISREG(os.fstat(handle.fileno()).st_mode)
+        data = handle.read(MAX_SHOT_BYTES + 1) if regular else b""
+    if not data.startswith(PNG_MAGIC) or len(data) > MAX_SHOT_BYTES:
+        raise BrowserError(problem)
+    return Shot("image/png", b64encode(data).decode("ascii"))
 
 
 async def _quiet_close(client: StdioMcpClient) -> None:
