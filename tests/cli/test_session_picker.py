@@ -208,7 +208,8 @@ async def test_the_model_list_fits_44_columns_and_the_ascii_symbols() -> None:
         assert all(cells(row) <= 44 for row in picker), picker
         assert all(row.isascii() for row in picker), picker
         assert picker[2].startswith(" > + stub-model") and "(loaded)" in picker[3]
-        assert picker[-1].strip() == "3 models - enter switches - esc cancels"
+        # Narrow, the count goes before the words that say Enter saves.
+        assert picker[-1].strip() == "enter switches and saves - esc cancels"
         driver.type(ESC)
         await asyncio.wait_for(task, 3)
 

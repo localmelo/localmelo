@@ -349,19 +349,17 @@ class ModelPicker(ListPicker[ModelRow]):
             return f"No model matches '{self.buffer.text.strip()}'."
         count = f"{len(self.rows)} model{'s' if len(self.rows) != 1 else ''}"
         keeps = f"esc keeps {self.current}" if self.current else "esc cancels"
-        arrows = self.symbols.arrows
         if self.selected < 0:
-            options = [
-                f"{count} · {arrows} choose one, then enter · {keeps}",
-                f"{count} · {arrows} then enter",
-            ]
-        elif self.current:
-            options = [
-                f"{count} · enter switches and saves · {keeps}",
-                f"{count} · enter switches · esc cancels",
-            ]
+            action = f"{self.symbols.arrows} choose one, then enter"
         else:
-            options = [f"{count} · enter chooses · esc cancels"]
+            action = "enter switches and saves" if self.current else "enter chooses"
+        # Narrow, the count goes first, then the model that esc keeps.
+        options = [
+            f"{count} · {action} · {keeps}",
+            f"{action} · {keeps}",
+            f"{action} · esc cancels",
+            action,
+        ]
         room = self.width() - 1
         return next((o for o in options if cells(o) <= room), options[-1])
 
@@ -398,6 +396,7 @@ def run_inline(
             mouse_support=False,
             color_depth=ColorDepth.DEPTH_1_BIT if no_color else None,
         )
+        app.ttimeoutlen = 0.1  # Esc waits this long for a key that makes it Alt+key
         holder.append(app)
 
         async def answer() -> None:

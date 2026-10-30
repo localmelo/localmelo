@@ -150,3 +150,21 @@ def test_a_base_url_with_several_models_and_none_known_loaded_exits_2(
     assert "\n  chat-a\n  chat-b\n" in text
     assert "Pass --chat-model <id>." in text
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
+
+
+def test_closing_the_model_list_cancels_the_first_run(
+    chat_server: FakeChatServer, tmp_path: Path  # noqa: F811
+) -> None:
+    chat_server.models = ["chat-a", "chat-b"]
+    term = _melo(tmp_path, chat_server)
+    try:
+        assert term.read_until(lambda out: b"Server URL [" in out, 30), term.output
+        term.type(b"\r")
+        assert term.read_until(lambda out: b"Choose a model" in out, 30), term.output
+        term.type(b"\x1b")
+        assert _exit_code(term) == 130, term.output
+    finally:
+        term.close()
+    assert "Setup cancelled." in _text(term)
+    assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
+    assert chat_server.requests == 0  # no chat request: nothing was loaded
