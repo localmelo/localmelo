@@ -233,6 +233,10 @@ class AgentOptions:
       the run ends ``completed``, and a failing one sends the model back to
       work, at most twice (see ``melo/agent/_brief_gate.py``). ``None`` (the
       default) changes nothing.
+    - ``brief_items``: experimental, for a brief run only. When true, the
+      brief's top-level numbered items that no edit has touched yet are named
+      in each reflection request and in the deadline check (see
+      ``melo/agent/_brief_aids.py``). Default false: nothing changes.
     """
 
     context_window: int | None = None
@@ -283,6 +287,7 @@ class AgentOptions:
     reflect_tool_guard: bool = True
     cache_layout: CacheLayout = "v2"
     window_messages: int = SHORT_TERM_MAX
+    brief_items: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -393,6 +398,7 @@ class AgentOptions:
             "keep_decision_text",
             "captured_history",
             "typed_assertions",
+            "brief_items",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

@@ -113,6 +113,8 @@ completed passed
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
 ```
 
+实验性的 `--brief-items on` 还会在模型的反思请求和最后几步之前，指出简报中尚未被任何编辑触及的编号条目（见[参考](../../reference/cli.md#brief-items)）。
+
 结果是一行 JSON，含 `status`、`exit_code`、`tests` 和运行记录。所有字段和退出码见[命令行参考](../../reference/cli.md#output)（英文）。
 
 <a id="save-a-configuration"></a>

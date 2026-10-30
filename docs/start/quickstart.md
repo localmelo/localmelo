@@ -133,6 +133,10 @@ with a failed check exits with code 4, so a script can stop on it:
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md --output-format json > result.json && echo "check passed"
 ```
 
+The experimental `--brief-items on` also names the brief's numbered items that
+no edit has touched yet in the model's reflection requests and before its last
+steps (see the [reference](../reference/cli.md#brief-items)).
+
 The result is one JSON line with `status`, `exit_code`, `tests` and the run
 record. For every field and exit code, see the
 [command-line reference](../reference/cli.md#output).

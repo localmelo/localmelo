@@ -117,6 +117,7 @@ LATER_OPTIONS = [
     "--cache-layout",
     "--window-messages",
     "--captured-history",
+    "--brief-items",
     "--context-window",
     "--output-reserve",
     "--safety-margin",

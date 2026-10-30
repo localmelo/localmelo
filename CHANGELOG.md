@@ -146,6 +146,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
+  `--brief`, the harness marks the brief's top-level numbered items (`changed`,
+  `not yet` or `no file named`) from the files `git status` shows edited since the
+  run started, and names the items with no edit yet in each reflection request and
+  in the check two steps before the last attempt ends. It records a `brief_items`
+  notice each time. Without the option nothing changes. ([#232])
+
 - Experimental `cache_layout` and `window_messages` options for prompt-cache reuse
   (#183), off by default. `--cache-layout v3` (`[agent] cache_layout`), with the fixed
   prefix, appends a reflection once at the attempt boundary as an ordinary window
@@ -1457,6 +1464,7 @@ earlier milestones.
 [#228]: https://github.com/localmelo/localmelo/pull/228
 [#230]: https://github.com/localmelo/localmelo/pull/230
 [#231]: https://github.com/localmelo/localmelo/pull/231
+[#232]: https://github.com/localmelo/localmelo/pull/232
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

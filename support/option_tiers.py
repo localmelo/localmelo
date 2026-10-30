@@ -74,6 +74,7 @@ _ADVANCED = (
 EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--attempt-policy": "#185",
     "--reflection-gate": "#185",
+    "--brief-items": "#185",
     "--fixed-prefix": "#183",
     "--window-eviction": "#183",
     "--reflect-tool-guard": "#183",

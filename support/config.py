@@ -161,6 +161,9 @@ class AgentConfig:
     output_reserve: int | None = None
     safety_margin: int | None = None
     captured_history: bool = False  # opt-in redacted captured tool results
+    brief_items: bool = (
+        False  # --brief runs name the items no edit touched (experimental)
+    )
 
 
 @dataclass
@@ -442,6 +445,8 @@ class Config:
             errors.append("[agent] reflect_tool_guard must be a boolean")
         if not isinstance(self.agent.captured_history, bool):
             errors.append("[agent] captured_history must be a boolean")
+        if not isinstance(self.agent.brief_items, bool):
+            errors.append("[agent] brief_items must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -1040,6 +1045,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.cache_layout != defaults.cache_layout
         or cfg.agent.window_messages != defaults.window_messages
         or cfg.agent.captured_history
+        or cfg.agent.brief_items
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -1064,6 +1070,8 @@ def save(cfg: Config) -> None:
             lines.append(f"window_messages = {_toml_value(cfg.agent.window_messages)}")
         if cfg.agent.captured_history:
             lines.append("captured_history = true")
+        if cfg.agent.brief_items:
+            lines.append("brief_items = true")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
