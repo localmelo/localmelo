@@ -2,7 +2,7 @@
 
 # macOS 开发应用
 
-arm64 开发应用是供构建它的这台 Mac 使用的本地原型，不是经过公证的发行版，也不是 Homebrew cask。它使用临时签名（ad hoc），因此不需要 Apple 开发者账号。构建它需要 macOS、位于 `/Applications/Xcode.app` 的正式版 Xcode、`uv`，以及在构建时获取固定版本独立 Python 和锁定依赖所需的网络访问。它不会安装、启动或下载任何模型服务器。不会更改任何签名身份或 Xcode 设置。
+arm64 开发应用是供构建它的这台 Mac 使用的本地原型，不是经过公证的发行版，也不是 Homebrew cask。它使用临时签名（ad hoc），因此不需要 Apple 开发者账号。构建它需要 macOS、一个 Swift 编译器、`uv`，以及在构建时获取固定版本独立 Python 和锁定依赖所需的网络访问。Swift 编译器优先使用位于 `/Applications/Xcode.app` 的正式版 Xcode；没有它时，使用 `xcode-select -p` 指向的 Command Line Tools（`xcode-select --install` 可安装它）。两者都没有时，构建会在做任何工作之前停止，并只打印一行说明。环境中设置的 `DEVELOPER_DIR` 会选择另一个开发者目录。它不会安装、启动或下载任何模型服务器。不会更改任何签名身份或 Xcode 设置。
 
 在名为 `localmelo` 的检出目录中，一条命令即可构建应用并为当前用户安装，不需要管理员权限：
 
@@ -22,7 +22,7 @@ uv run python scripts/build_macos_app.py --uninstall
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-构建器拒绝覆盖已存在的输出。它把 Python 运行时和网关额外依赖复制进应用包，用正式版 Xcode 编译 Swift 宿主，把内置的 Python 编译为字节码，先对其中每个 Mach-O 文件、再对整个应用包签名，并包含可重定位的 `Contents/Resources/runtime/bin/melo`。字节码基于哈希且从不检查源文件，启动器和直接运行内置解释器都不会再写入字节码，因此签名保持有效。精确的独立解释器归档已固定版本，解压前会校验 SHA-256；wheel 的哈希则对照锁文件检查。构建工具静默运行，只在失败时才输出。
+构建器拒绝覆盖已存在的输出。它把 Python 运行时和网关额外依赖复制进应用包，用上面所说的 Swift 编译器编译 Swift 宿主（摘要会说明用了哪些工具，例如 `Built with the Command Line Tools.`），把内置的 Python 编译为字节码，先对其中每个 Mach-O 文件、再对整个应用包签名，并包含可重定位的 `Contents/Resources/runtime/bin/melo`。字节码基于哈希且从不检查源文件，启动器和直接运行内置解释器都不会再写入字节码，因此签名保持有效。精确的独立解释器归档已固定版本，解压前会校验 SHA-256；wheel 的哈希则对照锁文件检查。构建工具静默运行，只在失败时才输出。
 
 在装入依赖之前，构建器会先精简它复制来的 Python 运行时：去掉 IDLE、tkinter 和 turtle（连同它们加载的 Tcl/Tk 库）、pip、setuptools、ensurepip 和 2to3，共 36 MB，因此应用约为 147 MB，而不是 183 MB。去掉什么由运行时之下的一份固定路径清单决定（`scripts/build_macos_app.py` 中的 `UNUSED`）；`unittest`、`distutils`、`venv` 和 `pydoc` 保留，依赖会导入的所有内容也保留。清单中的路径若经由链接指向运行时之外，构建会中止。在内置解释器上运行的代码（例如 `python_exec` 工具）无法导入被去掉的部分，`python -m venv` 需要加上 `--without-pip`。
 
