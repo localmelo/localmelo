@@ -66,8 +66,8 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 
 Run `melo` in a terminal to chat. On the first run it finds a running server
 (oMLX on port 8000, Ollama on 11434), picks a model or asks for one, and saves
-a configuration; `melo serve` starts the gateway; run `melo console`
-in a terminal and open the one-use link within 60 seconds. The HTTP API and
+a configuration; `melo serve` starts the gateway and opens the web console in
+your browser (`melo console` opens it again). The HTTP API and
 web workspace are at `http://127.0.0.1:8401/`. `-u` and `-m` are the letters of `--url`
 and `--model`; the old spellings (`--base-url`, `--chat-model`, `--serve`,
 `--reconfigure`, `--gateway-login`) still work, and

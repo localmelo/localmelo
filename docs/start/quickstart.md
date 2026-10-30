@@ -273,10 +273,11 @@ Example output (values vary):
 {"result":"42","session_id":"a7e8f646ca2e"}
 ```
 
-The health check does not contact the model server; a task does. For the web
-workspace, run `melo console` in a terminal and open the one-use link
-it prints within 60 seconds. Do not share the link. See
-[Interactive conversations](#interactive-conversations).
+The health check does not contact the model server; a task does. The web
+workspace opens in your browser when `melo serve` starts at a terminal on this
+computer; `melo console` opens it again. Over SSH, or when no browser starts,
+`melo console` prints a one-use link to open within 60 seconds. Do not share the
+link. See [Interactive conversations](#interactive-conversations).
 
 Press Ctrl+C in the first terminal to stop the gateway. Tasks use the saved
 configuration:
@@ -314,8 +315,8 @@ With the default settings a file write waits for your approval, so the task
 is `held` until you answer it. The task waits once for each tool the model
 asks to use: a model that runs its own check asks for `python_exec` too, and
 the task is `held` again until you answer that. `melo-task show` names the
-tool it waits for. Run `melo console` in a terminal, open
-the link it prints, and answer the request in the Tasks view. Then show the
+tool it waits for. Run `melo console` in a terminal to open the console,
+and answer the request in the Tasks view. Then show the
 task:
 
 ```bash

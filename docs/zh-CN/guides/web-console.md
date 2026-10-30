@@ -10,7 +10,7 @@
 
 ## 网页工作区
 
-在浏览器中打开 `http://127.0.0.1:8401/` 即可进入网页工作区。这是控制台的页面，只与 `/api`（[API v2](../../reference/api-v2.md)（英文））通信，因此网关必须运行才能提供该页面：先运行 `melo serve`。在终端运行 `melo console`，并在 60 秒内打开其一次性链接（非默认端口需加上 `--port PORT`）。不要分享该链接；见[网关安全](gateway.md#keep-the-gateway-private)。
+在浏览器中打开 `http://127.0.0.1:8401/` 即可进入网页工作区。这是控制台的页面，只与 `/api`（[API v2](../../reference/api-v2.md)（英文））通信，因此网关必须运行才能提供该页面：先运行 `melo serve`，它会在浏览器中打开已登录的页面。没有链接就打开页面时，会显示 “Sign in to localmelo”：在终端运行 `melo console`，页面会以已登录的状态打开（非默认端口需加上 `--port PORT`）。通过 SSH 或没有浏览器能启动时，它会改为输出一次性链接，请在 60 秒内打开。不要分享该链接；见[网关安全](gateway.md#keep-the-gateway-private)。
 
 首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。没有服务器在运行时，卡片会显示启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致），放在一个点按一次即可全选的方框里，并提供键盘可用的 **Copy commands** 按钮；卡片在屏幕上且标签页可见时，每三秒再次寻找，服务器一响应，模型就会出现。**Check again** 立即寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 

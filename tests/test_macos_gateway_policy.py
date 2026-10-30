@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -135,6 +136,23 @@ def run_policy(tmp_path: Path, source: str) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_quitting_asks_only_when_something_would_stop(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+func health(_ chats: Int, _ tasks: Int, _ runs: Int, waiting: String = "[]") -> Data {
+    let running = #"{"chats":\#(chats),"tasks":\#(tasks),"runs":\#(runs),"terminal":1}"#
+    return Data(#"{"api":2,"status":{"running":\#(running),"waiting":\#(waiting)}}"#.utf8)
+}
+precondition(!quitNeedsConfirmation(health(0, 0, 0)) && !quitNeedsConfirmation(health(0, 0, 2)))
+precondition(quitNeedsConfirmation(health(1, 0, 0)) && quitNeedsConfirmation(health(0, 1, 0)))
+precondition(quitNeedsConfirmation(health(0, 0, 0, waiting: #"[{"kind":"task","id":"t1"}]"#)))
+precondition(quitNeedsConfirmation(nil) && quitNeedsConfirmation(Data(#"{"api":2}"#.utf8)))
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_gateway_port_comes_from_the_startup_line(tmp_path: Path) -> None:
     run_policy(
         tmp_path,
@@ -259,6 +277,36 @@ let odd = #"[{"kind":"chat","id":"a b"},{"kind":"chat","id":"../x"},{"kind":"cha
 precondition(waitingItems(health(none, waiting: odd)) == [WaitingItem(kind: "chat", id: "ok.1:2-3_x")])
 """,
     )
+
+
+def contrast(one: str, other: str) -> float:
+    """The WCAG contrast ratio of two #rrggbb colours, given without the #."""
+
+    def luminance(color: str) -> float:
+        light = [int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+        r, g, b = (
+            c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in light
+        )
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    high, low = sorted((luminance(one), luminance(other)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_the_menu_bar_dot_has_three_to_one_against_its_ring_and_either_bar() -> None:
+    # The dot is not a template, so its colours are ours: light, then dark, in the palette.
+    palette = (ROOT / "macos/LocalMeloApp/StatusView.swift").read_text()
+    dot, ring = (
+        re.findall(rf"static let {name} = pair\(0x(\w{{6}}), 0x(\w{{6}})\)", palette)[0]
+        for name in ("badge", "badgeRing")
+    )
+    bars = (
+        ("ffffff", "ececee"),
+        ("000000", "2c2c2e"),
+    )  # the ends of a light, a dark bar
+    for appearance, ends in enumerate(bars):
+        for behind in (ring[appearance], *ends):
+            assert contrast(dot[appearance], behind) >= 3, (appearance, behind)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")

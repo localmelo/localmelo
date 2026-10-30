@@ -1098,6 +1098,39 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Quitting the macOS app asks only when something would stop. With no chat or task running and
+  nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task
+  runs, something waits for an approval, or the app cannot tell what runs, the dialog is the
+  same as before (`Quit and Stop` / `Cancel`, naming what would stop). Direct runs and terminal
+  chats are other processes, so they do not make it ask. Direct mode's stdout and stderr, JSON,
+  exit codes and requests are unchanged. ([#264])
+- The web console opens in your browser. At a terminal on your computer, `melo serve` opens
+  the console once the gateway listens, already signed in, and prints `Web console: opened in
+  your browser (melo console opens it again).` in place of the `Web UI:` and `Sign in:` lines;
+  `melo console` opens it the same way and says `Opened the web console in your browser.` Over
+  SSH, or when no browser starts, both print the one-use link instead (`Open this link within 60
+  seconds. Do not share it:` and the link on its own line). The app's gateway, a login service
+  and a pipe never open a browser, and a pipe keeps the `Web UI:` and `Sign in:` lines.
+  `melo console` with nothing listening on the port says `no gateway is running on port N` and
+  exits 1, instead of printing a link to nothing. A console page opened without a link now says
+  `Sign in to localmelo` and `In a terminal, run melo console. It opens this page signed in.`
+  The `Gateway:` line, direct mode's stdout and stderr, JSON, exit codes and requests are
+  unchanged. ([#264])
+- The macOS app and its menu-bar item use the localmelo logo, Melo the mascot,
+  instead of the placeholder mark. The app icon (Dock, Finder, Spotlight and every
+  dialog) is the README's emblem, `docs/assets/melo.png`, whole, on a rounded tile of
+  the macOS icon grid in the emblem's own paper colour, taken from its four corners;
+  the emblem fades into the tile, so no edge shows, and every size is made from the
+  picture itself. The menu-bar item is the round logo, `docs/assets/icon_small.png`,
+  in colour instead of a template image, with the states it had: the logo alone while
+  idle, the count beside it while something runs, and a red dot with a ring while an
+  approval waits (a lighter red on a dark bar). VoiceOver, the tooltip and the
+  announcement of a wait are unchanged. The icon and the logo are committed files in
+  `macos/assets`, made by `uv run --with pillow python scripts/make_app_icons.py`
+  (Pillow is fetched for that run; it is not a dependency), and the build only copies
+  them, so replacing the art is regenerate and commit. `macos/mark.svg` is gone
+  ([#263]).
+
 - The first run and the first answer say only what helps. With a model server found, the
   first run asks `Use it? [Y/n]:` (Enter says yes; `n` asks for a URL) where it said it had
   found one and then asked for its URL. With no embedding model on the server it says
@@ -1998,6 +2031,8 @@ earlier milestones.
 [#258]: https://github.com/localmelo/localmelo/pull/258
 [#259]: https://github.com/localmelo/localmelo/pull/259
 [#260]: https://github.com/localmelo/localmelo/pull/260
+[#263]: https://github.com/localmelo/localmelo/pull/263
+[#264]: https://github.com/localmelo/localmelo/pull/264
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

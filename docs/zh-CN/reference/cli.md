@@ -34,7 +34,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo serve [install\|uninstall\|status]` | 运行网关，或把它作为登录服务管理（macOS）。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
-| `melo console [--reset]` | 打印打开网页控制台的一次性链接；`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
+| `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | 导入 worker 历史。 | `--title T` |
@@ -376,7 +376,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 |---|---|---|
 | `--serve` | 关闭 | 启动网关：HTTP API 和网页工作区。 |
 | `--host HOST` | `127.0.0.1` | 网关监听的地址。 |
-| `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
+| `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行（没有打开浏览器时才输出）写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
 | `--allow-unconfigured` | 关闭 | 与 `--serve` 一起使用时，即使没有配置任何后端或配置文件有校验错误，也启动网关，以便通过 `/api/settings` 进行配置。 |
 | `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use it? [Y/n]:`；回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
 | `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`。 |
@@ -386,7 +386,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 - 没有任务时，`--host` 和 `--port` 需要 `--serve`、`--daemon`、`--gateway-login` 或 `--gateway-rotate-token` 之一。
 - 没有终端且没有配置文件时，`melo --serve` 会在 stderr 上打印一行并以退出码 1 退出，与 launchd 下的行为一致：`melo: no backend is configured; run melo setup in a terminal`。没有终端时，`--reconfigure` 仍会运行设置向导，并从标准输入读取答案，因此脚本可以通过管道输入。`--allow-unconfigured` 同时跳过设置向导和启动时校验，因此 `melo --serve --allow-unconfigured` 可以在没有配置文件的情况下启动；它不能与 `--reconfigure` 同用，也不能不带 `--serve` 使用。
 - 在设置向导的问题处按 Ctrl-D 会打印 `Setup cancelled.` 并以退出码 0 退出；按 Ctrl+C 会打印相同内容，并以 130 退出。
-- `melo --gateway-login [--port PORT]` 会在终端中打印一次性登录链接；`melo --gateway-rotate-token` 轮换共享的本地网关令牌。网关拒绝非回环地址的绑定，并要求认证；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。
+- `melo --gateway-login [--port PORT]`（即 `melo console`）在 stdin 和 stdout 都是本机终端时（没有 `SSH_CONNECTION`、`SSH_CLIENT`、`SSH_TTY`），用默认浏览器打开网页控制台（`BROWSER` 可指定浏览器）。没有浏览器能启动或通过 SSH 时，它只向终端输出一次性登录链接。stdout 不是终端时退出码为 2（stderr 上有一行提示，stdout 上不输出任何内容），该端口上没有网关在监听时退出码为 1。`melo --gateway-rotate-token` 轮换共享的本地网关令牌。网关拒绝非回环地址的绑定，并要求认证；见[保持网关私有](../guides/gateway.md#keep-the-gateway-private)。
 
 <a id="usage-errors"></a>
 

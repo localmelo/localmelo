@@ -15,6 +15,10 @@ enum Palette {
     static let ink = pair(0x1d1f1b, 0xeef0e9)
     static let secondary = pair(0x4d5149, 0xc2c7ba)
     static let onInk = pair(0xffffff, 0x1e211c)
+    // The menu-bar dot and the ring that sets it off from the logo and the bar. The red is at least 3:1
+    // against the ring and against a light or a dark bar of the system's own greys.
+    static let badge = pair(0xd70015, 0xff453a)
+    static let badgeRing = pair(0xffffff, 0x1c1c1e)
 }
 
 /// Melo's picture as a framed print: its paper tile reads as the print, not as a
