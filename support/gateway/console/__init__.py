@@ -46,6 +46,7 @@ from . import (
     errors,
     routes_details,
     routes_page,
+    routes_pictures,
     routes_sessions,
     routes_settings,
     routes_status,
@@ -206,6 +207,7 @@ class Console:
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
         routes_page.add_routes(app, self)
+        routes_pictures.add_routes(app, self)
         routes_tasks.add_routes(app, self)
         _add_not_found(app)
 
