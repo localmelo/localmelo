@@ -195,7 +195,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "Choose a server..." entry when nothing is saved, instead of a preset (MLC at
   `http://localhost:8400/v1`), and no longer shows the terminal advice
   (`run 'melo setup'`).
-  ([#NN])
+  ([#243])
 
 - The macOS app's menu bar says when melo needs you, and the app has an icon. The
   menu-bar item is Melo's head (a template image the system tints for light and dark)
@@ -1034,17 +1034,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and undone turns in a readable grey instead of faded. Colours, sizes and radii
   come from tokens in `workspace.css`, and the dark palette is written once. The
   level and send buttons lose their native `title` tooltips and keep their
-  `aria-label`. ([#NN])
+  `aria-label`. ([#243])
 
 - The web console asks for an approval in plain words: a question such as
   "Replace notes.txt (125 bytes)?", one filled "Allow once", an outlined "Allow
   for this chat" that says what it covers, and a quiet "Deny" that asks what melo
-  should do instead. Escape stops a running turn only from the message box. ([#NN])
+  should do instead. Escape stops a running turn only from the message box. ([#243])
 
 - The web console says what to do after a run ends badly: a ✗ or ⚠ symbol, a
   hint and one filled next step (Open model settings, Continue, Try again, Show
   tools or Copy details). Tool rows use ✓ ✗ ⊘ ◌ and a live dot, the offline banner
-  has "Try again", and the selected chat has an accent bar. ([#NN])
+  has "Try again", and the selected chat has an accent bar. ([#243])
 
 - The first run explains itself. With no config file, `melo` first says what it needs
   (`melo uses a model server on this computer (oMLX, Ollama, LM Studio…).`) and asks
@@ -1678,6 +1678,7 @@ earlier milestones.
 [#240]: https://github.com/localmelo/localmelo/pull/240
 [#241]: https://github.com/localmelo/localmelo/pull/241
 [#242]: https://github.com/localmelo/localmelo/pull/242
+[#243]: https://github.com/localmelo/localmelo/pull/243
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
