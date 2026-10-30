@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from localmelo.support import config
 from localmelo.support.backends.registry import ensure_defaults_registered
 from localmelo.support.config import (
     CliConfig,
@@ -1541,4 +1542,71 @@ class TestOmlxSpelling:
             "[vllm] chat_url is empty. "
             "Set it to your oMLX URL (e.g. http://localhost:8000).",
             "[vllm] chat_model is empty. Specify the oMLX model name.",
+        ]
+
+
+class TestSettingOverrides:
+    """``-X`` values live in a layer ``load()`` applies and ``save()`` never writes."""
+
+    @pytest.fixture(autouse=True)
+    def _file(self, tmp_path: Path) -> Iterator[Path]:
+        path = tmp_path / "config.toml"
+        with (
+            mock.patch("localmelo.support.config.CONFIG_PATH", str(path)),
+            mock.patch("localmelo.support.config.CONFIG_DIR", str(tmp_path)),
+        ):
+            yield path
+
+    def test_load_applies_them_and_save_writes_what_the_file_had(
+        self, _file: Path
+    ) -> None:
+        saved = Config(
+            chat_backend="ollama", ollama=LocalBackendConfig(chat_model="m1")
+        )
+        saved.retrieval.k = 5
+        save(saved)
+        config.set_overrides({"cli.stream": True, "retrieval.k": 9})
+        cfg = load()
+        assert (cfg.cli.stream, cfg.retrieval.k) == (True, 9)
+        cfg.ollama.chat_model = "m2"
+        save(cfg)
+        text = _file.read_text(encoding="utf-8")
+        assert 'chat_model = "m2"' in text and "k = 5" in text
+        assert "stream" not in text and "[cli]" not in text and "k = 9" not in text
+        assert cfg.retrieval.k == 9  # the caller's config is not touched
+        assert load().cli.stream is True  # and the next load applies them again
+        config.set_overrides({})
+        assert (load().cli.stream, load().retrieval.k) == (False, 5)
+
+    def test_a_value_the_caller_changed_is_theirs(self, _file: Path) -> None:
+        save(Config(chat_backend="ollama"))
+        config.set_overrides({"cli.stream": True, "retrieval.k": 9})
+        cfg = load()
+        cfg.retrieval.k = 6
+        cfg.cli.stream = False
+        save(cfg)
+        config.set_overrides({})
+        assert (load().retrieval.k, load().cli.stream) == (6, False)
+
+    def test_a_setting_the_config_has_no_field_for_is_kept_and_ignored(self) -> None:
+        config.set_overrides({"memory.dir": "/x", "agent.attempt_policy": "none"})
+        assert load() == Config()
+        assert config.overrides() == {
+            "memory.dir": "/x",
+            "agent.attempt_policy": "none",
+        }
+
+    def test_set_overrides_replaces_the_last_ones(self) -> None:
+        config.set_overrides({"cli.stream": True})
+        config.set_overrides({"scheduler.n_srv": 2})
+        assert (load().cli.stream, load().scheduler.n_srv) == (False, 2)
+
+    def test_setting_errors_need_no_backend(self) -> None:
+        cfg = Config()
+        assert cfg.setting_errors() == []
+        cfg.cli.status_line = "loud"
+        cfg.request_timeout_s = -1
+        assert len(cfg.setting_errors()) == 2
+        assert cfg.validate() == ["chat_backend is not set (run 'melo setup')"] + [
+            e for e in cfg.validate()[1:]
         ]

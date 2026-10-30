@@ -49,8 +49,8 @@ prints a hint and exits 2 before any model is built.
 ### Old spelling to new
 
 Every old spelling still works and parses to the same result; `melo -h` leaves
-them out. The settings (`--recall-k`, `--cache-layout` and the other experimental
-options) keep their options and are listed by `melo -h all`.
+them out. A setting is a `config.toml` key: `-X KEY=VALUE` changes it for one run
+and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 
 | Old spelling | New |
 |---|---|
@@ -74,6 +74,62 @@ options) keep their options and are listed by `melo -h all`.
 | `--inbox-fd` | `melo worker BRIEF --inbox-fd` |
 | `--parent-run` | `melo worker BRIEF --parent` |
 | `--import-session` | `melo import FORMAT FILE` |
+| `--attempt-policy` | `-X agent.attempt_policy=VALUE` |
+| `--reflection-gate` | `-X agent.reflection_gate=VALUE` |
+| `--fixed-prefix` | `-X agent.fixed_prefix=VALUE` |
+| `--window-eviction` | `-X agent.window_eviction=VALUE` |
+| `--reflect-tool-guard` | `-X agent.reflect_tool_guard=VALUE` |
+| `--cache-layout` | `-X agent.cache_layout=VALUE` |
+| `--window-messages` | `-X agent.window_messages=VALUE` |
+| `--brief-items` | `-X agent.brief_items=VALUE` |
+| `--reasoning` | `-X agent.reasoning=VALUE` |
+| `--replay-turns` | `-X agent.replay_turns=VALUE` |
+| `--note-writer` | `-X agent.note_writer=VALUE` |
+| `--captured-history` | `-X agent.captured_history=VALUE` |
+| `--context-window` | `-X agent.context_window=VALUE` |
+| `--output-reserve` | `-X agent.output_reserve=VALUE` |
+| `--safety-margin` | `-X agent.safety_margin=VALUE` |
+| `--tool-exposure` | `-X agent.tool_exposure=VALUE` |
+| `--retriever` | `-X retrieval.retriever=VALUE` |
+| `--recall-at` | `-X retrieval.recall_at=VALUE` |
+| `--recall-k` | `-X retrieval.k=VALUE` |
+| `--recall-kinds` | `-X retrieval.kinds=VALUE` |
+| `--recall-placement` | `-X retrieval.placement=VALUE` |
+| `--recall-min-score` | `-X retrieval.min_score=VALUE` |
+| `--retrieval-extra-body` | `-X retrieval.extra_body=VALUE` |
+| `--admit-on-outcome` | `-X memory.admit_on_outcome=VALUE` |
+| `--keep-decision-text` | `-X memory.keep_decision_text=true` |
+| `--memory-dir` | `-X memory.dir=VALUE` |
+| `--request-timeout` | `-X request_timeout_s=VALUE` |
+| `--no-save-session` | `-X sessions.record_direct=false` |
+| `--embedding-base-url` | `-X endpoint.embedding_url=VALUE` |
+| `--embedding-model` | `-X endpoint.embedding_model=VALUE` |
+| `--reasoning-field` | `-X endpoint.reasoning_field=VALUE` |
+
+## Settings
+
+A setting is a key of the [config file](configuration.md#the-config-file): `retrieval.k`
+is `k` in the `[retrieval]` table, and a top-level key such as `request_timeout_s` has no
+dot. `melo -h all` lists the keys with their defaults.
+
+- `-X KEY=VALUE` (long form `--set KEY=VALUE`, as often as needed) changes one for this
+  run. The value is read as TOML (`true`, `5`, `"v3"`), else taken as text; `on` and
+  `off` also mean a boolean. `-X` beats the config file, which beats the default, and
+  never writes the file. After `--` it is task text.
+- A key that has an old option becomes that option before parsing (see the table
+  above): `-X retrieval.k=5` is `--recall-k 5`, with the same checks and refusals. Any
+  other key (`cli.stream`, `scheduler.policy`...) overrides the config this process
+  loads, and a bad value exits 2 naming what the key allows. Nine settings are for one
+  run only, so `-X` takes them and the file does not: `agent.attempt_policy`,
+  `agent.reflection_gate`, `agent.tool_exposure`, `memory.dir`,
+  `memory.keep_decision_text`, `retrieval.extra_body`, `endpoint.embedding_url`,
+  `endpoint.embedding_model` and `endpoint.reasoning_field`.
+- `melo config` shows the file and what differs from the defaults. `melo config keys
+  [FILTER]` lists every key with its value, default and source (default, file or `-X`),
+  `melo config get KEY` prints one, and `melo config set KEY VALUE` checks a key and
+  saves it. An unknown key names the nearest ones.
+- Whatever writes the file (`/model`, the console's settings page, `melo config set`)
+  writes what the file had, never a `-X` value.
 
 ## Modes
 

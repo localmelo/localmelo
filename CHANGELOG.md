@@ -993,7 +993,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Every old spelling still works and parses to the same result, so scripts, the macOS
   app and the benchmark need no change. A first argument that is exactly a command
   word is the command: quote a task that starts with one (`melo "setup the project"`)
-  or put `--` before it. The hints name the new commands. ([#NN])
+  or put `--` before it. `-X KEY=VALUE` (long form `--set`) changes one `config.toml`
+  key for one run and never writes the file: a key that has an old option
+  (`-X retrieval.k=5` is `--recall-k 5`) becomes that option, so the run is the same,
+  and any other key (`cli.stream`, `scheduler.policy`) overrides the loaded config and
+  is checked. `melo config keys`, `get` and `set` list, read and save keys; nine keys
+  are for one run only. The hints name the new commands. ([#NN])
 
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and

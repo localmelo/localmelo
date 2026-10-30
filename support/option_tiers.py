@@ -77,6 +77,19 @@ _ADVANCED = (
     "--embedding-model",
 )
 
+# The old spellings of the everyday options and of the modes: still accepted, and in no
+# list of options to use (the console's list of advanced options leaves them out).
+EVERYDAY_OLD = (
+    "--chat-model",
+    "--base-url",
+    "--max-steps",
+    "--output-format",
+    "--brief",
+    "--serve",
+    "--gateway-login",
+    "--reconfigure",
+)
+
 # Experimental: each option compares designs; the value names the issue that
 # decides it.
 EXPERIMENTAL_ISSUES: dict[str, str] = {
@@ -156,6 +169,12 @@ SETTINGS = (
     Setting("endpoint.reasoning_field", "--reasoning-field", False, "auto"),
 )
 
+# The two settings whose option takes no value: the option means the key has this one.
+_SWITCH_VALUES = {
+    "memory.keep_decision_text": "true",
+    "sessions.record_direct": "false",
+}
+
 # Old option -> what replaces it. Each one still works and parses to the same result;
 # ``melo -h`` leaves them out, and docs/reference/cli.md has this table.
 OLD_SPELLINGS: dict[str, str] = {
@@ -179,6 +198,11 @@ OLD_SPELLINGS: dict[str, str] = {
     "--inbox-fd": "melo worker BRIEF --inbox-fd",
     "--parent-run": "melo worker BRIEF --parent",
     "--import-session": "melo import FORMAT FILE",
+    # A setting is a config key; -X KEY=VALUE sets it for one run.
+    **{
+        item.flag: f"-X {item.key}={_SWITCH_VALUES.get(item.key, 'VALUE')}"
+        for item in SETTINGS
+    },
 }
 
 # (options, what it takes, what it does): the rows of ``melo -h all``; the first
@@ -193,6 +217,11 @@ OPTION_ROWS = (
     ("-t, --timeout", "SEC", "stop the run after SEC seconds"),
     ("-o, --output", "FORMAT", "text (default) or json"),
     ("-y, --yolo", "", "run tools without asking"),
+    (
+        "-X, --set",
+        "KEY=VALUE",
+        "change a setting for this run (list: melo config keys)",
+    ),
     ("-V, --version", "", "show the version"),
     ("--memory", "on|off", "long-term memory (default on)"),
     ("--builtins", "SET", "built-in tools: all, none or NAME,... (default: per mode)"),
@@ -203,7 +232,7 @@ OPTION_ROWS = (
     ("--title", "T", "title of this run's worker session"),
     ("--developer", "", "with -h: every option and setting, as -h all does"),
 )
-SHORT_ROWS = 10
+SHORT_ROWS = 11
 
 USAGE = 'usage: melo [options] ["task"]\n       melo COMMAND [options]'
 DESCRIPTION = 'melo opens a chat here. melo "task" runs one task and prints the answer.'
@@ -240,17 +269,18 @@ def help_all() -> str:
     """``melo -h all``: every option, every command, every setting with its default."""
     from localmelo.support import settings
     from localmelo.support.command_words import SUMMARIES
-    from localmelo.support.config import Config
 
-    defaults = settings.flat(Config())
     rows = []
-    for item in SETTINGS:
-        value = defaults[item.key] if item.file else item.default
-        shown = value if isinstance(value, str) else settings.show(value)
-        issue = EXPERIMENTAL_ISSUES.get(item.flag)
-        rows.append(
-            f"  {item.key:<26}{shown:<12}{item.flag}" + (f" ({issue})" if issue else "")
+    for key in settings.catalog().values():
+        default = key.default
+        shown = (
+            default if isinstance(default, str) and default else settings.show(default)
         )
+        issue = EXPERIMENTAL_ISSUES.get(key.flag)
+        row = f"  {key.name:<27}{shown:<12}{key.flag}" + (
+            f" ({issue})" if issue else ""
+        )
+        rows.append(row.rstrip())
     lines = [
         USAGE,
         "",
@@ -265,8 +295,9 @@ def help_all() -> str:
         "Developer tools, own -h: melo-retrieve · melo-procedures · melo-task",
         'Old spellings of the options: docs/reference/cli.md, "Old spelling to new".',
         "",
-        "Settings: config.toml keys, and the option that sets one for a single run",
-        "(a comparison names the issue that decides it):",
+        "Settings, by config.toml key (melo config keys shows the values in use):",
+        "-X KEY=VALUE changes one for this run and melo config set KEY VALUE saves",
+        "it; the option shown still works. A comparison names the issue that decides it.",
         *rows,
     ]
     return "\n".join(lines) + "\n"

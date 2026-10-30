@@ -912,6 +912,39 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert config.load().embedding_backend == "sglang"
 
 
+async def test_a_model_switch_never_saves_an_x_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support import config
+    from localmelo.support.cli.agents import config_backend
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    config.save(
+        config.Config(
+            chat_backend="sglang",
+            embedding_backend="none",
+            sglang=config.LocalBackendConfig(chat_url=URL, chat_model="m1"),
+        )
+    )
+    config.set_overrides({"cli.stream": True, "retrieval.k": 9})
+    cfg = config.load()
+    assert cfg.cli.stream is True  # this session runs with the setting
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+    )
+    factory.use_model("m2")
+    assert await factory.save() == ""
+    text = path.read_text(encoding="utf-8")
+    assert 'chat_model = "m2"' in text
+    assert "stream" not in text and "[retrieval]" not in text
+    assert config.load().cli.stream is True
+
+
 async def test_backend_saves_an_ollama_server_as_the_ollama_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

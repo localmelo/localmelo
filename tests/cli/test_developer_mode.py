@@ -17,6 +17,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.support import command_words, config
+from localmelo.support import settings as settings_module
 from localmelo.support.option_tiers import (
     ADVANCED,
     EXPERIMENTAL,
@@ -111,12 +112,13 @@ def test_default_help_fits_twenty_lines_and_names_no_old_spelling(
     lines = text.splitlines()
     assert len(lines) <= 20 and max(map(len, lines)) <= 80
     assert _is_short(text)
-    shown = set(_shown_options(text))
+    shown = set(_shown_options(text)) - {"--set"}  # -X is not a parser option
     assert shown == {n for n, tier in OPTION_TIERS.items() if tier == USER} - {"--help"}
+    assert "  -X, --set KEY=VALUE  change a setting for this run" in text
     assert not shown & set(OLD_SPELLINGS)
     assert not any(" " + old in text for old in OLD_SPELLINGS)
     # No option is alone on its row: the row's text follows on the same line.
-    assert all(re.match(r"^  -.* {2,}\S", row) for row in lines[6:16])
+    assert all(re.match(r"^  -.* {2,}\S", row) for row in lines[6:17])
 
 
 @pytest.mark.parametrize(
@@ -156,8 +158,10 @@ def test_the_full_help_lists_every_option_command_and_setting_without_wrapping(
     for word in ("setup", "config", "serve", "console", "task", "worker", "import"):
         assert re.search(rf"^  {word} ", text, re.M), word
     assert "melo-retrieve" in text and "docs/reference/cli.md" in text
-    for item in SETTINGS:
-        assert re.search(rf"^  {re.escape(item.key)} +\S.* {item.flag}\b", text, re.M)
+    assert "-X KEY=VALUE changes one for this run" in text
+    for key in settings_module.catalog().values():
+        row = rf"^  {re.escape(key.name)} +\S"
+        assert re.search(row + (rf".* {key.flag}\b" if key.flag else ""), text, re.M)
 
 
 def test_an_experimental_setting_names_its_issue() -> None:

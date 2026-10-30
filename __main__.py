@@ -1931,9 +1931,10 @@ def _build_parser(
 
 def _parse(argv: Sequence[str]) -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     """The parser and the checked namespace of a command line (words included)."""
+    from localmelo.support import settings
     from localmelo.support.command_words import expand
 
-    argv = expand(argv)
+    argv = settings.expand(expand(argv))
     legacy = _build_parser(direct_only=True)
     try:
         args, unknown = legacy.parse_known_args(argv)

@@ -31,10 +31,13 @@ _HELP = {
         "melo setup",
     ),
     "config": (
-        "melo config",
-        "Show where the config file is and which settings differ from the defaults.",
+        "melo config [keys [FILTER] | get KEY | set KEY VALUE]",
+        "Show where the config file is and which settings differ from the defaults.\n"
+        "keys lists every setting with its value, default and source (default, file\n"
+        "or -X); get prints one; set checks one and saves it in the file. A setting\n"
+        "marked one run only is set with -X KEY=VALUE.",
         "",
-        "melo config",
+        "melo config keys recall",
     ),
     "serve": (
         "melo serve [install|uninstall|status] [options]",
@@ -244,4 +247,10 @@ def expand(argv: Sequence[str]) -> list[str]:
     if word != "task" and ("-h" in rest or "--help" in rest):
         sys.stdout.write(help_text(word))
         raise SystemExit(0)
-    return _EXPANDERS[word](rest)
+    if word in ("task", "config"):
+        return _EXPANDERS[word](rest)
+    # The word's own parser does not know -X: take the settings out, put them back.
+    from localmelo.support import settings
+
+    rest, pairs = settings.scan(rest)
+    return [*_EXPANDERS[word](rest), *(arg for pair in pairs for arg in ("-X", pair))]

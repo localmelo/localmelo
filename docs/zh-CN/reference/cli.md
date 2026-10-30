@@ -45,7 +45,7 @@ melo -h all                                  # every option, command and setting
 
 ### 旧写法对应的新写法
 
-所有旧写法仍然可用，解析结果相同；`melo -h` 不再列出它们。各项设置（`--recall-k`、`--cache-layout` 等实验性选项）保留原有选项，由 `melo -h all` 列出。
+所有旧写法仍然可用，解析结果相同；`melo -h` 不再列出它们。设置对应 `config.toml` 中的键：`-X KEY=VALUE` 只对本次运行生效，`melo config set KEY VALUE` 会把它保存下来（见[设置](#settings)）。
 
 | 旧写法 | 新写法 |
 |---|---|
@@ -69,6 +69,48 @@ melo -h all                                  # every option, command and setting
 | `--inbox-fd` | `melo worker BRIEF --inbox-fd` |
 | `--parent-run` | `melo worker BRIEF --parent` |
 | `--import-session` | `melo import FORMAT FILE` |
+| `--attempt-policy` | `-X agent.attempt_policy=VALUE` |
+| `--reflection-gate` | `-X agent.reflection_gate=VALUE` |
+| `--fixed-prefix` | `-X agent.fixed_prefix=VALUE` |
+| `--window-eviction` | `-X agent.window_eviction=VALUE` |
+| `--reflect-tool-guard` | `-X agent.reflect_tool_guard=VALUE` |
+| `--cache-layout` | `-X agent.cache_layout=VALUE` |
+| `--window-messages` | `-X agent.window_messages=VALUE` |
+| `--brief-items` | `-X agent.brief_items=VALUE` |
+| `--reasoning` | `-X agent.reasoning=VALUE` |
+| `--replay-turns` | `-X agent.replay_turns=VALUE` |
+| `--note-writer` | `-X agent.note_writer=VALUE` |
+| `--captured-history` | `-X agent.captured_history=VALUE` |
+| `--context-window` | `-X agent.context_window=VALUE` |
+| `--output-reserve` | `-X agent.output_reserve=VALUE` |
+| `--safety-margin` | `-X agent.safety_margin=VALUE` |
+| `--tool-exposure` | `-X agent.tool_exposure=VALUE` |
+| `--retriever` | `-X retrieval.retriever=VALUE` |
+| `--recall-at` | `-X retrieval.recall_at=VALUE` |
+| `--recall-k` | `-X retrieval.k=VALUE` |
+| `--recall-kinds` | `-X retrieval.kinds=VALUE` |
+| `--recall-placement` | `-X retrieval.placement=VALUE` |
+| `--recall-min-score` | `-X retrieval.min_score=VALUE` |
+| `--retrieval-extra-body` | `-X retrieval.extra_body=VALUE` |
+| `--admit-on-outcome` | `-X memory.admit_on_outcome=VALUE` |
+| `--keep-decision-text` | `-X memory.keep_decision_text=true` |
+| `--memory-dir` | `-X memory.dir=VALUE` |
+| `--request-timeout` | `-X request_timeout_s=VALUE` |
+| `--no-save-session` | `-X sessions.record_direct=false` |
+| `--embedding-base-url` | `-X endpoint.embedding_url=VALUE` |
+| `--embedding-model` | `-X endpoint.embedding_model=VALUE` |
+| `--reasoning-field` | `-X endpoint.reasoning_field=VALUE` |
+
+<a id="settings"></a>
+
+## 设置
+
+设置是[配置文件](configuration.md#the-config-file)中的键：`retrieval.k` 就是 `[retrieval]` 表里的 `k`，`request_timeout_s` 这样的顶层键没有点号。`melo -h all` 会列出各个键及其默认值。
+
+- `-X KEY=VALUE`（长格式 `--set KEY=VALUE`，可重复）只对本次运行修改一项设置。值按 TOML 读取（`true`、`5`、`"v3"`），否则当作文本；`on` 和 `off` 也表示布尔值。`-X` 优先于配置文件，配置文件优先于默认值，并且从不写入文件。出现在 `--` 之后时，它是任务文字。
+- 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
+- `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个。
+- 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
 
 <a id="modes"></a>
 

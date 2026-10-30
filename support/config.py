@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import math
 import os
@@ -256,6 +257,10 @@ class Config:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     _enable_playground: bool = field(default=False, repr=False, compare=False)
+    # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
+    _overridden: dict[str, tuple[Any, Any]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
     # ``melo --serve --port 0``: the gateway binds a free port and writes it
     # to ``gateway.port``. A saved ``[gateway] port = 0`` is still invalid.
     _ephemeral_port: bool = field(default=False, repr=False, compare=False)
@@ -652,6 +657,19 @@ class Config:
             msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
             raise ConfigError(msg)
 
+    def setting_errors(self) -> list[str]:
+        """The errors of the settings alone, which need no backend (``-X``, ``melo config``)."""
+        return [
+            *self._validate_agent(),
+            *self._validate_retrieval(),
+            *self._validate_memory(),
+            *self._validate_scheduler(),
+            *self._validate_gateway_workspace(),
+            *self._validate_cli(),
+            *self._validate_ui(),
+            *self._validate_request_timeout(),
+        ]
+
     def cli_errors(self) -> list[str]:
         """The ``[cli]`` errors alone, for a path that does not read the rest."""
         return self._validate_cli()
@@ -730,7 +748,66 @@ _CLOUD_API_PROVIDER_MIGRATION: dict[str, str] = {
 }
 
 
+# Settings ``-X KEY=VALUE`` gives this process: ``load()`` applies them, and ``save()``
+# never writes them. A key is ``section.name``, or a top-level name without a dot.
+_OVERRIDES: dict[str, Any] = {}
+
+
+def set_overrides(values: Mapping[str, Any]) -> None:
+    """Replace the settings this process runs with (empty: none)."""
+    _OVERRIDES.clear()
+    _OVERRIDES.update(values)
+
+
+def overrides() -> dict[str, Any]:
+    return dict(_OVERRIDES)
+
+
+def _holder(cfg: Config, key: str) -> tuple[Any, str] | None:
+    """The object that holds *key*, and its name there; None if *cfg* has no such field."""
+    owner, _, name = key.rpartition(".")
+    target = getattr(cfg, owner, None) if owner else cfg
+    return (target, name) if target is not None and hasattr(target, name) else None
+
+
+def get_key(cfg: Config, key: str) -> Any:
+    holder = _holder(cfg, key)
+    return getattr(*holder) if holder else None
+
+
+def set_key(cfg: Config, key: str, value: Any) -> bool:
+    """Set *key* on *cfg*; False when *cfg* has no such field."""
+    holder = _holder(cfg, key)
+    if holder:
+        setattr(*holder, value)
+    return holder is not None
+
+
 def load() -> Config:
+    cfg = _load_file()
+    for key, value in _OVERRIDES.items():
+        original = get_key(cfg, key)
+        if set_key(cfg, key, value):
+            cfg._overridden[key] = (original, value)
+    return cfg
+
+
+def _as_in_file(cfg: Config) -> Config:
+    """*cfg* with each ``-X`` value that is still in place put back to what the file had.
+
+    A value the caller changed since ``load()`` is theirs and is kept.
+    """
+    if not cfg._overridden:
+        return cfg
+    saved = copy.deepcopy(cfg)
+    saved._overridden = {}
+    for key, (original, applied) in cfg._overridden.items():
+        if get_key(cfg, key) == applied:
+            set_key(saved, key, original)
+    return saved
+
+
+def _load_file() -> Config:
     path = config_path()
     if not os.path.isfile(path):
         return Config()
@@ -1001,6 +1078,7 @@ def _spelling(backend: str, alias: str) -> str:
 
 
 def save(cfg: Config) -> None:
+    cfg = _as_in_file(cfg)
     os.makedirs(config_dir(), exist_ok=True)
 
     lines: list[str] = []
