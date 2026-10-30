@@ -8,7 +8,7 @@ import json
 import math
 import os
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ import aiosqlite
 
 from localmelo.support.sessions.store import (
     _SESSION_COLUMNS,
+    DayTurn,
     FinishedTurn,
     SessionInfo,
     SessionStore,
@@ -235,6 +236,38 @@ class WorkerReader(SessionStore):
         if not os.path.exists(self.path):
             return None
         return await super().latest_finished_turn(kinds)
+
+    async def day_turns(
+        self, since: float, kinds: Collection[str] = READ_KINDS, *, limit: int = 100
+    ) -> list[DayTurn]:
+        """The day's runs and terminal chats, a terminal chat redacted; none before the file exists."""
+        if not os.path.exists(self.path):
+            return []
+        rows = await super().day_turns(since, kinds, limit=limit)
+        return [
+            (
+                replace(
+                    row,
+                    title=redact_worker(row.title),
+                    answer=redact_worker(row.answer),
+                    note=redact_worker(row.note),
+                    workspace=redact_worker(row.workspace),
+                )
+                if row.kind == "chat"
+                else row
+            )
+            for row in rows
+        ]
+
+    async def latest_events(
+        self, session_id: str, *, limit: int = 40
+    ) -> list[StoredEvent]:
+        """The newest events, a terminal chat's redacted; none before the file exists."""
+        if not os.path.exists(self.path):
+            return []
+        events = await super().latest_events(session_id, limit=limit)
+        chat, _ = await self._chat_workspace(session_id)
+        return [redact_event(event, {}) for event in events] if chat else events
 
     async def get_session(self, session_id: str) -> SessionInfo | None:
         if not os.path.exists(self.path):
