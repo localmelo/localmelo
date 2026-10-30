@@ -17,8 +17,9 @@ work, for the macOS app and for launchers; [Old spelling to new](../reference/cl
 lists them.
 
 - When there is no config file yet, `melo serve` asks first, as `melo setup`
-  does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`, and
-  the full backend menu follows only after `n` or with `--developer`, and with
+  does: it prints `Found a model server at …` and asks `Use this model
+  server?`, and the full backend menu follows only after `Use another server`
+  or with `--developer`, and with
   no server running it prints the commands that start one; see [Configuration](configure.md#set-up-with-the-wizard).
   Without a terminal it cannot ask, so it prints
   `melo: no backend is configured; run melo setup in a terminal`

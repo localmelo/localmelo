@@ -106,6 +106,7 @@ class FakeApp:
         # What /model's picker is shown, and what the person picks, in turn.
         self.offered: list[tuple[list[ModelRow], str, str]] = []
         self.picks: list[str | None] = []
+        self.asked: list[tuple[str, list[str], int, int]] = []
         self.exited = False
         self.bells = 0
         self.invalidated = 0
@@ -131,6 +132,13 @@ class FakeApp:
     ) -> str | None:
         self.offered.append((list(rows), where, current))
         return self.picks.pop(0)
+
+    async def pick(
+        self, title: str, options: list[str], *, default: int, escape: int
+    ) -> int:
+        """A list question, answered from the same script: ``y`` is the first row."""
+        self.asked.append((title, list(options), default, escape))
+        return 0 if self.answers.pop(0) in ("y", "yes") else escape
 
 
 class Setup:
@@ -1945,6 +1953,26 @@ async def test_attach_bang_attaches_the_last_output_only_when_asked(
     [attached] = turn.attachments
     assert attached.name.startswith("shell output: ") and secret not in attached.name
     assert attached.text.strip() == "ok\n[redacted]"  # exactly what was shown
+
+
+async def test_the_attach_question_is_a_list_that_starts_on_not_attaching(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    for command, title in (
+        ("! echo ok", "Attach this output?"),
+        (f"! echo ok; echo {secret}", "Attach this redacted snapshot?"),
+    ):
+        assert session.enter(command) is None
+        await setup.idle()
+        setup.app.asked.clear()
+        setup.app.answers.append("n")
+        assert session.enter("/attach !") is None
+        await setup.idle()
+        # Safe answer first and on esc: "Don't attach it", the second row.
+        assert setup.app.asked == [(title, ["Attach it", "Don't attach it"], 1, 1)]
+        assert session.attachment_line == ""
 
 
 async def test_a_command_without_output_leaves_nothing_to_attach(

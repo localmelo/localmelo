@@ -131,13 +131,12 @@ melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.j
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问是否使用找到的那个（`Use it? [Y/n]:`，按 Enter 即同意）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。模型是一个用方向键选择的列表（输入即可筛选，Enter 选择，Esc 取消），其中只有对话模型；答案从管道输入时则改为编号列表，对话模型在前，嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，其中第一个会被高亮，因此 Enter 不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，不会高亮任何一项，在你移到某个模型之前 Enter 不起作用，因为尚未加载的模型可能需要数分钟和大量内存才能加载（管道输入时同样没有默认值：只按 Enter 会再次询问，空答案是错误）。只有一个对话模型时无需选择：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问是否使用找到的那个（`Use this model server?`，一个列表：按 Enter 即选中 `Use it`）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。模型是一个用方向键选择的列表（输入即可筛选，Enter 选择，Esc 取消），其中只有对话模型；答案从管道输入时则改为编号列表，对话模型在前，嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，其中第一个会被高亮，因此 Enter 不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，不会高亮任何一项，在你移到某个模型之前 Enter 不起作用，因为尚未加载的模型可能需要数分钟和大量内存才能加载（管道输入时同样没有默认值：只按 Enter 会再次询问，空答案是错误）。只有一个对话模型时无需选择：
 
 ```text
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Use it? [Y/n]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
@@ -148,7 +147,11 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
-如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 服务器保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
+如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory?`；选择默认选中的 `Use it` 后，会在一次嵌入探测通过后保存。
+
+在终端里，每个答案固定的问题都是列表：↑ ↓ 或数字键移动，Enter 确认，Esc 取安全答案，回答后列表会被擦除（见[问题都是列表](../guides/terminal.md#questions-are-lists)）。管道输入的答案和脚本仍使用键入的问题（`Use it? [Y/n]:`）。
+
+输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 服务器保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
 
 <a id="with-the-setup-wizard"></a>
 
@@ -164,18 +167,18 @@ melo --serve --reconfigure
 
 | 提示 | 输入内容 |
 |---|---|
-| `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于 oMLX 或其他 OpenAI 兼容服务器，选择 oMLX 或 vLLM（`3`）。 |
+| `Chat backend` | 你的服务器类型，例如 `2. Ollama (local endpoint)`：用 ↑ ↓ 移动并按 Enter，或直接按数字键（管道输入时键入编号）。默认选中已保存的后端，否则为 MLC（`1`）。对于 oMLX 或其他 OpenAI 兼容服务器，选择 oMLX 或 vLLM（`3`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
-| `Save and continue?` | 按 Enter（是）保存并继续。 |
-| `Embedding backend` | 输入 `5` 选择 `None (no long-term memory)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，第一个为默认值；选择一个即可。 |
+| `Save these settings?` | 在 `Save and continue` 上按 Enter，或选择 `Cancel setup`（管道输入时为 `Save and continue? [Y]:`）。 |
+| `Embedding backend` | `5. None (no long-term memory)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，默认选中第一个；选择一个即可。 |
 | `Embedding endpoint URL`, `Embedding model name` | 仅当选择固定嵌入后端 `1`–`4` 之一，而不是检测到的模型时询问。 |
 
 对于云端 API，选择提供方。向导会改为询问 `API key env var`（你导出的变量名称）和 `Chat model`，而不是 `Base URL` 和 `Chat model name`。
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `[r]etry, [s]ave anyway, [N]o [N]:`；`r` 会重新询问 URL 和模型，按 Enter 则不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use it? [Y/n]:`。只有回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `The check failed. What now?`，选项有 `Try again`、`Save anyway` 和 `Cancel setup`（管道输入时为 `[r]etry, [s]ave anyway, [N]o [N]:`）；`Try again` 会重新询问 URL 和模型，按 Enter 会选中默认的 `Cancel setup`，不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后在 `http://127.0.0.1:8401` **启动网关**。网关会在此终端持续运行。单独运行 `melo setup` 时，会改为打开交互式界面；在默认模式下它先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use this model server?`。只有选择 `Use another server`、使用 `--developer`，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
 
 <a id="start-the-gateway"></a>
 

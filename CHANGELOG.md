@@ -1087,6 +1087,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Every terminal question with a fixed set of answers is a list you move through and
+  confirm with Enter, not a letter to type. On a terminal, the first run's questions
+  (`Use this model server?`, `Use <model> for long-term memory?`, `What now?` after a
+  URL that cannot be used, the no-server screen's `Check again`, `Enter an address` and
+  `Quit`, and `Save URL · MODEL as the default backend?`), the setup wizard's backend
+  lists, `Save these settings?` and `The check failed. What now?`, and `/attach !`'s
+  `Attach this output?` show their answers as rows of words, as the tool approval and
+  `/model` do: ↑ ↓ move, a number key (1 to 9) chooses that row at once, Enter confirms,
+  and Esc takes the safe answer named in the key line (cancel the setup, decline, do not
+  attach). The recommended answer is selected first, and a failed check and the attach
+  question start on `Cancel setup` and `Don't attach it`, as `[N]` and `[y/N]` did. A
+  list has no filter field. With answers piped in (stdin is not a terminal), nothing
+  is drawn and every question reads the typed answer it always did (`Use it? [Y/n]:`,
+  `[r]etry, [s]ave anyway, [N]o [N]:`, a number for a backend, Enter for the default),
+  so scripts keep working; a direct run, `--output-format json` and workers never ask.
+  The inline list the first run's model question uses now serves them all ([#NN]).
+
 - The macOS app and its menu-bar item use the localmelo logo, Melo the mascot,
   instead of the placeholder mark. The app icon (Dock, Finder, Spotlight and every
   dialog) is the README's emblem, `docs/assets/melo.png`, whole, on a rounded tile of

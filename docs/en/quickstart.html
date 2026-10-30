@@ -225,7 +225,11 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           OpenAI-compatible server as <code>vllm</code>, the key for those.
           When the server lists an
           embedding model, the first run asks one more question,
-          <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>. See
+          <code>Use &lt;model&gt; for long-term memory?</code>, a list whose
+          selected row, <code>Use it</code>, saves it. Every question with a
+          fixed set of answers is a list on a terminal (↑ ↓ or a number move,
+          Enter confirms, Esc takes the safe answer); piped answers keep the
+          typed questions. See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
           and
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">Set up an embedding model</a>.
@@ -246,11 +250,11 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
               <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default is the saved backend, else <code>[1]</code>, MLC. For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (<code>3</code>).</td></tr>
+              <tr><td><code>Chat backend</code></td><td>Your server type, such as <code>2. Ollama (local endpoint)</code>: move with ↑ ↓ and press Enter, or press the number (piped: type it). The saved backend is selected first, else MLC (<code>1</code>). For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (<code>3</code>).</td></tr>
               <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
-              <tr><td><code>Save and continue?</code></td><td>Press Enter (yes) to save and continue.</td></tr>
-              <tr><td><code>Embedding backend</code></td><td><code>5</code> for <code>None (no long-term memory)</code>. Without a saved embedding, the chat server's own embedding models are appended as <code>6</code>, <code>7</code>, … with the first as the default; choosing one is enough.</td></tr>
+              <tr><td><code>Save these settings?</code></td><td>Press Enter on <code>Save and continue</code>, or choose <code>Cancel setup</code> (piped: <code>Save and continue? [Y]:</code>).</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5. None (no long-term memory)</code>. Without a saved embedding, the chat server's own embedding models are appended as <code>6</code>, <code>7</code>, … with the first selected; choosing one is enough.</td></tr>
               <tr><td><code>Embedding endpoint URL</code>, <code>Embedding model name</code></td><td>Only asked when you chose one of the fixed embedding backends <code>1</code>–<code>4</code>, not a detected model.</td></tr>
             </tbody>
           </table>
@@ -270,8 +274,11 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           Next, the wizard sends a short test request to each server
           (<code>Probing backends ...</code>). If the chat server does not
           answer, it prints <code>Probe failed: …</code> and asks
-          <code>[r]etry, [s]ave anyway, [N]o [N]:</code>; <code>r</code> asks
-          for the URL and model again, and pressing Enter saves nothing. If
+          <code>The check failed. What now?</code> with <code>Try again</code>,
+          <code>Save anyway</code> and <code>Cancel setup</code> (piped:
+          <code>[r]etry, [s]ave anyway, [N]o [N]:</code>); <code>Try again</code>
+          asks for the URL and model again, and Enter, which takes the selected
+          <code>Cancel setup</code>, saves nothing. If
           only the embedding server fails, the wizard saves with embedding off
           and says so. On success it prints <code>Config saved to …</code>,
           the path of <code>~/.cache/localmelo/config.toml</code>, and then
@@ -281,8 +288,8 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           opens the interactive UI instead, and in
           default mode it starts with the first run's question: it prints
           <code>Found a model server at …</code> and asks
-          <code>Use it? [Y/n]:</code>. The full menu above follows only after
-          <code>n</code>, when no server is found, or with
+          <code>Use this model server?</code>. The full menu above follows only
+          after <code>Use another server</code>, when no server is found, or with
           <code>--developer</code>.
         </p>
       </section>

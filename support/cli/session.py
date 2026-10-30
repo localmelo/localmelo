@@ -829,16 +829,21 @@ class CliSession:
                 )
             )
             self.out.print(Text(item.content))
-            answer = (
-                await self.app.ask(
-                    "Attach this redacted snapshot? [y/N]"
-                    if item.changed
-                    else "Attach this output? [y/N]"
+            yes = (
+                self.app is not None
+                and await self.app.pick(
+                    (
+                        "Attach this redacted snapshot?"
+                        if item.changed
+                        else "Attach this output?"
+                    ),
+                    ["Attach it", "Don't attach it"],
+                    default=1,
+                    escape=1,
                 )
-                if self.app is not None
-                else None
+                == 0
             )
-            if (answer or "").strip().lower() not in ("y", "yes"):
+            if not yes:
                 raise ValueError("Attachment not added.")
         self._attachments = updated
         self.out.print(
