@@ -46,6 +46,7 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "budget": "The attempt used its step budget.",
     "empty_reply": "The model returned an empty reply; asking it to continue.",
     "no_change": "Nothing has changed in the workspace yet.",
+    "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
         "The task's check still fails; the run ends completed with failing tests."
     ),
@@ -465,6 +466,17 @@ class _Emitter:
             return
         detail = {} if scope is None else {"scope": scope}
         self._notice("no_change", NOTICE_MESSAGES["no_change"], detail)
+
+    def brief_items(self, scope: str, marks: dict[str, str]) -> None:
+        """A brief run named the items no edit has touched; *marks* maps each
+        item's number to its mark and *scope* is ``"reflection"`` or ``"deadline"``."""
+        if self._sink is None:
+            return
+        self._notice(
+            "brief_items",
+            NOTICE_MESSAGES["brief_items"],
+            {"scope": scope, "marks": marks},
+        )
 
     def brief_check(self, result: BriefCheckResult, round_: int) -> None:
         """A brief run's gate ran one check; *round_* counts the gate's runs."""

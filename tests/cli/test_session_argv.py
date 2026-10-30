@@ -73,7 +73,7 @@ R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 # Fixed prefix is opt-in; historical invocations leave it unset.
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
-CAPTURED_DEFAULTS = {"captured_history": None}
+CAPTURED_DEFAULTS = {"captured_history": None, "brief_items": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 REFLECT_TOOL_GUARD_DEFAULTS = {"reflect_tool_guard": None}
 CACHE_LAYOUT_DEFAULTS = {"cache_layout": None, "window_messages": None}

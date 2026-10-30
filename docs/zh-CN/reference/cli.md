@@ -132,6 +132,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--note-writer` | experimental | #183 |
 | `--tool-exposure` | experimental | #3 |
 | `--captured-history` | experimental | #4 |
+| `--brief-items` | experimental | #185 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -184,6 +185,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--cache-layout v2\|v3` | `v2` | 启用固定前缀时，`v3` 在尝试边界把反思作为一条窗口消息只追加一次，让反思请求及其回复留在窗口中，并在同一前缀上再次询问不可读的反思；`v2` 是今天的请求。没有固定前缀时它不改变任何内容。它会覆盖 `[agent] cache_layout`；见[配置](configuration.md#context-accounting)。 |
 | `--window-messages N` | `20` | 工作窗口的消息数上限，8 到 256。它会覆盖 `[agent] window_messages`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
+| `--brief-items on\|off` | `off` | 实验性。配合 `--brief`，在每个反思请求中，以及最后一次尝试结束前两步，指出简报中尚未被任何编辑触及的编号条目；见[运行 worker 任务](#brief-items)。它会覆盖 `[agent] brief_items`；没有 `--brief` 时不起作用。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
 | `--max-steps N` | `30` | 整个运行最多可以使用的规划步数。 |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试之后都进行一次反思。`none`：只做一次尝试，不进行反思。 |
@@ -345,6 +347,9 @@ melo: error: argument --max-steps: must be at least 1, got 0
 另外三项辅助机制会让 brief 运行持续写作。自上一次看到的变化（或开始时）以来，连续 6 个步骤中工作区摘要没有变化后，会加入一条用户行：“You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue.”，并发出 detail 为 `{"scope": "step"}` 的 `no_change` 通知；计数在每次尝试开始时以及每次探测之后重置，因此这一行至多每 6 个步骤出现一次（边界行依然保留）。当窗口或适配丢弃了工具输出时，运行会为每个被丢弃的结果记住一行（工具、其关键参数缩短到 80 个字符、输出长度，以及最近的 8 条）；每个规划请求的末尾会附上“Earlier tool output no longer in your context: file_read support/sessions/runner.py (49,999 chars); shell_exec `grep -n ...` (2,310 chars). Read again what you need before you edit.”（若该步骤带有 inbox 行，则不附加）。反思请求的末尾附有一句话，要求在 `useful_evidence` 中给出带行号的确切文件路径，并要求把第一条要运行的命令或编辑作为 `next_promising_directions` 的第一项；当添加了上面的边界行时，它以“Start with: <that direction>”结尾（经过脱敏，最多 300 个字符）。
 
 第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用，无论运行是否向模型提供 `shell_exec`（直接模式下不提供，除非指定 `--builtins all` 或 `--builtins shell_exec`；`--builtins none` 也不会阻止检查：要跳过检查，请删除该行）。只有工具自身的这次调用能越过这一过滤：模型的工具列表和它自己的 `shell_exec` 调用保持不变。检查器的 `pre_execute`、工作区根目录（`--workspace`）、shell 超时和脱敏与模型自己的调用一样适用。退出状态为 0 即通过。若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。若检查在最后仍然失败，运行仍以 `completed` 结束，但 `tests` 为 `failed`，会发出一条 `brief_check_failed` 通知，退出码为 4（见[退出码](#exit-codes)；stderr 会输出一行 `melo: the brief's check failed: <command> (exit N)`，被拒绝的检查显示 `not run`，超时显示 `no exit status`）；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。当运行处于最后一次尝试、总步数预算恰好还剩两步、工作区自检查上次运行（或运行开始）以来有变化，且门禁在该次尝试中尚未运行时，工具会在下一个规划请求之前运行一次检查，使模型仍有机会修复检查所示的问题。通过则不改变任何行为；失败则发送与门禁相同的消息，并消耗两次重试中的一次。`max_steps` 仍是硬性上限。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
+
+<a id="brief-items"></a>
+**实验性：`--brief-items on`（`[agent] brief_items = true`，默认关闭）。** 一份有多个编号条目、检查又较弱的简报，可能在一个条目完全没动的情况下以 `completed passed` 结束。开启该选项后，工具会读取简报的顶层条目（代码块之外的 `1.`、`2)` 和 `- [ ]` 行；每条只取第一行，最多 12 条，缩短到约 120 个字符；少于两条的简报什么也不加），并根据 `git status` 列出的、自运行开始以来被改动的文件给每条打标记：条目中点名的文件（含 `/` 或带文件扩展名的词）被编辑过为 `changed`，点名了文件但都没被编辑为 `not yet`，其余为 `no file named`。标记只说明编辑情况，从不声称条目已完成。标记以同一个文本块的形式放入每个尝试边界的反思请求，以及最后一次尝试结束前两步的检查中：`Items in the brief with no edit yet: 2, 3`，后接这些条目的行，因此中间的规划请求保持其前缀。没有 `not yet` 条目时不加该块。每次使用都会发出一条 `brief_items` 通知，detail 为 `{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`。不是 git 树的工作区没有该块。没有 `--brief` 时该选项不起作用。
 
 使用显式的 `--inbox FILE` 时，worker 会在每个规划步骤开始时读取完整的、以 LF 结尾的非空 UTF-8 行。未完成的最后一行会等待其换行符。该文件可以最初不存在，但除此之外必须是只追加的普通文件（不能是符号链接），总共不超过 1 MiB，每行不超过 16 KiB。写入者需要串行化，每次以一次写入追加完整的一行，并且每次运行使用新的收件箱。没有默认的收件箱：只使用 `--brief` 时不读取任何文件，收件箱路径也从不进入模型的上下文。
 

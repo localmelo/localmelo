@@ -44,6 +44,7 @@ tables of the chosen backends.
 | `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
 | `fixed_prefix` | `[agent]` | `true` | `false` sends the requests from before the stable prefix became the default. See [Context accounting](#context-accounting). |
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
+| `brief_items` | `[agent]` | `false` | Experimental. `true` makes a `--brief` run name the brief's numbered items that no edit has touched yet; see [`--brief-items`](cli.md#brief-items). |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
 | `cache_layout` | `[agent]` | `"v2"` | Experimental. `"v3"`, with `fixed_prefix`, appends a reflection once instead of rebuilding it in every planning request. See [Context accounting](#context-accounting). |
 | `window_messages` | `[agent]` | `20` | Experimental. The working window's message cap, 8 to 256. See [Context accounting](#context-accounting). |

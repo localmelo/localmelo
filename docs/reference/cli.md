@@ -172,6 +172,7 @@ two equal.
 | `--note-writer` | experimental | #183 |
 | `--tool-exposure` | experimental | #3 |
 | `--captured-history` | experimental | #4 |
+| `--brief-items` | experimental | #185 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -226,6 +227,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--cache-layout v2\|v3` | `v2` | With the fixed prefix, `v3` appends a reflection once at the attempt boundary as a window message, keeps the reflection request and its reply in the window, and asks an unreadable reflection again on the same prefix; `v2` is today's requests. Without the fixed prefix it changes nothing. Overrides `[agent] cache_layout`; see [Configuration](configuration.md#context-accounting). |
 | `--window-messages N` | `20` | The working window's message cap, 8 to 256. Overrides `[agent] window_messages`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
+| `--brief-items on\|off` | `off` | Experimental. With `--brief`, name the brief's numbered items that no edit has touched yet in each reflection request and two steps before the last attempt ends; see [Run a worker task](#brief-items). Overrides `[agent] brief_items`; inert without `--brief`. |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
@@ -659,6 +661,25 @@ before the next planning request, so the model can still fix what they show. A
 pass changes nothing; a failure sends the same message as the gate and uses one
 of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
 line behaves as before, and the model's own account of its checks is still only that.
+
+<a id="brief-items"></a>
+**Experimental: `--brief-items on` (`[agent] brief_items = true`, off by default).**
+A brief with several numbered items and a weak check can end `completed passed`
+with one item untouched. With the option on, the harness reads the brief's
+top-level items (`1.`, `2)` and `- [ ]` lines outside code blocks; the first line
+of each, at most 12, shortened to about 120 characters; a brief with fewer than
+two gets nothing) and marks each from the files `git status` lists as changed
+since the run started: `changed` when a file the item names (a word with a `/`
+or a file extension) was edited, `not yet` when it names files and none was,
+`no file named` otherwise. A mark speaks of edits only; it never says an item is
+done. The marks go into the reflection request at each attempt boundary and into
+the check two steps before the last attempt ends, always as the same block,
+`Items in the brief with no edit yet: 2, 3` followed by those item lines, so the
+planning requests in between keep their prefix. The block is left out when no
+item is `not yet`. Each use emits a `brief_items` notice with detail
+`{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`. A
+workspace that is not a git tree gets no block. Without `--brief` the option
+does nothing.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last

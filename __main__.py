@@ -79,6 +79,7 @@ _DIRECT_FLAGS = {
     "cache_layout": "--cache-layout",
     "window_messages": "--window-messages",
     "captured_history": "--captured-history",
+    "brief_items": "--brief-items",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
     "safety_margin": "--safety-margin",
@@ -1298,6 +1299,8 @@ def _direct_options(
         fields["window_messages"] = args.window_messages
     if getattr(args, "captured_history", None) is not None:
         fields["captured_history"] = args.captured_history == "on"
+    if getattr(args, "brief_items", None) is not None:
+        fields["brief_items"] = args.brief_items == "on"
     reasoning = getattr(args, "reasoning", None)
     if reasoning is not None:
         fields["reasoning"] = reasoning
@@ -1457,6 +1460,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--window-messages",
             "--developer",
             "--captured-history",
+            "--brief-items",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1579,6 +1583,13 @@ def _build_parser(
         "--captured-history",
         choices=["on", "off"],
         help="Store bounded, redacted captured tool results (default off)",
+    )
+    direct.add_argument(
+        "--brief-items",
+        choices=["on", "off"],
+        help="With --brief, name the brief's numbered items that no edit has "
+        "touched yet in each reflection request and before the budget ends "
+        "(default off)",
     )
     direct.add_argument(
         "--fixed-prefix",
@@ -2333,6 +2344,11 @@ def _build_direct_mode_agent(
         and budget_cfg.agent.captured_history
     ):
         options = dataclasses.replace(options, captured_history=True)
+
+    if not isinstance(budget_cfg.agent.brief_items, bool):
+        config_value_error("[agent] brief_items must be a boolean")
+    if getattr(args, "brief_items", None) is None and budget_cfg.agent.brief_items:
+        options = dataclasses.replace(options, brief_items=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint

@@ -30,9 +30,15 @@ from localmelo.melo.agent._brief_aids import (
     REFLECTION_ADDENDUM,
     STEP_PUSH,
     STEP_PUSH_STEPS,
+    FileStamp,
     dropped_notes,
+    edited_files,
+    mark_items,
+    parse_items,
     render_dropped,
+    render_items,
     start_with,
+    workspace_stamps,
 )
 from localmelo.melo.agent._brief_gate import (
     MAX_CHECK_RETRIES,
@@ -1196,6 +1202,10 @@ class _RunState:
     check_digest: str | None = None
     check_attempt: int = 0
     last_attempt: bool = False
+    # AgentOptions.brief_items: the brief's numbered items and the files git
+    # listed as changed at the run's start (None: not tracked).
+    items: list[str] = dataclasses.field(default_factory=list)
+    items_baseline: dict[str, FileStamp] | None = None
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -4436,6 +4446,10 @@ class Agent:
         addendum: dict[str, Any] = (
             {"addendum": REFLECTION_ADDENDUM} if run is not None and run.brief else {}
         )
+        if run is not None and run.items:
+            block = await self._items_block(run, "reflection")
+            if block:
+                addendum["addendum"] = f"{REFLECTION_ADDENDUM}\n{block}"
         response = await self.chat.reflect(
             short=sent,
             query=task.query,
@@ -5154,6 +5168,12 @@ class Agent:
                     self.hippo.working.on_drop = lambda gone: self._note_dropped(
                         run, gone
                     )
+                    if self.options.brief_items:
+                        run.items = parse_items(query)
+                        if run.items:
+                            run.items_baseline = await asyncio.to_thread(
+                                workspace_stamps, self._workspace_for_brief()
+                            )
                 if self.options.brief_check is not None:
                     run.check_commands = check_commands(query)
                 async with deadline:
@@ -6283,31 +6303,62 @@ class Agent:
         """Keep a line for each tool result that left the window of a brief run."""
         run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
+    async def _items_block(self, run: _RunState, scope: str) -> str:
+        """The block that names the brief's items no edit has touched, or "".
+
+        Marks each item from the files git lists as changed now against those
+        at the run's start, and records the marks in a ``brief_items`` notice
+        when the block is shown (*scope*: where it goes).
+        """
+        if run.items_baseline is None:
+            return ""
+        now = await asyncio.to_thread(workspace_stamps, self._workspace_for_brief())
+        if now is None:
+            return ""
+        marks = mark_items(run.items, edited_files(run.items_baseline, now))
+        block = render_items(run.items, marks)
+        if block:
+            run.events.brief_items(
+                scope,
+                {
+                    item.split(".", 1)[0]: mark
+                    for item, mark in zip(run.items, marks, strict=True)
+                },
+            )
+        return block
+
     async def _deadline_check(self, run: _RunState) -> None:
         """With two steps left in a brief run's last attempt, run the checks once.
 
-        Only when the workspace changed since the checks last ran and the
+        With ``brief_items``, the items no edit has touched yet are named in a
+        user line first (joined to the gate's failure message when both come).
+        The checks run only when the workspace changed since the checks last ran and the
         gate has not run in this attempt. A pass changes nothing; a failure
         adds the gate's failure message to the window, so the next planning
         request carries it, and uses one of the gate's retries.
         """
+        if not run.brief or not run.last_attempt:
+            return
+        lines = []
+        if run.items:
+            block = await self._items_block(run, "deadline")
+            if block:
+                lines.append(block)
         if (
-            not run.brief
-            or not run.last_attempt
-            or not run.check_commands
-            or run.check_attempt == run.attempts
-            or run.check_digest is None
-            or self.options.brief_probe is None
+            run.check_commands
+            and run.check_attempt != run.attempts
+            and run.check_digest is not None
+            and self.options.brief_probe is not None
         ):
-            return
-        digest = await asyncio.to_thread(
-            self.options.brief_probe, self._workspace_for_brief()
-        )
-        if digest == run.check_digest:
-            return
-        retry = await self._brief_gate(run, can_retry=True, quiet=True)
-        if retry is not None:
-            self.hippo.working.append(Message(role="user", content=retry))
+            digest = await asyncio.to_thread(
+                self.options.brief_probe, self._workspace_for_brief()
+            )
+            if digest != run.check_digest:
+                retry = await self._brief_gate(run, can_retry=True, quiet=True)
+                if retry is not None:
+                    lines.append(retry)
+        if lines:
+            self.hippo.working.append(Message(role="user", content="\n\n".join(lines)))
 
     async def _brief_gate(
         self, run: _RunState, *, can_retry: bool, quiet: bool = False

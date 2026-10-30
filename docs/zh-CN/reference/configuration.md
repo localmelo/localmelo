@@ -43,6 +43,7 @@ chat_model = "qwen3:8b"
 | `tool_env` | `[agent]` | `[]` | 配置支持的直接运行和会话中，shell/Python 工具额外继承的环境变量名称。值从不保存；见[工具环境](#tool-environment)。 |
 | `fixed_prefix` | `[agent]` | `true` | `false` 会发送稳定前缀成为默认值之前的请求。见[上下文统计](#context-accounting)。 |
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
+| `brief_items` | `[agent]` | `false` | 实验性。`true` 让 `--brief` 运行指出简报中尚未被任何编辑触及的编号条目；见 [`--brief-items`](cli.md#brief-items)。 |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `cache_layout` | `[agent]` | `"v2"` | 实验性。`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思，而不是在每个规划请求中重建它。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | `20` | 实验性。工作窗口的消息数上限，8 到 256。见[上下文统计](#context-accounting)。 |
