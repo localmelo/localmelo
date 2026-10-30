@@ -887,13 +887,16 @@ class Chat:
         Only the display sees deltas: the completed reply is returned as
         ``chat`` would return it, so the agent, its checker and its stored
         events are unchanged. Without a release declaration the filter holds
-        the text and only the ``thinking`` indicator shows.
+        the text and only the ``thinking`` indicator shows. A reply that the
+        server sent whole (``StreamFragment.whole``) shows no deltas; a display
+        that defines ``whole()`` is told so before it closes.
         """
         display.opened()
         hint = display.reasoning_tags
         separate = False
         filter: StreamFilter | None = None
         reply: Message | None = None
+        whole = False
         saw_text = False
         try:
             async with contextlib.aclosing(
@@ -902,6 +905,7 @@ class Chat:
                 async for fragment in stream:
                     if fragment.kind == "reply":
                         reply = fragment.reply
+                        whole = fragment.whole
                         break
                     if fragment.kind == "reasoning":
                         saw_text = True
@@ -930,6 +934,10 @@ class Chat:
                 _, tail = filter.finish()
                 if saw_text and tail:
                     display.content(tail)
+            if whole:
+                tell = getattr(display, "whole", None)
+                if tell is not None:
+                    tell()
         finally:
             display.closed()
         return reply

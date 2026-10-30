@@ -259,10 +259,12 @@ def status_segments(
     local: bool,
     now: float,
     tasks: TaskCounts | None = None,
+    steps: bool = True,
 ) -> list[str]:
     """The status row's segments, left to right: cache, ctx, steps, tasks.
 
-    A segment with no data is left out. Steps are the progress spec's level-0
+    A segment with no data is left out, and so are the steps with *steps*
+    false. Steps are the progress spec's level-0
     facts (never a percent or ``n/max``) and show only while a run is active.
     The idle time is as of the last redraw (the row redraws on events only),
     so it shows from one minute on.
@@ -286,7 +288,7 @@ def status_segments(
             f"ctx {format_tokens(measured)}"
             + (f"/{format_tokens(limit)}" if limit else "")
         )
-    if snap.run_active and snap.progress is not None:
+    if steps and snap.run_active and snap.progress is not None:
         facts = [f"step {_count(snap.progress.get('step')) or 0}"]
         attempt = _count(snap.progress.get("attempt")) or 1
         if attempt >= 2:

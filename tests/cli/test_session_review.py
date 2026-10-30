@@ -75,14 +75,14 @@ async def test_resume_retains_display_preferences_but_clears_call_state(
 ) -> None:
     sid = await seed(setup)
     renderer = setup.session.renderer
-    renderer.verbose, renderer.thinking = True, False
+    renderer.verbose, renderer.thinking = True, True  # not the default mode's
     renderer.progress = {"level": 1}
     setup.session.enter(f"/resume {sid}")
     await setup.idle()
-    assert renderer.verbose and not renderer.thinking
+    assert renderer.verbose and renderer.thinking
     assert renderer.progress is None and renderer.tool_outputs == []
     await setup.session.new()
-    assert not renderer.verbose and renderer.thinking
+    assert not renderer.verbose and not renderer.thinking
 
 
 @pytest.mark.parametrize("kind,message", [("deleted", DELETED), ("busy", BUSY)])

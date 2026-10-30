@@ -1,0 +1,6 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {"content": "This reply came whole, in one body.", "stream_ignored": true}
+  ]
+}

@@ -1091,6 +1091,41 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
   and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
   line, JSON, exit codes and requests are unchanged ([#240]).
+- A turn's record is quiet and the answer is the loudest thing on screen. A turn of three
+  tool calls printed 27 rows of thinking excerpts and output before its answer; it now
+  prints 12 (11 without the label of text streamed before a call). Thinking is one line
+  (`✻ Thought for 8.0s`; `/thinking on` shows the excerpt). A call that succeeded shows
+  the first line of its output with `+N lines (/expand 1.1)` on the same row; a call that
+  failed, or a command that exited with another code than 0, still shows three lines, the
+  first of a failure in red. Only the mark of a tool row is colored (the whole row was
+  green). The live row says what melo does and for how long, without `step N` and the
+  phase, and the status bar leaves out `step` (`cache`, `ctx` and `tasks` stay).
+  `--developer` (or `[ui] mode = "developer"`) and `/verbose` keep the detail. Direct
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#245]).
+- The terminal UI is readable on a light terminal. The sentences a person must read or
+  act on were dim, which a light background draws at about 2.4:1: the approval's warning
+  and key line, and the hint row under the input box are now default text, dim stays for
+  durations, counts and `(/expand T.C)`. A warning is yellow only on a background
+  `COLORFGBG` reports as dark and bold in the default color elsewhere, and the code in an
+  answer uses rich's `ansi_light` theme on a light background. The terminal is never
+  queried; start melo with `COLORFGBG='0;15' melo` where the variable is not set. Direct mode's
+  stdout and stderr, JSON, exit codes and requests are unchanged ([#245]).
+- Replies stream by default in the terminal UI. `[cli] stream` is `true` unless set (it
+  was `false`), so the interactive UI's requests carry `stream: true` and a model whose
+  reasoning format is declared in `[cli.reasoning_tags]`, or that sends its reasoning in
+  a field of its own, shows its reply as it is written. A model with no hint still shows
+  its reply when complete, and says so once after its first whole reply (`This model's
+  replies appear when complete until its reasoning format is set (see Streamed
+  replies).`). `/stream on` and `/stream off` answer `Streaming on.` and `Streaming off.`
+  with that sentence (they said `Live streaming on · conservative until declared.`).
+  `/stream off`, `melo -X cli.stream=false` and `melo config set cli.stream false` turn
+  it off. A model server that does not stream still answers every turn: a reply it sends
+  as one JSON body is used as it is, and a stream that closes before it sent anything is
+  asked for again once without streaming. The provider then stops asking that server to
+  stream, and melo says so once (`This server sends replies whole; melo shows them when
+  they are complete.`). A stream that breaks after part of a reply arrived still fails the
+  turn. Direct mode, workers and the gateway never stream: their requests, output and
+  exit codes are unchanged ([#245]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being
@@ -1695,6 +1730,7 @@ earlier milestones.
 [#241]: https://github.com/localmelo/localmelo/pull/241
 [#242]: https://github.com/localmelo/localmelo/pull/242
 [#243]: https://github.com/localmelo/localmelo/pull/243
+[#245]: https://github.com/localmelo/localmelo/pull/245
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

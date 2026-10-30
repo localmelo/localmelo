@@ -40,11 +40,27 @@ PROXY_VARS = {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
 SHELL_COMMAND = 'sleep 60 & echo $$ $! > "{pids}"; wait'
 
 
+def _sse(message: dict[str, Any]) -> bytes:
+    """*message* as a server streams it: its content, its calls, a finish, ``[DONE]``."""
+    calls = message.get("tool_calls") or []
+    deltas: list[dict[str, Any]] = []
+    if message.get("content"):
+        deltas.append({"content": message["content"]})
+    deltas += [{"tool_calls": [{"index": i, **call}]} for i, call in enumerate(calls)]
+    finish = "tool_calls" if calls else "stop"
+    frames = [{"choices": [{"index": 0, "delta": d}]} for d in deltas]
+    frames.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+    body = "".join(f"data: {json.dumps(frame)}\n\n" for frame in frames)
+    return (body + "data: [DONE]\n\n").encode()
+
+
 class FakeChatServer:
     """An OpenAI-compatible ``/chat/completions`` that replays queued replies.
 
-    Once ``replies`` is empty, every reply is the final answer ``done``.
-    ``bodies`` keeps the body of every chat request, in order. ``GET /models``
+    Once ``replies`` is empty, every reply is the final answer ``done``. A
+    request with ``"stream": true`` (the interactive UI's) gets its reply as
+    SSE, as a real server answers it. ``bodies`` keeps the body of every chat
+    request, in order. ``GET /models``
     lists ``models``, each with ``owned_by`` when that is set (``"omlx"`` makes
     this server answer as oMLX does); ``POST /embeddings`` answers a two-value
     vector.
@@ -92,9 +108,15 @@ class FakeChatServer:
                         else {"role": "assistant", "content": "done"}
                     )
                     answer = {"choices": [{"index": 0, "message": message}]}
-                body = json.dumps(answer).encode()
+                    if payload.get("stream"):
+                        answer = {"stream": message}
+                kind = "application/json"
+                if "stream" in answer:
+                    kind, body = "text/event-stream", _sse(answer["stream"])
+                else:
+                    body = json.dumps(answer).encode()
                 self.send_response(200)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", kind)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)

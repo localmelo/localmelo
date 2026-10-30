@@ -255,7 +255,7 @@ def test_a_key_without_an_option_overrides_the_config_this_process_loads() -> No
     _namespace(
         [
             "-X",
-            "cli.stream=on",
+            "cli.stream=off",
             "-X",
             "scheduler.n_srv=4",
             "-X",
@@ -264,14 +264,14 @@ def test_a_key_without_an_option_overrides_the_config_this_process_loads() -> No
         ]
     )
     assert config.overrides() == {
-        "cli.stream": True,
+        "cli.stream": False,
         "scheduler.n_srv": 4,
         "ui.mode": "developer",
     }
     cfg = config.load()
-    assert (cfg.cli.stream, cfg.scheduler.n_srv, cfg.ui.mode) == (True, 4, "developer")
+    assert (cfg.cli.stream, cfg.scheduler.n_srv, cfg.ui.mode) == (False, 4, "developer")
     config.set_overrides({})
-    assert config.load().cli.stream is False
+    assert config.load().cli.stream is True
 
 
 def test_record_direct_true_beats_a_file_that_says_false() -> None:
@@ -356,8 +356,8 @@ def test_set_checks_a_key_and_saves_it(
         "retrieval.k = 4  (~/.cache/localmelo/config.toml)"
     )
     assert config.load().retrieval.k == 4
-    assert _config(["set", "cli.stream", "on"], capsys)[0] == 0
-    assert config.load().cli.stream is True
+    assert _config(["set", "cli.stream", "off"], capsys)[0] == 0
+    assert config.load().cli.stream is False
     assert _config(["set", "agent.replay_turns", "none"], capsys)[0] == 0
     refused = _config(["set", "retrieval.k", "3", "-X", "cli.stream=on"], capsys)
     assert refused[0] == 2 and "-X does not apply to melo config set" in refused[2]

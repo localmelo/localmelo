@@ -332,6 +332,22 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         assert not app.ui.renderer.live.waiting
 
 
+async def test_the_warning_and_the_key_line_are_default_text_not_dim(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        rows = {part[1]: part[0] for part in app.ui._panel_fragments()}
+        for needle in ('"Allow every" lets', "Commands can reach", "↑↓ select"):
+            [style] = [style for text, style in rows.items() if needle in text]
+            assert style == "", needle  # dim reads at 2.4:1 on a light terminal
+        now[0] += APPROVAL_KEY_GUARD_S + 0.1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
 async def test_arrows_and_enter_choose_option_two(now: list[float]) -> None:
     approver = TerminalApprover(clock=lambda: now[0])
     async with running_app(approver=approver, clock=lambda: now[0]) as app:

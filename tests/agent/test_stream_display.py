@@ -105,6 +105,13 @@ class Display:
         return [kind for kind, _ in self.events]
 
 
+class WholeDisplay(Display):
+    """A display that also hears that a server sent a reply whole."""
+
+    def whole(self) -> None:
+        self.events.append(("whole", ""))
+
+
 async def _drain(display: Display) -> str:
     return display.text()
 
@@ -339,3 +346,43 @@ async def test_the_agent_tells_the_display_each_step_before_it_streams() -> None
         STREAM_DISPLAY.reset(token)
     assert result.status == "completed"
     assert [value for kind, value in display.events if kind == "step"] == ["1", "2"]
+
+
+async def test_a_reply_the_server_sent_whole_tells_the_display_before_it_closes() -> (
+    None
+):
+    display = WholeDisplay("none")
+    sent = Message(role="assistant", content="all at once")
+    llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
+    token = STREAM_DISPLAY.set(display)
+    try:
+        reply = await Chat(llm).plan_step([], [], [], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert reply.content == "all at once"
+    assert display.kinds() == ["opened", "whole", "closed"]
+    assert display.text() == ""
+
+
+async def test_a_display_that_does_not_listen_for_it_still_gets_the_reply() -> None:
+    display = Display("none")  # older displays have no whole()
+    sent = Message(role="assistant", content="all at once")
+    llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
+    token = STREAM_DISPLAY.set(display)
+    try:
+        reply = await Chat(llm).plan_step([], [], [], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert reply.content == "all at once"
+    assert display.kinds() == ["opened", "closed"]
+
+
+async def test_a_reply_that_streamed_is_not_reported_as_whole() -> None:
+    display = WholeDisplay("none")
+    llm = StreamLLM([["Hello\n", Message(role="assistant", content="Hello\n")]])
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await Chat(llm).plan_step([], [], [], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert "whole" not in display.kinds()

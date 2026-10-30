@@ -33,10 +33,19 @@ A reply with ``stream`` is sent as incremental SSE instead of one JSON
 body: ``{"chunks": [...], "reasoning": [...], "delay_s": 0.02, "slice": 0,
 "drop": false}``. ``chunks`` are content deltas (the reply's ``content``
 when absent), ``reasoning`` deltas go to ``reasoning_content``, and
-``tool_calls`` are sent as complete fragments before the finish reason.
+``tool_calls`` are sent as complete fragments before the finish reason. A
+request with ``"stream": true`` gets any other reply as SSE too (its reasoning
+and its content, one delta each), so the terminal UI, which streams by default,
+runs against every scenario.
 ``slice`` writes the encoded body in pieces of that many bytes, so a test
 can split UTF-8 or a tag across transport chunks. ``drop`` closes the
 connection after the deltas, before the finish frame and ``[DONE]``.
+
+Two options model a server that cannot stream, and answer every request that
+does not ask for a stream as usual: ``"stream_ignored": true`` answers a
+request with ``"stream": true`` with the ordinary JSON body, and
+``"stream_closed": true`` answers it with the SSE headers and no frame, then
+closes the connection.
 """
 
 from __future__ import annotations
@@ -204,6 +213,17 @@ class StubServer:
                     self._hold(reply.get("then") or {})
                     return
                 time.sleep(float(reply.get("delay_s") or 0))
+                if body.get("stream") and reply.get("stream_closed"):
+                    reply = {"stream": {"chunks": [], "drop": True}}
+                if body.get("stream") and not (
+                    {"stream", "status", "stream_ignored"} & set(reply)
+                ):
+                    # As a real server does: a streamed request gets SSE.
+                    reasoning = reply.get("reasoning")
+                    reply = {
+                        **reply,
+                        "stream": {"reasoning": [reasoning] if reasoning else []},
+                    }
                 if "stream" in reply:
                     self._stream(reply)
                     return
