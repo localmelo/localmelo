@@ -174,7 +174,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   build tools print only when they fail. The bundled Python is compiled to bytecode
   before signing (the standalone archive has none), so `melo --version` from the bundle
   takes 0.29 s instead of 0.96 s (median of three runs) and nothing writes bytecode into
-  the signed bundle, at the cost of 63 MB (120 to 183 MB). ([#NN])
+  the signed bundle, at the cost of 63 MB (120 to 183 MB). ([#238])
 
 - Experimental `--brief-items on|off` (`[agent] brief_items`, off by default; #185). With
   `--brief`, the harness marks the brief's top-level numbered items (`changed`,
@@ -985,7 +985,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   background matches the console's, so a dark window no longer flashes white. When
   the gateway cannot start, does not start within 20 seconds or stops, the same
   view gives the reason and offers Try Again (a new gateway), Open Log and Quit;
-  these problems no longer show a dialog and close the app ([#NN]).
+  these problems no longer show a dialog and close the app ([#238]).
 
 - The macOS app starts its gateway with `--port 0` and reads the port from the
   gateway's startup line (`Gateway: http://127.0.0.1:PORT`) instead of using a
@@ -993,14 +993,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   service or the ports other work reserves, so `LOCALMELO_APP_PORT` and the
   "port in use" check before the start are gone. The gateway's output still goes
   to `~/Library/Logs/LocalMelo/gateway.log`, and the 20-second start deadline now
-  also covers the wait for that line ([#NN]).
+  also covers the wait for that line ([#238]).
 
 - The macOS app calls itself localmelo wherever it names itself: the window title, the
   Dock and the app menu, the menu-bar item (`localmelo`, or `localmelo · 3` while three
   things run, where it read `Melo`), the menu entries, the quit dialog and the
   output of `--install` and `--uninstall`, as its starting view and failure view
   already did. `LocalMelo.app` stays the file name and the bundle id stays
-  `org.localmelo.app` ([#NN]).
+  `org.localmelo.app` ([#238]).
 
 - An oMLX server is called oMLX wherever a user looks. The setup wizard's menus and the web
   settings dropdown label the `vllm` entry `oMLX or vLLM (OpenAI-compatible, local)` (it said
@@ -1536,6 +1536,7 @@ earlier milestones.
 [#232]: https://github.com/localmelo/localmelo/pull/232
 [#236]: https://github.com/localmelo/localmelo/pull/236
 [#237]: https://github.com/localmelo/localmelo/pull/237
+[#238]: https://github.com/localmelo/localmelo/pull/238
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
