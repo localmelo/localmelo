@@ -1499,6 +1499,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- melo remembers two ways, and never asks you to confirm a note. When you ask ("remember
+  that Sam has the lab keys", "keep in mind that…", "记住…", "别忘了…", "帮我记一下…"), the
+  note is kept at once, as before, even if the model does nothing. Otherwise the chat's
+  model keeps a note with a new `remember` tool (`text`, one sentence; `topic`) when you
+  share something lasting about yourself or your work, or a finished task's result in the
+  chat is worth keeping; a plain statement ("I prefer short answers", "call me Ray") is no
+  longer kept by fixed rules, only when the model keeps it. Code checks each note the
+  model keeps: a password or key is refused, and its words must come from what you typed
+  in that chat (any turn not undone) or from a finished task's result recalled in it, so a
+  fact only a web page, a file or a tool's output states is refused and the model is told
+  it was not something you said. A newer note of the same subject replaces the older one
+  and a repeat is not written twice. The note appears under your message as before
+  (`Remembered: … · Undo`): the turn's `turn.memory` event is sent again, whole, with it.
+  The chat's instructions now tell the model to keep notes with `remember`, never to ask
+  whether to remember something, never to save notes in a file or with code, and to
+  acknowledge a note in one short sentence. The line that tells the model a requested
+  note is saved now reads `(saved; do not save it again or in a file)`, so it can still
+  keep another fact from the same message. While the tool runs, the panel and the
+  activity line say `Remembering`, then `Remembered`. The tool asks no approval. Direct runs,
+  workers, the terminal chat and the benchmark have no `remember` tool and are unchanged
+  ([#316]).
+
 - The command list under the input box is in the terminal's colours. Typing `/`, `@` or a
   command's argument showed a grey block (prompt_toolkit's default, black text on grey bars);
   the list now has no background: names in your text colour, their descriptions muted, and the
@@ -2528,6 +2550,7 @@ earlier milestones.
 [#312]: https://github.com/localmelo/localmelo/pull/312
 [#313]: https://github.com/localmelo/localmelo/pull/313
 [#314]: https://github.com/localmelo/localmelo/pull/314
+[#316]: https://github.com/localmelo/localmelo/pull/316
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

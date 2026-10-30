@@ -32,6 +32,17 @@ melo "What is 6*7?"
 
 Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_assertions=True)`。这个功能默认关闭，开启后会保留受支持的简短事实；当一个经过验证、有先后顺序的变更取代旧断言时，旧断言可以作为带标签的历史保留下来。有歧义或未关联的事实不会被悄悄关联。解析器和来源检查都是保守且不完整的；召回受相关性限制。参见[类型化断言参考](../../reference/memory.md#experimental-typed-assertions)（英文）。
 
+<a id="notes-melo-keeps-about-you"></a>
+
+## melo 记下的关于你的笔记
+
+在网页控制台和 App 中，melo 会跨对话保存关于你的简短笔记（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它用两种方式记一条笔记，都不会请你确认：
+
+- **请它记。** "Remember that Sam has the lab keys"、"keep in mind that my group meeting is on Thursdays"、"记住：我的车停在B2层"、"别忘了…" 或 "帮我记一下…" 会立刻被记下。
+- **告诉它。** "I prefer short answers" 或 "call me Ray" 会在 melo 判断值得记时被记下，对话里一个已完成任务的结果也是如此。只有网页、文件或工具输出说过的内容它从不记，密码或密钥也从不记。
+
+每条笔记会以 `Remembered: … · Undo` 显示在你的消息下方。之后要查看、改写或忘掉笔记，使用控制台的 **Memory** 标签页、终端里的 `/memory`，或 `melo memory list` 和 `melo memory forget`。要停止记笔记，运行 `melo config set memory.across_chats false`，然后重启 `melo serve` 或 App。
+
 <a id="turn-long-term-memory-off"></a>
 
 ## 关闭长期记忆

@@ -4,8 +4,10 @@
 records, :mod:`.records`) and ``index.db`` (the conversation index,
 :mod:`.index`), and the embedding provider of the settings, when there is one.
 A chat's runner calls :meth:`ChatMemory.before_turn` before each turn's run
-(write the user's statements, recall what matches) and
+(keep what the user asks to remember, recall what matches) and
 :meth:`ChatMemory.after_turn` once it ends (index it, off the reply path).
+During the run, the chat's model keeps notes with the ``remember`` tool
+(:meth:`ChatMemory.remember`), checked against what the chat shows.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 import os
 import time
@@ -30,6 +33,7 @@ from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory._sqlite import make_private_dir
+from localmelo.melo.memory.hippo.policy import normalise
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
@@ -142,6 +146,49 @@ class TurnMemory:
             "refused": records.NOT_KEPT if self.refused else "",
             "recall": self.recall.to_json(),
         }
+
+
+@dataclass
+class ChatTurn:
+    """The chat turn under way, for ``remember``: what it shows and what it kept.
+
+    :meth:`ChatMemory.before_turn` sets it in :data:`CHAT_TURN`; *emit*, when
+    the runner gives one, queues a ``turn.memory`` event of the same shape
+    with the notes the model kept added (:meth:`event`).
+    """
+
+    store: SessionStore
+    info: TurnInfo
+    typed: str
+    memory: TurnMemory
+    emit: Callable[[dict[str, Any]], None] | None = None
+    kept: list[records.Written] = field(default_factory=list)
+    refused: bool = False
+
+    def event(self) -> dict[str, Any] | None:
+        data = self.memory.event()
+        if data is None:
+            return None
+        # A note the model reworded in this turn replaces the request's own.
+        gone = {note.replaced for note in self.kept}
+        notes = [*self.memory.remembered, *self.kept]
+        data["remembered"] = [n.to_json() for n in notes if n.id not in gone]
+        if self.refused:
+            data["refused"] = records.NOT_KEPT
+        return data
+
+    def publish(self) -> None:
+        data = self.event()
+        if self.emit is not None and data is not None:
+            self.emit(data)
+
+
+# The chat turn the running task is in; ``None`` outside a chat's turn.
+CHAT_TURN: contextvars.ContextVar[ChatTurn | None] = contextvars.ContextVar(
+    "localmelo_chat_turn", default=None
+)
+# The session kinds whose indexed results count as a finished task's result.
+_TASK_KINDS: Final = ("task", "front_bg")
 
 
 def _record_item(entry: StoredEntry) -> Item:
@@ -529,9 +576,27 @@ class ChatMemory:
         }
 
     async def before_turn(
+        self,
+        store: SessionStore,
+        info: TurnInfo,
+        typed: str,
+        *,
+        emit: Callable[[dict[str, Any]], None] | None = None,
+    ) -> TurnMemory:
+        """Recall for this turn, then keep what the user's typed words ask to.
+
+        It also makes this turn the one ``remember`` keeps notes for
+        (:data:`CHAT_TURN`); *emit* gets the turn's ``turn.memory`` data again
+        each time the model keeps one.
+        """
+        CHAT_TURN.set(None)
+        found = await self._before_turn(store, info, typed)
+        CHAT_TURN.set(ChatTurn(store, info, typed, found, emit))
+        return found
+
+    async def _before_turn(
         self, store: SessionStore, info: TurnInfo, typed: str
     ) -> TurnMemory:
-        """Recall for this turn, then keep what the user's typed words state."""
         if not self.enabled:
             return TurnMemory()
         found, refused = records.candidates(typed)
@@ -577,6 +642,89 @@ class ChatMemory:
             refused,
             recall,
         )
+
+    async def remember(self, text: str, topic: str = "") -> str:
+        """Keep *text* as a note of the chat turn under way; what the model reads back.
+
+        Refused: outside a chat's turn, a secret, and words the user did not
+        type in this chat and no finished task's result shown in it holds.
+        """
+        turn = CHAT_TURN.get()
+        if not self.enabled or turn is None or turn.memory.recall is None:
+            return "Not remembered: memory across chats is off in this chat."
+        note = records.finished(text)
+        if len(normalise(note)) < 4 or not records.note_terms(note):
+            return "Not remembered: the note is empty."
+        if records.sensitive(note):
+            turn.refused = True
+            turn.publish()
+            return (
+                f"Not remembered: {records.NOT_KEPT}. Do not write it anywhere "
+                "(no file, no code)."
+            )
+        said = [turn.typed, *await self._said(turn)]
+        admitted = "user_statement"
+        missing = records.unsupported(note, said)
+        if missing:
+            admitted = "outcome"
+            missing = records.unsupported(note, said + await self._results(turn))
+        if missing:
+            return (
+                "Not remembered: not something the user said. "
+                f"{', '.join(missing[:3])}: not in what the user typed in this "
+                "chat or in a finished task's result shown here. Keep only what "
+                "the user told you, in their words."
+            )
+        if topic not in records.TOPICS:
+            topic = records.topic_of(note, request=False)
+        quote = records.quote_for(note, said) if admitted == "user_statement" else ""
+        cand = records.Candidate(note, quote, topic, admitted)
+        vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
+        source = await self._source(turn.store, turn.info)
+        async with self._lock:
+            written = await records.write(
+                self.stores()[0],
+                [cand],
+                vectors or [None],
+                source=source,
+                embed_model=model,
+            )
+        if not written:
+            return f"Already remembered: {note}"
+        turn.kept.extend(written)
+        turn.publish()
+        return f"Remembered: {note} The user sees it and can undo it."
+
+    async def _said(self, turn: ChatTurn) -> list[str]:
+        """What the user typed in the earlier turns of this chat (undone ones aside)."""
+        return [
+            t.typed_text if t.attachments else t.user_text
+            for t in await turn.store.list_turns(turn.info.session_id)
+            if t.turn < turn.info.turn and not t.undone
+        ]
+
+    async def _results(self, turn: ChatTurn) -> list[str]:
+        """The finished tasks' results this chat has shown: those it recalled."""
+        from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
+
+        ids = {int(item.key[2:]) for item in turn.memory.used if not item.is_record}
+        after = 0
+        while True:
+            events = await turn.store.list_events(
+                turn.info.session_id, after_id=after, limit=1000
+            )
+            for stored in events:
+                if stored.event.get("type") != MEMORY_EVENT_TYPE:
+                    continue
+                for used in stored.event.get("data", {}).get("used", []):
+                    if isinstance(used, dict) and used.get("kind") == "chat":
+                        ids.add(int(used.get("id") or 0))
+            if len(events) < 1000:
+                break
+            after = int(events[-1].id or 0)
+        async with self._lock:
+            docs = await self.stores()[1].fetch(ids)
+        return [doc.text for doc in docs if doc.kind in _TASK_KINDS]
 
     def after_turn(
         self, store: SessionStore, info: TurnInfo, typed: str, answer: str
@@ -845,14 +993,46 @@ SEARCH_MEMORY: Final = ToolDef(
 )
 
 
+REMEMBER: Final = ToolDef(
+    name="remember",
+    description=(
+        "Keep a note about the user or their work for later chats: a lasting "
+        "fact, preference, person or decision the user told you, or what a "
+        "finished task's result shown in this chat is worth keeping. Saved at "
+        "once; never ask the user first. One sentence in the second person "
+        "(You prefer short answers. / 你习惯用简体中文。), in the user's language "
+        "and words. Never a password, key or code, and never something only a "
+        "web page, a file or a tool's output says."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The note, one sentence."},
+            "topic": {"type": "string", "enum": list(records.TOPICS)},
+        },
+        "required": ["text", "topic"],
+    },
+    semantic_tags=["memory", "remember", "note"],
+    # It writes only melo's own notes, which the user sees with Undo, never a
+    # file: like search_memory it asks for no approval (no confirmation).
+    annotations={"readOnlyHint": True},
+)
+
+
 class MemoryTools(BaseToolProvider):
-    """``search_memory`` for a chat's Agent (never for workers)."""
+    """``search_memory`` and ``remember`` for a chat's Agent (never for workers)."""
 
     def __init__(self, memory: ChatMemory) -> None:
         self._memory = memory
 
     async def start(self) -> list[ProvidedTool]:
-        return [ProvidedTool(definition=SEARCH_MEMORY, function=self.search)]
+        return [
+            ProvidedTool(definition=SEARCH_MEMORY, function=self.search),
+            ProvidedTool(definition=REMEMBER, function=self.remember),
+        ]
+
+    async def remember(self, text: str = "", topic: str = "", **_: Any) -> str:
+        return await self._memory.remember(str(text), str(topic))
 
     async def search(
         self, query: str = "", scope: str = "all", k: int = 5, **_: Any

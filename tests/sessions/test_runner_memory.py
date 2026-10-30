@@ -1,10 +1,11 @@
 """Memory across chats in a chat's runner, end to end on the stub model.
 
-Chat A says "my group meeting is on Thursdays"; chat B asks "when is my group
-meeting?" and its request carries the recalled record, quoted, with its source,
-while B's stored turn keeps only what was typed. Workers, attachments and the
-model's answers write no record; a task's runner only indexes; an undone turn
-leaves no document.
+Chat A says "my group meeting is on Thursdays" and its model keeps it with
+``remember``; chat B asks "when is my group meeting?" and its request carries
+the recalled record, quoted, with its source, while B's stored turn keeps only
+what was typed. A plain statement without the tool call, workers, attachments
+and the model's answers write no record; a task's result shown in a chat can
+be kept; a task's runner only indexes; an undone turn leaves no document.
 """
 
 from __future__ import annotations
@@ -30,6 +31,12 @@ from localmelo.tests.memory.chat_memory_helpers import EmbeddingServer
 
 SAYS = "I prefer short answers; my group meeting is on Thursdays"
 ASKS = "when is my group meeting?"
+THANKS = "thanks, keep that in mind"
+KEPT = ("You prefer short answers.", "Your group meeting is on Thursdays.")
+
+
+def remember(text: str, topic: str) -> dict[str, Any]:
+    return {"name": "remember", "arguments": {"text": text, "topic": topic}}
 
 
 def today() -> str:
@@ -41,6 +48,31 @@ def today() -> str:
 def stub() -> Any:
     scenarios: dict[str, dict[str, Any]] = {
         "answer": {"replies": [{"content": "I prefer long answers. My name is Melo."}]},
+        # The chat model keeps what chat A was told, then answers.
+        "keep": {
+            "match": [SAYS],
+            "replies": [
+                {
+                    "tool_calls": [
+                        remember(KEPT[0], "preferences"),
+                        remember(KEPT[1], "about"),
+                    ]
+                },
+                {"content": "Noted."},
+            ],
+        },
+        # A finished task's result the chat showed, kept on the next turn.
+        "outcome": {
+            "match": [THANKS],
+            "replies": [
+                {
+                    "tool_calls": [
+                        remember("Find on-device ML jobs: remote roles.", "projects")
+                    ]
+                },
+                {"content": "Noted."},
+            ],
+        },
         # The chat model as the llm retriever meets it: it keeps the first note.
         "pick": {
             "replies": [
@@ -131,14 +163,18 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
     memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
 ) -> None:
     a = await chat(memory, store, stub, tmp_path / "a", SAYS)
-    (said,) = memory_events(a)
-    assert [r["text"] for r in said["remembered"]] == [
-        "You prefer short answers.",
-        "Your group meeting is on Thursdays.",
-    ]
+    # Before the run: nothing kept by rule; then once per note the model keeps,
+    # the whole event again, so the page shows both under the message.
+    before, *during = memory_events(a)
+    assert before["remembered"] == [] and len(during) == 2
+    said = during[-1]
+    assert [r["text"] for r in said["remembered"]] == list(KEPT)
     assert said["used"] == [] and said["refused"] == ""
+    assert said["recall"] == before["recall"] and said.keys() == before.keys()
     types = [e["type"] for e in a]
     assert types.index("turn.memory") < types.index("run.started")
+    tools = [t["function"]["name"] for t in stub.requests[0]["tools"]]
+    assert "remember" in tools and "search_memory" in tools
 
     stub.requests.clear()
     b = await chat(memory, store, stub, tmp_path / "b", ASKS)
@@ -170,25 +206,36 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
     assert [t.user_text for t in await store.list_turns(session_id)] == [ASKS]
 
 
-async def test_a_stated_fact_reaches_the_model_as_kept_with_the_instruction_not_to_file_it(
+async def test_a_request_to_remember_reaches_the_model_as_kept_without_a_tool_call(
     memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
 ) -> None:
-    events = await chat(memory, store, stub, tmp_path / "a", "Call me Ray.")
+    typed = "Remember that my name is Ray."
+    events = await chat(memory, store, stub, tmp_path / "a", typed)
     (said,) = memory_events(events)
-    assert [r["text"] for r in said["remembered"]] == ["You go by Ray."]
+    assert [r["text"] for r in said["remembered"]] == ["Your name is Ray."]
     (request,) = stub.requests
     assert request["messages"][-1]["content"] == (
-        f"Call me Ray.\n\n{BLOCK_HEADER}\nmelo kept from this message: “Call me "
-        "Ray.” (saved; nothing else to save)"
+        f"{typed}\n\n{BLOCK_HEADER}\nmelo kept from this message: “my name is "
+        "Ray.” (saved; do not save it again or in a file)"
     )
     system = request["messages"][0]["content"]
-    assert "localmelo keeps those notes by itself; you do not." in system
-    assert "Never save what the user says about themselves in a file or with code" in (
+    assert "keep it with remember" in system and "Never ask whether" in system
+    assert "never save a note, or what the user says about themselves, in a file" in (
         system
     )
     # The stored turn keeps only what was typed.
     session_id = (await store.list_sessions())[0].id
-    assert [t.user_text for t in await store.list_turns(session_id)] == ["Call me Ray."]
+    assert [t.user_text for t in await store.list_turns(session_id)] == [typed]
+
+
+async def test_a_plain_statement_the_model_does_not_keep_is_not_saved(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    events = await chat(memory, store, stub, tmp_path / "a", "I prefer tea.")
+    (said,) = memory_events(events)
+    assert said["remembered"] == [] and await memory.records() == []
+    (request,) = stub.requests
+    assert request["messages"][-1]["content"] == "I prefer tea."
 
 
 async def test_the_chat_b_request_carries_a_paraphrase_with_vectors(
@@ -269,6 +316,13 @@ async def test_a_task_runner_only_indexes(
     assert used["kind"] == "chat"
     assert used["source"] == f"task “Find on-device ML jobs”, {today()}"
     assert used["text"].startswith("Task: Find on-device ML jobs User: I prefer remote")
+    # On the next turn of that chat, the model keeps what the task found.
+    chat_b = next(s for s in await store.list_sessions() if s.id != task.id)
+    kept = await chat(memory, store, stub, tmp_path / "b", THANKS, session_id=chat_b.id)
+    note = memory_events(kept)[-1]["remembered"]
+    assert [n["text"] for n in note] == ["Find on-device ML jobs: remote roles."]
+    (entry,) = await memory.records()
+    assert entry.admitted_by == "outcome" and entry.provenance["topic"] == "projects"
 
 
 async def test_an_undone_turn_leaves_no_document(

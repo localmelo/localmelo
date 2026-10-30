@@ -28,7 +28,7 @@ from localmelo.support.memory.recall import (
     kept_lines,
 )
 from localmelo.support.sessions.store import NewSession, SessionStore
-from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
+from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding, teach
 
 HOLDER = "test-host:1:recall"
 
@@ -107,7 +107,7 @@ async def build(
     keys: dict[str, str] = {}
     for key, text in SAID.items():
         turn = await _turn(store, f"About {key}")
-        found = await memory.before_turn(store, turn, text)
+        found = await teach(memory, store, turn, text)
         (note,) = found.remembered
         keys[key] = f"r:{note.id}"
     _, index = memory.stores()
@@ -175,11 +175,10 @@ async def test_the_qwen3_query_instruction_goes_on_queries_only(
     try:
         embedding.calls.clear()
         turn = await _turn(store, "Ask")
-        await memory.before_turn(store, turn, "I prefer tea. When is my meeting?")
+        said = "Remember that I prefer tea. When is my meeting?"
+        await memory.before_turn(store, turn, said)
         (batch,) = embedding.calls
-        assert batch[0].startswith("Instruct: ") and batch[0].endswith(
-            "Query: I prefer tea. When is my meeting?"
-        )
+        assert batch[0].startswith("Instruct: ") and batch[0].endswith(f"Query: {said}")
         assert batch[1:] == ["You prefer tea."]
     finally:
         await memory.aclose()
@@ -242,12 +241,12 @@ async def test_the_block_names_what_was_kept_before_what_was_recalled(
     memory, _ = await build(tmp_path, store, None)
     try:
         turn = await _turn(store, "Teach")
-        said = "My group meeting is on Thursdays at 3 pm."
+        said = "Remember that my group meeting is on Thursdays at 3 pm."
         found = await memory.before_turn(store, turn, said)
         kept, recalled = found.block.split("\n")[3:]
         assert kept == (
-            "melo kept from this message: “My group meeting is on Thursdays at "
-            "3 pm.” (saved; nothing else to save)"
+            "melo kept from this message: “my group meeting is on Thursdays at "
+            "3 pm.” (saved; do not save it again or in a file)"
         )
         assert recalled.startswith("- the user said “My group meeting is on Thu")
         assert found.recall is not None and found.recall.used == len(found.used) == 1
@@ -346,7 +345,7 @@ async def test_search_memory_answers_with_sources_and_scopes(
 
     memory, _ = await build(tmp_path, store, None)
     try:
-        (tool,) = await memory.tools().start()
+        tool, _ = await memory.tools().start()  # remember: test_chat_remember.py
         assert tool.definition is SEARCH_MEMORY and not tool.requires_approval
         assert tool.definition.annotations == {"readOnlyHint": True}
         found = str(await tool.function(query="robotics lab keys"))
@@ -411,13 +410,13 @@ async def test_a_question_finds_a_turn_that_says_it_in_other_word_forms(
         ("我的猫叫团子。", "你的猫叫团子。", "我的猫叫什么？"),
     ],
 )
-async def test_a_statement_is_kept_and_a_new_chat_finds_it_by_words(
+async def test_a_statement_the_model_keeps_is_found_by_words_in_a_new_chat(
     tmp_path: Path, store: SessionStore, said: str, note: str, asked: str
 ) -> None:
     memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
     try:
         first = await _turn(store, "Teaching")
-        kept = await memory.before_turn(store, first, said)
+        kept = await teach(memory, store, first, said)
         assert [n.text for n in kept.remembered] == [note]
         memory.after_turn(store, first, said, "Noted.")
         await memory.drain()
