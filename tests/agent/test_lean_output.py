@@ -34,16 +34,18 @@ DEFAULTS = {
     "window_messages": 64,
 }
 # The sha256 of the run's three request bodies (plan, reflection, plan) as main sends
-# them (139992b5), and with the option.
+# them, and with the option. Recorded at 139992b5; re-recorded when the fixed system
+# section lost its ``Prefix: fixed-prefix-v2`` line: with that line put back,
+# the digests of 139992b5 come out again.
 OFF = (
-    "d56ab062a59a1aa32a76a9aac9a2f097f116561ab83940508ce230548191f6f5",
-    "5160518be456ef1d4da2098f1fe5aa39f1514be35c7a5d6c5b094ec15b5d3051",
-    "48c4a06d0643cadc632eb9f0fb9daf9286693027abd43fc1fc88124ca1af81b4",
+    "7a62a3faecb8bebd8fe83467700b62269bf67a8b97fb9039c91fa82b0ad900c6",
+    "8e10ad929b5a90fd3319ca0f46f22674776277f2005fcaf9eabe579abdcf5596",
+    "4519c79dde01bffe07d7a87e4fcbaf9b2b492ddf47ea977094a2ddad38e85e16",
 )
 ON = (
-    "8156fad5d527e52da476d5efa383fbdb9d5feb31a3d0266949b9ab8666bbf229",
-    "8256eeb0775fd8e91c47397cb8d926a089e5512a5acdb4d84d4b7fb92a8d8d21",
-    "8afe300e79e1ba7c24e5cd3681d6456bbb7551d9000541d8f9526a5de8454f36",
+    "0f373344545d2350e7e089f2052f194d4395830f23aefa65c812dd60ff77fe0b",
+    "43cda7aadf2711965ac4037138334bfcf5de44926d29bc2fff59159b7ffb2ac9",
+    "18334f3b33486153d93e5306a008d63a930186b950f323dda9d3b4da97197505",
 )
 GATE = {
     "recommended_action",

@@ -10,7 +10,7 @@
 
   No approvals for this turn (--yolo).
 · The model returned an empty reply; asking it to continue.
-✻ Thought for 0.1s
+✻ Thought
 ⚠ The model returned only empty replies.
   /retry, or try another model.
 ✻ Stopped after 0.1s
