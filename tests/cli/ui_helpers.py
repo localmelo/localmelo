@@ -73,7 +73,7 @@ class FakeController:
         pass
 
     def status_bar(self) -> StatusBar:
-        return StatusBar("stub-model", "~/demo-project", "", self.title, "ask")
+        return StatusBar(self.title, "ask")
 
 
 def backend() -> BackendInfo:
