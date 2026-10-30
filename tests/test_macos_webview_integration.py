@@ -118,6 +118,10 @@ extension App {
                     state("clicked")
                     self.webView.evaluateJavaScript("location.hash") { value, _ in record("route " + String(describing: value ?? "nil")) }
                 }
+            case "dock":
+                // What the Dock icon's click calls; the system says a visible window exists (Melo's own), as it does.
+                _ = self.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true)
+                after(0.7) { state("reopened") }
             case "menu":
                 run(self.pet.view.menu, "Open localmelo")
                 after(0.7) { state("opened") }
@@ -960,6 +964,14 @@ def test_a_click_opens_the_window_and_one_on_a_waiting_melo_opens_what_waits(
     assert steps["closed"].label == "Melo, waiting for your approval."
     assert steps["clicked"].window == "true"
     assert "route #/s/chat-1" in (waiting / "events").read_text()
+
+
+def test_the_dock_icon_opens_the_window_after_it_was_closed(
+    app: Path, tmp_path: Path
+) -> None:
+    steps = run_pet(app, tmp_path, "dock", "reopened")
+    assert steps["closed"].shown == "true"
+    assert (steps["reopened"].shown, steps["reopened"].window) == ("false", "true")
 
 
 def test_the_menu_opens_the_window_and_hide_melo_is_remembered_until_show_melo(
