@@ -1085,7 +1085,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   green). The live row says what melo does and for how long, without `step N` and the
   phase, and the status bar leaves out `step` (`cache`, `ctx` and `tasks` stay).
   `--developer` (or `[ui] mode = "developer"`) and `/verbose` keep the detail. Direct
-  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+  mode's stdout and stderr, JSON, exit codes and requests are unchanged ([#245]).
 - The terminal UI is readable on a light terminal. The sentences a person must read or
   act on were dim, which a light background draws at about 2.4:1: the approval's warning
   and key line, and the hint row under the input box are now default text, dim stays for
@@ -1093,7 +1093,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `COLORFGBG` reports as dark and bold in the default color elsewhere, and the code in an
   answer uses rich's `ansi_light` theme on a light background. The terminal is never
   queried; start melo with `COLORFGBG='0;15' melo` where the variable is not set. Direct mode's
-  stdout and stderr, JSON, exit codes and requests are unchanged ([#NN]).
+  stdout and stderr, JSON, exit codes and requests are unchanged ([#245]).
 - Replies stream by default in the terminal UI. `[cli] stream` is `true` unless set (it
   was `false`), so the interactive UI's requests carry `stream: true` and a model whose
   reasoning format is declared in `[cli.reasoning_tags]`, or that sends its reasoning in
@@ -1109,7 +1109,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   stream, and melo says so once (`This server sends replies whole; melo shows them when
   they are complete.`). A stream that breaks after part of a reply arrived still fails the
   turn. Direct mode, workers and the gateway never stream: their requests, output and
-  exit codes are unchanged ([#NN]).
+  exit codes are unchanged ([#245]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being
@@ -1714,6 +1714,7 @@ earlier milestones.
 [#241]: https://github.com/localmelo/localmelo/pull/241
 [#242]: https://github.com/localmelo/localmelo/pull/242
 [#243]: https://github.com/localmelo/localmelo/pull/243
+[#245]: https://github.com/localmelo/localmelo/pull/245
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
