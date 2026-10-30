@@ -325,6 +325,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in `~/.cache/localmelo/memory/` (`records.db`, `index.db`); `[memory] across_chats =
   false` turns it all off. Direct runs, workers, the terminal chat and the benchmark are
   unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#NN]).
+- The panel beside a chat. The web console (and so the macOS app) shows Melo on
+  the right of the chat: his portrait, which rests, works, waits or cheers with
+  what runs, one status line (`Connected · <model> on <server>`, `Working on 2
+  things`, `Waiting for you`, `Model server not reachable` with **Open
+  settings**), and the tabs **Activity**, **Approvals**, **Scheduled** and
+  **Memory** (the last three say what they will hold; arrow keys move between
+  them, and the last one used reopens). Activity lists what runs now, in plain
+  words (`Reading notes.md`, `Running the tests`, `Waiting for your approval`),
+  and what finished today, newest first, with a one-line result and the time,
+  across chats, tasks, worker runs and terminal chats. A row opens in place to
+  its live steps and the latest output, with **Pause** or **Resume**, **Stop**
+  and the priority in words for a task, and **Review** for one that waits. From
+  700 to 1180 px the chat list is a rail of initials; below 900 px the panel is a
+  sheet behind a face chip in the header. Default mode drops the header's
+  running chip; developer mode opens **Details** in the panel. The app's window
+  opens at 1280 × 800. For clients, `status.items` of `GET /api/health` gains
+  `activity` and `icon`, `status.focus` names the item a glance shows, and
+  `GET /api/activity?since=` lists the day ([#308]).
+
 - Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
   "safari-automation"` (off by default; `/browser on` in the terminal chat, or
   `-X browser.driver=safari-automation` for one run) the terminal chat and the web console
@@ -2419,6 +2438,7 @@ earlier milestones.
 [#304]: https://github.com/localmelo/localmelo/pull/304
 [#305]: https://github.com/localmelo/localmelo/pull/305
 [#306]: https://github.com/localmelo/localmelo/pull/306
+[#308]: https://github.com/localmelo/localmelo/pull/308
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

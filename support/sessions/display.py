@@ -8,7 +8,9 @@ for text a tool or a model printed, :func:`localmelo_version`, :func:`display_ve
 :func:`split_thinking` (re-exported from the core), and the words of a run's
 end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
-ended. Nothing here imports the UI's libraries or the gateway.
+ended, and :func:`activity_text` for what a running session is doing, in
+plain words (:func:`event_activity` reads it from the session's newest
+events). Nothing here imports the UI's libraries or the gateway.
 """
 
 from __future__ import annotations
@@ -19,10 +21,11 @@ import math
 import os
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
@@ -368,6 +371,149 @@ def approval_tag(
             f"Denied by you: {reason}" if reason else "Denied by you",
         )
     return None
+
+
+@dataclass(frozen=True)
+class ActivityText:
+    """What a running chat, task or run is doing: plain words and a kind icon.
+
+    ``icon`` names the kind (``wait``, ``held``, ``paused``, ``read``,
+    ``write``, ``run``, ``web``, ``memory``, ``think``, ``tool``); each surface
+    draws it with its own glyph and hue, so a row never reads by colour alone.
+    """
+
+    text: str
+    icon: str
+
+
+# A command that runs a test suite reads as "Running the tests".
+_TEST_COMMAND: Final = re.compile(
+    r"(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|"
+    r"(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|"
+    r"python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])"
+)
+_STATE_WORDS: Final[Mapping[str, ActivityText]] = {
+    "waiting": ActivityText("Waiting for your approval", "wait"),
+    "held": ActivityText("Waiting for the model", "held"),
+    "queued": ActivityText("Waiting to start", "held"),
+    "paused": ActivityText("Paused", "paused"),
+    "reflecting": ActivityText("Checking its work", "think"),
+    "remembering": ActivityText("Remembering", "memory"),
+    "thinking": ActivityText("Thinking", "think"),
+}
+_BROWSER_READS: Final = frozenset(
+    {"browser_read", "browser_find", "browser_back", "browser_tabs", "browser_wait"}
+)
+
+
+def _file_name(arguments: Mapping[str, Any]) -> str:
+    path = str(arguments.get("path") or "").rstrip("/")
+    return path.rsplit("/", 1)[-1]
+
+
+def activity_text(
+    tool: str = "",
+    arguments: object = None,
+    *,
+    state: str = "",
+    root: str | None = None,
+) -> ActivityText:
+    """The words for a *state* (``waiting``, ``held``, ``queued``, ``paused``,
+    ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
+
+    A tool reads by what it does: ``Reading notes.md``, ``Looking through
+    ~/talk``, ``Writing slides.md``, ``Running the tests``, ``Running a
+    command``, ``Running Python``, ``Reading example.com``. Only a file's
+    name, a folder relative to *root* (or with ``~``) and a page's host are
+    shown, never a command line, code or text. A tool this table does not
+    know reads ``Using a tool``; no state and no tool reads ``Thinking``.
+    """
+    if state in _STATE_WORDS:
+        return _STATE_WORDS[state]
+    args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}
+    name = tool.rsplit("__", 1)[-1] if tool.startswith("mcp__") else tool
+    if name == "file_read":
+        return ActivityText(f"Reading {_file_name(args) or 'a file'}", "read")
+    if name == "file_write":
+        return ActivityText(f"Writing {_file_name(args) or 'a file'}", "write")
+    if name == "list_files":
+        path = str(args.get("path") or "")
+        label = display_path(path, root) if path else "."
+        return ActivityText(
+            (
+                "Looking through the folder"
+                if label == "."
+                else f"Looking through {label}"
+            ),
+            "read",
+        )
+    if name == "shell_exec":
+        command = " ".join(str(args.get("command") or "").split())
+        tests = _TEST_COMMAND.search(command) is not None
+        return ActivityText(
+            "Running the tests" if tests else "Running a command", "run"
+        )
+    if name == "python_exec":
+        return ActivityText("Running Python", "run")
+    if name in ("recall", "search_memory"):
+        return _STATE_WORDS["remembering"]
+    if name == "browser_open":
+        host = (urlsplit(str(args.get("url") or "")).hostname or "").removeprefix(
+            "www."
+        )
+        return ActivityText(f"Reading {host}" if host else "Opening a page", "web")
+    if name == "browser_follow":
+        return ActivityText("Following a link", "web")
+    if name == "browser_screenshot":
+        return ActivityText("Looking at the page", "web")
+    if name in _BROWSER_READS:
+        return ActivityText("Reading the page", "web")
+    if not name:
+        return _STATE_WORDS["thinking"]
+    return ActivityText("Using a tool", "tool")
+
+
+def event_activity(
+    newest_first: Iterable[Mapping[str, Any]], root: str | None = None
+) -> ActivityText | None:
+    """What a session's turn is doing, from its stored events, newest first.
+
+    An approval that waits wins, then a call still running, then a
+    reflection; any other event of a running turn reads ``Thinking``. A turn
+    whose end is among them is doing nothing: ``None``.
+    """
+    finished: set[str] = set()
+    resolved: set[str] = set()
+    for event in newest_first:
+        kind = event.get("type")
+        data = event.get("data")
+        data = data if isinstance(data, Mapping) else {}
+        if kind in ("turn.finished", "run.finished"):
+            return None
+        if kind == "tool.finished":
+            finished.add(str(data.get("call_id", "")))
+        elif kind == "approval.resolved":
+            resolved.add(str(data.get("request_id", "")))
+        elif kind == "approval.requested":
+            if str(data.get("request_id", "")) not in resolved:
+                return _STATE_WORDS["waiting"]
+        elif kind == "tool.started":
+            if str(data.get("call_id", "")) not in finished:
+                return activity_text(
+                    str(data.get("name") or ""), data.get("arguments"), root=root
+                )
+        elif kind == "reflection.started":
+            return _STATE_WORDS["reflecting"]
+        elif kind in ("recall", "memory"):
+            return _STATE_WORDS["remembering"]
+        elif kind in (
+            "reflection",
+            "step.started",
+            "assistant.message",
+            "turn.started",
+        ):
+            return _STATE_WORDS["thinking"]
+    return _STATE_WORDS["thinking"]
 
 
 def clean_output(text: str) -> str:

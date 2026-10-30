@@ -122,6 +122,8 @@ CAUSES: Final = frozenset(get_args(Cause))
 OUTCOME_CAUSES: Final = ("run", "user_stop")
 # How many of the most recently updated sessions latest_finished_turn looks at.
 RECENT_SESSIONS: Final = 8
+# Characters of an answer that :meth:`SessionStore.day_turns` reads.
+DAY_ANSWER_CHARS: Final = 600
 STALE_ERROR: Final = "The process running this turn stopped before it finished."
 # The error of a turn that another host's expired lease left (revision 48).
 TAKEOVER_ERROR: Final = "The session was taken over by another process"
@@ -355,6 +357,32 @@ class FinishedTurn:
     status: str
     cause: str
     finished_at: float
+
+
+@dataclass(frozen=True)
+class DayTurn:
+    """A session's newest turn of a day, for the activity list (:meth:`SessionStore.day_turns`).
+
+    ``answer`` is the answer's start (:data:`DAY_ANSWER_CHARS`), ``tool`` the
+    name of the turn's last call (``""`` without one), ``turns`` how many of
+    the session's turns started that day, and ``live`` whether a running
+    turn's lease is live.
+    """
+
+    session_id: str
+    kind: str
+    title: str
+    workspace: str | None
+    turn: int
+    status: str
+    cause: str
+    started_at: float
+    finished_at: float | None
+    note: str
+    answer: str
+    tool: str
+    turns: int
+    live: bool
 
 
 @dataclass(frozen=True)
@@ -1690,6 +1718,81 @@ class SessionStore:
             rows = await _rows(conn, sql, args)
         return [
             StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
+        ]
+
+    async def latest_events(
+        self, session_id: str, *, limit: int = 40
+    ) -> list[StoredEvent]:
+        """The session's newest *limit* events (1..1000), newest first."""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT id, turn, event FROM events WHERE session_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (session_id, limit),
+            )
+        return [
+            StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
+        ]
+
+    async def day_turns(
+        self, since: float, kinds: Collection[str], *, limit: int = 100
+    ) -> list[DayTurn]:
+        """Each session of *kinds* with a turn that runs or ended at or after *since*.
+
+        One row per session, its newest turn that is not undone, newest end
+        first (a running turn by its start), at most *limit*. A session whose
+        turn ended before *since* is left out; one whose turn still runs is
+        in, however early it began.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError(f"limit must be an int >= 1, got {limit!r}")
+        kind_sql, kind_args = self._kind_filter(_check_kinds(kinds))
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT s.id, s.kind, s.title, s.workspace, t.turn, t.status, t.cause, "
+                "t.started_at, t.finished_at, t.note, substr(t.answer, 1, ?), "
+                "(SELECT json_extract(e.event, '$.data.name') FROM events e "
+                "WHERE e.session_id = s.id AND e.turn = t.turn AND e.type = 'tool.started' "
+                "ORDER BY e.id DESC LIMIT 1), "
+                "(SELECT COUNT(*) FROM turns c WHERE c.session_id = s.id "
+                "AND c.undone = 0 AND c.started_at >= ?), s.lease_holder, s.lease_until "
+                "FROM sessions s JOIN turns t ON t.session_id = s.id AND t.turn = ("
+                "SELECT MAX(q.turn) FROM turns q WHERE q.session_id = s.id AND q.undone = 0) "
+                f"WHERE (s.updated_at >= ? OR t.status = 'running') {kind_sql} "
+                "AND (t.status = 'running' OR t.finished_at >= ?) "
+                "ORDER BY COALESCE(t.finished_at, t.started_at) DESC, s.id LIMIT ?",
+                (DAY_ANSWER_CHARS, since, since, *kind_args, since, limit),
+            )
+            now = self._clock()
+        return [
+            DayTurn(
+                session_id=row[0],
+                kind=row[1],
+                title=row[2],
+                workspace=row[3],
+                turn=row[4],
+                status=row[5],
+                cause=row[6],
+                started_at=row[7],
+                finished_at=row[8],
+                note=row[9],
+                answer=row[10],
+                tool=str(row[11] or ""),
+                turns=int(row[12]),
+                live=row[5] == "running"
+                and self._running_is_live(row[13], row[14], now),
+            )
+            for row in rows
         ]
 
     async def latest_event_id(self, session_id: str) -> int:
