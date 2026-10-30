@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
-from localmelo.melo.schema import SHORT_TERM_MAX, Message, ToolInfo
+from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
 
 from .errors import ApiError
@@ -127,9 +127,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
         await _require_session(console, session_id)
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
+        # Open sessions show their agent's cap; closed ones, the setting's cap.
+        window_max = console.cfg.agent.window_messages
         if entry is not None:
             if entry.agent is not None:
                 messages = entry.agent.conversation()
+                window_max = entry.agent.options.window_messages
             elif entry.kept is not None:
                 messages = entry.kept
         backend = getattr(console.cfg, "embedding_backend", "") or "none"
@@ -140,7 +143,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     memory_json(message, limit=MEMORY_TEXT_CHARS)
                     for message in messages
                 ],
-                "working_max": SHORT_TERM_MAX,
+                "working_max": window_max,
                 "long_term": {
                     "enabled": backend != "none",
                     "backend": backend,

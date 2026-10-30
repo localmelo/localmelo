@@ -1087,6 +1087,26 @@ test('status banners do not rewrite unchanged live text', async () => {
   assert.equal(writes['model-banner'], 0);
 });
 
+test('Connect a model is offered only when no model is set up or the configured server cannot be reached', async () => {
+  const welcome = async (patch) => {
+    const h = harness(baseRoutes({'GET /health': {...health, ...patch}}));
+    h.context.location.hash = '#/new';
+    await h.run('init()');
+    return h;
+  };
+  const server = (reachable) => ({url_label: '127.0.0.1:8500', reachable, error: reachable === false ? 'connection refused' : '', checked_s_ago: 1});
+  const connected = await welcome({model_server: server(true)});
+  assert.equal(connected.element('welcome').hidden, false);
+  assert.equal(connected.element('setup-btn').hidden, true, 'A reachable model needs no setup');
+  assert.equal((await welcome({configured: false})).element('setup-btn').hidden, false, 'No model is configured');
+  assert.equal((await welcome({model_server: server(false)})).element('setup-btn').hidden, false, 'The configured server cannot be reached');
+  assert.equal((await welcome({model_server: server(null)})).element('setup-btn').hidden, true, 'A probe that has not answered yet is not a failure');
+  assert.equal((await welcome({model_server: null})).element('setup-btn').hidden, true, 'A cloud backend has no local server to probe');
+  connected.state().health = {...health, model_server: server(false)};
+  connected.run('syncUI()');
+  assert.equal(connected.element('setup-btn').hidden, false, 'The next health answer shows it');
+});
+
 test('setup failure offers the details drawer tools action', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');

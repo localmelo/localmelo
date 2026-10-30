@@ -14,7 +14,6 @@ from rich.text import Text
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import (
     EMPTY_REPLY_NUDGE,
-    SHORT_TERM_MAX,
     Message,
     split_thinking,
 )
@@ -129,6 +128,7 @@ def memory_view(
     messages: Sequence[Message],
     backend: BackendInfo,
     *,
+    window_max: int,
     memory: bool,
     loaded: ResumeInfo | None,
     width: int,
@@ -165,7 +165,7 @@ def memory_view(
             )
         )
     chars = sum(len(message.content) for message in messages)
-    title = f"Working memory: {len(messages)} of {SHORT_TERM_MAX} messages · {turns} turn{'s' if turns != 1 else ''}, {len(with_tools)} with tool steps · {chars:,} chars"
+    title = f"Working memory: {len(messages)} of {window_max} messages · {turns} turn{'s' if turns != 1 else ''}, {len(with_tools)} with tool steps · {chars:,} chars"
     long_term = (
         "off (--memory off)"
         if not memory
