@@ -58,7 +58,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Waiting for the model is one row in the terminal, not two. A turn waiting on a model whose
   replies are held until they are complete showed `✢ Thinking… · 7s · esc to stop` and, under
   it, `✻ thinking…`, which said the same again. The spinner row alone says it now; rows that
-  add something (the streamed text, the running tool, the past runs) stay ([#NN]).
+  add something (the streamed text, the running tool, the past runs) stay ([#289]).
 
 - A reply that is only the model's unfinished thinking is never shown as the
   answer. When a thinking model stopped before its end-of-thinking mark, a
@@ -1226,7 +1226,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chosen row on the same moss band with one `❯` as every other list, with the names standing
   under the text you typed. The scrollbar is a slim rule-coloured bar and appears only when
   there are more rows than the eight shown. Without the exact background the chosen row is
-  moss and bold, and with `NO_COLOR` it is in reverse video ([#NN]).
+  moss and bold, and with `NO_COLOR` it is in reverse video ([#289]).
 
 - The fixed system section of a request no longer has the line `Prefix: fixed-prefix-v2`.
   The model read the layout's internal name as an instruction and spent a reply deciding
@@ -2231,6 +2231,7 @@ earlier milestones.
 [#285]: https://github.com/localmelo/localmelo/pull/285
 [#287]: https://github.com/localmelo/localmelo/pull/287
 [#288]: https://github.com/localmelo/localmelo/pull/288
+[#289]: https://github.com/localmelo/localmelo/pull/289
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
