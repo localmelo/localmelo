@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+import shlex
+
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.config import BROWSER_DRIVERS as DRIVERS
 
@@ -17,7 +20,14 @@ def provider_for(driver: str) -> BrowserToolProvider | None:
     if driver == "safari-automation":
         from localmelo.support.browser.safari import SafariAutomationDriver
 
-        return BrowserToolProvider(SafariAutomationDriver())
+        # LOCALMELO_SAFARIDRIVER replaces the program's command line, so tests
+        # and screenshots can run a fake and never start the real Safari.
+        command, *args = shlex.split(os.environ.get("LOCALMELO_SAFARIDRIVER", "")) or [
+            "/usr/bin/safaridriver"
+        ]
+        return BrowserToolProvider(
+            SafariAutomationDriver(command=command, args=(*args, "--mcp"))
+        )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 
 

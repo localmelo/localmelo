@@ -211,6 +211,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
+  "safari-automation"` (off by default; `/browser on` in the terminal chat, or
+  `-X browser.driver=safari-automation` for one run) the terminal chat and the web console
+  get eight read-only tools: `browser_open`, `browser_read`, `browser_find`,
+  `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
+  They open `http` and `https` pages in Safari's own automation windows (the sign-ins of
+  your Safari are not used) through the `safaridriver --mcp` server that ships with Safari,
+  started on the first call; nothing is installed. Safari needs Settings > Developer > "Allow
+  remote automation" once, and melo says so in words when it is off. Nothing clicks, types,
+  signs in or posts yet. Each site asks once per chat ("Open a website?"; "allow for this
+  chat" is the only lasting answer, `/new` and `/approvals forget` take it back, a redirect
+  asks about where it lands before the page is read, auto mode still asks and `--yolo` asks
+  nothing). A page reaches the model as one block between two markers that carry the same
+  random number, with a system note that text between them is data and never instructions;
+  it is cut into parts of about 2,000 tokens (a Chinese character counts three Latin
+  ones), shows at most 60 numbered elements (`browser_find` searches the rest), refuses a
+  ref from an older reading, shows no value of a password, one-time-code or card field and
+  does not read a page with payment fields. Direct runs, `--brief` workers, saved tasks and
+  the benchmark never get the tools. A provider can now mark its tools as a group that
+  `tool_exposure = "retrieve"` offers on every step, add a note to the system prompt, and
+  ask the run's approval policy about something it finds while a tool runs. See [Browsing
+  with melo](docs/guides/browsing.md) ([#NN]).
+
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
   portrait instead of the framed print: working while the server starts and signs in, calm once

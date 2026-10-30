@@ -70,6 +70,8 @@ those tools. `--tool-exposure` chooses the list:
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 
+A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eight browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)).
+
 A call to a tool that the step did not offer is refused with
 `Tool '<name>' was not offered in this step.` and does not run. The refusal
 stays in the conversation, so a later step can offer that tool.

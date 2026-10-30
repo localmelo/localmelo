@@ -126,3 +126,26 @@ def test_direct_runs_and_workers_never_name_a_driver() -> None:
     config.save(cfg)
     args = argparse.Namespace(mcp_config=None)
     assert cli._direct_tool_providers(argparse.ArgumentParser(), args) == []
+
+
+def test_the_safari_command_line_can_be_replaced_for_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.support.browser import provider_for
+    from localmelo.support.browser.safari import SafariAutomationDriver
+
+    def command(provider: Any) -> tuple[str, list[str]]:
+        assert isinstance(provider.driver, SafariAutomationDriver)
+        return provider.driver._config.command, provider.driver._config.args
+
+    monkeypatch.setenv("LOCALMELO_SAFARIDRIVER", "python3 -I /x/fake.py")
+    assert command(provider_for("safari-automation")) == (
+        "python3",
+        ["-I", "/x/fake.py", "--mcp"],
+    )
+    monkeypatch.delenv("LOCALMELO_SAFARIDRIVER")
+    assert command(provider_for("safari-automation")) == (
+        "/usr/bin/safaridriver",
+        ["--mcp"],
+    )
+    assert provider_for("off") is None
