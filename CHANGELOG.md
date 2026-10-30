@@ -1053,7 +1053,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the new one: `--mcp FILE` in `/mcp`, `-X endpoint.embedding_url=URL` in the memory
   row of developer mode's banner, and `melo console --reset` when the gateway's token
   is invalid. Direct mode's stdout and stderr, JSON, exit codes and requests are
-  unchanged ([#NN]).
+  unchanged ([#250]).
 
 - `/status` says whether melo is ready, in five rows: the model and its server with
   `✓ answers` (or `✗ does not answer (connection refused). Start it, then /status checks
@@ -1066,7 +1066,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   other segments that room. `melo config keys` and `melo config get` show an unset
   `agent.window_messages` as the window it falls back to (`64 (local server)` or
   `20 (cloud)`) instead of `unset`. Direct mode's stdout and stderr, JSON, exit codes and
-  requests are unchanged ([#NN]).
+  requests are unchanged ([#250]).
 
 - Reflections survive two more one-character slips in their JSON. With the default
   `reflection_gate flags`, a reply that holds no reflection already gets one repair of
@@ -1805,6 +1805,7 @@ earlier milestones.
 [#247]: https://github.com/localmelo/localmelo/pull/247
 [#248]: https://github.com/localmelo/localmelo/pull/248
 [#249]: https://github.com/localmelo/localmelo/pull/249
+[#250]: https://github.com/localmelo/localmelo/pull/250
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
