@@ -36,7 +36,9 @@ def review_action(payload: ActionReviewPayload) -> ActionReview:
         elif payload.tool_name == "python_exec":
             review_python(ctx, f, str(args.get("code") or ""))
         elif payload.tool_name == "file_write":
+            # The workspace fence places it; only what the path is counts.
             touch(ctx, f, str(args.get("path") or ""), "write")
-    except (RecursionError, ValueError, TypeError, OSError, IndexError) as exc:
+            f.high.pop("outside_write", None)
+    except Exception as exc:  # the rules fail safe: the call is asked about
         f.doubt(f"melo could not check this call ({type(exc).__name__}).")
     return f.review()

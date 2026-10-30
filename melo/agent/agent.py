@@ -81,6 +81,7 @@ from localmelo.melo.agent.options import (
 )
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
+    ActionReviewPayload,
     ExecutorResultPayload,
     MemoryCandidatePayload,
     MemoryWritePayload,
@@ -102,6 +103,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.contracts.review import SELF_DENIAL, ActionReview
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -1436,6 +1438,10 @@ class _ApprovalGate:
     ``run.waiting_call_id`` names the call, so that a cancellation there
     closes the call as not started (see :meth:`Agent._on_cancelled`).
 
+    With a *checker*, the request carries the call's review (#279), kept in
+    :attr:`review` for the denial text; a call that would change localmelo
+    itself (the ``self`` category) is denied without asking the policy.
+
     The run's cancellation propagates, and the prompt counts as withdrawn.
     The policy fails closed otherwise: an exception it raises, a
     ``CancelledError`` while nothing cancels the run, and a return value
@@ -1450,18 +1456,27 @@ class _ApprovalGate:
         call: ToolCall,
         workspace_root: str | None,
         tier: ToolTier,
+        checker: Checker | None = None,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
         self._tier = tier
+        self._checker = checker
+        self.review: ActionReview | None = None
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
         self.asked: dict[str, Any] | None = None
 
     async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
         run, call = self._run, self._call
+        if self._checker is not None:
+            self.review = self._checker.review_action(
+                ActionReviewPayload(
+                    request.tool_name, dict(request.arguments), self._workspace_root
+                )
+            )
         asking = ApprovalRequest(
             request_id=uuid.uuid4().hex,
             run_id=run.task_id,
@@ -1471,7 +1486,11 @@ class _ApprovalGate:
             preview=call_preview(request.tool_name, request.arguments),
             workspace_root=self._workspace_root,
             tier=self._tier,
+            review=self.review,
         )
+        if self.review is not None and "self" in self.review.categories:
+            self._record(asking, origin="policy", reason=SELF_DENIAL)
+            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
         run.waiting_call_id = call.id
         try:
             decided: object = await self._policy.decide(asking)
@@ -3849,7 +3868,12 @@ class Agent:
                 "write" if called_tool is None else self.checker.tier(called_tool)
             )
             gate = _ApprovalGate(
-                run.approval, run, call, self.executor.workspace_root, tier
+                run.approval,
+                run,
+                call,
+                self.executor.workspace_root,
+                tier,
+                self.checker,
             )
         try:
             exec_request = ExecutionRequest(

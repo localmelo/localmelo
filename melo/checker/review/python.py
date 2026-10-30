@@ -76,6 +76,11 @@ _PASS = set(
 )
 
 
+# The nodes the first pass looks at; the rest are skipped fast.
+_BINDS = {ast.Call, ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign}
+_BINDS |= {ast.NamedExpr, ast.For, ast.AsyncFor, ast.comprehension, ast.withitem}
+
+
 class _Review:
     def __init__(self, ctx: Context, f: Findings, tree: ast.AST) -> None:
         self.ctx, self.f, self.busy = ctx, f, set[str]()
@@ -84,6 +89,8 @@ class _Review:
         self.bound: dict[str, list[ast.expr]] = {}
         self.later: list[ast.AST] = []  # the calls and imports, once all is bound
         for node in ast.walk(tree):
+            if type(node) not in _BINDS:
+                continue
             if isinstance(node, ast.Call | ast.Import | ast.ImportFrom):
                 self.later.append(node)
             if isinstance(node, ast.Import):

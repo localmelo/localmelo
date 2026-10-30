@@ -340,7 +340,8 @@ class Executor:
                 return ExecutionOutcome(
                     tool_name=request.tool_name,
                     status=ExecutionStatus.BLOCKED,
-                    error=denial_text(decision),
+                    # The agent's gate keeps the call's review (#279).
+                    error=denial_text(decision, getattr(approve, "review", None)),
                     error_category=ErrorCategory.APPROVAL_DENIED,
                 )
             asked = True
