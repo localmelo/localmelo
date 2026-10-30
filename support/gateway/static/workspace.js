@@ -17,7 +17,7 @@ import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
 import { workerHistory } from "./worker-history.mjs";
 import { setupTasks } from "./tasks.mjs";
-import { setupStatusRow } from "./status-row.mjs";
+import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import {
@@ -333,6 +333,37 @@ function setupShown() {
   return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
 }
 
+// The scheduler's reason for a call that waits on a foreign GPU lock.
+const LOCK_HOLD = "Reservation";
+
+/** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
+function connectionState({ turn, held, pending, session }) {
+  if (!S.online) return { text: "Gateway offline", offline: true };
+  if (developerMode) {
+    const text = turn ? (held ? `Waiting: ${held}` : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
+    return { text, offline: false };
+  }
+  const model = S.health?.model;
+  if (S.health?.configured === false) return { text: "No model", offline: true };
+  if (S.health?.model_server?.reachable === false) return { text: "Model offline", offline: true };
+  return { text: model?.name || model?.backend_label || "Model", offline: false };
+}
+
+/**
+ * What default mode leaves out of the header and the sidebar: the level, Details, the GPU line, and
+ * Workers and Tasks until there is something in them. The elements stay in the page, hidden.
+ */
+function applyChrome() {
+  $("details-trigger").hidden = !developerMode || workerMode;
+  $("level-btn").hidden = !developerMode || workerMode;
+  $("connection-btn").hidden = workerMode;
+  $("workers-link").hidden = !developerMode && !sections.workers;
+  $("tasks-link").hidden = !developerMode && !sections.tasks;
+  $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
+  $("composer-note").hidden = !developerMode;
+  setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
+}
+
 function syncUI() {
   const view = S.activeId ? S.view : null;
   const session = activeSession();
@@ -341,12 +372,12 @@ function syncUI() {
   const pending = view ? view.pending.size : 0;
   const machine = machineLine(S.machine);
   const chip = $("machine-state");
-  const snapshot = `${machine.text}\n${machine.label}`;
+  const snapshot = `${developerMode}\n${machine.text}\n${machine.label}`;
   if (snapshot !== machineSnapshot) {
     machineSnapshot = snapshot;
     // Unhide before the text write, so a screen reader announces the first
     // lock instead of a mutation inside a hidden live region.
-    chip.hidden = !machine.text;
+    chip.hidden = !machine.text || !developerMode;
     chip.textContent = machine.text;
     chip.setAttribute("aria-label", machine.label || "Machine status");
     chip.title = machine.label;
@@ -373,18 +404,17 @@ function syncUI() {
     : model?.name
       ? `${model.name} · ${model.backend_label}`
       : "Connect your model to get started";
-  $("connection-label").textContent = !S.online
-    ? "Gateway offline"
-    : turn
-      ? held
-        ? `Waiting: ${held}`
-        : pending > 0
-          ? "Approval needed"
-          : "Working"
-      : session
-        ? "Ready"
-        : "New chat";
-  $("connection-dot").classList.toggle("offline", !S.online);
+  const connection = connectionState({ turn, held, pending, session });
+  $("connection-label").textContent = connection.text;
+  $("connection-dot").classList.toggle("offline", connection.offline);
+  if (developerMode) $("connection-btn").removeAttribute("aria-label");
+  else $("connection-btn").setAttribute("aria-label", `Model: ${connection.text}. Open settings.`);
+  // Unhide before the text write, so a screen reader announces the wait.
+  const lockBanner = $("lock-banner");
+  const lockNote = !developerMode && held === LOCK_HOLD ? "Waiting for this Mac's GPU, your chat starts when it is free." : "";
+  if (lockNote) lockBanner.hidden = false;
+  setTextIfChanged(lockBanner, lockNote);
+  if (!lockNote) lockBanner.hidden = true;
   $("model-btn").textContent = model?.name ? `${model.name}  ⌄` : "Choose a model  ⌄";
   $("send-btn").hidden = !!turn;
   $("stop-btn").hidden = !turn;
@@ -401,6 +431,7 @@ function syncUI() {
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
+  applyChrome();
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
   if (taskMode) {
@@ -1793,24 +1824,30 @@ function renderLevelMenu() {
   for (const number of [1, 2, 3, 4]) {
     const item = el("button", "level-item", levelName(number) + (number === 1 ? " · urgent" : number === 4 ? " · background" : ""));
     item.type = "button";
-    item.setAttribute("role", "option");
-    item.setAttribute("aria-selected", String(number === level));
+    item.setAttribute("role", "menuitemradio");
+    item.setAttribute("aria-checked", String(number === level));
     item.addEventListener("click", () => setLevel(number));
     menu.append(item);
   }
 }
 
-function showLevelMenu(open) {
+// A menu button's menu: opening moves focus into it (to the chosen level), arrows move between the
+// levels, Escape closes it and returns to the button.
+function showLevelMenu(open, { focus = false } = {}) {
   S.levelsOpen = open;
   $("level-menu").hidden = !open;
   $("level-btn").setAttribute("aria-expanded", String(open));
-  if (open) renderLevelMenu();
+  if (!open) return;
+  renderLevelMenu();
+  if (focus) Array.from($("level-menu").children).find((item) => item.getAttribute("aria-checked") === "true")?.focus();
 }
 
 async function setLevel(level) {
   if (workerMode) return;
   const id = S.activeId;
+  const inMenu = $("level-menu").contains(document.activeElement);
   showLevelMenu(false);
+  if (inMenu) $("level-btn").focus();
   if (!id) return;
   const previous = activeSession()?.level;
   const session = activeSession();
@@ -1862,17 +1899,37 @@ function statusRowNode() {
   node.hidden = true;
   return node;
 }
-const chatStatus = setupStatusRow({ api, root: $("status-row") });
+// Default mode draws the plain segments; a developer sees the terminal's row.
+const rowFilter = (segments) => (developerMode ? segments : plainSegments(segments));
+const chatStatus = setupStatusRow({ api, root: $("status-row"), filter: rowFilter });
 const running = setupRunning({ root: $("running-root"), button: $("running-btn"), menu: $("running-menu") });
+
+// Default mode lists Workers and Tasks once there is something in them.
+const sections = { workers: false, tasks: false };
 
 function setHealth(body) {
   S.health = body;
   running.update(body?.status);
+  const { running: now, tasks: queue } = body?.status ?? {};
+  sections.workers ||= (now?.runs ?? 0) + (now?.terminal ?? 0) > 0;
+  sections.tasks ||= (now?.tasks ?? 0) + (queue?.queued ?? 0) + (queue?.held ?? 0) > 0;
+}
+
+/** Whether a run, a terminal chat or a task exists yet: one question each, none of them fatal. */
+async function findSections() {
+  const some = (path, key) => api(path).then((body) => (body[key] ?? []).length > 0, () => false);
+  const [runs, terminals, tasks] = await Promise.all([
+    some("/sessions?kind=worker&limit=1", "sessions"),
+    some("/sessions?kind=terminal&limit=1", "sessions"),
+    some("/tasks", "tasks"),
+  ]);
+  sections.workers ||= runs || terminals;
+  sections.tasks ||= tasks;
 }
 
 let workerMode = false;
 let taskMode = false;
-const workerStatus = setupStatusRow({ api, root: statusRowNode() });
+const workerStatus = setupStatusRow({ api, root: statusRowNode(), filter: rowFilter });
 const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); }, (fn, ms) => {
   const timer = setInterval(fn, ms);
   return () => globalThis.clearInterval?.(timer);
@@ -1885,7 +1942,8 @@ const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWo
 });
 const tasks = setupTasks({
   api,
-  statusRow: setupStatusRow({ api, root: statusRowNode() }),
+  statusRow: setupStatusRow({ api, root: statusRowNode(), filter: rowFilter }),
+  developer: () => developerMode,
   live: {
     nodes: taskLiveNodes,
     open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
@@ -1919,12 +1977,11 @@ function showTasks(id) {
   workers.leave();
   workerMode = true;
   taskMode = true;
+  sections.tasks = true;
   $("worker-panel").hidden = true;
   $("scroll").hidden = true;
   document.querySelector(".composer-area").hidden = true;
-  $("details-trigger").hidden = true;
-  $("level-btn").hidden = true;
-  $("connection-btn").hidden = true;
+  applyChrome();
   $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
@@ -1957,12 +2014,11 @@ function showWorkers(id) {
     showLevelMenu(false);
   }
   workerMode = true;
+  sections.workers = true;
   $("worker-panel").hidden = false;
   $("scroll").hidden = true;
   document.querySelector(".composer-area").hidden = true;
-  $("details-trigger").hidden = true;
-  $("level-btn").hidden = true;
-  $("connection-btn").hidden = true;
+  applyChrome();
   $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
   renderSessions();
   $("workers-link").setAttribute("aria-current", "page");
@@ -1984,9 +2040,7 @@ function leaveWorkers() {
   $("worker-panel").hidden = true;
   $("scroll").hidden = false;
   document.querySelector(".composer-area").hidden = false;
-  $("details-trigger").hidden = false;
-  $("level-btn").hidden = false;
-  $("connection-btn").hidden = false;
+  applyChrome();
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
   $("tasks-link").removeAttribute("aria-current");
@@ -2157,9 +2211,12 @@ async function refreshMode(saved) {
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 const showSettings = setupSettings({
   api,
+  developer: () => developerMode,
   onSaved: async (saved) => {
     await refreshMode(saved);
     drawer.modeChanged();
+    chatStatus.bump();
+    if (!developerMode) await findSections();
     try {
       setHealth(await api("/health"));
       syncUI();
@@ -2249,6 +2306,7 @@ async function init() {
     return;
   }
   S.authenticated = true;
+  await refreshMode();
   $("lock-screen").hidden = true;
   $("app").hidden = false;
   $("app").inert = false;
@@ -2310,6 +2368,10 @@ async function init() {
   }, LIST_POLL_MS);
   S.ready = true;
   syncUI();
+  if (!developerMode) {
+    await findSections();
+    syncUI();
+  }
   // The first load is done: a screenshot harness (and a curious person) can
   // tell the page is wired before they type into it.
   document.documentElement.dataset.ready = "1";
@@ -2379,7 +2441,21 @@ $("approval-go").addEventListener("click", goToApproval);
 $("scroll").addEventListener("scroll", updateApprovalBar);
 $("level-btn").addEventListener("click", () => {
   if (!activeSession()) return;
-  showLevelMenu(!S.levelsOpen);
+  showLevelMenu(!S.levelsOpen, { focus: true });
+});
+$("level-btn").addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" || !activeSession() || S.levelsOpen) return;
+  event.preventDefault();
+  showLevelMenu(true, { focus: true });
+});
+$("level-menu").addEventListener("keydown", (event) => {
+  const items = Array.from($("level-menu").children);
+  const at = items.indexOf(document.activeElement);
+  const to = { ArrowDown: (at + 1) % items.length, ArrowUp: (at + items.length - 1) % items.length, Home: 0, End: items.length - 1 }[event.key];
+  if (to !== undefined) {
+    event.preventDefault();
+    items[to].focus();
+  } else if (event.key === "Tab") showLevelMenu(false);
 });
 document.addEventListener("click", (event) => {
   if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
@@ -2417,15 +2493,15 @@ document.querySelectorAll("[data-prompt]").forEach((node) =>
   }),
 );
 document.addEventListener("keydown", (event) => {
-  if (!S.authenticated || workerMode) return;
+  if (!S.authenticated) return;
   if (event.isComposing || event.keyCode === 229) return;
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+  if (!workerMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     newChat();
     return;
   }
   if (event.key !== "Escape") return;
-  // Close what is open first; a stop is the last thing Escape does.
+  // Close what is open first, in every view; a stop is the last thing Escape does.
   if (running.isOpen()) {
     running.toggle(false);
     $("running-btn").focus();
@@ -2433,6 +2509,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (S.levelsOpen) {
     showLevelMenu(false);
+    $("level-btn").focus();
     return;
   }
   if ($("settings-dialog")?.open) {
@@ -2445,6 +2522,7 @@ document.addEventListener("keydown", (event) => {
     sidebar(false);
     return;
   }
+  if (workerMode) return;
   for (const [id, state] of approvalStates) {
     if (!state.deny || !S.view?.pending.has(id)) continue;
     state.deny = false;

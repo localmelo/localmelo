@@ -1,3 +1,10 @@
+/** A new user's row: the cache share, the scheduler's queue and a run's phase are for developers. */
+export function plainSegments(segments) {
+  return segments
+    .filter((text) => !text.startsWith('cache') && !(text.startsWith('tasks ') && !/ \d+ held$/.test(text)))
+    .map((text) => (text.startsWith('step ') ? text.replace(/ phase .*$/, '') : text));
+}
+
 /**
  * The status row: the terminal's status-bar segments for one session, as
  * `GET /api/sessions/{id}/status` folds them on the server (cache share with
@@ -7,9 +14,10 @@
  * least `minGapMs` apart and never overlap, and a late answer for another
  * session is dropped. `schedule`/`cancel` and `clock` are injected for tests.
  * The segments are spans in one clipped line, so a narrow width drops the
- * rightmost first (see `.status-row` in workspace.css).
+ * rightmost first (see `.status-row` in workspace.css). `filter(segments)`
+ * picks the ones to draw: default mode draws `plainSegments`.
  */
-export function setupStatusRow({api, root, schedule = setTimeout, cancel = clearTimeout, clock = Date.now, minGapMs = 1000}) {
+export function setupStatusRow({api, root, schedule = setTimeout, cancel = clearTimeout, clock = Date.now, minGapMs = 1000, filter = (segments) => segments}) {
   const doc = root.ownerDocument;
   let id = null;
   let epoch = 0;
@@ -40,7 +48,7 @@ export function setupStatusRow({api, root, schedule = setTimeout, cancel = clear
       // Keep the last row: the next frame or poll asks again.
     }
     inflight = false;
-    if (mine === epoch && Array.isArray(body?.segments)) draw(body.segments);
+    if (mine === epoch && Array.isArray(body?.segments)) draw(filter(body.segments));
     pump();
   }
 

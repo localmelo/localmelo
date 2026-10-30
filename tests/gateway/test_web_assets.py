@@ -239,7 +239,7 @@ async def test_the_shell_has_a_level_chip_with_aria_attributes(
 ) -> None:
     page = await client.get("/")
     chip = _shell_attributes(page.text, "button", "level-btn")
-    assert chip.get("aria-haspopup") == "listbox"
+    assert chip.get("aria-haspopup") == "menu"
     assert chip.get("aria-expanded") == "false"
     assert chip.get("aria-label") == "Chat level"
     body = re.search(
@@ -248,7 +248,7 @@ async def test_the_shell_has_a_level_chip_with_aria_attributes(
     assert body is not None
     assert "P2" in body.group(1)
     menu = _shell_attributes(page.text, "div", "level-menu")
-    assert menu.get("role") == "listbox"
+    assert menu.get("role") == "menu"
     assert re.search(r'<div\b[^>]*\bid="level-menu"[^>]*\bhidden\b', page.text)
 
 
@@ -505,3 +505,40 @@ async def test_the_shell_offers_try_again_when_the_gateway_is_unreachable(
     assert "Could not reach the gateway" in banner.group(0)
     retry = r'<button\b[^>]*\bid="offline-retry"[^>]*>\s*Try again\s*</button>'
     assert re.search(retry, banner.group(0))
+
+
+async def test_the_shell_has_every_id_default_mode_hides(
+    client: httpx.AsyncClient,
+) -> None:
+    # Default mode hides these from script, so each must be in the page to be hidden.
+    page = (await client.get("/")).text
+    for element_id in (
+        "level-btn",
+        "details-trigger",
+        "machine-state",
+        "workers-link",
+        "tasks-link",
+        "section-nav",
+        "composer-note",
+        "lock-banner",
+        "settings-label",
+        "settings-tabs",
+        "settings-head-model",
+        "settings-meta",
+        "settings-theme-legend",
+    ):
+        assert f'id="{element_id}"' in page, element_id
+    assert re.search(
+        r'<div\b[^>]*\bid="lock-banner"[^>]*\brole="status"[^>]*\bhidden\b', page
+    )
+
+
+def test_touch_screens_and_phones_get_44px_targets() -> None:
+    css = _stylesheet()
+    block = re.search(
+        r"@media \(pointer: coarse\), \(max-width: 700px\)\s*\{(.*?)\n\}", css, re.S
+    )
+    assert block is not None
+    for name in ("send-button", "stop-button", "icon-button"):
+        assert re.search(rf"\.{name}\b[^{{}}]*\{{[^}}]*\b44px", block.group(1)), name
+    assert re.search(r'\.level-item\[aria-checked="true"\]', css)
