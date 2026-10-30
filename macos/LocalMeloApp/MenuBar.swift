@@ -12,6 +12,7 @@ final class MenuBar {
     private let divider = NSMenuItem.separator()
     private let plain: NSImage?
     private let badged: NSImage?
+    private var wasWaiting = false
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
     init(menu: NSMenu, waiting: Selector) {
@@ -38,13 +39,23 @@ final class MenuBar {
                 button.image = nil
                 button.title = count.isEmpty ? "localmelo" : "localmelo · \(count)"
             }
+            // Title and help say the words too: left alone they are the bare count and the tooltip, which
+            // VoiceOver would read on top of the label.
             button.setAccessibilityLabel(label)
+            button.setAccessibilityTitle(label)
+            button.setAccessibilityHelp("")
             button.toolTip = label
         }
         runningLine.title = line ?? ""
         runningLine.isHidden = line == nil
         waitingLine.isHidden = !waiting
         divider.isHidden = runningLine.isHidden && waitingLine.isHidden
+        // Someone working in another app cannot see the dot: the start of a wait is said aloud, as a failure is.
+        if waiting && !wasWaiting {
+            NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                                 userInfo: [.announcement: label, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        }
+        wasWaiting = waiting
     }
 
     /// The mark, 18 points tall. The badged image is wider and holds a dot beside the right ear, so
