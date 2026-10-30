@@ -129,7 +129,7 @@ makes larger requests: leave out `session_id` for an unrelated task.
 - Creating a session also closes the sessions that have been idle for more
   than 1 hour.
 - Each session's agent uses the config file's backends and the default run
-  options (three built-in tools, `file_read`, `file_write` and
+  options (four built-in tools, `file_read`, `file_write`, `list_files` and
   `python_exec`, and no MCP tools), except that it keeps its answers
   (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
   offer `shell_exec`: legacy `/v1` has no approval policy, so there is no one

@@ -32,11 +32,17 @@ ToolMode = Literal["direct", "interactive", "gateway", "python"]
 # `python` mode passes no approval policy, so a Python caller must name
 # `shell_exec` in `builtins` to get it. `python_exec`, `file_read` and
 # `file_write` stay everywhere: `python_exec` is a child process and the
-# bench's Python tasks keep working.
+# bench's Python tasks keep working. `list_files` is read-only, so it needs
+# no approval; it is offered where a person chats, `interactive` and the
+# gateway, so that "what is this project?" is answered without a prompt.
+# Direct and `python` keep the three they had: the benchmark runs direct
+# mode, and its requests do not change.
 DEFAULT_BUILTINS: Mapping[ToolMode, frozenset[str]] = {
     "direct": frozenset({"file_read", "file_write", "python_exec"}),
-    "interactive": frozenset({"file_read", "file_write", "python_exec", "shell_exec"}),
-    "gateway": frozenset({"file_read", "file_write", "python_exec"}),
+    "interactive": frozenset(
+        {"file_read", "file_write", "list_files", "python_exec", "shell_exec"}
+    ),
+    "gateway": frozenset({"file_read", "file_write", "list_files", "python_exec"}),
     "python": frozenset({"file_read", "file_write", "python_exec"}),
 }
 

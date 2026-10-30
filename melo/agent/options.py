@@ -107,7 +107,9 @@ class AgentOptions:
       decides the built-ins that ``builtins=None`` registers: only the
       interactive UI offers ``shell_exec`` (its panel asks before an
       ``exec`` call runs); direct, the gateway and the library's ``python``
-      default offer ``file_read``, ``file_write`` and ``python_exec``.
+      default offer ``file_read``, ``file_write`` and ``python_exec``, and
+      the interactive UI and the gateway also ``list_files`` (read-only, so
+      it never asks).
       The CLI sets its own surface's mode; a Python caller gets
       ``shell_exec`` by naming it in ``builtins``. An explicit ``builtins``
       wins.
@@ -127,7 +129,8 @@ class AgentOptions:
       directory. With a root, ``file_read`` and ``file_write`` resolve a
       relative path against it and refuse a path whose real path is
       outside it, a symlink that replaces the checked file and anything
-      but a regular file;
+      but a regular file; ``list_files`` resolves and refuses a folder
+      path the same way (no path lists the root);
       ``shell_exec`` and ``python_exec`` run in a child process that
       starts in the root, but can still reach any path, so approval is
       their control; a non-zero exit of ``shell_exec`` starts its text

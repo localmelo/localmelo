@@ -137,7 +137,7 @@ Three limits apply at different levels:
   out. A request that times out is retried twice. See
   [Chat request timeout](../reference/configuration.md#chat-request-timeout).
 - **Tool time limits.** `shell_exec` 30 seconds, `python_exec` 60 seconds,
-  `file_read` and `file_write` 60 seconds, MCP tools their server's
+  `file_read`, `file_write` and `list_files` 60 seconds, MCP tools their server's
   `timeout`. `shell_exec` and `python_exec` run in a child process with a
   process group, which a timeout or a cancellation kills; the interactive
   UI gives them 10 minutes. See

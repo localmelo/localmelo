@@ -1472,7 +1472,7 @@ async def test_status_shows_the_facts(
     assert "workspace  " in text and "fence      file tools stay here" in text
     assert "session    'hello' · " in text and " · 1 turn" in text
     assert "approvals  ask · allowed in this session: none" in text
-    assert "tools      4 built-in (3 ask first)" in text
+    assert "tools      5 built-in (3 ask first)" in text
     assert "memory     2 of 64 (local server) messages · " in text
     assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text

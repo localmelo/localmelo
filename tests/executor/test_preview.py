@@ -27,6 +27,9 @@ class _Unprintable:
             "import os (+3 more lines)",
         ),
         ("file_read", {"path": "notes/today.txt"}, "notes/today.txt"),
+        ("list_files", {}, "."),
+        ("list_files", {"path": "src", "depth": 1}, "src"),
+        ("list_files", {"path": "src", "depth": 3}, "src (3 levels)"),
         (
             "file_write",
             {"path": "out.txt", "content": "héllo\n"},
@@ -51,6 +54,8 @@ def test_each_row(tool: str, arguments: dict[str, Any], preview: str) -> None:
         ("python_exec", {"code": 3}),
         ("python_exec", {"code": "  \n\n"}),
         ("file_read", {"path": None}),
+        ("list_files", {"path": 7}),
+        ("list_files", {"depth": "2"}),
         ("file_write", {"path": "a.txt"}),
         ("file_write", {"path": 1, "content": "x"}),
     ],

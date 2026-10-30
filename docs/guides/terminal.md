@@ -503,7 +503,9 @@ not read it.
 ### Approvals
 
 `shell_exec`, `python_exec` and `file_write` run only once you answer, and
-so do MCP tools marked for approval. (The interactive UI loads the MCP
+so do MCP tools marked for approval. `file_read` and `list_files` only read,
+so they never ask: melo can look at your folder to answer "What is this
+project?" without a panel. (The interactive UI loads the MCP
 servers of `--mcp`, else of the top-level `mcp_config` key; a server
 that fails to start turns MCP off for the session and `/mcp` says why.) The panel takes the place
 of the input box, and your draft stays:
@@ -546,7 +548,7 @@ of the input box, and your draft stays:
 ### The workspace
 
 melo works in the current folder, or in `--workspace DIR`. File tools
-(`file_read`, `file_write`) stay in this folder. Commands and Python can
+(`file_read`, `file_write`, `list_files`) stay in this folder. Commands and Python can
 reach other files, so melo asks first. The banner warns when the workspace
 is your home folder or `/`. `shell_exec` and `python_exec` stop after 10
 minutes in the UI (30 and 60 seconds for a task).

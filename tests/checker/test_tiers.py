@@ -26,6 +26,7 @@ class TestTheBuiltInTable:
     def test_every_builtin_has_its_tier(self) -> None:
         assert BUILTIN_TIERS == {
             "file_read": "read",
+            "list_files": "read",
             "file_write": "write",
             "shell_exec": "exec",
             "python_exec": "exec",

@@ -215,6 +215,7 @@ asyncio.run(main())
 | `shell_exec` | 命令，连续的空白会被压缩。 |
 | `python_exec` | 代码的第一个非空行；若后面还有更多行，则附加 ` (+<n> more lines)`。 |
 | `file_read` | 路径。 |
+| `list_files` | 路径（不带路径时为 `.`），深度大于 1 时后接 ` (<n> levels)`。 |
 | `file_write` | `<path> (<n> chars)`。 |
 | 其他任何工具，或上述缺失或不是字符串的参数 | 参数，以紧凑 JSON 形式输出，键已排序。 |
 
