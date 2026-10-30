@@ -324,7 +324,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `search_memory`. Deleting a chat deletes its index entries. The notes and the index live
   in `~/.cache/localmelo/memory/` (`records.db`, `index.db`); `[memory] across_chats =
   false` turns it all off. Direct runs, workers, the terminal chat and the benchmark are
-  unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#NN]).
+  unchanged. See [Memory across chats](docs/concepts/memory.md#memory-across-chats) ([#309]).
 - The panel beside a chat. The web console (and so the macOS app) shows Melo on
   the right of the chat: his portrait, which rests, works, waits or cheers with
   what runs, one status line (`Connected · <model> on <server>`, `Working on 2
@@ -2439,6 +2439,7 @@ earlier milestones.
 [#305]: https://github.com/localmelo/localmelo/pull/305
 [#306]: https://github.com/localmelo/localmelo/pull/306
 [#308]: https://github.com/localmelo/localmelo/pull/308
+[#309]: https://github.com/localmelo/localmelo/pull/309
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
