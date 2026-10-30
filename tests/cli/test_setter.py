@@ -183,6 +183,8 @@ def test_a_setting_works_with_a_command_word(tmp_path: Path) -> None:
         (["-X"], "-X needs KEY=VALUE"),
         (["-X", "retrieval.k"], "-X needs KEY=VALUE, got 'retrieval.k'"),
         (["-X", "retrieval.kk=1", "q"], "nearest: retrieval.k, retrieval.kinds"),
+        # `mcp_config` is a key, so the nearest key beats the option of that name.
+        (["-X", "agent.mcp_config=f", "q"], "nearest: mcp_config"),
         (["--set", "nope=1", "q"], "unknown setting 'nope'"),
         (["-X", "scheduler.policy=nope", "q"], "('off', 'fcfs', 'class')"),
         (["-X", "cli.status_line=loud", "q"], "is not one of ('auto', 'off')"),
@@ -197,6 +199,56 @@ def test_a_wrong_setting_is_a_usage_error_that_says_what_to_do(
     assert code == 2 and message in err
     if "unknown" in message or "nearest" in message:
         assert "melo config keys" in err
+
+
+@pytest.mark.parametrize(
+    ("key", "use"),
+    [
+        ("agent.max_steps", "-s N (--steps)"),
+        ("max_steps", "-s N (--steps)"),
+        ("agent.steps", "-s N (--steps)"),
+        ("agent.timeout", "-t SEC (--timeout)"),
+        ("agent.workspace", "-w DIR (--workspace)"),
+        ("agent.chat_model", "-m NAME (--model)"),
+        ("agent.model", "-m NAME (--model)"),
+        ("endpoint.base_url", "-u URL (--url)"),
+        ("agent.output_format", "-o FORMAT (--output)"),
+        ("agent.yolo", "-y (--yolo)"),
+        ("agent.resume", "-r [ID] (--resume)"),
+        ("agent.builtins", "--builtins SET"),
+        ("memory", "--memory on|off"),
+        ("agent.mcp-only", "--mcp-only"),
+        ("agent.save_session", "--title T"),
+    ],
+)
+def test_a_key_named_like_an_option_says_the_option(
+    key: str, use: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, err = _exit(["-X", f"{key}=5", "q"], capsys)
+    assert code == 2
+    assert err == f"melo: error: {key} is not a setting; use {use} for this run.\n"
+
+
+def test_melo_config_says_the_option_too(capsys: pytest.CaptureFixture[str]) -> None:
+    expected = (
+        "melo: error: agent.max_steps is not a setting; "
+        "use -s N (--steps) for this run.\n"
+    )
+    assert _config(["get", "agent.max_steps"], capsys)[1:] == ("", expected)
+    assert _config(["set", "agent.max_steps", "5"], capsys)[1:] == ("", expected)
+
+
+def test_a_name_that_is_neither_a_key_nor_an_option_keeps_the_nearest_keys(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code, err = _exit(["-X", "retrieval.kk=1", "q"], capsys)
+    assert code == 2
+    assert err == (
+        "melo: error: unknown setting 'retrieval.kk'; nearest: retrieval.k, "
+        "retrieval.kinds, retrieval.retriever. Every key: melo config keys\n"
+    )
+    # A real key whose name an option shares is still a key.
+    assert settings.lookup("gateway.workspace").name == "gateway.workspace"
 
 
 def test_a_key_without_an_option_overrides_the_config_this_process_loads() -> None:

@@ -21,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, NoReturn
 
 from localmelo.support import config
-from localmelo.support.option_tiers import SETTINGS
+from localmelo.support.option_tiers import OLD_SPELLINGS, OPTION_ROWS, SETTINGS
 
 # The order of sections in listings; a key with no section comes first.
 SECTIONS = (
@@ -96,9 +96,30 @@ def catalog() -> dict[str, Key]:
     return dict(sorted(out.items(), key=lambda pair: rank.get(pair[1].section, 99)))
 
 
+def option_for(name: str) -> str | None:
+    """The option that the last part of *name* spells, as ``melo -h`` writes it.
+
+    ``agent.max_steps`` spells ``--max-steps``, which ``-s N (--steps)`` replaces; None
+    when no option has that name.
+    """
+    option = "--" + name.rpartition(".")[2].replace("_", "-")
+    for names, meta, _ in OPTION_ROWS:
+        spellings = names.split(", ")
+        if option in spellings or OLD_SPELLINGS.get(option) == names:
+            first, *others = spellings
+            use = f"{first} {meta}".strip()
+            return f"{use} ({', '.join(others)})" if others else use
+    return None
+
+
 def lookup(name: str) -> Key:
     keys = catalog()
     if name not in keys:
+        # A name that is a key by its last part (`agent.mcp_config`) gets the nearest
+        # keys; one that is only an option (`agent.max_steps`) gets the option.
+        use = None if name.rpartition(".")[2] in keys else option_for(name)
+        if use:
+            fail(f"{name} is not a setting; use {use} for this run.")
         near = difflib.get_close_matches(name, keys, n=3, cutoff=0.6)
         hint = f"; nearest: {', '.join(near)}" if near else ""
         fail(f"unknown setting {name!r}{hint}. Every key: melo config keys")
