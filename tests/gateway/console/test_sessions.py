@@ -31,6 +31,8 @@ SESSION_KEYS = {
     # waits, read from the one gate the page and the console share.
     "level",
     "held",
+    # True for the main chat only; every chat of kind "chat" is a side chat.
+    "main",
 }
 
 
@@ -45,6 +47,7 @@ async def test_the_list_shape_and_a_session(
     assert set(session) == SESSION_KEYS
     assert session["id"] == turn.session_id
     assert session["kind"] == "chat"
+    assert session["main"] is False
     assert session["title"] == "Notes"
     assert session["model"] == "stub-model"
     assert session["workspace"] == workspace

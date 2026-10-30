@@ -201,6 +201,8 @@ class TaskWorkers:
         self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
+        # The main chat a task created here belongs to (its ``front_id``).
+        self.front_id: str | None = None
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -292,7 +294,7 @@ class TaskWorkers:
             if self._closed:
                 raise RuntimeError("workers are closed")
             existing = await self.tasks.find_existing_request(
-                spec, origin="user", request_key=key
+                spec, origin="user", front_id=self.front_id, request_key=key
             )
             if existing is not None:
                 return await self._body(existing), True
@@ -305,6 +307,7 @@ class TaskWorkers:
                 workspace=workspace,
                 request_key=key,
                 task_id=task_id,
+                front_id=self.front_id,
                 _recovery_proof=True,
             )
             if not repeated:

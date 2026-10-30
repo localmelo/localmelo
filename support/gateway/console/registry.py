@@ -1049,6 +1049,12 @@ class ConsoleSessions:
                     "task_session_read_only",
                     "A task session cannot be deleted as a chat.",
                 )
+            if info is not None and info.kind == "front":
+                raise ApiError(
+                    409,
+                    "main_chat",
+                    "The main chat is always there: it cannot be deleted.",
+                )
             entry = self._sessions.get(session_id)
             if entry is not None and (
                 entry.runner.busy or self._broker.pending(session_id)

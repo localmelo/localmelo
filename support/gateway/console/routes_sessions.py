@@ -24,6 +24,7 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import check_client_request_id
 
+from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
@@ -203,23 +204,29 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         # A row with no turn is a create that never got its message (a
         # shutdown in the middle of one); the list starts at one turn, a
-        # running one included, so a session appears as it is created.
+        # running one included, so a session appears as it is created. The
+        # main chat is there before its first message.
         sessions = await _store_call(
             console,
             console.store.list_sessions(
-                limit=limit + 1, query=query, kinds=(kind,), min_turns=1
+                limit=limit + 1,
+                query=query,
+                kinds=(kind,),
+                min_turns=0 if kind == "front" else 1,
             ),
         )
         has_more = len(sessions) > limit
-        return JSONResponse(
-            content={
-                "sessions": [console.session_body(info) for info in sessions[:limit]],
-                # The one shared gate's machine snapshot: the page's header
-                # shows the GPU lock and battery, as its /v1 list did (S2b).
-                "machine": console.gate.machine_payload(),
-                "has_more": has_more,
-            }
-        )
+        content: dict[str, Any] = {
+            "sessions": [console.session_body(info) for info in sessions[:limit]],
+            # The one shared gate's machine snapshot: the page's header
+            # shows the GPU lock and battery, as its /v1 list did (S2b).
+            "machine": console.gate.machine_payload(),
+            "has_more": has_more,
+        }
+        if kind == "chat":
+            # The chats are the main chat's side chats; the list names it.
+            content["main"] = await _store_call(console, console.main_body())
+        return JSONResponse(content=content)
 
     @app.get("/api/sessions/{session_id}")
     async def get_session(session_id: str) -> JSONResponse:
@@ -281,7 +288,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         events: bool = Query(False),
     ) -> JSONResponse:
         console.require_store()
-        _, store = await _read_session(console, session_id)
+        info, store = await _read_session(console, session_id)
         worker = store is console.worker_history
         turns = await _store_call(
             console,
@@ -296,6 +303,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 None if worker else session_id,
             )
             has_earlier = bool(older)
+        cards: list[StoredEvent] = []
+        if info.kind == "front":
+            await console.cards.flush()
+            cards = await _page_cards(console, session_id, turns, before)
         body: dict[str, Any] = {
             "turns": [
                 turn_json(
@@ -313,6 +324,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         }
         if before is None:
             body["replay_from"] = await _replay_from(console, store, session_id, turns)
+            if cards and not turns:
+                # The stream replays from here: the cards already given.
+                body["replay_from"] = max((cards[0].id or 1) - 1, 0)
+        if info.kind == "front":
+            body["cards"] = [card_json(event) for event in cards]
         return JSONResponse(content=body)
 
     @app.get("/api/sessions/{session_id}/events")
@@ -452,6 +468,45 @@ def _event_id(value: str, name: str) -> int:
             f"{name} must be an integer of at least 0.",
         )
     return number
+
+
+async def _turn_start(console: Console, session_id: str, turn: int) -> int | None:
+    """The id of a turn's first event, or ``None``."""
+    events: list[StoredEvent] = await _store_call(
+        console,
+        console.store.list_events(session_id, limit=1, turns=(turn, turn)),
+        session_id,
+    )
+    return events[0].id if events else None
+
+
+async def _page_cards(
+    console: Console, session_id: str, turns: list[TurnInfo], before: int | None
+) -> list[StoredEvent]:
+    """The main chat's cards beside a page of its turns, the newest :data:`CARD_PAGE`.
+
+    From the page's oldest turn (or the start, when it is the oldest page)
+    to the next page's first turn (or now).
+    """
+    low = 0
+    if turns:
+        older = await _store_call(
+            console,
+            console.store.list_turns(session_id, limit=1, before=turns[0].turn),
+            session_id,
+        )
+        if older:
+            low = (await _turn_start(console, session_id, turns[0].turn) or 1) - 1
+    high = None if before is None else await _turn_start(console, session_id, before)
+    return list(
+        await _store_call(
+            console,
+            console.store.events_of_type(
+                session_id, CARD_EVENT, after_id=low, before_id=high, limit=CARD_PAGE
+            ),
+            session_id,
+        )
+    )
 
 
 async def _replay_from(
