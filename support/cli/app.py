@@ -76,8 +76,11 @@ from localmelo.support.cli.picker import (
     ModelPicker,
     ModelRow,
     SessionPicker,
+    fit_row,
+    key_line,
 )
 from localmelo.support.cli.render import STREAM_LIVE_LINES, TurnRenderer, live_rows
+from localmelo.support.cli.steps import STEPS_BINDING, StepsPicker
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
@@ -115,7 +118,7 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class StatusBar:
-    """The status bar's parts: the left ones in order, and the approval mode."""
+    """The status bar's parts: its zones' parts in order, and the approval mode."""
 
     model: str
     workspace: str
@@ -123,9 +126,12 @@ class StatusBar:
     title: str
     mode: str
     mode_style: str = "class:muted"
-    # The usage segments (cache, ctx, steps, tasks) between the workspace and
-    # the title; empty with [cli] status_line = "off".
+    # The usage segments (cache, ctx, tasks): the resources zone with the
+    # context; empty with [cli] status_line = "off".
     segments: tuple[str, ...] = ()
+    # While a turn runs: its brief steps and the key that lists them
+    # (``2/~8 · ctrl+o steps``); the run zone shows the title otherwise.
+    run: str = ""
 
 
 class Controller(Protocol):
@@ -161,63 +167,94 @@ class Controller(Protocol):
 
 
 def status_fragments(
-    bar: StatusBar, width: int, ellipsis: str, dot: str = " · "
+    bar: StatusBar,
+    width: int,
+    ellipsis: str,
+    dot: str = " · ",
+    sep: str = " │ ",
 ) -> StyleAndTextTuples:
-    """The status bar at *width*: the mode always shows, at the right edge.
+    """The status bar at *width*, in zones apart: who and where, the run, resources.
 
-    When the width is short, the title is cut first, then the usage segments
-    go right to left, then the workspace is cut (from the middle), then the
-    context goes (and the workspace takes its room back), then the model is
-    cut. Every cut counts cells, and no part is left as a bare ellipsis.
+    The zones keep their place: the model and the folder; the run (while a
+    turn runs its brief steps and the key that lists them, else the chat's
+    title); the prompt cache and the context. The mode always shows, at the
+    right edge. When the width is short, the title is cut first, then the
+    resources go right to left, then the folder is cut (from the middle),
+    then it goes, then the model is cut; a running turn's figure stays. Every
+    cut counts cells, and no part is left as a bare ellipsis.
     """
     # Control characters (a pasted ^Z) count the cells they are drawn in.
-    bar = StatusBar(
-        model=shown(bar.model),
-        workspace=shown(bar.workspace),
-        context=shown(bar.context),
-        title=shown(bar.title),
-        mode=shown(bar.mode),
-        mode_style=bar.mode_style,
-        segments=tuple(shown(segment) for segment in bar.segments),
-    )
-    mode = cut_cells(bar.mode, max(1, width - 3), ellipsis)
+    mode = cut_cells(shown(bar.mode), max(1, width - 3), ellipsis)
     # No mode (ask, which everyone expects): the room of its cells and gap is the rest's.
     room = width - 2 - (cells(mode) + 1 if mode else 0)
-    model, context, title = bar.model, bar.context, bar.title
-    segments = [segment for segment in bar.segments if segment]
+    model, folder = shown(bar.model), shown(bar.workspace)
+    running = bool(bar.run)
+    run = shown(bar.run or bar.title)
+    resources = [shown(part) for part in (*bar.segments, bar.context) if part]
 
-    def joined(workspace: str) -> str:
-        parts = (model, workspace, *segments, context, title)
-        return dot.join(part for part in parts if part)
+    def zones(workspace: str) -> list[str]:
+        who = dot.join(part for part in (model, workspace) if part)
+        return [zone for zone in (who, run, dot.join(resources)) if zone]
 
-    def fit_workspace() -> str:
-        keep = room - cells(joined(bar.workspace)) + cells(bar.workspace)
-        return cut_middle(bar.workspace, max(MIN_PART_CELLS, keep), ellipsis)
+    def used(workspace: str) -> int:
+        return cells(sep.join(zones(workspace)))
 
-    workspace = bar.workspace
-    if cells(joined(workspace)) > room and title:
-        title = cut_cells(
-            title, max(0, room - cells(joined(workspace)) + cells(title)), ellipsis
-        )
-        if cells(title) < 6:
-            title = ""
-    while segments and cells(joined(workspace)) > room:
-        segments.pop()
-    if cells(joined(workspace)) > room:
-        workspace = fit_workspace()
-    if cells(joined(workspace)) > room and context:
-        context = ""
-        workspace = fit_workspace()
-    if cells(joined(workspace)) > room:
+    workspace = folder
+    if used(workspace) > room and run and not running:
+        run = cut_cells(run, max(0, room - used(workspace) + cells(run)), ellipsis)
+        if cells(run) < 6:
+            run = ""
+    while resources and used(workspace) > room:
+        resources.pop()
+    if used(workspace) > room:
+        keep = room - used(folder) + cells(folder)
+        workspace = cut_middle(folder, max(MIN_PART_CELLS, keep), ellipsis)
+    if used(workspace) > room:
         workspace = ""
-    if cells(joined(workspace)) > room:
-        model = cut_cells(model, room, ellipsis)
-    left = joined(workspace)
-    if cells(left) > room or cells(left) <= cells(ellipsis) + 1 and ellipsis in left:
-        left = ""  # no room for even a cut model
-    gap = max(1 if mode else 0, width - 2 - cells(left) - cells(mode))
+    # A running turn's key loses its word, then the model is cut, then the
+    # key goes: the figure stays.
+    shorter = [run.removesuffix(" steps"), run.partition(dot)[0]] if running else []
+    if used(workspace) > room and shorter:
+        run = shorter.pop(0)
+    if used(workspace) > room and model:
+        model = cut_cells(model, max(0, room - used("") + cells(model)), ellipsis)
+        if cells(model) <= cells(ellipsis) + 1 and ellipsis in model:
+            model = ""  # no room for even a cut model
+    if used(workspace) > room and shorter:
+        run = shorter.pop(0)
+        model = cut_cells(bar.model, max(0, room - used("") + cells(model)), ellipsis)
+        if cells(model) <= cells(ellipsis) + 1:
+            model = ""
+    if used(workspace) > room:
+        run = cut_cells(run, room, ellipsis) if running else ""
+        model = ""
+        if cells(run) <= cells(ellipsis) + 1 and ellipsis in run:
+            run = ""
+    left: StyleAndTextTuples = []
+    for zone, parts in (
+        ("who", [("class:status_model", model), ("class:status_path", workspace)]),
+        ("run", [("class:status_run" if running else "class:status", run)]),
+        ("resources", [("class:status", part) for part in resources]),
+    ):
+        parts = [part for part in parts if part[1]]
+        if not parts:
+            continue
+        if left:
+            left.append(("class:status_sep", sep))
+        for number, (style, text) in enumerate(parts):
+            if number:
+                left.append(("class:status", dot))
+            if zone == "run" and running and dot in text:
+                figure, _, rest = text.partition(dot)
+                left += [(style, figure), *key_line(dot + rest, dot)]
+            else:
+                left.append((style, text))
+    drawn = sum(cells(text) for _, text, *_ in left)
+    gap = max(1 if mode else 0, width - 2 - drawn - cells(mode))
     return [
-        ("class:status", "  " + left + " " * gap),
+        ("class:status", "  "),
+        *left,
+        ("class:status", " " * gap),
         (bar.mode_style, mode),
     ]
 
@@ -550,8 +587,34 @@ class InteractiveApp:
             return await picker.run()
         finally:
             self.picker = None
-            self.app.layout.focus(self.input_window)
+            # An approval that opened meanwhile keeps the keys.
+            self.app.layout.focus(
+                self.panel_window if self._panel_open() else self.input_window
+            )
             self.invalidate()
+
+    def open_steps(self) -> None:
+        """ctrl+o: the running turn's steps, or the last turn's, as a list."""
+        if self.picker is not None:
+            return
+        if not self.renderer.steps():
+            self.hint("No steps yet: a turn's tool calls show here")
+            return
+        title = "Steps of the last turn"
+        if self.renderer.live is not None:
+            title = "Steps of this turn"
+        picker = StepsPicker(
+            self.renderer.steps,
+            title=title,
+            width=self._width,
+            invalidate=self.invalidate,
+            symbols=self.symbols,
+        )
+
+        async def show() -> None:
+            await self.choose(picker)  # enter or esc closes it; nothing to do
+
+        self.app.create_background_task(show())
 
     async def choose_session(
         self,
@@ -752,8 +815,12 @@ class InteractiveApp:
             activity = self.controller.activity or ""
             index = self._frame if self._frame is not None else int(now / TICK_S)
             mark = self.symbols.spinner[index % len(self.symbols.spinner)]
-            text = f"{mark} {activity}{self.symbols.ellipsis}"
-            rows = [[("class:accent", cut_cells(text, width, self.symbols.ellipsis))]]
+            text = cut_cells(
+                f"{mark} {activity}{self.symbols.ellipsis}",
+                width,
+                self.symbols.ellipsis,
+            )
+            rows = [[("class:accent", text[: len(mark)]), ("", text[len(mark) :])]]
         fragments: StyleAndTextTuples = []
         for number, row in enumerate(rows):
             if number:
@@ -796,6 +863,7 @@ class InteractiveApp:
             width,
             self.symbols.ellipsis,
             f" {self.symbols.dot} ",
+            f" {self.symbols.gutter} ",
         )
 
     # ── The approval panel ──
@@ -831,6 +899,8 @@ class InteractiveApp:
             live.waiting = pending is not None
         if pending is not None:
             self.reason.reset()
+            if isinstance(self.picker, StepsPicker):
+                self.picker.close()  # the question comes first
             with contextlib.suppress(ValueError):
                 self.app.layout.focus(self.panel_window)
             self.bell()
@@ -873,7 +943,10 @@ class InteractiveApp:
         for index, label in self._options(pending):
             chosen = index == pending.selected and not pending.reason
             mark = symbols.selection if chosen else " "
+            # The chosen answer is a band; while a reason is typed, its answer
+            # keeps the accent.
             style = "class:accent" if index == pending.selected else ""
+            style = "class:chosen" if chosen else style
             options += wrapped(style, f"{mark} {index + 1}. {label}", width, "     ")
         keys: list[tuple[str, str]] = []
         if not pending.reason:
@@ -891,7 +964,7 @@ class InteractiveApp:
                     "esc stop the turn",
                 ]
             )
-            keys = wrapped("", "  " + line, width, "  ")
+            keys = wrapped("keys", "  " + line, width, "  ")
         # The rows the rest of the screen keeps: the status bar, the live
         # area, a queued line, a hint and the reason field.
         rows = size.rows - 1
@@ -941,20 +1014,40 @@ class InteractiveApp:
                 ("class:muted", f"{symbols.ellipsis} +{hidden} lines (v views all)")
             ]
         out: StyleAndTextTuples = []
+        # A diff's added and removed rows are bands across the panel.
+        bands = {"class:ok": "class:diff_add", "class:error": "class:diff_remove"}
 
-        def row(style: str, line: str) -> None:
-            out.append((style, line))
-            out.append(("", "\n"))
+        def row(style: str, line: str, room: int = width) -> None:
+            if style in bands:
+                out.extend(fit_row([("", line)], room, bands[style]))
+            elif style == "class:chosen":
+                mark = (
+                    len(symbols.selection) if line.startswith(symbols.selection) else 0
+                )
+                parts = [("class:accent", line[:mark]), ("", line[mark:])]
+                out.extend(fit_row(parts, room, style))
+            elif style == "keys":
+                out.extend(key_line(line, f" {symbols.dot} "))
+            else:
+                out.append((style, line))
+            if room == width:
+                out.append(("", "\n"))
 
         if boxed:
-            title = cut_cells(f"─ {text.title} ", width - 2)
-            row("", "╭" + title + "─" * max(0, width - 2 - cells(title)) + "╮")
+            # The frame in the warn colour, its title bold.
+            label = cut_cells(text.title, width - 5)
+            out.append(("class:frame", "╭─ "))
+            out.append(("class:title", label))
+            dashes = "─" * max(0, width - 5 - cells(label))
+            row("class:frame", f" {dashes}╮")
             for style, line in head + body + tail:
                 shown = cut_cells(line, inner, symbols.ellipsis)
-                out.append(("", "│ "))
-                out.append((style, shown))
-                row("", " " * (inner - cells(shown)) + " │")
-            row("", "╰" + "─" * (width - 2) + "╯")
+                out.append(("class:frame", "│ "))
+                row(style, shown, inner)
+                if style not in bands:
+                    out.append(("", " " * (inner - cells(shown))))
+                row("class:frame", " │")
+            row("class:frame", "╰" + "─" * (width - 2) + "╯")
         else:
             row("class:question", cut_cells(text.title, width, symbols.ellipsis))
             for style, line in head + body + tail:
@@ -1107,6 +1200,13 @@ class InteractiveApp:
         @kb.add("tab", filter=in_input)
         def _(event: KeyPressEvent) -> None:
             self._tab()
+
+        # Over prompt_toolkit's emacs "operate and get next", which melo never used.
+        @kb.add(
+            STEPS_BINDING, filter=in_input & ~Condition(lambda: bool(self._question))
+        )
+        def _(event: KeyPressEvent) -> None:
+            self.open_steps()
 
         # Not bound in this version (no suspend): Ctrl+Z inserts nothing.
         @kb.add("c-z", filter=in_input)

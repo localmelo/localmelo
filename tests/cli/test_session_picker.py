@@ -239,3 +239,22 @@ def _model_picker_without_a_screen(models: list[ModelRow], width: int) -> ModelP
         invalidate=lambda: None,
         symbols=UNICODE,
     )
+
+
+async def test_the_chosen_row_is_a_band_with_one_mark_and_the_tick_in_ok() -> None:
+    picker = _model_picker_without_a_screen(
+        [ModelRow("stub-model"), ModelRow("stub-model-large", loaded=True)], width=50
+    )
+    picker.rows, picker.loading = list(picker.models), False
+    first, second, footer = picker._drawn()
+    # The band runs across the width; the mark is the accent, the tick ok.
+    assert all(style.startswith("class:chosen") for style, *_ in first)
+    assert sum(cells(text) for _, text, *_ in first) == 50
+    assert ("class:chosen class:accent", " ❯ ") in first
+    assert ("class:chosen class:ok", "✓") in first
+    assert "".join(text for _, text, *_ in first).count("❯") == 1
+    assert not any("chosen" in style for style, *_ in second)
+    assert ("class:muted", "  (loaded)") in second
+    # The footer's keys are in the body's ink and their words faint.
+    assert ("class:key", "enter") in footer and ("class:key", "esc") in footer
+    assert ("class:faint", " switches and saves") in footer

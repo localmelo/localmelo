@@ -773,27 +773,37 @@ def test_the_live_state_follows_the_events() -> None:
     assert turn.renderer.finished
 
 
+def _first_row(rows: list[list[tuple[str, str]]]) -> str:
+    """The live area's first row as text, its styled parts joined."""
+    return "".join(text for _, text in rows[0])
+
+
 def test_the_spinner_row_never_shows_a_step_budget() -> None:
     live = LiveState(
         activity="Thinking", started=94.0, step=4, attempt=1, output_tokens=412
     )
     rows = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)
+    # The spinner in the accent, the activity in the body's ink, the facts muted.
     assert rows == [
-        [("class:accent", "· Thinking… · step 4 · 6s · ↓ 412 tokens · esc to stop")]
+        [
+            ("class:accent", "·"),
+            ("", " Thinking…"),
+            ("class:muted", " · step 4 · 6s · ↓ 412 tokens · esc to stop"),
+        ]
     ]
     live.attempt = 2
-    text = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)[0][0][1]
+    text = _first_row(live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True))
     assert "step 4 · attempt 2 · 6s" in text and not re.search(r"step 4/\d", text)
 
 
 def test_the_spinner_row_drops_the_hint_then_the_tokens_when_narrow() -> None:
     live = LiveState(activity="Thinking", started=94.0, step=4, output_tokens=412)
     assert (
-        live_rows(live, 100.0, 50, UNICODE, frame=0, developer=True)[0][0][1]
+        _first_row(live_rows(live, 100.0, 50, UNICODE, frame=0, developer=True))
         == "· Thinking… · step 4 · 6s · ↓ 412 tokens"
     )
     assert (
-        live_rows(live, 100.0, 34, UNICODE, frame=0, developer=True)[0][0][1]
+        _first_row(live_rows(live, 100.0, 34, UNICODE, frame=0, developer=True))
         == "· Thinking… · step 4 · 6s"
     )
     for developer in (False, True):
@@ -801,7 +811,7 @@ def test_the_spinner_row_drops_the_hint_then_the_tokens_when_narrow() -> None:
             for row in live_rows(
                 live, 100.0, width, UNICODE, frame=0, developer=developer
             ):
-                assert cells(row[0][1]) <= width
+                assert cells("".join(text for _, text in row)) <= width
 
 
 def test_the_default_live_row_leaves_out_the_step_and_the_phase() -> None:
@@ -813,13 +823,11 @@ def test_the_default_live_row_leaves_out_the_step_and_the_phase() -> None:
         output_tokens=412,
         progress={"level": 0, "step": 4, "attempt": 2, "phase": "Explore"},
     )
-    [[(style, text)]] = live_rows(live, 100.0, 80, UNICODE, frame=0)
-    assert (style, text) == (
-        "class:accent",
-        "· Thinking… · 6s · ↓ 412 tokens · esc to stop",
-    )
+    [row] = live_rows(live, 100.0, 80, UNICODE, frame=0)
+    assert _first_row([row]) == "· Thinking… · 6s · ↓ 412 tokens · esc to stop"
+    assert row[0] == ("class:accent", "·")
     developer = live_rows(live, 100.0, 80, UNICODE, frame=0, developer=True)
-    assert "step 4 · attempt 2 · Explore · 6s" in developer[0][0][1]
+    assert "step 4 · attempt 2 · Explore · 6s" in _first_row(developer)
 
 
 def test_a_running_tool_shows_its_clock_and_limit() -> None:
@@ -840,12 +848,15 @@ def test_a_running_tool_shows_its_clock_and_limit() -> None:
 
 def test_waiting_and_wrapping_up() -> None:
     live = LiveState(activity="Thinking", started=97.0, step=1, waiting=True)
-    assert live_rows(live, 100.0, 80, UNICODE, developer=True)[0][0][1].startswith(
+    assert _first_row(live_rows(live, 100.0, 80, UNICODE, developer=True)).startswith(
         "⚠ Waiting for your approval · step 1 · 3s"
     )
-    assert live_rows(live, 100.0, 80, UNICODE)[0][0][1] == (
-        "⚠ Waiting for your approval · 3s"
-    )
+    # The mark in the warn colour, the words bold, the facts muted.
+    assert live_rows(live, 100.0, 80, UNICODE)[0] == [
+        ("class:warn", "⚠"),
+        ("class:title", " Waiting for your approval"),
+        ("class:muted", " · 3s"),
+    ]
     live.finished = True
     assert live_rows(live, 100.0, 80, UNICODE) == [[("class:muted", "Wrapping up…")]]
 
@@ -1178,9 +1189,8 @@ def test_the_spinner_row_drops_whole_parts_then_cuts_the_facts(
     width: int, row: str
 ) -> None:
     live = LiveState(activity="Thinking", started=0.0, step=3, output_tokens=1200)
-    assert live_rows(live, 4920.0, width, UNICODE, frame=2, developer=True)[0] == [
-        ("class:accent", row)
-    ]
+    rows = live_rows(live, 4920.0, width, UNICODE, frame=2, developer=True)
+    assert _first_row(rows) == row
 
 
 @pytest.mark.parametrize("width", [30, 45, 50, 60])
@@ -1394,9 +1404,9 @@ def test_a_retry_counts_down_in_the_live_area() -> None:
     assert turn.renderer.live is not None
     assert turn.renderer.live.activity == "Retrying"
     rows = live_rows(turn.renderer.live, turn.now[0] + 2.5, 80, UNICODE, frame=0)
-    assert "Retrying in 2s" in rows[0][0][1]
+    assert "Retrying in 2s" in _first_row(rows)
     rows = live_rows(turn.renderer.live, turn.now[0] + 9.0, 80, UNICODE, frame=0)
-    assert "Retrying in" not in rows[0][0][1] and "Retrying…" in rows[0][0][1]
+    assert "Retrying in" not in _first_row(rows) and "Retrying…" in _first_row(rows)
 
 
 def test_an_empty_reply_is_a_dim_notice() -> None:

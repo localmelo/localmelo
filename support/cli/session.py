@@ -66,6 +66,7 @@ from localmelo.support.cli.render import (
 )
 from localmelo.support.cli.session_tools import SessionTools
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
+from localmelo.support.cli.steps import STEPS_KEY, learned_total, step_figure
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
@@ -297,12 +298,13 @@ class CliSession:
         # Default mode says the figures in words; developer mode keeps them compact.
         words = not self.developer
         if self.status_line == "auto":
+            # The run zone carries the steps, in both modes.
             segments = tuple(
                 status_segments(
                     self.renderer.usage,
                     local=backend.local,
                     now=time.time(),
-                    steps=self.developer,
+                    steps=False,
                     words=words,
                 )
             )
@@ -326,7 +328,21 @@ class CliSession:
             title=self.title or "New chat",
             mode=shown,
             mode_style="class:yolo" if yolo else "class:muted",
+            run=self._run_zone(),
         )
+
+    def _run_zone(self) -> str:
+        """While a turn runs: ``2/~8 · ctrl+o steps``, its steps in brief and the key."""
+        live = self.renderer.live
+        if live is None or self._state not in ("running", "stopping"):
+            return ""
+        progress = self.renderer.progress
+        step = live.step
+        if isinstance(progress, Mapping) and isinstance(progress.get("step"), int):
+            step = max(step, progress["step"])
+        figure = step_figure(step, learned=learned_total(progress))
+        dot = f" {self.renderer.symbols.dot} "
+        return dot.join(part for part in (figure, f"{STEPS_KEY} steps") if part)
 
     def on_event(self, stored: StoredEvent) -> None:
         """Render one event of a turn, and redraw the bar its usage may change."""

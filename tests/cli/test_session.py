@@ -2127,3 +2127,23 @@ async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
     )
     session.developer = True
     assert session.status_bar().context == "ctx 1.0k"
+
+
+async def test_the_run_zone_gives_the_steps_in_brief_while_a_turn_runs(
+    setup: Setup,
+) -> None:
+    from localmelo.support.cli.render import LiveState
+
+    session = setup.session
+    assert session.status_bar().run == ""  # idle: the zone holds the title
+    session._state = "running"
+    renderer = session.renderer
+    renderer.live = LiveState(activity="Thinking", started=0.0, step=2)
+    renderer.progress = None
+    assert session.status_bar().run == "step 2 · ctrl+o steps"
+    renderer.progress = {"step": 2, "past": {"runs": 1, "last_steps": 8}}
+    assert session.status_bar().run == "2/~8 · ctrl+o steps"
+    renderer.progress = {"step": 3, "basis": {"match": "new"}, "past": None}
+    assert session.status_bar().run == "step 3 · ctrl+o steps"
+    session._state = "idle"
+    renderer.live = None

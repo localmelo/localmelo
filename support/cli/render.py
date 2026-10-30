@@ -48,6 +48,7 @@ from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
+from localmelo.support.cli.steps import StepRow, call_status
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
@@ -93,6 +94,8 @@ THINKING_LINES: Final = 3
 VERBOSE_THINKING_LINES: Final = 40
 # Lines of a call's arguments under its header, with /verbose.
 ARGUMENT_LINES: Final = 20
+# A slash command named in what melo says: /retry, /model, /status.
+COMMAND_PATTERN: Final = r"(?<![\w/.])/[a-z]+(?![\w/])"
 # Lines /expand prints, then the rest's count.
 EXPAND_LINES: Final = 200
 # A block header's last part that carries free text keeps this much room.
@@ -297,6 +300,8 @@ class ToolOutput:
     preview: str
     status: str
     text: str  # tool.finished output, or error when the call failed
+    duration_s: float | None = None
+    exit_code: int | None = None
 
 
 @dataclass
@@ -593,6 +598,8 @@ class TurnRenderer:
         self.tool_outputs: list[ToolOutput] = []
         self._turn = 0
         self._call_number = 0
+        # Where the running or last turn's calls start in tool_outputs.
+        self._turn_outputs = 0
 
     # ── A turn ──
 
@@ -638,6 +645,7 @@ class TurnRenderer:
         self._whole = False
         self._turn += 1
         self._call_number = 0
+        self._turn_outputs = len(self.tool_outputs)
 
     # ── Streamed provisional text ──
 
@@ -981,6 +989,7 @@ class TurnRenderer:
         status = str(data.get("status") or "")
         text = str(data.get("output") or "")
         error = str(data.get("error") or "")
+        exit_code = data.get("exit_code")
         self.tool_outputs.append(
             ToolOutput(
                 ref=f"{self._turn}.{self._call_number}",
@@ -988,8 +997,42 @@ class TurnRenderer:
                 preview=self._preview_of(data),
                 status=status,
                 text=error if error and status != "success" else text,
+                duration_s=_float(data.get("duration_s")),
+                exit_code=exit_code if isinstance(exit_code, int) else None,
             )
         )
+
+    def steps(self) -> list[StepRow]:
+        """The running or last turn's calls, then the steps still to come.
+
+        A step to come is one of the steps the task took last time that this
+        run has not reached (the progress's pending items).
+        """
+        rows = [
+            StepRow(
+                call_status(output.status, output.exit_code),
+                output.name,
+                output.preview,
+                output.duration_s,
+                self.kind(output.name),
+            )
+            for output in self.tool_outputs[self._turn_outputs :]
+            if not output.ref.startswith("!")
+        ]
+        live = self.live
+        if live is not None and live.tool and not live.finished:
+            seconds = self._clock() - live.tool_started
+            rows.append(
+                StepRow(
+                    "running", live.tool, live.preview, seconds, self.kind(live.tool)
+                )
+            )
+        items = (self.progress or {}).get("items")
+        for item in items if isinstance(items, list) else []:
+            label = " ".join(str(item.get("label") or "").split())
+            if isinstance(item, Mapping) and item.get("state") == "pending" and label:
+                rows.append(StepRow("next", label))
+        return rows
 
     def _on_notice(self, data: Mapping[str, Any]) -> None:
         kind = str(data.get("kind") or "")
@@ -1571,7 +1614,9 @@ class TurnRenderer:
         mark = self.symbols.failed if severe else self.symbols.warn
         self.out.print(_marked(mark, style, Text(clean_output(headline), style=style)))
         if action:
-            self.out.print(Padding(Text(clean_output(action)), (0, 0, 0, 2)))
+            line = Text(clean_output(action))
+            line.highlight_regex(COMMAND_PATTERN, "command")
+            self.out.print(Padding(line, (0, 0, 0, 2)))
 
     def footer(self, result: RunResult) -> str:
         """``✻ Worked for 14s · 1 tool call · ↓ 412 tokens``, on one line.
@@ -1892,7 +1937,17 @@ def live_rows(
         if drop and drop in extras and total(extras) > width:
             extras = [part for part in extras if part != drop]
     first = cut_cells(compose(extras), width, symbols.ellipsis)
-    rows = [[("class:accent", first)]]
+    # The spinner (or the approval's mark) in its colour, the activity in the
+    # body's ink (bold while waiting), the facts muted.
+    mark_cells = len(head.split(" ", 1)[0])
+    rows = [
+        [
+            ("class:warn" if live.waiting else "class:accent", first[:mark_cells]),
+            ("class:title" if live.waiting else "", first[mark_cells : len(head)]),
+            ("class:muted", first[len(head) :]),
+        ]
+    ]
+    rows[0] = [fragment for fragment in rows[0] if fragment[1]]
     if live.stream_text:
         rows.extend(_stream_rows(live.stream_text, width, symbols, stream_lines))
     elif live.stream_held and not live.waiting:

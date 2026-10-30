@@ -415,9 +415,10 @@ def test_a_dropped_context_gives_its_room_back_to_the_workspace() -> None:
 
 
 def test_a_bar_without_a_mode_gives_its_room_to_the_rest() -> None:
-    # The cells and the gap kept for "ask" are the folder's: it is not cut at 41 columns.
-    assert _bar_line(41, "") == "  stub-model · ~/demo-project · ctx 120  "
-    assert "~/demo-proj… · ctx 120" in _bar_line(41)
+    # The cells and the gap kept for "ask" are the rest's: at 41 columns the
+    # context still fits beside the whole folder, and with "ask" it goes first.
+    assert _bar_line(41, "") == "  stub-model · ~/demo-project │ ctx 120  "
+    assert "ctx 120" not in _bar_line(41) and "~/demo-project" in _bar_line(41)
 
 
 @pytest.mark.parametrize("width", [16, 20, 25, 30, 37, 39, 41, 60])
@@ -645,9 +646,11 @@ def _row_line(width: int, segments: tuple[str, ...] = ROW) -> str:
 
 
 def test_the_status_row_shows_every_segment_at_120_columns() -> None:
+    # Zones: who and where │ the run (the title when idle) │ resources.
     line = _row_line(120)
+    assert line.index("~/demo-project │ fail please │ cache 83% idle 3m") > 0
     assert line.index("cache 83% idle 3m") < line.index("ctx 12k/32k")
-    assert line.index("ctx 12k/32k") < line.index("step 4") < line.index("fail please")
+    assert line.index("ctx 12k/32k") < line.index("step 4")
     assert line.endswith(" ask")
 
 
@@ -690,22 +693,22 @@ def _words_line(width: int, mode: str = "") -> str:
 
 def test_the_bar_in_words_shows_both_figures_at_100_columns() -> None:
     assert _words_line(100).rstrip() == (
-        "  stub-model · ~/demo-project · 83% cached · context 8% used"
-        " · What is this project?"
+        "  stub-model · ~/demo-project │ What is this project?"
+        " │ 83% cached · context 8% used"
     )
 
 
 def test_the_bar_in_words_at_80_columns_cuts_the_title_before_a_figure() -> None:
     line = _words_line(80)
-    assert "  stub-model · ~/demo-project · 83% cached · context 8% used · " in line
-    assert line.rstrip().endswith("…")  # the title, never a figure
+    assert line.startswith("  stub-model · ~/demo-project │ What is this")
+    assert line.rstrip().endswith("… │ 83% cached · context 8% used")  # the title
 
 
 def test_the_bar_in_words_drops_figures_whole_at_44_columns() -> None:
     # The words are longer than the compact figures, so the last one goes first
     # and whole, as the row always dropped them; none is cut ("context 8%…").
     line = _words_line(44)
-    assert line.rstrip() == "  stub-model · ~/demo-project · 83% cached"
+    assert line.rstrip() == "  stub-model · ~/demo-project │ 83% cached"
     # A mode at the right edge takes room from the figures.
     line = _words_line(44, "auto")
     assert line.startswith("  stub-model · ~/demo-project") and line.endswith(" auto")
@@ -721,6 +724,6 @@ def test_a_figure_in_words_shows_whole_or_not_at_all(width: int) -> None:
 
 def test_without_segments_the_bar_is_the_old_one() -> None:
     bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", "ask")
-    left = "  stub-model · ~/demo-project · ctx 120 · fail please"
+    left = "  stub-model · ~/demo-project │ fail please │ ctx 120"
     expected = left + " " * (120 - len(left) - len("ask")) + "ask"
     assert "".join(f[1] for f in status_fragments(bar, 120, "…")) == expected
