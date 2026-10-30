@@ -347,6 +347,7 @@ class ConsoleSessions:
                 holder=self._holder,
                 resume_mode=DEFAULT_RESUME_MODE,
                 progress=True,
+                pictures=True,
             )
             granted_at: dict[str, float] = {}
             policy = RememberingPolicy(
@@ -716,6 +717,7 @@ class ConsoleSessions:
             holder=self._holder,
             resume_mode=DEFAULT_RESUME_MODE,
             progress=True,
+            pictures=True,
             # A create's key stays where a create looks it up, even though
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
