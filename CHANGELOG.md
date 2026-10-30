@@ -24,7 +24,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   localmelo itself (an install into the Python that runs it, a write under
   `~/.cache/localmelo`) is denied without asking. A denied high-impact call
   tells the model why melo asked. Direct, `--brief` and `--yolo` runs are not
-  reviewed ([#NN]).
+  reviewed ([#290]).
 
 - A worker's shell and Python write only inside its workspace on macOS. In a
   `--brief` worker run (`melo worker`) and a saved task, `shell_exec` and
@@ -2249,6 +2249,7 @@ earlier milestones.
 [#287]: https://github.com/localmelo/localmelo/pull/287
 [#288]: https://github.com/localmelo/localmelo/pull/288
 [#289]: https://github.com/localmelo/localmelo/pull/289
+[#290]: https://github.com/localmelo/localmelo/pull/290
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
