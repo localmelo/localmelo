@@ -102,6 +102,7 @@ class AgentFactory:
         mcp_source: str = "",
         mcp_servers: list[Any] | None = None,
         saves: bool = True,
+        browser_driver: str = "off",
     ) -> None:
         self.backend = backend
         self._cfg = cfg
@@ -126,6 +127,8 @@ class AgentFactory:
 
             mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
         self.mcp_servers: list[Any] = list(mcp_servers or [])
+        # The browser the Agents may read pages in ([browser] driver); /browser changes it.
+        self.browser_driver = browser_driver
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
@@ -184,6 +187,7 @@ class AgentFactory:
                 reasoning_field=self._reasoning_field,
                 retrieval_extra_body=self._retrieval_extra_body,
                 mcp_config=mcp_config,
+                browser_driver=self.browser_driver,
             )
         cfg = self._cfg
         if url is not None:
@@ -198,6 +202,7 @@ class AgentFactory:
             reasoning_field=self._reasoning_field,
             retrieval_extra_body=self._retrieval_extra_body,
             mcp_config=mcp_config,
+            browser_driver=self.browser_driver,
         )
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:

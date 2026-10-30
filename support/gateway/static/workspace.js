@@ -1344,6 +1344,14 @@ function approvalCard(request, view = chatApproval) {
     if (diff) what = `Changes to ${path}`;
     caption = !target ? `${tool} · checking the file` : diff ? `${diffSummary(diff)} · ${tool}` : tool;
     title = !target ? `Write ${path}?` : !target.exists ? `Create ${path}?` : diff ? `Replace ${path}?` : `Replace ${path} (${formatBytes(target.size_bytes)})?`;
+  } else if (tool.startsWith("browser:")) {
+    // A site melo wants to open in Safari: one question per site and chat.
+    const site = String(args.site || tool.slice(8));
+    what = "What melo will do";
+    title = `Let melo open ${site}?`;
+    caption = "browser · read only";
+    covers = `opening ${site}`;
+    content = `melo wants to open ${site} in Safari and read it. Safari opens it in its own window; your sign-ins are not used.`;
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (why) card.append(el("p", "approval-note", why));

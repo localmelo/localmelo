@@ -262,6 +262,20 @@ class SchedulerConfig:
     lock_gate: str = "record"  # record | wait
 
 
+BROWSER_DRIVERS = ("off", "safari-automation")
+
+
+@dataclass
+class BrowserConfig:
+    """The ``[browser]`` table: whether melo may read web pages in a browser.
+
+    ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
+    (Safari's automation windows). Only the terminal chat and the console offer it.
+    """
+
+    driver: str = "off"  # off | safari-automation
+
+
 @dataclass
 class Config:
     chat_backend: str = (
@@ -301,6 +315,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     _enable_playground: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
@@ -340,6 +355,7 @@ class Config:
         errors.extend(self._validate_retrieval())
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
+        errors.extend(self._validate_browser())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -402,6 +418,14 @@ class Config:
         if not isinstance(value, bool):
             return [f"[memory] admit_on_outcome must be a bool, got {value!r}"]
         return []
+
+    def _validate_browser(self) -> list[str]:
+        """``[browser] driver`` names a driver."""
+        if self.browser.driver in BROWSER_DRIVERS:
+            return []
+        return [
+            f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
+        ]
 
     def _validate_scheduler(self) -> list[str]:
         """``[scheduler]`` values are inside their documented ranges."""
@@ -721,6 +745,7 @@ class Config:
             *self._validate_retrieval(),
             *self._validate_memory(),
             *self._validate_scheduler(),
+            *self._validate_browser(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -944,6 +969,11 @@ def _load_file() -> Config:
         for k, v in data["scheduler"].items():
             if hasattr(cfg.scheduler, k):
                 setattr(cfg.scheduler, k, v)
+
+    if isinstance(data.get("browser"), dict):
+        for k, v in data["browser"].items():
+            if hasattr(cfg.browser, k):
+                setattr(cfg.browser, k, v)
 
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
@@ -1255,6 +1285,9 @@ def save(cfg: Config) -> None:
         if cfg.memory.admit_on_outcome:
             lines.append("admit_on_outcome = true")
         lines.append("")
+
+    if cfg.browser != BrowserConfig():
+        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

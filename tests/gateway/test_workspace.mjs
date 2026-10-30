@@ -898,6 +898,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, 'Create b.txt?', 'file_write'],
     ['file_write', {path: 'c.txt', content: 'abc'}, null, 'Write c.txt?', 'file_write · checking the file'],
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
+    ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};

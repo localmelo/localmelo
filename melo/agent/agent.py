@@ -91,6 +91,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
+    TOOL_ASK,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -1532,6 +1533,50 @@ class _ApprovalGate:
         }
 
 
+class _ToolAsk:
+    """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
+
+    The request is for a name and arguments the tool chooses, not for the
+    tool's own call, so a policy that keeps grants by name keeps one per name.
+    It has the call's id, so a surface shows the question with the call. The
+    run's cancellation propagates, and the prompt counts as withdrawn.
+    """
+
+    def __init__(
+        self,
+        policy: ApprovalPolicy,
+        run: _RunState,
+        call: ToolCall,
+        workspace_root: str | None,
+    ) -> None:
+        self._policy = policy
+        self._run = run
+        self._call = call
+        self._workspace_root = workspace_root
+
+    async def __call__(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        decided: object = await self._policy.decide(
+            ApprovalRequest(
+                request_id=uuid.uuid4().hex,
+                run_id=self._run.task_id,
+                call_id=self._call.id,
+                tool_name=tool_name,
+                arguments=copy.deepcopy(dict(arguments)),
+                preview=preview,
+                workspace_root=self._workspace_root,
+                tier="network",
+            )
+        )
+        if not isinstance(decided, ApprovalDecision):
+            raise TypeError(
+                f"the approval policy returned {type(decided).__name__}, "
+                "not an ApprovalDecision"
+            )
+        return decided
+
+
 class _ToolSetupError(Exception):
     """The tool providers could not be set up; the message is the run's error."""
 
@@ -1648,6 +1693,8 @@ class Agent:
         self._tools_failure: str | None = None
         # The names of the tools that the setup registered (see list_tools).
         self._provided_names: frozenset[str] = frozenset()
+        # Of those, the ones in a group, which "retrieve" offers on every step.
+        self._grouped_names: frozenset[str] = frozenset()
         # close() or begin_exit() has begun: no tool provider is started
         # from then on.
         self._closing = False
@@ -3355,6 +3402,12 @@ class Agent:
                     ),
                 )
             self._provided_names = frozenset(tool.definition.name for tool in provided)
+            self._grouped_names = frozenset(
+                tool.definition.name for tool in provided if tool.group
+            )
+            self.chat.add_system_notes(
+                [note for provider in started for note in provider.system_notes()]
+            )
             self._tools_ready = True
 
     async def _start_provider(self, provider: BaseToolProvider) -> list[ProvidedTool]:
@@ -3666,20 +3719,31 @@ class Agent:
             # sorted by name too: the list stays byte-identical for as long
             # as the chosen set does not change, whatever the hint order.
             builtins = self._builtin_names
+            # A provider's tool group is offered like the built-ins, after them.
+            offered = builtins | self._grouped_names
             # Hints are the model's tool calls, which live in the window; the
             # long-term and reflection messages carry none.
             hint_sources = long_context + short_window + reflection_msgs
             tool_hints = [
                 name
                 for name in self.hippo.extract_tool_hints(hint_sources)
-                if name not in builtins
+                if name not in offered
             ]
             tools = sorted(
                 (t for t in self.hippo.list_tools() if t.name in builtins),
                 key=lambda t: t.name,
             )
+            if self._grouped_names:
+                tools += sorted(
+                    (
+                        t
+                        for t in self.hippo.list_tools()
+                        if t.name in self._grouped_names
+                    ),
+                    key=lambda t: t.name,
+                )
             tools += sorted(
-                self.hippo.resolve_tools(query, hints=tool_hints, exclude=builtins),
+                self.hippo.resolve_tools(query, hints=tool_hints, exclude=offered),
                 key=lambda t: t.name,
             )
 
@@ -3843,6 +3907,7 @@ class Agent:
         exit_codes: list[int] | None = [] if events.active or self._notes_mode else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
         gate = None
+        ask_slot = None
         if run.approval is not None:
             called_tool = self.hippo.get_tool(call.tool_name)
             tier: ToolTier = (
@@ -3850,6 +3915,9 @@ class Agent:
             )
             gate = _ApprovalGate(
                 run.approval, run, call, self.executor.workspace_root, tier
+            )
+            ask_slot = TOOL_ASK.set(
+                _ToolAsk(run.approval, run, call, self.executor.workspace_root)
             )
         try:
             exec_request = ExecutionRequest(
@@ -3906,6 +3974,8 @@ class Agent:
         finally:
             if slot is not None:
                 TOOL_EXIT_CODE.reset(slot)
+            if ask_slot is not None:
+                TOOL_ASK.reset(ask_slot)
         exported = (
             preview_result(captured[0], notes)[0] if captured is not None else result
         )

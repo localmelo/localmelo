@@ -488,6 +488,12 @@ async def main_async(
 
     store = SessionStore(writer="cli")
     factory: AgentFactory | None = None
+    browser_driver = config.load().browser.driver
+    if browser_driver not in config.BROWSER_DRIVERS:
+        logging.getLogger(__name__).warning(
+            "Invalid [browser] driver %r; browsing is off", browser_driver
+        )
+        browser_driver = "off"
     try:
         try:
             await store.open()
@@ -508,6 +514,7 @@ async def main_async(
             mcp_source=mcp_source,
             mcp_servers=mcp_servers,
             saves=choice.saves,
+            browser_driver=browser_driver,
         )
         try:
             agent = await factory.build()

@@ -67,6 +67,7 @@ from localmelo.support.cli.approvals import (
     PendingApproval,
     TerminalApprover,
     panel_text,
+    session_option,
     session_warning,
 )
 from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
@@ -934,10 +935,9 @@ class InteractiveApp:
         self.app.invalidate()
 
     def _options(self, pending: PendingApproval) -> list[tuple[int, str]]:
-        tool = pending.request.tool_name
         options = [(0, "Yes")]
         if pending.offer_session:
-            options.append((1, f"Yes, and allow every {tool} call in this session"))
+            options.append((1, session_option(pending.request)))
         options.append((2, "No, and tell melo why"))
         return options
 
