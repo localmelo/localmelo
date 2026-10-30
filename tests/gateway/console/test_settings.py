@@ -873,3 +873,34 @@ def test_a_hand_written_mode_wins_and_a_bad_one_reads_default(
     resp = client.put("/api/settings", json=_put_body(stale["revision"]))
     assert resp.status_code == 200
     assert "expert" not in isolated_config.read_text()
+
+
+# ── The spelling of an oMLX server ──
+
+
+def test_a_server_a_listing_named_omlx_is_saved_as_omlx_until_the_url_changes(
+    client: TestClient, isolated_config: Path
+) -> None:
+    import tomllib
+
+    omlx = "http://127.0.0.1:18001/v1"
+    other = "http://127.0.0.1:18002/v1"
+    reply = httpx.Response(200, json={"data": [{"id": "m", "owned_by": "omlx"}]})
+    transport = httpx.MockTransport(lambda request: reply)
+    asyncio.run(
+        routes_settings.discovery.list_models("vllm", omlx, transport=transport)
+    )
+
+    def put(url: str, revision: str) -> dict[str, Any]:
+        section = {"vllm": {"chat_url": url, "chat_model": "m"}}
+        body = _put_body(revision, chat_backend="vllm", sections=section)
+        resp = client.put("/api/settings", json=body)
+        assert resp.status_code == 200
+        saved: dict[str, Any] = resp.json()
+        return saved
+
+    saved = put(omlx, "")
+    assert tomllib.loads(isolated_config.read_text())["chat_backend"] == "omlx"
+    assert saved["chat_backend"] == "vllm", "the API keeps one key for the backend"
+    put(other, saved["revision"])
+    assert tomllib.loads(isolated_config.read_text())["chat_backend"] == "vllm"
