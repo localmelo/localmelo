@@ -20,8 +20,38 @@ enum PetState: String, CaseIterable {
     var folder: String { rawValue.hasPrefix("sit-") ? "portrait" : "pet" }
 
     /// The file for a screen scale: `lie-idle.png`, and `lie-idle@2x.png` from 2.
-    func fileName(scale: Int) -> String { scale >= 2 ? "\(rawValue)@2x.png" : "\(rawValue).png" }
+    func fileName(scale: Int) -> String { pieceFile(rawValue, scale: scale) }
+
+    /// A file of the picture's family (`lie-idle-blink`) for a screen scale.
+    func pieceFile(_ name: String, scale: Int) -> String { scale >= 2 ? "\(name)@2x.png" : "\(name).png" }
+
+    /// The eyes-closed patch laid over the picture for a blink, nil where the picture has none. A patch fits only the
+    /// picture it was cut from: the lazy and the sleeping dogs have their eyes half or fully shut already.
+    var blinkPatch: String? {
+        switch self {
+        case .sitIdle: return "sit-idle-blink"
+        case .lieIdle: return "lie-idle-blink"
+        default: return nil
+        }
+    }
+
+    /// The picture without its tail, and the tail alone, for the wag; nil where the picture has no tail to wag.
+    var tailPieces: (body: String, tail: String)? { self == .lieDone ? ("lie-done-body", "lie-done-tail") : nil }
+
+    /// Where a sleeping dog's "z" starts, in points from the top left of the pet's canvas (`z` in anchors.json).
+    var sleepZ: CGPoint? {
+        switch self {
+        case .sleepFront: return CGPoint(x: 86, y: 24)
+        case .sleepSide: return CGPoint(x: 62, y: 22)
+        case .sleepBack: return CGPoint(x: 30, y: 40)
+        default: return nil
+        }
+    }
 }
+
+/// Where the lying dog's tail joins its back, in points from the top left of the pet's canvas: the tail wags about it
+/// (`tail.pivot` of `lie-done` in anchors.json).
+let petTailPivot = CGPoint(x: 101.8, y: 53)
 
 /// The sitting picture of the app's first window: the working puppy while the server starts and signs in, the calm
 /// one once the gateway is ready and the console is on its way, the one with the drooping ear when it cannot go on.
