@@ -40,11 +40,15 @@ import {
   nextAction,
   printable,
   reflectionLine,
+  serverAddress,
+  serverUnreachable,
+  shownItems,
   statusLine,
   statusMark,
   statusText,
   toolState,
   turnDuration,
+  unreachableUrl,
   workSummary,
 } from "./turns.mjs";
 
@@ -1008,7 +1012,7 @@ function assistantNode(turn) {
   icon.alt = "";
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
-  if (!turn.finishedAt || turn.items.length > 0) article.append(workGroup(turn));
+  if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
       article.append(el("p", "turn-caption", "Best effort"));
@@ -1057,15 +1061,22 @@ function statusMarkNode(severity, stopped = false) {
   return mark;
 }
 
+// Whether the model runs on a server of the user's own (the settings have an address to change).
+const localBackend = () => ["mlc", "ollama", "vllm", "sglang"].includes(S.health?.model?.backend);
+
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
-function failureHint(turn, can) {
+function failureHint(turn, can, error) {
   const own = [];
   if (can.continue) own.push("Continue picks up where it stopped.");
   if (can.retry) own.push("Try again starts over.");
   switch (turn.status) {
     case "provider_error": {
-      const backend = S.health?.model?.backend;
-      return ["mlc", "ollama", "vllm", "sglang"].includes(backend)
+      if (serverUnreachable(turn.status, error)) {
+        if (S.health?.model?.backend && !localBackend()) return "Check your network connection, then try again.";
+        const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
+        return `Is your model server still running${where ? ` at ${where}` : ""}? Start it, then try again.`;
+      }
+      return localBackend()
         ? `Is the model server running at ${S.health?.model_server?.url_label || "the configured address"}? Start it, or open model settings to change the address.`
         : "Check the API key and the model name in model settings.";
     }
@@ -1083,11 +1094,12 @@ function failureHint(turn, can) {
 
 // The row of next steps. The newest turn's first step is the filled button; the rest are links.
 function failureActions(turn, {stopped, newest, can, error}) {
-  const first = nextAction(turn.status, turn.cause);
+  const first = nextAction(turn.status, turn.cause, error);
+  const address = serverUnreachable(turn.status, error) && localBackend();
   const offered = [
     ["continue", can.continue, "Continue", () => queueMessage("Continue the task from where you stopped.")],
     ["retry", can.retry, "Try again", () => retryTurn(turn)],
-    ["settings", turn.status === "provider_error", "Open model settings", () => openSettings()],
+    ["settings", turn.status === "provider_error", address ? "Change the server address" : "Open model settings", () => openSettings()],
     ["tools", turn.status === "setup_error", "Show tools", () => drawer.open("tools")],
     ["copy", !stopped, first === "copy" ? "Copy details" : "Copy error", async () => {
       try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
@@ -1109,7 +1121,8 @@ function failureActions(turn, {stopped, newest, can, error}) {
 }
 
 function statusNode(turn) {
-  const info = statusText(turn.status, turn.cause);
+  const error = String(turn.result?.error || turn.error || "");
+  const info = statusText(turn.status, turn.cause, error);
   const stopped = turn.status === "cancelled" || (turn.status === "crashed" && turn.cause === "crash");
   const newest = S.view?.turns[S.view.turns.length - 1] === turn;
   const can = {continue: canContinue(turn, newest), retry: canRetry(turn, newest)};
@@ -1118,9 +1131,11 @@ function statusNode(turn) {
   const heading = el("p", "failure-title");
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
-  const error = String(turn.result?.error || turn.error || "");
-  if (!stopped && error) node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
-  const hint = stopped ? "" : failureHint(turn, can);
+  // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
+  if (!stopped && error && !serverUnreachable(turn.status, error)) {
+    node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
+  }
+  const hint = stopped ? "" : failureHint(turn, can, error);
   if (hint) node.append(el("p", "failure-hint", hint));
   node.append(failureActions(turn, {stopped, newest, can, error}));
   if (!stopped) {
@@ -1166,7 +1181,7 @@ function workGroup(turn) {
   group.addEventListener("toggle", () => {
     if (group.open !== open) turn.userToggledGroup = group.open;
   });
-  for (const item of turn.items) {
+  for (const item of shownItems(turn)) {
     group.append(itemNode(item, turn));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
     if (request) group.append(approvalCard(request));

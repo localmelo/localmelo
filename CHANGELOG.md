@@ -1041,6 +1041,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The console and the app point the right way when the model server is down. In the console, a
+  run that could not reach the server now says `Could not reach the model server` and asks
+  `Is your model server still running at 127.0.0.1:8000? Start it, then try again.` once: the
+  red line that repeated the error, and the work box's retry line, are gone, and the provider's
+  own text stays under Details. The filled button is **Try again** (**Continue** when the run had
+  used tools), and **Change the server address** is a link beside it; a hosted model reads
+  `Check your network connection, then try again.` and keeps **Open model settings**. A server
+  that answered with an error keeps its card as before. In the macOS app, a gateway that quits
+  on its own shows `Its background service quit unexpectedly. Try Again starts it again; Open
+  Log shows what happened.` instead of `The gateway was terminated by signal 9.`; the signal or
+  exit status goes to `gateway.log`. The provider's error text, direct mode's stdout and stderr,
+  JSON, exit codes and requests are unchanged. ([#NN])
 - The macOS app is 36 MB smaller (183 to 147 MB). Before the dependencies go in, the
   build leaves out the parts of the standalone Python that the app never runs: IDLE,
   tkinter and turtle with the Tcl/Tk libraries, pip, setuptools, ensurepip and 2to3. A

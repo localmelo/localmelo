@@ -786,7 +786,10 @@ def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
         os.kill(child_pid, signal.SIGKILL)
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
-        assert "terminated by signal 9" in events
+        # The window says it in plain words; the signal is for the log.
+        assert "alert Its background service quit unexpectedly." in events
+        assert "signal" not in events
+        assert "The gateway was terminated by signal 9." in log.read_text()
         time.sleep(1)  # the failure is shown in the window: the app stays open
         assert process.poll() is None
 

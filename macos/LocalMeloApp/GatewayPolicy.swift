@@ -220,7 +220,14 @@ func failureNotice(reason: String, ready: Bool) -> FailureNotice {
                   reason: reason, actions: FailureAction.allCases)
 }
 
-func gatewayExitMessage(status: Int32, signalled: Bool) -> String {
+/// What the window says when the gateway quits on its own: no signal or status, which mean nothing to
+/// most people and go to the log. `detail` is a fact worth saying, such as who holds the port now.
+func gatewayExitMessage(detail: String = "") -> String {
+    "Its background service quit unexpectedly.\(detail) Try Again starts it again; Open Log shows what happened."
+}
+
+/// The same exit as the log records it.
+func gatewayExitLogLine(status: Int32, signalled: Bool) -> String {
     signalled ? "The gateway was terminated by signal \(status)." : "The gateway exited (status \(status))."
 }
 

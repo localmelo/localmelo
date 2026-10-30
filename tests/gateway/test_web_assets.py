@@ -23,6 +23,7 @@ from localmelo.support.gateway.playground import (  # noqa: E402
     _SCENARIOS_PATH,
     SmokePlayground,
 )
+from localmelo.support.providers._http import UNREACHABLE_PREFIX  # noqa: E402
 
 
 class ShellAssets(HTMLParser):
@@ -274,6 +275,11 @@ async def test_settings_module_is_served_as_javascript(
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "setupSettings" in response.text
+
+
+def test_the_console_reads_an_unreachable_server_as_the_provider_words_it() -> None:
+    turns = (webapp._STATIC / "turns.mjs").read_text(encoding="utf-8")
+    assert f'const UNREACHABLE_PREFIX = "{UNREACHABLE_PREFIX}";' in turns
 
 
 def test_quickstart_describes_available_workspace_controls() -> None:

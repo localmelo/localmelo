@@ -266,8 +266,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.listenerPIDs { pids in
                     let holders = (pids ?? []).filter { $0 != process.processIdentifier }
                     let detail = holders.isEmpty ? "" : " Port \(self.port) is held by process \(holders.map(String.init).joined(separator: ", "))."
-                    let exit = gatewayExitMessage(status: process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
-                    self.fail("\(exit)\(detail)")
+                    let log = gatewayExitLogLine(status: process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
+                    try? self.logHandle?.write(contentsOf: Data("\n\(log)\(detail)\n".utf8))
+                    self.fail(gatewayExitMessage(detail: detail))
                 }
             }
         }

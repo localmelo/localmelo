@@ -281,7 +281,8 @@ reload the details, deny, or stop the run.
 A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
 plain title, the first line of the error and a hint. On the newest turn one next
 step is the filled button and the other actions are links: **Open model
-settings** after a model server error, **Continue** after running out of steps
+settings** after a model server error that came back as an answer (a refused
+key, an unknown model), **Continue** after running out of steps
 or timing out (**Try again** when no tool ran), **Try again** when the run was
 stuck, failed or stopped after reflection, **Show tools** when tools could not
 start, and **Copy details** after a crash inside localmelo. **Try again** and
@@ -290,6 +291,18 @@ turn that ran tools. **Copy error** copies one line and the run id for a bug
 report; the technical fields stay under **Details**. Stopped or interrupted
 turns use a neutral line (■). The banner shown when the page cannot reach the
 gateway has **Try again**.
+
+When the model server cannot be reached at all, the card says `Could not reach
+the model server` and asks `Is your model server still running at
+127.0.0.1:8000? Start it, then try again.`, naming the address that failed. It
+does not repeat the error: the provider's own text stays under **Details**. The
+filled button is **Try again** (**Continue** when the run had used tools, so the
+work is picked up, not started over), and **Change the server address** is a
+link that opens the settings. For a hosted model the hint reads `Check your
+network connection, then try again.` and the link stays **Open model settings**,
+since there is no address to change. A run that ended this way also leaves the
+retry lines out of its work box, which the card already says; while it is still
+retrying they show.
 
 ## Persistence and limits
 

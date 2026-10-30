@@ -30,8 +30,13 @@ let owned = GatewayHealth(store: "unavailable", error: "owned", reason: "owned",
 let failed = GatewayHealth(store: "unavailable", error: "corrupt", reason: "open-error", running: 0)
 precondition(storeFailureMessage(owned).contains("Stop the other gateway"))
 precondition(!storeFailureMessage(failed).contains("other gateway"))
-precondition(gatewayExitMessage(status: 9, signalled: true).contains("signal 9"))
-precondition(gatewayExitMessage(status: 2, signalled: false).contains("status 2"))
+// The window says it plainly, with what its buttons do; the signal or the status goes to the log.
+let said = gatewayExitMessage()
+precondition(said == "Its background service quit unexpectedly. Try Again starts it again; Open Log shows what happened.")
+precondition(!said.contains("signal") && !said.contains("status") && !said.contains("gateway"))
+precondition(gatewayExitMessage(detail: " Port 9 is held by process 4.").contains("unexpectedly. Port 9 is held by process 4. Try Again"))
+precondition(gatewayExitLogLine(status: 9, signalled: true) == "The gateway was terminated by signal 9.")
+precondition(gatewayExitLogLine(status: 2, signalled: false) == "The gateway exited (status 2).")
 """)
     binary = tmp_path / "test-policy"
     subprocess.run(
@@ -170,7 +175,7 @@ precondition(startStepText(portKnown: true, ready: false) == "Signing in")
 precondition(startStepText(portKnown: true, ready: true) == "Opening your workspace")
 
 // A failure keeps the reason it is given; the title says whether the console had loaded.
-let reason = gatewayExitMessage(status: 9, signalled: true)
+let reason = gatewayExitMessage()
 let early = failureNotice(reason: reason, ready: false)
 let late = failureNotice(reason: reason, ready: true)
 precondition(early.title == "localmelo could not start" && late.title == "localmelo stopped")

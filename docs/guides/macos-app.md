@@ -28,7 +28,9 @@ Until the console has loaded, the window shows a native starting view: Melo's pi
 spinner beside a line that names the step (`Starting the local server`, `Signing in`, `Opening your workspace`). If the
 gateway cannot start within its 20-second deadline, or stops later, the same view says why, under `localmelo could not
 start` or `localmelo stopped`, and offers **Try Again**, which starts a new gateway, **Open Log**, which opens
-`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. A problem never shows a dialog and never closes the app. The
+`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. When the gateway quits on its own, the view says so in plain
+words (`Its background service quit unexpectedly. Try Again starts it again; Open Log shows what happened.`); the signal
+or exit status that tells why goes to the log. A problem never shows a dialog and never closes the app. The
 window and the web view use the console's canvas colour, so a dark window does not flash white.
 
 The menu-bar item is Melo's head, a template image that the system tints for a light bar, a dark bar and the open menu. Idle, it is the head alone. While something runs, the number running sits beside it, counting the console's chats, tasks, direct runs and terminal chats (the count of the console's header chip). While a chat or a task waits for your answer to a tool approval, a dot appears beside the head. All of it comes from the app's 2-second health check, so an approval shows within one poll. VoiceOver and the hover tooltip say it in words (`localmelo, nothing running`, `localmelo, 3 running` or `localmelo, waiting for your approval`), and the start of a wait is announced. The menu starts with what runs (`Nothing running`, `3 running`) and, while an approval waits, **Waiting for your approval**, which opens the window on that chat or task. Below them are **Open localmelo**, **Settings…** (Command-comma in the app menu too; it opens the console's settings), **Sign In Again** and **Quit localmelo**. If the mark is missing from the bundle, the item shows the text `localmelo` instead.
