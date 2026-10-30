@@ -2589,6 +2589,8 @@ def _start_gateway(cfg: Config) -> None:
     if sockets is not None:
         print(f"  melo-task: pass --gateway http://{host}:{cfg.gateway.port}")
     print()
+    # A pipe or a file is block-buffered: readers need these lines before exit.
+    sys.stdout.flush()
 
     extra: dict[str, Any] = {} if sockets is None else {"sockets": sockets}
     if getattr(cfg, "_allow_unconfigured", False):
