@@ -2,9 +2,11 @@
 
 The text is built from the backend an Agent is built on (``config_identity`` for
 the config file's backend, ``url_identity`` for a URL), so a model switch, which
-builds a new Agent, names the new model. Nothing here reaches a server: the
-console's builder and the terminal's factory build Agents on addresses that
-nothing listens on, and ``start()`` does not connect.
+builds a new Agent, names the new model. The memory sentences are built from the
+memory settings the Agent is made with (``kept_across_chats``). Nothing here
+reaches a server but the stub's: the console's builder and the terminal's factory
+build Agents on addresses that nothing listens on, and ``start()`` does not
+connect.
 """
 
 from __future__ import annotations
@@ -13,18 +15,23 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support.backends import discovery
 from localmelo.support.cli.agents import AgentFactory, config_backend, url_backend
 from localmelo.support.config import CloudVendorConfig, Config, LocalBackendConfig
 from localmelo.support.gateway.console.registry import default_builder
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.identity import (
+    KEPT_LEGACY,
+    KEPT_TYPED,
     config_identity,
     host_of,
     identity_text,
+    kept_across_chats,
     url_identity,
 )
+from localmelo.tests.fixtures.stub_llm import StubServer
 
 URL = "http://127.0.0.1:9/v1"
 MODEL = "Qwen3.8-Flash-Next-oQ4e-mtp"
@@ -54,11 +61,12 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
     assert "say that you are melo from localmelo and name the model you run on" in text
     assert "never present yourself as the model's own assistant" in text
     assert "or as made by its maker" in text
-    assert "Answer in the user's language." in text
+    assert "Reply in the language and script the user writes in (for example" in text
+    assert "simplified or traditional Chinese)." in text
     assert text.endswith(
         "For a greeting or a question you can answer directly, reply without using tools."
     )
-    assert len(text) < 900
+    assert len(text) < 1200
 
 
 @pytest.mark.parametrize(
@@ -161,7 +169,7 @@ def test_an_unnamed_model_names_the_server_only(name: str | None) -> None:
 
 def test_a_name_is_one_short_line() -> None:
     text = identity_text("odd\nname  \t" + "x" * 500, "S\nrv", local=True)
-    assert text.count("\n") == 3  # four lines
+    assert text.count("\n") == 4  # five lines
     assert "the model odd name x" in text
     assert len(line(text, "You are running on")) < 200
     assert host_of("http://u:p@Example.org:99/x") == "example.org"
@@ -251,3 +259,161 @@ def test_the_option_must_be_a_text() -> None:
     for bad in ("", "  \n", 3):
         with pytest.raises(ValueError, match="identity"):
             AgentOptions(identity=bad)  # type: ignore[arg-type]
+
+
+# What a chat says it remembers, by memory setting.
+
+ALONE = "You remember the recent messages of this chat, and nothing from other chats."
+ACROSS = (
+    "You remember the recent messages of this chat. Across chats you remember only "
+    "what localmelo keeps on this computer: {kept}. "
+    "It brings back what matches the user's question."
+)
+NO_NOTES = (
+    "You keep no notes of your own, and files in the user's folder are not memory."
+)
+PLAIN = "answer in one or two plain sentences and do not describe how your memory works"
+
+
+def memory_line(text: str) -> str:
+    return line(text, "You remember")
+
+
+@pytest.mark.parametrize(
+    ("fields", "has_embedding", "kept"),
+    [
+        ({}, False, ""),  # a chat as it starts: no persistence
+        ({}, True, ""),  # an embedding provider alone keeps nothing past the chat
+        ({"memory_dir": "m"}, False, ""),  # legacy recalls through embeddings
+        ({"memory_dir": "m"}, True, KEPT_LEGACY),
+        ({"memory_dir": "m", "memory": False}, True, ""),
+        ({"memory_dir": "m", "reasoning": "drop"}, False, KEPT_TYPED),
+        ({"memory_dir": "m", "reasoning": "compress"}, True, KEPT_TYPED),
+        ({"memory_dir": "m", "reasoning": "drop", "retriever": "off"}, True, ""),
+        ({"memory_dir": "m", "reasoning": "drop", "memory": False}, True, ""),
+    ],
+)
+def test_what_a_chat_keeps_across_chats_follows_its_memory_settings(
+    fields: dict[str, object], has_embedding: bool, kept: str
+) -> None:
+    options = AgentOptions(**fields)  # type: ignore[arg-type]
+    assert kept_across_chats(options, has_embedding=has_embedding) == kept
+
+
+def test_the_environment_switch_that_persists_memory_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCALMELO_PERSIST_MEMORY", "1")
+    assert kept_across_chats(AgentOptions(), has_embedding=True) == KEPT_LEGACY
+    assert kept_across_chats(AgentOptions(), has_embedding=False) == ""
+
+
+def test_a_chat_that_keeps_nothing_says_so_in_plain_words() -> None:
+    text = url_identity(URL, MODEL)
+    assert memory_line(text).startswith(ALONE + " ")
+    assert NO_NOTES in memory_line(text) and PLAIN in memory_line(text)
+    assert "Across chats" not in text and "localmelo keeps" not in text
+    assert text.index(ALONE) > text.index("If the user asks who")
+    assert text.index(ALONE) < text.index("Reply in the language and script")
+
+
+@pytest.mark.parametrize("kept", [KEPT_LEGACY, KEPT_TYPED])
+def test_a_chat_with_memory_across_chats_says_what_is_kept(kept: str) -> None:
+    for text in (url_identity(URL, MODEL, kept), config_identity(local(), kept)):
+        assert memory_line(text).startswith(ACROSS.format(kept=kept) + " ")
+        assert NO_NOTES in memory_line(text) and PLAIN in memory_line(text)
+        assert "nothing from other chats" not in text
+        assert text.count("\n") == 4  # five lines
+    # Only the memory sentences differ between the settings.
+    alone, across = url_identity(URL, MODEL), url_identity(URL, MODEL, kept)
+    assert alone.replace(ALONE, "X") == across.replace(ACROSS.format(kept=kept), "X")
+
+
+def test_the_paragraph_has_no_internal_words_for_the_model_to_repeat() -> None:
+    for kept in ("", KEPT_LEGACY, KEPT_TYPED):
+        text = memory_line(url_identity(URL, MODEL, kept)).lower()
+        for word in ("embedding", "sqlite", "reflection", "retriev", "bm25", "hippo"):
+            assert word not in text
+
+
+def with_embedding(url: str = URL) -> Config:
+    cfg = local(url)
+    cfg.embedding_backend = "vllm"
+    cfg.vllm.embedding_url = url
+    cfg.vllm.embedding_model = "embed"
+    return cfg
+
+
+@pytest.mark.parametrize(
+    ("cfg", "base_url", "embedding_url", "fields", "kept"),
+    [
+        (local(), None, None, {}, ""),
+        (local(), None, None, {"memory_dir": "m"}, ""),
+        (with_embedding(), None, None, {}, ""),
+        (with_embedding(), None, None, {"memory_dir": "m"}, KEPT_LEGACY),
+        (local(), URL, None, {"memory_dir": "m"}, ""),
+        (local(), URL, URL, {"memory_dir": "m"}, KEPT_LEGACY),
+        # The URL's own embedding decides, not the config's.
+        (with_embedding(), URL, None, {"memory_dir": "m"}, ""),
+        (local(), None, None, {"memory_dir": "m", "reasoning": "drop"}, KEPT_TYPED),
+    ],
+)
+async def test_a_session_agent_names_the_memory_it_was_built_with(
+    tmp_path: Path,
+    cfg: Config,
+    base_url: str | None,
+    embedding_url: str | None,
+    fields: dict[str, object],
+    kept: str,
+) -> None:
+    if "memory_dir" in fields:
+        fields = {**fields, "memory_dir": str(tmp_path / "memory")}
+    agent = await build_session_agent(
+        cfg=cfg,
+        base_url=base_url,
+        model=MODEL if base_url else None,
+        workspace=str(tmp_path),
+        options=AgentOptions(**fields),  # type: ignore[arg-type]
+        embedding_base_url=embedding_url,
+        identify=True,
+    )
+    try:
+        want = ACROSS.format(kept=kept) if kept else ALONE
+        assert memory_line(agent.chat.identity).startswith(want + " ")
+    finally:
+        await agent.close()
+
+
+async def test_the_stub_sees_the_memory_words_in_chat_requests_and_not_in_direct_runs(
+    tmp_path: Path,
+) -> None:
+    stub = StubServer().start()
+    try:
+        url = stub.base_url.rsplit("/v1", 1)[0] + "/s/answer/v1"
+        chat = await build_session_agent(
+            cfg=None,
+            base_url=url,
+            model="stub-model",
+            workspace=str(tmp_path),
+            options=AgentOptions(),
+            identify=True,
+        )
+        direct = Agent(
+            llm=OpenAICompatLLM(base_url=url, model="stub-model"),
+            options=AgentOptions(workspace_root=str(tmp_path)),
+        )
+        try:
+            await chat.run_task("hello")
+            await direct.run_task("hello")
+        finally:
+            await chat.close()
+            await direct.close()
+        systems = [r["messages"][0]["content"] for r in stub.requests]
+    finally:
+        stub.close()
+    assert len(systems) == 2
+    chat_system, direct_system = systems
+    assert ALONE in chat_system and NO_NOTES in chat_system
+    assert "Reply in the language and script the user writes in" in chat_system
+    for words in ("You remember", "no notes", "Reply in the language", "melo from"):
+        assert words not in direct_system
