@@ -665,6 +665,7 @@ and `"run_id": ""`.
 | `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id` |
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
+| `turn.pictures` | A console turn made pictures: after its run's last event, before `turn.finished`. Absent when it made none, and in the terminal's file. | `turn`, `turn_id`, `pictures` |
 | `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
 | `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
@@ -679,6 +680,13 @@ and `"run_id": ""`.
 - `cause` says what ended the turn: `run`, `user_stop`, `closed`,
   `shutdown`, `crash`, `takeover` or `park`; see
   [Turns, statuses and causes](sessions.md#turns-statuses-and-causes).
+- `pictures` lists, at most 24 of them, the picture files (`.png`, `.jpg`, `.jpeg`,
+  `.gif`, `.webp`, `.svg`) the turn created or changed in its folder, seen by
+  looking at the folder before and after the run, then the picture files its
+  answer names that are inside the folder. Each is `{"path", "size", "mtime", "state"}`:
+  `path` is relative to the folder with `/`, `size` is in bytes, `mtime` in
+  seconds, and `state` is `new`, `modified` or `mentioned`. The files are served by
+  [`GET /api/sessions/{id}/pictures`](api-v2.md#get-apisessionsidpictures).
 - `outcome` is `allowed`, `denied` or `withdrawn`. `origin` is the
   decision's, as in `tool.finished`'s `approval`: `user`, `session`,
   `policy` or `timeout`; `error` when the ask failed; or `withdrawn` when

@@ -445,6 +445,17 @@ async def test_running_module_is_served_and_the_shell_has_its_chip(
     assert 'id="running-btn"' in page.text
 
 
+async def test_pictures_module_is_served_and_the_shell_has_its_light_box(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/pictures.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "picturesNode" in response.text
+    page = await client.get("/")
+    assert re.search(r'<dialog\b[^>]*\bid="picture-box"', page.text)
+
+
 def _stylesheet() -> str:
     css = (webapp._STATIC / "workspace.css").read_text(encoding="utf-8")
     return re.sub(r"/\*.*?\*/", "", css, flags=re.S)

@@ -41,6 +41,19 @@ function objectOf(value) {
   return isObject(value) ? value : {};
 }
 
+/** The `turn.pictures` event's list, kept to the entries the page can use. */
+export function readPictures(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item) => isObject(item) && typeof item.path === "string" && item.path !== "")
+    .map((item) => ({
+      path: item.path,
+      size: num(item.size) ?? 0,
+      mtime: num(item.mtime) ?? 0,
+      state: typeof item.state === "string" ? item.state : "",
+    }));
+}
+
 // ── Text mirrors (support/sessions/display.py, support/progress_line.py) ──
 
 /** `split_thinking`: the reasoning in a `<think>` block, and the text. */
@@ -532,6 +545,9 @@ export function newTurn(row) {
     progress: null,
     retryUntil: 0,
     userToggledGroup: false,
+    // The picture files the turn made or changed, or its answer names (`turn.pictures`).
+    pictures: [],
+    picturesOpen: false,
     error: "",
   };
 }
@@ -944,6 +960,10 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     }
     case "turn.undone": {
       turn.undone = true;
+      break;
+    }
+    case "turn.pictures": {
+      turn.pictures = readPictures(data.pictures);
       break;
     }
     default:

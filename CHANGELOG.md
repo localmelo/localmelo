@@ -201,6 +201,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Pictures a turn makes show under its answer in the web console and the app. Ask for a chart
+  and the chart is there: the PNG, JPEG, GIF, WebP and SVG files the turn created or changed
+  in the chat's folder (found by looking at the folder when the turn starts and when it ends, so
+  a file written by `python_exec` or `shell_exec` counts), and any picture the answer names by a
+  path inside that folder, appear as a row of previews with the file name and size. Four show;
+  `+N more` shows the rest. Select one to see it full size; a file that is gone says `No longer
+  in the folder`. The list is stored with the turn as a new `turn.pictures` event, so a reopened
+  chat shows its pictures too. The pictures come from a new route, `GET
+  /api/sessions/{id}/pictures?path=`, behind the console's sign-in: it serves a file only when
+  its real path (links followed) is inside that chat's folder, its name and its content are a
+  PNG, JPEG, GIF, WebP or SVG, and it is at most 20 MB, with `nosniff`, `Cache-Control: private`
+  and, for SVG, `Content-Security-Policy: sandbox; default-src 'none'; style-src
+  'unsafe-inline'`, so a picture never runs as a page. It writes and lists nothing. Direct runs
+  and the terminal are unchanged. ([#NN])
+
 - Melo the Akita puppy is now the face of the app's first window and of the web console, in the
   app and in a browser alike. The window that shows while localmelo starts has Melo's sitting
   portrait instead of the framed print: working while the server starts and signs in, calm once

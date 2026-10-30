@@ -426,6 +426,7 @@ asyncio.run(main())
 | `turn.started` | 一轮开始，先于其运行的事件。 | `turn`, `turn_id`, `user_text`, `client_request_id` |
 | `turn.finished` | 该轮结束：它的最后一个事件。 | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | 某轮被撤销；该事件不属于任何轮次。 | `turn`, `turn_id` |
+| `turn.pictures` | 控制台的一轮产生了图片：在其运行的最后一个事件之后、`turn.finished` 之前。没有图片时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `pictures` |
 | `session.title` | 第一轮设置会话标题，或标题被重命名。 | `title` |
 | `session.updated` | 会话的模型、工作区或 `meta` 发生变化。 | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | 向用户询问某个工具调用（`SessionRunner.observe`）。 | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
@@ -434,6 +435,7 @@ asyncio.run(main())
 - `workspace_label` 是把主目录缩写为 `~` 后的工作区，未设置工作区时为空字符串。较早存储的 `session.updated` 事件可能没有此键；客户端必须容忍它的缺失。
 - `client_request_id` 是该轮[提交](sessions.md#message-ids-and-submissions)的消息 id，或为 `null`。
 - `cause` 说明是什么结束了该轮：`run`、`user_stop`、`closed`、`shutdown`、`crash`、`takeover` 或 `park`；见[轮次、状态与原因](sessions.md#turns-statuses-and-causes)。
+- `pictures` 最多列出 24 项：该轮在其文件夹里创建或修改的图片文件（`.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`、`.svg`，通过比较运行前后的文件夹得知），以及回答中提到且位于该文件夹内的图片文件。每项为 `{"path", "size", "mtime", "state"}`：`path` 是相对于该文件夹、以 `/` 分隔的路径，`size` 的单位是字节，`mtime` 的单位是秒，`state` 为 `new`、`modified` 或 `mentioned`。这些文件由 [`GET /api/sessions/{id}/pictures`](api-v2.md#get-apisessionsidpictures) 提供。
 - `outcome` 为 `allowed`、`denied` 或 `withdrawn`。`origin` 是决定的来源，与 `tool.finished` 的 `approval` 中相同：`user`、`session`、`policy` 或 `timeout`；询问失败时为 `error`；运行在决定之前停止，以及存储为一个从未存储答复的请求写入事件时，为 `withdrawn`（见下面的保证）。
 - `turn` 对于不属于任何轮次的事件为 `null`：`turn.undone`、重命名时的 `session.title`、`session.updated`，以及在轮次之外存储的调度器事件。
 - **调度器的类型。** 以 `task.`、`sched.` 或 `attention.` 开头的类型保留给调度器。只有网关的存储会保存它们，作为不属于任何轮次的事件（`SessionStore.append_session_event`），或属于某一轮（`SessionRunner.publish`）。它们的键尚未固定；其 `data` 遵循[载荷规则](#payload-rules)。存储会拒绝其他所有类型。
