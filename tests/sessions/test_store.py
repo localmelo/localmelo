@@ -1405,6 +1405,7 @@ async def test_a_reflection_from_before_the_prefix_key_is_stored(
         "utility",
         "stop_reason",
         "unreadable_reason",
+        "repaired",
     ):
         del old["data"][key]
     await store.append_events(turn.session_id, 1, [old], holder=HOLDER)

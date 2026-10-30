@@ -442,7 +442,7 @@ async def test_an_evicted_checkpoint_counts_only_what_stayed(tmp_path: Path) -> 
             answer=f"answer {index}",
         )
     runner, agent, _ = await runner_for(
-        tmp_path, store, sid, "window", window_eviction="slide"
+        tmp_path, store, sid, "window", window_eviction="slide", window_messages=20
     )
     assert await runner.resume() == 10  # 24 loaded, the 4 oldest evicted
     info = runner.last_resume
@@ -487,7 +487,9 @@ async def test_an_evicted_checkpoint_counts_only_what_stayed_under_chunk(
         )
     # The default window eviction drops whole units at once, so fewer stay than
     # under slide; the count is still the questions that stayed.
-    runner, agent, _ = await runner_for(tmp_path, store, sid, "window")
+    runner, agent, _ = await runner_for(
+        tmp_path, store, sid, "window", window_messages=20
+    )
     stayed = await runner.resume()
     assert 0 < stayed < 10
     questions = [m.content for m in agent.conversation() if m.role == "user"]

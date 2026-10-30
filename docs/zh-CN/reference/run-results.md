@@ -27,7 +27,7 @@
 - **`completed`。** 当反思判定任务已完成时，答案是它的尽力结果；如果那是空的，就是该次运行中模型写下的最新文本。
 - **`failed`。** 错误说明是哪项检查拒绝了运行，例如 `Plan check failed: Prompt too large: <n> chars` 或 `Response check failed: …`。既没有工具调用也没有文本的回复是空回复：localmelo 要求模型继续并重新规划，这一步照常计数。连续两次空回复会以错误 `empty replies` 结束运行。
 - **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n> (stop reason: <code>)`。`reflection` 事件总是带有停止原因和决定的各项标志（见[事件](../../reference/events.md#reflection)）。使用 `--reflection-gate utility` 时，读不懂的反思也会结束运行；超过大小限制的反思同样如此，除非它选择了 `done`。
-- **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。使用 `--reflection-gate utility` 时，任何 JSON 对象都算可读；第二次回复若没有 JSON 对象，则以 `gate_stopped` 结束运行：回复无法读取时错误是 `Could not parse reflection response`，是有效 JSON 但不是对象时是 `Reflection response was not a JSON object`。如果没有剩余尝试，运行反而以 `budget_exhausted` 结束。
+- **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。本来不含反思的回复会对其 JSON 中一处常见小错误尝试一次修补：没有开括号与之匹配的 `]` 或 `}`、闭合括号之前的逗号，或字符串内原始的换行符、回车符和制表符（见[事件](events.md#reflection)中的 `repaired`）。不会补全或插入任何内容，需要两处修补的回复仍然读不懂。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象；若回复含有解码器拒绝的 JSON，再多一行引用解码器的错误。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。使用 `--reflection-gate utility` 时，任何 JSON 对象都算可读，不做修补也不引用错误；第二次回复若没有 JSON 对象，则以 `gate_stopped` 结束运行：回复无法读取时错误是 `Could not parse reflection response`，是有效 JSON 但不是对象时是 `Reflection response was not a JSON object`。如果没有剩余尝试，运行反而以 `budget_exhausted` 结束。
 - **`budget_exhausted`。** 错误是 `Max steps reached` 或 `Max attempts reached`。使用 `--attempt-policy reflect` 时，最后一次反思仍可选择 `done`；否则它的尽力结果成为 `result`。
 - **`stuck`。** 只出现在 `--attempt-policy none` 下；使用 `reflect` 时，由反思决定接下来做什么。错误是 `Stuck: the same tool calls or errors repeated`。返回新结果的重复调用（例如轮询一个任务）不算卡住。
 - **`provider_error`。** 见[提供方错误与重试](#provider-errors-and-retries)。
@@ -92,8 +92,8 @@
 | `tools` | 所有已注册的工具，内置的和 MCP 的，按名称排序。 |
 | `window_eviction` | 运行使用了 `chunk`（默认值）或 `boundary` 时为该值；`slide` 不出现。 |
 | `reflect_tool_guard` | 运行使用了保护（默认值）时为 `true`；使用 `--reflect-tool-guard off` 时不出现。 |
-| `cache_layout` | 运行使用了 `v3` 时为该值；`v2`（默认值）不出现。 |
-| `window_messages` | 窗口的消息数上限不是 20 时为该值；否则不出现。 |
+| `cache_layout` | 运行使用了 `v3`（默认值）时为该值；`v2` 不出现。 |
+| `window_messages` | 窗口的消息数上限不是 20 时为该值（本地服务器或 URL 上默认为 64）；为 20 时不出现。 |
 | `reasoning`, `replay_turns`, `note_writer` | 在 `legacy` 之外，是生效的推理模式、它的轮次上限（`null` 表示范围内的所有轮次）以及压缩模式下由谁写回复的笔记。它们不出现在 `legacy` 行中。 |
 | `retriever`, `retriever_effective`, `recall_at` | 在 `legacy` 之外，是请求的检索器（取默认值时为 `auto`）、已启用触发点的映射（`{"start": "llm", "attempt": "llm", "step": "bm25"}`，已排序）以及排序后的生效触发点列表。 |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | 在 `legacy` 之外，是任务内的命中上限、排序后的已启用类型、步骤中的放置位置，以及嵌入/长期条目的分数下限。 |
