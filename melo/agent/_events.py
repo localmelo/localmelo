@@ -584,7 +584,8 @@ class _Emitter:
         read. The retry that follows can still make ``readable`` true.
         ``repaired`` names the one slip of the JSON that was mended to read
         the reply that gave the reflection (``unmatched_closer``,
-        ``trailing_comma`` or ``control_char``); ``None`` when none was.
+        ``trailing_comma``, ``control_char``, ``invalid_escape`` or
+        ``unclosed_array``); ``None`` when none was.
         """
         if self._sink is None:
             return

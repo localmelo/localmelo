@@ -68,6 +68,13 @@ STRAY_CLOSER = GOOD.replace('quirk.",', 'quirk."],')
 # The other two slips, in the reflection's last field and in its first string.
 TRAILING_COMMA = GOOD.replace('"feasibility": 0.8', '"feasibility": 0.8,')
 RAW_NEWLINE = GOOD.replace("Echoed once.", "Echoed\nonce.")
+# The next two shapes: a backslash before a character that JSON has no escape
+# for (ESCAPED has it written twice, as JSON needs), and an array that the next
+# key breaks off, with its closing bracket and line gone and its comma kept.
+ESCAPE_FIELDS = {**FIELDS, "summary": "Echoed once; find -exec \\; failed."}
+ESCAPED = json.dumps(ESCAPE_FIELDS, indent=2)
+BAD_ESCAPE = ESCAPED.replace("\\\\;", "\\;")
+UNCLOSED_ARRAY = GOOD.replace('came back"\n  ],', 'came back",')
 
 # Two slips in one reply, a stray bracket and an object that is never closed:
 # the reply stays unreadable. The decoder stops at the bracket, character 51.
@@ -88,6 +95,14 @@ class TestReader:
         assert 'quirk."],' in STRAY_CLOSER
         assert _find_reflection(STRAY_CLOSER) is None
         assert _read_reflection(STRAY_CLOSER) == (FIELDS, "unmatched_closer")
+
+    def test_the_next_two_shapes_are_repaired(self) -> None:
+        for text, fields, repair in (
+            (BAD_ESCAPE, ESCAPE_FIELDS, "invalid_escape"),
+            (UNCLOSED_ARRAY, FIELDS, "unclosed_array"),
+        ):
+            assert _find_reflection(text) is None
+            assert _read_reflection(text) == (fields, repair)
 
     @pytest.mark.parametrize(
         ("text", "repair"),
@@ -130,6 +145,14 @@ class TestReader:
                 '{"recommended_action": "done", "a": "x\ny", "b": "z\tw"}',
                 "control_char",
             ),
+            # A backslash that JSON has no escape for, alone and after escapes
+            # that are valid (the third backslash is the slip).
+            (r'{"recommended_action": "done", "x": "a \; b"}', "invalid_escape"),
+            (r'{"recommended_action": "done", "x": "\n\\\; \"q\""}', "invalid_escape"),
+            # An array that the next key breaks off: one item or several, of
+            # any kind, and the key may be the action.
+            ('{"recommended_action": "done", "x": ["a",\n "y": 1}', "unclosed_array"),
+            ('{"x": [{}, [2] , "b",\n "recommended_action": "done"}', "unclosed_array"),
             # The repair is found inside a fence and inside prose.
             (f"```json\n{STRAY_CLOSER}\n```", "unmatched_closer"),
             (f"Here it is: {STRAY_CLOSER} That is all.", "unmatched_closer"),
@@ -152,6 +175,10 @@ class TestReader:
             "newline",
             "carriage_return_and_tab",
             "several_strings",
+            "escape",
+            "escape_after_escapes",
+            "array",
+            "array_of_values",
             "fenced",
             "in_text",
             "after_another_object",
@@ -171,11 +198,13 @@ class TestReader:
             "control_char",
         )
 
-    def test_the_repair_names_are_the_documented_three(self) -> None:
+    def test_the_repair_names_are_the_documented_five(self) -> None:
         assert REFLECTION_REPAIRS == (
             "unmatched_closer",
             "trailing_comma",
             "control_char",
+            "invalid_escape",
+            "unclosed_array",
         )
 
     @pytest.mark.parametrize(
@@ -217,6 +246,16 @@ class TestReader:
             '{"recommended_action": "done", "x": ["a"]]], "rationale": "r"}',
             # A comma and a bracket together.
             '{"recommended_action": "done", "x": ["a",]]}',
+            # A new repair and another slip, either first; one slip twice.
+            BAD_ESCAPE.replace('quirk.",', 'quirk."],'),
+            STRAY_CLOSER.replace('"hi"', r'"h\;i"'),
+            UNCLOSED_ARRAY.replace('"feasibility": 0.8', '"feasibility": 0.8,'),
+            BAD_ESCAPE.replace('"hi"', r'"h\;i"'),
+            UNCLOSED_ARRAY.replace('echo again"\n  ],', 'echo again",'),
+            BAD_ESCAPE.replace('came back"\n  ],', 'came back",'),
+            # A bracket the array has after the key, and an array in an array.
+            '{"recommended_action": "done", "x": ["a", "y": 1]}',
+            '{"recommended_action": "done", "x": [["a",\n  "y": 1}',
         ],
         ids=[
             "bracket_and_comma",
@@ -225,6 +264,14 @@ class TestReader:
             "two_commas",
             "two_brackets",
             "comma_and_bracket",
+            "escape_then_bracket",
+            "bracket_then_escape",
+            "array_then_comma",
+            "two_escapes",
+            "two_arrays",
+            "escape_then_array",
+            "array_closed_after_the_key",
+            "array_in_an_array",
         ],
     )
     def test_a_reply_that_needs_two_repairs_stays_unreadable(self, text: str) -> None:
@@ -256,11 +303,40 @@ class TestReader:
 
     @pytest.mark.parametrize(
         "text",
+        [
+            # A valid escape is no slip, and a unicode escape is not this repair's.
+            r'{"recommended_action": "done", "x": "a\\;b" "y": 1}',
+            r'{"recommended_action": "done", "x": "a\u12"}',
+            # A closed array, and a colon after a value or after the first item.
+            '{"recommended_action": "done", "x": ["a", "b"] "y": 1}',
+            '{"recommended_action": "done", "x": ["a"], "y": "b": 1}',
+            '{"recommended_action": "done", "x": ["y": 1]}',
+        ],
+        ids=["escape", "unicode", "closed", "value", "first"],
+    )
+    def test_a_shape_that_is_no_slip_is_not_mended(self, text: str) -> None:
+        assert _read_reflection(text) is None
+        [(start, error)] = list(rejected_objects(text))
+        names = {name for name, _ in repairs(text, start, error)}
+        assert names.isdisjoint({"invalid_escape", "unclosed_array"})
+
+    @pytest.mark.parametrize(
+        "text",
         [GOOD, f"```json\n{GOOD}\n```", f"Sure. {GOOD} Done."],
         ids=["bare", "fenced", "in_text"],
     )
     def test_a_reply_that_reads_is_not_repaired(self, text: str) -> None:
         assert _read_reflection(text) == (FIELDS, None)
+
+    @pytest.mark.parametrize(
+        "earlier", [r'{"x": "a \;"}', '{"x": ["a",\n "y": 1}'], ids=["escape", "array"]
+    )
+    def test_a_reply_that_reads_is_not_repaired_whatever_comes_before(
+        self, earlier: str
+    ) -> None:
+        reply = earlier + ' then {"recommended_action": "done"}'
+        assert _read_reflection(reply) == ({"recommended_action": "done"}, None)
+        assert _read_reflection(ESCAPED) == (ESCAPE_FIELDS, None)
 
     def test_the_strict_reading_wins_over_an_earlier_repairable_object(self) -> None:
         text = '{"recommended_action": "stop", "x": 1]} then {"recommended_action": "done"}'
@@ -336,6 +412,21 @@ class TestHelpers:
         assert [name for name, _ in repairs(other, start, error)] == [
             "unmatched_closer"
         ]
+
+    def test_a_new_repair_adds_one_character_where_the_decoder_stopped(self) -> None:
+        bracket = UNCLOSED_ARRAY.replace('back",', 'back"],')
+        for text, name, fixed in (
+            (BAD_ESCAPE, "invalid_escape", ESCAPED),
+            (UNCLOSED_ARRAY, "unclosed_array", bracket),
+        ):
+            [(start, error)] = list(rejected_objects(text))
+            assert list(repairs(text, start, error)) == [(name, fixed)]
+            assert len(fixed) == len(text) + 1
+
+    def test_a_key_of_an_object_is_no_unclosed_array(self) -> None:
+        text = '{"recommended_action": "done", "x": 1, "y": 2}'
+        error = json.JSONDecodeError("Expecting ',' delimiter", text, text.index(": 2"))
+        assert list(repairs(text, 0, error)) == []
 
     def test_the_error_line_quotes_the_error_and_the_text_around_it(self) -> None:
         line = _json_error_line(STRAY_CLOSER)
@@ -443,8 +534,13 @@ class TestInTheLoop:
 
     @pytest.mark.parametrize(
         ("reply", "repair"),
-        [(TRAILING_COMMA, "trailing_comma"), (RAW_NEWLINE, "control_char")],
-        ids=["comma", "newline"],
+        [
+            (TRAILING_COMMA, "trailing_comma"),
+            (RAW_NEWLINE, "control_char"),
+            (BAD_ESCAPE, "invalid_escape"),
+            (UNCLOSED_ARRAY, "unclosed_array"),
+        ],
+        ids=["comma", "newline", "escape", "array"],
     )
     async def test_each_repair_is_reported_by_name(
         self, reply: str, repair: str

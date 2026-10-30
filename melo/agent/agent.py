@@ -387,13 +387,15 @@ def _read_reflection(text: str) -> tuple[dict[str, Any], str | None] | None:
     That is the reflection of :func:`_find_reflection` with ``None`` as the
     repair. A reply that holds none gets one more reading with a single
     conservative repair of a ``{...}`` the decoder rejects:
-    ``"unmatched_closer"``, ``"trailing_comma"`` or ``"control_char"`` (see
+    ``"unmatched_closer"``, ``"trailing_comma"``, ``"control_char"``,
+    ``"invalid_escape"`` or ``"unclosed_array"`` (see
     :func:`~localmelo.melo.agent._json_repair.repairs`). The repaired text is
     read as any reply is, so a repair counts only when it gives an object
     with a valid ``recommended_action``, under the order and the nesting rule
     of :func:`_find_reflection`. A reply that needs two repairs holds no
-    reflection, and nothing is closed or inserted, so truncated text stays
-    unreadable. A reply that reads as it stands is never repaired.
+    reflection, and nothing but a backslash or a bracket is inserted, so
+    truncated text stays unreadable. A reply that reads as it stands is never
+    repaired.
     """
     found = _find_reflection(text)
     if found is not None:
