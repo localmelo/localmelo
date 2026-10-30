@@ -441,6 +441,7 @@ async def main_async(
     from localmelo.support.cli.termcolors import query_colors
     from localmelo.support.cli.theme import (
         activate,
+        active,
         detect,
         in_symbols,
         symbols_for,
@@ -578,6 +579,7 @@ async def main_async(
                     symbols=symbols,
                     session_title=selected.title if selected is not None else None,
                     developer=developer,
+                    palette=active(),
                 )
             )
             if invalid_mode:

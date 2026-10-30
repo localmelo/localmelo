@@ -284,3 +284,42 @@ def test_an_unusual_exact_background_moves_a_role_until_it_reads() -> None:
     assert Palette("truecolor", "dark", "#1e1e1e").look("muted").fg == theme.Colour(
         HUES["muted"].dark
     )
+
+
+# ── Bands: the chosen row and a diff's rows ──
+
+BANDS = (("selection", "accent"), ("diff_add", "ok_text"), ("diff_remove", "error"))
+FOREGROUND = {"dark": "#e6e6e6", "light": "#1f1f1f"}
+
+
+@pytest.mark.parametrize("depth", ["truecolor", "256"])
+@pytest.mark.parametrize("polarity", ["dark", "light"])
+def test_text_on_a_band_keeps_4_5_to_1_on_every_typical_background(
+    depth: str, polarity: str
+) -> None:
+    from localmelo.support.cli.termcolors import XTERM, contrast
+
+    for ground in TYPICAL[polarity]:
+        palette = Palette(depth, polarity, ground, FOREGROUND[polarity])  # type: ignore[arg-type]
+        assert palette.fills, ground
+        for fill, role in BANDS:
+            colour, fg = palette.fills[fill], palette.on_raised(role, fill).fg
+            assert fg is not None
+            drawn = XTERM[fg.xterm] if fg.xterm is not None else fg.value
+            painted = XTERM[colour.xterm] if colour.xterm is not None else colour.value
+            assert contrast(drawn, painted) >= theme.TEXT, (ground, fill)
+
+
+def test_the_chosen_row_without_fills_is_bold_and_reverse_with_no_color() -> None:
+    def attrs(palette: Palette, name: str) -> object:
+        return palette.pt_style.get_attrs_for_style_str(f"class:{name}")
+
+    banded = attrs(Palette("truecolor", "dark", "#181a1f", "#e6e6e6"), "chosen")
+    assert banded.bgcolor and banded.bold and not banded.reverse  # type: ignore[attr-defined]
+    plain = attrs(Palette("truecolor", "dark"), "chosen")  # the background unknown
+    assert not plain.bgcolor and plain.bold and plain.color  # type: ignore[attr-defined]
+    assert attrs(Palette("none"), "chosen").reverse  # type: ignore[attr-defined]
+    # A key's words are muted with a palette, plain at 16 colours: never dim.
+    assert attrs(Palette("256", "dark"), "faint").color  # type: ignore[attr-defined]
+    assert not attrs(Palette("16", "light"), "faint").dim  # type: ignore[attr-defined]
+    assert attrs(Palette("truecolor", "dark"), "frame").color == "e9bc54"  # type: ignore[attr-defined]

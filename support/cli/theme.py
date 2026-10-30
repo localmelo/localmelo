@@ -268,9 +268,9 @@ class Palette:
                 return self._colour(moved, (self.background,), hue.target)
         return Colour(value, index if self.depth == "256" else None)
 
-    def on_raised(self, name: str) -> Look:
-        """*name*'s look on the raised fill: its colour moved, hue kept, until it reads at 4.5:1."""
-        look, raised = self.look(name), self.fills.get("raised")
+    def on_raised(self, name: str, fill: str = "raised") -> Look:
+        """*name*'s look on the *fill*: its colour moved, hue kept, until it reads at 4.5:1."""
+        look, raised = self.look(name), self.fills.get(fill)
         fg = look.fg
         if raised is None or fg is None or not fg.value.startswith("#"):
             return look
@@ -320,8 +320,20 @@ class Palette:
                 "markdown.table.border": rule,
                 "markdown.table.header": "bold",
                 **{f"markdown.h{level}": "none" for level in range(1, 8)},
+                # A slash command named in what melo says (Start it, then /retry).
+                "command": accent + RichStyle(bold=True),
             }
         )
+
+    def band(self, fill: str, role: str) -> str:
+        """A row on the *fill* band in *role*'s colour; bold *role* without fills."""
+        colour = self.fills.get(fill)
+        if self.depth == "none":
+            return "reverse" if fill == "selection" else ""
+        look = self.on_raised(role, fill).pt()
+        if colour is None:
+            return f"{look} bold" if fill == "selection" else look
+        return f"{look} bg:{colour.pt()}" + (" bold" if fill == "selection" else "")
 
     @functools.cached_property
     def pt_style(self) -> Style:
@@ -334,9 +346,26 @@ class Palette:
                 "yolo": "ansiwhite bg:ansired",
                 "prompt": f"{accent.pt()} bold".strip(),
                 "placeholder": muted.pt(),
-                "status": "",
+                "status": muted.pt(),
                 "hint": "",  # says what to do or why a key did nothing: not dim
                 "question": "bold",
+                # Lists and panels: the chosen row's band, a frame, its title,
+                # the keys a footer names, and the diff's rows.
+                "chosen": self.band("selection", "accent"),
+                "diff_add": self.band("diff_add", "ok_text"),
+                "diff_remove": self.band("diff_remove", "error"),
+                "frame": self.look("warn").pt(),
+                "title": "bold",
+                "key": "",
+                "command": f"{accent.pt()} bold".strip(),
+                # The status bar: the model bold, the folder a path, zones apart.
+                "status_model": "bold",
+                "status_path": self.look("path").pt(),
+                "status_sep": self.look("rule").pt(),
+                "status_run": "",
+                # A key's words beside it: muted, but never dim (dim reads at
+                # 2.4:1 on a light terminal), so plain at 16 colours.
+                "faint": muted.pt() if self.hues else "",
             }
         )
 

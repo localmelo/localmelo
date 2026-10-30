@@ -22,7 +22,7 @@ from typing import Final, Generic, TypeVar
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
-from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.formatted_text import OneStyleAndTextTuple, StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.layout import (
     BufferControl,
@@ -49,6 +49,63 @@ T = TypeVar("T")
 
 # Rows shown at once; the list scrolls to keep the highlighted one in view.
 VISIBLE_ROWS: Final = 8
+# The words a footer or a hint names as keys: drawn in the body's ink, the
+# rest of the line muted.
+_KEYS: Final = frozenset({"↑↓", "up/down", "enter", "esc", "tab", "v", "/"})
+
+
+def key_line(text: str, dot: str = " · ") -> StyleAndTextTuples:
+    """*text*, parts joined by *dot*: each key in the body's ink, its words faint.
+
+    Faint is the muted colour where the palette has one, else plain: never dim.
+    """
+    fragments: StyleAndTextTuples = []
+    for number, part in enumerate(text.split(dot)):
+        if number:
+            fragments.append(("class:faint", dot))
+        lead = part[: len(part) - len(part.lstrip(" "))]
+        word, space, rest = part.lstrip(" ").partition(" ")
+        is_key = (
+            word in _KEYS
+            or word.startswith("ctrl+")
+            or word[:1].isdigit()
+            and "-" in word
+        )
+        if is_key:
+            fragments += [
+                ("", lead),
+                ("class:key", word),
+                ("class:faint", space + rest),
+            ]
+        else:
+            fragments.append(("class:faint", part))
+    return [fragment for fragment in fragments if fragment[1]]
+
+
+def fit_row(
+    parts: Sequence[OneStyleAndTextTuple],
+    width: int,
+    band: str = "",
+    ellipsis: str = "…",
+) -> StyleAndTextTuples:
+    """*parts* cut to *width* cells; on a *band* (a style), padded to the width.
+
+    Every fragment keeps its own style over the band's, so a coloured mark
+    stays coloured on a highlighted row.
+    """
+    text = "".join(part[1] for part in parts)
+    shown = cut_cells(text, width, ellipsis)
+    kept = len(shown) - (len(ellipsis) if shown != text else 0)
+    out: StyleAndTextTuples = []
+    for style, part, *_ in parts:
+        take, kept = part[: max(0, kept)], kept - len(part)
+        if take:
+            out.append((f"{band} {style}".strip(), take))
+    if shown != text and out:
+        out.append((out[-1][0], ellipsis))
+    if band:
+        out.append((band, " " * max(0, width - cells(shown))))
+    return out
 
 
 class ListPicker(Generic[T]):
@@ -109,7 +166,9 @@ class ListPicker(Generic[T]):
                 Window(
                     self.control,
                     height=1,
-                    get_line_prefix=lambda line, wrap: f" Filter {symbols.prompt} ",
+                    get_line_prefix=lambda line, wrap: [
+                        ("class:muted", f" Filter {symbols.prompt} ")
+                    ],
                 )
             )
         else:
@@ -142,8 +201,17 @@ class ListPicker(Generic[T]):
     def add_keys(self, keys: KeyBindings) -> None:
         """More keys for the list; a later binding of a key wins."""
 
+    def _row_fragments(self, item: T) -> StyleAndTextTuples:
+        """One row, after its mark, as styled fragments: :meth:`_row` by default."""
+        return [("", self._row(item))]
+
     def _header_window(self) -> Window:
-        return Window(FormattedTextControl(self._header), height=1)
+        return Window(FormattedTextControl(self._header_fragments), height=1)
+
+    def _header_fragments(self) -> StyleAndTextTuples:
+        """The header: its title bold, what follows it muted."""
+        title, dot, rest = self._header().partition(" · ")
+        return [("class:title", title), ("class:muted", dot + rest)]
 
     # ── Running ──
 
@@ -198,23 +266,39 @@ class ListPicker(Generic[T]):
 
     # ── Drawing ──
 
-    def _lines(self) -> list[tuple[str, str]]:
-        """The visible rows and the footer as (style, text), cut to the width."""
+    def _drawn(self) -> list[StyleAndTextTuples]:
+        """The visible rows and the footer, each cut to the width.
+
+        The highlighted row is a band across the width with a single ``❯``;
+        the footer's keys are in the body's ink and its words muted.
+        """
+        width = self.width()
         first = max(0, self.selected - (VISIBLE_ROWS - 1))
-        lines: list[tuple[str, str]] = []
+        lines: list[tuple[str, StyleAndTextTuples]] = []
         for index, item in enumerate(self.rows[first : first + VISIBLE_ROWS], first):
             chosen = index == self.selected
-            mark = "❯" if chosen else " "
+            mark = ("class:accent", " ❯ ") if chosen else ("", "   ")
             lines.append(
-                ("class:accent" if chosen else "", f" {mark} {self._row(item)}")
+                ("class:chosen" if chosen else "", [mark, *self._row_fragments(item)])
             )
-        lines.append(("", " " + self._footer()))
+        lines.append(("", key_line(" " + self._footer())))
         return [
-            (
-                style,
-                cut_cells(clean_output(in_symbols(text, self.symbols)), self.width()),
+            fit_row(
+                [
+                    (style, clean_output(in_symbols(text, self.symbols)))
+                    for style, text, *_ in parts
+                ],
+                width,
+                band,
             )
-            for style, text in lines
+            for band, parts in lines
+        ]
+
+    def _lines(self) -> list[tuple[str, str]]:
+        """The visible rows and the footer as (style, text), cut to the width."""
+        return [
+            (row[0][0] if row else "", "".join(part[1] for part in row).rstrip(" "))
+            for row in self._drawn()
         ]
 
     def _rows(self) -> str:
@@ -222,8 +306,10 @@ class ListPicker(Generic[T]):
 
     def _fragments(self) -> StyleAndTextTuples:
         fragments: StyleAndTextTuples = []
-        for number, (style, text) in enumerate(self._lines()):
-            fragments.append((style, ("\n" if number else "") + text))
+        for number, row in enumerate(self._drawn()):
+            if number:
+                fragments.append(("", "\n"))
+            fragments.extend(row)
         return fragments
 
 
@@ -360,16 +446,20 @@ class ModelPicker(ListPicker[ModelRow]):
         return cut_cells(text, self.width(), self.symbols.ellipsis)
 
     def _row(self, model: ModelRow) -> str:
+        return "".join(part[1] for part in self._row_fragments(model))
+
+    def _row_fragments(self, model: ModelRow) -> StyleAndTextTuples:
+        """``✓ name  (embedding, loaded)``: the current model's tick in ok, tags muted."""
         tags = [] if model.kind == "chat" else [model.kind]
         tags += ["loaded"] if model.loaded else []
         suffix = f"  ({', '.join(tags)})" if tags else ""
         mark = "✓" if model.id == self.current else " "
         name = " ".join(clean_output(model.id).split())
-        return (
-            f"{mark} "
-            + cut_cells(name, max(1, self.width() - cells(suffix) - 5))
-            + suffix
-        )
+        return [
+            ("class:ok", mark),
+            ("", " " + cut_cells(name, max(1, self.width() - cells(suffix) - 5))),
+            ("class:muted", suffix),
+        ]
 
     def _footer(self) -> str:
         if self.loading:
@@ -450,7 +540,9 @@ class ChoicePicker(ListPicker[int]):
 
     def _header_window(self) -> Window:
         return Window(
-            FormattedTextControl(self._header), wrap_lines=True, dont_extend_height=True
+            FormattedTextControl(lambda: [("class:title", self._header())]),
+            wrap_lines=True,
+            dont_extend_height=True,
         )
 
     def _header(self) -> str:

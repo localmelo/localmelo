@@ -104,6 +104,7 @@ run does).
 | Ctrl+D | Quit, when no turn runs and the draft is empty; with text, delete the character under the cursor. |
 | ↑ ↓ | Move between lines, then through earlier messages. On an empty draft during a turn, ↑ takes back the queued message. |
 | Ctrl+R | Search earlier messages. |
+| Ctrl+O | List the turn's steps (during a turn, or the last one after it); Esc closes the list. |
 | Tab | Complete a command or a listed model; ↑ ↓ pick in the menu, and Enter takes the one picked. |
 | Ctrl+L | Clear the screen. |
 | Ctrl+Z | Nothing (melo does not suspend in this version). |
@@ -414,15 +415,31 @@ happens without the explicit `/copy` command.
 
 ### The status bar
 
-The bar under the input box carries the usage figures of the session, taken
-from events melo has already received: no request, no polling, no timer.
-Left to right, after the model and the workspace, each segment appears only
-when it has data. The default mode says them in words:
+The bar under the input box is split into three zones that keep their place,
+with a rule between them: who and where (the model, bold, and the folder),
+the run, and resources (the prompt cache and the context). Its figures come
+from events melo has already received: no request, no polling, no timer. The
+default mode says them in words:
 
 ```text
-  stub-model · ~/demo-project · 83% cached · context 8% used · List the files.
+  stub-model · ~/demo-project │ List the files. │ 83% cached · context 8% used
 ```
 
+- **The run.** When no turn runs, the zone holds the chat's title. While a
+  turn runs it gives the steps in brief and the key that lists them:
+
+  ```text
+    stub-model · ~/demo-project │ 2/~4 · ctrl+o steps │ context 1.8k tokens
+  ```
+
+  `2/~4` is step 2 of about 4: the task was done before and took 4 steps then,
+  so the total is an estimate and marked `~`. A task melo has not done before
+  shows `step 2`, and so does a run that has gone past the estimate. (`2/8`
+  without `~` is kept for a turn that brings its own plan; none does yet.)
+  Ctrl+O opens the steps as a list: each tool call with its tool, target,
+  status and time, then the steps the last run of the task still had after
+  this point (`◌ Run the tests · to come`); Esc closes it. After the turn the
+  same key lists the last turn's steps.
 - `context 8% used` is the last measured prompt over the input limit; when no
   limit is known it says the tokens instead (`context 2.6k tokens`).
 - `83% cached` is the share of the last request's prompt tokens the server
@@ -436,25 +453,28 @@ Developer mode (`--developer`, or `[ui] mode = "developer"`) keeps the compact
 figures, which are also what the web console's status row draws:
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k/32k · step 4 · List the files.  ask
+  stub-model · ~/demo-project │ 2/~4 · ctrl+o steps │ cache 83% · ctx 1.4k/32k  ask
 ```
 
 - `cache 83%` is the cached share (`cache --` when the server reports none,
   never 0%), with `idle 3m` after it for a local server.
 - `ctx 12k/32k` is the last measured prompt over the input limit, or just
   `ctx 12k` when no limit is known.
-- `step 4 attempt 2 phase fix` are the run's progress facts while a run is
-  active, never a percent or `n/max`; the default mode leaves them out.
+- The live row above the input box adds the run's facts (`step 4 · attempt 2 ·
+  phase fix`).
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
 the last redraw. The approval mode shows at the right edge only when it is not
 `ask` (`auto`, `deny`, or the `⚠ YOLO: no approvals` warning); developer mode
-always shows it. On a narrow terminal the title goes first, then the segments
-right to left, whole (the words are never cut), then the workspace is cut, and
-the bar never wraps. `/status` prints the figures in full. `[cli] status_line =
-"off"` keeps the bar as it was before these segments: the model, workspace, the
-context of the last request (`context 1.0k tokens`, or `ctx 1.0k` in developer
-mode) and the title. There is no command-line flag for it.
+always shows it. On a narrow terminal the title is cut first, then the
+resources go right to left, whole (the words are never cut), then the folder
+is cut and then left out; the run zone stays (its key's word, then the model,
+then the key give way before the figure), and the bar never wraps. With
+`NO_COLOR` or `LOCALMELO_ASCII=1` the zones are still apart: a plain `│`, or
+`|`. `/status` prints the figures in full. `[cli] status_line = "off"` keeps
+the bar without the usage figures: the model, workspace, the run zone and the
+context of the last request (`context 1.0k tokens`, or `ctx 1.0k` in
+developer mode). There is no command-line flag for it.
 
 ### Streamed replies
 
@@ -596,6 +616,29 @@ says the same without it, so `NO_COLOR` and `LOCALMELO_ASCII=1` lose nothing.
 
 Inline code is set on a raised chip and a code block on a raised panel, its
 keywords moss, strings gold and names navy.
+
+Panels, lists and bars use the same colours:
+
+| What | Look |
+|---|---|
+| The approval panel | an amber frame with its title bold; the chosen answer `❯ 1. Yes` on a moss band; a diff's added rows on a teal band and removed rows on a red one |
+| Every list (`/model`, `/sessions`, the setup questions, the attach question, Ctrl+O's steps) | the title bold, the chosen row on a moss band with one `❯`, the current model's `✓` teal |
+| A line of keys (`↑↓ select · enter confirm · esc stop the turn`) | the keys in your text colour, their words muted (plain at 16 colours, never dim) |
+| The live row | the spinner moss, what melo does in your text colour, the time and tokens muted; while an approval waits, an amber `⚠` and bold words |
+| The status bar | the model bold, the folder gold, the rest muted, a rule between the zones |
+| A command in advice (`Start it, then /retry.`) | moss, bold |
+
+Without the exact background the bands go and the chosen row is moss and bold;
+with `NO_COLOR` it is in reverse video.
+
+At 256 colours or more, in a Unicode terminal of 80 columns or more, the
+welcome's rows stand beside Melo's head, five rows of half blocks with its two
+upright ears, eyes, nose and cream muzzle, and `melo` is orange (the README's
+screenshot shows it). The head is computed from the pet's face picture
+(`macos/art/akita/face/idle@2x.png`), not drawn by hand;
+`scripts/make_terminal_mark.py` makes it again when the picture changes. Under
+80 columns, at 16 colours, with `NO_COLOR` or with `LOCALMELO_ASCII=1`, the
+welcome is its three rows alone: fewer rows of half blocks lose the ears.
 
 How melo chooses:
 
