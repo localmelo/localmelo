@@ -707,3 +707,51 @@ async def test_naming_a_server_adds_no_request() -> None:
     assert seen == [f"GET {URL}/models"]
     assert discovery.is_omlx(URL)
     assert seen == [f"GET {URL}/models"]  # asking again sends nothing
+
+
+# ── A server that answers as oMLX does, over HTTP ──
+
+
+async def test_the_stub_that_answers_as_omlx_is_recognised_and_its_alias_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stub lists a model by its alias and reports it by its folder name."""
+    from localmelo.tests.fixtures.stub_llm import (
+        SCENARIOS_DIR,
+        StubServer,
+        load_scenarios,
+    )
+
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    server = StubServer(load_scenarios([SCENARIOS_DIR]), default="omlx_alias").start()
+    try:
+        models = await list_models("vllm", server.base_url)
+        loaded = await discovery.loaded_models(server.base_url)
+        recognised = discovery.is_omlx(server.base_url)
+    finally:
+        server.close()
+    assert models == ["Qwen3-32B-4bit", "qwen3", "gemma-3-4b-it-4bit"]
+    assert recognised
+    assert loaded == LoadedModels(frozenset({"Qwen3-8B-4bit", "qwen3"}), True)
+    assert pick_model(models, loaded, unique=True) == "qwen3"
+
+
+async def test_a_scenario_without_omlx_lists_models_as_it_always_did(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.tests.fixtures.stub_llm import (
+        SCENARIOS_DIR,
+        StubServer,
+        load_scenarios,
+    )
+
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    server = StubServer(load_scenarios([SCENARIOS_DIR]), default="three_models").start()
+    try:
+        models = await list_models("vllm", server.base_url)
+        loaded = await discovery.loaded_models(server.base_url)
+        recognised = discovery.is_omlx(server.base_url)
+    finally:
+        server.close()
+    assert models == ["stub-model", "qwen3-8b", "llama-3.1"]
+    assert not recognised and loaded == LoadedModels()
