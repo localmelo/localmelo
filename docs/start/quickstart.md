@@ -70,6 +70,12 @@ The answer is printed on stdout, and the command exits with code 0
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
 
+Without `--chat-model`, melo first asks the server which models it has and
+uses its only chat model, or the one the server says is in memory. With
+several chat models and none known to be in memory it stops with exit code 2
+and lists them, because asking for a model that is not loaded can make the
+server load a large one: pass `--chat-model <id>`.
+
 Direct tasks write files and run Python without asking, and have no
 `shell_exec` tool unless you pass `--builtins all`. That is not a sandbox:
 `python_exec` can still start programs (see the
@@ -321,8 +327,8 @@ and the answer prints as Markdown:
 
 ```bash
 melo
-# Or talk to an OpenAI-compatible server that is not saved, with its first
-# model or the one you name:
+# Or talk to an OpenAI-compatible server that is not saved, with its only
+# chat model, the one it says is loaded, or the one you name:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```
