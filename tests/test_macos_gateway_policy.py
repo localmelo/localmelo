@@ -103,6 +103,64 @@ precondition(quitMessage(nil, statusKnown: false).hasPrefix("The task status is 
     subprocess.run([str(binary)], check=True, timeout=5)
 
 
+def run_policy(tmp_path: Path, source: str) -> None:
+    """Compile the policy file with a test main and run it."""
+    main = tmp_path / "main.swift"
+    main.write_text("import Foundation\n" + source)
+    binary = tmp_path / "test-policy"
+    subprocess.run(
+        [
+            "/usr/bin/xcrun",
+            "swiftc",
+            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(main),
+            "-o",
+            str(binary),
+        ],
+        env={
+            **os.environ,
+            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+        },
+        check=True,
+        timeout=60,
+    )
+    subprocess.run([str(binary)], check=True, timeout=5)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_gateway_port_comes_from_the_startup_line(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+func port(_ line: String) -> Int? { gatewayPort(fromLine: line) }
+precondition(port("  Gateway: http://127.0.0.1:51234") == 51234)
+precondition(port("Gateway: http://[::1]:51234\n") == 51234)
+precondition(port("  Gateway: http://[fe80::1]:65535") == 65535)
+for other in ["", "garbage", "Starting localmelo gateway ...", "  Web UI:  http://127.0.0.1:51234/",
+              "  Sign in: run melo --gateway-login --port 51234 in another terminal",
+              "  Gateway: http://127.0.0.1:", "  Gateway: http://127.0.0.1:0",
+              "  Gateway: http://127.0.0.1:65536", "  Gateway: http://127.0.0.1:12ab",
+              "  Gateway: http://[::1:51234", "  Gateway: http://:51234",
+              "  Gateway: https://127.0.0.1:51234", "log: Gateway: http://127.0.0.1:51234"] {
+    precondition(port(other) == nil, other)
+}
+
+// The line can arrive in pieces, after other output, and is reported once.
+var output = StartupOutput()
+precondition(output.append(Data("\n  Starting localmelo gateway ...\n  Chat: mlc\n".utf8)) == nil)
+precondition(output.append(Data("  Gateway: http://127.0.".utf8)) == nil)
+precondition(output.append(Data("0.1:51234\n  Web UI:  http://127.0.0.1:51234/\n".utf8)) == 51234)
+precondition(output.append(Data("  Gateway: http://127.0.0.1:1\n".utf8)) == nil)
+
+// No startup line: nothing is reported, however much other output comes.
+var silent = StartupOutput()
+precondition(silent.append(Data("warning: something else\r\n".utf8)) == nil)
+precondition(silent.append(Data(repeating: 65, count: 100_000)) == nil)
+precondition(silent.append(Data("\n  Gateway: http://127.0.0.1:777\n".utf8)) == 777)
+""",
+    )
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
     subprocess.run(

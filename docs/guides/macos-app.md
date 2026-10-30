@@ -16,15 +16,16 @@ extra into the bundle, compiles the Swift host with release Xcode, and includes 
 `Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and
 SHA-256 checked before extraction; wheel hashes are checked against the lock file.
 
-Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing listener. Stop a
-conflicting listener or gateway holding the console store first. A machine that reserves 8400-8799 for other work
-must not run the app during that work. For isolated manual tests, `LOCALMELO_APP_PORT` can select another available
-port; use a temporary `HOME` and avoid ports reserved by other work. Closing the window leaves the gateway running;
+Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
+startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
+20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
+reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
+first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
 quitting always asks before stopping the gateway and any running tasks. The menu-bar item reads `Melo` when nothing runs
 and `Melo · 3` when three things run, counting the console's chats, tasks, direct runs and terminal chats (the count of the
 console's header chip), read with the app's 2-second health check. The quit dialog names what would stop, for example
 `2 tasks and 1 chat are running. Quitting stops the gateway and everything running in it.`; direct runs and terminal chats
-belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the listener is a melo background
+belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background
 service, `melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
 

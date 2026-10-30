@@ -954,6 +954,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The macOS app starts its gateway with `--port 0` and reads the port from the
+  gateway's startup line (`Gateway: http://127.0.0.1:PORT`) instead of using a
+  fixed port. It can no longer collide with another gateway, the background
+  service or the ports other work reserves, so `LOCALMELO_APP_PORT` and the
+  "port in use" check before the start are gone. The gateway's output still goes
+  to `~/Library/Logs/LocalMelo/gateway.log`, and the 20-second start deadline now
+  also covers the wait for that line ([#NN]).
+
 - Cache-friendly requests are now the defaults (part of #183). `[agent] fixed_prefix`
   is `true` (was `false`), `[agent] window_eviction` is `"chunk"` (was `"slide"`), and
   the reflection tool guard is on, with a new `[agent] reflect_tool_guard` key that

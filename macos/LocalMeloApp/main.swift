@@ -3,10 +3,6 @@ import Darwin
 import Foundation
 import WebKit
 
-// The port is fixed for this development build. Tests may choose a different
-// non-reserved port via the environment, without changing the user's config.
-let defaultPort = 8401
-
 final class ConsoleWebView: WKWebView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
@@ -39,18 +35,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var signInAttempts = 0
     // Instance collision check, not authentication against another local process.
     private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-    private var port = defaultPort
+    // The gateway picks its own port (`--port 0`) and prints it; 0 until then.
+    private var port = 0
     private var logHandle: FileHandle?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        if let override = ProcessInfo.processInfo.environment["LOCALMELO_APP_PORT"] {
-            guard let value = Int(override), (1...65535).contains(value) else {
-                fail("Invalid LOCALMELO_APP_PORT.")
-                return
-            }
-            port = value
-        }
         createWindow()
         createMenu()
         startGateway()
@@ -122,6 +112,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // lsof identifies the kernel's listener, not just a response at that port.
     private func listenerPIDs(completion: @escaping ([Int32]?) -> Void) {
         let port = self.port
+        guard port != 0 else { return completion([]) }
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -175,18 +166,6 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func startGateway() {
-        listenerPIDs { [weak self] listeners in self?.startGateway(listeners: listeners) }
-    }
-
-    private func startGateway(listeners: [Int32]?) {
-        guard let listeners = listeners else {
-            fail("Cannot inspect port \(port). The gateway was not started.")
-            return
-        }
-        guard listeners.isEmpty else {
-            fail("Port \(port) is already in use by process \(listeners.map(String.init).joined(separator: ", ")). Stop the listener or choose another port. For the melo service, use melo --daemon status and melo --daemon uninstall.")
-            return
-        }
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
             fail("The bundled gateway is missing.")
             return
@@ -210,12 +189,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["--serve", "--allow-unconfigured", "--host", "127.0.0.1", "--port", String(port)]
+        process.arguments = ["--serve", "--allow-unconfigured", "--host", "127.0.0.1", "--port", "0"]
         var environment = ProcessInfo.processInfo.environment
         environment["LOCALMELO_APP_INSTANCE"] = instance
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = logHandle
+        let output = Pipe()
+        process.standardOutput = output
         process.standardError = logHandle
         process.terminationHandler = { [weak self] process in
             RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
@@ -235,9 +215,29 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             fail("Cannot start the bundled gateway: \(error.localizedDescription)")
             return
         }
+        readStartup(output)
         child = process
         deadline = Date().addingTimeInterval(20)
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkReady() }
+    }
+
+    // The gateway binds a free port first and then prints "Gateway: http://HOST:PORT".
+    // Keep reading after that line so the child never blocks on a full pipe, and
+    // write everything to the log, where its output went before.
+    private func readStartup(_ output: Pipe) {
+        let log = logHandle
+        var startup = StartupOutput()
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            try? log?.write(contentsOf: data)
+            if let port = startup.append(data) {
+                DispatchQueue.main.async { self?.port = port }
+            }
+        }
     }
 
     private func checkReady() {
@@ -246,10 +246,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             timer?.invalidate()
             stopping = true
             kill(child.processIdentifier, SIGTERM)
-            fail("Gateway did not become ready on port \(port). See ~/Library/Logs/LocalMelo/gateway.log.")
+            fail((port == 0 ? "The gateway did not report its port." : "Gateway did not become ready on port \(port).")
+                + " See ~/Library/Logs/LocalMelo/gateway.log.")
             return
         }
-        guard !checking else { return }
+        guard port != 0, !checking else { return }
         if !healthAuthenticated && Date() < nextLoginAttempt { return }
         checking = true
         listenerPIDs { [weak self] pids in

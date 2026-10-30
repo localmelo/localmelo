@@ -77,6 +77,38 @@ func acceptsInstance(_ header: String?, expected: String, childRunning: Bool) ->
     childRunning && header == expected
 }
 
+/// The port in the gateway's startup line `Gateway: http://HOST:PORT`, where
+/// HOST may be an IPv6 address in brackets. Any other line gives nil.
+func gatewayPort(fromLine line: String) -> Int? {
+    let marker = "Gateway: http://"
+    let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard text.hasPrefix(marker) else { return nil }
+    let address = text.dropFirst(marker.count)
+    guard let colon = address.lastIndex(of: ":") else { return nil }
+    let host = address[..<colon], digits = address[address.index(after: colon)...]
+    guard !host.isEmpty, host.hasPrefix("[") ? host.hasSuffix("]") : !host.contains(":"),
+          !digits.isEmpty, digits.count <= 5, digits.allSatisfy({ ("0"..."9").contains($0) }),
+          let port = Int(digits), port > 0, port <= 65535 else { return nil }
+    return port
+}
+
+/// The child's output as it arrives. The startup line can span two reads, so
+/// it keeps the unfinished line; it reports the port once and then ignores the rest.
+struct StartupOutput {
+    private var pending = ""
+    private var done = false
+
+    mutating func append(_ data: Data) -> Int? {
+        guard !done else { return nil }
+        let lines = (pending + String(decoding: data, as: UTF8.self)).components(separatedBy: .newlines)
+        pending = lines.last.map { $0.utf8.count > 4096 ? "" : $0 } ?? ""
+        guard let port = lines.dropLast().lazy.compactMap({ gatewayPort(fromLine: $0) }).first else { return nil }
+        done = true
+        pending = ""
+        return port
+    }
+}
+
 func isGatewayURL(_ url: URL, port: Int) -> Bool {
     url.scheme == "http" && url.host == "127.0.0.1" && url.port == port
         && url.user == nil && url.password == nil

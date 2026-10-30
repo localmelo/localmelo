@@ -162,23 +162,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     def log_message(self, *args): pass
-server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
-threading.Thread(target=server.serve_forever, daemon=True).start()
+server = None
+if mode == "foreign":
+    # Report a port that another process holds.
+    port = int(os.environ["TEST_FOREIGN_PORT"])
+elif mode != "silent":
+    # --port 0: bind first, then say which port came out.
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    (home / "port").write_text(f"{port}\n")
+if mode != "silent":
+    print(f"  Gateway: http://127.0.0.1:{port}", flush=True)
 while not (home / "exit-child").exists(): time.sleep(.05)
-server.shutdown()
+if server:
+    server.shutdown()
 pidfile.unlink()
 """
-
-
-def safe_socket() -> socket.socket:
-    for _ in range(100):
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        if not (8400 <= port <= 8799 or port in {8955, 11434, 11500}):
-            return sock
-        sock.close()
-    raise RuntimeError("could not allocate a non-reserved port")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -352,13 +352,13 @@ def wait_for(
     pytest.fail(f"timed out waiting for {predicate!r}; events={text!r}")
 
 
-def launch(app: Path, home: Path, port: int, mode: str) -> subprocess.Popen[bytes]:
+def launch(app: Path, home: Path, mode: str, **extra: str) -> subprocess.Popen[bytes]:
     env = {
         **os.environ,
         "HOME": str(home),
-        "LOCALMELO_APP_PORT": str(port),
         "TEST_EVENTS": str(home / "events"),
         "TEST_MODE": mode,
+        **extra,
     }
     return subprocess.Popen(
         [str(app)],
@@ -385,12 +385,10 @@ def stop(process: subprocess.Popen[bytes], home: Path) -> None:
 def running(
     app: Path, home: Path, mode: str
 ) -> Iterator[tuple[subprocess.Popen[bytes], int]]:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, home, port, mode)
+    process = launch(app, home, mode)
     try:
-        yield process, port
+        # The app asked for port 0; the fake gateway says which port it got.
+        yield process, int(wait_for(home / "port", "\n", process))
     finally:
         stop(process, home)
 
@@ -450,9 +448,6 @@ def test_sign_in_again_menu_item_is_wired(app: Path, tmp_path: Path) -> None:
 def test_listener_that_takes_the_port_after_the_probe_receives_no_code(
     app: Path, tmp_path: Path, mode: str
 ) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
     received: list[str] = []
     servers: list[HTTPServer] = []
 
@@ -475,6 +470,7 @@ def test_listener_that_takes_the_port_after_the_probe_receives_no_code(
         deadline = time.monotonic() + 10
         while not (tmp_path / "port-free").exists() and time.monotonic() < deadline:
             time.sleep(0.005)
+        port = int((tmp_path / "port").read_text())
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             candidate = socket.socket()
@@ -499,9 +495,10 @@ def test_listener_that_takes_the_port_after_the_probe_receives_no_code(
         (tmp_path / "foreign-ready").write_text("failed")
 
     threading.Thread(target=take_port, daemon=True).start()
-    process = launch(app, tmp_path, port, mode)
+    process = launch(app, tmp_path, mode)
     try:
         events = wait_for(tmp_path / "events", "alert ", process)
+        port = int((tmp_path / "port").read_text())
         assert f"Port {port} is held by another process" in events
         assert not (tmp_path / "browser-login-ok").exists()
         time.sleep(0.5)
@@ -514,13 +511,15 @@ def test_listener_that_takes_the_port_after_the_probe_receives_no_code(
 
 
 def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
-    with running(app, tmp_path, "correct") as (process, _):
+    with running(app, tmp_path, "correct") as (process, port):
         wait_for(tmp_path / "browser-login-ok", "yes", process)
         logins = (tmp_path / "logins").read_text().splitlines()
         assert len(logins) == 2, "health and page must consume separate one-use codes"
         events = wait_for(tmp_path / "events", "edit ", process)
         for item in ("Undo:z", "Redo:Z", "Cut:x", "Copy:c", "Paste:v", "Select All:a"):
             assert item in events
+        log = tmp_path / "Library/Logs/LocalMelo/gateway.log"
+        assert f"Gateway: http://127.0.0.1:{port}" in log.read_text()
         child_pid = int((tmp_path / "gateway-pid").read_text())
         os.kill(child_pid, signal.SIGKILL)
         events = wait_for(tmp_path / "events", "alert ", process)
@@ -560,9 +559,9 @@ def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None
         assert process.returncode == 0
 
 
-def test_existing_foreign_listener_never_loads(app: Path, tmp_path: Path) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
+def test_a_port_the_child_does_not_own_receives_no_request(
+    app: Path, tmp_path: Path
+) -> None:
     requests: list[str] = []
 
     class ForeignHandler(BaseHTTPRequestHandler):
@@ -575,24 +574,32 @@ def test_existing_foreign_listener_never_loads(app: Path, tmp_path: Path) -> Non
         def log_message(self, *args: object) -> None:
             pass
 
-    server = HTTPServer(("127.0.0.1", port), ForeignHandler, bind_and_activate=False)
-    server.socket.close()
-    server.socket = sock
-    server.server_address = sock.getsockname()
-    server.server_activate()
+    server = HTTPServer(("127.0.0.1", 0), ForeignHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    process = launch(app, tmp_path, port, "correct")
+    process = launch(
+        app, tmp_path, "foreign", TEST_FOREIGN_PORT=str(server.server_address[1])
+    )
     try:
-        events = wait_for(tmp_path / "events", "alert ", process)
-        assert f"Port {port} is already in use" in events
-        assert "melo --daemon status" in events
-        assert "melo --daemon uninstall" in events
-        assert "loaded" not in events
+        time.sleep(3)  # many polls: the app checks the owner before any request
+        assert process.poll() is None
         assert not requests
-        assert not (tmp_path / "Library/Logs/LocalMelo/gateway.log").exists()
+        events = tmp_path / "events"  # not written until something happens
+        assert not events.exists() or "loaded" not in events.read_text()
     finally:
         stop(process, tmp_path)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_a_gateway_that_never_reports_a_port_is_stopped_at_the_deadline(
+    app: Path, tmp_path: Path
+) -> None:
+    process = launch(app, tmp_path, "silent")
+    try:
+        events = wait_for(tmp_path / "events", "alert ", process, timeout=40)
+        assert "did not report its port" in events
+        assert "loaded" not in events
+    finally:
+        stop(process, tmp_path)
