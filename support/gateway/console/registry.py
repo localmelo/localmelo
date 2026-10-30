@@ -1028,8 +1028,12 @@ class ConsoleSessions:
 
     # ── Delete and shutdown ──
 
-    async def delete(self, session_id: str) -> None:
-        """Close the session's runner and delete its row; 404 when unknown."""
+    async def delete(self, session_id: str, *, forget_notes: bool = False) -> None:
+        """Close the session's runner and delete its row; 404 when unknown.
+
+        The chat's index entries go with it; its notes stay (a remembered fact
+        outlives the moment it was learned) unless *forget_notes*.
+        """
         lock = self.lock(session_id)
         # Do not wait behind an opening or queued start: it has already claimed
         # the session, even if the runner has not registered a turn yet.
@@ -1063,6 +1067,8 @@ class ConsoleSessions:
             if self._memory is not None:
                 try:
                     await self._memory.forget_session(session_id)
+                    if forget_notes:
+                        await self._memory.forget_chat_notes(session_id)
                 except Exception:
                     logger.warning("Could not forget a deleted chat", exc_info=True)
             if entry is not None:

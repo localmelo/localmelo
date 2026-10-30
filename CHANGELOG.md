@@ -329,6 +329,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- See and change what melo remembers. The panel's **Memory** tab lists the notes melo
+  kept, newest first, each with its topic and the chat and day it came from; **Edit**
+  rewords a note, **Delete** asks first, the search box filters, and **Forget everything…**
+  names what goes (the notes and melo's search index of your chat turns; chats stay)
+  before it removes them. A switch, **Remember across chats**, turns memory on or off and
+  a line says whether melo searches by meaning or by words only. A note outlives its
+  chat: deleting a chat keeps its notes (`From a deleted chat`), and a chat with notes
+  asks "Also forget the 2 notes from this chat?" with **Keep the notes** first. A deleted
+  or reworded note leaves no old text in the files, and a deleted note is never recalled
+  again. In the terminal, `/memory` is now a list of the notes (Enter on one offers Back,
+  Edit it or Delete it; `/memory window` is the old view of the model's working window),
+  and `melo memory list`, `forget [ID] [-y]`, `status` and `reindex` do the same from the
+  command line. The first run, `melo setup` and the console's Settings ask "Remember
+  across chats with <model>?" when the server lists an embedding model and say plainly
+  that melo searches by words only when it lists none; the setup lines that said
+  "Long-term memory is off" now say so in these words. For clients, `GET
+  /api/memory/records` adds `from`, `chat_gone` and `edited`, and there are `PATCH
+  /api/memory/records/{id}`, `DELETE /api/memory/records?all=true`, `PUT /api/memory` and
+  `POST /api/memory/reindex`; `DELETE /api/sessions/{id}?notes=forget`; `GET /api/models`
+  lists `embedding_models`; `GET`/`PUT /api/settings` carry `across_chats`. See
+  [Memory across chats](docs/concepts/memory.md#see-and-change-what-melo-remembers) ([#312]).
 - Memory across chats: melo remembers what you tell it, in every chat of the web console
   and the app. When a message you type says something about you ("I prefer short
   answers", "my group meeting is on Thursdays", "call me Ray", "我习惯用简体中文") or asks
@@ -2490,6 +2511,7 @@ earlier milestones.
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
 [#311]: https://github.com/localmelo/localmelo/pull/311
+[#312]: https://github.com/localmelo/localmelo/pull/312
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

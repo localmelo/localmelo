@@ -160,8 +160,8 @@ On the right of the chat is Melo's panel. At the top is Melo's portrait, with a 
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
 settings**. Under it are four tabs: **Activity**, **Approvals**, **Scheduled** and **Memory**. Arrow keys, Home and
-End move between them, and the panel opens the tab you used last. Approvals, Scheduled and Memory say what they will
-list; Activity is the one that works today.
+End move between them, and the panel opens the tab you used last. Approvals and Scheduled say what they will list;
+Activity and Memory work today.
 
 **Activity** has two parts, read from [`GET /api/activity`](../reference/api-v2.md#get-apiactivity) at the page's
 health poll whenever what runs changes, and every 30 seconds:
@@ -185,6 +185,26 @@ The panel is 340 px wide from a 1180 px window up. From 700 to 1180 px the chat 
 (hover a circle for the chat's title), and the panel stays. Below 900 px the panel becomes a sheet: the face chip in
 the header (`2 · !` when two things run and one waits) opens it from the bottom; Esc, the backdrop or a drag down on
 its handle closes it. The [macOS app](macos-app.md) now opens at 1280 × 800 so the three columns fit.
+
+**Memory** lists what melo remembers about you: the notes it kept from what you typed
+(see [Memory across chats](../concepts/memory.md#memory-across-chats)).
+
+- The switch **Remember across chats** turns memory on or off, and a line under it says how melo searches: `Searching
+  by meaning with Qwen3-Embedding-0.6B, and by words.` or `Searching by words only.` Settings asks `Remember across chats
+  with <model>?` once **Discover models** finds an embedding model on your server.
+- The notes come newest first, each with its topic (About you, Preferences, People, Projects, Decisions) and where it
+  came from: `From chat “Planning”, Oct 30`, or `From a deleted chat, Oct 30`, since a note outlives its chat. The search
+  box filters them.
+- **Edit** opens the note to reword; **Save** keeps the new wording (a wording that looks like a password or key is
+  refused with the reason). **Delete** asks `Forget this note?` with **Keep it** and **Forget it**.
+- **Forget everything…** says what goes before it goes: `This removes 12 notes and melo's search index of 48 chat turns.
+  Your chats stay. It cannot be undone.` **Keep everything** comes first. In developer mode **Rebuild search index** reads
+  the chats again.
+- With nothing remembered, the tab says how memory starts: tell melo something about yourself in a chat, such as `I
+  prefer short answers`, or ask it to remember something.
+
+Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: **Keep the notes** (first),
+**Forget the 2 notes too**, or **Don’t delete the chat**.
 
 In developer mode, **Details** opens in the panel, in place of the tabs, until you close it.
 

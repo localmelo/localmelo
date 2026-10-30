@@ -205,7 +205,7 @@ pip install -e ".[gateway]"</code></pre>
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -226,7 +226,7 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
           OpenAI-compatible server as <code>vllm</code>, the key for those.
           When the server lists an
           embedding model, the first run asks one more question,
-          <code>Use &lt;model&gt; for long-term memory?</code>, a list whose
+          <code>Remember across chats with &lt;model&gt;?</code>, a list whose
           selected row, <code>Use it</code>, saves it. Every question with a
           fixed set of answers is a list on a terminal (↑ ↓ or a number move,
           Enter confirms, Esc takes the safe answer); piped answers keep the

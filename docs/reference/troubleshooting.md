@@ -198,7 +198,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: embedding probe failed: …
-  Saving with embedding off: no long-term memory (melo setup sets it again).
+  Saving without the embedding model: melo remembers across chats by words only (melo setup sets it again).
 ```
 
 - **Cause:** the `POST /v1/embeddings` probe failed. **HTTP 404** means the

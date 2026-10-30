@@ -183,7 +183,8 @@ the command does and, where it needs one, its argument (`/attach PATH`).
 | `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the chat is saved. |
 | `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals. `?` means not recorded. |
-| `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
+| `/memory` | The notes melo keeps about you, as a list (type to filter): Enter on a note offers `Back`, `Edit it` and `Delete it`; the last row, `Forget everything…`, names what goes and offers `Keep everything` first. Opens when no turn runs. The files are the web console's. |
+| `/memory window` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
 | `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
 | `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode), leaving only `Thought for 1.2s`; without an argument, flips it. |
@@ -349,8 +350,8 @@ first. It sends the full stored message while retaining its typed text.
 turn or missing counter is `?`, not zero; a partial total ends in `+?`.
 Below 72 columns, usage uses labeled, wrapped rows instead of clipping
 numeric table cells.
-`/memory` reads a copy of the window, so it and `/usage` may run during a
-turn. Memory rows show user/assistant/tool messages, not hidden thinking;
+`/memory window` reads a copy of the window, so it and `/usage` may run during a
+turn (`/memory` alone, the list of notes, waits for the turn to end). Memory rows show user/assistant/tool messages, not hidden thinking;
 the footer explains whether a resume restored pairs or a checkpoint with
 later pairs. It does not read all persistent memories or ask the model to
 summarize them.
@@ -847,14 +848,14 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-Long-term memory is off; melo setup turns it on.
+melo remembers across chats by words only; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 Between the second and third lines melo asks `Use this model server?` as a
 list (see [Questions are lists](#questions-are-lists)); the list is erased once
 you answer. With a server that lists an embedding model too, one more list
-asks `Use nomic-embed-text for long-term memory?` (`Use it`, `Leave it off`).
+asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
 
 #### Questions are lists
 
@@ -871,11 +872,11 @@ fixed set of answers is a list, as the tool approval and `/model` are:
 ↑ ↓ move, Enter confirms the selected row, and a number key (1 to 9) chooses
 that row at once. The safe or recommended answer is selected first, and Esc
 gives the answer named at the end of the key line (`esc cancel` ends the
-setup, as Ctrl+C does; `esc not now`, `esc leave it off` and `esc don't attach
+setup, as Ctrl+C does; `esc not now`, `esc no, by words only` and `esc don't attach
 it` decline). There is no filter field: the lists are short, and letters
 typed in them do nothing. Ctrl+C prints `Setup cancelled.` and exits with 130,
 Ctrl+D exits with 0, as at a typed question. The questions are:
-`Use this model server?`; `Use <model> for long-term memory?`; `What now?` after
+`Use this model server?`; `Remember across chats with <model>?`; `What now?` after
 a URL that cannot be used (`Try again`, `Start without saving`, `Quit`; Esc
 quits); `No model server found. What now?` (`Check again`, `Enter an address`
 which then asks `Server URL […]:`, `Quit`; Esc quits); `Save URL · MODEL as
@@ -958,14 +959,14 @@ question.
   use the `[vllm]` table's `chat_url` and `chat_model`. The file's other
   settings are kept.
 - When the server lists an embedding model other than the chosen chat model,
-  melo asks `Use <model> for long-term memory?` (piped: `[Y/n]:`), recommending
-  Qwen3-Embedding first. `Use it` sends one `POST /v1/embeddings` probe and saves
+  melo asks `Remember across chats with <model>?` (piped: `[Y/n]:`), recommending
+  Qwen3-Embedding first. `Yes, with it` sends one `POST /v1/embeddings` probe and saves
   `embedding_backend = "<chat key>"` with that table's `embedding_url` (the
-  chat URL) and `embedding_model`. `Leave it off` (or Esc), a failed probe, or no candidate
-  saves `embedding_backend = "none"` and says that memory is off
-  (`Long-term memory is off; melo setup turns it on.`); `melo setup` also names
-  how to add a model, `ollama pull qwen3-embedding:0.6b` for an Ollama server
-  and `Serve Qwen3-Embedding-0.6B on it` otherwise. See
+  chat URL) and `embedding_model`. `No, by words only` (or Esc), a failed probe, or no candidate
+  saves `embedding_backend = "none"` and says that melo remembers across chats by words
+  only (`melo remembers across chats by words only; melo setup adds search by meaning.`);
+  `melo setup` also names how to add a model, `ollama pull qwen3-embedding:0.6b` for an
+  Ollama server and serving Qwen3-Embedding-0.6B on it otherwise. See
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks `What now?` (piped:

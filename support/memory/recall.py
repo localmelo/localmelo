@@ -128,6 +128,11 @@ def day(at: float) -> str:
     return f"{time.strftime('%b', local)} {local.tm_mday}"
 
 
+def origin(chat: str, gone: bool, at: float) -> str:
+    """Where a note came from: ``from chat “Plans”, Oct 30``, or ``from a deleted chat, Oct 30``."""
+    return f"from {'a deleted chat' if gone else chat}, {day(at)}"
+
+
 def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"

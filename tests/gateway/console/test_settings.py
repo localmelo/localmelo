@@ -276,6 +276,39 @@ async def test_put_settings_preserves_other_fields_and_closes_idle_agents(
     )
 
 
+def test_the_settings_carry_the_memory_switch_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    config.save(
+        Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(chat_url="http://127.0.0.1:9/v1", chat_model="m"),
+        )
+    )
+    loaded = client.get("/api/settings").json()
+    assert loaded["across_chats"] is True
+    body = {
+        "chat_backend": "mlc",
+        "embedding_backend": "none",
+        "workspace": "~/ws",
+        "sections": {},
+        "revision": loaded["revision"],
+    }
+    saved = client.put("/api/settings", json=body)
+    assert saved.status_code == 200 and saved.json()["across_chats"] is True
+    off = client.put(
+        "/api/settings",
+        json={**body, "revision": saved.json()["revision"], "across_chats": False},
+    )
+    assert off.status_code == 200 and off.json()["across_chats"] is False
+    assert config.load().memory.across_chats is False
+    again = client.put(
+        "/api/settings", json={**body, "revision": off.json()["revision"]}
+    )
+    assert again.json()["across_chats"] is False, "a body without it leaves it as it is"
+
+
 def test_put_settings_conflict_on_stale_revision(
     client: TestClient, isolated_config: Path
 ) -> None:
@@ -470,7 +503,12 @@ def test_models_endpoint_with_mock_transport(
 
     ok = client.get("/api/models?backend=mlc&url=http://ok.test:8000/v1")
     assert ok.status_code == 200
-    assert ok.json() == {"models": ["qwen3-8b", "nomic-embed"]}
+    # A listed embedding model is the offer "Remember across chats with <model>?".
+    assert ok.json() == {
+        "models": ["qwen3-8b", "nomic-embed"],
+        "embedding_models": ["nomic-embed"],
+        "suggested_embedding": "nomic-embed",
+    }
 
     # Without parameters, GET /api/models uses the saved chat backend and URL,
     # and patching discovery.list_models directly is honored too.
@@ -489,7 +527,7 @@ def test_models_endpoint_with_mock_transport(
     monkeypatch.setattr(routes_settings.discovery, "list_models", mocked_list)
     default_ok = client.get("/api/models")
     assert default_ok.status_code == 200
-    assert default_ok.json() == {"models": ["qwen3-8b", "nomic-embed"]}
+    assert default_ok.json()["models"] == ["qwen3-8b", "nomic-embed"]
 
     empty = client.get("/api/models?backend=mlc&url=http://empty.test:8000/v1")
     assert empty.status_code == 502

@@ -76,6 +76,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     }
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
+    if (path === '/memory/records') return {on: true, records: [], documents: 0, embedding_model: '', last_error: ''};
     throw new Error(`unexpected ${path}`);
   };
   h.panel = setupPanel({
@@ -196,7 +197,8 @@ test('the tabs are a tablist: arrows, Home and End move and select, and the choi
   assert.equal(h.body().attributes['aria-labelledby'], 'panel-tab-approvals');
   list.dispatch('keydown', {key: 'End'});
   assert.equal(h.doc.activeElement, tabs[3]);
-  assert.match(h.body().text(), /remembers about you/);
+  await settle();
+  assert.match(h.body().text(), /Nothing remembered yet/, 'the Memory tab lists what melo keeps (memory-tab.mjs has its own tests)');
   list.dispatch('keydown', {key: 'ArrowRight'});
   assert.equal(h.doc.activeElement, tabs[0], 'the arrows wrap around');
   list.dispatch('keydown', {key: 'ArrowLeft'});

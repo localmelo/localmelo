@@ -433,9 +433,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return JSONResponse(content={"session": console.session_body(info)})
 
     @app.delete("/api/sessions/{session_id}")
-    async def delete_session(session_id: str) -> Response:
+    async def delete_session(
+        session_id: str, notes: Literal["keep", "forget"] = "keep"
+    ) -> Response:
+        """Delete a chat; its notes stay unless ``?notes=forget``."""
         console.require_store()
-        await _sessions_call(console, console.sessions.delete(session_id), session_id)
+        await _sessions_call(
+            console,
+            console.sessions.delete(session_id, forget_notes=notes == "forget"),
+            session_id,
+        )
         return Response(status_code=204)
 
 

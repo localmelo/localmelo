@@ -1,12 +1,13 @@
 import {cleanOutput, formatDuration} from './turns.mjs';
 import {taskLive} from './task-live.mjs';
+import {setupMemoryTab} from './memory-tab.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. Activity
  * lists what runs now and what ran today (`GET /api/activity`), and a row
  * opens in place to its live steps (task-live.mjs, which follows any
  * session's events) with the actions the terminal's task list offers.
- * Approvals, Scheduled and Memory say what they will hold. `update(health)`
+ * Approvals and Scheduled say what they will hold; Memory (memory-tab.mjs) lists the notes melo keeps. `update(health)`
  * is called on every health poll: the header follows it, and the list is read
  * again when what runs changed or every REFRESH_MS. Below 900 px the panel is
  * a bottom sheet behind `chip`, closed by Escape (`closeSheet()`), the
@@ -20,7 +21,6 @@ const TABS = [['activity', 'Activity', '≡'], ['approvals', 'Approvals', '✓']
 const SOON = {
   approvals: 'What melo asked to do, and how you answered, will be listed here.',
   scheduled: 'Nothing scheduled. Chores that repeat, such as a morning brief, will be listed here.',
-  memory: 'What melo remembers about you will be listed here, to read, change or delete.',
 };
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const LEVELS = ['Now', 'Today', 'Normal', 'Whenever', 'If idle'];
@@ -85,6 +85,7 @@ export function setupPanel({
   const newest = (path, options) => (/\/turns\?/.test(path)
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
+  const memory = setupMemoryTab({doc, api, developer});
   const live = taskLive({api: newest, changed: () => drawBody(), doc, ...follow});
   let reads = 0;
 
@@ -315,6 +316,11 @@ export function setupPanel({
   function drawBody() {
     // A priority being chosen is not drawn away.
     if (body.contains(doc.activeElement) && doc.activeElement?.tagName === 'SELECT') return;
+    if (state.tab === 'memory') {
+      // The tab keeps its own state (a note being reworded is not drawn away).
+      if (body.firstChild !== memory.root) { body.replaceChildren(memory.root); memory.show(); }
+      return;
+    }
     const focused = doc.activeElement?.dataset?.focusKey;
     const nodes = state.tab === 'activity' ? activityNodes() : [node('p', 'panel-soon', SOON[state.tab])];
     body.replaceChildren(...nodes);
@@ -345,6 +351,7 @@ export function setupPanel({
     const open = state.rows.find((row) => key(row) === state.open);
     if (open) live.sync(liveState(open));
     else if (state.open) { state.open = null; live.leave(); }
+    if (state.tab === 'memory') memory.reload();
     drawBody();
   }
 

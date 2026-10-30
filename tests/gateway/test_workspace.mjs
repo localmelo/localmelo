@@ -520,6 +520,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -666,6 +667,8 @@ function harness(routes, {mobile = false} = {}) {
   FakeEventSource.reset();
   const elements = new Map();
   const timers = [];
+  const asked = [];
+  const answer = {notes: 'keep'};
   const documentListeners = {};
   const windowListeners = {};
   const root = makeElement('html');
@@ -717,6 +720,8 @@ function harness(routes, {mobile = false} = {}) {
     picturesNode,
     setupPictureBox,
     memoryNodes,
+    // The question a deleted chat with notes asks; a test sets `answer`.
+    askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
@@ -757,6 +762,8 @@ function harness(routes, {mobile = false} = {}) {
     context,
     net,
     timers,
+    asked,
+    answer,
     run: (expression) => vm.runInContext(expression, context),
     state: () => vm.runInContext('S', context),
     text: (id) => flatten(element(id)),
@@ -2512,6 +2519,34 @@ test('closing the last chat opens a new one and keeps its waiting draft', async 
     JSON.parse(h.session.getItem('localmelo-console-drafts')).new,
     'precious new',
   );
+});
+
+test('closing a chat that has notes asks what to do with them, and Escape leaves the chat alone', async () => {
+  const withNotes = (count) => ({'GET /memory/records?session_id=a': {on: true, records: Array.from({length: count}, (_, id) => ({id: id + 1}))}});
+  // The notes stay by default: a plain delete.
+  const keep = harness(baseRoutes({...withNotes(2), 'DELETE /sessions/a': {status: 204, body: {}}}));
+  await keep.run('init()');
+  await keep.run('deleteSession("a")');
+  assert.deepEqual(keep.asked.map((ask) => ask.count), [2]);
+  assert.equal(keep.net.callsTo('/sessions/a').filter((call) => call.method === 'DELETE').length, 1);
+  // "Forget the notes too" says so in the request.
+  const forget = harness(baseRoutes({...withNotes(1), 'DELETE /sessions/a?notes=forget': {status: 204, body: {}}}));
+  forget.answer.notes = 'forget';
+  await forget.run('init()');
+  await forget.run('deleteSession("a")');
+  assert.equal(forget.net.callsTo('/sessions/a?notes=forget').length, 1);
+  // Cancel deletes nothing.
+  const cancel = harness(baseRoutes({...withNotes(1), 'DELETE /sessions/a': {status: 204, body: {}}}));
+  cancel.answer.notes = 'cancel';
+  await cancel.run('init()');
+  await cancel.run('deleteSession("a")');
+  assert.equal(cancel.net.calls.filter((call) => call.method === 'DELETE').length, 0);
+  assert.equal(cancel.state().activeId, 'a');
+  // No notes, no question; an unreadable count leaves the notes alone.
+  const none = harness(baseRoutes({...withNotes(0), 'DELETE /sessions/a': {status: 204, body: {}}}));
+  await none.run('init()');
+  await none.run('deleteSession("a")');
+  assert.equal(none.asked.length, 0);
 });
 
 test('a busy chat is not closed from the sidebar', async () => {

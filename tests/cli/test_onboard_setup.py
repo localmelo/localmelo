@@ -155,7 +155,7 @@ def test_a_found_server_is_offered_with_one_question_and_its_models_are_listed(
     assert answers.prompts == [
         "Use it? [Y/n]: ",
         "Model [1]: ",
-        "Use bge-m3-embed for long-term memory? [Y/n]: ",
+        "Remember across chats with bge-m3-embed? [Y/n]: ",
     ]
     detect.assert_awaited_once_with(
         ("http://127.0.0.1:8000/v1", "http://127.0.0.1:11434/v1")
@@ -168,7 +168,7 @@ def test_a_found_server_is_offered_with_one_question_and_its_models_are_listed(
         "  [1] Qwen3-8B\n"
         "  [2] bge-m3-embed  (embedding)\n"
         f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
-        "Long-term memory is off; melo setup turns it on.\n"
+        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
         f"Saved to {config_path} (melo setup changes it).\n"
     )
     cfg = config.load()
@@ -625,7 +625,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
     assert answers.prompts == [
         "Use it? [Y/n]: ",
         "Model [1]: ",
-        "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
+        "Remember across chats with Qwen3-Embedding-0.6B? [Y/n]: ",
     ]
     probe.assert_awaited_once()
     # The probe path answers GET /api/version once and passes it to the save.
@@ -645,7 +645,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Qwen3-Embedding-0.6B",
     )
     out = capsys.readouterr().out
-    assert "Long-term memory is off" not in out
+    assert "remembers across chats by words only; melo setup adds" not in out
 
 
 def test_a_first_run_on_ollama_saves_the_embedding_in_its_table(
@@ -684,8 +684,9 @@ def test_a_first_run_that_declines_saves_embedding_off(
     probe.assert_not_awaited()
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
-    assert "Long-term memory is off; melo setup turns it on.\n" in (
-        capsys.readouterr().out
+    assert (
+        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
+        in (capsys.readouterr().out)
     )
 
 
@@ -695,7 +696,10 @@ def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
     result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
     assert result == FirstSetup(url=URL, model="only", saved=True)
     out = capsys.readouterr().out
-    assert "Long-term memory is off; melo setup turns it on.\n" in out
+    assert (
+        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
+        in out
+    )
     assert "No embedding model" not in out and "Qwen3-Embedding" not in out
     assert config.load().embedding_backend == "none"
 
@@ -705,12 +709,14 @@ def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
     [
         (
             False,
-            "No embedding model on this server. Serve Qwen3-Embedding-0.6B "
-            "on it, then melo setup.",
+            "This server lists no embedding model, so melo remembers across "
+            "chats by words only. For search by meaning, serve "
+            "Qwen3-Embedding-0.6B on it, then melo setup.",
         ),
         (
             True,
-            "No embedding model on this server. ollama pull "
+            "This server lists no embedding model, so melo remembers across "
+            "chats by words only. For search by meaning: ollama pull "
             "qwen3-embedding:0.6b, then melo setup.",
         ),
     ],
@@ -730,7 +736,10 @@ def test_melo_setup_says_how_to_get_an_embedding_model(
     cfg = _guided(_Answers(""), found=FoundServer(url=URL, models=["only"]))
     assert cfg is not None and cfg.embedding_backend == "none"
     out = capsys.readouterr().out
-    assert f"{hint}\n" in out and "Long-term memory is off" not in out
+    assert (
+        f"{hint}\n" in out
+        and "remembers across chats by words only; melo setup adds" not in out
+    )
 
 
 def test_a_failed_embedding_probe_saves_with_embedding_off(
@@ -748,7 +757,7 @@ def test_a_failed_embedding_probe_saves_with_embedding_off(
     assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
     out = capsys.readouterr().out
     assert "  Probe failed: embedding probe failed: refused\n" in out
-    assert "  Saving with embedding off: no long-term memory" in out
+    assert "  Saving without the embedding model: melo remembers across chats" in out
 
 
 def test_without_a_found_server_the_typed_url_is_listed(
@@ -1125,7 +1134,7 @@ def test_a_failed_wizard_embedding_probe_does_not_save_the_model(
     assert saved.vllm.embedding_model == ""
     out = capsys.readouterr().out
     assert "Probe failed: embedding probe failed: refused" in out
-    assert "Saving with embedding off: no long-term memory" in out
+    assert "Saving without the embedding model: melo remembers across chats" in out
 
 
 def test_the_wizard_keeps_a_saved_embedding(config_path: Path) -> None:
@@ -1294,7 +1303,7 @@ def test_a_failed_embedding_check_saves_with_embedding_off(
     assert cfg.embedding_backend == "none"
     out = capsys.readouterr().out
     assert "Probe failed: embedding probe failed: refused\n" in out
-    assert "Saving with embedding off: no long-term memory" in out
+    assert "Saving without the embedding model: melo remembers across chats" in out
 
 
 # ── Review fixes ──

@@ -118,10 +118,59 @@ characters, read when the chat starts its model). The chat also has the read-onl
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark
 neither recall nor keep notes; a task's runner only adds its result to the
-index. The web console's API lists the notes with `GET /api/memory/records`
-and deletes one with `DELETE /api/memory/records/{id}` (`?undo=true` brings
-back the note it replaced). Nothing leaves your computer except the embedding
-requests to your own model server.
+index. Nothing leaves your computer except the embedding requests to your own
+model server.
+
+### See and change what melo remembers
+
+The **Memory** tab of the console's panel, `/memory` in the terminal and
+`melo memory` show the same notes and change the same files.
+
+- **The Memory tab.** The switch **Remember across chats** turns memory on or off
+  (`[memory] across_chats`). A line under it says how melo searches: by meaning
+  with the embedding model and by words, or by words only. Then come the notes,
+  newest first, each with its topic and where it came from
+  (`From chat “Planning”, Oct 30`). **Edit** rewords a note; **Delete** asks
+  `Forget this note?` first; the search box filters the list; **Forget
+  everything…** names what goes (the notes and melo's search index of your
+  chat turns; your chats stay) with `Keep everything` as the first answer. With
+  no notes, the tab says how memory starts.
+- **A note outlives its chat.** Deleting a chat removes its entries from the
+  chat index but keeps the notes it made, which then read `From a deleted
+  chat, Oct 30`, because what melo learned about you does not stop being true
+  when the chat is gone. When the chat has notes, the console asks `Also forget
+  the 2 notes from this chat?` with `Keep the notes` first.
+- **Rewording and deleting are final.** A reworded note replaces the old
+  wording in place (the old text is overwritten, not kept as history) and is
+  embedded again; a wording that looks like a password or key is refused. A
+  deleted note leaves nothing in either file: its vector, the older wordings it
+  replaced and the text of its entries in the decision log are removed, and the
+  freed space is overwritten and folded out of the write-ahead log. A deleted
+  note is never recalled again, and a chat that is already open starts over with its
+  next message, so its instructions stop listing a preference or a fact you reworded or
+  deleted.
+- **In the terminal.** `/memory` lists the notes (type to filter). Enter on a
+  note offers `Back`, `Edit it` and `Delete it`; the last row, `Forget
+  everything…`, names what goes and offers `Keep everything` first. `/memory
+  window` shows what it used to: the model's working window.
+- **On the command line.** `melo memory list [-n N]` prints the notes,
+  `melo memory forget [ID] [-y]` forgets one or, with no ID, everything after a
+  question (a list on a terminal, a number when input is piped; `-y` skips it),
+  `melo memory status` says whether memory is on, how many notes and indexed
+  turns there are, and how it searches, and `melo memory reindex` rebuilds the
+  chat index from your chats and gives every note a vector of the embedding
+  model now set. The index can always be rebuilt; what you forgot is not
+  indexed again. While the console or the app runs it owns the chats, so
+  `reindex` asks you to stop it first (the console's Memory tab does the same
+  in developer mode).
+- **Setup.** `melo setup` and the console's Settings ask `Remember across chats
+  with <model>?` when the server lists an embedding model; `Yes, with it`
+  saves it after one embeddings probe, and `No, by words only` leaves
+  memory on without it. Without a listed model they say so plainly: melo
+  remembers across chats by words only.
+
+The routes behind the tab are in the
+[API reference](../reference/api-v2.md#memory-across-chats).
 
 ## Reasoning notes
 

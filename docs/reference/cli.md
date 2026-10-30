@@ -27,7 +27,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 <a id="commands-and-short-options"></a>
 ## Commands and short options
 
-Seven command words name what `melo` does. A word counts only as the first
+Eight command words name what `melo` does. A word counts only as the first
 argument and only as an exact match, so `melo "setup the project"` (one quoted
 argument) and `melo -- setup the project` are tasks, while `melo setup a venv`
 prints a hint and exits 2 before any model is built. A task that is one command
@@ -40,6 +40,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 |---|---|---|
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
+| `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`. | `list -n N`, `forget ID`, `forget -y` |
 | `melo serve [install\|uninstall\|status]` | Run the gateway, or manage it as a login service (macOS). | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
@@ -138,6 +139,27 @@ dot. `melo -h all` lists the keys with their defaults.
   `20 (cloud)`) in `keys` and `get`.
 - Whatever writes the file (`/model`, the console's settings page, `melo config set`)
   writes what the file had, never a `-X` value.
+
+### Memory
+
+`melo memory VERB` sees and changes the notes melo keeps about you, the same ones the console's
+Memory tab lists (see [Memory across chats](../concepts/memory.md#memory-across-chats)). It reads and writes
+`~/.cache/localmelo/memory/` and never calls a model.
+
+| Verb | What it does |
+|---|---|
+| `melo memory list [-n N]` | Print the notes newest first: number, topic, text, and the chat and day each came from. `-n N` keeps the newest N. |
+| `melo memory forget [ID] [-y]` | Forget note `ID`, or with no `ID` every note and the chat index (chats stay). It asks first: on a terminal a list with `Keep it` or `Keep everything` first, with piped input a numbered question read from stdin; Esc, end of input and Enter keep. `-y` does not ask. Exit 1 when nothing was forgotten. |
+| `melo memory status` | Whether memory across chats is on, the number of notes and of indexed chat turns, how it searches (by meaning with the embedding model, or by words only), the folder and the last reason the embedding model was not used. |
+| `melo memory reindex` | Rebuild the chat index from the chats and give every note a vector of the embedding model now set. Turns that ended before the last "forget everything" stay out. Exit 1 while `melo serve` or the app runs, since it owns the chats. |
+
+```text
+$ melo memory list
+   3  Preferences  You prefer short answers.
+      from chat “I prefer short answers”, Oct 30
+$ melo memory forget 3 -y
+Forgot note 3.
+```
 
 ## Modes
 

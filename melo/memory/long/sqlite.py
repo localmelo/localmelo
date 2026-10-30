@@ -666,13 +666,24 @@ class SqliteLongTerm(LongTerm):
                 ) as cur:
                     row = await cur.fetchone()
                 if row is not None:
+                    gone = [entry_id]
+                    # Without a restore, the wordings it replaced go with it.
+                    older = None if restore else row[1]
+                    while older is not None and older not in gone:
+                        gone.append(older)
+                        async with conn.execute(
+                            "SELECT supersedes FROM long_term WHERE id = ?", (older,)
+                        ) as cur:
+                            found = await cur.fetchone()
+                        older = found[0] if found else None
+                    marks = ", ".join("?" * len(gone))
                     await conn.execute(
-                        "DELETE FROM long_term WHERE id = ?", (entry_id,)
+                        f"DELETE FROM long_term WHERE id IN ({marks})", gone
                     )
                     await conn.execute(
                         "UPDATE decisions SET text = NULL, text_sha256 = '' "
-                        "WHERE entry_id = ? OR target_id = ?",
-                        (entry_id, entry_id),
+                        f"WHERE entry_id IN ({marks}) OR target_id IN ({marks})",
+                        [*gone, *gone],
                     )
                     if restore and row[1] is not None:
                         await conn.execute(
@@ -692,8 +703,106 @@ class SqliteLongTerm(LongTerm):
                 with contextlib.suppress(Exception):
                     await conn.rollback()
                 raise
+            # The write-ahead log would keep the old wording until it is folded in.
+            await checkpoint_wal(conn)
         self._index = None
         return row is not None
+
+    async def edit_entry(
+        self,
+        entry_id: int,
+        *,
+        text: str,
+        embedding: list[float] | None,
+        embed_model: str,
+    ) -> bool:
+        """Rewrite an active record in place; ``False`` when there is none.
+
+        The user's new wording replaces the old one and is the record's quote
+        now; the old wording is overwritten (not kept as a superseded row),
+        the text of every decision row about the record is blanked, and an
+        ``EDIT`` row records the edit. Only a records file keeps edits.
+        """
+        if self._version != _RECORDS_VERSION:
+            raise ValueError("only a records file keeps edited notes")
+        conn = await self._ensure_ready()
+        vector = (
+            b"" if embedding is None else np.asarray(embedding, np.float32).tobytes()
+        )
+        async with self._write_lock, secure_deletes(conn):
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute(
+                    "SELECT kind, provenance_json FROM long_term "
+                    "WHERE id = ? AND status = 'active'",
+                    (entry_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row is not None:
+                    now = time.time()
+                    provenance = json.loads(row[1])
+                    provenance.update(
+                        quote=text,
+                        edited=True,
+                        embed_model=embed_model if vector else "",
+                    )
+                    await conn.execute(
+                        "UPDATE long_term SET text = ?, vector = ?, provenance_json = ?, "
+                        "embed_dim = ?, embed_model = ?, quote = ?, edited_at = ? "
+                        "WHERE id = ?",
+                        (
+                            text,
+                            vector,
+                            json.dumps(provenance, ensure_ascii=False),
+                            0 if embedding is None else len(embedding),
+                            embed_model if vector else "",
+                            text,
+                            now,
+                            entry_id,
+                        ),
+                    )
+                    await conn.execute(
+                        "UPDATE decisions SET text = NULL, text_sha256 = '' "
+                        "WHERE entry_id = ? OR target_id = ?",
+                        (entry_id, entry_id),
+                    )
+                    await conn.execute(
+                        "INSERT INTO decisions (candidate_id, action, kind, "
+                        "admitted_by, entry_id, reason, source_ids_json, "
+                        "text_sha256, timestamp) VALUES ('', 'EDIT', ?, "
+                        "'user_edit', ?, 'edited by the user', '[]', '', ?)",
+                        (row[0], entry_id, now),
+                    )
+                await conn.commit()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+                raise
+            await checkpoint_wal(conn)
+        self._index = None
+        return row is not None
+
+    async def set_vector(
+        self, entry_id: int, embedding: list[float] | None, embed_model: str
+    ) -> None:
+        """Replace an entry's vector and the model it came from (a reindex)."""
+        conn = await self._ensure_ready()
+        vector = (
+            b"" if embedding is None else np.asarray(embedding, np.float32).tobytes()
+        )
+        async with self._write_lock:
+            await conn.execute(
+                "UPDATE long_term SET vector = ?, embed_dim = ?, embed_model = ? "
+                "WHERE id = ?",
+                (
+                    vector,
+                    0 if embedding is None else len(embedding),
+                    embed_model if vector else "",
+                    entry_id,
+                ),
+            )
+            await conn.commit()
+        self._index = None
 
     async def forget(self, task_id: str) -> None:
         """Delete the entries and decisions whose ``task_id`` is *task_id*."""
