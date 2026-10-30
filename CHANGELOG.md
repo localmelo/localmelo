@@ -1144,7 +1144,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   face picture. A command in an error's advice (`/retry`) is drawn as a command. `NO_COLOR`
   and `LOCALMELO_ASCII=1` keep every meaning; direct mode, workers, JSON, stream-json, events
   and exit codes are unchanged.
-  ([#NN])
+  ([#273])
 - The terminal's colour tells kinds of output apart (part 1 of its new look). Each tool row
   shows its kind before the name, in the kind's colour: `→` reads (muted, so they fade), `±`
   writes, `$` commands and code, `@` network. A command that exits with another code than 0
@@ -2118,7 +2118,7 @@ earlier milestones.
 [#268]: https://github.com/localmelo/localmelo/pull/268
 [#271]: https://github.com/localmelo/localmelo/pull/271
 [#272]: https://github.com/localmelo/localmelo/pull/272
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#273]: https://github.com/localmelo/localmelo/pull/273
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
