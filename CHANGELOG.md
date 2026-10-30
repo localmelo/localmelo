@@ -31,6 +31,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A reflection reply with one common slip in its JSON no longer costs a retry.
+  A reply with a stray `]` after a string value (a `]` that no `[` opened) could
+  not be decoded, so it was asked for again, and a second failure lost the
+  reflection. With the default `reflection_gate flags`, a reply that holds no
+  reflection now gets one repair of the `{...}` the decoder rejects, at the
+  decoder's error and nowhere else: a `]` or `}` that no opener matches is
+  dropped, a comma before a closer is dropped, or raw newline, carriage return
+  and tab characters inside strings are escaped. The repaired text must still
+  hold an object with a valid `recommended_action`, nothing is closed or
+  inserted, and a reply that needs two repairs stays unreadable. The
+  `reflection` event gains `repaired` (`unmatched_closer`, `trailing_comma`,
+  `control_char` or `null`). When a reply with JSON that the decoder rejected
+  is asked for again, the retry adds one line after its note that quotes the
+  decoder's error and up to 60 characters around it. Requests whose first reply
+  reads are unchanged. ([#NN])
 - Setup never picks a model silently when several are served and none is known
   to be loaded. On a server whose status route needs a key (it answers 401) the
   first run used to default to the first listed model, which could be a large

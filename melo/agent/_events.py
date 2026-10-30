@@ -143,6 +143,7 @@ class _Emitter:
         # The replies of the reflection under way (see replies).
         self._replies: list[Message] | None = None
         self._unreadable_reason: str | None = None
+        self._repaired: str | None = None
         self._calls: list[CallTelemetry] = []
         self._sink_failed = False
         self._warned_awaitable = False
@@ -537,6 +538,7 @@ class _Emitter:
         self._replies = []
         self._calls = []
         self._unreadable_reason = None
+        self._repaired = None
         self._reflecting_since = time.perf_counter()
 
     @property
@@ -555,6 +557,10 @@ class _Emitter:
     def reflection_unreadable(self, reason: str) -> None:
         """Keep why the first reply of the reflection under way held no reflection."""
         self._unreadable_reason = reason
+
+    def reflection_repaired(self, repair: str | None) -> None:
+        """Keep the repair that made the reply of the reflection under way readable."""
+        self._repaired = repair
 
     def reflection(
         self,
@@ -576,6 +582,9 @@ class _Emitter:
         the first reply held no reflection: ``tool_call`` (it has tool calls
         and no reflection), ``no_json`` or ``invalid``; ``None`` when it
         read. The retry that follows can still make ``readable`` true.
+        ``repaired`` names the one slip of the JSON that was mended to read
+        the reply that gave the reflection (``unmatched_closer``,
+        ``trailing_comma`` or ``control_char``); ``None`` when none was.
         """
         if self._sink is None:
             return
@@ -630,6 +639,7 @@ class _Emitter:
                     "requests": len(replies),
                     "readable": reflected is not None,
                     "unreadable_reason": self._unreadable_reason,
+                    "repaired": self._repaired,
                     "usage": usage,
                     "prefix": prefix,
                     "duration_s": duration_s,

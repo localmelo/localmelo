@@ -275,7 +275,8 @@ reuse it; `slide` drops the oldest unit at every step once the window is full, a
   reflection is read, even after the retry, none of it stays in the window.
 - An unreadable reply is asked again on the same prefix: the request, the unreadable reply as an
   assistant message (a tool call written out as text, so no call is left without its result), then a
-  closing note, with the tools the request offered, instead of the text transcript. When the first
+  closing note, with the tools the request offered, instead of the text transcript. When the reply
+  had JSON that the decoder rejected, one line after the note quotes the decoder's error. When the first
   request did not repeat the plan's request (the window had moved on), there is no exchange to
   continue and the retry is the transcript as before. A read retry keeps the whole exchange in the
   window: the request, the unreadable reply, the note and the reply.

@@ -83,6 +83,9 @@ More about reflections:
   either, the next attempt starts without a new reflection, or the run ends
   as `budget_exhausted` when none can start; see
   [Run results](../reference/run-results.md#statuses).
+- A reply whose JSON has one common slip, such as a stray `]` after a string
+  value, is read after the slip is mended and needs no second request. If the
+  decoder rejected the first reply's JSON, the second request quotes its error.
 
 ## Tools in each step
 
