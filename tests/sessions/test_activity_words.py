@@ -51,6 +51,12 @@ from localmelo.support.sessions.display import (
         ("browser_screenshot", {}, "Looking at the page", "web"),
         ("recall", {"query": "x"}, "Remembering", "memory"),
         ("search_memory", {"query": "x"}, "Remembering", "memory"),
+        (
+            "remember",
+            {"text": "You prefer tea.", "topic": "x"},
+            "Remembering",
+            "memory",
+        ),
         ("mcp__files__file_read", {"path": "a/b.txt"}, "Reading b.txt", "read"),
         ("mcp__calendar__list_events", {}, "Using a tool", "tool"),
         ("", None, "Thinking", "think"),

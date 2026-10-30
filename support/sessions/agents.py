@@ -253,7 +253,7 @@ async def build_session_agent(
 
     *memory*, when it is on, gives a chat memory across chats: its identity
     says so and pins the user's About-you and Preferences notes, and the
-    Agent gets ``search_memory``. The runner does the rest per turn.
+    Agent gets ``search_memory`` and ``remember``. The runner does the rest per turn.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace

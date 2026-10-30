@@ -1,9 +1,12 @@
-"""Records of memory across chats: written from the user's typed words only.
+"""Records of memory across chats: what the user asks to remember, kept by code.
 
-A statement or a remember request becomes one second-person record with its
-topic and the user's quote; a secret is refused, not stored redacted; a new
-value of the same subject supersedes the old one; a delete leaves no text in the
-decision log; the file is a records file (schema 2) that a plain store refuses.
+A remember request ("remember that…", "记住…", "别忘了…", "帮我记一下…") becomes
+one second-person record with its topic and the user's quote, without a model
+call; a plain statement is not kept by rule (the model keeps it with
+``remember``: test_chat_remember.py); a secret is refused, not stored redacted;
+a new value of the same subject supersedes the old one; a delete leaves no text
+in the decision log; the file is a records file (schema 2) that a plain store
+refuses.
 """
 
 from __future__ import annotations
@@ -23,55 +26,77 @@ from localmelo.support.sessions.store import NewSession, SessionStore
 HOLDER = "test-host:1:memory"
 
 
+# The sentences the rules used to keep as statements: now the model's to keep
+# (test_chat_remember.py keeps each with ``remember``).
+STATEMENTS = [
+    ("I prefer short answers.", "You prefer short answers.", "preferences"),
+    ("Call me Ray.", "You go by Ray.", "about"),
+    ("I'm allergic to peanuts.", "You are allergic to peanuts.", "about"),
+    (
+        "We decided to use Qwen3-Embedding-0.6B for memory search.",
+        "You decided to use Qwen3-Embedding-0.6B for memory search.",
+        "decisions",
+    ),
+    ("我习惯用简体中文。", "你习惯用简体中文。", "preferences"),
+    ("我的组会是每周四。", "你的组会是每周四。", "about"),
+    ("叫我小王", "你希望被叫作小王。", "about"),
+    (
+        "My reading group meets on Tuesdays.",
+        "Your reading group meets on Tuesdays.",
+        "about",
+    ),
+    ("Our team lives in Pittsburgh.", "Your team lives in Pittsburgh.", "about"),
+    ("我的猫叫团子。", "你的猫叫团子。", "about"),
+    ("我的导师姓林。", "你的导师姓林。", "about"),
+]
+
+
 @pytest.mark.parametrize(
     ("typed", "texts", "topics"),
     [
-        ("I prefer short answers.", ["You prefer short answers."], ["preferences"]),
-        (
-            "I prefer short answers; my group meeting is on Thursdays",
-            ["Your group meeting is on Thursdays.", "You prefer short answers."],
-            ["about", "preferences"],
-        ),
-        ("Call me Ray.", ["You go by Ray."], ["about"]),
-        ("I'm allergic to peanuts.", ["You are allergic to peanuts."], ["about"]),
         (
             "Remember that Sam has the lab keys.",
             ["Sam has the lab keys."],
             ["people"],
         ),
         (
-            "We decided to use Qwen3-Embedding-0.6B for memory search.",
-            ["You decided to use Qwen3-Embedding-0.6B for memory search."],
-            ["decisions"],
-        ),
-        ("我习惯用简体中文。", ["你习惯用简体中文。"], ["preferences"]),
-        ("我的组会是每周四。", ["你的组会是每周四。"], ["about"]),
-        ("叫我小王", ["你希望被叫作小王。"], ["about"]),
-        ("记住：我的车停在B2层。", ["你的车停在B2层。"], ["about"]),
-        (
-            "My reading group meets on Tuesdays.",
-            ["Your reading group meets on Tuesdays."],
-            ["about"],
+            "Remember that I prefer short answers; my group meeting is on Thursdays",
+            ["You prefer short answers."],
+            ["preferences"],
         ),
         (
-            "Our team lives in Pittsburgh.",
+            "Keep in mind that our team lives in Pittsburgh.",
             ["Your team lives in Pittsburgh."],
             ["about"],
         ),
-        ("我的猫叫团子。", ["你的猫叫团子。"], ["about"]),
-        ("我的导师姓林。", ["你的导师姓林。"], ["about"]),
+        (
+            "Remember that we decided to use Qwen3-Embedding-0.6B.",
+            ["You decided to use Qwen3-Embedding-0.6B."],
+            ["decisions"],
+        ),
+        ("记住：我的车停在B2层。", ["你的车停在B2层。"], ["about"]),
+        ("别忘了我的组会是每周四。", ["你的组会是每周四。"], ["about"]),
+        ("帮我记一下：我的车停在B2层。", ["你的车停在B2层。"], ["about"]),
+        ("记住：叫我小王", ["你希望被叫作小王。"], ["about"]),
     ],
 )
-def test_statements_in_english_and_chinese_become_second_person_records(
+def test_a_request_to_remember_becomes_a_second_person_record_in_english_and_chinese(
     typed: str, texts: list[str], topics: list[str]
 ) -> None:
     found, refused = records.candidates(typed)
     assert not refused
-    assert sorted(c.text for c in found) == sorted(texts)
-    by_text = {c.text: c.topic for c in found}
-    assert [by_text[t] for t in texts] == topics
+    assert [c.text for c in found] == texts
+    assert [c.topic for c in found] == topics
     for cand in found:
         assert cand.quote in typed and len(cand.text) <= records.MAX_RECORD_CHARS
+        assert cand.admitted_by == "user_request"
+
+
+@pytest.mark.parametrize(("typed", "note", "topic"), STATEMENTS)
+def test_a_plain_statement_is_not_kept_by_rule(
+    typed: str, note: str, topic: str
+) -> None:
+    assert records.candidates(typed) == ([], False)
 
 
 @pytest.mark.parametrize(
@@ -112,7 +137,7 @@ def test_secrets_are_refused_and_never_written(typed: str) -> None:
 
 
 def test_a_secret_beside_a_statement_refuses_only_the_secret() -> None:
-    found, refused = records.candidates("I prefer tea. My PIN is 4821.")
+    found, refused = records.candidates("Remember that I prefer tea. My PIN is 4821.")
     assert refused and [c.text for c in found] == ["You prefer tea."]
     assert not records.sensitive("My phone number is 412-555-0199.")
     assert not records.sensitive("Order 4111 1111 1111 1112 shipped.")  # fails Luhn
@@ -154,14 +179,17 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
 ) -> None:
     sid = await _session(store)
     found = await _say(
-        memory, store, sid, "I prefer short answers; my wifi password is x9"
+        memory,
+        store,
+        sid,
+        "Remember that I prefer short answers; my wifi password is x9",
     )
     assert [w.text for w in found.remembered] == ["You prefer short answers."]
     assert found.refused
     # The block says what was kept and what was refused, never the secret itself.
     assert found.block == (
         f"\n\n{BLOCK_HEADER}\nmelo kept from this message: “I prefer short "
-        f"answers” (saved; nothing else to save)\n{NOT_KEPT_LINE}"
+        f"answers” (saved; do not save it again or in a file)\n{NOT_KEPT_LINE}"
     )
     assert "x9" not in found.block
     data = found.event()
@@ -180,7 +208,7 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
     }
     (entry,) = await memory.records()
     assert entry.session_id == sid and entry.source == "user"
-    assert entry.admitted_by == "user_statement" and entry.kind == "profile"
+    assert entry.admitted_by == "user_request" and entry.kind == "profile"
     assert entry.provenance["chat"] == "chat “Planning”"
     assert entry.provenance["quote"] == "I prefer short answers"
     assert entry.provenance["turn"] == 1
@@ -190,17 +218,17 @@ async def test_saying_it_again_keeps_one_record(
     memory: ChatMemory, store: SessionStore
 ) -> None:
     sid = await _session(store)
-    await _say(memory, store, sid, "I prefer short answers.")
-    again = await _say(memory, store, sid, "I prefer short answers!")
+    await _say(memory, store, sid, "Remember that I prefer short answers.")
+    again = await _say(memory, store, sid, "Remember that I prefer short answers!")
     assert again.remembered == () and len(await memory.records()) == 1
 
 
 @pytest.mark.parametrize(
     ("typed", "quote"),
     [
-        ("Call me Ray.", "Call me Ray."),
+        ("记住：叫我小王", "叫我小王"),
         ("Remember that Sam has the lab keys.", "Sam has the lab keys."),
-        ("我的猫叫团子。", "我的猫叫团子。"),
+        ("别忘了我的猫叫团子。", "我的猫叫团子。"),
     ],
 )
 async def test_the_block_says_a_fact_was_kept_even_when_nothing_is_recalled(
@@ -211,7 +239,7 @@ async def test_the_block_says_a_fact_was_kept_even_when_nothing_is_recalled(
     assert said.remembered and said.used == () and said.recall is not None
     assert said.recall.used == 0
     # The user's words, as the recall lines quote them; a repeat says it again.
-    line = f"melo kept from this message: “{quote}” (saved; nothing else to save)"
+    line = f"melo kept from this message: “{quote}” (saved; do not save it again or in a file)"
     assert said.block == f"\n\n{BLOCK_HEADER}\n{line}"
     again = await _say(memory, store, sid, typed)
     assert again.remembered == () and line in again.block
@@ -232,15 +260,15 @@ async def test_a_question_or_a_lone_secret_carries_no_kept_line(
 @pytest.mark.parametrize(
     ("first", "second", "kept"),
     [
-        ("Call me R.", "Call me Ray.", "You go by Ray."),
+        ("记住：叫我小王", "记住：叫我老王", "你希望被叫作老王。"),
         (
-            "My group meeting is on Thursdays.",
-            "My group meeting is now on Fridays.",
+            "Remember that my group meeting is on Thursdays.",
+            "Remember that my group meeting is now on Fridays.",
             "Your group meeting is now on Fridays.",
         ),
         (
-            "I live in Boston.",
-            "I live in Pittsburgh now.",
+            "Remember that I live in Boston.",
+            "Remember that I live in Pittsburgh now.",
             "You live in Pittsburgh now.",
         ),
     ],
@@ -261,8 +289,8 @@ async def test_different_preferences_are_both_kept(
     memory: ChatMemory, store: SessionStore
 ) -> None:
     sid = await _session(store)
-    await _say(memory, store, sid, "I prefer Python.")
-    await _say(memory, store, sid, "I prefer dark mode.")
+    await _say(memory, store, sid, "Remember that I prefer Python.")
+    await _say(memory, store, sid, "Remember that I prefer dark mode.")
     assert len(await memory.records()) == 2
 
 
@@ -270,7 +298,8 @@ async def test_a_delete_blanks_the_decision_text_and_logs_the_delete(
     memory: ChatMemory, store: SessionStore, tmp_path: Path
 ) -> None:
     sid = await _session(store)
-    (note,) = (await _say(memory, store, sid, "My dentist is Dr. Lee.")).remembered
+    said = "Remember that my dentist is Dr. Lee."
+    (note,) = (await _say(memory, store, sid, said)).remembered
     assert await memory.delete_record(note.id)
     assert not await memory.delete_record(note.id)
     path = tmp_path / "memory" / "records.db"
@@ -292,9 +321,11 @@ async def test_two_writers_at_once_keep_every_record(
         sid = await _session(store)
         things = ("bike", "car", "kettle", "desk", "scarf", "phone case")
         colors = ("red", "blue", "green", "black", "yellow", "white")
-        said = [f"My {t} is {c}." for t, c in zip(things, colors, strict=True)]
+        said = [
+            f"Remember that my {t} is {c}." for t, c in zip(things, colors, strict=True)
+        ]
         said += [
-            f"我的{t}是{c}的。"
+            f"记住：我的{t}是{c}的。"
             for t, c in zip("书伞杯灯衣盘", "红蓝绿黑黄白", strict=True)
         ]
         results = await asyncio.gather(
@@ -314,7 +345,7 @@ async def test_the_records_file_is_schema_two_and_a_plain_store_refuses_it(
     memory: ChatMemory, store: SessionStore, tmp_path: Path
 ) -> None:
     sid = await _session(store)
-    await _say(memory, store, sid, "I prefer tea.")
+    await _say(memory, store, sid, "Remember that I prefer tea.")
     path = tmp_path / "memory" / "records.db"
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone() == (2,)
@@ -352,8 +383,12 @@ async def test_memory_off_writes_and_recalls_nothing(
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         sid = await _session(store)
-        found = await _say(memory, store, sid, "I prefer tea.")
+        found = await _say(memory, store, sid, "Remember that I prefer tea.")
         assert found.event() is None and not (tmp_path / "memory").exists()
         assert await memory.pinned_quotes() == ""
+        # The model's tool keeps nothing either.
+        said = await memory.remember("You prefer tea.", "preferences")
+        assert said == "Not remembered: memory across chats is off in this chat."
+        assert not (tmp_path / "memory").exists()
     finally:
         await memory.aclose()

@@ -62,7 +62,7 @@ chat_model = "qwen3:8b"
 | `cross_task_ratio` | `[retrieval]` | `1.1` | 跨任务情节摘要需要达到同一长期存储后端中最佳同任务摘要分数的这个倍数；1–10。 |
 | `cross_task_cap` | `[retrieval]` | `1` | 每次召回的跨任务摘要上限，0–2；既有的长期命中总数上限仍为两条。 |
 | `cross_task_cold` | `[retrieval]` | `0` | 没有匹配的同任务摘要时，允许 0 或 1 条跨任务摘要；仍受上限和后端下限约束。一般记忆绕过这道门。 |
-| `across_chats` | `[memory]` | `true` | 网页控制台和 App 中的跨对话记忆：melo 记下你告诉它的关于你自己的事，为每个完成的对话轮次和任务结果建立索引，并在每条新消息时带回相关内容，注明出处。`false` 全部关闭。直接运行和 worker 从不使用它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
+| `across_chats` | `[memory]` | `true` | 网页控制台和 App 中的跨对话记忆：你请 melo 记住的事，以及它判断值得记的你告诉它的事，它会记成笔记；它为每个完成的对话轮次和任务结果建立索引，并在每条新消息时带回相关内容，注明出处。`false` 全部关闭。直接运行和 worker 从不使用它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
 | `retriever` | `[memory]` | `"auto"` | 网页控制台或 App 中的对话如何为一条消息找到笔记：`"auto"`（按词搜索；设置了嵌入模型时也按语义搜索）、`"bm25"`（只按词，不向模型发请求）、`"embedding"`（有模型时与 `auto` 相同；没有嵌入模型时 `melo serve` 拒绝启动）或 `"llm"`（先按词挑出最多 20 个候选，再由对话模型在 4 秒内从中选择；超时、出错或回复无法读取时只按词搜索；不调用嵌入模型）。这是用于比较各种方式的开发者设置：`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它。每次召回的耗时在 `turn.memory` 的 `recall` 对象里。见[召回如何找到笔记](../concepts/memory.md#memory-across-chats)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |

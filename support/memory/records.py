@@ -1,14 +1,18 @@
-"""Records: what the user said about themselves, kept as one sentence each.
+"""Records: what the user said about themselves or their work, one sentence each.
 
-A record is written only from the user's own typed words. The signal lexicon
-(:mod:`localmelo.melo.memory.hippo.signals`) finds a statement ("I prefer…",
-"my … is", "call me…", "我习惯…") or a remember request ("remember that…",
-"记住…") in the typed text, never in attachments, tool output, pages or a
-worker's report. Each sentence becomes one record in the second person ("You
-prefer short answers."), at most :data:`MAX_RECORD_CHARS` characters, with its
-topic, the user's quote and where it was said. Text that looks like a secret
-is refused, not stored redacted. A new record of the same subject supersedes
-the old one ("call me Ray" after "call me R.").
+A record is written two ways, and neither asks the user to confirm. When the
+user asks ("remember that…", "记住…", "别忘了…", "帮我记一下…"), code keeps the
+fact the request carries (:func:`candidates`, the signal lexicon of
+:mod:`localmelo.melo.memory.hippo.signals`), in the second person ("You
+prefer short answers."). Otherwise the chat's model keeps a note with the
+``remember`` tool when it judges something worth keeping; the note's content
+words must come from what the user typed in that chat or from a finished
+task's result shown there (:func:`unsupported`), never from a page or tool
+output alone. A plain statement is not kept by rule. Each record has at most
+:data:`MAX_RECORD_CHARS` characters, its topic, the user's quote and where it
+was said. Text that looks like a secret is refused, not stored redacted. A new
+record of the same subject supersedes the old one ("call me Ray" after "call
+me R.").
 """
 
 from __future__ import annotations
@@ -20,12 +24,19 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.memory.hippo.policy import content_tokens, normalise, overlap
+from localmelo.melo.memory.bm25 import tokenize
+from localmelo.melo.memory.hippo.policy import (
+    STOPWORDS,
+    content_tokens,
+    normalise,
+    overlap,
+)
 from localmelo.melo.memory.hippo.signals import classify_user_text
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
+from localmelo.support.memory.recall import stem
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
 TOPIC_LABELS: Final = {
@@ -76,23 +87,42 @@ _SINGLE = {
         ("timezone", r"\btime ?zone\b|时区"),
     )
 }
-# A statement about the user's own things that the shared lexicon (``my … is``)
-# misses: "My reading group meets on Tuesdays.", "我的猫叫团子。". The sentence
-# starts with "my"/"our" and its predicate is a verb of habit or state, so a
-# request ("my code fails, fix it") or a report of the work ("my code works")
-# stays out.
-_OWN_FACT = re.compile(
-    r"^\W*(?:my|our)\b(?P<thing>[^.\n]{1,60}?)\s+(?:meets?|starts?|ends?|begins?|"
-    r"opens?|closes?|lives?|studies|teaches|plays|likes?|loves?|hates?|eats?|"
-    r"drinks?|speaks?|visits?|moved)\b"
-    r"|^\W*我的(?P<cjk>[^。\n]{1,20}?)(?:叫|姓|住在|喜欢|每(?:周|天|月)|在(?:周|星期))",
+# Request phrases the shared lexicon lacks, read as "remember that":
+# "帮我记一下：…", "keep in mind that …", "make a note that …".
+_ALSO_ASKS = re.compile(
+    r"^(?:please\s+)?(?:keep in mind|make a note)(?:\s+that)?\b[\s,:]*"
+    r"|^(?:请)?(?:帮我)?记一下[\s,:：，]*",
     re.IGNORECASE,
 )
-_OWN_META = re.compile(
-    r"\b(?:task|question|request|goal|plan|problem|issue|job|point)\b"
-    r"|任务|问题|请求|目标|计划",
-    re.IGNORECASE,
+# Words a note adds when it restates what was said ("The user prefers…",
+# "You go by…"); they are never what has to be found in the user's words.
+_FRAMING: Final = frozenset(
+    [
+        "user",
+        "users",
+        "prefer",
+        "prefers",
+        "like",
+        "likes",
+        "love",
+        "loves",
+        "want",
+        "wants",
+        "go",
+        "goes",
+        "call",
+        "called",
+        "name",
+        "named",
+        "remember",
+        "note",
+    ]
 )
+_CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么")
+_CJK_FRAMING = re.compile("希望被叫作|希望被称为|用户")
+_POSSESSIVE = re.compile(r"(?<=\w)['’]s\b")
+_WORD = re.compile(r"[a-z0-9_]+")
+_CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
 # The never-kept classes: passwords and codes, card and ID numbers.
 _SECRET_WORDS = re.compile(
     r"\b(passwords?|passcodes?|passwd|pin|cvv|security code|one-time code|otp)\b"
@@ -169,6 +199,12 @@ def second_person(sentence: str) -> str:
     text = " ".join(sentence.split()).strip(" -—:：,，")
     for pattern, replacement in _SWAPS:
         text = pattern.sub(replacement, text)
+    return finished(text)
+
+
+def finished(text: str) -> str:
+    """*text* as a record reads: one line, a capital, an end mark, bounded."""
+    text = " ".join(text.split()).strip(" -—:：,，")
     text = text[:1].upper() + text[1:]
     if len(text) > MAX_RECORD_CHARS:
         text = text[: MAX_RECORD_CHARS - 1].rstrip() + "…"
@@ -193,51 +229,108 @@ def topic_of(sentence: str, *, request: bool) -> str:
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
     """The records the user's *typed* text asks for, and whether one was refused.
 
-    A sentence that looks like a secret is never a candidate; it only sets
-    the refusal flag, so the turn can say "Not remembered".
+    Only a request to remember counts ("remember that…", "记住…", "别忘了…",
+    "帮我记一下…"); a plain statement is the model's to keep. A sentence that
+    looks like a secret, a request's or a statement's, is never a candidate;
+    it only sets the refusal flag, so the turn can say "Not remembered".
     """
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return [], False
     # A ";" joins two statements as often as it joins two clauses.
     joined = re.sub(r"\s*[;；]\s*", "\n", typed)
+    joined = "\n".join(
+        _ALSO_ASKS.sub("remember that ", sentence, count=1)
+        for _, sentence in split_sentences(joined)
+    )
     signals = classify_user_text(joined)
-    found: list[tuple[str, str]] = [(f, "user_request") for f in signals.request_facts]
-    found += [(f, "user_statement") for f in signals.facts]
-    found += [(s, "user_statement") for s in _own_facts(joined, signals.facts)]
-    decisions = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?。！？])\s+|\n", typed)
-        if _DECISION.search(s) and not s.rstrip().endswith(("?", "？"))
-    ]
-    found += [(s, "user_statement") for s in decisions]
+    found = list(signals.request_facts)
+    # A request whose words after the marker did not read as a fact alone
+    # ("Remember, I'm allergic to peanuts.") keeps the whole sentence.
+    found += [f for f in signals.facts if classify_user_text(f).remember]
+    # A statement is not kept by rule, but one with a secret still says so.
+    refused = any(sensitive(s) for s in signals.facts)
     out: list[Candidate] = []
-    refused = False
-    for sentence, signal in found:
+    for sentence in found:
         if sensitive(sentence):
             refused = True
             continue
         text = second_person(sentence)
         if len(normalise(text)) < 4 or any(c.text == text for c in out):
             continue
-        topic = topic_of(sentence, request=signal == "user_request")
-        out.append(Candidate(text, sentence[:MAX_RECORD_CHARS], topic, signal))
+        topic = topic_of(sentence, request=True)
+        out.append(Candidate(text, sentence[:MAX_RECORD_CHARS], topic, "user_request"))
     return out, refused
 
 
-def _own_facts(text: str, known: Sequence[str]) -> list[str]:
-    """The declarative sentences about the user's own things that *known* lacks."""
-    out: list[str] = []
-    for _, sentence in split_sentences(text):
-        match = _OWN_FACT.match(sentence)
-        if (
-            match is None
-            or sentence in known
-            or sentence.rstrip().endswith(("?", "？"))
-            or _OWN_META.search(match.group("thing") or match.group("cjk") or "")
-        ):
+def _stem(word: str) -> str:
+    """*word* without its endings, twice, so "meetings" finds "meets"."""
+    return stem(stem(word))
+
+
+def note_terms(text: str) -> list[str]:
+    """The content words a note must find in the evidence, in order."""
+    terms: list[str] = []
+    # "the user's name" restates; its "s" is not a word the user typed.
+    text = _POSSESSIVE.sub("", _CJK_FRAMING.sub(" ", text))
+    for term in tokenize(normalise(text)):
+        if term.isascii():
+            if term in STOPWORDS or term in _FRAMING:
+                continue
+            term = _stem(term)
+        elif _CJK_FILLER.intersection(term):
             continue
-        out.append(sentence)
-    return out
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _evidence(texts: Sequence[str]) -> set[str]:
+    """The words of *texts*, stemmed; two adjacent words joined ("3 pm"); and
+    Chinese pairs with one character between them ("下周三要去" gives "三去")."""
+    found: set[str] = set()
+    for text in texts:
+        folded = normalise(text)
+        terms = tokenize(folded)
+        found.update(_stem(t) if t.isascii() else t for t in terms)
+        words = _WORD.findall(folded)
+        found.update(a + b for a, b in zip(words, words[1:], strict=False))
+        for run in _CJK_RUN.findall(folded):
+            found.update(run[i] + run[i + 2] for i in range(len(run) - 2))
+    return found
+
+
+def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
+    """The content words of *note* that none of the *evidence* texts holds.
+
+    A word counts when the evidence has it after stemming, or a word at most
+    two letters longer that starts with it ("named" finds "name"); the words a
+    note adds to restate a fact ("The user prefers…") need not be found.
+    ``[]`` means grounded.
+    """
+    words = _evidence(evidence)
+    ascii_words = [w for w in words if w.isascii()]
+    return [
+        term
+        for term in note_terms(note)
+        if term not in words
+        and not (
+            term.isascii()
+            and len(term) >= 3
+            and any(w.startswith(term) and len(w) <= len(term) + 2 for w in ascii_words)
+        )
+    ]
+
+
+def quote_for(note: str, said: Sequence[str]) -> str:
+    """The sentence of *said* that holds most of *note*'s words: the user's quote."""
+    terms = set(note_terms(note))
+    best, score = "", 0
+    for text in said:
+        for _, sentence in split_sentences(re.sub(r"\s*[;；]\s*", "\n", text)):
+            hits = len(terms - set(unsupported(note, [sentence])))
+            if hits > score:
+                best, score = sentence, hits
+    return best[:MAX_RECORD_CHARS]
 
 
 def _single(text: str) -> str:

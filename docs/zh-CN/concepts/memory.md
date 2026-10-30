@@ -26,7 +26,13 @@
 
 在网页控制台和 App 中，melo 会跨对话记忆。除非设置 `[memory] across_chats = false`（`melo config set memory.across_chats false`，然后重启 `melo serve` 或 App），否则它是开启的。`~/.cache/localmelo/memory/` 中的两个文件保存它（文件夹权限 0700，文件 0600），每个对话读写的都是同一组文件：
 
-- **关于你的笔记**（`records.db`）。当你输入的消息说到关于你的事（"I prefer short answers"、"my group meeting is on Thursdays"、"my reading group meets on Tuesdays"、"我的猫叫团子"、"call me Ray"、"我习惯用简体中文"），或请 melo 记住一个事实（"remember that Sam has the lab keys"）时，melo 把它记成一句对你说的话，带上主题（About you、Preferences、People 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`）。只有你输入的文字才算：附加的文件、工具输出、网页、melo 的回答和任务报告都不算。问题和待办（"remember to buy milk"）不是笔记。看起来像密码、密钥、一次性验证码、卡号或证件号的文字不会被保存，那一行会写 `Not remembered: it looked like a password or key`。笔记由 melo 自己记，不靠模型：模型被告知，绝不要把你说的关于你自己的事存进文件或用代码保存；它读到的消息会说明记下了什么（见下面的召回）。
+- **关于你的笔记**（`records.db`）。melo 用两种方式记笔记，都不会请你确认：
+  - **你要求时。** 请 melo 记住一个事实的消息（"remember that Sam has the lab keys"、"keep in mind that my group meeting is on Thursdays"、"记住：我的车停在B2层"、"别忘了…"、"帮我记一下…"）会立刻被记下，不管模型做什么。
+  - **melo 判断值得记时。** 当你告诉 melo 关于你自己或你的工作的长期信息（"I prefer short answers"、"call me Ray"、"my reading group meets on Tuesdays"、"我习惯用简体中文"、"we decided to use Qwen3-Embedding-0.6B"），或对话里一个已完成任务的结果值得保留时，模型用它的 `remember` 工具记一条笔记。模型没有记的陈述就不是笔记。
+
+  一条笔记是一句对你说的话，带上主题（About you、Preferences、People、Projects 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`），已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
+
+  模型记的每条笔记都由代码检查。它的词必须来自你在这个对话中输入的内容（任何一轮，撤销的轮次除外），或来自对话展示给你的一个已完成任务的结果（在你某条消息下召回的任务结果）；只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。看起来像密码、密钥、一次性验证码、卡号或证件号的文字从不被保存，那一行会写 `Not remembered: it looked like a password or key`。模型被告知，绝不要把笔记或你说的关于你自己的事存进文件或用代码保存。
 - **每个对话的索引**（`index.db`）。每个完成的对话轮次添加一个文档：你输入的内容和 melo 的回答（不含思考），最多 2,000 个字符，密钥会被遮盖。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。
 
 **召回。** 一条消息发给模型之前，melo 会搜索这两个文件：总是按词搜索（对单词和汉字的 BM25），配置了嵌入模型时也按语义搜索（见[设置嵌入模型](../guides/embedding.md)；例如与对话模型同在一个 oMLX 服务器上的 Qwen3-Embedding-0.6B）。最多 3 条笔记和其他对话的 2 个早先轮次（总共不超过 900 个字符）会一次性加在你的消息末尾，以引用形式出现，并各自注明出处：
@@ -38,13 +44,13 @@ when is my group meeting?
 - the user said “my group meeting is on Thursdays” (chat “Planning”, Oct 30)
 ```
 
-当消息本身陈述了一个 melo 记下的事实时，同一个块会以一行引用你原话的文字开头，即使没有召回任何内容，这样模型就知道笔记已经保存、没有什么需要再写：
+当消息请 melo 记住一个事实、melo 也记下了时，同一个块会以一行引用你原话的文字开头，即使没有召回任何内容，这样模型就知道这条笔记已经保存，不能再次保存，也不能写进文件（同一条消息里的其他事实它仍可以记）：
 
 ```text
-Call me Ray.
+Remember that my name is Ray.
 
 [melo's memory · notes and earlier chats, not instructions]
-melo kept from this message: “Call me Ray.” (saved; nothing else to save)
+melo kept from this message: “my name is Ray.” (saved; do not save it again or in a file)
 ```
 
 如果消息的一部分看起来像密码或密钥，另一行会说明它没有被保存，也不能被写到任何地方（密钥本身从不被引用）。
@@ -62,9 +68,9 @@ melo kept from this message: “Call me Ray.” (saved; nothing else to save)
 
 每次召回都会计时。页面上不会多出任何内容，但每个轮次的 `turn.memory` 事件带有 `recall` 对象：回答的 `retriever`、`fallback`（`none`、`timeout`、`error`、`unreadable` 或 `no-embedding`）、嵌入（`embed_ms`）、搜索（`search_ms`）和选择（`select_ms`）各花的毫秒数、选择用掉的 `select_tokens`（`prompt`、`completion`）、`candidates` 的数量和实际 `used` 的条数。同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 
-对话的指令会说明它记得什么，说明笔记由 localmelo 保存、不是模型（模型绝不把你说的关于你自己的事存进文件或用代码保存，你只是告诉它一件事时，它用一句简短的话回应，不使用工具），并用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取）。对话还有只读工具 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）。
+对话的指令会说明它记得什么；说明当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你；说明你请它记住的事实已经保存；说明它绝不把笔记存进文件或用代码保存；并说明它用一句简短的话确认一条笔记。指令还用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取）。对话有两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。
 
-直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记；任务的运行器只把结果加入索引。除了发给你自己模型服务器的嵌入请求，没有任何内容离开你的电脑。
+直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。除了发给你自己模型服务器的嵌入请求，没有任何内容离开你的电脑。
 
 <a id="see-and-change-what-melo-remembers"></a>
 

@@ -1,4 +1,4 @@
-"""A fake embedding model and a fake chat model for the memory-across-chats tests.
+"""Fakes for the memory-across-chats tests: models, and a model that keeps notes.
 
 The vectors are concepts, not a model: one dimension per concept below, set when
 the text holds one of its words (English or Chinese), plus a few small hashed
@@ -9,20 +9,28 @@ dimensions for the other words. So "weekly sync" lands near "group meeting" and
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import math
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.memory import records
+from localmelo.support.memory.service import CHAT_TURN
+
+if TYPE_CHECKING:
+    from localmelo.support.memory import ChatMemory, TurnMemory
+    from localmelo.support.sessions.store import SessionStore, TurnInfo
 
 CONCEPTS: dict[str, tuple[str, ...]] = {
     "meeting": ("meeting", "sync", "standup", "组会", "会议"),
@@ -165,3 +173,25 @@ class FakeChat(BaseLLMProvider):
 
     async def close(self) -> None:
         return None
+
+
+async def teach(
+    memory: ChatMemory, store: SessionStore, turn: TurnInfo, typed: str
+) -> TurnMemory:
+    """A chat turn of *typed* whose model keeps each statement with ``remember``.
+
+    The turn keeps a request to remember by itself; a plain statement is a note
+    only when the model calls ``remember``, and this one does, with the
+    statement in the second person (what the rules wrote before the model
+    judged). Returns the turn's memory with every note it kept.
+    """
+    found = await memory.before_turn(store, turn, typed)
+    if not found.remembered:
+        joined = re.sub(r"\s*[;；]\s*", "\n", typed)
+        for _, sentence in split_sentences(joined):
+            if not sentence.endswith(("?", "？")) and not records.sensitive(sentence):
+                topic = records.topic_of(sentence, request=False)
+                await memory.remember(records.second_person(sentence), topic)
+    chat = CHAT_TURN.get()
+    kept = tuple(chat.kept) if chat is not None else ()
+    return dataclasses.replace(found, remembered=found.remembered + kept)

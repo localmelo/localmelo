@@ -456,7 +456,7 @@ def activity_text(
         )
     if name == "python_exec":
         return ActivityText("Running Python", "run")
-    if name in ("recall", "search_memory"):
+    if name in ("recall", "search_memory", "remember"):
         return _STATE_WORDS["remembering"]
     if name == "browser_open":
         host = (urlsplit(str(args.get("url") or "")).hostname or "").removeprefix(

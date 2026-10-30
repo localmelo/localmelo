@@ -20,6 +20,7 @@ from localmelo.support.cli.theme import UNICODE
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.cli.ui_helpers import ENTER, ESC, Driver, running_app
+from localmelo.tests.memory.chat_memory_helpers import teach
 
 DOWN = "\x1b[B"
 HOLDER = "test-host:1:notes"
@@ -66,7 +67,7 @@ async def seed(home: Path) -> ChatMemory:
             turn = await store.begin_turn(
                 None, text, holder=HOLDER, new_session=NewSession()
             )
-            await memory.before_turn(store, turn, text)
+            await teach(memory, store, turn, text)
     finally:
         await store.aclose()
     return memory

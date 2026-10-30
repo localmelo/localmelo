@@ -20,7 +20,7 @@ from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, Recall
 from localmelo.support.memory import service as memory_service
 from localmelo.support.sessions.store import SessionStore
-from localmelo.tests.memory.chat_memory_helpers import FakeChat, FakeEmbedding
+from localmelo.tests.memory.chat_memory_helpers import FakeChat, FakeEmbedding, teach
 from localmelo.tests.memory.test_chat_recall import (
     BY_WORDS,
     NOTHING,
@@ -180,7 +180,7 @@ async def test_these_two_make_no_embedding_call(
         embedding.calls.clear()
         typed = "I prefer tea. When is my group meeting?"
         turn = await _turn(store, "Ask")
-        found = await memory.before_turn(store, turn, typed)
+        found = await teach(memory, store, turn, typed)
         memory.after_turn(store, turn, typed, "On Thursdays.")
         await memory.drain()
         await memory.search("where do I live?")
