@@ -83,6 +83,13 @@ utility score computed from its own estimates must reach 0.1.
 [Evaluations](../project/evaluations.md#reflection-gate) compares the two gates and runs
 without reflection on coding exercises.
 
+A developer setting, `--reflection-gate patient`, is `flags` with one exception:
+a `continue` that is feasible and concrete but not novel still starts the next
+attempt, once per run. A second one stops the run as `flags` does, and the
+reflection's `recommended_avoids` reach the next attempt as usual. With it,
+and with `answer_on_stop`, the reflection's `useful_evidence`, `failed_hypotheses`
+and `recommended_avoids` keep at most 8 items of at most 300 characters each.
+
 More about reflections:
 
 - Only the latest reflection is carried forward: each one replaces the one

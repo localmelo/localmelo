@@ -565,6 +565,11 @@ class RunResult:
     N being the writes outside the workspace that this run's shell and
     Python reported refused, or ``{"writes": "not_confined", "reason":
     ...}``. :meth:`to_dict` leaves it out when it is ``None``.
+
+    ``answered_on_stop`` is true only for a run that ended ``gate_stopped``
+    or ``budget_exhausted`` with no answer, whose ``result`` then comes from
+    the extra request that ``AgentOptions.answer_on_stop`` makes.
+    :meth:`to_dict` leaves it out when it is false.
     """
 
     task_id: str
@@ -585,6 +590,7 @@ class RunResult:
     context_budget: list[dict[str, Any]] | None = None
     prefix_cache: dict[str, Any] | None = None
     confinement: dict[str, Any] | None = None
+    answered_on_stop: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -601,6 +607,8 @@ class RunResult:
             del data["prefix_cache"]
         if data.get("confinement") is None:
             del data["confinement"]
+        if not data["answered_on_stop"]:
+            del data["answered_on_stop"]
         return data
 
 

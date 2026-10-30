@@ -53,13 +53,15 @@ SPEC_FIELDS = [
 ]
 
 # Optional memory, context accounting, prefix telemetry and write confinement are
-# omitted while None, so SPEC_FIELDS stays the legacy JSON line's shape.
+# omitted while None, and answered_on_stop while false, so SPEC_FIELDS stays the
+# legacy JSON line's shape.
 DATACLASS_FIELDS = [
     *SPEC_FIELDS,
     "memory_stats",
     "context_budget",
     "prefix_cache",
     "confinement",
+    "answered_on_stop",
 ]
 
 

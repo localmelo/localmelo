@@ -365,6 +365,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   opens at 1280 × 800. For clients, `status.items` of `GET /api/health` gains
   `activity` and `icon`, `status.focus` names the item a glance shows, and
   `GET /api/activity?since=` lists the day ([#308]).
+- Two developer settings for a run that stops with nothing to show, and a cap on
+  a reflection's lists. `--reflection-gate patient` (`-X
+  agent.reflection_gate=patient` for one run; off by default) is the default gate,
+  except that a reflection that chooses `continue` with a feasible, concrete but
+  not new next step still starts the next attempt, once per run; a second one
+  stops the run as before. `[agent] answer_on_stop = true` (`-X
+  agent.answer_on_stop=on`; off by default, listed by `melo config keys` and `melo
+  -h all`) makes a run that ends `gate_stopped` or `budget_exhausted` with an
+  empty result ask the model once more, without tools, for the final answer from
+  what it gathered, in the format the task asks for (`unknown` is allowed): the
+  status stays, `result` is that answer, and the JSON record gains
+  `"answered_on_stop": true`. With either on, a reflection keeps at most 8 items
+  of at most 300 characters in its evidence, failed-hypotheses and avoid lists.
+  Everything else is unchanged ([#311]).
 
 - Browsing, part 1: melo can read web pages in Safari. With `[browser] driver =
   "safari-automation"` (off by default; `/browser on` in the terminal chat, or
@@ -2462,6 +2476,7 @@ earlier milestones.
 [#306]: https://github.com/localmelo/localmelo/pull/306
 [#308]: https://github.com/localmelo/localmelo/pull/308
 [#309]: https://github.com/localmelo/localmelo/pull/309
+[#311]: https://github.com/localmelo/localmelo/pull/311
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

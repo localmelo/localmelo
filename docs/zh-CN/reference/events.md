@@ -311,7 +311,7 @@ CLI 在其计划行出现之前会忽略此事件；会话运行器会保存它�
 - `action`：反思的选择：`continue`、`stop`、`decompose` 或 `done`。使用 `reflection_gate="utility"` 时，对于超过大小限制且未选择 `done` 的反思，它为 `decompose`；默认的 `"flags"` 下，这样的反思会被裁剪，并保留其选择。
 - `continue_run`：仅当另一次尝试开始时为 `true`。在选择 `done` 之后、最后一次尝试之后，或 `max_steps` 用完之后，以及继续判定停止运行时，它为 `false`。
 - `flags`：决定中的 `task_still_feasible`、`next_step_is_concrete` 和 `next_step_is_novel`，均为布尔值；回复无法读取时为 `null`。
-- `gate`：生效的 `reflection_gate`，即 `flags` 或 `utility`。
+- `gate`：生效的 `reflection_gate`，即 `flags`、`utility` 或 `patient`。
 - `utility`：使用 `"utility"` 时为决定的效用值（见该选项）；否则为 `null`。
 - `stop_reason`：当且仅当 `continue_run` 为 `true` 时为 `null`；否则为下列中第一个适用的原因，顺序如下：`unreadable_reply`（没有决定，且无法开始任何尝试）、`action_not_continue`（动作为 `done`）、`no_attempt_left`（已用完 `max_attempts`；运行以 `Max attempts reached` 结束）、`step_budget_used`（已用完 `max_steps`；`Max steps reached`），然后是继续判定的各项检查：`action_not_continue`（动作为 `stop` 或 `decompose`）、`not_feasible`、`not_concrete`、`not_novel`，以及仅在 `"utility"` 下才有的 `utility_below_threshold`。它由决定它的代码推导得出，因此绝不会与 `continue_run` 相矛盾。`gate_stopped` 运行中若理由为空，则在 `error` 中报告：`Stopped after attempt <n> (stop reason: <code>)`；有理由时，错误就是该理由本身。在 `--brief` 运行中，只要还有步骤和尝试，`continue` 就会继续，因此 `flags` 中可以有 `false`，而 `stop_reason` 仍为 `null`；上面的其他检查不变。
 - `rationale`、`summary` 和 `best_effort_result`：反思的理由、它对该次尝试的总结，以及它迄今为止最佳的答案。它们与 `assistant.message` 的 `thinking` 和 `content` 一样经过敏感信息脱敏；`RunResult` 保留模型写出的最佳答案原文。
