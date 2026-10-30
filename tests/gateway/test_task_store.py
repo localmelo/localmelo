@@ -1562,3 +1562,24 @@ async def test_the_gateway_sweep_runs_the_scheduler_retention(
     assert await store.apply_retention() >= 1
     assert await recent_log(tasks, record.task_id) == []
     assert await get_task(tasks, record.task_id) is not None
+
+
+async def test_latest_finished_is_the_task_that_ended_last(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    assert await tasks.latest_finished() is None
+    first, _ = await create_task(tasks, spec("first"), origin="user")
+    second, _ = await create_task(tasks, spec("second"), origin="user")
+    queued, _ = await create_task(tasks, spec("queued"), origin="user")
+    await tasks.change(first.task_id, state="running")
+    assert await tasks.latest_finished() is None  # nothing has ended
+    clock.advance(10)
+    await tasks.change(first.task_id, state="done")
+    assert await tasks.latest_finished() == (first.task_id, "done", clock.now)
+    clock.advance(10)
+    await tasks.change(second.task_id, state="failed", failure_reason="it broke")
+    assert await tasks.latest_finished() == (second.task_id, "failed", clock.now)
+    assert queued.state == "queued"
+    clock.advance(10)
+    await tasks.change(queued.task_id, state="cancelled")
+    assert await tasks.latest_finished() == (queued.task_id, "cancelled", clock.now)

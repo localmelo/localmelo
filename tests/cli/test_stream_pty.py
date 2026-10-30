@@ -154,6 +154,11 @@ def test_a_tool_call_preamble_outside_developer_mode_has_no_label(
     term.see("Ask melo")
     term.type("read app.py\r")
     term.see("The file prints hello.")
+    # The second reply streams live while the first reply's event may still be
+    # on its way to the screen (events are drawn after they are stored, and
+    # storing is slower on a busy machine): count the preamble once the turn
+    # has ended and every event is drawn.
+    term.see("Worked for")
     text = screen(term)
     assert text.count("Let me read it.") == 1
     assert "partial reply" not in text

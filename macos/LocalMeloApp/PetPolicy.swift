@@ -1,0 +1,179 @@
+import CoreGraphics
+import Foundation
+
+/// Melo the Akita puppy's 14 pictures, named as their files under `Resources/akita` (`scripts/build_pet_assets.py`).
+/// The five sitting ones are the portrait of the starting view and the empty chat; the lying and sleeping nine are
+/// the desktop pet's.
+enum PetState: String, CaseIterable {
+    case sitIdle = "sit-idle", sitWorking = "sit-working", sitWaiting = "sit-waiting"
+    case sitDone = "sit-done", sitError = "sit-error"
+    case lieIdle = "lie-idle", lieWorking = "lie-working", lieWaiting = "lie-waiting"
+    case lieDone = "lie-done", lieError = "lie-error"
+    case restLazy = "rest-lazy", sleepFront = "sleep-front", sleepSide = "sleep-side", sleepBack = "sleep-back"
+
+    /// The three sleeping poses, in the order the pet turns through them.
+    static let sleepPoses: [PetState] = [.sleepFront, .sleepSide, .sleepBack]
+
+    var isAsleep: Bool { Self.sleepPoses.contains(self) }
+
+    /// The folder of the picture under `Resources/akita`.
+    var folder: String { rawValue.hasPrefix("sit-") ? "portrait" : "pet" }
+
+    /// The file for a screen scale: `lie-idle.png`, and `lie-idle@2x.png` from 2.
+    func fileName(scale: Int) -> String { scale >= 2 ? "\(rawValue)@2x.png" : "\(rawValue).png" }
+}
+
+/// How the newest finished run or chat turn ended: `done`, `failed` (anything the console words as a warning or an
+/// error) or `stopped` (the person stopped it).
+enum RunOutcome: String {
+    case done, failed, stopped
+}
+
+/// `status.recent` of `GET /api/health`: what finished last, and how many seconds ago.
+struct RecentOutcome: Equatable {
+    let kind: String
+    let id: String
+    let outcome: RunOutcome
+    let endedAgo: TimeInterval
+}
+
+/// The newest outcome, or nil when none finished yet, the field is missing (an older gateway) or damaged.
+func recentOutcome(_ data: Data) -> RecentOutcome? {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let status = body["status"] as? [String: Any],
+          let entry = status["recent"] as? [String: Any],
+          let kind = entry["kind"] as? String, ["chat", "task", "run", "terminal"].contains(kind),
+          let id = entry["id"] as? String, (1...128).contains(id.count),
+          let word = entry["outcome"] as? String, let outcome = RunOutcome(rawValue: word),
+          let ago = entry["ended_s_ago"] as? Double, ago.isFinite, ago >= 0 else { return nil }
+    return RecentOutcome(kind: kind, id: id, outcome: outcome, endedAgo: ago)
+}
+
+/// Seconds a finished run shows as done, and a failed one as an error, before the pet goes back to rest.
+let petDoneFor: TimeInterval = 6
+let petFailedFor: TimeInterval = 10
+/// Seconds of quiet before the pet falls asleep, and between one sleeping pose and the next.
+let petSleepAfter: TimeInterval = 60
+let petRotateEvery: TimeInterval = 180
+
+/// What the pet is doing. `picture` is what it looks like; the words differ where two moods share a picture.
+enum PetMood: Equatable {
+    case unknown, resting, sleeping(PetState), working(Int), waiting, done, failed, stopped
+
+    var picture: PetState {
+        switch self {
+        case .unknown: return .lieIdle
+        case .resting: return .restLazy
+        case .sleeping(let pose): return pose
+        case .working: return .lieWorking
+        case .waiting: return .lieWaiting
+        case .done: return .lieDone
+        case .failed, .stopped: return .lieError
+        }
+    }
+
+    /// What VoiceOver reads, and what hovering shows.
+    var label: String {
+        switch self {
+        case .unknown: return "Melo"
+        case .resting: return "Melo, resting. Nothing running."
+        case .sleeping: return "Melo, sleeping. Nothing running."
+        case .working(let n): return "Melo, working. \(n) running."
+        case .waiting: return "Melo, waiting for your approval."
+        case .done: return "Melo, done."
+        case .failed: return "Melo, the last run did not finish."
+        case .stopped: return "Melo, localmelo stopped."
+        }
+    }
+
+    /// What pressing the pet does.
+    var help: String { self == .waiting ? "Opens what waits for your approval" : "Opens localmelo" }
+}
+
+/// The pet's mood from the last health reply (nil: none yet, or the gateway did not answer). First match wins:
+/// the app's own failure, then a wait, then work, then a run that just finished, then rest. `sinceTouch` is the
+/// seconds since the person last touched the pet (hover, click, drag) or since it appeared; the quiet that puts
+/// it to sleep is the shorter of that and the age of the newest finished run, so a touch wakes it into rest and
+/// nothing changes its pose while it is touched. `poseSeed` picks the first sleeping pose of a quiet spell.
+func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval, poseSeed: Int) -> PetMood {
+    if stopped { return .stopped }
+    guard let data = health, let counts = runningCounts(data) else { return .unknown }
+    if !waitingItems(data).isEmpty { return .waiting }
+    if counts.total > 0 { return .working(counts.total) }
+    let recent = recentOutcome(data)
+    if let recent = recent {
+        if recent.outcome == .done && recent.endedAgo < petDoneFor { return .done }
+        if recent.outcome == .failed && recent.endedAgo < petFailedFor { return .failed }
+    }
+    let quiet = min(sinceTouch, recent?.endedAgo ?? .infinity)
+    guard !quiet.isNaN, quiet >= petSleepAfter else { return .resting }
+    let turns = Int(min((quiet - petSleepAfter) / petRotateEvery, 1_000_000))
+    let poses = PetState.sleepPoses
+    return .sleeping(poses[((poseSeed % poses.count + turns) % poses.count + poses.count) % poses.count])
+}
+
+/// What the system says that decides whether the pet may move.
+struct PetEnvironment: Equatable {
+    var reduceMotion = false
+    var lowPower = false
+    var thermal: ProcessInfo.ThermalState = .nominal
+    /// The pet's panel can be seen: not hidden by the person, not covered or off the screen.
+    var visible = true
+    /// The screen is on and this user's session is in front.
+    var screenAwake = true
+}
+
+/// Whether the pet's loops (breathing, the sleeping drift) may run. Each stop leaves the state's still picture.
+func shouldAnimate(_ environment: PetEnvironment) -> Bool {
+    let hot = environment.thermal == .serious || environment.thermal == .critical
+    return !environment.reduceMotion && !environment.lowPower && !hot
+        && environment.visible && environment.screenAwake
+}
+
+/// Seconds a change of picture takes: a short cross-fade, and none under Reduce Motion (the picture swaps).
+func petCrossfade(_ environment: PetEnvironment) -> TimeInterval { environment.reduceMotion ? 0 : 0.15 }
+
+/// Points between the pet's panel and the right edge of the screen's usable area when it first appears.
+let petEdgeInset: CGFloat = 16
+/// A drop whose paws are this close to the bottom edge of the usable area puts them on it.
+let petSnapDistance: CGFloat = 12
+
+/// The panel's frame (screen coordinates, y up) at first: at the bottom right of `visible`, the usable area of the
+/// screen, with the paws on its bottom edge. `belowPaws` is the clear strip under the paws on the panel's canvas
+/// (its height minus `ground` in anchors.json).
+func petDefaultFrame(size: CGSize, belowPaws: CGFloat, in visible: CGRect) -> CGRect {
+    let frame = CGRect(x: visible.maxX - petEdgeInset - size.width, y: visible.minY - belowPaws,
+                       width: size.width, height: size.height)
+    return petClamped(frame, belowPaws: belowPaws, in: visible)
+}
+
+/// `frame` moved the least that puts it inside `visible`, except that the strip under the paws may hang below the
+/// bottom edge so the paws can rest on it. A panel larger than `visible` keeps its bottom-left corner.
+func petClamped(_ frame: CGRect, belowPaws: CGFloat, in visible: CGRect) -> CGRect {
+    CGRect(x: max(visible.minX, min(frame.minX, visible.maxX - frame.width)),
+           y: max(visible.minY - belowPaws, min(frame.minY, visible.maxY - frame.height)),
+           width: frame.width, height: frame.height)
+}
+
+/// A dropped panel: within `petSnapDistance` of the bottom edge, the paws go onto it; otherwise as it is.
+func petSnapped(_ frame: CGRect, belowPaws: CGFloat, in visible: CGRect) -> CGRect {
+    guard abs(frame.minY + belowPaws - visible.minY) <= petSnapDistance else { return frame }
+    return CGRect(x: frame.minX, y: visible.minY - belowPaws, width: frame.width, height: frame.height)
+}
+
+/// Where to save a panel for its screen: how far its bottom-right corner is from the bottom-right corner of the
+/// screen's usable area. A change of Dock size or of the screen's resolution moves the pet with that corner.
+struct PetSpot: Equatable {
+    let dx: CGFloat
+    let dy: CGFloat
+}
+
+func petSpot(of frame: CGRect, on visible: CGRect) -> PetSpot {
+    PetSpot(dx: frame.maxX - visible.maxX, dy: frame.minY - visible.minY)
+}
+
+/// The panel's frame for a saved spot on the screen's current usable area, clamped onto it.
+func petFrame(size: CGSize, spot: PetSpot, belowPaws: CGFloat, on visible: CGRect) -> CGRect {
+    petClamped(CGRect(x: visible.maxX + spot.dx - size.width, y: visible.minY + spot.dy,
+                      width: size.width, height: size.height), belowPaws: belowPaws, in: visible)
+}

@@ -62,7 +62,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
       {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo"},
       {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog"},
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test"}
-    ]
+    ],
+    "waiting": [],
+    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2}
   },
   "uptime_s": 132.4
 }
@@ -77,6 +79,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `sessions.resume_mode` 是当前使用的恢复方式；目前为 `pairs`。
 - `status.running` 按类别统计当前正在运行的内容：`chats`（控制台中有轮次在进行的对话，与 `sessions.running` 相同）、`tasks`（状态为 `running` 的调度任务）、`runs`（直接运行和 `--brief` worker）和 `terminal`（交互式 `melo` 对话）。后两项来自命令行文件，只在租约有效时才计入一个轮次，因此进程已终止的运行不会被计入。`status.tasks` 是状态行所显示的调度队列：`running`、`queued`、`held` 和 `top_level`（其中最高的级别，没有则为 `null`）。`status.items` 列出正在运行的内容，先是对话，然后是任务、运行和终端对话，最多 20 项，每项为 `{"kind", "id", "title"}`（`kind` 为 `chat`、`task`、`run` 或 `terminal`；终端对话的标题已脱敏）。计数没有上限。无法读取的存储按没有运行任何内容计；一次调用通过索引读取任务状态，并通过索引读取命令行文件中正在运行的轮次。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
+- `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中 Melo 的状态策略会读取它，应用目前还不显示 Melo。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
 
 ## GET /api/settings
 

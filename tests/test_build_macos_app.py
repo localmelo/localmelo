@@ -305,6 +305,9 @@ def test_build_assembles_locked_runtime_and_swift(
     # Each asset holds its own name, so a copy under the wrong name shows.
     for name in ("AppIcon.icns", "MenuBarLogo.png", "MenuBarLogo@2x.png"):
         (root / "macos/assets" / name).write_bytes(name.encode())
+    for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
+        (root / "macos/art/akita" / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / "macos/art/akita" / name).write_bytes(name.encode())
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
@@ -347,6 +350,10 @@ def test_build_assembles_locked_runtime_and_swift(
     assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"
     assert (resources / "MenuBarLogo.png").read_bytes() == b"MenuBarLogo.png"
     assert (resources / "MenuBarLogo@2x.png").read_bytes() == b"MenuBarLogo@2x.png"
+    # Melo's pictures keep their folders: the app finds them under Resources/akita.
+    akita = resources / "akita"
+    for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
+        assert (akita / name).read_bytes() == name.encode()
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()

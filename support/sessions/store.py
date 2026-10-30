@@ -117,6 +117,11 @@ SESSION_KINDS: Final = frozenset({"chat", "front", "front_bg", "task", "worker"}
 RESERVED_EVENT_PREFIXES: Final = ("task.", "sched.", "attention.")
 Cause = Literal["run", "user_stop", "closed", "shutdown", "crash", "takeover", "park"]
 CAUSES: Final = frozenset(get_args(Cause))
+# The causes of a turn that finished as an outcome: its run ended, or the person stopped it. A shutdown, a crash,
+# a takeover, a close and a park end a turn without a result worth showing.
+OUTCOME_CAUSES: Final = ("run", "user_stop")
+# How many of the most recently updated sessions latest_finished_turn looks at.
+RECENT_SESSIONS: Final = 8
 STALE_ERROR: Final = "The process running this turn stopped before it finished."
 # The error of a turn that another host's expired lease left (revision 48).
 TAKEOVER_ERROR: Final = "The session was taken over by another process"
@@ -333,6 +338,17 @@ class SessionInfo:
     meta: dict[str, Any]
     busy: bool
     turns: int
+
+
+@dataclass(frozen=True)
+class FinishedTurn:
+    """The newest turn that ended through its run or by the person's stop: its session, how, and when."""
+
+    session_id: str
+    kind: str
+    status: str
+    cause: str
+    finished_at: float
 
 
 @dataclass(frozen=True)
@@ -1608,6 +1624,34 @@ class SessionStore:
             conn = await self._ready()
             rows = await _rows(conn, sql, args)
         return [_turn_info(row) for row in reversed(rows)]
+
+    async def latest_finished_turn(self, kinds: Collection[str]) -> FinishedTurn | None:
+        """The newest finished turn of a session of *kinds*, or ``None``.
+
+        Only a turn that ended with the cause ``run`` or ``user_stop``
+        counts (:data:`OUTCOME_CAUSES`), and not an undone one. It reads the
+        newest finished turn of each of the :data:`RECENT_SESSIONS` most
+        recently updated sessions, through the kind index and the turn key,
+        so it costs a few rows however many turns are stored: a turn's end
+        updates its session, so the newest finished turn is in one of them.
+        """
+        kind_sql, kind_args = self._kind_filter(_check_kinds(kinds))
+        causes = ", ".join("?" * len(OUTCOME_CAUSES))
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT r.id, r.kind, t.status, t.cause, t.finished_at FROM "
+                f"(SELECT s.id, s.kind FROM sessions s WHERE 1 {kind_sql} "
+                "ORDER BY s.updated_at DESC LIMIT ?) r "
+                "JOIN turns t ON t.session_id = r.id AND t.turn = ("
+                "SELECT q.turn FROM turns q WHERE q.session_id = r.id "
+                "AND q.finished_at IS NOT NULL AND q.undone = 0 "
+                f"AND q.cause IN ({causes}) ORDER BY q.turn DESC LIMIT 1) "
+                "ORDER BY t.finished_at DESC LIMIT 1",
+                (*kind_args, RECENT_SESSIONS, *OUTCOME_CAUSES),
+            )
+        return FinishedTurn(*rows[0]) if rows else None
 
     async def list_events(
         self,

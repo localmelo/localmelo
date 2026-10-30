@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,11 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.running import MAX_ITEMS
 from localmelo.support.gateway.console.worker_reader import WorkerReader
-from localmelo.support.sessions.store import NewSession, SessionStore
+from localmelo.support.sessions.store import (
+    NewSession,
+    SessionStore,
+    SessionStoreError,
+)
 
 from .conftest import HOLDER, FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
 
@@ -89,6 +94,7 @@ async def test_nothing_runs_on_a_fresh_console(client: TestClient) -> None:
         "tasks": {"running": 0, "queued": 0, "held": 0, "top_level": None},
         "items": [],
         "waiting": [],
+        "recent": None,
     }
     # Every field health had before stays.
     assert body["sessions"]["running"] == 0 and body["model"]["name"] == "stub-model"
@@ -253,3 +259,164 @@ async def test_an_unavailable_store_still_answers(
     finally:
         await second.aclose()
         await first.aclose()
+
+
+def set_turn(console: Console, session_id: str, **columns: Any) -> None:
+    """Change columns of a session's turns in the gateway's file, as an older or odder turn would have them."""
+    sets = ", ".join(f"{name} = ?" for name in columns)
+    with sqlite3.connect(console.store.path) as conn:
+        conn.execute(
+            f"UPDATE turns SET {sets} WHERE session_id = ?",
+            (*columns.values(), session_id),
+        )
+
+
+async def test_the_newest_finished_chat_turn_is_the_recent_outcome(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    older = await seed_turn(console.store, workspace, title="Older")
+    set_turn(console, older.session_id, finished_at=time.time() - 500)
+    newest = await seed_turn(console.store, workspace, title="Newest")
+    found = status(client)["recent"]
+    assert found.keys() == {"kind", "id", "outcome", "ended_s_ago"}
+    assert (found["kind"], found["id"], found["outcome"]) == (
+        "chat",
+        newest.session_id,
+        "done",
+    )
+    assert 0 <= found["ended_s_ago"] < 5
+    # The age counts from the end of the turn, to a tenth of a second.
+    set_turn(console, newest.session_id, finished_at=time.time() - 42.26)
+    assert status(client)["recent"]["ended_s_ago"] == pytest.approx(42.3, abs=0.5)
+
+
+@pytest.mark.parametrize(
+    "status_word, cause, outcome",
+    [
+        ("completed", "run", "done"),
+        ("cancelled", "user_stop", "stopped"),
+        ("failed", "run", "failed"),
+        ("provider_error", "run", "failed"),
+        ("budget_exhausted", "run", "failed"),
+        ("stuck", "run", "failed"),
+        ("timeout", "run", "failed"),
+        ("crashed", "run", "failed"),
+    ],
+)
+async def test_a_turns_status_says_done_failed_or_stopped(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    status_word: str,
+    cause: str,
+    outcome: str,
+) -> None:
+    turn = await seed_turn(console.store, workspace, status=status_word)
+    set_turn(console, turn.session_id, cause=cause)
+    assert status(client)["recent"]["outcome"] == outcome
+
+
+@pytest.mark.parametrize("cause", ["shutdown", "closed", "crash", "takeover", "park"])
+async def test_a_turn_that_something_else_ended_is_no_outcome(
+    client: TestClient, console: Console, workspace: str, cause: str
+) -> None:
+    """A restart, a crash recovery or a park is not a result the person should see."""
+    turn = await seed_turn(console.store, workspace)
+    set_turn(console, turn.session_id, cause=cause)
+    assert status(client)["recent"] is None
+
+
+async def test_the_last_real_outcome_of_a_session_shows_past_a_later_recovery(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    done = await seed_turn(console.store, workspace, status="failed")
+    stale = await console.store.begin_turn(
+        done.session_id, "again", holder=HOLDER, title=None
+    )
+    await console.store.finish_turn(
+        stale.session_id,
+        stale.turn,
+        holder=HOLDER,
+        status="crashed",
+        cause="crash",
+        result=None,
+        answer="",
+    )
+    assert status(client)["recent"]["outcome"] == "failed"
+    # An undone turn counts for nothing either.
+    set_turn(console, done.session_id, undone=1)
+    assert status(client)["recent"] is None
+
+
+async def test_runs_and_terminal_chats_have_their_own_kinds_and_the_newest_wins(
+    client: TestClient, console: Console, workspace: str, cli_path: Path
+) -> None:
+    chat = await seed_turn(console.store, workspace)
+    set_turn(console, chat.session_id, finished_at=time.time() - 300)
+    run = await begin(cli_path, "worker", "a run", finish=True)
+    assert status(client)["recent"]["kind"] == "run"
+    assert status(client)["recent"]["id"] == run
+    with sqlite3.connect(cli_path) as conn:
+        conn.execute("UPDATE turns SET finished_at = ?", (time.time() - 900,))
+    terminal = await begin(cli_path, "chat", "a terminal chat", finish=True)
+    with sqlite3.connect(cli_path) as conn:
+        conn.execute(
+            "UPDATE turns SET finished_at = ? WHERE session_id = ?",
+            (time.time() - 100, terminal),
+        )
+    found = status(client)["recent"]
+    assert (found["kind"], found["id"]) == ("terminal", terminal)
+    # A running turn is not an outcome: only the finished one shows.
+    await begin(cli_path, "worker", "still going")
+    assert status(client)["recent"]["id"] == terminal
+
+
+@pytest.mark.parametrize(
+    "state, outcome",
+    [
+        ("done", "done"),
+        ("failed", "failed"),
+        ("cancelled", "stopped"),
+        ("expired", "stopped"),
+    ],
+)
+async def test_a_finished_task_is_a_recent_outcome(
+    client: TestClient,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+    outcome: str,
+) -> None:
+    async def latest() -> tuple[str, str, float]:
+        return ("t9", state, time.time() - 3)
+
+    monkeypatch.setattr(console.workers.tasks, "latest_finished", latest)
+    found = status(client)["recent"]
+    assert (found["kind"], found["id"], found["outcome"]) == ("task", "t9", outcome)
+    assert 2.5 <= found["ended_s_ago"] <= 8
+
+
+async def test_an_unreadable_part_leaves_the_others_and_never_fails_health(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    cli_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await seed_turn(console.store, workspace)
+    run = await begin(cli_path, "worker", "a run", finish=True)
+    set_turn(console, (await console.store.list_sessions())[0].id, finished_at=1.0)
+
+    async def broken(*_: Any, **__: Any) -> Any:
+        raise SessionStoreError("cannot read")
+
+    monkeypatch.setattr(console.worker_history, "latest_finished_turn", broken)
+    monkeypatch.setattr(console.workers.tasks, "latest_finished", broken)
+    assert status(client)["recent"]["kind"] == "chat"
+    monkeypatch.setattr(console.store, "latest_finished_turn", broken)
+    assert status(client)["recent"] is None
+    monkeypatch.undo()
+    assert status(client)["recent"]["id"] == run
+    # A store that is not ok is not asked at all.
+    monkeypatch.setattr(console, "store_state", lambda: "unavailable")
+    assert client.get("/api/health").json()["status"]["recent"]["id"] == run

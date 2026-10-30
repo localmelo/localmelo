@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -350,10 +351,77 @@ def test_a_real_direct_run_is_served_and_summarised(
     assert body["cache"]["requests"] >= 1
 
 
+# What a loaded machine slows down in the test below: the run's process start
+# (the CLI creates its file, then the schema), the writer task that stores each
+# event, and the model call. Every wait is for the event it needs, under one
+# generous deadline, never for a fixed time.
+DEADLINE_S = 120.0
+
+# A child that stands still between creating its sessions file and creating
+# the schema in it: a process start that is slow at that point.
+SLOW_SCHEMA = """\
+import asyncio
+
+from localmelo.support.sessions import store
+
+_create_schema = store.SessionStore._create_schema
+
+
+async def _slow(self, conn):
+    await asyncio.sleep({delay})
+    return await _create_schema(self, conn)
+
+
+store.SessionStore._create_schema = _slow
+"""
+
+
+async def first_worker_session(
+    client: httpx.AsyncClient, base: str, run: subprocess.Popen[bytes]
+) -> str:
+    """The id of the worker run, once the console lists it.
+
+    The CLI creates its sessions file before the schema in it, so for a while
+    the list answers 503 ``store_unavailable``: that is not yet, not a failure.
+    """
+    deadline = time.monotonic() + DEADLINE_S
+    last = "no answer"
+    while time.monotonic() < deadline:
+        resp = await client.get(f"{base}/api/sessions?kind=worker")
+        last = f"{resp.status_code} {resp.text}"
+        if resp.status_code == 200 and (rows := resp.json()["sessions"]):
+            return str(rows[0]["id"])
+        assert run.poll() is None, f"the run ended ({run.returncode}) unlisted: {last}"
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"no worker run was listed in {DEADLINE_S:g} s: {last}")
+
+
+async def read_until(lines: AsyncIterator[str], needle: str) -> None:
+    """Read stream lines up to the first one holding *needle*."""
+    try:
+        async with asyncio.timeout(DEADLINE_S):
+            async for line in lines:
+                if needle in line:
+                    return
+    except TimeoutError:
+        raise AssertionError(f"{needle!r} did not arrive in {DEADLINE_S:g} s") from None
+    raise AssertionError(f"the stream ended before {needle!r}")
+
+
+async def wait_for(check: Callable[[], bool], what: str) -> None:
+    deadline = time.monotonic() + DEADLINE_S
+    while not check():
+        assert time.monotonic() < deadline, f"{what} did not happen in {DEADLINE_S:g} s"
+        await asyncio.sleep(0.05)
+
+
+@pytest.mark.parametrize("schema_delay_s", [0.0, 1.5], ids=["prompt", "schema-late"])
 async def test_a_direct_run_held_mid_flight_is_followed_to_its_end(
     tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
     console: Console,
     monkeypatch: pytest.MonkeyPatch,
+    schema_delay_s: float,
 ) -> None:
     """The stream carries a real run's steps while it is blocked, then ends."""
     from localmelo.tests.fixtures.stub_llm import StubServer
@@ -377,6 +445,12 @@ async def test_a_direct_run_held_mid_flight_is_followed_to_its_end(
     stub = StubServer(scenario, default="live").start()
     env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALMELO_")}
     env["HOME"] = str(tmp_path)
+    if schema_delay_s:
+        hook = tmp_path_factory.mktemp("slow-schema")
+        (hook / "sitecustomize.py").write_text(SLOW_SCHEMA.format(delay=schema_delay_s))
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(hook), *filter(None, [env.get("PYTHONPATH")])]
+        )
     run = subprocess.Popen(
         [sys.executable, "-m", "localmelo", "--base-url", stub.base_url]
         + ["--chat-model", "stub-model", "--", "read the notes"],
@@ -392,26 +466,20 @@ async def test_a_direct_run_held_mid_flight_is_followed_to_its_end(
     server, task, port = await _serve(console)
     base = f"http://127.0.0.1:{port}"
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            sid = None
-            for _ in range(600):
-                rows = (await client.get(f"{base}/api/sessions?kind=worker")).json()
-                if rows["sessions"]:
-                    sid = rows["sessions"][0]["id"]
-                    break
-                await asyncio.sleep(0.1)
-            assert sid is not None
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=None)) as client:
+            sid = await first_worker_session(client, base, run)
             async with client.stream("GET", f"{base}/api/sessions/{sid}/events") as r:
                 lines = r.aiter_lines()
-                await _line_starting(lines, 'data: {"id":')
-                async for line in lines:
-                    if '"type":"tool.finished"' in line:
-                        break
+                await read_until(lines, 'data: {"id":')
+                await read_until(lines, '"type":"tool.finished"')
+                # The next model call is the one the stub holds: wait until it
+                # is there, so the run is blocked on the model, not about to be.
+                await wait_for(lambda: len(stub.requests) >= 2, "the held model call")
                 assert run.poll() is None, "the run is still blocked on the model"
                 stub.released.set()
-                rest = await asyncio.wait_for(_collect(lines), timeout=60)
+                rest = await asyncio.wait_for(_collect(lines), timeout=DEADLINE_S)
             assert any('"type":"turn.finished"' in line for line in rest)
-        assert run.wait(timeout=60) == 0
+        assert await asyncio.to_thread(run.wait, DEADLINE_S) == 0
     finally:
         stub.close()
         if run.poll() is None:

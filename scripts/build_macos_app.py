@@ -82,6 +82,9 @@ ASSETS = {
     "MenuBarLogo.png": "MenuBarLogo.png",
     "MenuBarLogo@2x.png": "MenuBarLogo@2x.png",
 }
+# Melo the Akita puppy's pictures (the desktop pet, the portrait, the small faces) are committed in macos/art/akita,
+# made by scripts/build_pet_assets.py when the art changes. The build copies the folder as it is, with its anchors.json.
+PICTURES = "macos/art/akita"
 
 # Resolve every link, including a Homebrew-style link to this launcher. No build
 # paths or shell-interpreted user arguments are embedded in the bundle.
@@ -351,6 +354,7 @@ def build(output: Path) -> None:
             name,
         ) in ASSETS.items():  # the app icon, and the logo of the menu-bar item
             shutil.copy2(ROOT / "macos/assets" / asset, contents / "Resources" / name)
+        shutil.copytree(ROOT / PICTURES, contents / "Resources/akita")
         verify_links(python)
         run(
             [
