@@ -26,6 +26,7 @@ from localmelo.support.cli import commands
 from localmelo.support.cli.agents import AgentFactory, url_backend
 from localmelo.support.cli.approvals import TerminalApprover
 from localmelo.support.cli.output import RecordingOut
+from localmelo.support.cli.picker import ModelRow
 from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import UNICODE
@@ -102,6 +103,9 @@ class FakeApp:
         self.buffer = Buffer(multiline=True)
         self.hints: list[str] = []
         self.answers = list(answers or [])
+        # What /model's picker is shown, and what the person picks, in turn.
+        self.offered: list[tuple[list[ModelRow], str, str]] = []
+        self.picks: list[str | None] = []
         self.exited = False
         self.bells = 0
         self.invalidated = 0
@@ -121,6 +125,12 @@ class FakeApp:
     async def ask(self, prompt: str, default: str = "") -> str | None:
         answer = self.answers.pop(0)
         return default if answer == "" else answer
+
+    async def choose_model(
+        self, rows: list[ModelRow], *, where: str, current: str
+    ) -> str | None:
+        self.offered.append((list(rows), where, current))
+        return self.picks.pop(0)
 
 
 class Setup:
@@ -380,14 +390,16 @@ async def test_new_starts_a_new_session_with_no_grants(setup: Setup) -> None:
     assert len(await setup.store.list_sessions()) == 2
 
 
-async def test_model_lists_then_switches_and_saves(setup: Setup) -> None:
+async def test_model_picks_from_the_list_then_switches_and_saves(setup: Setup) -> None:
     session = setup.session
     session.enter("one")
     await setup.idle()
     old = session.agent
+    setup.app.picks = ["m2"]
     await session.model("")
-    assert "❯ 1. m1\n  2. m2" in setup.out.text()
-    await session.model("2")
+    [(rows, where, current)] = setup.app.offered
+    assert [row.id for row in rows] == ["m1", "m2"] and current == "m1"
+    assert where == f"OpenAI-compatible server · {URL}"
     assert session.agent is not old and session.factory.backend.model == "m2"
     assert old not in setup.factory.live_agents()
     # The conversation moved to the new Agent.
@@ -399,6 +411,92 @@ async def test_model_lists_then_switches_and_saves(setup: Setup) -> None:
     )
     sessions = await setup.store.list_sessions()
     assert sessions[0].model == "m2"
+    # The numbers of the last listing still switch: /model 1 is m1 again.
+    await session.model("1")
+    assert session.factory.backend.model == "m1"
+
+
+async def test_model_offers_chat_models_and_marks_the_loaded_one(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels(frozenset({"m2", "embed-x"}), True)
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    setup.factory.listed = ["embed-x", "m1", "m2", "rerank-y"]
+    setup.app.picks = [None]
+    await setup.session.model("")
+    [(rows, _, _)] = setup.app.offered
+    assert [(row.id, row.loaded, row.kind) for row in rows] == [
+        ("m1", False, "chat"),
+        ("m2", True, "chat"),
+    ]
+    assert setup.session.models == ["embed-x", "m1", "m2", "rerank-y"]
+
+
+async def test_model_asks_which_models_are_loaded_only_between_several(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        raise AssertionError("one chat model needs no status request")
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    setup.factory.listed = ["m1", "embed-x"]
+    setup.app.picks = [None]
+    await setup.session.model("")
+    assert [row.id for row in setup.app.offered[0][0]] == ["m1"]
+
+
+async def test_model_with_only_embedding_models_shows_them_tagged(
+    setup: Setup,
+) -> None:
+    setup.factory.listed = ["embed-a", "embed-b"]
+    setup.app.picks = [None]
+    await setup.session.model("")
+    [(rows, _, _)] = setup.app.offered
+    assert [(row.id, row.kind) for row in rows] == [
+        ("embed-a", "embedding"),
+        ("embed-b", "embedding"),
+    ]
+
+
+async def test_closing_the_model_list_keeps_the_model_and_saves_nothing(
+    setup: Setup,
+) -> None:
+    setup.app.picks = [None, "m1"]
+    old = setup.session.agent
+    await setup.session.model("")
+    assert "Cancelled. Still using m1." in setup.out.text()
+    await setup.session.model("")  # the model that is already in use
+    assert "Still using m1." in setup.out.text()
+    assert setup.session.agent is old and setup.factory.saved == []
+    assert setup.session.state == "idle"
+
+
+async def test_model_without_a_list_to_pick_from_says_how_to_switch(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(setup.factory, "listable", lambda: False)  # a cloud API
+    await setup.session.model("")
+    text = setup.out.text()
+    assert "Model: m1 · OpenAI-compatible server" in text
+    assert "/model NAME switches and saves." in text and setup.app.offered == []
+
+
+@pytest.mark.parametrize(
+    ("listed", "said"),
+    [
+        (DiscoveryError("connection refused", reachable=False), "✗ Could not list"),
+        ([], f"✗ {URL} lists no models."),
+    ],
+    ids=["server-down", "no-models"],
+)
+async def test_model_says_why_there_is_no_list(
+    setup: Setup, listed: list[str] | Exception, said: str
+) -> None:
+    setup.factory.listed = listed
+    await setup.session.model("")
+    assert said in setup.out.text() and setup.app.offered == []
 
 
 async def test_a_model_that_cannot_start_keeps_the_old_one(setup: Setup) -> None:
@@ -513,11 +611,11 @@ async def test_model_ids_from_the_server_cannot_act_on_the_terminal(
     setup: Setup,
 ) -> None:
     setup.factory.listed = ["m1", "evil\x1b]0;PWNED\x1b\\model"]
+    setup.app.picks = [None]
     await setup.session.model("")
     await setup.session.model("missing\x1b[2J")
     text = setup.out.text()
     assert "\x1b" not in text and "PWNED" not in text
-    assert "2. evilmodel" in text
 
 
 # ── Review fixes ──
@@ -1093,15 +1191,15 @@ async def test_a_turn_that_could_not_run_gives_the_message_back(
 
 async def test_a_command_that_runs_is_echoed_before_its_output(setup: Setup) -> None:
     session = setup.session
+    setup.app.picks = [None]  # /model's list is closed again
     session.enter("/model")
-    await _until(lambda: "/model NAME or /model N" in setup.out.text())
+    await _until(lambda: "Cancelled. Still using m1." in setup.out.text())
     await setup.idle()
     session.enter("/model m2")
     await _until(lambda: "Saved as the default." in setup.out.text())
     await setup.idle()
     text = setup.out.text()
-    assert "› /model\nModel: m1 · " in text
-    assert "/model NAME or /model N switches and saves.\n\n› /model m2\n" in text
+    assert "› /model\nCancelled. Still using m1.\n\n› /model m2\n" in text
     assert (
         "› /model m2\nModel: m2 (OpenAI-compatible server). Saved as the default.\n\n"
         in text

@@ -96,8 +96,10 @@ like this, and with several chat models it asks oMLX which are loaded
 - Several, and oMLX says which are loaded: setup marks them `(loaded)` and
   makes the first of them the default.
 - Several, and none is loaded or oMLX does not say: there is no default.
-  Type the number of the model to use; Enter alone asks again, because
-  choosing for you could start a long load of a large model. While a key is
+  Nothing is highlighted, and Enter does nothing until you move to a model
+  with ↑ ↓ (answers piped in: type the number of the model to use, and Enter
+  alone asks again), because choosing for you could start a long load of a
+  large model. While a key is
   set, oMLX does not say, even with **Allow inference without API key** on,
   and setup prints `The server did not say which models are loaded (it needs
   a key for that).` A model that has an alias in oMLX is listed under the

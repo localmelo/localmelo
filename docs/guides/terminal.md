@@ -149,7 +149,7 @@ with `/model`, `/backend`, `/new`, `/status`, `/help` and `/exit`.
 | `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, a usage block (cache, context, steps, tasks: a row appears once it has data; `--developer` shows every row), files and version. |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
 | `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
-| `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
+| `/model [name\|number]` | Alone: a list of the server's chat models (an embedding or reranking model is left out), the current one marked `✓` and the ones in memory `(loaded)` where the server says. Type to filter, ↑ ↓ to move, Enter to switch and save the model as the default, Esc to keep the current one. With a listed id, or a number from the server's listing (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. With no list to pick from (a cloud API), `/model` says so and `/model NAME` switches. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, `omlx` when its model listing names oMLX, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
@@ -628,16 +628,26 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
-- A server that lists several models shows them as a numbered list, chat
-  models first, and asks `Model [N]:`; type a number or an id. An embedding
-  or reranking model is tagged `(embedding)` or `(reranking)` and is never
-  the default. With several chat models, a loaded one is marked `(loaded)` and
-  is the default; when the server does not say which are loaded, the prompt is
+- A server that lists several models is shown as a list to choose from. On a
+  terminal (stdin and stdout, `TERM` not `dumb`) it is the same list as `/model`:
+  type to filter, ↑ ↓ to move, Enter to choose, Esc or Ctrl+C to cancel the
+  setup (`Setup cancelled.`). It holds the chat models only (embedding and
+  reranking models are left out, unless the server lists nothing else). With
+  several chat models, a loaded one is marked `(loaded)` and highlighted; when
+  the server does not say which are loaded, nothing is highlighted, Enter does
+  nothing until a key moves to a row, and a line first says that a model that
+  is not loaded yet can take minutes and a lot of memory to load. Without a
+  terminal (answers piped in) the models are a numbered list, chat models
+  first, and the prompt is `Model [N]:`; type a number or an id. An embedding
+  or reranking model is tagged `(embedding)` or `(reranking)` and is never the
+  default. With several chat models, a loaded one is marked `(loaded)` and is
+  the default; when the server does not say which are loaded, the prompt is
   `Model:` with no default and Enter alone asks again
-  (`Type the number of the model to use. …`). Without a terminal an empty
-  answer then exits 2 with an error. `/backend` asks the same way. A server that lists only embedding or
-  reranking models is shown the same way, with a line saying that chat needs a
-  chat model. The hints are wrapped to the terminal's width at word boundaries.
+  (`Type the number of the model to use. …`), and without a terminal an empty
+  answer exits 2 with an error. `/backend` asks with numbers. A server that
+  lists only embedding or reranking models is shown the same way, with a line
+  saying that chat needs a chat model. The hints are wrapped to the terminal's
+  width at word boundaries.
 - An Ollama server, one that answers `GET /api/version` with
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
   `[ollama]` table's `chat_url` and `chat_model`; the banner then says

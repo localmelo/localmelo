@@ -548,11 +548,41 @@ class ModelChoiceError(Exception):
     """Several models are served, none is known to be loaded, and none was named."""
 
 
-def _kind(model: str) -> str:
-    """What a listed id names: ``chat``, ``embedding`` or ``reranking``."""
-    if "rerank" in model.lower():
-        return "reranking"
-    return "embedding" if discovery.is_embedding_model(model) else "chat"
+def _arrow_keys() -> bool:
+    """Whether stdin and stdout are a terminal that an arrow-key list can draw on."""
+    try:
+        ttys = sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+    return ttys and os.environ.get("TERM") != "dumb"
+
+
+def _pick_model(
+    url: str, models: list[str], loaded: discovery.LoadedModels, default: str | None
+) -> str:
+    """Choose from *models* with the arrow-key list; a close cancels the setup."""
+    from localmelo.support.cli.picker import ModelPicker, ModelRow, run_inline
+    from localmelo.support.cli.theme import symbols_for, wants_no_color
+
+    rows = [
+        ModelRow(model, model in loaded.ids, discovery.model_kind(model))
+        for model in models
+    ]
+    chosen = run_inline(
+        lambda width, invalidate: ModelPicker(
+            rows,
+            where=url,
+            start=default,
+            title="Choose a model",
+            width=width,
+            invalidate=invalidate,
+            symbols=symbols_for(sys.stdout.encoding),
+        ),
+        no_color=wants_no_color(),
+    )
+    if chosen is None:
+        raise KeyboardInterrupt
+    return chosen.id
 
 
 def _choose_model(url: str, models: list[str]) -> str:
@@ -560,11 +590,14 @@ def _choose_model(url: str, models: list[str]) -> str:
 
     Chat models are listed first, an embedding or reranking model is tagged
     and is never the default. With several chat models the default is the
-    one the server says is loaded; if it does not say, there is no default
-    and Enter asks again. Without a terminal an empty answer then raises
-    :class:`ModelChoiceError`.
+    one the server says is loaded; if it does not say, there is no default.
+    On a terminal the list is chosen from with the arrow keys (embedding and
+    reranking models left out when there is a chat model; with no default
+    nothing is highlighted until a key moves). Otherwise the models are
+    numbered, Enter alone asks again, and without a terminal an empty answer
+    raises :class:`ModelChoiceError`.
     """
-    chat = [model for model in models if _kind(model) == "chat"]
+    chat = [model for model in models if discovery.model_kind(model) == "chat"]
     if len(models) == 1 and chat:
         return models[0]
     listed = chat + [model for model in models if model not in chat]
@@ -574,12 +607,14 @@ def _choose_model(url: str, models: list[str]) -> str:
         if len(chat) > 1
         else discovery.LoadedModels()
     )
-    print(f"Models on {url}:")
-    for i, model in enumerate(listed, 1):
-        tags = [] if model in chat else [_kind(model)]
-        tags += ["loaded"] if model in loaded.ids else []
-        suffix = f"  ({', '.join(tags)})" if tags else ""
-        print(f"  [{i}] {model}{suffix}")
+    arrows = _arrow_keys()
+    if not arrows:
+        print(f"Models on {url}:")
+        for i, model in enumerate(listed, 1):
+            tags = [] if model in chat else [discovery.model_kind(model)]
+            tags += ["loaded"] if model in loaded.ids else []
+            suffix = f"  ({', '.join(tags)})" if tags else ""
+            print(f"  [{i}] {model}{suffix}")
     if not chat:
         _say(
             "These look like embedding or reranking models; chat needs a chat model.",
@@ -589,6 +624,10 @@ def _choose_model(url: str, models: list[str]) -> str:
     default = str(listed.index(pick) + 1) if pick else ""
     if len(chat) > 1 and not default and loaded.needs_key:
         _say(discovery.NO_STATUS_KEY_NOTE, indent=2)
+    if arrows:
+        if len(chat) > 1 and pick is None:
+            _say(discovery.LOAD_COST_NOTE, indent=2)
+        return _pick_model(url, chat or listed, loaded, pick)
     while True:
         raw = _question("Model", default)
         if not raw:
