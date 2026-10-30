@@ -88,6 +88,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A fact you state is kept as a note, and melo no longer goes off to save it in a
+  file. On a real model, "My group meeting is on Thursdays at 3 pm.", "Remember that Sam
+  has the lab keys.", "Call me Ray." and "我的猫叫团子。" were already kept as notes, but
+  the model then explored the folder and tried to save the fact itself with `file_write`
+  or `python_exec`, which asked for approval and left the turn running. The chat's
+  instructions now say that localmelo keeps the notes by itself, that the model never
+  saves what you say about yourself in a file or with code, and that it acknowledges a
+  fact in one short sentence without tools; and the message the model reads carries one
+  line saying what was kept (`melo kept from this message: “Call me Ray.” (saved; nothing
+  else to save)`), or that part of it looked like a password or key, was not kept and must
+  not be written anywhere. The page shows nothing new. Direct runs, workers and the
+  benchmark are unchanged ([#313]).
+
 - Memory across chats keeps and finds more of what you say. "My reading group meets on
   Tuesdays." and "我的猫叫团子。" were not kept as notes, because only "my ... is" sentences
   counted; a sentence that starts with "my" or "our" and has a verb of habit or state
@@ -2513,6 +2526,7 @@ earlier milestones.
 [#309]: https://github.com/localmelo/localmelo/pull/309
 [#311]: https://github.com/localmelo/localmelo/pull/311
 [#312]: https://github.com/localmelo/localmelo/pull/312
+[#313]: https://github.com/localmelo/localmelo/pull/313
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

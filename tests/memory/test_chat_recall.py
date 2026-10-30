@@ -18,7 +18,15 @@ import pytest
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
-from localmelo.support.memory.recall import BLOCK_CHARS, BLOCK_HEADER, chat_label
+from localmelo.support.memory.recall import (
+    BLOCK_CHARS,
+    BLOCK_HEADER,
+    NOT_KEPT_LINE,
+    Item,
+    block,
+    chat_label,
+    kept_lines,
+)
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 
@@ -226,6 +234,41 @@ async def test_the_block_names_each_source_and_stays_in_bounds(
         assert len(block) <= BLOCK_CHARS + 2
     finally:
         await memory.aclose()
+
+
+async def test_the_block_names_what_was_kept_before_what_was_recalled(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory, _ = await build(tmp_path, store, None)
+    try:
+        turn = await _turn(store, "Teach")
+        said = "My group meeting is on Thursdays at 3 pm."
+        found = await memory.before_turn(store, turn, said)
+        kept, recalled = found.block.split("\n")[3:]
+        assert kept == (
+            "melo kept from this message: “My group meeting is on Thursdays at "
+            "3 pm.” (saved; nothing else to save)"
+        )
+        assert recalled.startswith("- the user said “My group meeting is on Thu")
+        assert found.recall is not None and found.recall.used == len(found.used) == 1
+        assert len(found.block) <= BLOCK_CHARS + 2
+    finally:
+        await memory.aclose()
+
+
+def test_kept_lines_come_first_and_the_budget_holds() -> None:
+    items = [
+        Item(f"r:{n}", "text", f"chat {n}", "s", n, 0.0, quote=f"note {n} " + "x" * 200)
+        for n in range(1, 4)
+    ]
+    quotes = [f"fact {n} " + "y" * 300 for n in range(5)]
+    lines = kept_lines(quotes, refused=True)
+    text, used = block(items, lines)
+    assert text.split("\n")[:2] == [BLOCK_HEADER, lines[0]]
+    assert lines[0].count("“") == 3 and "and 2 more" in lines[0]
+    assert lines[1] == NOT_KEPT_LINE and "y" * 130 not in text
+    assert len(text) <= BLOCK_CHARS and 0 < len(used) < len(items)
+    assert block([], []) == ("", []) and block([], lines[:1])[0].count("\n") == 1
 
 
 async def test_documents_of_this_chat_are_not_recalled_and_two_per_chat_at_most(
