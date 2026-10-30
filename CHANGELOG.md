@@ -1113,7 +1113,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is drawn and every question reads the typed answer it always did (`Use it? [Y/n]:`,
   `[r]etry, [s]ave anyway, [N]o [N]:`, a number for a backend, Enter for the default),
   so scripts keep working; a direct run, `--output-format json` and workers never ask.
-  The inline list the first run's model question uses now serves them all ([#NN]).
+  In the UI, `/backend`'s model question is the list `/model` shows (it was numbered
+  rows and a typed number). The inline list the first run's model question uses now
+  serves them all ([#NN]).
 
 - Quitting the macOS app asks only when something would stop. With no chat or task running and
   nothing waiting for your answer, **Quit localmelo** (or ⌘Q) quits at once. When a chat or task

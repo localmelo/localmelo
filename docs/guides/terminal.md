@@ -759,7 +759,7 @@ question.
   the default; when the server does not say which are loaded, the prompt is
   `Model:` with no default and Enter alone asks again
   (`Type the number of the model to use. …`), and without a terminal an empty
-  answer exits 2 with an error. `/backend` asks with numbers. A server that
+  answer exits 2 with an error. `/backend` shows the same list (`Choose a model`; Esc changes nothing). A server that
   lists only embedding or reranking models is shown the same way, with a line
   saying that chat needs a chat model. The hints are wrapped to the terminal's
   width at word boundaries.

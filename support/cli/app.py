@@ -574,15 +574,25 @@ class InteractiveApp:
         )
 
     async def choose_model(
-        self, models: Sequence[ModelRow], *, where: str, current: str
+        self,
+        models: Sequence[ModelRow],
+        *,
+        where: str,
+        current: str,
+        start: str | None = "",
+        title: str = "Switch model",
     ) -> str | None:
-        """The model picked from *models*, with *current* marked; None when closed."""
+        """The model picked from *models*, with *current* marked; None when closed.
+
+        The highlight starts on *start* (None: on no row); by default on *current*.
+        """
         row = await self.choose(
             ModelPicker(
                 models,
                 where=where,
                 current=current,
-                start=current,
+                start=current if start == "" else start,
+                title=title,
                 width=self._width,
                 invalidate=self.invalidate,
                 symbols=self.symbols,
