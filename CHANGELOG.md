@@ -45,7 +45,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `control_char` or `null`). When a reply with JSON that the decoder rejected
   is asked for again, the retry adds one line after its note that quotes the
   decoder's error and up to 60 characters around it. The repair changes no
-  request whose first reply reads. ([#NN])
+  request whose first reply reads. ([#239])
 - `melo --serve` writes its startup lines, the port that `--port 0` picked
   included, as soon as they are printed when stdout is a pipe or a file. They
   used to wait in the buffer until the server exited, so a script or a log
@@ -1010,7 +1010,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   8.3 steps (8.7) and 32 s (35 s). `--cache-layout v2 --window-messages 20`, or the same
   keys in `[agent]`, send the earlier requests. Both flags moved from the experimental to
   the advanced tier of `melo --developer --help`. A default run's JSON result now carries
-  `config.cache_layout`, and `config.window_messages` on a local server. ([#NN])
+  `config.cache_layout`, and `config.window_messages` on a local server. ([#239])
 
 - The macOS app's window says what is happening. Until the console has loaded it
   shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
@@ -1570,6 +1570,7 @@ earlier milestones.
 [#236]: https://github.com/localmelo/localmelo/pull/236
 [#237]: https://github.com/localmelo/localmelo/pull/237
 [#238]: https://github.com/localmelo/localmelo/pull/238
+[#239]: https://github.com/localmelo/localmelo/pull/239
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
