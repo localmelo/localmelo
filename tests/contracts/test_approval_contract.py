@@ -18,6 +18,7 @@ from localmelo.melo.contracts.approvals import (
     DenyAllPolicy,
     denial_text,
 )
+from localmelo.melo.contracts.review import ActionReview
 
 ENDING = (
     "Do not run it again or reach the same result another way unless the user asks."
@@ -144,6 +145,29 @@ class TestDenialText:
     def test_an_allowed_call_has_no_denial_text(self) -> None:
         with pytest.raises(ValueError):
             denial_text(ApprovalDecision(True))
+
+    def test_a_high_impact_review_says_why_and_what_to_do(self) -> None:
+        review = ActionReview(
+            "high", ("install", "env"), ("Installs x with pip.", "Creates a venv.")
+        )
+        because = "installs x with pip; creates a venv"
+        assert denial_text(ApprovalDecision(False), review) == (
+            f"The user denied this call. melo asked because it {because}. {ENDING} "
+            "If the task needs it, say in your answer what for and ask the user."
+        )
+        policy = ApprovalDecision(False, "no one can approve", origin="policy")
+        assert denial_text(policy, review) == (
+            f"The approval policy denied this call: no one can approve. It {because}. "
+            f"{ENDING} Finish what you can without it, and say in your answer what "
+            "you would need."
+        )
+        timeout = ApprovalDecision(False, origin="timeout")
+        assert denial_text(timeout, review) == TIMEOUT_TEXT
+
+    def test_a_routine_or_undecided_review_adds_nothing(self) -> None:
+        for review in (ActionReview("routine"), ActionReview("undecided", (), ("x",))):
+            decision = ApprovalDecision(False)
+            assert denial_text(decision, review) == denial_text(decision)
 
     def test_the_constants(self) -> None:
         assert DENIAL_ENDING == ENDING
