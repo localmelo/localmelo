@@ -11,11 +11,12 @@ You need:
   not supported.
 - Python 3.11 or later, Git, and [uv](https://docs.astral.sh/uv/) (or pip,
   see [Install with pip](#install-with-pip)).
-- A model server. This tutorial uses [Ollama](https://ollama.com): install
-  it, start it, and pull a model with `ollama pull qwen3:8b`. Any server
-  with an OpenAI-compatible API works too: use its `/v1` URL and its model
-  name in the commands below. On a Mac with Apple silicon, you can
-  [serve a model with oMLX](../guides/model-servers.md#serve-a-model-with-omlx) instead.
+- A model server. The commands below use [Ollama](https://ollama.com):
+  install it, start it, and pull a model with `ollama pull qwen3:8b`. On a
+  Mac with Apple silicon, [oMLX](../guides/model-servers.md#serve-a-model-with-omlx)
+  is the recommended server: use `http://127.0.0.1:8000/v1` and your model's
+  folder name in the commands instead. Any server with an OpenAI-compatible
+  API works too: use its `/v1` URL and its model name.
 
 ## Install
 
@@ -69,6 +70,13 @@ The answer is printed on stdout, and the command exits with code 0
 (`echo $?` prints `0`). `--base-url` points localmelo at an OpenAI-compatible
 server for this one run, without a configuration file. It sends no API key,
 so use it for local servers; for a cloud API, save a configuration (below).
+
+With [oMLX](../guides/model-servers.md#serve-a-model-with-omlx), use its URL
+and the name of a model folder:
+
+```bash
+melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+```
 
 Direct tasks write files and run Python without asking, and have no
 `shell_exec` tool unless you pass `--builtins all`. That is not a sandbox:
@@ -147,8 +155,9 @@ A configuration file saves the backends, so that `melo`, `melo "<task>"`
 and the gateway work without `--base-url`.
 
 For a local server, run `melo` in a terminal. With no configuration yet, it
-looks for a model server on this computer, asks for its URL (press Enter to
-accept the one it found) and for a model from the server's list, saves
+looks for a model server on this computer (oMLX on port 8000, Ollama on
+11434), asks for its URL (press Enter to accept the one it found) and for a
+model from the server's list, saves
 `~/.cache/localmelo/config.toml` and opens the interactive UI. When the list
 holds several chat models and the server says which are in memory (oMLX,
 Ollama), they are marked `(loaded)` and Enter chooses the first of them, so
@@ -183,8 +192,8 @@ If the server also lists an embedding model, the first run adds one question,
 `Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
 embeddings probe. Type a message and press Enter, or `/exit` to leave. From
 then on, `melo` goes straight in and `melo "<task>"` uses the saved server.
-The server here is Ollama, so it is saved as the `ollama` backend; any other
-OpenAI-compatible server is saved as `vllm`, the key for those. See
+The server here is Ollama, so it is saved as the `ollama` backend; oMLX and
+any other OpenAI-compatible server are saved as `vllm`, the key for those. See
 [First run](../guides/configure.md#first-run) and
 [Set up an embedding model](../guides/embedding.md).
 
@@ -203,7 +212,7 @@ The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
+| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For oMLX or another OpenAI-compatible server, choose vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Save and continue?` | Press Enter (yes) to save and continue. |
@@ -321,8 +330,9 @@ and the answer prints as Markdown:
 
 ```bash
 melo
-# Or talk to an OpenAI-compatible server that is not saved, with its first
-# model or the one you name:
+# Or talk to an OpenAI-compatible server that is not saved. Without
+# --chat-model it uses the server's only chat model or its one loaded model;
+# with several chat models and not exactly one loaded, it exits 2 and lists them:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```

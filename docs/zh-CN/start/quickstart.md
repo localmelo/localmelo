@@ -12,7 +12,7 @@
 
 - macOS（已开发和测试）或 Linux（应该可以运行，但未经测试）。不支持 Windows。
 - Python 3.11 或更新版本、Git 和 [uv](https://docs.astral.sh/uv/)（或 pip，见[使用 pip 安装](#install-with-pip)）。
-- 模型服务器。本教程使用 [Ollama](https://ollama.com)：安装并启动它，然后使用 `ollama pull qwen3:8b` 拉取模型。任何提供 OpenAI 兼容 API 的服务器也可以使用：在下面的命令中填写它的 `/v1` URL 和模型名称。在搭载 Apple silicon 的 Mac 上，也可以[使用 oMLX 提供模型服务](../guides/model-servers.md#serve-a-model-with-omlx)。
+- 模型服务器。下面的命令使用 [Ollama](https://ollama.com)：安装并启动它，然后使用 `ollama pull qwen3:8b` 拉取模型。在搭载 Apple silicon 的 Mac 上，推荐使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx)：在命令中改用 `http://127.0.0.1:8000/v1` 和你的模型文件夹名。任何提供 OpenAI 兼容 API 的服务器也可以使用：填写它的 `/v1` URL 和模型名称。
 
 <a id="install"></a>
 
@@ -57,6 +57,12 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ```
 
 答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--base-url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。
+
+使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx) 时，填写它的 URL 和模型文件夹的名称：
+
+```bash
+melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+```
 
 直接任务会不经询问就写入文件、运行 Python，并且没有 `shell_exec` 工具，除非传入 `--builtins all`。这不是沙箱：`python_exec` 仍可启动程序（见[上面的警告](#run-your-first-task)）。任务简报中的检查（见[运行 worker 任务](#run-a-worker-task)）仍会运行。
 
@@ -123,7 +129,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --brief brief.md
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--base-url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器，询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它会在本机查找模型服务器（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，Enter 选择其中第一个，因此不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，没有默认值：请输入要使用的模型的编号，因为尚未加载的模型可能需要数分钟和大量内存才能加载。只按 Enter 会再次询问；答案从管道输入时，空答案是错误。只有一个对话模型时无需选择：
 
 ```text
 $ melo
@@ -145,7 +151,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 
 标题显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。
 
-如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
+如果服务器还列出嵌入模型，首次运行会多问一个问题 `Use <model> for long-term memory? [Y/n]:`；回答 `y` 后，会在一次嵌入探测通过后保存。输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 和其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
 
 <a id="with-the-setup-wizard"></a>
 
@@ -161,7 +167,7 @@ melo --serve --reconfigure
 
 | 提示 | 输入内容 |
 |---|---|
-| `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于其他 OpenAI 兼容服务器，选择 vLLM（`3`）。 |
+| `Chat backend` | 服务器类型的编号，例如 Ollama 为 `2`。默认值为已保存的后端，否则为 `[1]`，即 MLC。对于 oMLX 或其他 OpenAI 兼容服务器，选择 vLLM（`3`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
 | `Save and continue?` | 按 Enter（是）保存并继续。 |
@@ -248,8 +254,9 @@ c5b2d38ceecc  done
 
 ```bash
 melo
-# Or talk to an OpenAI-compatible server that is not saved, with its first
-# model or the one you name:
+# Or talk to an OpenAI-compatible server that is not saved. Without
+# --chat-model it uses the server's only chat model or its one loaded model;
+# with several chat models and not exactly one loaded, it exits 2 and lists them:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```

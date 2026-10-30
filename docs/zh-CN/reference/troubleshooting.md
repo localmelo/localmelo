@@ -199,7 +199,7 @@ melo: run ended with status provider_error: POST /chat/completions failed with H
 melo: run ended with status provider_error: POST /chat/completions failed: ReadTimeout
 ```
 
-- **原因：** 服务器在对话请求超时时间内没有发送任何内容，连续三次。这大约需要 3 × 超时时间 + 5 秒。
+- **原因：** 服务器在对话请求超时时间内没有发送任何内容，连续三次。这大约需要 3 × 超时时间 + 5 秒。在第一个请求到达时才加载模型的服务器（如 oMLX）可能还在加载。
 - **修复：** 给慢速模型更多时间：使用 `--request-timeout 600`，或在配置文件顶部设置 `request_timeout_s = 600`。
 
 ### A run never ends

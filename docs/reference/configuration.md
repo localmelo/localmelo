@@ -27,7 +27,7 @@ tables of the chosen backends.
 
 | Key | Table | Default | Description |
 |---|---|---|---|
-| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). Required. |
+| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `vllm`. Required. |
 | `embedding_backend` | top level | not set | `mlc`, `ollama`, `vllm`, `sglang` or `none`. Required. |
 | `request_timeout_s` | top level | not set | Chat request timeout in seconds; see [Chat request timeout](#chat-request-timeout). |
 | `chat_url` | local backend | not set | The model server's URL. |
@@ -91,8 +91,8 @@ exact bytes; the wizard keeps a non-default policy.
 
 Top-level keys must come before the first `[table]` line. How URLs are used:
 
-- `mlc`, `vllm` and `sglang`: `/v1` is added to `chat_url` and
-  `embedding_url` when it is missing.
+- `mlc`, `vllm` (also for oMLX) and `sglang`: `/v1` is added to
+  `chat_url` and `embedding_url` when it is missing.
 - `ollama`: chat uses Ollama's own `/api/chat`, so `chat_url` is used without
   `/v1` (a trailing `/v1` is removed). `embedding_url` gets `/v1` added.
 - Cloud backends: `base_url` is used as given.
@@ -408,6 +408,9 @@ chat_model = "Qwen/Qwen3-8B"
   a quoted value.
 - `--request-timeout SECONDS` overrides it for one direct run and does not
   change the file.
+- A server that loads a model when the first request for it arrives, as
+  oMLX does, can need more than 120 seconds for that request; `600` above
+  gives it room.
 - It applies to chat requests only. Embedding requests always wait up to
   120 seconds.
 - The timer restarts whenever the server sends data, so a server that sends

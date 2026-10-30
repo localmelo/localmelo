@@ -140,6 +140,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#NN]).
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
 - Add zh-CN reference twins for events, retrieval and memory, with the English anchors and code examples ([#202]).
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).

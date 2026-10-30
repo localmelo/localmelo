@@ -1,12 +1,15 @@
 # Guide: Model servers
 
-This guide shows how to run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vLLM, SGLang or a cloud API. Read it when you choose a backend; the setting names and defaults are in the [configuration reference](../reference/configuration.md).
+This guide shows how to run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vLLM, SGLang or a cloud API. Read it when you choose a backend; the setting names and defaults are in the [configuration reference](../reference/configuration.md). On a Mac with Apple silicon, oMLX is the recommended local server; Ollama is the alternative on other systems.
 
 ## Serve a model with oMLX
 
 [oMLX](https://github.com/jundot/omlx) serves MLX models through an
-OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later. To
-use it instead of Ollama:
+OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later.
+localmelo supports it as a local server: first-run setup finds it on port
+8000 and asks it which models are loaded. In the config file it is the
+`vllm` backend; [oMLX](model-servers.md#omlx) explains why. To use it
+instead of Ollama:
 
 1. Install oMLX with Homebrew:
 
@@ -17,7 +20,10 @@ use it instead of Ollama:
 
    The oMLX macOS app also installs the command, as `~/.omlx/bin/omlx`. Its
    [README](https://github.com/jundot/omlx#install) has the other ways to
-   install it.
+   install it. The Homebrew command above installs oMLX without its
+   optional native kernels, which a few model families (Qwen3.5, for
+   example) need to run at full speed; the app ships them, and the README
+   explains the Homebrew option.
 
 2. Put each model in a folder of its own inside one models folder. oMLX
    serves every subfolder that holds a model (a `config.json` and its
@@ -37,11 +43,19 @@ use it instead of Ollama:
    It listens on `http://127.0.0.1:8000`. oMLX saves `--model-dir` and
    `--port` in its `settings.json` (under `~/.omlx` by default) and uses
    them when you leave the flags out, so a port saved earlier wins over the
-   default 8000; giving `--port` avoids that. Keep the default host and do not set `--api-key`: localmelo sends
+   default 8000; giving `--port` avoids that. The oMLX app and `omlx start`
+   run the server in the background instead, with the folder and port saved
+   in oMLX (the Homebrew service starts with `~/.omlx/models` and port
+   8000): then skip the command above.
+
+   Keep the default host and do not set `--api-key`: localmelo sends
    no API key to a local server. If requests fail with HTTP 401
    (`API key required`), a key was set earlier, in oMLX's admin page or
    with `OMLX_API_KEY`: turn on **Allow inference without API key** in the
-   admin page's settings, or unset `OMLX_API_KEY`.
+   admin page's settings, or unset `OMLX_API_KEY`. With that setting on,
+   listing models and chat work, but oMLX still asks for the key on the
+   route that says which models are loaded, so setup cannot mark them (see
+   below).
 
 4. Check that the server lists the model:
 
@@ -63,18 +77,40 @@ use it instead of Ollama:
 
    oMLX loads the model on its first request, which can take a minute for a
    large model. If that request times out, add `--request-timeout 600`.
-   `melo --base-url http://127.0.0.1:8000/v1` without a task opens the
-   interactive UI on the first model oMLX lists.
+   Name the model with `--chat-model` when you give a task: without it melo
+   requests a model called `default`. `melo --base-url http://127.0.0.1:8000/v1`
+   without a task opens the interactive UI on the only chat model oMLX lists
+   or on its one loaded model; with several chat models and not exactly one
+   loaded, it exits 2, lists them and asks for `--chat-model <id>`.
 
 To make oMLX your default, run `melo` in a terminal before any configuration
 is saved: it finds oMLX on port 8000, lists its models and saves the one you
-pick. With a configuration saved already, run step 5 first, so that the
-model is loaded, then the wizard (`melo --reconfigure`): choose vLLM (`3`)
-as the chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and
-choose `5` (None) as the embedding backend unless oMLX also serves an
-embedding model. [oMLX configuration](model-servers.md#omlx) shows the file they
-save and the table to add to turn off a Qwen3 model's thinking. The web
-workspace then uses that model; it reads the configuration file.
+pick; [First run](configure.md#first-run) shows the exchange. oMLX loads a
+model when the first request for it arrives, so a listed model is not always
+in memory, and loading a large one can take minutes. Setup therefore chooses
+like this, and with several chat models it asks oMLX which are loaded
+(`GET /v1/models/status`, one second at most):
+
+- One chat model: it is the default.
+- Several, and oMLX says which are loaded: setup marks them `(loaded)` and
+  makes the first of them the default.
+- Several, and none is loaded or oMLX does not say: there is no default.
+  Type the number of the model to use; Enter alone asks again, because
+  choosing for you could start a long load of a large model. While a key is
+  set, oMLX does not say, even with **Allow inference without API key** on,
+  and setup prints `The server did not say which models are loaded (it needs
+  a key for that).` A model that has an alias in oMLX is listed under the
+  alias but reported as loaded under its folder name, so it is not marked.
+
+With a configuration saved already, run step 5 first, so that the model is
+loaded, then `melo --reconfigure`: in default mode it offers the server it
+finds with the first run's questions. In the full menu (after `n`, or with
+`--developer`), choose vLLM (`3`) as the chat backend, enter
+`http://127.0.0.1:8000/v1` and the model id, and choose `5` (None) as the
+embedding backend unless oMLX also serves an embedding model.
+[oMLX configuration](model-servers.md#omlx) shows the file they save and the
+table to add to turn off a Qwen3 model's thinking. The web workspace then
+uses that model; it reads the configuration file.
 
 ## Backends
 
@@ -82,7 +118,7 @@ workspace then uses that model; it reads the configuration file.
 |---|---|---|---|---|
 | `ollama` | local | [Ollama](https://ollama.com) | `http://localhost:11434` (wizard) | yes |
 | `mlc` | local | [MLC LLM](https://llm.mlc.ai) | `http://localhost:8400/v1` (wizard) | yes |
-| `vllm` | local | [vLLM](https://docs.vllm.ai) | `http://localhost:8000/v1` (wizard) | yes |
+| `vllm` | local | [oMLX](https://github.com/jundot/omlx), [vLLM](https://docs.vllm.ai) or another OpenAI-compatible server | `http://localhost:8000/v1` (wizard) | yes |
 | `sglang` | local | [SGLang](https://docs.sglang.ai) | `http://localhost:30000/v1` (wizard) | yes |
 | `openai` | cloud | OpenAI API | `https://api.openai.com/v1` | no |
 | `anthropic` | cloud | Anthropic API | `https://api.anthropic.com/v1` | no |
@@ -92,13 +128,18 @@ workspace then uses that model; it reads the configuration file.
 The wizard suggests the local URLs; use your server's address and port.
 localmelo only connects to a local server: you start and stop it yourself.
 `mlc`, `vllm` and `sglang` use the plain OpenAI-compatible API, so another
-OpenAI-compatible server works with any of them.
+OpenAI-compatible server works with any of them. There is no `omlx` key:
+oMLX is a supported server, and `vllm` is the key for it
+([details](model-servers.md#omlx)).
 
 ### oMLX
 
-[oMLX](https://github.com/jundot/omlx) has an OpenAI-compatible API, so it
-uses the `vllm` backend. [Serve a model with oMLX](model-servers.md#serve-a-model-with-omlx)
-shows how to start it.
+[oMLX](https://github.com/jundot/omlx) is a supported local server. Its API
+is OpenAI-compatible, and the `vllm` key stands for any OpenAI-compatible
+server, vLLM's own included. So oMLX has no key of its own: the config file
+says `chat_backend = "vllm"`, and first-run setup saves oMLX that way.
+[Serve a model with oMLX](model-servers.md#serve-a-model-with-omlx) shows how
+to start it.
 
 ```toml
 chat_backend = "vllm"
@@ -114,7 +155,8 @@ enable_thinking = false
 ```
 
 - `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
-  name, or the alias set for it in oMLX.
+  name, or the alias set for it in oMLX. `--chat-model ID` replaces it for
+  one run.
 - [First run](configure.md#first-run) writes the `chat_backend`, `chat_url` and
   `chat_model` lines: run `melo` in a terminal with no config file, while
   oMLX runs. When it offers an embedding model it also writes

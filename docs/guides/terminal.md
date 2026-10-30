@@ -562,9 +562,11 @@ Use nomic-embed-text for long-term memory? [Y/n]:
 - melo looks for a server on this computer with `GET /v1/models` on
   `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000
   (SGLang), and offers the first that lists a model. Press Enter to accept
-  the URL, or type another. Only the model list is requested; saving the
-  choice asks `GET /api/version` once to tell an Ollama server apart. No
-  chat request is sent, so a server does not load a model for it. A server that
+  the URL, or type another. The model list is requested; with several chat
+  models, so are `GET /v1/models/status` (oMLX) and `GET /api/ps` (Ollama),
+  which say which models are loaded. Saving the choice asks
+  `GET /api/version` once to tell an Ollama server apart. No chat request
+  is sent, so a server does not load a model for it. A server that
   lists a chat model comes first; one that lists only embedding or reranking
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none

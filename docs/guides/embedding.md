@@ -83,7 +83,9 @@ and use that id instead.
 ## oMLX
 
 oMLX serves embeddings and chats from the same endpoint. Put the model in its
-model directory, keep the chat server as it is, and check the id oMLX lists:
+model directory and keep the chat server as it is. Keep `embed` in the folder
+name of a Qwen3-Embedding model, as in `Qwen3-Embedding-0.6B`: oMLX
+recognizes that model by its name. Then check the id oMLX lists:
 
 ```bash
 curl -sS http://127.0.0.1:8000/v1/models
@@ -94,8 +96,8 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 
 `GET /v1/models` gives ids but no type, so it cannot tell you which ids are
 embedding models: the embeddings request above is the check. The model id is
-oMLX's own, usually the folder name. Then set the `vllm` backend to oMLX and
-add its embedding fields:
+oMLX's own, usually the folder name. Then add its embedding fields to the
+`[vllm]` table that holds oMLX's chat settings:
 
 ```toml
 chat_backend = "vllm"

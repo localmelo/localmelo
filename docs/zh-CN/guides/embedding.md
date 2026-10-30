@@ -60,7 +60,7 @@ Ollama 的 `embedding_url` 不带 `/v1`，与它的 `chat_url` 一样；后端�
 
 ## oMLX
 
-oMLX 在同一个端点提供嵌入和对话服务。将模型放入其模型目录，保持对话服务器不变，并检查 oMLX 列出的 ID：
+oMLX 在同一个端点提供嵌入和对话服务。将模型放入其模型目录，保持对话服务器不变。请在 Qwen3-Embedding 模型的文件夹名中保留 `embed`，如 `Qwen3-Embedding-0.6B`：oMLX 通过名称识别这个模型。然后检查 oMLX 列出的 ID：
 
 ```bash
 curl -sS http://127.0.0.1:8000/v1/models
@@ -69,7 +69,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
 ```
 
-`GET /v1/models` 返回 ID 但不返回类型，因此无法告诉你哪些 ID 是嵌入模型：上面的嵌入请求才是检查。模型 ID 由 oMLX 决定，通常是文件夹名称。然后将 `vllm` 后端指向 oMLX，并添加嵌入字段：
+`GET /v1/models` 返回 ID 但不返回类型，因此无法告诉你哪些 ID 是嵌入模型：上面的嵌入请求才是检查。模型 ID 由 oMLX 决定，通常是文件夹名称。然后把嵌入字段添加到保存 oMLX 对话设置的 `[vllm]` 表中：
 
 ```toml
 chat_backend = "vllm"
