@@ -494,7 +494,7 @@ def test_fixed_prefix_preserves_option_positional_order() -> None:
 
     names = [item.name for item in fields(AgentOptions)]
     assert names[0] == "context_window"
-    assert names[-17:-9] == [
+    assert names[-18:-10] == [
         "mode",
         "fixed_prefix",
         "captured_history",
@@ -504,7 +504,7 @@ def test_fixed_prefix_preserves_option_positional_order() -> None:
         "brief_check",
         "reflect_tool_guard",
     ]
-    assert names[-9:] == [
+    assert names[-10:] == [
         "cache_layout",
         "window_messages",
         "brief_items",
@@ -514,6 +514,7 @@ def test_fixed_prefix_preserves_option_positional_order() -> None:
         "tool_images",
         "tool_images_keep",
         "tool_images_retire",
+        "answer_on_stop",
     ]
 
 

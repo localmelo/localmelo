@@ -1653,10 +1653,11 @@ def _build_parser(
     )
     direct.add_argument(
         "--reflection-gate",
-        choices=["flags", "utility"],
+        choices=["flags", "utility", "patient"],
         help="After a reflection, start the next attempt when it chooses continue "
         "and its three checks hold (flags, default), or also require its utility "
-        "score to reach 0.1 (utility, the behavior before this option)",
+        "score to reach 0.1 (utility, the behavior before this option), or as "
+        "flags, but once per run also when the next step is not novel (patient)",
     )
     direct.add_argument(
         "--captured-history",
@@ -2531,6 +2532,11 @@ def _build_direct_mode_agent(
     # A task given on the command line (--brief included), not the `melo ""` loop.
     if budget_cfg.agent.lean_output and "".join(args.query):
         options = dataclasses.replace(options, lean_output=True)
+
+    if not isinstance(budget_cfg.agent.answer_on_stop, bool):
+        config_value_error("[agent] answer_on_stop must be a boolean")
+    if budget_cfg.agent.answer_on_stop:
+        options = dataclasses.replace(options, answer_on_stop=True)
 
     if not isinstance(budget_cfg.agent.confine_direct_runs, bool):
         config_value_error("[agent] confine_direct_runs must be a boolean")

@@ -30,7 +30,7 @@ from localmelo.melo.schema import (
 )
 
 AttemptPolicy = Literal["reflect", "none"]
-ReflectionGate = Literal["flags", "utility"]
+ReflectionGate = Literal["flags", "utility", "patient"]
 ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
 NoteWriter = Literal["auto", "heuristic"]
@@ -90,7 +90,13 @@ class AgentOptions:
       the utility score computed from the reflection's own estimates to
       reach 0.1; a reply without a reflection reads as ``stop``, and a
       reflection over the budget as ``decompose``, unless it chooses
-      ``done``, which ends the run as it is.
+      ``done``, which ends the run as it is. ``"patient"`` (a developer
+      setting) is ``"flags"``, except that a ``continue`` that is feasible
+      and concrete but not novel still starts the next attempt, once per
+      run; a second one stops the run as ``"flags"`` does. With it, a
+      reflection's ``useful_evidence``, ``failed_hypotheses`` and
+      ``recommended_avoids`` keep at most 8 items of at most 300
+      characters each (``"flags"`` does too when ``answer_on_stop`` is on).
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for
@@ -263,6 +269,14 @@ class AgentOptions:
       text, in planning and reflection requests. ``None`` (the default)
       adds nothing: direct runs, workers and the benchmark send the base
       text alone.
+    - ``answer_on_stop``: when true, a run that ends ``gate_stopped`` or
+      ``budget_exhausted`` with no answer makes one more request, without
+      tools, for the final answer from the evidence gathered (the working
+      window and the latest reflection), in the format the task asks for,
+      ``unknown`` allowed. The run keeps its status; its ``result`` is that
+      answer and ``RunResult.answered_on_stop`` is true. The request counts
+      in ``n_aux``. A failed request leaves the run as it was. Default
+      false: nothing changes.
     - ``confine_writes``: when true, the ``shell_exec`` and ``python_exec``
       children start, on macOS, under a ``sandbox-exec`` profile that
       refuses every file write outside the workspace (the
@@ -349,6 +363,7 @@ class AgentOptions:
     tool_images: ToolImages = "auto"
     tool_images_keep: int = 3
     tool_images_retire: int = 2
+    answer_on_stop: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -468,6 +483,7 @@ class AgentOptions:
             "typed_assertions",
             "brief_items",
             "lean_output",
+            "answer_on_stop",
             "confine_writes",
         ):
             if not isinstance(getattr(self, name), bool):

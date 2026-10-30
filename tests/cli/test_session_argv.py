@@ -7,6 +7,8 @@ The three explicit R4 overrides were captured from upstream cb250c6 before U2b,
 not from the new parser: compress became valid, and two replay errors name it.
 R2b intentionally retires the no-query reasoning-field refusal: that one case
 now checks UI dispatch and its complete namespace; the original golden remains.
+The invalid ``--reflection-gate`` choice's error now lists ``patient`` too (an
+``upstream_overrides`` entry and the 3.12 variant); every other case is as recorded.
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 

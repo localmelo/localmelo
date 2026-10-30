@@ -186,6 +186,9 @@ class AgentConfig:
     # Developer setting: plain direct runs (melo "TASK", melo "") are confined too
     # (AgentOptions.confine_writes); worker runs and saved tasks follow confine_writes.
     confine_direct_runs: bool = False
+    # Developer setting: a run that stops (gate_stopped, budget_exhausted) with no
+    # answer asks the model once for one (AgentOptions.answer_on_stop).
+    answer_on_stop: bool = False
     # Pictures tools return reach the model: auto (when the server says the model
     # reads images) | on | off; the newest keep, retired retire at a time.
     tool_images: str = "auto"
@@ -594,6 +597,8 @@ class Config:
             errors.append("[agent] confine_writes must be a boolean")
         if not isinstance(self.agent.confine_direct_runs, bool):
             errors.append("[agent] confine_direct_runs must be a boolean")
+        if not isinstance(self.agent.answer_on_stop, bool):
+            errors.append("[agent] answer_on_stop must be a boolean")
         errors.extend(tool_images_errors(self.agent))
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
@@ -1325,6 +1330,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.lean_output
         or cfg.agent.confine_writes != defaults.confine_writes
         or cfg.agent.confine_direct_runs
+        or cfg.agent.answer_on_stop
         or any(
             getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
         )
@@ -1360,6 +1366,8 @@ def save(cfg: Config) -> None:
             lines.append(f"confine_writes = {_toml_value(cfg.agent.confine_writes)}")
         if cfg.agent.confine_direct_runs:
             lines.append("confine_direct_runs = true")
+        if cfg.agent.answer_on_stop:
+            lines.append("answer_on_stop = true")
         for name in IMAGE_KEYS:
             if getattr(cfg.agent, name) != getattr(defaults, name):
                 lines.append(f"{name} = {_toml_value(getattr(cfg.agent, name))}")

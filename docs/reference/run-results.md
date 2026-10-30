@@ -43,6 +43,14 @@ Details:
   (see [Events](events.md#reflection)). With `--reflection-gate utility`, an unreadable
   reflection stops the run too, and so does one over the size limit unless
   it chose `done`.
+- **An answer when a run stops.** With the developer setting `[agent]
+  answer_on_stop = true` (`-X agent.answer_on_stop=on`), a run that ends
+  `gate_stopped` or `budget_exhausted` with an empty `result` makes one more
+  request, without tools, that asks for the final answer from the working
+  window and the latest reflection, in the format the task asks for, with
+  `unknown` allowed. The run keeps its status and `error`; `result` is that
+  answer and the record gains `"answered_on_stop": true`. The request counts in
+  `n_aux`. A request that fails, or a blank reply, leaves the run as it was.
 - **Unreadable reflections.** A reflection reply is readable when it holds a
   JSON object whose `recommended_action` is `done`, `continue`, `stop` or
   `decompose`; other JSON, such as a tool call written out as text, does not
@@ -148,6 +156,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `context_budget` | When configured, a list of per-attempt planning/reflection accounting records; absent when disabled. See [context accounting](configuration.md#context-accounting). |
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 | `confinement` | Only in a run that confines its writes (a `--brief` worker or a saved task, see [Writes stay in the workspace](cli.md#confined-writes)): `{"writes": "confined", "refused_writes": N}`, N being the writes outside the workspace this run's `shell_exec` and `python_exec` reported refused, or `{"writes": "not_confined", "reason": "..."}` off macOS. Absent otherwise. |
+| `answered_on_stop` | Only `true`, and only in a run whose `result` came from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
 
 `config` holds:
 
@@ -157,6 +166,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
+| `answer_on_stop` | `true` when the run set it; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
 | `cache_layout` | `v3` (the default) when the run used it; absent for `v2`. |
