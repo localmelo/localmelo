@@ -1,7 +1,7 @@
 """Default mode and developer mode (#186): the tier table and what ``-h`` shows.
 
-``melo -h`` is the short help (20 lines); developer mode and ``-h all`` print every
-option, command and setting. The mode decides what help prints and how much the
+``melo -h`` is the short help (at most 24 lines); developer mode and ``-h all`` print
+every option, command and setting. The mode decides what help prints and how much the
 startup banner shows; every option parses in both modes.
 """
 
@@ -57,7 +57,7 @@ def _shown_options(text: str) -> list[str]:
 
 
 def _is_short(text: str) -> bool:
-    return "Commands: setup" in text and "Settings:" not in text
+    return "\nCommands:\n  setup " in text and "Settings:" not in text
 
 
 def _write_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
@@ -109,12 +109,12 @@ def test_the_old_spelling_table_matches_the_code() -> None:
 # -- default mode --------------------------------------------------------------
 
 
-def test_default_help_fits_twenty_lines_and_names_no_old_spelling(
+def test_default_help_fits_24_lines_and_names_no_old_spelling(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     text = _help("-h", capsys=capsys)
     lines = text.splitlines()
-    assert len(lines) <= 20 and max(map(len, lines)) <= 80
+    assert len(lines) <= 24 and max(map(len, lines)) <= 80
     assert _is_short(text)
     shown = set(_shown_options(text)) - {"--set"}  # -X is not a parser option
     assert shown == {n for n, tier in OPTION_TIERS.items() if tier == USER} - {"--help"}
@@ -123,6 +123,30 @@ def test_default_help_fits_twenty_lines_and_names_no_old_spelling(
     assert not any(" " + old in text for old in OLD_SPELLINGS)
     # No option is alone on its row: the row's text follows on the same line.
     assert all(re.match(r"^  -.* {2,}\S", row) for row in lines[6:17])
+
+
+def test_default_help_says_what_the_everyday_commands_do(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    text = _help("-h", capsys=capsys)
+    assert text.endswith(
+        "\nCommands:\n"
+        "  setup     choose the model server again\n"
+        "  serve     run the web console and API\n"
+        "  console   open the web console\n"
+        "More commands and every setting: melo -h all\n"
+    )
+    # The seven words are not all listed: the rest are in `melo -h all`.
+    assert "worker" not in text and "import" not in text
+    assert re.search(r"-s, --steps N +most model calls per task \(default 30\)", text)
+
+
+def test_every_everyday_command_is_a_command_the_full_help_explains() -> None:
+    words = [word for word, _ in command_words.EVERYDAY]
+    assert words == ["setup", "serve", "console"]
+    assert set(words) <= set(command_words.COMMANDS)
+    summarized = {row[0].split()[0] for row in command_words.SUMMARIES}
+    assert set(words) <= summarized
 
 
 @pytest.mark.parametrize(

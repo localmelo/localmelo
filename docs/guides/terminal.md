@@ -28,7 +28,7 @@ Try: What is this project? · / commands · ctrl+d quit
 ────────────────────────────────────────────────────────────────────────────
 › Ask melo · / for commands
 ────────────────────────────────────────────────────────────────────────────
-  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?
+  Qwen3-8B · ~/demo-project · context 2.1k tokens · What is in this folder?
 ```
 
 The welcome is three rows: the version and the model, with how to change it;
@@ -135,10 +135,10 @@ the command does and, where it needs one, its argument (`/attach PATH`).
 | `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
 | `/attachments` | List staged files and their numbers. |
 | `/detach N\|all` | Remove the numbered staged file or all staged files. |
-| `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/new` (also `/clear`) | Start a new chat: the model forgets the conversation, and this chat's grants end. A `── New chat ──` rule marks the start. |
 | `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
-| `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the session is created. |
+| `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the chat is saved. |
 | `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals. `?` means not recorded. |
 | `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
@@ -338,9 +338,10 @@ happens without the explicit `/copy` command.
   cut with `…`. The second row
   is the running tool, its own clock, and for `shell_exec` and
   `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
-  10:00`. On a session's first turn, a third row shows the past runs the
-  progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
-  ✓`.
+  10:00`. For a task melo has run before, a third row shows the past runs the
+  progress line would, with the steps they took: `last time 6 steps, 2m10s:
+  Run ls ✓ · Read app.py ✓`. It shows on a session's first turn, and in
+  developer mode on every turn.
 - **Thinking.** `✻ Thought for 1.2s`: one line. `/thinking on` and developer
   mode add the first 3 rows of the thinking, `/verbose` 40, wrapped to the
   width. An intermediate message prints as Markdown after `●`; the
@@ -377,38 +378,74 @@ happens without the explicit `/copy` command.
   in the default color. The footer then reads `✻ Stopped after 14s` instead of
   `Worked for`, without a count of zero tool calls. Direct mode keeps its
   `melo: run ended with status …` line on stderr.
+- **Changed files.** A turn that wrote files with `file_write` ends with one more
+  quiet line under its footer, so you see what it touched without reading every
+  block:
+
+  ```text
+  ✓ file_write  hello.py (15 chars) · 0.0s · allowed
+    └ new file, 1 line
+  ● I saved hello.py. Run it with python hello.py.
+  ✻ Worked for 4.7s · 1 tool call · ↓ 50 tokens
+    Changed hello.py (+1)
+  ```
+
+  Several files read `Changed hello.py (+1), README.md (+3 −1)`: paths relative to the
+  folder melo works in, each with the lines the turn added and removed in it. At most
+  three names show, then `and 2 more`; a narrow terminal shows fewer and never wraps. A
+  file written twice counts once, the file as the turn found it against the file as it
+  left it, and a file written back as it was is left out. A name stands alone, with no
+  counts, when there is nothing to count or compare: a new empty file, a file melo could
+  not compare (too large, or not text) and every file of a `--yolo` turn, where nothing
+  read the old file first. The line comes from the turn's own `file_write` calls: a
+  write that was denied or refused (a path outside the folder) is not listed, and
+  neither is a file that a shell command or a script changed, because melo never scans
+  the folder. Nothing prints when the turn changed no file, or when you stop it (a
+  stopped turn has no footer). Developer mode shows the same line.
 
 ### The status bar
 
 The bar under the input box carries the usage figures of the session, taken
 from events melo has already received: no request, no polling, no timer.
 Left to right, after the model and the workspace, each segment appears only
-when it has data:
+when it has data. The default mode says them in words:
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.
+  stub-model · ~/demo-project · 83% cached · context 8% used · List the files.
 ```
 
-- `cache 83%` is the share of the last request's prompt tokens the server
-  reported as cached (`cache --` when the server reports none, never 0%). For
-  a local server, `idle 3m` follows once a minute has passed since the last
-  request; a local server evicts its prefix cache by memory, not by time, so
-  there is no countdown.
+- `context 8% used` is the last measured prompt over the input limit; when no
+  limit is known it says the tokens instead (`context 2.6k tokens`).
+- `83% cached` is the share of the last request's prompt tokens the server
+  reported as cached. It shows once the server has reported a value: a server
+  that reports none shows nothing, never 0%. For a local server, `, idle 3m`
+  follows once a minute has passed since the last request; a local server
+  evicts its prefix cache by memory, not by time, so there is no countdown.
+- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
+
+Developer mode (`--developer`, or `[ui] mode = "developer"`) keeps the compact
+figures, which are also what the web console's status row draws:
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k/32k · step 4 · List the files.  ask
+```
+
+- `cache 83%` is the cached share (`cache --` when the server reports none,
+  never 0%), with `idle 3m` after it for a local server.
 - `ctx 12k/32k` is the last measured prompt over the input limit, or just
   `ctx 12k` when no limit is known.
 - `step 4 attempt 2 phase fix` are the run's progress facts while a run is
-  active, never a percent or `n/max`. Developer mode shows them; the default
-  mode leaves them out.
-- `tasks 1 running 2 queued` appears only when a task store is reachable; `1 held` is added while a task waits, for example on an approval.
+  active, never a percent or `n/max`; the default mode leaves them out.
 
 The bar redraws when an event arrives or you press a key, so `idle` is as of
 the last redraw. The approval mode shows at the right edge only when it is not
 `ask` (`auto`, `deny`, or the `⚠ YOLO: no approvals` warning); developer mode
 always shows it. On a narrow terminal the title goes first, then the segments
-right to left, then the workspace is cut, and the bar never wraps. `/status all`
-prints the same figures in full. `[cli] status_line = "off"` keeps the bar as
-it was before these segments: the model, workspace, `ctx` of the last request
-and the title. There is no command-line flag for it.
+right to left, whole (the words are never cut), then the workspace is cut, and
+the bar never wraps. `/status` prints the figures in full. `[cli] status_line =
+"off"` keeps the bar as it was before these segments: the model, workspace, the
+context of the last request (`context 1.0k tokens`, or `ctx 1.0k` in developer
+mode) and the title. There is no command-line flag for it.
 
 ### Streamed replies
 
@@ -548,42 +585,53 @@ wrapped message leaves no blank rows. Known limits:
 
 ### Sessions and files
 
-Bare `melo` starts a new session; only the first message creates its row.
+Bare `melo` starts a new chat; only the first message saves it. The status
+bar names it `New chat` until it has a title.
 Use `melo -c` (`--continue`) to resume the newest chat with a finished turn
 in the current workspace, or `melo -r` (`--resume`) to pick one. With none,
-either starts a new session and says so; Esc in the startup picker also
+either starts a new chat and says so; Esc in the startup picker also
 starts new, without creating an empty row. `melo -r REF` resolves an ID,
 a prefix of at least four characters, or an exact case-insensitive title;
 multiple matches, or a title/message search fallback, open the picker.
 An unknown reference exits 2. The startup choice, including the `-r` picker,
 happens before the banner: the recap names a chosen chat (`◆ Resumed "TITLE"`,
 and developer mode's box labels it `"TITLE" (resumed)`); Esc or an empty list
-gives a new-session banner. `-c` and `-r` cannot be
+gives the new-chat banner. `-c` and `-r` cannot be
 combined, or used with a task or `melo serve`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest
-first. The filter updates after 150 ms; Tab toggles this folder/all folders.
-Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
+first. Its header says what the keys do (`Resume a chat · ~/demo-project · tab:
+this folder or all · esc close`); a folder too long for the row is cut from its
+middle, so the keys stay. The filter updates after 150 ms; Tab toggles this
+folder and all folders. Enter resumes, Esc or Ctrl+D closes it, and the
+ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
 Web and scheduler sessions are never offered. The web console's Workers view
 shows your chats here read-only under **Terminal chats**, redacted as it reads
 them (the stored copy is not redacted); it cannot change or send to them. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
 `/verbose`, `/thinking` and `/stream` preferences stay as they were. `/new`
-resets those display preferences (`/stream` back to `[cli] stream`). A note says when the session previously worked in another folder.
+resets those display preferences (`/stream` back to `[cli] stream`). A note says when the chat previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
-redacted copies. The line below its title says what reached model memory:
-`[sessions] resume_mode = "pairs"` (the default) restores recent user/answer
-pairs, without tool steps; `"window"` restores a saved working-memory
-checkpoint plus later pairs, falling back to pairs if no checkpoint is usable.
+redacted copies, as plain text: your message after `›`, and each answer after
+one `●`, with its Markdown markers off, its blank lines left out and at most
+four rows, the rows under the mark indented. The line below its title says how
+many turns are back in the model's memory (`1 turn is back in the model's
+memory.`); developer mode adds what became of their tool calls. `[sessions]
+resume_mode = "pairs"` (the default) restores recent user/answer pairs, without
+tool steps; `"window"` restores a saved working-memory checkpoint plus later
+pairs, falling back to pairs if no checkpoint is usable.
 Set this in `config.toml`; an invalid value warns in the UI and uses pairs,
 without adding warnings to direct-mode output. The recap's counts reflect
 the restored window after eviction, not the total number of stored turns.
 
 Two terminals may take turns on one CLI session. Before sending, melo reloads
 changes from the other window; a busy or deleted session keeps the draft.
-On exit, a session with turns prints its `melo -r ID` resume command.
+On exit, a chat with turns says how to come back to it:
+`◆ Saved "What is this project?". Continue it with: melo -c` when it is the
+newest chat of this folder and melo ran in that folder, and
+`Resume it with: melo -r ID` otherwise.
 
 Sessions are kept in `~/.cache/localmelo/cli/sessions.db`: every turn,
 with your message, the answer and each tool call with its output.

@@ -36,6 +36,7 @@
    notes.md   missing
 
 ✻ Worked for 0.3s · 5 tool calls · ↓ 240 tokens
+  Changed summary.md
 
 › Run the check again.
 

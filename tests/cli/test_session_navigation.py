@@ -72,9 +72,9 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
     assert info.model == setup.factory.backend.model
     assert "Resumed" in setup.out.text()
     assert "attached notes.txt (4 chars)" in setup.out.text()
-    assert "their tool calls are not" not in setup.out.text()  # singular grammar
-    assert "its tool calls are not" in setup.out.text()
-    assert "stored **answer**" in setup.out.text()
+    assert "1 turn is back in the model's memory." in setup.out.text()
+    assert "tool calls are not" not in setup.out.text()  # developer mode says it
+    assert "● stored answer" in setup.out.text()  # the Markdown shows as text
     assert "last worked in /other" in setup.out.text()
     session.enter("/retry")
     await setup.idle()
@@ -102,7 +102,7 @@ async def test_resolution_filters_exact_nonchat_and_empty_ids(setup: Setup) -> N
     for ref in (task, empty.id, "no such session"):
         setup.session.enter(f"/resume {ref}")
         await setup.idle()
-        assert "No session matches" in setup.out.text()
+        assert "No chat matches" in setup.out.text()
         assert setup.session.runner is None
 
 
@@ -216,6 +216,41 @@ async def test_saved_hint_is_computed_before_store_close(setup: Setup) -> None:
     assert "Resume it with: melo -r" in setup.session.saved_resume_hint
 
 
+async def test_the_exit_hint_says_melo_c_for_the_newest_chat_of_this_folder(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(setup.factory.root)
+    setup.session.enter("save this")
+    await setup.idle()
+    await setup.session.shutdown()
+    assert (
+        setup.session.saved_resume_hint
+        == '◆ Saved "save this". Continue it with: melo -c'
+    )
+
+
+async def test_the_exit_hint_names_the_id_when_melo_c_would_not_find_the_chat(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    setup.session.enter("save this")
+    await setup.idle()
+    assert setup.session.runner is not None and setup.session.runner.session_id
+    sid = setup.session.runner.session_id
+    named = f'◆ Saved "save this". Resume it with: melo -r {sid}'
+    # In another folder, `melo -c` would look there.
+    monkeypatch.chdir(tmp_path)
+    assert await setup.session.navigation.saved_hint() == named
+    # Here, but another chat of this folder is newer.
+    monkeypatch.chdir(setup.factory.root)
+    assert (
+        await setup.session.navigation.saved_hint()
+        == '◆ Saved "save this". Continue it with: melo -c'
+    )
+    await asyncio.sleep(0.02)
+    await seed(setup, "written in another window")
+    assert await setup.session.navigation.saved_hint() == named
+
+
 async def test_own_turns_do_not_trigger_spurious_reload(setup: Setup) -> None:
     scripted(setup).replies.extend([answer("second answer")])
     for text in ("one", "two"):
@@ -280,10 +315,7 @@ async def test_empty_startup_creates_no_session(
     await setup.session.navigation.startup(continue_session, ref)
     assert setup.session.runner is None
     assert await setup.store.list_sessions() == []
-    assert (
-        "No earlier session" in setup.out.text()
-        or "No sessions yet" in setup.out.text()
-    )
+    assert "No earlier chat" in setup.out.text() or "No chats yet" in setup.out.text()
 
 
 async def test_missing_startup_ref_exits_two(
@@ -294,7 +326,7 @@ async def test_missing_startup_ref_exits_two(
     assert setup.app.exited
     assert (
         capsys.readouterr().err
-        == "melo: no session matches 'not-found' (melo -r lists them)\n"
+        == "melo: no chat matches 'not-found' (melo -r lists them)\n"
     )
 
 
@@ -324,6 +356,7 @@ async def test_window_resume_plumbing_and_fallback_notes(
             answer="tail answer",
         )
     setup.session.navigation.mode = "window"
+    setup.session.developer = True  # the note names what became of the tool steps
     setup.session.enter(f"/resume {sid}")
     await setup.idle()
     runner = setup.session.runner

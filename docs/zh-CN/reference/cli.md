@@ -39,7 +39,7 @@ melo -h all                                  # every option, command and setting
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | 导入 worker 历史。 | `--title T` |
 
-`melo -h` 只有 20 行，`melo -h all` 列出全部选项、命令和设置，`melo COMMAND -h` 说明单个命令。字母选项的值要分开写（`-s 5` 或 `-s=5`）；`--title T` 给任务的 worker 会话命名。
+`melo -h` 列出常用选项，以及三个附有一句说明的命令（`setup`、`serve`、`console`），`melo -h all` 列出全部选项、命令和设置，`melo COMMAND -h` 说明单个命令。字母选项的值要分开写（`-s 5` 或 `-s=5`）；`--title T` 给任务的 worker 会话命名。
 
 <a id="old-spelling-to-new"></a>
 
@@ -147,7 +147,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 
 | 模式 | 如何选择 | `--help` 显示的内容 |
 |---|---|---|
-| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（20 行）：常用选项和命令词，最后指向更多内容的位置。 |
+| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（23 行）：常用选项、三个各附一句说明的命令，最后指向其余内容的位置。 |
 | 开发者 | 在配置中写 `[ui] mode = "developer"`，或单次运行时加 `--developer` | `melo -h all` 的全部内容：所有选项、命令和设置；每个实验性设置都会注明决定它去留的 issue。 |
 
 每个选项在两种模式下都能解析和生效，无论来自命令行还是配置文件，因此脚本和基准测试不受影响：模式只是把选项从帮助中隐藏，而不是删除它。`--developer` 无论放在命令行的哪个位置都对帮助生效（`melo --help --developer` 也可以），且必须写全名。既不是 `"default"` 也不是 `"developer"` 的 `[ui] mode` 会在 stderr 上打印一行并显示默认帮助；它从不会使运行或网关停止。

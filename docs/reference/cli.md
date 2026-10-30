@@ -46,7 +46,8 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 | `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | Import a worker history. | `--title T` |
 
-`melo -h` is 20 lines, `melo -h all` lists every option, command and setting, and
+`melo -h` lists the everyday options and three commands with what they do (`setup`,
+`serve`, `console`), `melo -h all` lists every option, command and setting, and
 `melo COMMAND -h` explains one command. A letter takes its value apart (`-s 5` or
 `-s=5`); `--title T` names a task's worker session.
 
@@ -206,7 +207,7 @@ option does.
 
 | Mode | How to choose it | What `--help` shows |
 |---|---|---|
-| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The short help (20 lines): the everyday options and the command words, then where to look next. |
+| Default | nothing, or `[ui] mode = "default"` in the [config file](configuration.md#the-config-file) | The short help (23 lines): the everyday options, three commands with a line on what each does, then where to find the rest. |
 | Developer | `[ui] mode = "developer"`, or `--developer` for one run | Everything `melo -h all` prints: every option, command and setting; each experimental setting names the issue that decides it. |
 
 Every option parses and works in both modes, from the command line and from

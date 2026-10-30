@@ -20,14 +20,15 @@ def test_continue_picker_and_exit_hint_across_terminal_processes(
     first.see("Hello! I am melo, running on a stub model.")
     first.see("Worked for")
     assert first.quit() == 0
-    assert "Resume it with: melo -r" in first.text()
+    assert 'Saved "hello". Continue it with: melo -c' in first.text()
     resumed = melo("-c")
     resumed.see('Resumed "hello"')
-    resumed.see("its tool calls are not")
+    resumed.see("1 turn is back in the model's memory.")
+    assert "tool calls are not" not in resumed.text()
     assert resumed.quit() == 0
     assert len(_turns(tmp_path)) == 1
     picker = melo("-r")
-    picker.see("Resume a session")
+    picker.see("Resume a chat")
     picker.type(b"\x1b")
     picker.see("Ask melo")
     assert picker.quit() == 0
@@ -39,4 +40,4 @@ def test_unknown_resume_reference_exits_two_on_a_terminal(
 ) -> None:
     term = melo("-r", "unknown-reference")
     assert term.wait() == 2, term.text()
-    assert "no session matches 'unknown-reference'" in term.text()
+    assert "no chat matches 'unknown-reference'" in term.text()

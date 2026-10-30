@@ -656,7 +656,8 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 The numbers the terminal's `/status` and status bar show for one chat, task or
 worker session, folded on the server from its stored events with the
-terminal's own code, so both agree. A worker run or terminal chat is read from
+terminal's own code, so both agree. The segments are the compact ones of the
+terminal's developer mode; its default mode says the same figures in words. A worker run or terminal chat is read from
 the CLI's file.
 
 ```bash
@@ -675,8 +676,8 @@ the CLI's file.
 }
 ```
 
-- `segments` is what the terminal's status bar draws, left to right: cache,
-  context, step, tasks. A segment with no data is left out.
+- `segments` is what the terminal's status bar draws in developer mode, left to
+  right: cache, context, step, tasks. A segment with no data is left out.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is

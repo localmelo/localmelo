@@ -126,7 +126,7 @@ def test_startup_picker_precedes_the_banner(melo: Callable[..., Melo]) -> None:
     first.see("Worked for")
     assert first.quit() == 0
     picker = melo("--developer", "-r")
-    picker.see("Resume a session")
+    picker.see("Resume a chat")
     assert "╭─ melo" not in picker.text()
     picker.type("\r")
     picker.see('Resumed "hello"')

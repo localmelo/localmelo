@@ -210,8 +210,8 @@ def test_the_bare_slash_lists_each_command_once() -> None:
 
 
 def test_an_alias_row_names_the_other_spelling() -> None:
-    assert _complete("/cl") == [("/clear", "/clear", "Start a new session (also /new)")]
-    assert _complete("/ne") == [("/new", "/new", "Start a new session (also /clear)")]
+    assert _complete("/cl") == [("/clear", "/clear", "Start a new chat (also /new)")]
+    assert _complete("/ne") == [("/new", "/new", "Start a new chat (also /clear)")]
     assert _complete("/q") == [("/quit", "/quit", "Quit (also /exit, ctrl+d)")]
     assert _complete("/exi") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
     assert _complete("/ex") == [
