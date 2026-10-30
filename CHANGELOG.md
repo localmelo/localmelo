@@ -31,6 +31,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo --serve` writes its startup lines, the port that `--port 0` picked
+  included, as soon as they are printed when stdout is a pipe or a file. They
+  used to wait in the buffer until the server exited, so a script or a log
+  reader could not find the port while it ran ([#NN]).
+
 - Setup never picks a model silently when several are served and none is known
   to be loaded. On a server whose status route needs a key (it answers 401) the
   first run used to default to the first listed model, which could be a large
