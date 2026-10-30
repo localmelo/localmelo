@@ -358,6 +358,14 @@ the call runs is read once. A call is **routine**, **high-impact** or
 A call is undecided when the rules cannot read what it does: a command,
 program or path built at run time, a POST that sends data, `git push`.
 
+- **The card says why.** A high-impact call gets its own card in the web
+  console and its own panel in the terminal. Each names what the call does as
+  a question ("Install software?", "Change files outside demo-project?"), lists
+  up to three reasons, offers no session choice, starts on No in the
+  terminal, and says in one line that a session grant never covers installs,
+  downloads or changes outside the folder. The console card also shows the
+  message that started the turn. See [the web console](web-console.md#approvals-and-failures)
+  and [the terminal](terminal.md#approvals).
 - **A session grant covers routine calls only.** "Allow for this chat" (in
   the terminal, "Yes, and allow every … call in this session") lets routine
   calls of that tool run without asking. A high-impact or undecided call of
@@ -374,5 +382,4 @@ program or path built at run time, a POST that sends data, `git push`.
 - **Limits.** The rules read the literal text of a call; code that builds
   what it runs at run time is undecided, and a call the rules miss still runs
   under a grant. Direct runs, `--brief` runs and `--yolo` have no policy, so
-  nothing is reviewed there. The approval card and the terminal panel do not
-  show the reasons yet.
+  nothing is reviewed there.

@@ -1543,6 +1543,11 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .approval-note { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
+/* A high-impact call: a heavier edge, the reasons melo asks, and what the person asked for. */
+.approval-card[data-impact="high"] { border-left-width: 4px; }
+.approval-why { margin: 0 0 2px; font-weight: 600; }
+.approval-reasons { margin: 0 0 8px; padding-left: 20px; line-height: 1.5; }
+.approval-asked { margin: 0 0 10px; color: var(--ink-2); line-height: 1.5; }
 /* A diff: its rows fill the box, so a removed or added one is tinted edge to edge. */
 .approval-diff { padding: 0; white-space: normal; }
 .diff-row { display: grid; grid-template-columns: 4ch 1.5ch minmax(0, 1fr); gap: 0 var(--space-2); padding: 0 10px; white-space: pre-wrap; }

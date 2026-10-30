@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.gateway.console import Console
 from localmelo.support.sessions.store import SessionStore
 
@@ -205,6 +206,86 @@ async def test_a_pending_file_write_shows_its_target(
     # A remembered grant is timed when it begins, not left at the 0.0
     # placeholder the route fills for a missing entry.
     assert body["granted_at"]["file_write"] > 0
+
+
+async def test_a_pending_high_impact_call_carries_its_review_and_is_never_granted(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    entry = await open_session(console.sessions, turn.session_id)
+    review = ActionReview(
+        "high",
+        ("install", "env"),
+        ("Installs playwright with pip.", "Creates a Python environment in .venv."),
+        by="rules",
+    )
+    request = ApprovalRequest(
+        request_id="req-pip",
+        run_id="",
+        call_id="call_1",
+        tool_name="shell_exec",
+        arguments={"command": "pip install playwright"},
+        preview="pip install playwright",
+        workspace_root=workspace,
+        review=review,
+    )
+    # The chat holds a routine grant of the tool from an hour ago.
+    entry.policy._granted.add("shell_exec")
+    entry.granted_at["shell_exec"] = 123.0
+    deciding = asyncio.create_task(entry.policy.decide(request))
+    for _ in range(10):
+        if console.broker.pending(turn.session_id):
+            break
+        await asyncio.sleep(0)
+
+    [pending] = client.get(f"/api/sessions/{turn.session_id}").json()[
+        "pending_approvals"
+    ]
+    assert pending["review"] == {
+        "verdict": "high",
+        "title": "Install software?",
+        "reasons": [
+            "Installs playwright with pip.",
+            "Creates a Python environment in .venv.",
+        ],
+    }
+
+    # An answer that asks to remember allows this call and restarts no clock.
+    assert console.broker.answer("req-pip", ApprovalDecision(True, remember=True))
+    assert not (await deciding).remember
+    body = client.get(f"/api/sessions/{turn.session_id}").json()
+    assert body["grants"] == ["shell_exec"]
+    assert body["granted_at"] == {"shell_exec": 123.0}
+
+
+async def test_a_pending_routine_call_has_a_review_without_a_title(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    entry = await open_session(console.sessions, turn.session_id)
+    for request_id, review in (("a", ActionReview("routine")), ("b", None)):
+        request = ApprovalRequest(
+            request_id=request_id,
+            run_id="",
+            call_id="call_1",
+            tool_name="shell_exec",
+            arguments={"command": "ls"},
+            preview="ls",
+            workspace_root=workspace,
+            review=review,
+        )
+        asyncio.create_task(entry.policy.decide(request))
+    for _ in range(10):
+        if len(console.broker.pending(turn.session_id)) == 2:
+            break
+        await asyncio.sleep(0)
+
+    pending = client.get(f"/api/sessions/{turn.session_id}").json()["pending_approvals"]
+    assert {item["request_id"]: item["review"] for item in pending} == {
+        "a": {"verdict": "routine", "title": "", "reasons": []},
+        "b": None,
+    }
+    console.broker.withdraw_all(reason="test over")
 
 
 async def test_a_pending_write_over_a_file_shows_what_it_replaces(

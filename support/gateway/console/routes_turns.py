@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.review import offers_grant
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionInfo,
@@ -366,7 +367,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if body.choice == "once":
             decision = ApprovalDecision(True)
         elif body.choice == "session":
-            decision = ApprovalDecision(True, remember=True)
+            # A high-impact call is never granted for the chat: this answer
+            # allows the one call, and the reply says so.
+            asked = console.broker.request(request_id)
+            grant = asked is None or offers_grant(asked.review)
+            decision = ApprovalDecision(True, remember=grant)
         else:
             decision = ApprovalDecision(False, body.reason)
         outcome = console.broker.answer(request_id, decision)

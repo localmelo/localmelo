@@ -278,12 +278,28 @@ from-the-child
 ❯ 1. Yes
   2. Yes, and allow every shell_exec call in this session
   3. No, and tell melo why
-  "Allow every" lets any shell command run without asking for the rest of this session.
-  Commands can reach files outside ~/demo-project.
+  "Allow every" lets routine shell commands run without asking for the rest of this session.
+  Installs, downloads and changes outside ~/demo-project still ask.
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
-- `1` 允许本次调用，`2` 在本会话剩余时间内允许该工具的常规调用（安装、下载、更改文件夹以外的文件等[高影响调用](tools-mcp.md#high-impact-calls)仍会询问），`3` 打开理由输入框（最多 500 个字符），模型会读取该理由；Enter 发送。也可以用 ↑ ↓ 和 Enter 选择。字母不能作为回答；面板打开后的 0.4 秒内只有 Esc 和 Ctrl+C 有效，避免你正在输入的消息意外回答审批。
+安装软件、下载文件、更改文件夹以外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用会得到另一种面板：标题用一个问题说出调用要做什么，代码上方列出原因，没有会话授权的选项，并默认选中 No，因此只按 Enter 不会允许它：
+
+```text
+╭─ Install software? ────────────────────────────────────────────────────────╮
+│ shell_exec · in ~/demo-project                                             │
+│ ⚠ melo asks because this call installs playwright with pip (downloads      │
+│   about 42 MB).                                                            │
+│   pip install playwright                                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+  1. Yes
+❯ 2. No, and tell melo why
+  Session grants never cover installs, downloads or changes outside the
+  folder.
+  ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
+```
+
+- `1` 允许本次调用，`2` 在本会话剩余时间内允许该工具的常规调用（安装、下载、更改文件夹以外的文件等[高影响调用](tools-mcp.md#high-impact-calls)仍会询问），`3` 打开理由输入框（最多 500 个字符），模型会读取该理由；Enter 发送。高影响面板没有会话授权的选项，所以那里的 `2` 是 No。也可以用 ↑ ↓ 和 Enter 选择。字母不能作为回答；面板打开后的 0.4 秒内只有 Esc 和 Ctrl+C 有效，避免你正在输入的消息意外回答审批。
 - 标题显示工具名和文件夹。开发者模式会在工具名后加上其权限级别，对于 `file_write` 则加在路径后（`shell_exec · exec · in ~/demo-project`；MCP 工具可为 `write`、`exec` 或 `network`，前提是界面能加载该工具）。只读 MCP 工具仅在服务器的 `require_approval` 强制询问时显示 `read`；参见[权限级别](tools-mcp.md#permission-tiers)。
 - 在选项处按 Esc 或 Ctrl+C 会停止当前轮次，2 秒内再次按 Ctrl+C 则退出；在理由输入框中按 Esc 返回选项。
 - 命令、代码或文件的新内容会按实际运行时的原样显示，长行换行，绝不截断：控制字符和会重新排列或隐藏文本的字符以转义形式显示（`\r`、`\x1b`、`\u{202e}`），并附有警告行，防止内容被隐藏。

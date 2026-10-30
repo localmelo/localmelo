@@ -22,7 +22,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.store import SessionBusyError
@@ -473,6 +475,44 @@ async def test_an_approval_answers_the_waiting_turn(tmp_path: Path) -> None:
         )
         assert again.status_code == 409
         assert again.json()["error"]["code"] == "already_answered"
+
+
+@pytest.mark.parametrize(
+    ("review", "remember"),
+    [
+        (None, True),
+        (ActionReview("routine"), True),
+        (ActionReview("undecided"), True),
+        (ActionReview("high", ("install",), ("Installs x with pip.",)), False),
+    ],
+    ids=["unreviewed", "routine", "undecided", "high"],
+)
+async def test_a_chat_wide_answer_to_a_high_impact_call_allows_only_that_call(
+    tmp_path: Path, review: ActionReview | None, remember: bool
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        request = ApprovalRequest(
+            request_id="req-high",
+            run_id="",
+            call_id="call_1",
+            tool_name="shell_exec",
+            arguments={"command": "pip install x"},
+            preview="pip install x",
+            workspace_root=str(tmp_path / "ws"),
+            review=review,
+        )
+        waiting = console.broker.begin("s1", request)
+
+        response = await client.post(
+            "/api/approvals/req-high", json={"choice": "session"}
+        )
+
+        assert response.json() == {
+            "request_id": "req-high",
+            "outcome": "allowed",
+            "remember": remember,
+        }
+        assert await waiting == ApprovalDecision(True, remember=remember)
 
 
 async def test_stopping_a_turn_while_an_approval_waits(tmp_path: Path) -> None:

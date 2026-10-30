@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The approval card says why melo asks, and never offers a chat-wide allow for
+  a high-impact call. In the web console and the macOS app, a call that
+  installs software, downloads files, changes files outside the workspace or
+  does anything else high-impact gets a card with a question that names it
+  ("Install software?"), "Why melo asks" with up to three reasons, "You
+  asked:" with the message that started the turn, and only **Allow once** and
+  **Deny** (the filled button, the one **Review** moves to). The terminal's
+  panel shows the same title and reasons before the code, has no session
+  choice, starts on No, and numbers its options by position. Both say in one
+  line that a session grant never covers installs, downloads or changes
+  outside the folder; the routine grant line now says it covers routine calls
+  and that installs, downloads and changes outside the workspace still ask.
+  Answering "for this chat" to a high-impact request over the API allows that
+  one call, replies `"remember": false` and no longer starts the grant's
+  clock ([#294]).
+
 - High-impact calls ask even inside a session grant. Before an approval
   policy decides, each `shell_exec`, `python_exec` and `file_write` call is
   reviewed by fixed rules (the shell command split, the Python code parsed;
@@ -2298,6 +2314,7 @@ earlier milestones.
 [#291]: https://github.com/localmelo/localmelo/pull/291
 [#292]: https://github.com/localmelo/localmelo/pull/292
 [#293]: https://github.com/localmelo/localmelo/pull/293
+[#294]: https://github.com/localmelo/localmelo/pull/294
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203

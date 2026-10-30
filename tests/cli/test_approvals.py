@@ -221,12 +221,11 @@ def test_control_characters_show_escaped_and_nothing_is_dropped(
 
 def test_the_session_warning_is_for_shell_and_python_only() -> None:
     assert session_warning("shell_exec", "~/demo") == [
-        '"Allow every" lets any shell command run without asking for the rest of this session.',
-        "Commands can reach files outside ~/demo.",
+        '"Allow every" lets routine shell commands run without asking for the rest of this session.',
+        "Installs, downloads and changes outside ~/demo still ask.",
     ]
-    assert (
-        session_warning("python_exec", "~/demo")[1]
-        == "Python can reach files outside ~/demo."
+    assert session_warning("python_exec", "~/demo")[0].startswith(
+        '"Allow every" lets routine Python code run'
     )
     assert session_warning("file_write", "~/demo") == []
 
@@ -257,6 +256,12 @@ async def test_option_two_does_nothing_when_not_offered() -> None:
     assert not asking.done()
     approver.answer("once")
     assert await asking == ApprovalDecision(True)
+    # A caller that asks for the session choice does not get it either.
+    asking = asyncio.ensure_future(approver.ask(_reviewed(_PIP), offer_session=True))
+    await asyncio.sleep(0)
+    assert approver.pending is not None and not approver.pending.offer_session
+    approver.answer("deny")
+    assert await asking == ApprovalDecision(False)
 
 
 async def test_a_reason_is_kept_to_500_characters() -> None:
@@ -363,7 +368,7 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         assert "❯ 1. Yes" in text
         assert "  2. Yes, and allow every shell_exec call in this session" in text
         assert "  3. No, and tell melo why" in text
-        assert '"Allow every" lets any shell command run without asking' in text
+        assert '"Allow every" lets routine shell commands run without asking' in text
         assert (
             "↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn" in text
         )
@@ -413,7 +418,7 @@ async def test_the_warning_and_the_key_line_are_default_text_not_dim(
         await app.wait(lambda: "Run a shell command?" in app.text())
         fragments = app.ui._panel_fragments()
         rows = {part[1]: part[0] for part in fragments}
-        for needle in ('"Allow every" lets', "Commands can reach"):
+        for needle in ('"Allow every" lets', "Installs, downloads and changes"):
             [style] = [style for text, style in rows.items() if needle in text]
             assert style == "", needle  # dim reads at 2.4:1 on a light terminal
         # The key line: each key in the body's ink, its words faint, which is
@@ -453,9 +458,11 @@ async def test_option_two_is_not_shown_when_not_offered(now: list[float]) -> Non
     async with running_app(approver=approver, clock=lambda: now[0]) as app:
         asking = asyncio.ensure_future(approver.ask(_request(), offer_session=False))
         await app.wait(lambda: "Run a shell command?" in app.text())
-        assert "2. Yes" not in app.text() and "3. No, and tell melo why" in app.text()
+        # The options are numbered by position: 1 Yes, 2 No.
+        assert "2. Yes" not in app.text() and "2. No, and tell melo why" in app.text()
+        assert "1-2 · v view all" in app.text()
         now[0] += 1
-        app.type("2")
+        app.type("3")
         await app.settle()
         assert not asking.done()
         app.type("1")
@@ -599,7 +606,9 @@ async def test_the_warning_under_option_two_wraps_rather_than_hides_the_folder(
         asking = asyncio.ensure_future(approver.ask(_request()))
         await app.wait(lambda: "Run a shell command?" in app.text())
         joined = " ".join(" ".join(app.screen()).split())
-        assert f"Commands can reach files outside {WORKSPACE}." in joined
+        assert (
+            f"Installs, downloads and changes outside {WORKSPACE} still ask." in joined
+        )
         assert "allow every shell_exec call in this session" in joined
         now[0] += 1
         app.type("1")
@@ -927,4 +936,135 @@ async def test_the_frame_is_warn_its_title_bold_the_choice_a_band_and_a_diff_ban
         assert not any(p[0].startswith("class:chosen") for p in parts)
         assert any(p[0] == "class:accent" and "3. No" in p[1] for p in parts)
         app.type("\r")
+        await asyncio.wait_for(asking, 3)
+
+
+# ── High-impact calls: the title, the reasons, no session choice (#279) ──
+
+_PIP = ActionReview(
+    "high",
+    ("install", "env"),
+    (
+        "Installs playwright with pip into .signin_venv (downloads about 43 MB).",
+        "Creates a Python environment in .signin_venv.",
+    ),
+)
+
+
+def _reviewed(review: ActionReview | None) -> ApprovalRequest:
+    return dataclasses.replace(
+        _request("python_exec", code="import subprocess"), review=review
+    )
+
+
+@pytest.mark.parametrize(
+    ("review", "title", "notes"),
+    [
+        (None, "Run Python code?", ()),
+        (ActionReview("routine"), "Run Python code?", ()),
+        (
+            ActionReview("undecided", reasons=("Builds a command.",)),
+            "Run Python code?",
+            (),
+        ),
+        (
+            _PIP,
+            "Install software?",
+            (
+                "melo asks because this call installs playwright with pip into "
+                ".signin_venv (downloads about 43 MB); creates a Python environment "
+                "in .signin_venv.",
+            ),
+        ),
+    ],
+    ids=["unreviewed", "routine", "undecided", "high"],
+)
+def test_only_a_high_impact_call_gets_a_review_title_and_note(
+    review: ActionReview | None, title: str, notes: tuple[str, ...]
+) -> None:
+    text = panel_text(_reviewed(review), width=60)
+    assert (text.title, text.notes) == (title, notes)
+    assert text.header == f"python_exec · in {WORKSPACE}"
+
+
+def test_a_title_that_names_the_folder_and_a_reason_with_control_characters() -> None:
+    review = ActionReview("high", ("outside_write",), ("Writes \x1b[2Jx.",))
+    text = panel_text(_reviewed(review), width=60)
+    assert text.title == "Change files outside demo-project?"
+    assert text.notes == ("melo asks because this call writes \\x1b[2Jx.",)
+    assert text.escaped
+
+
+async def test_a_high_impact_call_has_no_session_choice_and_starts_on_no() -> None:
+    approver = TerminalApprover()
+    asking = asyncio.ensure_future(approver.ask(_reviewed(_PIP)))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None
+    assert (pending.offer_session, pending.selected) == (False, 2)
+    approver.answer("session")
+    assert not asking.done()
+    approver.answer("once")
+    assert await asking == ApprovalDecision(True)
+
+
+@pytest.mark.parametrize(
+    "review",
+    [None, ActionReview("routine"), ActionReview("undecided")],
+    ids=["unreviewed", "routine", "undecided"],
+)
+async def test_every_other_call_still_offers_the_session_choice(
+    review: ActionReview | None,
+) -> None:
+    approver = TerminalApprover()
+    asking = asyncio.ensure_future(approver.ask(_reviewed(review)))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None
+    assert (pending.offer_session, pending.selected) == (True, 0)
+    approver.answer("session")
+    assert await asking == ApprovalDecision(True, remember=True)
+
+
+async def test_the_high_impact_panel_shows_why_and_answers_by_position(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_reviewed(_PIP)))
+        await app.wait(lambda: "Install software?" in app.text())
+        text = app.text()
+        assert "╭─ Install software? ─" in text
+        assert "⚠ melo asks because this call installs playwright with pip" in text
+        assert "  1. Yes" in text and "❯ 2. No, and tell melo why" in text
+        assert "allow every" not in text and "3." not in text
+        assert (
+            "Session grants never cover installs, downloads or changes outside "
+            "the folder." in " ".join(text.split())
+        )
+        assert "enter confirm · 1-2 · v view all" in text
+        now[0] += 1
+        app.type("3")  # there is no third option
+        await app.settle()
+        assert not asking.done()
+        app.type(ENTER)  # Enter on the preselected No opens the reason field
+        await app.wait(lambda: "Reason (optional" in app.text())
+        app.type(ESC)
+        await app.wait(lambda: "Reason (optional" not in app.text(), timeout_s=3)
+        app.type("\x1b[A")  # up: Yes, the only other choice
+        await app.wait(lambda: "❯ 1. Yes" in app.text(), timeout_s=3)
+        app.type(ENTER)
+        assert await asyncio.wait_for(asking, 3) == ApprovalDecision(True)
+
+
+async def test_a_routine_panel_keeps_its_three_options(now: list[float]) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_reviewed(ActionReview("routine"))))
+        await app.wait(lambda: "Run Python code?" in app.text())
+        text = app.text()
+        assert "❯ 1. Yes" in text and "3. No, and tell melo why" in text
+        assert "melo asks because" not in text and "never cover" not in text
+        now[0] += 1
+        app.type("1")
         await asyncio.wait_for(asking, 3)

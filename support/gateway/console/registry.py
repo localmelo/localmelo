@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
@@ -487,6 +488,7 @@ class ConsoleSessions:
                 isinstance(decision, ApprovalDecision)
                 and decision.allow
                 and decision.remember
+                and offers_grant(request.review)
             ):
                 granted_at[request.tool_name] = self._clock()
             return decision

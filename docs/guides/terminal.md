@@ -610,16 +610,36 @@ of the input box, and your draft stays:
 ❯ 1. Yes
   2. Yes, and allow every shell_exec call in this session
   3. No, and tell melo why
-  "Allow every" lets any shell command run without asking for the rest of this session.
-  Commands can reach files outside ~/demo-project.
+  "Allow every" lets routine shell commands run without asking for the rest of this session.
+  Installs, downloads and changes outside ~/demo-project still ask.
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
+```
+
+A call that installs software, downloads files, changes files outside the
+folder or does anything else [high-impact](tools-mcp.md#high-impact-calls) gets
+a panel with the question that names it, the reasons above the code, no
+session choice, and the answer No selected, so that Enter alone never allows it:
+
+```text
+╭─ Install software? ────────────────────────────────────────────────────────╮
+│ shell_exec · in ~/demo-project                                             │
+│ ⚠ melo asks because this call installs playwright with pip (downloads      │
+│   about 42 MB).                                                            │
+│   pip install playwright                                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+  1. Yes
+❯ 2. No, and tell melo why
+  Session grants never cover installs, downloads or changes outside the
+  folder.
+  ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
 - `1` allows this call, `2` allows the tool's routine calls for the rest of
   the session (a call that installs, downloads, changes files outside the
   folder or does anything else
   [high-impact](tools-mcp.md#high-impact-calls) still asks), and `3` opens a field for a reason (at most 500 characters) that the
-  model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
+  model reads; Enter sends it. A high-impact panel has no session choice, so
+  `2` there is No. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.
 - The header names the tool and the folder. Developer mode adds the tool's

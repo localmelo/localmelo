@@ -64,9 +64,11 @@ from prompt_toolkit.search import SearchState
 from prompt_toolkit.widgets import SearchToolbar
 from rich.text import Text
 
+from localmelo.melo.contracts.review import offers_grant
 from localmelo.support.cli.approvals import (
     BODY_LINES,
     ESCAPED_WARNING,
+    NO_GRANT_RULE,
     REASON_MAX_CHARS,
     PendingApproval,
     TerminalApprover,
@@ -1011,26 +1013,29 @@ class InteractiveApp:
             return [(style, first)] + [(style, indent + part) for part in rest if part]
 
         options: list[tuple[str, str]] = []
-        for index, label in self._options(pending):
+        offered = self._options(pending)
+        for number, (index, label) in enumerate(offered, 1):
             chosen = index == pending.selected and not pending.reason
             mark = symbols.selection if chosen else " "
             # The chosen answer is a band; while a reason is typed, its answer
             # keeps the accent.
             style = "class:accent" if index == pending.selected else ""
             style = "class:chosen" if chosen else style
-            options += wrapped(style, f"{mark} {index + 1}. {label}", width, "     ")
+            options += wrapped(style, f"{mark} {number}. {label}", width, "     ")
         keys: list[tuple[str, str]] = []
         if not pending.reason:
             if pending.offer_session:
                 where = home_label(pending.request.workspace_root or "")
                 for line in session_warning(pending.request.tool_name, where):
                     options += wrapped("", "  " + line, width, "  ")
+            elif not offers_grant(pending.request.review):
+                options += wrapped("", "  " + NO_GRANT_RULE, width, "  ")
             dot = f" {symbols.dot} "
             line = dot.join(
                 [
                     f"{symbols.arrows} select",
                     "enter confirm",
-                    "1-3",
+                    f"1-{len(offered)}",
                     "v view all",
                     "esc stop the turn",
                 ]
@@ -1066,7 +1071,15 @@ class InteractiveApp:
                 if text.escaped
                 else []
             )
-            fixed = (2 if boxed else 1) + len(head) + len(tail) + len(options)
+            # Why melo asks comes before the code it asks about.
+            why = [
+                part
+                for note in text.notes
+                for part in wrapped("class:warn", f"{symbols.warn} {note}", inner, "  ")
+            ]
+            fixed = (
+                (2 if boxed else 1) + len(head) + len(why) + len(tail) + len(options)
+            )
             room = rows - fixed - len(keys)
             if room >= min(2, len(text.body)) or not (boxed or keys):
                 break
@@ -1111,7 +1124,7 @@ class InteractiveApp:
             out.append(("class:title", label))
             dashes = "─" * max(0, width - 5 - cells(label))
             row("class:frame", f" {dashes}╮")
-            for style, line in head + body + tail:
+            for style, line in head + why + body + tail:
                 shown = cut_cells(line, inner, symbols.ellipsis)
                 out.append(("class:frame", "│ "))
                 row(style, shown, inner)
@@ -1121,7 +1134,7 @@ class InteractiveApp:
             row("class:frame", "╰" + "─" * (width - 2) + "╯")
         else:
             row("class:question", cut_cells(text.title, width, symbols.ellipsis))
-            for style, line in head + body + tail:
+            for style, line in head + why + body + tail:
                 row(style, line)
         for style, line in options + keys:
             row(style, line)
@@ -1150,6 +1163,13 @@ class InteractiveApp:
         position = indexes.index(pending.selected) if pending.selected in indexes else 0
         pending.selected = indexes[(position + step) % len(indexes)]
         self.app.invalidate()
+
+    def _choose_position(self, position: int) -> None:
+        """Answer with the option shown at *position* (the number key minus one)."""
+        pending = self._pending()
+        offered = [] if pending is None else self._options(pending)
+        if position < len(offered):
+            self._choose(offered[position][0])
 
     def _choose(self, index: int) -> None:
         pending = self._pending()
@@ -1186,7 +1206,7 @@ class InteractiveApp:
         )
         header = text.header.replace(" · ", f" {self.symbols.dot} ")
         self.renderer.out.print(
-            Text("\n".join([header, *(line for _, line in text.body)]))
+            Text("\n".join([header, *text.notes, *(line for _, line in text.body)]))
         )
 
     def _panel_bindings(self) -> list[KeyBindings]:
@@ -1197,8 +1217,8 @@ class InteractiveApp:
         for number in (1, 2, 3):
 
             @kb.add(str(number), filter=choices)
-            def _(event: KeyPressEvent, index: int = number - 1) -> None:
-                self._choose(index)
+            def _(event: KeyPressEvent, position: int = number - 1) -> None:
+                self._choose_position(position)
 
         @kb.add("up", filter=choices)
         def _(event: KeyPressEvent) -> None:
