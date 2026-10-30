@@ -166,17 +166,19 @@ For a local server, run `melo` in a terminal. With no configuration yet, it
 first says what it needs, a model server on this computer. It then looks for
 one (oMLX on port 8000, Ollama on 11434), asks for its URL (press Enter to
 accept the one it found) and for a model from the server's list, saves
-`~/.cache/localmelo/config.toml` and opens the interactive UI. The list shows
-chat models first. An embedding or reranking model is tagged `(embedding)` or
-`(reranking)` and is never the default. When the list holds several chat
-models and the server says which are in memory (oMLX, Ollama), they are
-marked `(loaded)` and Enter chooses the first of them, so it does not load a
-large model that is not in memory. When it does not say (a server with an API
-key answers 401, others have no such route) or none is loaded, there is no
-default: type the number of the model to use, because a model that is not
-loaded yet can take minutes and a lot of memory to load. Enter alone asks
-again, and with the answers piped in, an empty answer is an error. With one
-chat model there is nothing to choose:
+`~/.cache/localmelo/config.toml` and opens the interactive UI. The models are
+a list to choose from with the arrow keys (type to filter, Enter to choose,
+Esc to cancel), chat models only; with the answers piped in they are numbered
+instead, chat models first, and an embedding or reranking model is tagged
+`(embedding)` or `(reranking)` and is never the default. When the list holds
+several chat models and the server says which are in memory (oMLX, Ollama),
+they are marked `(loaded)` and the first of them is highlighted, so Enter does
+not load a large model that is not in memory. When it does not say (a server
+with an API key answers 401, others have no such route) or none is loaded,
+nothing is highlighted and Enter does nothing until you move to a model,
+because a model that is not loaded yet can take minutes and a lot of memory
+to load (piped, there is no default either: Enter alone asks again, and an
+empty answer is an error). With one chat model there is nothing to choose:
 
 ```text
 $ melo
@@ -343,8 +345,8 @@ melo --url http://127.0.0.1:8000/v1
 melo --url http://127.0.0.1:8000/v1 --model YOUR_MODEL_ID
 ```
 
-- Type `/` for the commands: `/model` lists the server's models and
-  switches to one, `/backend` switches to another server (both saved as the
+- Type `/` for the commands: `/model` opens a list of the server's models to
+  switch to one, `/backend` switches to another server (both saved as the
   default, except in a `melo --url` session), `/new` starts over,
   `/exit` or Ctrl+D leaves.
 - melo asks before it runs a shell command, Python code or a file write:

@@ -14,11 +14,11 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (3 models).
 Server URL [http://127.0.0.1:8000/v1]:
-Models on http://127.0.0.1:8000/v1:
-  [1] Qwen3-8B-4bit  (loaded)
-  [2] Qwen3-32B-4bit
-  [3] Qwen3-Embedding-0.6B  (embedding)
-Model [1]:
+ Choose a model · http://127.0.0.1:8000/v1
+ Filter ›
+ ❯ Qwen3-8B-4bit  (loaded)
+   Qwen3-32B-4bit
+ 2 models · enter chooses · esc cancels
 ✓ http://127.0.0.1:8000/v1 lists 3 models; using Qwen3-8B-4bit.
 Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
@@ -26,13 +26,18 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
   30000 fills in the URL; one with a chat model comes first. Listing a
-  server's models sends `GET /v1/models`. The list shows chat models first;
-  an embedding or reranking model is tagged `(embedding)` or `(reranking)` and
-  is never the default. With several chat models, setup
+  server's models sends `GET /v1/models`. On a terminal the models are a list
+  to choose from (type to filter, ↑ ↓ to move, Enter to choose, Esc to
+  cancel; the list is erased once you choose) with the chat models only, as
+  above. Without a terminal, when answers are piped in, they are numbered
+  (`Model [1]:`), chat models first; an embedding or reranking model is
+  tagged `(embedding)` or `(reranking)` and is never the default. With
+  several chat models, setup
   also asks which are in memory, with `GET /v1/models/status` (oMLX) and
   `GET /api/ps` (Ollama), one second each and without a key: it marks the
-  loaded ones `(loaded)` and makes the first the default, and with none
-  loaded there is no default, so type a number. Saving the choice asks
+  loaded ones `(loaded)` and makes the first the default (highlighted), and
+  with none loaded there is no default: nothing is highlighted, so move to a
+  model with ↑ ↓ (or type a number, piped). Saving the choice asks
   `GET /api/version` once, to tell an Ollama server apart, and a `y` sends
   one `POST /v1/embeddings` probe of the offered model.
 - The embedding question is asked only when the list holds an embedding

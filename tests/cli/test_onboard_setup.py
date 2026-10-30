@@ -323,6 +323,141 @@ def _terminal(monkeypatch: pytest.MonkeyPatch, tty: bool) -> None:
     monkeypatch.setattr("sys.stdin", Stdin())
 
 
+# ── On a terminal the model is chosen with the arrow keys ──
+
+
+def _arrow_keys(monkeypatch: pytest.MonkeyPatch, choose: int | None) -> list[Any]:
+    """The first run on a terminal; the list is built, then *choose* picks a row.
+
+    Returns the pickers it built, so a test can read what the list offered.
+    """
+    from localmelo.support.cli import picker as pickers
+
+    built: list[Any] = []
+
+    def run_inline(build: Any, *, no_color: bool = False) -> Any:
+        async def make() -> Any:
+            return build(lambda: 80, lambda: None)
+
+        asked = asyncio.run(make())
+        built.append(asked)
+        return None if choose is None else asked.models[choose]
+
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(pickers, "run_inline", run_inline)
+    return built
+
+
+@pytest.mark.parametrize(
+    ("models", "loaded", "offered", "start", "said"),
+    [
+        (  # several chat models and none known loaded: nothing is highlighted
+            ["nomic-embed-text", "chat-a", "chat-b"],
+            [],
+            [("chat-a", False, "chat"), ("chat-b", False, "chat")],
+            None,
+            discovery.LOAD_COST_NOTE,
+        ),
+        (  # the loaded chat model is where the highlight starts
+            ["chat-a", "chat-b", "bge-m3"],
+            ["chat-b"],
+            [("chat-a", False, "chat"), ("chat-b", True, "chat")],
+            "chat-b",
+            "",
+        ),
+        (  # no chat model: the others are offered, tagged, with a note
+            ["nomic-embed-text", "bge-reranker-v2-m3"],
+            [],
+            [
+                ("nomic-embed-text", False, "embedding"),
+                ("bge-reranker-v2-m3", False, "reranking"),
+            ],
+            "nomic-embed-text",
+            "These look like embedding or reranking models",
+        ),
+    ],
+    ids=["no-default", "loaded", "no-chat-model"],
+)
+def test_on_a_terminal_the_models_are_a_list_to_choose_from(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    models: list[str],
+    loaded: list[str],
+    offered: list[tuple[str, bool, str]],
+    start: str | None,
+    said: str,
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels(frozenset(loaded), bool(loaded))
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    built = _arrow_keys(monkeypatch, choose=len(offered) - 1)
+    answers = _Answers("", "n")  # the URL; then, with embedding models, memory
+    result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
+    [asked] = built
+    assert [(m.id, m.loaded, m.kind) for m in asked.models] == offered
+    assert (asked.start, asked.where, asked.title) == (start, URL, "Choose a model")
+    assert result is not None and result.model == offered[-1][0]
+    assert not any(prompt.startswith("Model") for prompt in answers.prompts)
+    out = capsys.readouterr().out
+    assert "Models on" not in out and "[1]" not in out and said in out
+    assert f"✓ {URL} lists {len(models)} models; using {result.model}.\n" in out
+
+
+def test_closing_the_model_list_cancels_the_first_run(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _arrow_keys(monkeypatch, choose=None)
+    with pytest.raises(KeyboardInterrupt):
+        _first_setup(
+            _Answers(""), found=FoundServer(url=URL, models=["chat-a", "chat-b"])
+        )
+    assert not config_path.exists()
+
+
+def test_a_server_with_one_model_needs_no_list_even_on_a_terminal(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = _arrow_keys(monkeypatch, choose=None)
+    answers = _Answers("")
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["only-model"])
+    )
+    assert result == FirstSetup(url=URL, model="only-model", saved=True)
+    assert built == []
+    assert not any(prompt.startswith("Model") for prompt in answers.prompts)
+
+
+@pytest.mark.parametrize(
+    ("stdin", "stdout", "term", "expected"),
+    [
+        (True, True, "xterm-256color", True),
+        (True, True, "dumb", False),
+        (True, False, "xterm-256color", False),
+        (False, True, "xterm-256color", False),
+    ],
+)
+def test_the_list_needs_a_terminal_on_both_sides_that_is_not_dumb(
+    monkeypatch: pytest.MonkeyPatch,
+    stdin: bool,
+    stdout: bool,
+    term: str,
+    expected: bool,
+) -> None:
+    class Stream:
+        def __init__(self, tty: bool) -> None:
+            self.tty = tty
+
+        def isatty(self) -> bool:
+            return self.tty
+
+    monkeypatch.setattr("sys.stdin", Stream(stdin))
+    monkeypatch.setattr("sys.stdout", Stream(stdout))
+    monkeypatch.setenv("TERM", term)
+    assert onboard._arrow_keys() is expected
+
+
 def test_without_a_loaded_answer_there_is_no_default_and_enter_asks_again(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
