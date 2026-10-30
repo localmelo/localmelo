@@ -1003,7 +1003,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   instead of breaking inside a word, a failed check asks `Enter tries again · s starts
   without saving · q quits:` (it asked `[r]etry, [s]tart without saving, [q]uit [r]:`),
   and the first banner no longer says how to add long-term memory right after you
-  declined it. The saved config and every machine output are unchanged ([#NN]).
+  declined it. The saved config and every machine output are unchanged ([#240]).
 
 - The welcome starts the conversation. The interactive UI opens with three rows,
   `melo 0.1.0 · MODEL (/model to change)`, the folder, and `Try: What is this project? ·
@@ -1012,7 +1012,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   only when the model is not the saved default; tools, memory and session are in
   `/status`. A narrow terminal drops the least needed parts of a row whole instead of
   wrapping it. `--developer` (or `[ui] mode = "developer"`) keeps the box
-  ([#NN]).
+  ([#240]).
 
 - Errors in the terminal say what happened and what to do, in plain words. A run that does
   not complete used to end with `✗ melo: run ended with status provider_error: cannot reach
@@ -1022,7 +1022,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   steps (30).`, `Stopped: the same calls kept repeating.`) and one action. The footer after
   a failed turn reads `✻ Stopped after 5.0s` (it said `Worked for`, and `0 tool calls`),
   and a retry prints one line a turn that keeps the server's URL. Direct mode's stderr
-  line, JSON, exit codes and requests are unchanged ([#NN]).
+  line, JSON, exit codes and requests are unchanged ([#240]).
 - The measured cache layout is now the default (part of #183 and #185).
   `[agent] cache_layout` is `"v3"` (was `"v2"`) on every backend: with the fixed prefix,
   a reflection is appended to the window once, at the attempt boundary, instead of being
@@ -1600,6 +1600,7 @@ earlier milestones.
 [#237]: https://github.com/localmelo/localmelo/pull/237
 [#238]: https://github.com/localmelo/localmelo/pull/238
 [#239]: https://github.com/localmelo/localmelo/pull/239
+[#240]: https://github.com/localmelo/localmelo/pull/240
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
