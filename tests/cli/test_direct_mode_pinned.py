@@ -66,7 +66,12 @@ which the legacy goldens check with those values. The experimental ``[agent] lea
 (no flag; ``-X agent.lean_output=true``) adds a check of its config value and its
 application to a task, not to the ``melo ""`` loop, to ``_build_direct_mode_agent``,
 which has a new hash; off, the default, sends the requests it sent, as
-``tests/agent/test_lean_output.py`` pins. ``_check_args`` is not pinned.
+``tests/agent/test_lean_output.py`` pins. The developer setting ``[agent] confine_direct_runs``
+(no flag; ``-X agent.confine_direct_runs=true``) adds a check of its config value and its
+application to a plain direct run (a task or the ``melo ""`` loop, never ``--brief``) to
+``_build_direct_mode_agent``, which has a new hash again; off, the default, leaves the
+options and so the requests, stdout and exit codes as they were, as
+``tests/cli/test_confine_direct_runs.py`` checks. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -88,7 +93,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "d649c4527eb4f6d6f80d3190964b51c468c6a9fd77c24c8067d99e67d9312dd8",
+    "_build_direct_mode_agent": "3489129be9bf79db6160b2385089f8d351cae2e7d0911de45823dd67ed095876",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
