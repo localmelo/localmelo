@@ -63,7 +63,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   commands of `/ex`, all of them at `/`, the names after an `@`, and nothing once
   the `/` or `@` is gone, which closes the list. Moving the cursor alone still
   opens nothing, Esc closes the list until the next edit, and Tab, Enter and the
-  arrow keys take a command as before. ([#NN])
+  arrow keys take a command as before. ([#285])
 
 - A reflection reply with one common slip in its JSON no longer costs a retry.
   A reply with a stray `]` after a string value (a `]` that no `[` opened) could
@@ -2171,6 +2171,7 @@ earlier milestones.
 [#274]: https://github.com/localmelo/localmelo/pull/274
 [#275]: https://github.com/localmelo/localmelo/pull/275
 [#284]: https://github.com/localmelo/localmelo/pull/284
+[#285]: https://github.com/localmelo/localmelo/pull/285
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
 [#203]: https://github.com/localmelo/localmelo/pull/203
