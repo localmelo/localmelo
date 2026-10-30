@@ -463,14 +463,19 @@ def test_a_digest_that_is_a_path_reads_as_its_name() -> None:
 
 
 async def front_chat(console: Console, workspace: str, **new: Any) -> str:
-    """A finished chat of the given session kind or meta, as the main chat will be."""
-    turn = await console.store.begin_turn(
-        None,
-        "hello",
-        holder=HOLDER,
-        title="Main chat",
-        new_session=NewSession(model="m", workspace=workspace, **new),
-    )
+    """A finished chat of the given session kind or meta; kind ``front`` is the console's main chat."""
+    if new.get("kind") == "front":
+        # The console made its one main chat when it opened the store.
+        assert console.main_id is not None
+        turn = await console.store.begin_turn(console.main_id, "hello", holder=HOLDER)
+    else:
+        turn = await console.store.begin_turn(
+            None,
+            "hello",
+            holder=HOLDER,
+            title="Main chat",
+            new_session=NewSession(model="m", workspace=workspace, **new),
+        )
     await console.store.finish_turn(
         turn.session_id,
         turn.turn,

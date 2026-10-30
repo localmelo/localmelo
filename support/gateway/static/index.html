@@ -33,18 +33,18 @@
           /><strong>localmelo</strong><span class="local-badge" id="local-badge" hidden>LOCAL</span>
         </div>
         <nav class="worker-navigation" id="section-nav" aria-label="History sections">
-          <a href="#/new" id="chats-link">Chats</a>
           <a href="#/workers" id="workers-link">Workers</a>
           <a href="#/tasks" id="tasks-link">Tasks</a>
         </nav>
+        <div class="main-chat-slot" id="main-chat-row" hidden></div>
         <button class="nav-button new-chat" id="new-btn">
-          <span aria-hidden="true">＋</span> <span class="nav-label">New chat</span> <kbd>⌘ K</kbd>
+          <span aria-hidden="true">＋</span> <span class="nav-label" id="new-label">New chat</span> <kbd>⌘ K</kbd>
         </button>
         <label class="search"
           ><span aria-hidden="true">⌕</span
           ><input id="search" type="search" placeholder="Search chats" aria-label="Search chats"
         /></label>
-        <div class="list-heading">Chats <span id="session-count">0</span></div>
+        <div class="list-heading"><span id="list-label">Chats</span> <span id="session-count">0</span></div>
         <nav class="session-list" id="session-list" aria-label="Chats"></nav>
         <div class="sidebar-bottom">
           <button class="nav-button" id="settings-btn">
@@ -73,8 +73,11 @@
             ☰
           </button>
           <div class="header-titles">
-            <strong id="header-title">New chat</strong
-            ><span id="header-model">Connect your model to get started</span>
+            <div class="header-trail">
+              <button type="button" class="header-parent" id="header-parent" hidden>Main chat</button
+              ><strong id="header-title">New chat</strong>
+            </div>
+            <span id="header-model">Connect your model to get started</span>
           </div>
           <span
             class="machine-chip"
@@ -149,6 +152,7 @@
             <p id="welcome-description">
               A quiet space to think, build, and explore with your own model.
             </p>
+            <p class="welcome-link" id="welcome-workers" hidden><a href="#/workers">See what worker runs did</a></p>
             <section class="setup-card" id="setup-card" aria-labelledby="setup-title" aria-live="polite" tabindex="-1" hidden></section>
           </div>
           <div

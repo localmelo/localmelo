@@ -258,6 +258,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用内置工具 `file_read`、`file_write` 和 `python_exec`（不含 `shell_exec` 和 `list_files`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
 
 - `POST /api/tasks` 接受 `objective`（或其别名 `prompt`）、可选的 `title`、`workspace`、`level` 和 `request_key`。objective 必须非空，且不超过 100,000 个字符；title 不超过 200 个字符，默认为从 objective 派生的标题。level 为 0–5 的整数或 `P0`–`P5`；省略时为计算出的 P2。提供的 `deadline`（即使为 null）都会被拒绝；截止时间尚不支持。其他字段也会被拒绝。objective 缺失、为空白或过长、title 过长或 level 无效，都返回 400 `invalid_task`；模式或类型错误返回 400 `invalid_request`。创建新任务时返回 202 `{"task": ...}`。显式为空的 `request_key` 返回 400 `invalid_request`。非空的 `request_key` 使同一规范化请求的重复提交返回 200 `{"task": ..., "repeated": true}`；将其用于不同的请求会返回 409 `submission_conflict`。重复提交不会启动新的 worker。
+- `front_id`（可选）是发起该任务的对话：某个旁支对话或主对话的会话 id。任务属于它（即任务的 `front_id`，该对话的面板 Workers 标签页会列出它）；缺失时属于主对话。不指向任何控制台对话的 id（未知 id，或任务的会话）返回 400 `invalid_request`。
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
 - `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。`first` 会被 400 `invalid_request` 拒绝；它被推迟到 S6b。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
 
@@ -285,19 +286,21 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/sessions
 
-最新的会话排在最前面。默认只列出 `chat` 会话。
+最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 ```
 
 ```json
-{"sessions": [{"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""}], "machine": {"lock": "none", "holder": "", "purpose": "", "run": "", "eta": "", "stale": false, "readable": true, "on_ac": true, "battery_pct": 100, "battery_state": "charged", "band": 4, "gate": "record"}, "has_more": false}
+{"sessions": [{"id": "8983e7f06ecf", "kind": "chat", "main": false, "title": "Plan the Tokyo trip", "created_at": 1793399544.338924, "updated_at": 1793399544.339885, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""}], "machine": {"lock": "none", "holder": "", "purpose": "", "run": "", "eta": "", "stale": false, "readable": true, "on_ac": true, "battery_pct": null, "battery_state": "", "band": 4, "gate": "record"}, "has_more": false, "main": {"id": "313ad3fcb8fb", "kind": "front", "main": true, "title": "Main chat", "created_at": 1793399544.315079, "updated_at": 1793399544.315079, "model": "", "workspace": null, "workspace_label": "", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": "", "last_card": {"id": 4, "ts": 1793399544.342355, "source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}}}
 ```
 
+- **主对话。** 网关的会话文件中恰好有一个主对话：一个类型为 `front`、标题为 `Main chat` 的会话，在控制台第一次打开该文件时创建，早于它的第一条消息。它永远不会被删除。每个类型为 `chat` 的控制台对话都是它的旁支对话；主对话出现之前创建的对话也原样成为它的旁支对话。每个会话对象用 `main` 说明这一点：主对话为 `true`，其他会话为 `false`。
+- `main`（仅在默认的 `kind=chat` 下出现）是主对话的会话对象，另加 `last_card`：它最新的一张[卡片](#cards-in-the-main-chat)，没有时为 `null`。只要 `last_card.id` 比客户端上次显示的卡片更新，客户端就把主对话标为未读。只有在存储无法读取时，`main` 才为 `null`。
 - `limit` 为 1 到 200（默认 50）。`query` 最多 200 个字符，与会话的标题或任一轮次的用户文本匹配。`has_more` 表示该页之外还有更早的会话。
 - 会话在拥有一个轮次之后即被列出，正在运行的轮次也算在内：创建操作一旦保存了第一个轮次的行，会话就会出现。创建操作留下的、从未开始其消息的行（例如中途关机）没有轮次，因此不会被列出；`GET /api/sessions/{id}` 仍会显示它。
-- `kind` 为 `chat`（默认）、`front`、`front_bg`、`task`、`worker` 或 `terminal`；其他任何值都是 400 `invalid_request`。`worker` 和 `terminal` 以 SQLite 只读模式读取 CLI 会话文件：`worker` 列出直接运行，`terminal` 列出交互式 `melo` 会话的对话，`kind=chat` 从不包含它们。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
+- `kind` 为 `chat`（默认）、`front`、`front_bg`、`task`、`worker` 或 `terminal`；其他任何值都是 400 `invalid_request`。`front` 列出主对话，在它的第一条消息之前也会列出。`worker` 和 `terminal` 以 SQLite 只读模式读取 CLI 会话文件：`worker` 列出直接运行，`terminal` 列出交互式 `melo` 会话的对话，`kind=chat` 从不包含它们。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
 - worker 和 terminal 列表接受精确匹配的 `status`、`source` 和 `parent_run` 筛选条件，以及来自上一个响应 `next_cursor` 的不透明 `cursor`。结果按该行所用轮次的开始时间降序排列，再按会话 id 降序排列。到达末尾时 `next_cursor` 为 `null`；翻到后续页时，应保持相同的筛选条件和查询。无效的游标，或在没有 `kind=worker` 或 `kind=terminal` 的情况下使用这些参数，都返回 400。分页结果不是快照：并发的变更可能影响后续页面。
 - worker 的列表和详情会话对象包含可为空的 `source`、`parent_run`、`git_branch`、`git_head`、`exit_code`、`status`、`steps`、`tokens`、`started_at` 和 `duration_s`。开始时间是第一轮次的时间戳；存在时，持续时间为其记录的结果持续时间。`tokens` 是整数的总 token 数，`meta.usage` 保存完整的用量映射。状态回退为第一轮次的状态；步骤数和 token 数回退为其保存的结果。缺失的值为 `null`，而不是零。详情响应顶层的 `tokens` 单独统计 completion token；对于 worker，若没有任何轮次带有整数的 `completion_tokens`，则为 `null`。
 - 终端对话和 worker 运行一样以只读方式提供，列表和详情对象中的 `kind` 为 `terminal`。该行所用的轮次是对话的最新轮次，因此 `status`、`started_at`、`steps` 和 `duration_s` 描述的是那一轮，正在进行的对话排在最前。详情、轮次（包括 `events=true`）、`/events` 和 `/status` 与 worker 运行一样可以按 id 获取；当拥有该对话的终端持有有效租约并正在运行一个轮次时，`busy` 为 true。终端以未脱敏的方式保存对话，所以对话的每一段文本在读取时都会脱敏：标题、`meta`、轮次文本、回答、结果和事件载荷（包括工具输出和 shell 输出）中的密钥都变为 `[redacted]`，读取过 `.env` 之类密钥文件的调用，其输出被替换为一条说明，运行的 `config` 被省略。worker 运行是脱敏后保存的，按保存的内容读取。脱敏基于模式，不保证不含密钥；图片不会被脱敏。对于终端对话的 id，每个写入路由都返回 404，与 worker 的 id 相同。
@@ -318,7 +321,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ```json
 {
-  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
+  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "main": false, "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
   "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "arguments_complete": true, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["file_write"],
   "granted_at": {"file_write": 1761141604.9},
@@ -365,6 +368,22 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 对于被 `Try again` 撤销的轮次，`undone` 为 `true`；此类轮次仍会被列出。
 - `answer` 和 `result.result` 是保存的副本：密钥已脱敏，并且在保留期之后，内联的 `<think>` 块已被删除。
 - 轮次运行期间，`cause` 为 `""`。
+- 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。
+
+<a id="cards-in-the-main-chat"></a>
+
+### 主对话中的卡片
+
+旁支对话的一次运行结束，或任务完成、失败或等待审批时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。卡片从来不是轮次：没有模型会读取它，主对话的对话内容也从不包含它。它的 `data`：
+
+```json
+{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
+```
+
+- `state` 为 `done`、`failed` 或 `waiting`（有审批在等待答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`line` 是一行平实的话：回答的第一句、运行结束的方式，或 `Waiting for your approval`。`at` 是事情发生的时间。
+- 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
+- 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入。主对话的事件流以 `attention.card` 帧送来新卡片。
+- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
 
 ## GET /api/sessions/{id}/events
 
@@ -502,9 +521,10 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 ```
 
 ```json
-{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "main": false, "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
 ```
 
+- 创建得到的是[主对话](#get-apisessions)的一个旁支对话：`kind` 为 `chat`，`main` 为 false。主对话已经存在；向它发消息请用 `POST /api/sessions/{id}/turns`。
 - `workspace` 是可选的。缺失或为 `null` 时为 `~/localmelo-workspace`，不存在时以权限 `0700` 创建。其他值必须是绝对路径或以 `~/` 开头，并且是现有目录；其他任何情况都是 400 `invalid_workspace`，且不会创建智能体。
 - `turn` 是可选的。不带它时，回答是仅含 `session` 的 201，会话等待 `POST /api/sessions/{id}/turns`。
 - `session.model` 是本请求中设置的对话模型。第一条消息的文本会成为标题：空白被折叠，最多 60 个字符，超出时以 `…` 结尾。
@@ -618,6 +638,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 ```
 
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话被删除。
+- 主对话返回 409 `main_chat`（`The main chat is always there: it cannot be deleted.`），并保持原样。
 - 204 且无响应体：该会话的行、轮次、事件和 blob 都已删除，它在记忆对话索引中的条目也已删除。melo 在这个对话里产生的笔记会保留（笔记比对话活得久，之后显示为 `from a deleted chat`）；`?notes=forget` 会一并忘记。`notes` 的其他取值返回 400。
 - 在仍在进行的 security-1b 改动中，轮次运行或启动排队期间，409 `session_busy` 会拒绝删除；它不会取消该轮次，也不会删除其行。请取消或等待它结束，然后重试。持有会话锁的维护操作也可能短暂地返回该错误，即使没有轮次在运行；请等待后重试。
 - 未知会话返回 404 `not_found`。

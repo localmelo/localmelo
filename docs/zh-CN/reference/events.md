@@ -441,6 +441,7 @@ asyncio.run(main())
 - `outcome` 为 `allowed`、`denied` 或 `withdrawn`。`origin` 是决定的来源，与 `tool.finished` 的 `approval` 中相同：`user`、`session`、`policy` 或 `timeout`；询问失败时为 `error`；运行在决定之前停止，以及存储为一个从未存储答复的请求写入事件时，为 `withdrawn`（见下面的保证）。
 - `turn` 对于不属于任何轮次的事件为 `null`：`turn.undone`、重命名时的 `session.title`、`session.updated`，以及在轮次之外存储的调度器事件。
 - **调度器的类型。** 以 `task.`、`sched.` 或 `attention.` 开头的类型保留给调度器。只有网关的存储会保存它们，作为不属于任何轮次的事件（`SessionStore.append_session_event`），或属于某一轮（`SessionRunner.publish`）。它们的键尚未固定；其 `data` 遵循[载荷规则](#payload-rules)。存储会拒绝其他所有类型。
+- **`attention.card`** 是其中唯一键已固定的类型：主对话的卡片（`source_id`、`source_kind`、`title`、`state`、`line`、`at`），在旁支对话的运行或任务有结果时存入主对话，不属于任何轮次；见[主对话中的卡片](api-v2.md#cards-in-the-main-chat)。
 - **存储的 `run.finished` 保存脱敏后的答案。** 在存储之前，它的 `RunResult` 中的 `result` 会经过与 `assistant.message` 文本相同的脱敏，该轮存储的答案和结果也一样。运行返回的 `RunResult` 保留原文。
 
 存储提供以下保证：

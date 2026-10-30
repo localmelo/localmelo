@@ -25,6 +25,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
+import { byDay, cardNode, isMain, mergeCards, shortTime, timeline } from "./main-chat.mjs";
 import {
   activity,
   applyEvent,
@@ -70,6 +71,7 @@ const S = {
   ready: false, // The first load has chosen what to show, so the welcome is not a guess.
   machine: null,
   sessions: [],
+  main: null, // The main chat, as the list names it; null from a gateway without one.
   activeId: null,
   newWorkspace: null, // The folder picked for the next new chat; null is the server's default.
   defaultWorkspace: "", // That default, as `GET /api/settings` says it.
@@ -142,12 +144,48 @@ function setTextIfChanged(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
+/** The list's copy of a chat: a side chat, or the main chat. */
+function listed(id) {
+  return S.sessions.find((session) => session.id === id) ?? (S.main && S.main.id === id ? S.main : null);
+}
+
 function activeSession() {
-  return S.sessions.find((session) => session.id === S.activeId) ?? S.view?.session ?? null;
+  return listed(S.activeId) ?? S.view?.session ?? null;
+}
+
+function mainActive() {
+  return !!S.activeId && (S.main?.id === S.activeId || isMain(S.view?.session));
+}
+
+/** A chat not sent yet: under a main chat, it is a side chat. */
+function newTitle() {
+  return S.main ? "New side chat" : "New chat";
 }
 
 function title(session) {
-  return session?.title || "New chat";
+  return isMain(session) ? "Main chat" : session?.title || newTitle();
+}
+
+// The newest card id this page has heard of, and the one before it: a card from the open side
+// chat counts as seen only when everything before it was.
+let newestCard = 0;
+let cardBefore = 0;
+
+/**
+ * The newest card the person has not seen, or null. Opening the main chat sees them all; a card
+ * from the side chat open now is seen too, unless an earlier card is still unread.
+ */
+function unreadCard() {
+  const card = S.main?.last_card;
+  if (!card || typeof card.id !== "number") return null;
+  const seen = Number(stored(KEY + "-seen-card").id) || 0;
+  if (card.id > newestCard) [cardBefore, newestCard] = [newestCard, card.id];
+  if (card.id <= seen) return null;
+  if (mainActive() || (seen >= cardBefore && card.source_id === S.activeId)) {
+    persist(KEY + "-seen-card", { id: card.id });
+    return null;
+  }
+  return card;
 }
 
 function levelName(level) {
@@ -370,7 +408,8 @@ function applyChrome() {
   $("details-trigger").hidden = !developerMode || workerMode;
   $("level-btn").hidden = !developerMode || workerMode;
   $("connection-btn").hidden = workerMode;
-  $("workers-link").hidden = !developerMode && !sections.workers;
+  // Worker runs are a developer's view; a person reaches them from the main chat and the panel.
+  $("workers-link").hidden = !developerMode;
   $("tasks-link").hidden = !developerMode && !sections.tasks;
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
@@ -409,8 +448,10 @@ function syncUI() {
     chip.title = machine.label;
   }
   const model = S.health?.model ?? null;
-  $("header-title").textContent = session ? title(session) : "New chat";
-  document.title = `localmelo · ${session ? title(session) : "New chat"}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
+  $("header-title").textContent = session ? title(session) : newTitle();
+  // A side chat names the main chat it belongs to, and that name goes back to it.
+  $("header-parent").hidden = !S.main || workerMode || mainActive();
+  document.title = `localmelo · ${session ? title(session) : newTitle()}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
   const storeBanner = $("store-banner");
   const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
   setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : "");
@@ -478,10 +519,16 @@ function syncUI() {
   }
   const welcome = $("welcome-description");
   if (welcome) {
-    welcome.textContent = session
-      ? `${session.model || "Your model"} is ready. Start a conversation below.`
-      : "A quiet space to think, build, and explore with your own model.";
+    welcome.textContent = mainActive()
+      ? "This is your main chat. Side chats and tasks report back here."
+      : session
+        ? `${session.model || "Your model"} is ready. Start a conversation below.`
+        : "A quiet space to think, build, and explore with your own model.";
   }
+  // Worker history of earlier days (the panel's Workers tab lists today's): the main chat's empty state links to it.
+  $("welcome-workers").hidden = !mainActive() || !(developerMode || sections.workers);
+  setTextIfChanged($("new-label"), S.main ? "New side chat" : "New chat");
+  setTextIfChanged($("list-label"), S.main ? "Side chats" : "Chats");
 }
 
 // ── The session list ──
@@ -489,16 +536,21 @@ function syncUI() {
 function renderSessions() {
   const query = $("search").value.toLowerCase();
   const active = S.activeId;
+  const unread = unreadCard();
+  const main = S.main;
   const snapshot = JSON.stringify([
     query,
     active,
     workerMode,
+    developerMode,
+    unread?.id ?? 0,
+    main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.updated_at, main.last_card?.id],
+    new Date().toDateString(),
     S.sessions.map((session) => [
       session.id,
       session.title,
       session.model,
       session.workspace_label,
-      developerMode,
       session.busy,
       session.held || "",
       session.pending_approvals || 0,
@@ -512,44 +564,105 @@ function renderSessions() {
   const focusedClose = focused?.classList?.contains?.("session-close") === true;
   $("session-count").textContent = S.sessions.length;
   $("session-list").replaceChildren();
-  const shown = [...S.sessions]
-    .sort((left, right) => (right.updated_at || 0) - (left.updated_at || 0))
-    .filter((session) => `${title(session)} ${session.model || ""}`.toLowerCase().includes(query));
+  $("session-list").classList.toggle("nested", !!main);
+  const rows = [];
+  const mainSlot = $("main-chat-row");
+  mainSlot.hidden = !main;
+  mainSlot.replaceChildren();
+  if (main) {
+    const row = mainRow(main, unread);
+    mainSlot.append(row);
+    rows.push(row);
+  }
+  const shown = S.sessions.filter((session) => `${title(session)} ${session.model || ""}`.toLowerCase().includes(query));
   if (shown.length === 0) {
-    const empty = el("p", "list-empty", query ? "No matching chats." : "Your conversations will appear here.");
+    const empty = el("p", "list-empty", query ? "No matching chats." : main ? "Side chats you start appear here." : "Your conversations will appear here.");
     $("session-list").append(empty);
   }
-  for (const session of shown) {
-    const row = el("div", "session-item");
-    row.dataset.sessionId = session.id;
-    if (session.id === active) row.classList.add("active");
-    const info = el("button", "session-info");
-    info.type = "button";
-    // A narrow window shows the list as a rail of initials; the title names the chat there.
-    info.dataset.initial = (title(session).trim()[0] || "·").toUpperCase();
-    info.title = title(session);
-    if (session.id === active) info.setAttribute("aria-current", "page");
-    const asking = session.pending_approvals > 0;
-    const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
-    const dot = asking ? '<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"></span>' : "";
-    info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${marker}${esc(chatMeta(session))}</div>`;
-    info.addEventListener("click", () => {
-      openSession(session.id);
-    });
-    const close = el("button", "session-close", "×");
-    close.type = "button";
-    close.setAttribute("aria-label", `Close chat: ${title(session)}`);
-    close.title = "Close chat";
-    close.disabled = workerMode || !!session.busy || (session.pending_approvals || 0) > 0;
-    close.addEventListener("click", () => {
-      deleteSession(session.id);
-    });
-    row.append(info, close);
-    $("session-list").append(row);
-    if (session.id === focusedId) {
-      (focusedClose && !close.disabled ? close : info).focus({ preventScroll: true });
+  const groups = main ? byDay(shown, nowSeconds()) : [{ label: "", sessions: [...shown].sort((left, right) => (right.updated_at || 0) - (left.updated_at || 0)) }];
+  for (const group of groups) {
+    if (group.label) $("session-list").append(el("div", "list-day", group.label));
+    for (const session of group.sessions) {
+      const row = sessionRow(session, active);
+      $("session-list").append(row);
+      rows.push(row);
     }
   }
+  // Up and Down move through the list, the main chat first; Home and End go to its ends.
+  const buttons = rows.map((row) => row.children[0]);
+  buttons.forEach((info, index) => {
+    info.addEventListener("keydown", (event) => {
+      const to = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: buttons.length - 1 }[event.key];
+      if (to === undefined || !buttons[to]) return;
+      event.preventDefault();
+      buttons[to].focus();
+    });
+  });
+  for (const row of rows) {
+    if (row.dataset.sessionId !== focusedId) continue;
+    const close = row.children[1];
+    (focusedClose && close && !close.disabled ? close : row.children[0]).focus({ preventScroll: true });
+  }
+}
+
+/** The main chat's row, pinned above its side chats: Melo's face, the time and a dot for an unread card. */
+function mainRow(main, unread) {
+  const row = el("div", "session-item main-chat");
+  row.dataset.sessionId = main.id;
+  const active = main.id === S.activeId;
+  if (active) row.classList.add("active");
+  const info = el("button", "session-info");
+  info.type = "button";
+  info.dataset.initial = "M";
+  info.title = "Main chat";
+  if (active) info.setAttribute("aria-current", "page");
+  const asking = (main.pending_approvals || 0) > 0;
+  const meta = asking
+    ? "Needs your approval"
+    : main.busy
+      ? main.held ? "Waiting" : "Working"
+      : unread
+        ? unread.state === "waiting" ? `${unread.title || "A side chat"} needs you` : `New: ${unread.title || "a result"}`
+        : "";
+  const when = shortTime(Math.max(main.updated_at || 0, Number(main.last_card?.ts) || 0), nowSeconds());
+  const dot = asking || unread
+    ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${asking ? "Approval needed" : "New results"}" title="${asking ? "Approval needed" : "New results"}"></span>`
+    : "";
+  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">Main chat</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
+  info.addEventListener("click", () => {
+    openSession(main.id);
+  });
+  row.append(info);
+  return row;
+}
+
+function sessionRow(session, active) {
+  const row = el("div", "session-item");
+  row.dataset.sessionId = session.id;
+  if (session.id === active) row.classList.add("active");
+  const info = el("button", "session-info");
+  info.type = "button";
+  // A narrow window shows the list as a rail of initials; the title names the chat there.
+  info.dataset.initial = (title(session).trim()[0] || "·").toUpperCase();
+  info.title = title(session);
+  if (session.id === active) info.setAttribute("aria-current", "page");
+  const asking = session.pending_approvals > 0;
+  const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
+  const dot = asking ? '<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"></span>' : "";
+  info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${marker}${esc(chatMeta(session))}</div>`;
+  info.addEventListener("click", () => {
+    openSession(session.id);
+  });
+  const close = el("button", "session-close", "×");
+  close.type = "button";
+  close.setAttribute("aria-label", `Close chat: ${title(session)}`);
+  close.title = "Close chat";
+  close.disabled = workerMode || !!session.busy || (session.pending_approvals || 0) > 0;
+  close.addEventListener("click", () => {
+    deleteSession(session.id);
+  });
+  row.append(info, close);
+  return row;
 }
 
 async function refreshList() {
@@ -558,6 +671,7 @@ async function refreshList() {
     S.online = true;
     S.machine = body.machine ?? null;
     S.sessions = body.sessions ?? [];
+    S.main = body.main ?? null;
     const heldChanged = adoptSummary();
     renderSessions();
     syncUI();
@@ -575,7 +689,7 @@ async function refreshList() {
 function adoptSummary() {
   const session = S.view?.session;
   if (!session) return false;
-  const summary = S.sessions.find((item) => item.id === session.id);
+  const summary = listed(session.id);
   if (!summary) return false;
   const held = session.held;
   for (const key of ["title", "model", "workspace", "workspace_label", "busy", "held", "pending_approvals", "level", "updated_at"]) {
@@ -606,6 +720,7 @@ async function loadSession(id) {
   view.replayFrom = turns.replay_from ?? 0;
   view.lastEventId = view.replayFrom;
   view.turns = (turns.turns ?? []).map((row) => newTurn(row));
+  view.cards = mergeCards([], turns.cards ?? []);
   S.view = view;
   renderSessions();
   renderMessages(true);
@@ -718,6 +833,7 @@ function startStream(id) {
       return;
     }
     applyOutcome(applyEvent(S.view, frame));
+    if (frame.type === "attention.card") S.view.cards = mergeCards(S.view.cards ?? [], [frame]);
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
     if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
@@ -844,7 +960,7 @@ function applyOutcome(outcome) {
  * not wait for the poll.
  */
 function noteFrame(frame) {
-  const row = S.sessions.find((item) => item.id === S.activeId);
+  const row = listed(S.activeId);
   if (!S.view || !row) return;
   const type = String(frame?.type ?? "");
   const busy = type === "turn.started" ? true : type === "turn.finished" ? false : row.busy;
@@ -898,6 +1014,8 @@ function viewSnapshot() {
     view?.hasEarlier ?? false,
     earlierLoading,
     turns,
+    mainActive() ? (view?.cards ?? []).map((card) => card.id) : null,
+    mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
   ]);
 }
@@ -928,7 +1046,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
-  const nodes = turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
+  const nodes = mainActive() ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", earlierLoading ? "Loading earlier turns…" : "Show earlier turns", loadEarlier);
     earlier.disabled = earlierLoading;
@@ -946,7 +1064,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
       if (selection && selection[0] !== null) replacement.setSelectionRange?.(...selection);
     }
   }
-  $("welcome").hidden = nodes.length > 0 || !!S.activeId;
+  $("welcome").hidden = nodes.length > 0 || (!!S.activeId && !mainActive());
   if (forceScroll || (nearBottom && !preserveScroll)) scroller.scrollTop = scroller.scrollHeight;
   else scroller.scrollTop = oldTop;
   updateApprovalBar();
@@ -976,6 +1094,7 @@ async function loadEarlier() {
     }
     const existing = new Set(view.turns.map((turn) => turn.turn));
     view.turns = [...history.turns.filter((turn) => !existing.has(turn.turn)), ...view.turns];
+    view.cards = mergeCards(view.cards ?? [], page.cards ?? []);
     view.hasEarlier = page.has_earlier === true;
     const top = scroller.scrollTop;
     const height = scroller.scrollHeight;
@@ -997,6 +1116,22 @@ async function loadEarlier() {
       }
     }
   }
+}
+
+/** The main chat: its turns and the cards side chats and tasks sent back, under day dividers. */
+function mainNodes(view, turns) {
+  const newest = turns[turns.length - 1];
+  return timeline(turns, view?.cards ?? [], nowSeconds()).map((item) => {
+    if (item.kind === "turn") return turnNode(item.turn, item.turn === newest);
+    if (item.kind === "card") return cardNode({ doc: document, card: item.card, open: openCard });
+    return el("div", "day-divider", item.label);
+  });
+}
+
+/** A card's Open: the side chat, or the task. */
+function openCard(card) {
+  if (card.sourceKind === "task") globalThis.location.hash = `#/tasks/${encodeURIComponent(card.sourceId)}`;
+  else openSession(card.sourceId);
 }
 
 function turnNode(turn, newest = false) {
@@ -1993,7 +2128,9 @@ async function deleteSession(id) {
       closeStream();
       S.activeId = null;
       S.view = null;
-      if (S.sessions.length > 0) await openSession(S.sessions[0].id, { saveCurrent: false });
+      // Closing a side chat goes back to the main chat it belonged to.
+      if (S.main) await openSession(S.main.id, { saveCurrent: false });
+      else if (S.sessions.length > 0) await openSession(S.sessions[0].id, { saveCurrent: false });
       else newChat({ saveCurrent: false });
     }
     renderSessions();
@@ -2172,11 +2309,9 @@ function showTasks(id) {
   $("scroll").hidden = true;
   document.querySelector(".composer-area").hidden = true;
   applyChrome();
-  $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
   $("tasks-link").setAttribute("aria-current", "page");
-  $("chats-link").removeAttribute("aria-current");
   sidebar(false);
   syncUI();
   tasks.show(id);
@@ -2209,10 +2344,8 @@ function showWorkers(id) {
   $("scroll").hidden = true;
   document.querySelector(".composer-area").hidden = true;
   applyChrome();
-  $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
   renderSessions();
   $("workers-link").setAttribute("aria-current", "page");
-  $("chats-link").removeAttribute("aria-current");
   sidebar(false);
   if (id) workers.detail(id);
   else if (workers.state.loaded && !workers.state.error) { workers.state.epoch++; workers.state.mode = "list"; workers.state.session = null; workers.state.view = null; workers.state.loading = false; renderWorkers(); }
@@ -2234,7 +2367,6 @@ function leaveWorkers() {
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
   $("tasks-link").removeAttribute("aria-current");
-  $("chats-link").setAttribute("aria-current", "page");
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") checkSubmission(slot, entry.clientRequestId);
   }
@@ -2565,10 +2697,9 @@ async function init() {
   if (fromHash) {
     wanted = fromHash;
   } else if (!wantsNew) {
+    // The main chat opens by default; a tab that had a chat open goes back to it.
     const saved = stored(KEY + "-view").id;
-    wanted = S.sessions.some((session) => session.id === saved)
-      ? saved
-      : (S.sessions[0]?.id ?? "");
+    wanted = listed(saved) ? saved : (S.main?.id ?? S.sessions[0]?.id ?? "");
   }
   if (fromTask !== null) {
     showTasks(fromTask);
@@ -2667,6 +2798,9 @@ $("reconnect-btn").addEventListener("click", async () => {
   if (S.activeId === id && S.stream.status === "paused") startStream(id);
 });
 $("approval-go").addEventListener("click", goToApproval);
+$("header-parent").addEventListener("click", () => {
+  if (S.main) openSession(S.main.id);
+});
 $("scroll").addEventListener("scroll", updateApprovalBar);
 $("level-btn").addEventListener("click", () => {
   if (!activeSession()) return;

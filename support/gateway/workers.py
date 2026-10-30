@@ -201,6 +201,8 @@ class TaskWorkers:
         self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
+        # The main chat a task created here belongs to (its ``front_id``).
+        self.front_id: str | None = None
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -271,11 +273,20 @@ class TaskWorkers:
             "level",
             "deadline",
             "request_key",
+            "front_id",
         }
         if unknown:
             raise ValueError(f"unknown task fields: {', '.join(sorted(unknown))}")
         clean = dict(payload)
         key = clean.pop("request_key", None)
+        # The chat that starts the task owns it: a side chat, or the main chat.
+        front = clean.pop("front_id", None)
+        if front is not None:
+            info = (
+                await self.store.get_session(front) if isinstance(front, str) else None
+            )
+            if info is None or info.kind not in ("chat", "front"):
+                raise ValueError("front_id must name a console chat")
         if "deadline" in clean:
             raise ValueError("deadline is not supported yet")
         level = clean.get("level")
@@ -292,7 +303,7 @@ class TaskWorkers:
             if self._closed:
                 raise RuntimeError("workers are closed")
             existing = await self.tasks.find_existing_request(
-                spec, origin="user", request_key=key
+                spec, origin="user", front_id=front or self.front_id, request_key=key
             )
             if existing is not None:
                 return await self._body(existing), True
@@ -305,6 +316,7 @@ class TaskWorkers:
                 workspace=workspace,
                 request_key=key,
                 task_id=task_id,
+                front_id=front or self.front_id,
                 _recovery_proof=True,
             )
             if not repeated:

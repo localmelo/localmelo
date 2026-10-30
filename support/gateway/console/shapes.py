@@ -41,11 +41,14 @@ def session_json(
 
     *level* and *held* are the scheduler's view of the chat (S2): the chip's
     P1-P4 and why a model call waits, from the one gate both surfaces use.
+    ``main`` is true for the main chat (kind ``front``); every console chat
+    of kind ``chat`` is one of its side chats.
     """
     busy = info.busy
     return {
         "id": info.id,
         "kind": info.kind,
+        "main": info.kind == "front",
         "title": info.title,
         "created_at": info.created_at,
         "updated_at": info.updated_at,

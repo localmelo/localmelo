@@ -18,6 +18,7 @@ import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
 import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
+import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -521,6 +522,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -720,6 +722,7 @@ function harness(routes, {mobile = false} = {}) {
     picturesNode,
     setupPictureBox,
     memoryNodes,
+    ...mainChat,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
@@ -3079,7 +3082,7 @@ test('the Workers view filters to terminal chats and opens one read-only', async
   assert.doesNotMatch(detail, /Brief|Source|Git head/);
 });
 
-test('worker back returns to the list header and Chats resumes the open chat', async () => {
+test('worker back returns to the list header and the chat\'s row resumes the open chat', async () => {
   const h = harness(baseRoutes({
     'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker'})], next_cursor: null},
     'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Worker title'})},
@@ -3093,8 +3096,9 @@ test('worker back returns to the list header and Chats resumes the open chat', a
   assert.equal(h.element('header-title').textContent, 'Worker title');
   h.run('showWorkers("")');
   assert.equal(h.element('header-title').textContent, 'Workers');
-  assert.equal(h.element('chats-link').href, '#/s/a');
-  h.context.location.hash = h.element('chats-link').href;
+  // The list stays beside the history: the chat's row goes back to it (the Chats link is gone).
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === 'a').children[0].click();
+  assert.equal(h.context.location.hash, '#/s/a');
   await h.windowListeners.hashchange[0]();
   assert.equal(h.state().activeId, 'a');
   assert.equal(h.element('connection-btn').hidden, false);
@@ -3711,25 +3715,26 @@ test('default mode leaves out the level, Details, the GPU line and the idle sect
   assert.equal(developer.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'A developer never asks whether Workers has anything');
 });
 
-test('Workers and Tasks show in default mode once a run, a terminal chat or a task exists', async () => {
+test('Tasks shows in default mode once a task exists; the Workers switch is a developer\'s only', async () => {
   const nav = (h) => hiddenOf(h, ['workers-link', 'tasks-link', 'section-nav']);
   const none = harness(defaultMode());
   await none.run('init()');
   assert.deepEqual(nav(none), [true, true, true]);
   assert.deepEqual(none.net.calls.slice(-3).map((call) => call.path), ['/sessions?kind=worker&limit=1', '/sessions?kind=terminal&limit=1', '/tasks']);
+  // A run or a terminal chat no longer brings back the sidebar's Workers switch (the main chat links them).
   const terminal = harness(defaultMode({'GET /sessions?kind=terminal&limit=1': {sessions: [session('k', {kind: 'chat'})]}}));
   await terminal.run('init()');
-  assert.deepEqual(nav(terminal), [false, true, false]);
+  assert.deepEqual(nav(terminal), [true, true, true]);
   const task = harness(defaultMode({'GET /tasks': {tasks: [taskRow('t1')]}}));
   await task.run('init()');
   assert.deepEqual(nav(task), [true, false, false]);
   // Something running shows its section at the next health read, and a route opens its own.
-  none.context.setHealth({...health, status: {running: {chats: 0, tasks: 0, runs: 1, terminal: 0}, tasks: {running: 0, queued: 0, held: 0}, items: [], waiting: []}});
+  none.context.setHealth({...health, status: {running: {chats: 0, tasks: 1, runs: 1, terminal: 0}, tasks: {running: 1, queued: 0, held: 0}, items: [], waiting: []}});
   none.run('syncUI()');
-  assert.deepEqual(nav(none), [false, true, false]);
+  assert.deepEqual(nav(none), [true, false, false]);
   none.run('showTasks("")');
   await settle();
-  assert.deepEqual(nav(none), [false, false, false]);
+  assert.deepEqual(nav(none), [true, false, false]);
   // Leaving them brings back the chat's header, and none of the developer's.
   none.context.location.hash = '#/s/a';
   await none.windowListeners.hashchange[0]();
@@ -4055,4 +4060,179 @@ test('the starters show on an empty new chat, step aside for text, and fill the 
   h.element('input').value = '';
   h.run('syncUI()');
   assert.equal(h.element('starters').hidden, false, 'An emptied composer brings them back');
+});
+
+// ── The main chat and its side chats ──
+
+const NOW = Date.now() / 1000;
+const mainSession = (extra = {}) => session('m', {kind: 'front', main: true, title: 'Main chat', updated_at: NOW - 60, last_card: null, ...extra});
+const cardRow = (id, extra = {}) => ({id, ts: NOW, at: NOW, state: 'done', source_id: 'a', source_kind: 'chat', title: 'Plan the trip', line: 'The trip is planned.', ...extra});
+
+/** A gateway with a main chat and two side chats, one from today and one from three days ago. */
+function mainRoutes(extra = {}, {cards = [], turns = [], last = null} = {}) {
+  return baseRoutes({
+    'GET /sessions': () => ({
+      sessions: [session('a', {title: 'Plan the trip', updated_at: NOW - 30}), session('b', {title: 'Fix CI', updated_at: NOW - 3 * 86400})],
+      main: mainSession({last_card: last}), machine: null, has_more: false,
+    }),
+    'GET /sessions/m': {session: mainSession(), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/m/turns?limit=10': {turns, has_earlier: false, replay_from: 0, cards},
+    'GET /sessions/b': {session: session('b', {title: 'Fix CI'}), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
+    ...extra,
+  });
+}
+
+const rowsOf = (h) => h.element('session-list').children.map((node) => node.dataset.sessionId ?? `day:${node.textContent}`);
+
+test('the main chat opens by default, pinned above its side chats, which are grouped by day', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'm');
+  assert.equal(h.context.location.hash, '#/s/m');
+  assert.equal(h.element('main-chat-row').hidden, false);
+  const [main] = h.element('main-chat-row').children;
+  assert.match(flatten(main), /Main chat/);
+  assert.equal(main.children.length, 1, 'The main chat has no close button');
+  assert.equal(main.children[0].getAttribute('aria-current'), 'page');
+  const old = mainChat.dayLabel(NOW - 3 * 86400, NOW);
+  assert.deepEqual(rowsOf(h), ['day:Today', 'a', `day:${old}`, 'b']);
+  assert.equal(h.element('session-list').classList.contains('nested'), true);
+  assert.deepEqual([h.text('header-title'), h.element('header-parent').hidden], ['Main chat', true]);
+  assert.deepEqual([h.text('new-label'), h.text('list-label')], ['New side chat', 'Side chats']);
+  // An empty main chat greets, and links worker history until the panel lists workers.
+  assert.equal(h.element('welcome').hidden, false);
+  assert.match(h.text('welcome-description'), /main chat/);
+  assert.equal(h.element('welcome-workers').hidden, false);
+});
+
+test('a side chat names the main chat it belongs to, and that name goes back to it', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === 'a').children[0].click();
+  await settle();
+  assert.equal(h.state().activeId, 'a');
+  // The link's words ("Main chat") are the page's own; test_web_assets.py reads them.
+  assert.deepEqual([h.text('header-title'), h.element('header-parent').hidden], ['Plan the trip', false]);
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(h.state().activeId, 'm');
+  h.documentListeners.keydown.forEach((fn) => fn({key: 'k', metaKey: true, preventDefault() {}}));
+  assert.deepEqual([h.state().activeId, h.text('header-title'), h.element('header-parent').hidden], [null, 'New side chat', false], '⌘K starts a side chat');
+});
+
+test('cards are events in the main chat: by day, a busy source shows its newest, and Open goes to it', async () => {
+  const yesterday = NOW - 86400;
+  const cards = [
+    cardRow(1, {at: yesterday, ts: yesterday, title: 'Old trip'}),
+    cardRow(2, {at: NOW - 600, state: 'waiting', line: 'Waiting for your approval'}),
+    cardRow(3, {at: NOW - 500}),
+    cardRow(4, {at: NOW - 100, source_id: 't', source_kind: 'task', title: 'Find jobs', line: 'Two new roles.'}),
+  ];
+  const turns = [turnRow({started_at: NOW - 300, finished_at: NOW - 290})];
+  const h = harness(mainRoutes({'GET /sessions/a': {session: session('a'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0}}, {cards, turns}));
+  await h.run('init()');
+  const kinds = h.element('messages').children.map((node) => node.className.split(' ')[0]);
+  assert.deepEqual(kinds, ['day-divider', 'main-card', 'turn', 'main-card']);
+  assert.equal(h.element('messages').children[0].textContent, 'Today');
+  assert.deepEqual(h.element('messages').children.filter((node) => node.dataset.cardId).map((node) => node.dataset.cardId), ['3', '4'], 'The older cards of the same side chat fold into its newest');
+  assert.match(h.text('messages'), /Done: Plan the trip.*The trip is planned\..*Open side chat/);
+  assert.match(h.text('messages'), /Done: Find jobs.*Two new roles\..*Open task/);
+  assert.equal(h.element('welcome').hidden, true);
+  // A card from the stream is an event: no turn is added.
+  h.stream().emit({id: 30, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'failed', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: 'Ran out of steps', at: NOW}});
+  assert.equal(h.state().view.turns.length, 1);
+  assert.match(h.text('messages'), /Did not finish: Fix CI.*Ran out of steps/);
+  const open = (id) => findNode(h.element('messages'), (node) => node.dataset?.cardId === id).children[2].children[0];
+  open('4').click();
+  assert.equal(h.context.location.hash, '#/tasks/t');
+  open('3').click();
+  await settle();
+  assert.equal(h.state().activeId, 'a');
+});
+
+test('an unread card puts a dot on the main chat until it is open', async () => {
+  const last = {id: 9, ts: NOW, at: NOW, state: 'waiting', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: ''};
+  const h = harness(mainRoutes({}, {last}));
+  h.local.setItem('localmelo-console-view', JSON.stringify({id: 'a'}));
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'a', 'A tab that had a side chat open goes back to it');
+  const dot = () => findNode(h.element('main-chat-row'), (node) => /attention-dot/.test(node.innerHTML ?? ''));
+  assert.ok(dot());
+  assert.match(flatten(h.element('main-chat-row')), /Fix CI needs you/);
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(dot(), null);
+  await h.run('openSession("a")');
+  assert.equal(dot(), null, 'Seen stays seen');
+});
+
+test('Up and Down move through the list with the main chat first; Home and End reach its ends', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  const buttons = [h.element('main-chat-row').children[0].children[0], ...h.element('session-list').children.filter((node) => node.dataset.sessionId).map((row) => row.children[0])];
+  const press = (key) => h.context.document.activeElement.listeners.keydown.forEach((fn) => fn({key, preventDefault() {}}));
+  buttons[0].focus();
+  press('ArrowDown');
+  assert.equal(h.context.document.activeElement, buttons[1]);
+  press('End');
+  assert.equal(h.context.document.activeElement, buttons[2]);
+  press('ArrowDown');
+  assert.equal(h.context.document.activeElement, buttons[2], 'The last row stays');
+  press('Home');
+  assert.equal(h.context.document.activeElement, buttons[0]);
+});
+
+test('closing the open side chat goes back to the main chat', async () => {
+  const h = harness(mainRoutes({
+    'GET /memory/records?session_id=b': {records: []},
+    'DELETE /sessions/b': {status: 204},
+  }));
+  await h.run('init()');
+  await h.run('openSession("b")');
+  await h.run('deleteSession("b")');
+  assert.equal(h.state().activeId, 'm');
+  assert.equal(h.net.callsTo('/sessions/m').length >= 2, true);
+});
+
+test('at phone width the list is a drawer: a side chat closes it and its header goes back to the main chat', async () => {
+  const h = harness(mainRoutes(), {mobile: true});
+  await h.run('init()');
+  h.run('sidebar(true)');
+  assert.equal(h.element('app').classList.contains('sidebar-open'), true);
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === 'b').children[0].click();
+  await settle();
+  assert.equal(h.element('app').classList.contains('sidebar-open'), false);
+  assert.equal(h.element('sidebar').inert, true);
+  assert.equal(h.element('header-parent').hidden, false);
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(h.state().activeId, 'm');
+});
+
+test('in default mode worker history is linked from the empty main chat once a run exists', async () => {
+  const plain = harness(defaultMode({...mainRoutes(), 'GET /settings': {mode: 'default'}}));
+  await plain.run('init()');
+  assert.deepEqual([plain.element('workers-link').hidden, plain.element('welcome-workers').hidden], [true, true]);
+  const runs = harness(defaultMode({...mainRoutes(), 'GET /settings': {mode: 'default'}, 'GET /sessions?kind=worker&limit=1': {sessions: [session('w', {kind: 'worker'})]}}));
+  await runs.run('init()');
+  assert.deepEqual([runs.element('workers-link').hidden, runs.element('welcome-workers').hidden], [true, false]);
+});
+
+test('a card from the open side chat is seen there, unless an earlier one is still unread', async () => {
+  let last = {id: 5, ts: NOW, at: NOW, state: 'done', source_id: 'a', source_kind: 'chat', title: 'Plan the trip', line: ''};
+  const h = harness(mainRoutes({'GET /sessions': () => ({
+    sessions: [session('a', {title: 'Plan the trip', updated_at: NOW - 30}), session('b', {title: 'Fix CI', updated_at: NOW - 60})],
+    main: mainSession({last_card: last}), machine: null, has_more: false,
+  })}));
+  h.local.setItem('localmelo-console-view', JSON.stringify({id: 'a'}));
+  await h.run('init()');
+  const dot = () => findNode(h.element('main-chat-row'), (node) => /attention-dot/.test(node.innerHTML ?? ''));
+  assert.equal(dot(), null, 'Its own run coming back is no news in the chat that ran it');
+  last = {...last, id: 6, source_id: 'b', title: 'Fix CI'};
+  await h.run('refreshList()');
+  assert.ok(dot(), 'Another side chat\'s result is news');
+  last = {...last, id: 7, source_id: 'a', title: 'Plan the trip'};
+  await h.run('refreshList()');
+  assert.ok(dot(), 'The unread one keeps the dot');
 });

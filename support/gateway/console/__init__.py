@@ -56,6 +56,7 @@ from . import (
     routes_tasks,
     routes_turns,
 )
+from .cards import MainChatCards
 from .errors import ApiError
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
@@ -153,6 +154,10 @@ class Console:
             memory=self.memory,
         )
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
+        # The one main chat of the store's file, once it is open; and the
+        # cards that come back to it from side chats and tasks.
+        self.main_id: str | None = None
+        self.cards = MainChatCards(self)
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
@@ -175,6 +180,16 @@ class Console:
             level=self.gate.level(info.id),
             held=self.gate.held(info.id),
         )
+
+    async def main_body(self) -> dict[str, Any] | None:
+        """The main chat as the list gives it, with its newest card; ``None`` before the store opens."""
+        if self.main_id is None:
+            return None
+        await self.cards.flush()
+        info = await self.store.get_session(self.main_id)
+        if info is None:
+            return None
+        return {**self.session_body(info), "last_card": self.cards.last}
 
     # ── The gate ──
 
@@ -247,6 +262,10 @@ class Console:
         try:
             await self.store.open()
             await self.workers.open()
+            main = await self.store.main_chat()
+            self.main_id = main.id
+            self.workers.front_id = main.id
+            await self.cards.start(main.id)
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_open_reason = (
@@ -287,6 +306,7 @@ class Console:
         while not self._closed:
             await asyncio.sleep(SWEEP_INTERVAL_S)
             try:
+                await self.cards.flush()
                 await self.sessions.close_idle()
             except asyncio.CancelledError:
                 raise
@@ -319,6 +339,8 @@ class Console:
             try:
                 await self.workers.aclose()
             finally:
+                with contextlib.suppress(Exception):
+                    await self.cards.flush()
                 await self.sessions.close_all()
         finally:
             # Every live call leaves its one line; the log's files close.

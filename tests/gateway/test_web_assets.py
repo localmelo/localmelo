@@ -718,3 +718,25 @@ def test_touch_screens_and_phones_get_44px_targets() -> None:
     for name in ("send-button", "stop-button", "icon-button"):
         assert re.search(rf"\.{name}\b[^{{}}]*\{{[^}}]*\b44px", block.group(1)), name
     assert re.search(r'\.level-item\[aria-checked="true"\]', css)
+
+
+async def test_the_shell_pins_the_main_chat_and_drops_the_chats_switch(
+    client: httpx.AsyncClient,
+) -> None:
+    page = (await client.get("/")).text
+    assert "chats-link" not in page
+    assert re.search(r'<div\b[^>]*\bid="main-chat-row"[^>]*\bhidden\b', page)
+    parent = re.search(r'<button\b[^>]*\bid="header-parent"[^>]*>([^<]*)<', page)
+    assert parent is not None and parent.group(1) == "Main chat"
+    assert "hidden" in parent.group(0)
+    workers = re.search(r'id="welcome-workers"[^>]*hidden><a href="#/workers">', page)
+    assert workers is not None
+    module = (await client.get("/assets/main-chat.mjs")).text
+    assert "export function timeline" in module
+    css = _stylesheet()
+    # Phones and touch screens: the way back to the main chat is a 44 px target.
+    block = re.search(
+        r"@media \(max-width: 700px\), \(pointer: coarse\)\s*\{\s*\.header-parent[^}]*44px",
+        css,
+    )
+    assert block is not None

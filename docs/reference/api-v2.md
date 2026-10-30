@@ -467,6 +467,11 @@ built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
   `request_key` makes a repeat of the same normalized request return 200
   `{"task": ..., "repeated": true}`; reusing it for a different request
   returns 409 `submission_conflict`. A repeat does not start a new worker.
+- `front_id` (optional) is the chat that starts the task: a side chat's or the
+  main chat's session id. The task belongs to it (the task's `front_id`, which
+  the panel's Workers tab of that chat lists); absent, the main chat. An id
+  that names no console chat (unknown, or a task's session) is 400
+  `invalid_request`.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
@@ -569,16 +574,28 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 
 ## GET /api/sessions
 
-The newest sessions first. Only `chat` sessions are listed by default.
+The newest sessions first. Only `chat` sessions are listed by default: the
+side chats of the main chat, which the list names in `main`.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 ```
 
 ```json
-{"sessions": [{"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""}], "machine": {"lock": "none", "holder": "", "purpose": "", "run": "", "eta": "", "stale": false, "readable": true, "on_ac": true, "battery_pct": 100, "battery_state": "charged", "band": 4, "gate": "record"}, "has_more": false}
+{"sessions": [{"id": "8983e7f06ecf", "kind": "chat", "main": false, "title": "Plan the Tokyo trip", "created_at": 1793399544.338924, "updated_at": 1793399544.339885, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""}], "machine": {"lock": "none", "holder": "", "purpose": "", "run": "", "eta": "", "stale": false, "readable": true, "on_ac": true, "battery_pct": null, "battery_state": "", "band": 4, "gate": "record"}, "has_more": false, "main": {"id": "313ad3fcb8fb", "kind": "front", "main": true, "title": "Main chat", "created_at": 1793399544.315079, "updated_at": 1793399544.315079, "model": "", "workspace": null, "workspace_label": "", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": "", "last_card": {"id": 4, "ts": 1793399544.342355, "source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}}}
 ```
 
+- **The main chat.** The gateway's sessions file holds exactly one main chat:
+  a session of kind `front`, titled `Main chat`, made when the console first
+  opens the file, before its first message. It is never deleted. Every
+  console chat of kind `chat` is one of its side chats; chats made before
+  the main chat existed are its side chats too, unchanged. Each session
+  object says so in `main`: `true` for the main chat, `false` for any other.
+- `main` (with the default `kind=chat` only) is the main chat as a session
+  object, plus `last_card`: its newest [card](#cards-in-the-main-chat), or
+  `null`. A client marks the main chat unread while `last_card.id` is newer
+  than the last card it showed. `main` is `null` only while the store cannot
+  be read.
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
   matches a session's title or any turn's user text. `has_more` says that
   older sessions exist beyond the page.
@@ -588,7 +605,8 @@ The newest sessions first. Only `chat` sessions are listed by default.
   middle, say) has no turn and is left out; `GET /api/sessions/{id}` still
   shows it.
 - `kind` is `chat` (default), `front`, `front_bg`, `task`, `worker` or
-  `terminal`; any other value is 400 `invalid_request`. `worker` and `terminal`
+  `terminal`; any other value is 400 `invalid_request`. `front` lists the
+  main chat, also before its first message. `worker` and `terminal`
   read the CLI sessions file in SQLite read-only mode: `worker` lists direct
   runs and `terminal` lists the chats of interactive `melo` sessions, which
   `kind=chat` never includes. A
@@ -663,7 +681,7 @@ token total.
 
 ```json
 {
-  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
+  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "main": false, "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
   "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "arguments_complete": true, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["file_write"],
   "granted_at": {"file_write": 1761141604.9},
@@ -752,6 +770,36 @@ The session's turns, oldest first within the page.
 - `answer` and `result.result` are the stored copies: secrets are redacted
   and, after retention, an inline `<think>` block is gone.
 - `cause` is `""` while a turn runs.
+- The main chat's pages add `cards`, its cards beside the page's turns, oldest
+  first: from the page's oldest turn (from the start, on the oldest page) up to
+  the next page's first turn (up to now, on the newest page), at most the newest
+  50. A main chat without turns gives its newest 50 cards and a `replay_from`
+  just before the oldest of them, so the stream replays nothing older.
+
+### Cards in the main chat
+
+When a side chat's run ends, or a task finishes, fails or waits for an
+approval, the main chat gets a card: an `attention.card` session event that
+belongs to no turn. A card is never a turn: no model reads it, and the main
+chat's conversation never holds it. Its `data`:
+
+```json
+{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
+```
+
+- `state` is `done`, `failed` or `waiting` (an approval waits for an answer).
+  `source_kind` is `chat` or `task`, and `source_id` is the side chat or the
+  task to open. `line` is one plain line: the answer's first sentence, the way
+  the run ended, or `Waiting for your approval`. `at` is when it happened.
+- A side chat's run counts when its turn ends by its run (`cause` `run`); a
+  stop by the person, a shutdown or a crash makes no card. A task counts when
+  it ends `done`, `failed` or `expired`; a stop by the person makes none.
+- The gateway writes the cards when the main chat or the list is read, and
+  once a minute; a waiting card whose approval was answered first is never
+  written. The main chat's stream carries new cards as `attention.card` frames.
+- A task created through `POST /api/tasks` belongs to the chat its
+  `front_id` names, else to the main chat; its cards still come to the main
+  chat.
 
 ## GET /api/sessions/{id}/events
 
@@ -972,9 +1020,12 @@ Create a session, usually with its first turn.
 ```
 
 ```json
-{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "main": false, "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
 ```
 
+- A create makes a side chat of the [main chat](#get-apisessions): `kind`
+  `chat`, `main` false. The main chat already exists; write to it with
+  `POST /api/sessions/{id}/turns`.
 - `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
   created with mode `0700` when missing. Another value must be absolute or
   start with `~/` and be an existing directory; anything else is 400
@@ -1143,6 +1194,8 @@ Rename the session, move it to another folder, or both.
 ```
 
 - A task session returns 409 `task_session_read_only`; it cannot be deleted as a chat.
+- The main chat returns 409 `main_chat` (`The main chat is always there: it cannot be deleted.`)
+  and stays as it is.
 - 204 with no body: the session's row, turns, events and blobs are gone, and so are
   its entries in memory's chat index. The notes melo made in the chat stay (a note
   outlives its chat, and then lists as `from a deleted chat`); `?notes=forget` forgets

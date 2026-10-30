@@ -113,6 +113,13 @@ RETENTION_SWEEP_S: Final = 86_400.0
 # Seconds a turn's lease lasts; the runner refreshes it every LEASE_S / 3.
 LEASE_S: Final = 30.0
 SESSION_KINDS: Final = frozenset({"chat", "front", "front_bg", "task", "worker"})
+# The gateway's file holds one main chat: a session of kind ``front`` with this title.
+MAIN_CHAT_TITLE: Final = "Main chat"
+# The partial index that keeps it one, even across two processes.
+_ONE_MAIN_CHAT: Final = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_front ON sessions(kind) "
+    "WHERE kind = 'front'"
+)
 # Event types the scheduler owns; only a gateway file stores them.
 RESERVED_EVENT_PREFIXES: Final = ("task.", "sched.", "attention.")
 Cause = Literal["run", "user_stop", "closed", "shutdown", "crash", "takeover", "park"]
@@ -324,6 +331,10 @@ class StoreOwnedError(SessionStoreError):
 
 class SessionBusyError(Exception):
     """The session is running a turn."""
+
+
+class MainChatError(ValueError):
+    """The main chat is always there: it cannot be deleted."""
 
 
 # ── Records ──
@@ -1894,6 +1905,63 @@ class SessionStore:
         assert info is not None
         return info
 
+    async def main_chat(self) -> SessionInfo:
+        """The file's one main chat, made by the first call (the gateway's file only).
+
+        A session of kind ``front`` titled :data:`MAIN_CHAT_TITLE`, without
+        turns until the person writes in it. The look-up and the insert are
+        one ``BEGIN IMMEDIATE`` transaction under a unique index on that
+        kind, so two calls, or two processes, never make two. A file from
+        before the main chat keeps every chat: they are its side chats.
+        """
+        if self._writer != "gateway":
+            raise SessionStoreError("The main chat lives in the gateway's store")
+        async with self._lock:
+            conn = await self._ready()
+            self._check_writable()
+            async with self._transaction(conn, "main_chat"):
+                rows = await _rows(
+                    conn,
+                    "SELECT id FROM sessions WHERE kind = 'front' "
+                    "ORDER BY created_at, id LIMIT 2",
+                )
+                if len(rows) < 2:  # a file written otherwise keeps its oldest
+                    await conn.execute(_ONE_MAIN_CHAT)
+                session_id = rows[0][0] if rows else uuid.uuid4().hex[:12]
+                if not rows:
+                    now = self._clock()
+                    await conn.execute(
+                        "INSERT INTO sessions (id, kind, title, created_at, "
+                        "updated_at) VALUES (?, 'front', ?, ?, ?)",
+                        (session_id, MAIN_CHAT_TITLE, now, now),
+                    )
+                info = await self._get_session(conn, session_id)
+        assert info is not None
+        return info
+
+    async def events_of_type(
+        self,
+        session_id: str,
+        type_: str,
+        *,
+        after_id: int = 0,
+        before_id: int | None = None,
+        limit: int = 50,
+    ) -> list[StoredEvent]:
+        """The newest *limit* events of one type with ids in ``(after_id, before_id)``, in id order."""
+        sql = "SELECT id, turn, event FROM events WHERE session_id = ? AND type = ? AND id > ?"
+        args: list[Any] = [session_id, type_, after_id]
+        if before_id is not None:
+            sql += " AND id < ?"
+            args.append(before_id)
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
+        return [
+            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
+            for row in reversed(rows)
+        ]
+
     async def rename_session(self, session_id: str, title: str) -> bool:
         """Set the title; ``False`` for an unknown session.
 
@@ -1976,8 +2044,8 @@ class SessionStore:
         """Delete a session and everything of it; ``False`` for an unknown one.
 
         :class:`SessionBusyError` while a turn runs (in a CLI file, under a
-        live lease). The delete cascades to its turns, events, blobs,
-        submissions and window (T-12).
+        live lease), :class:`MainChatError` for the main chat. The delete
+        cascades to its turns, events, blobs, submissions and window (T-12).
         """
         async with self._lock:
             conn = await self._ready()
@@ -1985,14 +2053,16 @@ class SessionStore:
             async with self._transaction(conn, "delete_session"):
                 rows = await _rows(
                     conn,
-                    "SELECT s.lease_holder, s.lease_until, r.holder FROM sessions s "
+                    "SELECT s.lease_holder, s.lease_until, r.holder, s.kind FROM sessions s "
                     "LEFT JOIN turns r ON r.session_id = s.id AND r.status = 'running' "
                     "WHERE s.id = ?",
                     (session_id,),
                 )
                 if not rows:
                     return False
-                lease_holder, lease_until, running = rows[0]
+                lease_holder, lease_until, running, kind = rows[0]
+                if kind == "front":
+                    raise MainChatError("The main chat cannot be deleted")
                 if running is not None and self._running_is_live(
                     lease_holder, lease_until, self._clock()
                 ):
