@@ -21,18 +21,12 @@ SOURCES = (
     "step_summary",
 )
 STATUSES = ("active", "superseded", "conflicted")
-# EDIT and DELETE are the user's own changes to a record; user_confirm (a
-# tap on a proposal) and user_edit admit the records they write.
+# EDIT and DELETE are the user's own changes to a record.
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE", "EDIT", "DELETE")
-SIGNALS = (
-    "rehearsal",
-    "user_request",
-    "user_statement",
-    "outcome",
-    "sleep",
-    "user_confirm",
-    "user_edit",
-)
+# The signals a run admits by; its counters (RunResult ``admitted``) have one each.
+SIGNALS = ("rehearsal", "user_request", "user_statement", "outcome", "sleep")
+# What the store also accepts: the user's own tap on a proposal, or edit.
+STORE_SIGNALS = (*SIGNALS, "user_confirm", "user_edit")
 
 
 class LongTermSchemaError(Exception):
@@ -223,7 +217,7 @@ class LongTerm:
         for name, value, allowed in (
             ("kind", kind, KINDS),
             ("source", source, SOURCES),
-            ("admitted_by", admitted_by, SIGNALS),
+            ("admitted_by", admitted_by, STORE_SIGNALS),
             ("action", action, ACTIONS),
         ):
             if value not in allowed:

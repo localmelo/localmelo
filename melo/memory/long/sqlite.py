@@ -24,8 +24,8 @@ from localmelo.melo.memory.bm25 import BM25Index
 from localmelo.melo.memory.long import (
     ACTIONS,
     KINDS,
-    SIGNALS,
     SOURCES,
+    STORE_SIGNALS,
     LongTerm,
     LongTermSchemaError,
     StoredEntry,
@@ -353,7 +353,7 @@ class SqliteLongTerm(LongTerm):
         for name, value, allowed in (
             ("kind", kind, KINDS),
             ("source", source, SOURCES),
-            ("admitted_by", admitted_by, SIGNALS),
+            ("admitted_by", admitted_by, STORE_SIGNALS),
             ("action", action, ACTIONS),
         ):
             if value not in allowed:
