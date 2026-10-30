@@ -21,6 +21,7 @@ import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
+import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import {
   activity,
   applyEvent,
@@ -878,6 +879,8 @@ function viewSnapshot() {
     turn.finishedAt,
     turn.userToggledGroup,
     turn.userText,
+    turn.pictures,
+    turn.picturesOpen,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1033,11 +1036,27 @@ function assistantNode(turn, newest = false) {
       article.append(el("p", "turn-caption", "Best effort"));
       article.append(answerNode(turn.answer));
     }
-    article.append(statusNode(turn));
+    article.append(...picturesOf(turn), statusNode(turn));
   } else if (turn.answer) {
-    article.append(answerNode(turn.answer), actionsNode(turn));
+    article.append(answerNode(turn.answer), ...picturesOf(turn), actionsNode(turn));
   }
   return article;
+}
+
+// The row of previews under an answer: the pictures the turn made, or none.
+function picturesOf(turn) {
+  const row = picturesNode({
+    doc: document,
+    pictures: turn.pictures ?? [],
+    sessionId: S.activeId ?? "",
+    expanded: turn.picturesOpen === true,
+    open: (picture, url) => pictureBox(picture, url),
+    toggle: () => {
+      turn.picturesOpen = !turn.picturesOpen;
+      renderMessages(false, true);
+    },
+  });
+  return row ? [row] : [];
 }
 
 function answerNode(answer) {
@@ -2309,6 +2328,7 @@ async function refreshMode(saved) {
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
   } catch { /* Keep the last known mode and folder. */ }
 }
+const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 const showSettings = setupSettings({
   api,
@@ -2620,6 +2640,8 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key !== "Escape") return;
+  // An open picture closes itself (a modal dialog); nothing behind it reacts.
+  if ($("picture-box")?.open) return;
   // Close what is open first, in every view; a stop is the last thing Escape does.
   if (running.isOpen()) {
     running.toggle(false);

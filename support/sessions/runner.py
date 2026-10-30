@@ -50,6 +50,7 @@ from localmelo.melo.schema import (
     clip_session_text,
     split_thinking,
 )
+from localmelo.support.sessions import pictures as turn_pictures
 from localmelo.support.sessions.approvals import AskFunction
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
@@ -57,6 +58,7 @@ from localmelo.support.sessions.store import (
     CAUSES,
     CLOSED_ERROR,
     LEASE_S,
+    PICTURES_EVENT_TYPE,
     RESERVED_EVENT_PREFIXES,
     RESERVED_EVENT_TYPE_RE,
     SESSION_EVENT_FIELDS,
@@ -216,6 +218,9 @@ class SessionRunner:
     included. *before_turn*, when set, is awaited after acquiring the turn's
     lease and before calling the model. It receives a reload coroutine
     factory for synchronizing conversation under that lease; do not retain it.
+    With *pictures*, each turn looks at the Agent's folder before and after its
+    run and stores the picture files it made or changed, and those its answer
+    names, as one ``turn.pictures`` event (:mod:`~.pictures`).
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -237,6 +242,7 @@ class SessionRunner:
         create_scope_key: bool = False,
         observe: Callable[[AgentEvent], object] | None = None,
         inbox: InboxSource | None = None,
+        pictures: bool = False,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -258,6 +264,7 @@ class SessionRunner:
         self._on_event = on_event
         self._observe = observe
         self._inbox = inbox
+        self._pictures = pictures
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -642,6 +649,7 @@ class SessionRunner:
         assert task is not None
         run_exc: BaseException | None = None
         returned: RunResult | None = None
+        before: turn_pictures.Snapshot | None = None
         try:
             if self._before_turn is not None:
                 await self._before_turn(
@@ -660,9 +668,12 @@ class SessionRunner:
                 kwargs["routine"] = turn.routine
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
+            before = await self._scan_folder(turn)
             returned = await turn.agent.run_task(turn.text, **kwargs)
         except BaseException as exc:
             run_exc = exc
+        if before is not None:
+            await self._note_pictures(turn, before, returned)
         cancelled = (
             isinstance(run_exc, asyncio.CancelledError) and task.cancelling() > 0
         )
@@ -674,6 +685,47 @@ class SessionRunner:
                 if task.cancelling() > turn.runner_cancels:
                     break  # cancelled from outside again: step 7 goes on alone
         return self._outcome(turn, task, run_exc, returned)
+
+    async def _scan_folder(self, turn: _Turn) -> turn_pictures.Snapshot | None:
+        """The picture files in the Agent's folder, or ``None`` when pictures are off."""
+        root = turn.agent.workspace_root
+        if not self._pictures or root is None:
+            return None
+        try:
+            return await asyncio.to_thread(turn_pictures.scan, root)
+        except Exception:
+            logger.warning("Could not look at the folder for pictures", exc_info=True)
+            return None
+
+    async def _note_pictures(
+        self, turn: _Turn, before: turn_pictures.Snapshot, returned: RunResult | None
+    ) -> None:
+        """Queue ``turn.pictures``: what the run made or changed, and what its answer names."""
+        root = turn.agent.workspace_root
+        outcome = turn.outcome or returned
+        answer = split_thinking(outcome.result)[1] if outcome is not None else ""
+        assert root is not None
+        try:
+            found = await asyncio.to_thread(self._pictures_of, root, before, answer)
+        except asyncio.CancelledError:
+            return  # the turn's own cancel counter still ends the run as cancelled
+        except Exception:
+            logger.warning("Could not list the pictures of a turn", exc_info=True)
+            return
+        if found:
+            self._enqueue(
+                turn,
+                PICTURES_EVENT_TYPE,
+                {"turn": turn.turn.turn, "turn_id": turn.turn.id, "pictures": found},
+            )
+
+    @staticmethod
+    def _pictures_of(
+        root: str, before: turn_pictures.Snapshot, answer: str
+    ) -> list[dict[str, Any]]:
+        made = turn_pictures.new_pictures(before, turn_pictures.scan(root))
+        named = turn_pictures.mentioned(root, answer, {item["path"] for item in made})
+        return (made + named)[: turn_pictures.MAX_LISTED]
 
     def _outcome(
         self,
