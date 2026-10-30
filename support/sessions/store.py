@@ -1888,10 +1888,13 @@ class SessionStore:
             conn = await self._ready()
             self._check_writable()
             async with self._transaction(conn, "main_chat"):
-                await conn.execute(_ONE_MAIN_CHAT)
                 rows = await _rows(
-                    conn, "SELECT id FROM sessions WHERE kind = 'front' LIMIT 1"
+                    conn,
+                    "SELECT id FROM sessions WHERE kind = 'front' "
+                    "ORDER BY created_at, id LIMIT 2",
                 )
+                if len(rows) < 2:  # a file written otherwise keeps its oldest
+                    await conn.execute(_ONE_MAIN_CHAT)
                 session_id = rows[0][0] if rows else uuid.uuid4().hex[:12]
                 if not rows:
                     now = self._clock()

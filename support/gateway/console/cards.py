@@ -29,6 +29,8 @@ CARD_PAGE: Final = 50
 _TASK_ENDS: Final = {"done": "done", "failed": "failed", "expired": "failed"}
 # Events heard and not yet flushed, at most: the newest are kept.
 _HEARD_MAX: Final = 500
+# The data keys a card is built from.
+_READ: Final = ("turn", "status", "cause", "request_id", "state")
 
 
 def card_json(event: StoredEvent) -> dict[str, Any]:
@@ -76,7 +78,14 @@ class MainChatCards:
                 self.last = card_json(stored)
             return
         if kind in ("turn.finished", "approval.requested", "sched.finished"):
-            self._heard_events = [*self._heard_events[-(_HEARD_MAX - 1) :], stored]
+            # Only what a card reads: an approval's arguments can be large.
+            data = stored.event.get("data") or {}
+            light = {key: data.get(key) for key in _READ if key in data}
+            event = {"type": kind, "ts": stored.event.get("ts"), "data": light}
+            self._heard_events.append(
+                StoredEvent(stored.id, stored.session_id, stored.turn, event)
+            )
+            del self._heard_events[:-_HEARD_MAX]
 
     async def flush(self) -> None:
         """Write a card for each event heard since the last flush."""

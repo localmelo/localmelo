@@ -103,6 +103,27 @@ async def test_one_store_asked_at_once_makes_one_and_the_index_refuses_two(
         )
 
 
+async def test_a_file_with_two_fronts_keeps_its_oldest_and_still_opens(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sessions.db"
+    store = SessionStore(str(path), writer="gateway")
+    await store.list_sessions()  # creates the file, without the main chat's index
+    await store.aclose()
+    with sqlite3.connect(path) as conn:
+        for name, at in (("newer", 2), ("older", 1)):
+            conn.execute(
+                "INSERT INTO sessions (id, kind, created_at, updated_at) "
+                "VALUES (?, 'front', ?, ?)",
+                (name, at, at),
+            )
+    again = SessionStore(str(path), writer="gateway")
+    try:
+        assert (await again.main_chat()).id == "older"
+    finally:
+        await again.aclose()
+
+
 async def test_a_terminal_file_has_no_main_chat(tmp_path: Path) -> None:
     store = SessionStore(str(tmp_path / "cli.db"), writer="cli")
     try:
