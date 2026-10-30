@@ -31,7 +31,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 |---|---|
 | `melo -- "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
-| `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
+| `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model`, else the server's only chat model or the one it says is loaded. With several chat models and none known to be loaded it exits 2, lists them and asks for `--chat-model <id>`. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use it? [Y/n]:`) and shows the full backend menu only after `n`, with none found, or with `--developer`. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
@@ -197,7 +197,7 @@ deliberate change: a test pins the number of options default-mode help shows.
 | `--version` | | Print `melo <version>` (the package version, then the short commit on a git checkout, e.g. `melo 0.1.0 (baab21e)`) and exit 0. |
 | `--developer` | off | Show every option in `--help`, grouped by tier, for this run; the same as `[ui] mode = "developer"`. It changes only the help. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
-| `--chat-model NAME` | with `--base-url`, `default` for a task and the server's first listed model without one; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
+| `--chat-model NAME` | with `--base-url`, `default` for a task and the server's only chat model or its loaded one without one (see [Modes](#modes)); else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
 
 - `--base-url` is used exactly as given, so include `/v1`, as in
   `http://127.0.0.1:11434/v1`.
@@ -803,7 +803,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | The run ended with status `completed`. |
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
-| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode. |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode; or `melo --base-url URL` (no task) served several chat models with no `--chat-model` and none known to be loaded. |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 4 | A `--brief` run ended `completed`, but its brief's check failed for good: `tests.state` is `failed`, a refused check included. `status` stays `completed` and the record's `exit_code` is 4. A brief without a `Check:` line never exits 4. |
 | 129 | SIGHUP ended the run. |

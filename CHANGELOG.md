@@ -31,6 +31,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Setup never picks a model silently when several are served and none is known
+  to be loaded. On a server whose status route needs a key (it answers 401) the
+  first run used to default to the first listed model, which could be a large
+  one that was not in memory, and Enter started loading it. First-run setup,
+  `--reconfigure` and `/backend` now default only to a model the
+  server says is loaded; otherwise they ask for a number or an id and Enter
+  alone asks again (an empty answer with no terminal is an error).
+  `melo --base-url URL` without `--chat-model` picks the one loaded model, or
+  exits 2 with the list and `Pass --chat-model <id>`. ([#NN])
+
 - Concurrent first runs on a new home no longer lose a recording. A process
   that read a new sessions file just as another finished its schema saw version
   0 with tables and called the file foreign (`melo: could not record this run

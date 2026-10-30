@@ -57,9 +57,10 @@ The first of these that applies:
    full backend menu follows only after `n`, when none is found, or with
    `--developer`. Without a task it cannot be combined with `--base-url`.
 2. `--base-url URL`: that server, without the config file. The model is
-   `--chat-model`, else the first model that `GET URL/models` lists,
-   skipping models whose id contains `embed` or `rerank` while another is
-   listed. A URL without `/v1` is listed at `URL/v1/models`, and when that
+   `--chat-model`, else the only chat model that `GET URL/models` lists
+   (ids containing `embed` or `rerank` are not chat models), else the one
+   chat model the server says is loaded; with several and none known to be
+   loaded it exits 2, lists them and asks for `--chat-model <id>`. A URL without `/v1` is listed at `URL/v1/models`, and when that
    answers the UI uses `URL/v1` too. When the server does not answer the
    list, or lists no model, the model is `default` and a warning under the
    banner says why. With no config file it asks once
@@ -573,8 +574,12 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   four URLs with a comma-separated list, and its first URL is then the one
   offered; an empty value turns the search off.
 - A server that lists several models shows them as a numbered list and asks
-  `Model [N]:`; type a number or an id. The default skips embedding and
-  reranking models. A server that lists only such models is shown the same
+  `Model [N]:`; type a number or an id. With several chat models, a loaded
+  one is marked `(loaded)` and is the default; when the server does not say
+  which are loaded, the prompt is `Model:` with no default and Enter alone
+  asks again (`Type the number of the model to use. …`). Without a terminal
+  an empty answer then exits 2 with an error. `/backend` asks the same
+  way. A server that lists only such models is shown the same
   way, with a line saying that chat needs a chat model.
 - An Ollama server, one that answers `GET /api/version` with
   `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its

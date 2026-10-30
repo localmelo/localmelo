@@ -105,7 +105,7 @@ def _configured(
     return Choice(config_backend(cfg, model), cfg)
 
 
-def _with_url(args: argparse.Namespace) -> Choice:
+def _with_url(args: argparse.Namespace) -> Choice | int:
     """``--base-url``: the model from the flag or the server's list; maybe saved."""
     from localmelo.support.cli.agents import url_backend, url_embedding
 
@@ -123,7 +123,20 @@ def _with_url(args: argparse.Namespace) -> Choice:
             reason = str(exc)
         else:
             url, reason = normalize_url(url), "" if models else "it lists no models"
-    model = args.chat_model or discovery.pick_model(models)
+    loaded = discovery.LoadedModels()
+    if not args.chat_model and sum(map(discovery.is_chat_model, models)) > 1:
+        loaded = asyncio.run(discovery.loaded_models(url))
+    model = args.chat_model or discovery.pick_model(models, loaded, unique=True)
+    if model is None and models:
+        listing = "".join(
+            f"\n  {name}{'  (loaded)' if name in loaded.ids else ''}" for name in models
+        )
+        print(
+            f"melo: error: {url} serves several models and it is not known which "
+            f"one is loaded:{listing}\nPass --chat-model <id>.",
+            file=sys.stderr,
+        )
+        return 2
     saved = offer and model in models and onboard.offer_to_save(url, model)
     warning = ""
     if reason and not args.chat_model:
@@ -258,6 +271,9 @@ def run_interactive(
             # A script can pipe the wizard's answers in; nothing opens after.
             try:
                 onboard.run_backend_setup(guided=not _developer(args))
+            except onboard.ModelChoiceError as exc:
+                print(f"melo: error: {exc}", file=sys.stderr)
+                return 2
             except EOFError:
                 print("\nSetup cancelled.")
             except KeyboardInterrupt:
@@ -272,6 +288,9 @@ def run_interactive(
         return 2
     try:
         choice = choose_backend(args)
+    except onboard.ModelChoiceError as exc:
+        print(f"melo: error: {exc}", file=sys.stderr)
+        return 2
     except EOFError:
         print("\nSetup cancelled.")
         return 0

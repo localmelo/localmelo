@@ -148,8 +148,12 @@ accept the one it found) and for a model from the server's list, saves
 `~/.cache/localmelo/config.toml` and opens the interactive UI. When the list
 holds several chat models and the server says which are in memory (oMLX,
 Ollama), they are marked `(loaded)` and Enter chooses the first of them, so
-it does not load a large model that is not in memory; otherwise Enter chooses
-the first chat model:
+it does not load a large model that is not in memory. When it does not say
+(a server with an API key answers 401, others have no such route) or none is
+loaded, there is no default: type the number of the model to use, because a
+model that is not loaded yet can take minutes and a lot of memory to load.
+Enter alone asks again, and with the answers piped in, an empty answer is an
+error. With one chat model there is nothing to choose:
 
 ```text
 $ melo

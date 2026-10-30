@@ -45,10 +45,10 @@ def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _nothing_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first run asks which models are in memory; these servers say none."""
+    """The first run asks which models are in memory; these servers do not say."""
 
-    async def loaded_models(url: str, **kwargs: object) -> set[str]:
-        return set()
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels()
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
 
@@ -140,7 +140,7 @@ def _first_setup(
 def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     config_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    models = ["bge-m3-embed", "Qwen3-8B", "Qwen3-32B"]
+    models = ["bge-m3-embed", "Qwen3-8B"]
     answers = _Answers("", "", "n")
     result, detect, list_models = _first_setup(
         answers, found=FoundServer(url=URL, models=models)
@@ -156,12 +156,11 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     )
     list_models.assert_not_called()  # the found server's list is used
     assert capsys.readouterr().out == (
-        f"Found a model server at {URL} (3 models).\n"
+        f"Found a model server at {URL} (2 models).\n"
         f"Models on {URL}:\n"
         "  [1] bge-m3-embed\n"
         "  [2] Qwen3-8B\n"
-        "  [3] Qwen3-32B\n"
-        f"✓ {URL} lists 3 models; using Qwen3-8B.\n"
+        f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
         "Long-term memory off (melo --reconfigure sets it again).\n"
         f"Saved to {config_path} (melo --reconfigure changes it).\n"
     )
@@ -175,9 +174,9 @@ def test_a_loaded_model_is_marked_and_is_the_default(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
         assert url == URL
-        return {"Qwen3-Flash"}
+        return discovery.LoadedModels(frozenset({"Qwen3-Flash"}), True)
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
     models = ["Qwen3-27B", "Qwen3-Flash"]
@@ -191,21 +190,79 @@ def test_a_loaded_model_is_marked_and_is_the_default(
     )
 
 
-def test_without_a_loaded_answer_the_first_chat_model_stays_the_default(
-    config_path: Path, capsys: pytest.CaptureFixture[str]
+def _terminal(monkeypatch: pytest.MonkeyPatch, tty: bool) -> None:
+    class Stdin:
+        def isatty(self) -> bool:
+            return tty
+
+    monkeypatch.setattr("sys.stdin", Stdin())
+
+
+def test_without_a_loaded_answer_there_is_no_default_and_enter_asks_again(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _terminal(monkeypatch, True)
     models = ["Qwen3-27B", "Qwen3-Flash"]
-    answers = _Answers("", "", "n")
+    answers = _Answers("", "", "", "2", "n")
     result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
-    assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
-    assert answers.prompts[1] == "Model [1]: "
-    assert "(loaded)" not in capsys.readouterr().out
+    assert result == FirstSetup(url=URL, model="Qwen3-Flash", saved=True)
+    assert answers.prompts[1:4] == ["Model: "] * 3
+    out = capsys.readouterr().out
+    assert "(loaded)" not in out
+    assert out.count(discovery.NO_DEFAULT_HINT) == 2
+    assert "needs a key" not in out  # no status route answered 401
+
+
+def test_a_loaded_chat_model_among_several_is_the_default_even_with_embeddings(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels(frozenset({"nomic-embed", "b"}), True)
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    answers = _Answers("", "", "n")
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["a", "nomic-embed", "b"])
+    )
+    assert result is not None and result.model == "b"
+    assert answers.prompts[1] == "Model [3]: "
+
+
+def test_a_status_that_lists_none_loaded_gives_no_default(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _terminal(monkeypatch, True)
+
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
+        return discovery.LoadedModels(frozenset(), True)
+
+    monkeypatch.setattr(discovery, "loaded_models", loaded_models)
+    answers = _Answers("", "Qwen3-27B", "n")
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["Qwen3-27B", "Qwen3-Flash"])
+    )
+    assert result is not None and result.model == "Qwen3-27B"
+    assert answers.prompts[1] == "Model: "
+
+
+def test_without_a_terminal_an_empty_answer_with_no_default_is_an_error(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _terminal(monkeypatch, False)
+    answers = _Answers("", "")
+    with pytest.raises(onboard.ModelChoiceError, match="no default"):
+        _first_setup(
+            answers, found=FoundServer(url=URL, models=["Qwen3-27B", "Qwen3-Flash"])
+        )
+    assert not config_path.exists()
 
 
 def test_one_chat_model_is_not_looked_up(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
         raise AssertionError("no choice to make")
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
@@ -216,22 +273,33 @@ def test_one_chat_model_is_not_looked_up(
     assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
 
 
-def test_a_key_protected_server_keeps_the_first_chat_model(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("status", "says_key"), [(401, True), (404, False), (500, False)]
+)
+def test_a_server_that_does_not_say_what_is_loaded_gives_no_default(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    says_key: bool,
 ) -> None:
-    """The status route answers 401 as the listing does; the default is the old one."""
+    """Without a key the status route answers 401 as the listing would."""
+    _terminal(monkeypatch, True)
     real = _REAL_LOADED_MODELS
-    transport = httpx.MockTransport(lambda request: httpx.Response(401))
+    transport = httpx.MockTransport(lambda request: httpx.Response(status))
 
-    async def loaded_models(url: str, **kwargs: object) -> set[str]:
+    async def loaded_models(url: str, **kwargs: object) -> discovery.LoadedModels:
         return await real(url, transport=transport)
 
     monkeypatch.setattr(discovery, "loaded_models", loaded_models)
-    answers = _Answers("", "", "n")
+    answers = _Answers("", "", "1", "n")
     result, _, _ = _first_setup(
         answers, found=FoundServer(url=URL, models=["Qwen3-27B", "Qwen3-Flash"])
     )
     assert result == FirstSetup(url=URL, model="Qwen3-27B", saved=True)
+    assert answers.prompts[1:3] == ["Model: "] * 2
+    note = "The server did not say which models are loaded (it needs a key for that)."
+    assert (note in capsys.readouterr().out) is says_key
 
 
 def test_a_first_run_offers_the_servers_embedding_model(
@@ -387,7 +455,7 @@ def test_a_model_is_chosen_by_number_or_id(config_path: Path) -> None:
     answers = _Answers(URL, "4", "x", "3")
     result, _, _ = _first_setup(answers, lists=lists)
     assert result is not None and result.model == "c"
-    assert answers.prompts[1:] == ["Model [1]: "] * 3
+    assert answers.prompts[1:] == ["Model: "] * 3
 
     answers = _Answers(URL, "b")
     result, _, _ = _first_setup(answers, lists=lists)
