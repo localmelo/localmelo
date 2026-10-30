@@ -104,7 +104,7 @@
             <time datetime="2026-10-30">2026-10-30</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/243">#243</a>
           </p>
-          <p>控制台里没有小于 12px 的文字，输入框和消息框的边缘在浅色和深色下都更容易看清。首次运行、还没有设置模型时，欢迎页会显示一张卡片，找到这台 Mac 上已在运行的模型服务器（oMLX 或 Ollama），说出它的名字，并通过 “Use this model” 连接它：它会保存服务器、测试它并让欢迎页就绪，无需打开设置，也不再显示终端命令。有多个聊天模型且没有任何模型被确认已加载时，卡片会列出它们并等你选择；需要密钥的服务器，或没有服务器在运行，各有自己的文字和 “Check again”。“Connect a model” 按钮已经去掉。审批卡片提出一个平实的问题，如 “Replace notes.txt (125 bytes)?”，按钮是填充样式的 “Allow once”、描边样式的 “Allow for this chat”（按钮下面的一行说明它的范围）和低调的 “Deny”，Deny 可以告诉 melo 改做什么。以糟糕方式结束的运行，以 ✗ 或 ⚠、错误的第一行和一条提示开头，第一步是填充样式的按钮：“Open model settings”、“Continue”、“Try again”、“Show tools” 或 “Copy details”。当前打开的聊天有一条强调色竖条，离线横幅上有 “Try again”。API v2 新增了 <code>GET /api/setup/detect</code>。</p>
+          <p>控制台里没有小于 12px 的文字，输入框和消息框的边缘在浅色和深色下都更容易看清。首次运行、还没有设置模型，或已配置的服务器没有响应时，欢迎页会显示一张卡片，找到这台 Mac 上已在运行的模型服务器（oMLX 或 Ollama），说出它的名字，并通过 “Use this model” 连接它：它会保存服务器、测试它并让欢迎页就绪，无需打开设置，也不再显示终端命令。有多个聊天模型且没有任何模型被确认已加载时，卡片会列出它们并等你选择；需要密钥的服务器，或没有服务器在运行，各有自己的文字和 “Check again”。“Connect a model” 按钮已经去掉。审批卡片提出一个平实的问题，如 “Replace notes.txt (125 bytes)?”，按钮是填充样式的 “Allow once”、描边样式的 “Allow for this chat”（按钮下面的一行说明它的范围）和低调的 “Deny”，Deny 可以告诉 melo 改做什么。以糟糕方式结束的运行，以 ✗ 或 ⚠、错误的第一行和一条提示开头，第一步是填充样式的按钮：“Open model settings”、“Continue”、“Try again”、“Show tools” 或 “Copy details”。当前打开的聊天有一条强调色竖条，离线横幅上有 “Try again”。API v2 新增了 <code>GET /api/setup/detect</code>。</p>
         </article>
 
         <article class="update-entry" id="u-short-commands">
@@ -140,7 +140,7 @@
             <time datetime="2026-10-30">2026-10-30</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/239">#239</a>
           </p>
-          <p>反思回复的 JSON 中如果有一种常见的小错误——多出的 <code>]</code> 或 <code>}</code>、闭合符号前多出的逗号，或字符串里的原始换行或制表符——现在会先做一次保守的修复再读取，而不是再要求模型回复一次。修复不会补全或插入任何内容，需要两处修复的回复仍然无法读取，<code>reflection</code> 事件的 <code>repaired</code> 键会写明用了哪种修复。需要重试时，重试提示会引用解析器的错误及其周围的文字。另外，不做任何设置时，运行在所有后端上发送 <code>cache_layout</code> <code>v3</code>（反思只在窗口中加入一次），本地服务器或 <code>--base-url</code> 服务器的工作窗口保存 64 条消息；云端后端仍是 20 条。这个布局和窗口经过两轮基准测试，所以默认请求与早期版本不同。你设置的键和命令行标志仍然优先，<code>cache_layout = "v2"</code> 和 <code>window_messages = 20</code> 会发送此前的请求。</p>
+          <p>反思回复的 JSON 中如果有一种常见的小错误——多出的 <code>]</code> 或 <code>}</code>、闭合符号前多出的逗号，或字符串里的原始换行或制表符——现在会先做一次保守的修复再读取，而不是再要求模型回复一次。修复不会补全或插入任何内容，需要两处修复的回复仍然无法读取，<code>reflection</code> 事件的 <code>repaired</code> 键会写明用了哪种修复。需要重试时，重试提示会引用解析器的错误及其周围的文字。另外，不做任何设置时，运行在所有后端上发送 <code>cache_layout</code> <code>v3</code>（反思只在窗口中加入一次），本地服务器或 <code>--base-url</code> 服务器的工作窗口保存 64 条消息；云端后端仍是 20 条。默认请求与早期版本不同；这个布局和窗口经过两轮基准测试。你设置的键和命令行标志仍然优先，<code>cache_layout = "v2"</code> 和 <code>window_messages = 20</code> 会发送此前的请求。</p>
         </article>
 
         <article class="update-entry" id="u-app-first-minute">
