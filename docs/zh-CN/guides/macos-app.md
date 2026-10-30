@@ -42,13 +42,30 @@ uv run --with pillow python scripts/make_app_icons.py
 
 Pillow 只在这一次运行中获取；它不是 localmelo 的依赖，由 macOS 自带的 `iconutil` 打包图标。
 
-Melo，即 localmelo 的吉祥物，在应用包的 `Contents/Resources/akita` 下的图片里是一只秋田犬幼崽：九张给桌面宠物用（趴着、慵懒地趴着，以及三种睡姿），五张坐姿的用于启动视图，另有小头像和网站图标的各种尺寸，每张都有 1x 和 `@2x`。应用目前还不绘制它们。和图标一样，它们是提交进仓库的文件，位于 `macos/art/akita`（1.17 MB，透明 PNG，带一圈很细的奶油色外沿，让轮廓在深色桌面上依然看得见），构建会原样复制这个文件夹。`anchors.json` 以点为单位给出每张图片的画布、地面线和中心，因此换姿势时不会跳动。美术母版留在仓库之外；要在 Mac 上根据它们重新生成这些图片：
+Melo，即 localmelo 的吉祥物，是一只秋田犬幼崽；把应用收起来时，Melo 会趴在你的桌面上。关闭窗口、把它最小化或隐藏应用（Command-H），屏幕右下角、程序坞上方就会出现一个小小的 Melo。它停在其他窗口之上，出现在每一个空间里（它不会要求出现在全屏应用之上），不在程序坞和 Command-Tab 中，也从不抢走你正在使用的应用的键盘。窗口回来时它就消失，无论你是从程序坞、菜单栏、聚焦搜索打开窗口，还是点击 Melo。
+
+Melo 的样子说明 localmelo 在做什么，来自菜单栏图标用的同一个每 2 秒一次的健康检查：
+
+| Melo | 含义 |
+|---|---|
+| 瘫在肚皮上，眼睛半闭 | 休息：没有任何东西在运行。这是默认状态。 |
+| 抬眼望着，吐着舌头，开始工作时轻轻颠一下 | 工作中：有对话、任务、运行或终端对话在运行。 |
+| 睁大闪亮的眼睛，嘴巴圆圆的，开始时轻轻跳一下 | 在等你批准。 |
+| 开心地闭着眼睛、笑得张开了嘴，摇一小会儿 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
+| 眉毛耷拉着，一脸愁容 | 上一次运行没有完成（持续 10 秒），或 localmelo 已停止。 |
+| 侧着、趴着或仰着睡 | 一分钟内什么都没发生；睡姿每 3 分钟换一次，碰一下 Melo 就会醒。 |
+
+点击 Melo 会打开窗口；它在等你批准时，则打开需要你回答的那个对话或任务。可以把它拖到任何地方；它会为每块屏幕记住自己的位置，放在靠近底边处时会吸附到底边，屏幕变化时会回到屏幕内。右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo** 和 **Quit localmelo**。**Hide Melo** 会让它一直隐藏，重启应用后也一样，此时菜单栏菜单里会出现 **Show Melo**，这是唯一的回来方式（下次窗口被收起时，Melo 就会再出现）。它记住的内容保存在 `~/Library/Application Support/LocalMelo/pet.json`：是否隐藏、上次所在的屏幕，以及它在每块屏幕上的位置。
+
+Melo 趴着时会慢慢呼吸，开始工作时颠一下，等待时跳一下，运行完成时摇一摇，换图片时有短暂的淡入淡出（睡姿之间更慢）。这些全部由 Core Animation 完成，应用自己不做任何绘制：没有为 Melo 运行的定时器，它的状态在收到健康检查回复、被触碰或窗口变化时重新计算。在“减弱动态效果”下（此时图片直接切换，没有淡入淡出）、低电量模式下、Mac 发热时、Melo 被遮住或隐藏时，以及屏幕休眠时，Melo 会停止动作，每种状态只显示它的静态图片。VoiceOver 会把 Melo 读作一个按钮，并说出它的状态（`Melo, resting. Nothing running.`、`Melo, working. 2 running.`、`Melo, waiting for your approval.`、`Melo, done.`、`Melo, the last run did not finish.`、`Melo, localmelo stopped.`），并在开始等待时播报。
+
+图片在应用包的 `Contents/Resources/akita` 下：九张给桌面宠物用（趴着、慵懒地趴着，以及三种睡姿），五张坐姿的用于启动视图，另有小头像和网站图标的各种尺寸，每张都有 1x 和 `@2x`。和图标一样，它们是提交进仓库的文件，位于 `macos/art/akita`（1.17 MB，透明 PNG，带一圈很细的奶油色外沿，让轮廓在深色桌面上依然看得见），构建会原样复制这个文件夹。`anchors.json` 以点为单位给出每张图片的画布、地面线和中心，因此换姿势时不会跳动。美术母版留在仓库之外；要在 Mac 上根据它们重新生成这些图片：
 
 ```bash
 uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
 ```
 
-`picks.json` 的形式是 `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}`，列出脚本中的 14 个状态。Pillow 只在这一次运行中获取，两次运行得到的字节完全相同。`GET /api/health` 现在还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；应用中 Melo 的状态策略会读取它，用来显示刚结束的运行。
+`picks.json` 的形式是 `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}`，列出脚本中的 14 个状态。Pillow 只在这一次运行中获取，两次运行得到的字节完全相同。`GET /api/health` 现在还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；Melo 会读取它，用来显示刚结束的运行。
 
 打开应用会用 `melo --serve --port 0` 启动它自己的网关。网关绑定一个空闲端口，并在启动信息的 `Gateway: http://127.0.0.1:PORT` 一行中打印它，应用从网关的输出中读取这一行；整个启动过程的期限为 20 秒。应用从不自己选择端口，因此不会与其他网关冲突，也不会占用其他工作保留的端口，并且不会接管已有的监听者。如果另一个网关占用了控制台存储，请先停止那个网关。做隔离的手工测试时，请使用临时 `HOME`。关闭窗口会让网关继续运行；只有在有东西会被停止时才会询问：有对话或任务正在运行或在等你回答，或应用无法判断什么在运行；没有东西可停止时，应用直接退出。退出对话框会写明将被停止的内容，例如 `Quitting stops what is running: 2 tasks and 1 chat.`（只有一项时是 `Quitting stops 1 chat.`）；直接运行和终端对话属于其他进程，会继续运行，对话框会补充 `Not affected: 1 run and 1 terminal chat.`。如果另一个网关是 melo 后台服务，`melo serve status` 可以检查它，`melo serve uninstall` 会停止并移除它。子进程输出写入 `~/Library/Logs/LocalMelo/gateway.log`。这个原型没有日志轮转。
 
