@@ -10,7 +10,8 @@ end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
 ended, and :func:`activity_text` for what a running session is doing, in
 plain words (:func:`event_activity` reads it from the session's newest
-events). Nothing here imports the UI's libraries or the gateway.
+events; :func:`request_words` puts a call as a request). Nothing here
+imports the UI's libraries or the gateway.
 """
 
 from __future__ import annotations
@@ -471,6 +472,36 @@ def activity_text(
     if not name:
         return _STATE_WORDS["thinking"]
     return ActivityText("Using a tool", "tool")
+
+
+# The first word of an activity phrase, as a request says it: "Writing x" asks "Write x".
+_ASKED: Final[Mapping[str, str]] = {
+    "Reading": "Read",
+    "Writing": "Write",
+    "Looking through": "Look through",
+    "Looking at": "Look at",
+    "Running": "Run",
+    "Remembering": "Remember",
+    "Opening": "Open",
+    "Following": "Follow",
+    "Using": "Use",
+}
+
+
+def request_words(
+    tool: str, arguments: object = None, *, root: str | None = None
+) -> str:
+    """What a call that asked for approval would do, in plain words: ``Write slides.md``.
+
+    The same words as :func:`activity_text`, put as a request (``Run a
+    command``, ``Read example.com``), so a command line, code or text is never
+    shown.
+    """
+    text = activity_text(tool, arguments, root=root).text
+    for doing, asked in _ASKED.items():
+        if text.startswith(doing + " "):
+            return asked + text[len(doing) :]
+    return text
 
 
 def event_activity(
