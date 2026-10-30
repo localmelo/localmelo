@@ -25,7 +25,7 @@ Try: What is this project? · / commands · ctrl+d quit
 ────────────────────────────────────────────────────────────────────────────
 › Ask melo · / for commands
 ────────────────────────────────────────────────────────────────────────────
-  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?
+  Qwen3-8B · ~/demo-project · context 2.1k tokens · What is in this folder?
 ```
 
 欢迎信息共三行：版本和模型（并说明如何更换模型）；melo 工作的文件夹；以及一件可以试试的事，后面是命令和退出的按键。只有当模型不是保存的默认模型时，才会另起一行显示模型的服务器。警告紧随其后；`/status` 会检查模型是否有回应，并显示文件夹、会话、审批和上下文用量。开发者模式（`--developer`，或 `[ui] mode = "developer"`）下，欢迎信息是列出所有行的方框。
@@ -44,7 +44,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 
 按以下顺序使用第一项适用的配置：
 
-1. `melo setup`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、没有找到服务器或使用 `--developer` 时，才出现完整的后端菜单。不带任务时，不能与 `--url` 同用。
+1. `melo setup`：运行配置向导，然后使用它保存的后端。默认模式下，它先用首次运行的问题提供在本机找到的模型服务器（`Found a model server at …`、`Use it? [Y/n]:`）；只有回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时，才出现完整的后端菜单（什么都没保存时，会输出启动服务器的命令）。不带任务时，不能与 `--url` 同用。
 2. `--url URL`：使用该服务器，不使用配置文件。模型使用 `--model` 指定的模型，否则使用 `GET URL/models` 列出的唯一对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型），再否则使用服务器说明已加载的那一个对话模型；有多个且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--model <id>`。任务、`melo worker` 和 `melo ""` 在第一个请求之前以同样的方式选择模型（见[命令行参考](../reference/cli.md#general)）。没有 `/v1` 的 URL 会通过 `URL/v1/models` 获取列表，如果该地址有响应，界面也会使用 `URL/v1`。服务器没有响应模型列表请求或没有列出模型时，模型为 `default`，横幅下方的警告会说明原因。没有配置文件时会询问一次 `Save URL · MODEL as the default backend? [Y/n]`；按 Enter 保存，与首次运行相同。
 3. 已保存的后端；若指定 `--model`，则在本会话中用它替代保存的模型。界面打开前不做检查：显示横幅后，melo 会列出一次服务器模型（`GET /models`），如果服务器没有响应或没有列出该模型，就会警告：`⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
 4. 没有已保存的后端：先回答[首次运行](#first-run)的问题，然后打开界面。
@@ -84,10 +84,10 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/attach PATH` | 暂存一个工作区文本文件；路径含空格时请加引号。 |
 | `/attachments` | 列出已暂存的文件及其编号。 |
 | `/detach N\|all` | 移除指定编号的已暂存文件，或移除全部已暂存文件。 |
-| `/new`（也可用 `/clear`） | 开始新会话：模型忘记当前对话，会话授权结束。 |
+| `/new`（也可用 `/clear`） | 开始新聊天：模型忘记当前对话，本聊天的授权结束。开头会画一条 `── New chat ──` 分隔线。 |
 | `/sessions [filter]` | 在当前文件夹中选择已保存的聊天；输入文字筛选，Tab 切换到所有文件夹，↑ ↓ 选择，Enter 恢复，Esc 关闭。 |
 | `/resume [id\|title]` | 按 ID、ID 前缀（至少四个字符）或完整标题恢复；不带参数时打开选择器。 |
-| `/title [text]` | 显示或设置 1–200 个字符的标题。首条消息之前设置的标题会保留到会话创建时。 |
+| `/title [text]` | 显示或设置 1–200 个字符的标题。首条消息之前设置的标题会保留到聊天被保存时。 |
 | `/undo` | 忘记最近一个已完成轮次，并将其输入的消息放入 ↑ 历史记录。工具更改的文件不会回滚。 |
 | `/usage` | 显示每轮记录的步骤、工具调用、token 和耗时，以及总计；包含已撤销的工作。`?` 表示未记录。 |
 | `/memory` | 查看模型工作窗口的副本及其计数、长期记忆后端和恢复限制；不调用模型，也不写入记忆。 |
@@ -178,31 +178,51 @@ from-the-child
 ### 一轮的输出
 
 - **审批显示更改内容。**对已有文件的 `file_write` 会显示差异（删除的行标红、添加的行标绿，并显示行数）；写入内容过大或不是文本时会说明原因。`/approvals` 可以在 `ask`、`auto` 和 `deny` 之间切换，并管理本会话的授权。
-- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。会话的第一轮中，第三行显示进度行会显示的过去运行：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。
+- **实时区域。**第一行显示 melo 正在做什么（`Starting`、`Thinking`、`Replying`、`Running`、`Waiting for your approval`、`Retrying in 4s`、`Reflecting`、`Wrapping up`、`Stopping`），接着显示时间；后面是输出 token 数和 `esc to stop`（`Thinking… · 14s · ↓ 180 tokens · esc to stop`）。开发者模式会在时间之前加上运行信息：步骤（`step 4`，不与 `--steps` 对比）、从第二次开始显示的尝试次数、阶段及其周期和已见到的测试。行宽不足时先省略提示，再省略 token 数，开发者模式下的信息用 `…` 截断。第二行显示正在运行的工具、其自身计时，以及 `shell_exec` 和 `python_exec` 的时限：`└ shell_exec  pytest -q tests · 0:25 of 10:00`。对于 melo 以前运行过的任务，第三行显示进度行会显示的过去运行及其步骤：`last time 6 steps, 2m10s: Run ls ✓ · Read app.py ✓`。它在会话的第一轮显示，开发者模式下每一轮都显示。
 - **思考。**显示 `✻ Thought for 1.2s`，只有一行。`/thinking on` 和开发者模式会再显示思考的前 3 行（`/verbose` 为 40 行），按宽度换行。中间消息在 `●` 后以 Markdown 输出；最后一条会先暂存，到下一步才输出；如果直到结束时才输出，则只在它不同于最终回答时显示。
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及输出的第一行，同一行末尾显示 `+N lines (/expand T.C)`（若只剩一行则直接显示该行，不显示计数）。只有标记带颜色（`✓` 绿色，`✗` 红色，`⊘` 在深色终端为黄色、其他情况为粗体）；这一行的其余部分是默认颜色，耗时和标签是暗色。失败的调用，或运行后以非 0 退出码结束的命令，最多显示 3 行，失败时第一行为红色；开发者模式对每次调用显示 3 行，`/verbose` 显示 20 行并附上调用参数。图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试：每轮一行，服务器无法连接时这一行会保留它的 URL（`↻ Could not reach URL; trying again in 1 s`），延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会先输出尽力生成的结果，再用平实的话说明发生了什么、该怎么做：`✗ Could not reach the model server at URL.`，其下是 `Start it, then /retry.`。第一行是共享表中该状态的标题（`Ran out of steps (30).`、`Stopped: the same calls kept repeating.`），并附上有帮助的原因（URL、模型、失败检查的错误）；第二行是操作建议，使用默认颜色。页脚此时显示 `✻ Stopped after 14s` 而不是 `Worked for`，且不显示为零的工具调用次数。直接模式仍在标准错误上输出 `melo: run ended with status …` 这一行。
+- **更改的文件。**用 `file_write` 写过文件的一轮，会在页脚下方多出一行安静的提示，让你不必逐个查看工具块，就知道它动过哪些文件：
+
+  ```text
+  ✓ file_write  hello.py (15 chars) · 0.0s · allowed
+    └ new file, 1 line
+  ● I saved hello.py. Run it with python hello.py.
+  ✻ Worked for 4.7s · 1 tool call · ↓ 50 tokens
+    Changed hello.py (+1)
+  ```
+
+  多个文件时显示为 `Changed hello.py (+1), README.md (+3 −1)`：路径相对于 melo 工作的文件夹，每个文件后面是这一轮在其中增加和删除的行数。最多显示三个名字，其后是 `and 2 more`；终端较窄时显示得更少，并且不会换行。同一个文件写了两次只算一次，比较的是这一轮开始时的文件和结束时的文件；写回原样的文件不会列出。没有可统计或可比较的内容时，名字单独显示、不带行数：新建的空文件、melo 无法比较的文件（太大或不是文本），以及 `--yolo` 轮次中的所有文件（没有人事先读取过旧文件）。这一行来自这一轮自己的 `file_write` 调用：被拒绝的写入（审批被拒绝，或路径在文件夹之外）和失败的写入不会列出，shell 命令或脚本更改的文件也不会列出，因为 melo 从不扫描文件夹。这一轮没有更改任何文件，或者你停止了它（被停止的轮次没有页脚）时，不会输出这一行。开发者模式显示同样的这一行。
 
 <a id="the-status-bar"></a>
 
 ### 状态栏
 
 输入框下方的状态栏显示本会话的用量，数据来自 melo 已收到的事件：不发请求、不轮询、没有定时器。
-在模型和工作区之后从左到右，每一段只在有数据时出现：
+在模型和工作区之后从左到右，每一段只在有数据时出现。默认模式用文字表述：
 
 ```text
-  stub-model · ~/demo-project · cache 83% · ctx 1.4k · List the files.
+  stub-model · ~/demo-project · 83% cached · context 8% used · List the files.
 ```
 
-- `cache 83%`：服务器报告的、上一次请求提示词中已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%）。
-  本地服务器在距上次请求超过一分钟后还会显示 `idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
-- `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
-- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`。开发者模式显示它们，默认模式不显示。
+- `context 8% used`：最近一次测得的提示词词元数占输入上限的比例；不知道上限时改为显示词元数（`context 2.6k tokens`）。
+- `83% cached`：服务器报告的、上一次请求提示词中已缓存的比例。服务器报告过数值之后才显示：服务器没有报告时什么都不显示，绝不显示 0%。
+  本地服务器在距上次请求超过一分钟后还会在后面加 `, idle 3m`；本地服务器按内存而不是按时间淘汰前缀缓存，所以没有倒计时。
 - `tasks 1 running 2 queued`：仅在能访问任务存储时出现；有任务在等待（例如等待审批）时追加 `1 held`。
 
-状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。审批模式只在不是 `ask` 时显示在右端（`auto`、`deny`，或 `⚠ YOLO: no approvals` 警告）；开发者模式始终显示。终端较窄时先去掉标题，然后从右到左去掉各段，再截短工作区，且不会换行。
-`/status all` 会完整打印同样的数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的 `ctx` 和标题。没有命令行参数。
+开发者模式（`--developer`，或 `[ui] mode = "developer"`）保留紧凑的写法，网页控制台的状态行画的也是这种：
+
+```text
+  stub-model · ~/demo-project · cache 83% · ctx 1.4k/32k · step 4 · List the files.  ask
+```
+
+- `cache 83%`：已缓存的比例（服务器没有报告时显示 `cache --`，绝不显示 0%），本地服务器后面还有 `idle 3m`。
+- `ctx 12k/32k`：最近一次测得的提示词词元数与输入上限；不知道上限时只显示 `ctx 12k`。
+- `step 4 attempt 2 phase fix`：运行进行中的进度事实，从不显示百分比或 `n/max`；默认模式不显示它们。
+
+状态栏在事件到达或按键时重绘，所以 `idle` 是上一次重绘时的值。审批模式只在不是 `ask` 时显示在右端（`auto`、`deny`，或 `⚠ YOLO: no approvals` 警告）；开发者模式始终显示。终端较窄时先去掉标题，然后从右到左整段去掉各段（文字绝不会被截断），再截短工作区，且不会换行。
+`/status` 会完整打印这些数字。`[cli] status_line = "off"` 让状态栏保持这些段出现之前的样子：模型、工作区、上一次请求的上下文（`context 1.0k tokens`，开发者模式下为 `ctx 1.0k`）和标题。没有命令行参数。
 
 <a id="streamed-replies"></a>
 
@@ -219,19 +239,19 @@ from-the-child
 "Qwen3-8B" = "closing_only"
 ```
 
-提示是 `explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本，并且在它的第一条完整回复之后，melo 会说明一次：`This model's replies appear when complete until its reasoning format is set (see Streamed replies).` 把推理放在单独字段里发送的服务器无需提示就能流式显示，该字段绝不会作为正文绘制；`/thinking on` 会显示它的摘录。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。
+提示是 `explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本。在开发者模式下，它的第一条完整回复之后，melo 会说明一次：`This model's replies appear when complete until its reasoning format is set (see Streamed replies).` 新用户看不到这条说明。把推理放在单独字段里发送的服务器无需提示就能流式显示，该字段绝不会作为正文绘制；`/thinking on` 会显示它的摘录。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。
 
-流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。不支持流式的提供方会发送完整回复，照常打印。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
+流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，开发者模式下标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。不支持流式的提供方会发送完整回复，照常打印。`/stream on|off` 只切换后续轮次，不写入配置，`/new` 会把它恢复为 `[cli] stream`。没有交互式界面的运行（直接模式、worker、网关）从不流式，因此输出和请求体保持不变。无效的 `[cli]` 值不会让运行失败：交互式界面会发出警告并使用默认值，直接模式和网关根本不读取它。
 
 <a id="approvals"></a>
 
 ### 审批
 
-`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。（交互式界面加载 `--mcp` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
+`shell_exec`、`python_exec` 和 `file_write` 只有在你回答后才会运行，标记为需要审批的 MCP 工具也是如此。`file_read` 和 `list_files` 只读取，因此从不询问：melo 可以查看你的文件夹来回答 “What is this project?”，不会出现审批面板。（交互式界面加载 `--mcp` 指定的 MCP 服务器；未指定时加载顶层 `mcp_config` 键中的服务器。服务器启动失败会在本会话中关闭 MCP，`/mcp` 会说明原因。）审批面板取代输入框，草稿会保留：
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
-│ shell_exec · exec · in ~/demo-project                                    │
+│ shell_exec · in ~/demo-project                                           │
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
@@ -243,7 +263,7 @@ from-the-child
 ```
 
 - `1` 允许本次调用，`2` 在本会话剩余时间内允许该工具，`3` 打开理由输入框（最多 500 个字符），模型会读取该理由；Enter 发送。也可以用 ↑ ↓ 和 Enter 选择。字母不能作为回答；面板打开后的 0.4 秒内只有 Esc 和 Ctrl+C 有效，避免你正在输入的消息意外回答审批。
-- 标题在工具名后显示其权限级别；对于 `file_write`，则在路径后显示（此处为 `exec`；MCP 工具可为 `write`、`exec` 或 `network`，前提是界面能加载该工具）。只读 MCP 工具仅在服务器的 `require_approval` 强制询问时显示 `read`；参见[权限级别](tools-mcp.md#permission-tiers)。
+- 标题显示工具名和文件夹。开发者模式会在工具名后加上其权限级别，对于 `file_write` 则加在路径后（`shell_exec · exec · in ~/demo-project`；MCP 工具可为 `write`、`exec` 或 `network`，前提是界面能加载该工具）。只读 MCP 工具仅在服务器的 `require_approval` 强制询问时显示 `read`；参见[权限级别](tools-mcp.md#permission-tiers)。
 - 在选项处按 Esc 或 Ctrl+C 会停止当前轮次，2 秒内再次按 Ctrl+C 则退出；在理由输入框中按 Esc 返回选项。
 - 命令、代码或文件的新内容会按实际运行时的原样显示，长行换行，绝不截断：控制字符和会重新排列或隐藏文本的字符以转义形式显示（`\r`、`\x1b`、`\u{202e}`），并附有警告行，防止内容被隐藏。
 - 面板最多显示正文的 8 行，在较短的终端上更少，之后显示 `… +N lines (v views all)`；按 `v` 可在面板上方输出完整正文。
@@ -253,7 +273,7 @@ from-the-child
 
 ### 工作区
 
-melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文件工具（`file_read`、`file_write`）被限制在这个文件夹内。命令和 Python 可以访问其他文件，因此 melo 会先询问。工作区为你的主目录或 `/` 时，横幅会发出警告。界面中 `shell_exec` 和 `python_exec` 在 10 分钟后停止（单次任务分别为 30 秒和 60 秒）。
+melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文件工具（`file_read`、`file_write`、`list_files`）被限制在这个文件夹内。命令和 Python 可以访问其他文件，因此 melo 会先询问。工作区为你的主目录或 `/` 时，横幅会发出警告。界面中 `shell_exec` 和 `python_exec` 在 10 分钟后停止（单次任务分别为 30 秒和 60 秒）。
 
 <a id="chinese-and-other-wide-characters"></a>
 
@@ -278,13 +298,13 @@ melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文�
 
 ### 会话和文件
 
-直接运行 `melo` 会开始新会话；只有第一条消息才会创建会话记录。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新会话；在启动选择器中按 Esc 也会开始新会话，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：回顾会点出选中的聊天（`◆ Resumed "TITLE"`，开发者模式的方框把它标为 `"TITLE" (resumed)`）；按 Esc 或列表为空时显示新会话横幅。`-c` 和 `-r` 不能同时使用，也不能与任务或 `melo serve` 同用。
+直接运行 `melo` 会开始新聊天；只有第一条消息才会保存它。状态栏在聊天有标题之前显示 `New chat`。使用 `melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的聊天，或使用 `melo -r`（`--resume`）选择聊天。没有可选聊天时，两者都会提示并开始新聊天；在启动选择器中按 Esc 也会开始新聊天，不会创建空记录。`melo -r REF` 根据 ID、至少四个字符的前缀或不区分大小写的完整标题查找；有多个匹配项，或回退到标题／消息搜索时，会打开选择器。未知引用以退出码 2 退出。启动选择（包括 `-r` 选择器）发生在横幅之前：回顾会点出选中的聊天（`◆ Resumed "TITLE"`，开发者模式的方框把它标为 `"TITLE" (resumed)`）；按 Esc 或列表为空时显示新聊天横幅。`-c` 和 `-r` 不能同时使用，也不能与任务或 `melo serve` 同用。
 
-选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。网页控制台的 Workers 视图会在 **Terminal chats** 下以只读方式显示你的这些聊天，读取时会对其脱敏（保存的副本不会被脱敏）；控制台不能修改它们，也不能向它们发送消息。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果会话之前在另一个文件夹中工作过，会显示提示。
+选择器最多列出 50 个具有已完成且未撤销轮次的聊天，最新的在前。它的标题行说明各个按键（`Resume a chat · ~/demo-project · tab: this folder or all · esc close`）；文件夹路径太长时从中间截断，按键提示始终保留。筛选在 150 毫秒后更新；Tab 在当前文件夹和所有文件夹之间切换。Enter 恢复，Esc 或 Ctrl+D 关闭选择器，普通草稿保持不变。`/sessions FILTER` 和 `/resume REF` 使用同一选择器和查找方式。网页及调度器会话不会出现在选项中。网页控制台的 Workers 视图会在 **Terminal chats** 下以只读方式显示你的这些聊天，读取时会对其脱敏（保存的副本不会被脱敏）；控制台不能修改它们，也不能向它们发送消息。恢复会话会保留当前模型和工作区，将其记录到会话中，并清除审批授权；`/verbose`、`/thinking` 和 `/stream` 偏好保持不变。`/new` 会重置这些显示偏好（`/stream` 恢复为 `[cli] stream`）。如果聊天之前在另一个文件夹中工作过，会显示提示。
 
-横幅之后的回顾显示存储的脱敏副本中最近三个符合条件的轮次。标题下方的一行说明进入模型记忆的内容：`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息／回答配对，不包含工具步骤；`"window"` 恢复已保存的工作记忆检查点及之后的配对，没有可用检查点时退回配对模式。在 `config.toml` 中设置此项；无效值会在界面中产生警告并使用配对模式，但不会在直接模式输出中增加警告。回顾中的计数反映淘汰后的恢复窗口，而不是存储的轮次总数。
+横幅之后的回顾以纯文本显示存储的脱敏副本中最近三个符合条件的轮次：你的消息在 `›` 之后，每个回答只在开头有一个 `●`，去掉 Markdown 标记和空行，最多四行，标记下方的行缩进对齐。标题下方的一行说明有几个轮次回到了模型的记忆中（`1 turn is back in the model's memory.`）；开发者模式还会说明它们的工具调用怎么样了。`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息／回答配对，不包含工具步骤；`"window"` 恢复已保存的工作记忆检查点及之后的配对，没有可用检查点时退回配对模式。在 `config.toml` 中设置此项；无效值会在界面中产生警告并使用配对模式，但不会在直接模式输出中增加警告。回顾中的计数反映淘汰后的恢复窗口，而不是存储的轮次总数。
 
-两个终端可以轮流使用同一个 CLI 会话。发送前，melo 会重新加载另一个窗口的更改；会话忙碌或已删除时会保留草稿。退出时，有轮次的会话会输出其 `melo -r ID` 恢复命令。
+两个终端可以轮流使用同一个 CLI 会话。发送前，melo 会重新加载另一个窗口的更改；会话忙碌或已删除时会保留草稿。退出时，有轮次的聊天会说明如何回到它：当它是这个文件夹中最新的聊天，且 melo 就在该文件夹中运行时，显示 `◆ Saved "What is this project?". Continue it with: melo -c`；否则显示 `Resume it with: melo -r ID`。
 
 会话保存在 `~/.cache/localmelo/cli/sessions.db` 中：每一轮都包含你的消息、回答以及每次工具调用和输出。`~/.cache/localmelo/cli_history` 保存你的消息。两者都是明文（权限为 0600），未加密。界面将日志写入 `~/.cache/localmelo/logs/cli.log`（文件夹权限 0700、文件权限 0600、1 MB、两个备份），绝不会在屏幕上输出 traceback；出现问题时显示一条暗色提示，指出日志位置。配置文件不是有效的 TOML，或无法创建日志文件夹时，`melo` 会输出一行 `melo: …` 并以退出码 1 停止。程序性记忆与单次任务一样，遵循[记忆持久化](memory.md#keep-memory-between-runs)。
 
@@ -292,15 +312,15 @@ melo 在当前文件夹或 `--workspace DIR` 指定的文件夹中工作。文�
 
 ### 首次运行
 
-在没有配置文件的终端中，`melo` 会询问模型服务器和模型，保存它们，然后打开界面。服务器列出了嵌入模型时，还会询问一次是否使用它。之后运行会直接进入界面。
+在没有配置文件的终端中，`melo` 会提供找到的模型服务器，询问模型，保存它们，然后打开界面。服务器列出了嵌入模型时，还会询问一次是否使用它。之后运行会直接进入界面。
 
 ```text
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
-Server URL [http://127.0.0.1:8000/v1]:
+Use it? [Y/n]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo setup.
+Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
@@ -310,10 +330,24 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 Use nomic-embed-text for long-term memory? [Y/n]:
 ```
 
-- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器。按 Enter 接受 URL，或输入另一个 URL。探测时请求模型列表；有多个对话模型时，还会请求 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），了解哪些模型已加载；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出 `No model server found on this computer (looked at ports 8000, 8400, 11434, 30000). Start one (for example omlx serve or ollama serve), or enter its URL.`（在 macOS 以外的系统上只提到 `ollama serve`），并提供 `http://127.0.0.1:8000/v1`。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，此时提供列表中的第一个 URL；空值会关闭搜索。
+- melo 在本机通过 `GET /v1/models` 检查 `127.0.0.1` 的 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）端口，查找服务器，并提供第一个列出模型的服务器：对 `Use it? [Y/n]:` 按 Enter 即同意，回答 `n` 会询问 `Server URL […]:`（预填该 URL），可改填另一个。探测时请求模型列表；有多个对话模型时，还会请求 `GET /v1/models/status`（oMLX）和 `GET /api/ps`（Ollama），了解哪些模型已加载；保存选择时会请求一次 `GET /api/version`，以识别 Ollama 服务器。不发送对话请求，因此服务器不会为此加载模型。列出对话模型的服务器优先；只列出嵌入或重排模型的服务器其次。对于响应但没有返回列表的服务器，melo 也会指出该服务器并提供选择，例如 `A model server at URL answered, but HTTP 401: …`。都没有响应时，会输出启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致）并等待：
+
+  ```text
+  No model server is running yet. To start one with oMLX:
+
+    brew tap jundot/omlx https://github.com/jundot/omlx
+    brew install jundot/omlx/omlx
+    omlx serve --model-dir ~/models --port 8000
+
+  Put a model in its own folder of ~/models first. The guide shows how:
+  https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
+  Press Enter to check again, type an address, or q to quit:
+  ```
+
+  按 Enter 会再次检查同样的端口，有服务器响应时按上面的方式继续（仍然没有时输出 `✗ No model server found yet (looked at ports …).`）。改为输入的地址会像 URL 一样检查（见下）；`q` 以退出码 0 退出。`LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL，按 Enter 时检查的就是这些 URL；空值会关闭搜索，此时 melo 询问 `Server URL [http://127.0.0.1:8000/v1]:`。
 - 列出多个模型的服务器会以列表供你选择。在终端里（标准输入和输出都是终端，且 `TERM` 不是 `dumb`），它和 `/model` 是同一个列表：输入即可筛选，↑ ↓ 移动，Enter 选择，Esc 或 Ctrl+C 取消设置（`Setup cancelled.`）。列表只含对话模型（嵌入和重排模型不在其中，除非服务器只列出这些）。有多个对话模型时，已加载的会标上 `(loaded)` 并高亮；服务器没有说明哪些已加载时，不高亮任何一项，在按键移到某一行之前 Enter 不起作用，并且会先用一行说明：尚未加载的模型可能要花几分钟和大量内存来加载。没有终端时（答案通过管道输入），模型以编号列表显示，对话模型在前，并询问 `Model [N]:`；输入编号或 ID。嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。有多个对话模型时，已加载的会标上 `(loaded)` 并作为默认值；服务器没有说明哪些已加载时，提示符是没有默认值的 `Model:`，只按 Enter 会再次询问（`Type the number of the model to use. …`）；没有终端时，空答案会以错误退出，退出码为 2。`/backend` 用编号询问。只列出嵌入或重排模型的服务器也会以相同方式显示，并提示对话需要对话模型。提示文字会按终端宽度在词边界处换行。
 - 对 `GET /api/version` 返回 `{"version": "…"}` 的 Ollama 服务器会保存为 `chat_backend = "ollama"`，并在其 `[ollama]` 表中保存 `chat_url` 和 `chat_model`；横幅随后显示 Ollama，对话请求使用 Ollama 原生 API 及其 300 秒超时。oMLX 服务器（它的模型列表把 oMLX 标为每个模型的所有者）保存为 `chat_backend = "omlx"`，其他任何兼容 OpenAI 的服务器保存为 `chat_backend = "vllm"`（适用于所有兼容 OpenAI 服务器的键）；两者都在 `[vllm]` 表中保存 `chat_url` 和 `chat_model`。文件中的其他设置保持不变。
-- 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Use <model> for long-term memory? [Y/n]:`，优先推荐 Qwen3-Embedding。`y` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `n`、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明原因；没有候选模型的提示会针对 Ollama 服务器给出 `ollama pull qwen3-embedding:0.6b`，否则给出 `Serve Qwen3-Embedding-0.6B on it`。参见[设置嵌入模型](embedding.md)。
+- 服务器列出所选对话模型之外的嵌入模型时，melo 会询问 `Use <model> for long-term memory? [Y/n]:`，优先推荐 Qwen3-Embedding。`y` 发送一次 `POST /v1/embeddings` 探测，并保存 `embedding_backend = "<chat key>"` 及对应表中的 `embedding_url`（对话 URL）和 `embedding_model`。选择 `n`、探测失败或没有候选模型时，会保存 `embedding_backend = "none"` 并说明记忆已关闭（`Long-term memory is off; melo setup turns it on.`）；`melo setup` 还会说明如何添加模型：Ollama 服务器是 `ollama pull qwen3-embedding:0.6b`，否则是 `Serve Qwen3-Embedding-0.6B on it`。参见[设置嵌入模型](embedding.md)。
 - 服务器无法使用时，melo 会说明原因，例如 `✗ URL: connection refused.`，然后询问 `Enter tries again · s starts without saving · q quits:`。Enter 再次询问 URL，默认值为你输入的地址；`s` 询问 `Model name [default]:` 并打开界面但不保存（`Not saved: melo asks again next time.`）；`q` 以退出码 0 退出。原因包括 `connection refused`、`no answer in 5 s`、附有 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")` 的 `HTTP 401` 或 `HTTP 403`、其他 `HTTP` 状态（重定向会显示目标，melo 不会跟随）、`the reply is not a model list`、`the reply could not be read`、`not a URL` 和 `it lists no models`。
 - 选项按首字母选择，因此 `s`、`start` 和 `start without saving` 是同一回答（`r` 或 `retry` 等同于 Enter）；其他回答会重新询问。
 - 在问题处按 Ctrl-D 会输出 `Setup cancelled.` 并以退出码 0 退出；Ctrl+C 输出相同内容并以 130 退出。

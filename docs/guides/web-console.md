@@ -25,8 +25,13 @@ server) with its model, **A model server needs an API key**, or **No model serve
 is running on this Mac**. **Use this model** saves the server, tests it and makes
 the welcome ready without opening settings. With several chat models and none
 known to be loaded, the card lists them, marks the loaded one and waits for you to
-choose; it never picks one for you. **Check again** looks again after you start a
-server, **Enter a server address…** opens connection settings, and the composer
+choose; it never picks one for you. With no server running, the
+card shows the commands that start one (oMLX on a Mac, Ollama elsewhere, as in the
+[model servers guide](model-servers.md)) in a block that one click selects, with a
+**Copy commands** button for the keyboard, and asks
+again every three seconds while it is on screen and the tab is visible, so the model
+appears once the server answers. **Check again** asks at once, **Enter a server
+address…** opens connection settings, and the composer
 reads `Connect a model to start` until a model is set up. The card also shows when
 the configured server stops answering, and it looks for a server only while it is
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
@@ -75,7 +80,7 @@ for you to send or change, and step aside once there is text.
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline.
 4. A status row sits above the composer: the same segments as the terminal's
-   status bar, `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
+   developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
    segment only. The cache
    share reads `cache --` when the model server reports no cached tokens, never
@@ -330,9 +335,9 @@ the file, no Agent built yet (`not_loaded`); its Agent is built on the
 conversation the file holds when the next turn or retry starts.
 
 A chat runs in gateway mode: its Agent gets the gateway's default run options,
-the three built-in tools `file_read`, `file_write` and `python_exec`, and no
-MCP tools, except that it keeps its answers. It can read and write files and
-run Python code; `shell_exec` is not offered, so there is no direct shell
+the built-in tools `file_read`, `file_write`, `list_files` and `python_exec`, and no
+MCP tools, except that it keeps its answers. It can list folders, read and write
+files and run Python code; `shell_exec` is not offered, so there is no direct shell
 command (Python code can still start a process). Its model is the gateway's
 own, from the config file, and the page reads that file's `[scheduler]` table
 too — `policy`, the lane sizes, the call log and the lock and battery keys.

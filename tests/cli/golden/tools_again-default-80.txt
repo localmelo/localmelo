@@ -11,4 +11,5 @@
   └ Written 9 bytes to /home/me/demo-project/summary.md
 ● summary.md now holds what notes.txt says: buy milk.
 ✻ Worked for 0.7s · 3 tool calls · ↓ 58 tokens
+  Changed summary.md
 

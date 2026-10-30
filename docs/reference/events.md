@@ -293,6 +293,7 @@ too (see [Model calls](memory.md#model-calls)).
 | `shell_exec` | The command, with runs of whitespace collapsed. |
 | `python_exec` | The first non-blank line of the code, followed by ` (+<n> more lines)` when more lines follow. |
 | `file_read` | The path. |
+| `list_files` | The path (`.` without one), followed by ` (<n> levels)` for a depth above 1. |
 | `file_write` | `<path> (<n> chars)`. |
 | Any other tool, or an argument above that is missing or not a string | The arguments as compact JSON, with sorted keys. |
 

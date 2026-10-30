@@ -569,6 +569,77 @@ class TestGatewayMode:
         assert sign_in in out
         assert out.index("  Web UI:") < out.index(sign_in)
 
+    @pytest.mark.parametrize(
+        ("flags", "mode", "guided"),
+        [
+            ([], "default", True),
+            (["--developer"], "default", False),
+            ([], "developer", False),
+            (["--reconfigure"], "default", False),  # its docs promise the full menu
+        ],
+        ids=["default-mode", "developer-flag", "developer-config", "reconfigure"],
+    )
+    def test_serve_with_no_config_offers_the_found_server_outside_developer_mode(
+        self, flags: list[str], mode: str, guided: bool
+    ) -> None:
+        """A fresh `melo serve` asks the guided question, as `melo setup` does."""
+        empty_cfg = Config(chat_backend="")
+        empty_cfg.ui.mode = mode
+        mock_start = mock.MagicMock()
+
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("localmelo.__main__._on_a_terminal", return_value=True),
+            mock.patch("sys.argv", ["melo", "--serve", *flags]),
+            mock.patch("localmelo.support.config.load", return_value=empty_cfg),
+            mock.patch(
+                "localmelo.support.onboard.run_backend_setup",
+                return_value=_valid_cfg(),
+            ) as mock_setup,
+            mock.patch("localmelo.__main__._start_gateway", mock_start),
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        mock_setup.assert_called_once_with(**({"guided": True} if guided else {}))
+
+    @pytest.mark.parametrize(
+        ("cfg", "line"),
+        [
+            (_valid_cfg(), "  Model: Qwen3-1.7B on MLC-LLM\n"),
+            (
+                Config(
+                    chat_backend="vllm",
+                    chat_alias="omlx",
+                    vllm=LocalBackendConfig(chat_model="Qwen3-8B-4bit"),
+                ),
+                "  Model: Qwen3-8B-4bit on oMLX\n",
+            ),
+            (
+                Config(chat_backend=""),
+                "  Model: none yet (the web console sets one up)\n",
+            ),
+        ],
+        ids=["mlc", "omlx", "unconfigured"],
+    )
+    def test_start_gateway_names_the_model_and_its_server(
+        self, capsys: pytest.CaptureFixture[str], cfg: Config, line: str
+    ) -> None:
+        """The startup line says which model on which server, not a backend key."""
+        gateway = mock.MagicMock(start_gateway=mock.MagicMock())
+        cfg._allow_unconfigured = cfg.chat_backend == ""
+
+        with mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}):
+            from localmelo.__main__ import _start_gateway
+
+            _start_gateway(cfg)
+
+        out = capsys.readouterr().out
+        assert line in out
+        assert "Chat:" not in out
+        assert out.index("  Model:") < out.index("  Gateway: http://")
+
     def test_start_gateway_has_the_console_opened_when_it_listens_at_a_terminal(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

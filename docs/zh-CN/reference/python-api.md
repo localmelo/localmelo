@@ -46,7 +46,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `memory` | `True` | `False` 关闭长期记忆。 |
 | `memory_dir` | `None` | 存放 SQLite 记忆的目录，会展开 `~`。`None` 表示遵循环境变量；见[记忆](../guides/memory.md#keep-memory-between-runs)。 |
 | `timeout_s` | `None` | 每次运行的时间限制，以秒计。`None` 表示没有限制。它也会中断 `python_exec` 调用，并终止其子进程。 |
-| `mode` | `"python"` | 运行所属的界面：`"direct"`、`"interactive"`、`"gateway"` 或 `"python"`。它决定 `builtins=None` 注册什么：只有 `"interactive"` 提供 `shell_exec`；其他三个注册 `file_read`、`file_write` 和 `python_exec`。在 `builtins` 中点名 `shell_exec` 是 `direct` 或 `python` 调用方的显式启用，让运行可以使用它；未点名时检查器会拒绝它，在 `gateway` 模式下即使点名也拒绝；拒绝信息会说明模式，以及在 direct 或 python 模式下启用它的方法。显式的 `builtins` 优先于默认注册。 |
+| `mode` | `"python"` | 运行所属的界面：`"direct"`、`"interactive"`、`"gateway"` 或 `"python"`。它决定 `builtins=None` 注册什么：只有 `"interactive"` 提供 `shell_exec`；`"interactive"` 和 `"gateway"` 还提供 `list_files`；`"direct"` 和 `"python"` 注册 `file_read`、`file_write` 和 `python_exec`。在 `builtins` 中点名 `shell_exec` 是 `direct` 或 `python` 调用方的显式启用，让运行可以使用它；未点名时检查器会拒绝它，在 `gateway` 模式下即使点名也拒绝；拒绝信息会说明模式，以及在 direct 或 python 模式下启用它的方法。显式的 `builtins` 优先于默认注册。 |
 | `workspace_root` | `None` | 内置工具工作的目录，也是文件工具能到达的唯一目录；见[在目录中工作](../guides/python.md#work-in-a-directory)。 |
 | `tool_timeout_s` | `None` | `shell_exec` 和 `python_exec` 的时间限制，以秒计。需要 `workspace_root`。`None` 保持 shell 命令 30 秒、Python 60 秒。 |
 | `tool_env` | `None` | 在最小环境之上，为 `shell_exec` 和 `python_exec` 子进程提供的额外变量；见[在目录中工作](../guides/python.md#work-in-a-directory)。 |

@@ -16,8 +16,10 @@ The old spellings (`melo --serve`, `--daemon`, `--gateway-login`,
 work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new)
 lists them.
 
-- When there is no config file yet, `melo serve` runs the setup wizard
-  first; see [Configuration](configure.md#set-up-with-the-wizard).
+- When there is no config file yet, `melo serve` asks first, as `melo setup`
+  does: it prints `Found a model server at …` and asks `Use it? [Y/n]:`, and
+  the full backend menu follows only after `n` or with `--developer`, and with
+  no server running it prints the commands that start one; see [Configuration](configure.md#set-up-with-the-wizard).
   Without a terminal it cannot ask, so it prints
   `melo: no backend is configured; run melo setup in a terminal`
   and exits with code 1.
@@ -30,11 +32,11 @@ lists them.
 - It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
   file. `--host` and `--port` change them for one run, as in
   `melo serve --port 9401`.
-- It prints the backends and its addresses:
+- It prints the model, the embedding and its addresses:
 
   ```text
     Starting localmelo gateway ...
-    Chat: ollama
+    Model: qwen3:8b on Ollama
     Embedding: none
     Gateway: http://127.0.0.1:8401
     Web console: opened in your browser (melo console opens it again).
@@ -135,7 +137,7 @@ makes larger requests: leave out `session_id` for an unrelated task.
 - Creating a session also closes the sessions that have been idle for more
   than 1 hour.
 - Each session's agent uses the config file's backends and the default run
-  options (three built-in tools, `file_read`, `file_write` and
+  options (four built-in tools, `file_read`, `file_write`, `list_files` and
   `python_exec`, and no MCP tools), except that it keeps its answers
   (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
   offer `shell_exec`: legacy `/v1` has no approval policy, so there is no one

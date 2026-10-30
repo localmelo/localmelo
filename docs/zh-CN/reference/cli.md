@@ -39,7 +39,7 @@ melo -h all                                  # every option, command and setting
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
 | `melo import FORMAT FILE` | 导入 worker 历史。 | `--title T` |
 
-`melo -h` 只有 20 行，`melo -h all` 列出全部选项、命令和设置，`melo COMMAND -h` 说明单个命令。字母选项的值要分开写（`-s 5` 或 `-s=5`）；`--title T` 给任务的 worker 会话命名。
+`melo -h` 列出常用选项，以及三个附有一句说明的命令（`setup`、`serve`、`console`），`melo -h all` 列出全部选项、命令和设置，`melo COMMAND -h` 说明单个命令。字母选项的值要分开写（`-s 5` 或 `-s=5`）；`--title T` 给任务的 worker 会话命名。
 
 <a id="old-spelling-to-new"></a>
 
@@ -122,7 +122,7 @@ melo -h all                                  # every option, command and setting
 | `melo`（无任务） | 在终端中打开[交互式界面](../guides/terminal.md#the-interactive-ui)，使用已保存的后端。若没有已保存的后端，会先询问并保存一个模型服务器和一个模型；见[首次运行](../guides/terminal.md#first-run)。没有终端时以退出码 2 退出，并说明应改为运行什么。 |
 | `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
 | `melo --base-url URL -- "<task>"` | 在该服务器上以直接模式运行，模型为 `--chat-model`，否则在一次模型列表请求之后，按上一行的方式选定（见[通用](#general)）。读不到列表时请求模型 `default`。`--brief` 和 `melo ""` 同样如此。 |
-| `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use it? [Y/n]:`），只有回答 `n`、没有找到服务器或使用 `--developer` 时才显示完整的后端菜单。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
+| `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use it? [Y/n]:`），只有回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时才显示完整的后端菜单（什么都没保存且没有找到服务器时，会输出启动服务器的命令）。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
 | `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
 | `melo --daemon …` | 管理在 macOS 上运行网关的后台服务；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。 |
@@ -147,7 +147,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 
 | 模式 | 如何选择 | `--help` 显示的内容 |
 |---|---|---|
-| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（20 行）：常用选项和命令词，最后指向更多内容的位置。 |
+| 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（23 行）：常用选项、三个各附一句说明的命令，最后指向其余内容的位置。 |
 | 开发者 | 在配置中写 `[ui] mode = "developer"`，或单次运行时加 `--developer` | `melo -h all` 的全部内容：所有选项、命令和设置；每个实验性设置都会注明决定它去留的 issue。 |
 
 每个选项在两种模式下都能解析和生效，无论来自命令行还是配置文件，因此脚本和基准测试不受影响：模式只是把选项从帮助中隐藏，而不是删除它。`--developer` 无论放在命令行的哪个位置都对帮助生效（`melo --help --developer` 也可以），且必须写全名。既不是 `"default"` 也不是 `"developer"` 的 `[ui] mode` 会在 stderr 上打印一行并显示默认帮助；它从不会使运行或网关停止。
@@ -296,7 +296,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试之后都进行一次反思。`none`：只做一次尝试，不进行反思。 |
 | `--reflection-gate flags\|utility` | `flags` | 反思之后，当它选择 `continue` 且三项检查都成立时（`flags`），开始下一次尝试；或者还要求其效用分数达到 0.1（`utility`，即本选项出现之前的行为）。 |
 | `--tool-exposure retrieve\|all` | `retrieve` | 每个步骤向模型提供哪些工具。 |
-| `--builtins all\|none\|NAME,...` | 所在模式的默认集合 | 要注册的内置工具。不带该旗标时，直接运行获得 `file_read`、`file_write` 和 `python_exec`；`all` 会加上 `shell_exec`（交互式界面默认保留全部四个）。 |
+| `--builtins all\|none\|NAME,...` | 所在模式的默认集合 | 要注册的内置工具。不带该旗标时，直接运行获得 `file_read`、`file_write` 和 `python_exec`；`all` 会加上 `shell_exec` 和 `list_files`（交互式界面默认保留全部五个）。 |
 | `--mcp-config PATH` | 未设置 | 添加此 JSON 文件中列出的 MCP 服务器提供的工具。 |
 | `--mcp-only` | 关闭 | 只使用 MCP 工具：等同于 `--builtins none --tool-exposure all`。 |
 | `--memory on\|off` | `on` | `off` 会在本次运行中关闭长期记忆。 |
@@ -327,7 +327,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 - `--max-steps`：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 10 个步骤，最多 5 次尝试，总步骤数最多为 `--max-steps`。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。
 - `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。
 - `--tool-exposure`：见[工具的提供方式](tools.md#how-tools-are-offered)。
-- `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。
+- `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`list_files`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。
 - `--mcp-only` 需要 `--mcp-config`，且不能与 `--builtins` 或 `--tool-exposure` 同用。见[工具与 MCP](../guides/tools-mcp.md#add-tools-from-mcp-servers)。
 - `--memory-dir` 会为本次运行开启持久化，不论环境变量如何设置。`~` 会被展开。见[记忆](../guides/memory.md#keep-memory-between-runs)。
 - `--request-timeout`：默认值来自配置文件中的 `request_timeout_s`，没有则为 120 秒（`ollama` 后端为 300 秒）。与 `--base-url` 一起使用时为 120 秒，对 Ollama 的 `/v1` 地址也是如此。它不会更改配置文件。见[对话请求超时](configuration.md#chat-request-timeout)。
@@ -378,7 +378,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--host HOST` | `127.0.0.1` | 网关监听的地址。 |
 | `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行（没有打开浏览器时才输出）写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
 | `--allow-unconfigured` | 关闭 | 与 `--serve` 一起使用时，即使没有配置任何后端或配置文件有校验错误，也启动网关，以便通过 `/api/settings` 进行配置。 |
-| `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use it? [Y/n]:`；回答 `n`、没有找到服务器或使用 `--developer` 时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
+| `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use it? [Y/n]:`；回答 `n`、使用 `--developer`，或已保存后端但没有找到服务器时显示完整菜单），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
 | `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`。 |
 
 - `--host` 和 `--port` 的默认值来自配置文件中的 `[gateway]` 表。这些选项只为本次运行改变它们。

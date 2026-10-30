@@ -96,6 +96,15 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 - **原因：** 不带任务的 `melo` 会打开交互式界面，它需要 stdin 和 stdout 都是终端，并且 `TERM` 不是 `dumb`：这里其中之一是管道或文件（脚本、`melo | tee`），或者 `TERM=dumb`。`melo` 以退出码 2 退出。
 - **修复：** 运行 `melo "<task>"` 执行一个任务，或运行 `melo serve` 启动网关，或者在真正的终端中运行 `melo`。
 
+### No model server is running at the first run
+
+```text
+No model server is running yet. To start one with oMLX:
+```
+
+- **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`。
+- **修复：** 运行 melo 输出的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](../guides/model-servers.md)中的一致），然后按 Enter 再次检查。服务器在其他端口时，输入它的地址。按 `q` 退出且不保存。网页控制台的设置卡片显示同样的命令，并自动再次寻找。
+
 ### A model server cannot be used at the first run
 
 ```text

@@ -111,7 +111,7 @@ asyncio.run(main())
 - `ProvidedTool.requires_approval` 为 `True` 的提供的工具，这也会让 `read` 工具请求审批；
 - 配置项设置了 `require_approval` 的 MCP 服务器的工具；见 [MCP 配置文件](tools-mcp.md#mcp-config-file)。
 
-交互式界面始终有审批策略（除非使用 `--yolo`）；直接模式、网关和没有 `approval=` 的 Python 运行则没有，这也是这些模式默认不提供 `shell_exec` 的原因。`file_read` 属于 `read`，不请求审批：它由[工作区根目录](#work-in-a-directory)限制。只读 MCP 工具（`readOnlyHint: true`）也不请求审批，除非 `require_approval` 指定了它。通过 `agent.executor.register` 直接注册的工具保留其明确的 `requires_approval`；它的级别只是标签。没有策略时，本会请求审批的工具也像其他工具一样运行，正如从不设置策略的直接模式。`direct` 或 `python` 调用方在 `builtins` 中指定 `shell_exec` 是明确启用它，没有策略时它无需审批即可运行；`gateway` 仍会拒绝它。
+交互式界面始终有审批策略（除非使用 `--yolo`）；直接模式、网关和没有 `approval=` 的 Python 运行则没有，这也是这些模式默认不提供 `shell_exec` 的原因。`file_read` 和 `list_files` 属于 `read`，不请求审批：它们由[工作区根目录](#work-in-a-directory)限制。只读 MCP 工具（`readOnlyHint: true`）也不请求审批，除非 `require_approval` 指定了它。通过 `agent.executor.register` 直接注册的工具保留其明确的 `requires_approval`；它的级别只是标签。没有策略时，本会请求审批的工具也像其他工具一样运行，正如从不设置策略的直接模式。`direct` 或 `python` 调用方在 `builtins` 中指定 `shell_exec` 是明确启用它，没有策略时它无需审批即可运行；`gateway` 仍会拒绝它。
 
 策略可以是任何带有 `async def decide(request)` 方法并返回 `ApprovalDecision` 的对象。下面的策略在终端中询问：
 
@@ -235,6 +235,7 @@ asyncio.run(main())
 
 - 智能体展开 `~` 并将根目录解析为真实路径。如果根目录不是目录，创建智能体时会引发 `ValueError: workspace_root is not a directory: '<root>'`。
 - **`file_read` 和 `file_write`** 相对于根目录解析相对路径，只能访问其中的文件。`..` 和符号链接会先解析：根目录内指向外部的符号链接会被拒绝，而外部指向内部的符号链接会被允许。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，空路径会以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。它们打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝；非普通文件，例如 FIFO，也会以 `Not a regular file: <path>` 拒绝。`file_read` 最多按 UTF-8 读取 200,000 字节。超过 200,000 字节或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。`file_write` 报告解析后的路径。
+- **`list_files`** 以同样的方式解析路径（不带路径时列出根目录），并以同样的消息拒绝外部路径。它从不进入符号链接，也从不读取文件。
 - **`shell_exec` 和 `python_exec`** 始终在拥有独立进程组的子进程中运行，超时或取消会终止整个进程组；根目录是它们的启动目录。Shell 命令的标准输入是 `/dev/null`；`python_exec` 通过管道接收代码（绝不通过 argv），随后将 fd 0 指向 `/dev/null`，因此 `input()` 得到 EOF，两者都不读取终端。Python 代码在子 Python 进程中运行，因此时限可以停止它，`sys.exit()` 或 `os.chdir()` 的作用也留在子进程中。子进程还有一小时 CPU 时间限制和 1,024 个打开文件的限制（POSIX 上为 `RLIMIT_CPU` 和 `RLIMIT_NOFILE`），这些限制只会停止超过调用时长继续运行的代码；由于 macOS 不接受地址空间限制，因此没有设置。子进程的环境不是 melo 的环境：它获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `tool_env`，因此 melo 环境中的 API 密钥不会传给任何工具；`VIRTUAL_ENV`、`PYTHONPATH`、`SSH_AUTH_SOCK` 和代理变量只能通过 `tool_env` 传入。
 - **它们仍可访问任何路径。** 只有文件工具受根目录限制。使用[审批策略](#approve-tool-calls)控制 `shell_exec` 和 `python_exec`。
 - **退出状态。** Shell 命令以非零状态退出时，其文本以 `[exit code <n>]` 行开头，调用仍然成功：即使输出被截断，模型也能读取状态。Python 代码以非零状态退出时，调用以 `Python exited with code <n>` 失败，后面附上输出的最后 4,000 个字符。

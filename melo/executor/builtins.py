@@ -6,12 +6,13 @@ import asyncio
 import codecs
 import contextlib
 import contextvars
+import itertools
 import os
 import signal
 import stat
 import subprocess
 import sys
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Generator, Mapping
 from typing import Any
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
@@ -80,6 +81,13 @@ _REAP_TIMEOUT_S = 5.0
 # Bytes the file_read of a workspace reads at most. As UTF-8 they always
 # hold the MAX_OUTPUT_LEN characters that the executor's result check keeps.
 MAX_FILE_READ_BYTES = 200_000
+
+# What one list_files call shows at most (entries at every level), how deep
+# it goes, and how many more entries it counts to say how many it left out
+# (a larger rest reads "N+"; the limit bounds the walk of a huge tree).
+LIST_FILES_MAX_ENTRIES = 200
+LIST_FILES_MAX_DEPTH = 3
+_LIST_FILES_COUNT_LIMIT = 10_000
 
 
 def _builtin(tool_def: ToolDef) -> Callable[[ToolFunction], ToolFunction]:
@@ -241,6 +249,37 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
 async def _file_read(path: str) -> str:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: open(path).read())
+
+
+@_builtin(
+    ToolDef(
+        name="list_files",
+        description=(
+            "List the files and folders in a folder: names and sizes, never "
+            "contents. Folders end in /, links in @."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Folder path (default: the workspace)",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Levels of folders to list (default 1)",
+                    "minimum": 1,
+                    "maximum": LIST_FILES_MAX_DEPTH,
+                },
+            },
+        },
+        semantic_tags=["list", "folder", "directory", "files", "ls", "tree"],
+    )
+)
+async def _list_files(path: str = ".", depth: int = 1) -> str:
+    loop = asyncio.get_running_loop()
+    target = os.path.realpath(path or ".")  # like file_read: a given path is followed
+    return await loop.run_in_executor(None, _list_directory, target, depth)
 
 
 @_builtin(
@@ -497,6 +536,9 @@ def rooted_builtins(
       in ``MAX_OUTPUT_LEN`` together with a note of the file's size, so the
       executor's result check never cuts the note off. ``file_write``
       writes UTF-8 and reports the real path.
+    - ``list_files`` lists the folder the executor has resolved and fenced
+      like a file's path (the root when it gets none), as
+      :func:`_list_directory` says; it never reads a file or enters a link.
     - ``shell_exec`` runs the command in *root*, with its standard input
       on ``/dev/null``, and within *tool_timeout_s* seconds, else
       :data:`SHELL_TIMEOUT_S`. With *tool_timeout_s*, the executor's limit
@@ -533,6 +575,7 @@ def rooted_builtins(
     python_timeout_ms = None if tool_timeout_s is None else tool_timeout_s * 1000
     return {
         "file_read": (_rooted_file_read(root), None),
+        "list_files": (_rooted_list_files(root), None),
         "file_write": (_rooted_file_write(root), None),
         "shell_exec": (
             _rooted_shell_exec(root, tool_timeout_s, tool_env),
@@ -585,6 +628,15 @@ def _rooted_file_read(root: str) -> ToolFunction:
     return file_read
 
 
+def _rooted_list_files(root: str) -> ToolFunction:
+    async def list_files(path: str = ".", depth: int = 1) -> str:
+        target = os.path.join(root, path or ".")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _list_directory, target, depth)
+
+    return list_files
+
+
 def _rooted_file_write(root: str) -> ToolFunction:
     async def file_write(path: str, content: str) -> str:
         target = os.path.join(root, path)
@@ -621,6 +673,93 @@ def _read_regular_file(path: str) -> str:
         return text
     note = f"\n... [truncated: the file has {size} bytes]"
     return text[: MAX_OUTPUT_LEN - len(note)] + note
+
+
+def _list_directory(path: str, depth: int) -> str:
+    """The listing of the folder *path*, *depth* levels down (1 to 3).
+
+    One line per entry: folders first, each level sorted by name. A folder
+    ends in ``/`` and is followed by its entries, indented; a regular file by
+    its size; a symlink ends in ``@`` and is never entered. No file is read,
+    and ``.git`` is left out. After :data:`LIST_FILES_MAX_ENTRIES` lines,
+    ``... and N more`` counts the rest; nothing to show is ``(empty)``; a
+    folder inside that cannot be read is marked ``(unreadable)``, while
+    *path* itself raises the ``OSError`` it gets.
+    """
+    depth = max(1, min(depth, LIST_FILES_MAX_DEPTH))
+    fd = _open_folder(path)
+    try:
+        # Closing the walk closes the folders it still holds open.
+        with contextlib.closing(_walk(fd, 1, depth)) as lines:
+            shown = list(itertools.islice(lines, LIST_FILES_MAX_ENTRIES))
+            left = sum(1 for _ in itertools.islice(lines, _LIST_FILES_COUNT_LIMIT + 1))
+    finally:
+        os.close(fd)
+    if left:
+        plus = "+" if left > _LIST_FILES_COUNT_LIMIT else ""
+        shown.append(f"... and {min(left, _LIST_FILES_COUNT_LIMIT)}{plus} more")
+    return "\n".join(shown) or "(empty)"
+
+
+def _open_folder(name: str, parent: int | None = None) -> int:
+    """A descriptor of the folder *name* (of *parent*), never through a symlink."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    return os.open(name, flags, dir_fd=parent)
+
+
+def _walk(fd: int, level: int, depth: int) -> Generator[str, None, None]:
+    """The lines of the folder open at *fd*, and below it down to *depth*."""
+    with os.scandir(fd) as scan:
+        entries = sorted(
+            scan,
+            key=lambda e: (
+                not e.is_dir(follow_symlinks=False),
+                e.name.casefold(),
+                e.name,
+            ),
+        )
+    indent = "  " * (level - 1)
+    for entry in entries:
+        if entry.name == ".git":
+            continue
+        # A name is data: a control character in it must not start a line.
+        name = entry.name
+        if not name.isprintable():
+            name = name.encode("unicode_escape").decode("ascii")
+        if entry.is_symlink():
+            yield f"{indent}{name}@"
+        elif not entry.is_dir(follow_symlinks=False):
+            yield f"{indent}{name}{_size_suffix(entry)}"
+        else:
+            yield f"{indent}{name}/"
+            if level == depth:
+                continue
+            try:
+                # Through the parent's descriptor, without following a link:
+                # a folder swapped for a symlink since the scan is not entered.
+                child = _open_folder(entry.name, fd)
+                try:
+                    yield from _walk(child, level + 1, depth)
+                finally:
+                    os.close(child)
+            except OSError:
+                yield f"{indent}  (unreadable)"
+
+
+def _size_suffix(entry: os.DirEntry[str]) -> str:
+    """``  1.5 KB`` for a regular file, else nothing (a pipe, a socket)."""
+    try:
+        info = entry.stat(follow_symlinks=False)
+    except OSError:
+        return ""
+    if not stat.S_ISREG(info.st_mode):
+        return ""
+    size, unit = float(info.st_size), "B"
+    for larger in ("KB", "MB", "GB"):
+        if size < 1024:
+            break
+        size, unit = size / 1024, larger
+    return f"  {info.st_size} B" if unit == "B" else f"  {size:.1f} {unit}"
 
 
 def _write_regular_file(path: str, content: str) -> None:

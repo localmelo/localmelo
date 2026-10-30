@@ -385,7 +385,7 @@ async def test_new_starts_a_new_session_with_no_grants(setup: Setup) -> None:
     await session.new()
     assert session.runner is None and session.approvals.allowed_tools == frozenset()
     assert session.agent.conversation() == []
-    assert "─ New session ─" in setup.out.text()
+    assert "─ New chat ─" in setup.out.text()
     setup.factory.scripts["m1"] = [answer("again")]
     session.agent = await setup.factory.build()
     session.enter("two")
@@ -1472,7 +1472,7 @@ async def test_status_shows_the_facts(
     assert "workspace  " in text and "fence      file tools stay here" in text
     assert "session    'hello' · " in text and " · 1 turn" in text
     assert "approvals  ask · allowed in this session: none" in text
-    assert "tools      4 built-in (3 ask first)" in text
+    assert "tools      5 built-in (3 ask first)" in text
     assert "memory     2 of 64 (local server) messages · " in text
     assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text
@@ -1601,7 +1601,7 @@ async def test_status_answers_first_in_five_rows(
     session, out = setup.session, setup.out
     session.enter("/status")
     await _until(lambda: "context    " in out.text())
-    assert "\nsession    new\n" in out.text()
+    assert "\nchat       new\n" in out.text()
     session.enter("hello")
     await setup.idle()
     session.enter("/status")
@@ -1609,7 +1609,7 @@ async def test_status_answers_first_in_five_rows(
     assert out.text().strip().splitlines()[-5:] == [
         f"model      m1 · OpenAI-compatible server · {URL} · ✓ answers",
         "folder     ~/work",
-        'session    "hello" · 1 turn',
+        'chat       "hello" · 1 turn',
         "approvals  asks before running commands or changing files",
         "context    not measured yet",
     ]
@@ -1740,9 +1740,7 @@ async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
     assert "MCP servers from ~/mcp.json (mcp_config)" in out.text()
     factory.mcp_error = "the server exited"
     session.enter("/mcp")
-    await _until(
-        lambda: "MCP is off for this session: the server exited." in out.text()
-    )
+    await _until(lambda: "MCP is off for this chat: the server exited." in out.text())
     assert "Fix the config, then restart melo." in " ".join(out.text().split())
 
 
@@ -1777,6 +1775,63 @@ async def test_auto_mode_writes_and_shows_the_change(setup: Setup) -> None:
     await setup.idle()
     assert "auto-allowed" in out.text() or "allowed" in out.text()
     assert "└ +1 −1 lines" in out.text()
+
+
+async def test_a_turn_that_wrote_files_names_them_and_not_a_refused_write(
+    setup: Setup,
+) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "notes.txt", "content": "new note\n"}),
+        tool_call("file_write", {"path": "ideas.md", "content": "- one\n- two\n"}),
+        # The executor refuses a path outside the workspace; nothing is written.
+        tool_call("file_write", {"path": "../outside.txt", "content": "x\n"}),
+        answer("Wrote two files."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("write the notes")
+    await setup.idle()
+    text = out.text()
+    assert "✻ Worked for" in text
+    # Real results and real snapshots: the old notes.txt line is replaced.
+    assert text.endswith("\n  Changed notes.txt (+1 −1), ideas.md (+2)\n\n"), text
+    assert text.count("Changed") == 1
+    root = Path(session.agent.workspace_root or "")
+    assert not (root.parent / "outside.txt").exists()
+    # A later turn that wrote nothing names nothing, and not the first turn's files.
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.append(answer("Nothing to write."))
+    session.enter("is there anything to write?")
+    await setup.idle()
+    assert out.text().count("Changed") == 1
+    assert re.search(
+        r"● Nothing to write\.\n✻ Worked for [\d.]+s · 0 tool calls\n\n$", out.text()
+    )
+
+
+async def test_a_file_melo_cannot_compare_is_named_without_counts(
+    setup: Setup,
+) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    root = Path(session.agent.workspace_root or "")
+    (root / "data.bin").write_bytes(b"\xff\xfe not text")
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "data.bin", "content": "x\n"}),
+        answer("Rewrote it."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("rewrite the data")
+    await setup.idle()
+    # The old bytes are not text, so no diff and no counts: the name alone.
+    assert "  └ changed; no diff shown" in out.text()
+    assert out.text().endswith("\n  Changed data.bin\n\n"), out.text()
 
 
 async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
@@ -1946,9 +2001,39 @@ async def test_status_bar_redraws_after_an_assistant_message(setup: Setup) -> No
     before = setup.app.invalidated
     session.on_event(_request_event(1000, 830))
     assert setup.app.invalidated == before + 1
-    assert session.status_bar().segments == ("cache 83%",)
-    # Without a context_budget event the bar keeps its own ctx, as before.
-    assert session.status_bar().context == "ctx 1.0k"
+    # Without a context_budget event the bar keeps its last request's figure.
+    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
+    assert session.status_bar().context == ""
+    session.developer = True  # developer mode keeps the compact figures
+    bar = session.status_bar()
+    assert bar.segments == ("cache 83%",) and bar.context == "ctx 1.0k"
+
+
+def _context_budget(measured: int, limit: int | None) -> dict[str, Any]:
+    data = {"measured_prompt_tokens": measured, "input_limit": limit}
+    return {"type": "context_budget", "ts": time.time(), "data": data}
+
+
+async def test_the_status_bar_says_its_figures_in_words_until_developer_mode(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    session.renderer.usage.observe(_context_budget(2600, 32000))
+    session.on_event(_request_event(1000, None))  # the server reports no cache
+    bar = session.status_bar()
+    # The cache waits for a value; the context says how full it is.
+    assert bar.segments == ("context 8% used",) and bar.context == ""
+    session.on_event(_request_event(1000, 830))
+    assert session.status_bar().segments == ("83% cached", "context 8% used")
+    session.developer = True
+    assert session.status_bar().segments == ("cache 83%", "ctx 2.6k/32k")
+    session.developer = False
+    session.renderer.usage.observe(_context_budget(2600, None))
+    assert session.status_bar().segments[-1] == "context 2.6k tokens"
+
+
+async def test_a_new_chat_is_named_in_the_status_bar(setup: Setup) -> None:
+    assert setup.session.status_bar().title == "New chat"
 
 
 async def test_the_status_bar_shows_the_step_only_in_developer_mode(
@@ -1962,7 +2047,7 @@ async def test_the_status_bar_shows_the_step_only_in_developer_mode(
     for event in running:
         session.renderer.usage.observe(event)
     session.on_event(_request_event(1000, 830))
-    assert session.status_bar().segments == ("cache 83%",)
+    assert session.status_bar().segments == ("83% cached", "context 1.0k tokens")
     session.developer = True
     assert session.status_bar().segments == ("cache 83%", "step 4")
 
@@ -1980,7 +2065,9 @@ async def test_status_line_off_keeps_the_bar_as_it_was(setup: Setup) -> None:
     assert (off.model, off.workspace, off.context, off.title, off.mode) == (
         auto.model,
         auto.workspace,
-        "ctx 1.0k",
+        "context 1.0k tokens",
         auto.title,
         auto.mode,
     )
+    session.developer = True
+    assert session.status_bar().context == "ctx 1.0k"
