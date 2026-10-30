@@ -453,6 +453,17 @@ melo: error: argument --max-steps: must be at least 1, got 0
 
 第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用，无论运行是否向模型提供 `shell_exec`（直接模式下不提供，除非指定 `--builtins all` 或 `--builtins shell_exec`；`--builtins none` 也不会阻止检查：要跳过检查，请删除该行）。只有工具自身的这次调用能越过这一过滤：模型的工具列表和它自己的 `shell_exec` 调用保持不变。检查器的 `pre_execute`、工作区根目录（`--workspace`）、shell 超时和脱敏与模型自己的调用一样适用。退出状态为 0 即通过。若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。若检查在最后仍然失败，运行仍以 `completed` 结束，但 `tests` 为 `failed`，会发出一条 `brief_check_failed` 通知，退出码为 4（见[退出码](#exit-codes)；stderr 会输出一行 `melo: the brief's check failed: <command> (exit N)`，被拒绝的检查显示 `not run`，超时显示 `no exit status`）；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。当运行处于最后一次尝试、总步数预算恰好还剩两步、工作区自检查上次运行（或运行开始）以来有变化，且门禁在该次尝试中尚未运行时，工具会在下一个规划请求之前运行一次检查，使模型仍有机会修复检查所示的问题。通过则不改变任何行为；失败则发送与门禁相同的消息，并消耗两次重试中的一次。`max_steps` 仍是硬性上限。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
 
+<a id="confined-writes"></a>
+
+**写入留在工作区内（macOS；`[agent] confine_writes`，默认开启）。**
+worker 的 `shell_exec` 和 `python_exec` 子进程（包括检查）在一个 `sandbox-exec` 配置文件下启动，它拒绝工作区（`--workspace`，否则为当前文件夹）之外的所有文件写入，无论命令做什么：`cd ..` 之后的写入、在另一个检出中执行 `uv run`、子进程 `git` 或 Python 都会被拒绝。允许写入的位置有：工作区本身；其中的 `.melo-tmp`（`TMPDIR`、`TMP` 和 `TEMP` 指向它；其中的 `.gitignore` 让它不出现在 `git status` 中，它随工作区一起保留）；你自己的临时文件夹（`/var/folders/.../T`，无论 `TMPDIR` 是什么，macOS 的 `mktemp` 和 `mktemp -d` 都写到这里；`/tmp` 仍被拒绝）；uv 的缓存（`UV_CACHE_DIR`，否则为 `~/.cache/uv`）、black 的缓存（`~/Library/Caches/black`）和 npm 的缓存（`~/.npm`）；`/dev/null`、`/dev/zero`、终端、标准流、`/dev/fd` 和伪终端；以及当工作区是一个链接的 git worktree 时，它自己的 git 目录和仓库的 `objects`：`git status`、`diff` 和 `add` 可用，提交到分支会被拒绝，主检出的文件保持不可写。经测量，`uv run`、`uv sync`、`pytest`、`ruff`、`black`、`mypy` 和 `npm` 不需要写入其他位置。读取和网络不受限制。被拒绝的写入保留其错误，并在开头（`[exit code N]` 之后）多出一行：
+
+```text
+melo: writing outside the workspace is not allowed in this run (refused: /Users/me/outside.txt); write in /Users/me/project, and put scratch files in $TMPDIR.
+```
+
+结果中的 `run.confinement` 会统计这些写入：`{"writes": "confined", "refused_writes": 1}`。当配置文件无法应用时（缺少 `sandbox-exec`，或 melo 运行在一个拒绝再嵌套沙箱的沙箱中），worker 会在第一条命令之前以 `startup_error` 停止，并给出一行 `writes cannot be confined to the workspace: <why>; set agent.confine_writes to false to run without it (-X agent.confine_writes=false for one run)`。在其他系统上，运行会继续且不受限制，`run.confinement` 为 `{"writes": "not_confined", "reason": ...}`。`-X agent.confine_writes=false` 为一次运行关闭它；此时结果中没有 `confinement` 键。不带 `--brief` 的运行、交互式界面、网页控制台和应用都不受此限制。
+
 <a id="brief-items"></a>
 
 **实验性：`--brief-items on`（`[agent] brief_items = true`，默认关闭）。** 一份有多个编号条目、检查又较弱的简报，可能在一个条目完全没动的情况下以 `completed passed` 结束。开启该选项后，工具会读取简报的顶层条目（代码块之外的 `1.`、`2)` 和 `- [ ]` 行；每条只取第一行，最多 12 条，缩短到约 120 个字符；少于两条的简报什么也不加），并根据 `git status` 列出的、自运行开始以来被改动的文件给每条打标记：条目中点名的文件（含 `/` 或带文件扩展名的词）被编辑过为 `changed`，点名了文件但都没被编辑为 `not yet`，其余为 `no file named`。标记只说明编辑情况，从不声称条目已完成。标记以同一个文本块的形式放入每个尝试边界的反思请求，以及最后一次尝试结束前两步的检查中：`Items in the brief with no edit yet: 2, 3`，后接这些条目的行，因此中间的规划请求保持其前缀。没有 `not yet` 条目时不加该块。每次使用都会发出一条 `brief_items` 通知，detail 为 `{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`。不是 git 树的工作区没有该块。没有 `--brief` 时该选项不起作用。

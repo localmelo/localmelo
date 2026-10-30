@@ -162,7 +162,10 @@ The checks are guardrails, not a sandbox:
   the gateway, file tools reach any file you can. `python_exec` runs in a
   child process of melo, not in a sandbox: it reaches any file you can too.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
-  file you can: only the file tools are kept inside the root.
+  file you can: only the file tools are kept inside the root. The exception
+  is a worker run (`melo worker`) or a saved task on macOS: there, their
+  writes are confined to the workspace (reads and the network are not); see
+  [Writes stay in the workspace](../reference/cli.md#confined-writes).
 - Approvals apply to a run with an approval policy, including the
   interactive UI (unless `--yolo`) and console sessions. Direct mode,
   `melo ""` and the legacy gateway API have no approval policy.
@@ -265,7 +268,9 @@ without the flag and the gateway never set a workspace root.
   in. A shell command's standard input is `/dev/null`; `python_exec` gets its
   code on a pipe (never in argv) and then points fd 0 at `/dev/null`, so
   `input()` gets EOF and neither reads the terminal melo runs in. These two
-  tools are not fenced: they can reach any path.
+  tools are not fenced: they can reach any path, except that a worker run or
+  a saved task on macOS refuses their writes outside the workspace
+  (`AgentOptions(confine_writes=True)`).
 - **Environment.** The child of `shell_exec` and `python_exec` does not
   inherit melo's environment: it gets `PATH`, `HOME`, `USER`, `LOGNAME`,
   `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`, plus

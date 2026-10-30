@@ -179,6 +179,23 @@ def _exception_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
+def _confine_writes() -> bool:
+    """``[agent] confine_writes`` for a ``--brief`` run (default true).
+
+    A config file that cannot be read leaves the default, as for a run with
+    ``--base-url``; a value that is not a boolean stops the worker.
+    """
+    from localmelo.support import config
+
+    try:
+        value = config.load().agent.confine_writes
+    except (OSError, ValueError):
+        return True
+    if not isinstance(value, bool):
+        raise _StartupConfigError("[agent] confine_writes must be a boolean")
+    return value
+
+
 class _StartupConfigError(Exception):
     """A config-file value that stops a direct worker from starting.
 
@@ -2114,6 +2131,7 @@ def main() -> None:
                     options,
                     brief_probe=workspace_fingerprint,
                     brief_check=run_brief_check,
+                    confine_writes=_confine_writes(),
                 )
             if not query:
                 # The loop keeps its answers, so each turn sees the earlier ones; a

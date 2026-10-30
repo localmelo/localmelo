@@ -45,6 +45,7 @@ chat_model = "qwen3:8b"
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
 | `brief_items` | `[agent]` | `false` | 实验性。`true` 让 `--brief` 运行指出简报中尚未被任何编辑触及的编号条目；见 [`--brief-items`](cli.md#brief-items)。 |
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
+| `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行从不受此限制。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |

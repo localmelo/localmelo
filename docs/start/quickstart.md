@@ -153,6 +153,15 @@ The experimental setting `agent.brief_items` (`-X agent.brief_items=true`) also 
 no edit has touched yet in the model's reflection requests and before its last
 steps (see the [reference](../reference/cli.md#brief-items)).
 
+On macOS, the worker's shell commands and Python code can write only in the
+workspace: a write elsewhere, even after `cd ..`, fails with `Operation not
+permitted` and a line telling the model to write in the workspace, and scratch
+files go to `$TMPDIR`, which is `.melo-tmp` in the workspace. The caches of uv,
+black and npm and your own temporary folder (where `mktemp` writes) stay writable, and in a git worktree `git status`, `git diff` and
+`git add` work. Reads and the network are not limited. To run a worker without
+this, add `-X agent.confine_writes=false`; see
+[Writes stay in the workspace](../reference/cli.md#confined-writes).
+
 The result is one JSON line with `status`, `exit_code`, `tests` and the run
 record. For every field and exit code, see the
 [command-line reference](../reference/cli.md#output).

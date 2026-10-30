@@ -234,7 +234,8 @@ def test_run_result_and_message_keep_their_fields() -> None:
     assert [
         f.name
         for f in dataclasses.fields(RunResult)
-        if f.name not in ("memory_stats", "context_budget", "prefix_cache")
+        if f.name
+        not in ("memory_stats", "context_budget", "prefix_cache", "confinement")
     ] == [
         "task_id",
         "status",

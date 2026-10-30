@@ -144,6 +144,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `prefix_cache` | With fixed prefix enabled (the default; absent with `--fixed-prefix off`): version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
 | `context_budget` | When configured, a list of per-attempt planning/reflection accounting records; absent when disabled. See [context accounting](configuration.md#context-accounting). |
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
+| `confinement` | Only in a run that confines its writes (a `--brief` worker or a saved task, see [Writes stay in the workspace](cli.md#confined-writes)): `{"writes": "confined", "refused_writes": N}`, N being the writes outside the workspace this run's `shell_exec` and `python_exec` reported refused, or `{"writes": "not_confined", "reason": "..."}` off macOS. Absent otherwise. |
 
 `config` holds:
 

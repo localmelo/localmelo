@@ -26,6 +26,12 @@ from localmelo.melo.executor.models import (
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
 from localmelo.melo.executor.preview import call_preview
+from localmelo.melo.executor.sandbox import (
+    ConfinementError,
+    WriteConfinement,
+    confine,
+    platform_note,
+)
 
 
 def register_builtins(
@@ -38,6 +44,7 @@ def register_builtins(
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
     harness_only: Collection[str] = (),
+    confinement: WriteConfinement | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -79,6 +86,11 @@ def register_builtins(
     ``TMPDIR``) with *tool_env* on top, so a secret in the agent's
     environment reaches no tool unless *tool_env* names it.
 
+    *confinement* (from :func:`~localmelo.melo.executor.sandbox.confine`
+    for the same root, or for this process's directory without one) starts
+    ``shell_exec`` and ``python_exec`` under its profile, which refuses
+    their file writes outside that folder.
+
     *harness_only* names built-ins that are built the same way but kept from
     the model: they go to the executor only (see
     :meth:`Executor.register_harness_tool`) and not to the hippo, and a name
@@ -96,12 +108,19 @@ def register_builtins(
         raise ValueError("tool_timeout_s needs a workspace_root")
     rooted = (
         rooted_builtins(
-            workspace_root, tool_timeout_s=tool_timeout_s, tool_env=tool_env
+            workspace_root,
+            tool_timeout_s=tool_timeout_s,
+            tool_env=tool_env,
+            confinement=confinement,
         )
         if workspace_root
         else {}
     )
-    with_env = builtins_with_env(tool_env) if tool_env else {}
+    with_env = (
+        builtins_with_env(tool_env or {}, confinement)
+        if tool_env or confinement
+        else {}
+    )
     for tool_def, phase1a_fn in BUILTINS:
         if tool_def.name not in selected and tool_def.name not in harness_only:
             continue
@@ -128,6 +147,7 @@ __all__ = [
     "ApprovalGate",
     "ArtifactMeta",
     "BUILTINS",
+    "ConfinementError",
     "ErrorCategory",
     "ExecutionOutcome",
     "ExecutionRequest",
@@ -137,8 +157,11 @@ __all__ = [
     "TOOL_EXIT_CODE",
     "ToolOutput",
     "WorkspacePolicy",
+    "WriteConfinement",
     "builtin_names",
     "call_preview",
+    "confine",
+    "platform_note",
     "register_builtins",
     "rooted_builtins",
 ]
