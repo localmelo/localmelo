@@ -131,15 +131,15 @@ melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.j
 
 配置文件保存后端设置，使 `melo`、`melo "<task>"` 和网关无需 `--url` 即可工作。
 
-对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问其 URL（按 Enter 接受找到的地址）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。模型是一个用方向键选择的列表（输入即可筛选，Enter 选择，Esc 取消），其中只有对话模型；答案从管道输入时则改为编号列表，对话模型在前，嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，其中第一个会被高亮，因此 Enter 不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，不会高亮任何一项，在你移到某个模型之前 Enter 不起作用，因为尚未加载的模型可能需要数分钟和大量内存才能加载（管道输入时同样没有默认值：只按 Enter 会再次询问，空答案是错误）。只有一个对话模型时无需选择：
+对于本地服务器，在终端运行 `melo`。尚无配置时，它先说明自己需要什么：本机上的一个模型服务器。随后在本机查找（oMLX 在 8000 端口，Ollama 在 11434 端口），询问是否使用找到的那个（`Use it? [Y/n]:`，按 Enter 即同意）和服务器列表中的模型，保存 `~/.cache/localmelo/config.toml` 并打开交互式界面。模型是一个用方向键选择的列表（输入即可筛选，Enter 选择，Esc 取消），其中只有对话模型；答案从管道输入时则改为编号列表，对话模型在前，嵌入或重排模型会标上 `(embedding)` 或 `(reranking)`，且绝不作为默认值。列表里有多个对话模型、且服务器会说明哪些已在内存中（oMLX、Ollama）时，这些模型会标上 `(loaded)`，其中第一个会被高亮，因此 Enter 不会去加载不在内存中的大模型。服务器没有说明（带 API 密钥的服务器返回 401，其他服务器没有这个路由）或没有任何模型已加载时，不会高亮任何一项，在你移到某个模型之前 Enter 不起作用，因为尚未加载的模型可能需要数分钟和大量内存才能加载（管道输入时同样没有默认值：只按 Enter 会再次询问，空答案是错误）。只有一个对话模型时无需选择：
 
 ```text
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Server URL [http://127.0.0.1:11434/v1]:
+Use it? [Y/n]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project

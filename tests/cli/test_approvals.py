@@ -21,6 +21,7 @@ from localmelo.support.cli.approvals import (
     APPROVAL_KEY_GUARD_S,
     Approvals,
     EditSnapshots,
+    PanelText,
     TerminalApprover,
     approval_words,
     panel_text,
@@ -165,6 +166,24 @@ def test_an_mcp_header_names_the_tier() -> None:
         _request("mcp__notes__search", tier="read", q="x"), width=60
     )
     assert forced_read.header == "mcp__notes__search · read"
+
+
+def test_a_header_leaves_the_tier_out_when_asked() -> None:
+    path = f"{WORKSPACE}/todo.md"
+
+    def plain(
+        request: ApprovalRequest, target: edits.Target | None = None
+    ) -> PanelText:
+        return panel_text(request, target=target, width=60, show_tier=False)
+
+    assert plain(_request(tier="exec")).header == f"shell_exec · in {WORKSPACE}"
+    python = _request("python_exec", tier="exec", code="1")
+    assert plain(python).header == f"python_exec · in {WORKSPACE}"
+    write = _request("file_write", tier="write", path=path, content="a\nb\n")
+    new = plain(write, edits.Target(path=path, exists=False))
+    assert new.header == "file_write  todo.md · new file, 2 lines"
+    mcp = _request("mcp__cua__click", tier="network", x=1)
+    assert plain(mcp).header == "mcp__cua__click"
 
 
 def test_a_request_without_a_tier_keeps_the_old_header() -> None:
@@ -353,6 +372,28 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         await app.wait(lambda: "half a draft" in app.text())
         assert app.ui.buffer.text == "half a draft"
         assert not app.ui.renderer.live.waiting
+
+
+@pytest.mark.parametrize(
+    ("developer", "header"),
+    [
+        (False, f"shell_exec · in {WORKSPACE}"),
+        (True, f"shell_exec · exec · in {WORKSPACE}"),
+    ],
+    ids=["default mode", "developer mode"],
+)
+async def test_the_panel_header_names_the_tier_in_developer_mode_only(
+    now: list[float], developer: bool, header: str
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        app.ui.renderer.developer = developer
+        asking = asyncio.ensure_future(approver.ask(_request(tier="exec")))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        assert f"│ {header}" in app.text()
+        now[0] += APPROVAL_KEY_GUARD_S + 0.1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
 
 
 async def test_the_warning_and_the_key_line_are_default_text_not_dim(

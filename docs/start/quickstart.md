@@ -164,8 +164,8 @@ and the gateway work without `--url`.
 
 For a local server, run `melo` in a terminal. With no configuration yet, it
 first says what it needs, a model server on this computer. It then looks for
-one (oMLX on port 8000, Ollama on 11434), asks for its URL (press Enter to
-accept the one it found) and for a model from the server's list, saves
+one (oMLX on port 8000, Ollama on 11434), asks whether to use the one it found
+(`Use it? [Y/n]:`, Enter says yes) and for a model from the server's list, saves
 `~/.cache/localmelo/config.toml` and opens the interactive UI. The models are
 a list to choose from with the arrow keys (type to filter, Enter to choose,
 Esc to cancel), chat models only; with the answers piped in they are numbered
@@ -184,9 +184,9 @@ empty answer is an error). With one chat model there is nothing to choose:
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
-Server URL [http://127.0.0.1:11434/v1]:
+Use it? [Y/n]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo setup.
+Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project

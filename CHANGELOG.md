@@ -1041,6 +1041,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The first run and the first answer say only what helps. With a model server found, the
+  first run asks `Use it? [Y/n]:` (Enter says yes; `n` asks for a URL) where it said it had
+  found one and then asked for its URL. With no embedding model on the server it says
+  `Long-term memory is off; melo setup turns it on.`; the instruction to serve
+  Qwen3-Embedding-0.6B or run `ollama pull qwen3-embedding:0.6b` is now in `melo setup`.
+  Outside developer mode the dim `↳ partial reply (…)` line before text that was streamed
+  is gone (the text still prints once), the note after a model's first whole reply, `This
+  model's replies appear when complete until its reasoning format is set`, shows in
+  developer mode only, and the approval header names the tool and the folder
+  (`shell_exec · in ~/demo-project`); developer mode keeps the permission tier
+  (`shell_exec · exec · in ~/demo-project`). Direct mode's stdout and stderr, JSON, exit
+  codes and requests are unchanged ([#NN]).
 - With no model server running, the first run says exactly how to start one. With nothing
   saved and nothing answering on the usual ports, the first run of `melo` offered
   `http://127.0.0.1:8000/v1` as the server URL, and Enter looped on `✗ …: connection

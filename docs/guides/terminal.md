@@ -441,18 +441,20 @@ reasoning, which a per-model hint in `config.toml` declares:
 The hint is `explicit` (a leading `<think>` starts reasoning), `closing_only`
 (everything before `</think>` is reasoning) or `none` (tags are literal text).
 A model with no hint keeps the conservative rule: content is held until the
-reply ends, so the live area shows `✻ thinking…` rather than text, and after
-its first whole reply melo says so once: `This model's replies appear when
-complete until its reasoning format is set (see Streamed replies).` A server
+reply ends, so the live area shows `✻ thinking…` rather than text. In
+developer mode, after its first whole reply melo says so once: `This model's
+replies appear when complete until its reasoning format is set (see Streamed
+replies).` A new user never sees that note. A server
 that sends reasoning in a field of its own streams without a hint, and that
 field is never drawn as content; `/thinking on` shows its excerpt. The same
 hint splits the completed reply, so the stream and the stored answer do not
 disagree.
 
 Streamed text is provisional. If the reply becomes a tool call, a retry,
-a run that fails, or a stop, melo closes the live text and prints it once
-as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
-`(stopped)`; the completed final answer prints once after `●`. A provider
+a run that fails, or a stop, melo closes the live text and prints it once,
+and in developer mode labels it `↳ partial reply (tool call)`, `(retrying)`,
+`(not the final answer)` or `(stopped)`; the completed final answer prints once
+after `●`. A provider
 without streaming sends the complete reply, which prints as usual.
 `/stream on|off` flips the setting for later turns without saving it, and
 `/new` puts it back to `[cli] stream`. Runs without the interactive UI
@@ -471,7 +473,7 @@ of the input box, and your draft stays:
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
-│ shell_exec · exec · in ~/demo-project                                    │
+│ shell_exec · in ~/demo-project                                           │
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
@@ -487,9 +489,10 @@ of the input box, and your draft stays:
   model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.
-- The header names the tool's permission tier after its name, and after the
-  path for `file_write` (`exec` here; `write`, `exec` or `network` for an MCP
-  tool, once the UI can load one). A read-only MCP tool would show `read`
+- The header names the tool and the folder. Developer mode adds the tool's
+  permission tier after its name, and after the path for `file_write`
+  (`shell_exec · exec · in ~/demo-project`; `write`, `exec` or `network` for an
+  MCP tool, once the UI can load one). A read-only MCP tool would show `read`
   only when the server's `require_approval` forces it to ask; see
   [Permission tiers](tools-mcp.md#permission-tiers).
 - Esc or Ctrl+C at the choices stops the turn, and a second Ctrl+C within
@@ -597,17 +600,17 @@ for a task.
 
 ### First run
 
-In a terminal with no config file, `melo` asks for a model server and a
-model, saves them, and opens the UI. When the server lists an embedding
+In a terminal with no config file, `melo` offers the model server it finds,
+asks for a model, saves them, and opens the UI. When the server lists an embedding
 model, it asks once more whether to use it. Later runs go straight in.
 
 ```text
 $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
-Server URL [http://127.0.0.1:8000/v1]:
+Use it? [Y/n]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo setup.
+Long-term memory is off; melo setup turns it on.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
@@ -619,8 +622,9 @@ Use nomic-embed-text for long-term memory? [Y/n]:
 
 - melo looks for a server on this computer with `GET /v1/models` on
   `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000
-  (SGLang), and offers the first that lists a model. Press Enter to accept
-  the URL, or type another. The model list is requested; with several chat
+  (SGLang), and offers the first that lists a model: Enter says yes to
+  `Use it? [Y/n]:`, and `n` asks `Server URL […]:` with that URL, for another.
+  The model list is requested; with several chat
   models, so are `GET /v1/models/status` (oMLX) and `GET /api/ps` (Ollama),
   which say which models are loaded. Saving the choice asks
   `GET /api/version` once to tell an Ollama server apart. No chat request
@@ -684,9 +688,10 @@ Use nomic-embed-text for long-term memory? [Y/n]:
   Qwen3-Embedding first. `y` sends one `POST /v1/embeddings` probe and saves
   `embedding_backend = "<chat key>"` with that table's `embedding_url` (the
   chat URL) and `embedding_model`. `n`, a failed probe, or no candidate
-  saves `embedding_backend = "none"` and says why; the no-candidate line
-  names `ollama pull qwen3-embedding:0.6b` for an Ollama server and
-  `Serve Qwen3-Embedding-0.6B on it` otherwise. See
+  saves `embedding_backend = "none"` and says that memory is off
+  (`Long-term memory is off; melo setup turns it on.`); `melo setup` also names
+  how to add a model, `ollama pull qwen3-embedding:0.6b` for an Ollama server
+  and `Serve Qwen3-Embedding-0.6B on it` otherwise. See
   [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks

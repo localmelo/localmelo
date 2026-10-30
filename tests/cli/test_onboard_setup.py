@@ -140,7 +140,7 @@ def _first_setup(
 # ── First run ──
 
 
-def test_a_found_server_prefills_the_url_and_its_models_are_offered(
+def test_a_found_server_is_offered_with_one_question_and_its_models_are_listed(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -153,7 +153,7 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     )
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
     assert answers.prompts == [
-        f"Server URL [{URL}]: ",
+        "Use it? [Y/n]: ",
         "Model [1]: ",
         "Use bge-m3-embed for long-term memory? [Y/n]: ",
     ]
@@ -168,7 +168,7 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
         "  [1] Qwen3-8B\n"
         "  [2] bge-m3-embed  (embedding)\n"
         f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
-        "Long-term memory off (melo setup sets it again).\n"
+        "Long-term memory is off; melo setup turns it on.\n"
         f"Saved to {config_path} (melo setup changes it).\n"
     )
     cfg = config.load()
@@ -234,6 +234,18 @@ def test_chat_models_come_first_and_the_others_are_tagged_and_never_the_default(
     _first_setup(answers, found=FoundServer(url=URL, models=models))
     assert answers.prompts[1] == prompt
     assert _listed(capsys.readouterr().out) == rows
+
+
+def test_declining_the_found_server_in_a_first_run_asks_for_a_url(
+    config_path: Path,
+) -> None:
+    other = "http://127.0.0.1:9100/v1"
+    answers = _Answers("n", other)
+    result, _, _ = _first_setup(
+        answers, found=FoundServer(url=URL, models=["m"]), lists={other: ["x"]}
+    )
+    assert result == FirstSetup(url=other, model="x", saved=True)
+    assert answers.prompts == ["Use it? [Y/n]: ", f"Server URL [{URL}]: "]
 
 
 def test_a_model_number_counts_in_the_listed_order(config_path: Path) -> None:
@@ -595,7 +607,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
     assert answers.prompts == [
-        f"Server URL [{URL}]: ",
+        "Use it? [Y/n]: ",
         "Model [1]: ",
         "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
     ]
@@ -617,7 +629,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Qwen3-Embedding-0.6B",
     )
     out = capsys.readouterr().out
-    assert "Long-term memory off" not in out
+    assert "Long-term memory is off" not in out
 
 
 def test_a_first_run_on_ollama_saves_the_embedding_in_its_table(
@@ -656,9 +668,20 @@ def test_a_first_run_that_declines_saves_embedding_off(
     probe.assert_not_awaited()
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
-    assert "Long-term memory off (melo setup sets it again).\n" in (
+    assert "Long-term memory is off; melo setup turns it on.\n" in (
         capsys.readouterr().out
     )
+
+
+def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
+    assert result == FirstSetup(url=URL, model="only", saved=True)
+    out = capsys.readouterr().out
+    assert "Long-term memory is off; melo setup turns it on.\n" in out
+    assert "No embedding model" not in out and "Qwen3-Embedding" not in out
+    assert config.load().embedding_backend == "none"
 
 
 @pytest.mark.parametrize(
@@ -676,7 +699,7 @@ def test_a_first_run_that_declines_saves_embedding_off(
         ),
     ],
 )
-def test_a_first_run_without_a_candidate_prints_the_hint(
+def test_melo_setup_says_how_to_get_an_embedding_model(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -687,11 +710,11 @@ def test_a_first_run_without_a_candidate_prints_the_hint(
         return ollama
 
     monkeypatch.setattr(discovery, "is_ollama", is_ollama)
-    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
-    assert result == FirstSetup(url=URL, model="only", saved=True)
+    config.save(_configured())
+    cfg = _guided(_Answers(""), found=FoundServer(url=URL, models=["only"]))
+    assert cfg is not None and cfg.embedding_backend == "none"
     out = capsys.readouterr().out
-    assert f"{hint}\n" in out
-    assert config.load().embedding_backend == "none"
+    assert f"{hint}\n" in out and "Long-term memory is off" not in out
 
 
 def test_a_failed_embedding_probe_saves_with_embedding_off(
