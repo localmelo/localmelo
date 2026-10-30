@@ -1006,6 +1006,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   level and send buttons lose their native `title` tooltips and keep their
   `aria-label`. ([#NN])
 
+- The web console asks for an approval in plain words: a question such as
+  "Replace notes.txt (125 bytes)?", one filled "Allow once", an outlined "Allow
+  for this chat" that says what it covers, and a quiet "Deny" that asks what melo
+  should do instead. Escape stops a running turn only from the message box. ([#NN])
+
+- The web console says what to do after a run ends badly: a ✗ or ⚠ symbol, a
+  hint and one filled next step (Open model settings, Continue, Try again, Show
+  tools or Copy details). Tool rows use ✓ ✗ ⊘ ◌ and a live dot, the offline banner
+  has "Try again", and the selected chat has an accent bar. ([#NN])
+
 - The macOS app's window says what is happening. Until the console has loaded it
   shows Melo, `Starting localmelo…` and the step (`Starting the local server`,
   `Signing in`, `Opening your workspace`) instead of an empty web view, and its
