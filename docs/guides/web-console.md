@@ -633,10 +633,14 @@ asks before commands and file changes.
   runs only when it is routine and part of what you asked. A write outside
   the folder fails in Auto even when no rule caught it: its output says
   `writing outside the workspace is not allowed in auto mode`. A step in
-  Auto can neither read melo's sign-in token nor reach melo's own API. These
-  limits do not cover a program another app starts for melo (opening an app
-  or a script, scripting another app, a background job), so such a step is
-  always blocked in Auto and asked about in Ask.
+  Auto can neither read melo's sign-in token nor reach melo's own API.
+- **A reviewer, not a wall.** Auto blocks risky steps and steps that stray
+  from what you asked. Its sandbox keeps a step's files in the folder and
+  away from melo's sign-in, but a step that hands work to another app or
+  program (opening an app or a script, scripting another app, code for
+  another language, a container or a background job) is judged by the
+  review, not walled off: such steps are blocked or checked by your model,
+  never run as routine.
 - **What is blocked.** Installs, downloads, changes outside the folder,
   deletes, passwords and keys, system settings, code from the internet and
   the like, unless your own words ask for them; a change to localmelo itself
