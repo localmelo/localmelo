@@ -22,6 +22,7 @@ darwin = pytest.mark.skipif(
 FILES = (
     "GatewayPolicy.swift",
     "L10n.swift",
+    "MenuWords.swift",
     "PetPolicy.swift",
     "PetMotion.swift",
     "MotionGate.swift",

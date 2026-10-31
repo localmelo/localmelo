@@ -254,3 +254,17 @@ def test_only_a_one_time_schedule_has_a_date() -> None:
         Schedule("daily", minute=60, on=date(2026, 10, 30))
     with pytest.raises(ScheduleError):
         Schedule("daily", minute=60).when()
+
+
+def test_a_schedule_says_its_time_as_a_clock_each_reader_writes_in_its_own_way() -> (
+    None
+):
+    daily = Schedule("daily", minute=8 * 60 + 30)
+    assert daily.said() == {
+        "key": "schedule.daily",
+        "params": {"time": {"clock": 510}},
+    }
+    # The server writes the 24-hour clock in any language; the page writes its own (`saidText`).
+    assert said_text(daily.said(), "en") == "every day at 8:30"
+    assert said_text(daily.said(), "zh-Hans") == "每天 8:30"
+    assert daily.describe() == "every day at 8:30"

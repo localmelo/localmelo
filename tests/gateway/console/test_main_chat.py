@@ -237,6 +237,14 @@ async def test_a_waiting_approval_gets_a_card_unless_answered_first(
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["state"] == "waiting" and card["source_id"] == side
         assert card["line"] == "Wants to write todo.md"
+        # The words are kept with the line, so the page reads them in its language.
+        assert card["said"] == {
+            "key": "cards.wants.write",
+            "params": {"what": "todo.md"},
+        }
+        zh = {"X-LocalMelo-Language": "zh-Hans"}
+        chinese = (await client.get("/api/sessions", headers=zh)).json()["main"]
+        assert chinese["last_card"]["line"] == "想写入 todo.md"
         assert card["request_id"] == pending["request_id"]
         await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}

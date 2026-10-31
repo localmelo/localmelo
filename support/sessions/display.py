@@ -25,13 +25,14 @@ import re
 import subprocess
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
+from localmelo.support.words import said, said_in
 
 # Characters of the error that a status line shows at most (as direct mode).
 STATUS_LINE_ERROR_CHARS: Final = 500
@@ -389,10 +390,14 @@ class ActivityText:
     ``icon`` names the kind (``wait``, ``held``, ``paused``, ``read``,
     ``write``, ``run``, ``web``, ``memory``, ``think``, ``tool``); each surface
     draws it with its own glyph and hue, so a row never reads by colour alone.
+    ``text`` is the words in English, as the terminal reads them; ``words`` is
+    the same as a ``said`` (a key of the console's catalogs and its
+    parameters), which the console writes in its reader's language.
     """
 
     text: str
     icon: str
+    words: dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 # A command that runs a test suite reads as "Running the tests".
@@ -401,26 +406,21 @@ _TEST_COMMAND: Final = re.compile(
     r"(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|"
     r"python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])"
 )
-_STATE_WORDS: Final[Mapping[str, ActivityText]] = {
-    "waiting": ActivityText("Waiting for your approval", "wait"),
-    "held": ActivityText("Waiting for the model", "held"),
-    "queued": ActivityText("Waiting to start", "held"),
-    "paused": ActivityText("Paused", "paused"),
-    "reflecting": ActivityText("Checking its work", "think"),
-    "remembering": ActivityText("Remembering", "memory"),
-    "thinking": ActivityText("Thinking", "think"),
+# A state's words (a catalog key) and icon.
+_STATES: Final[Mapping[str, tuple[str, str]]] = {
+    "waiting": ("panel.state.waiting", "wait"),
+    "held": ("panel.state.held", "held"),
+    "queued": ("panel.state.queued", "held"),
+    "paused": ("panel.state.paused", "paused"),
+    "reflecting": ("activity.now.reflecting", "think"),
+    "remembering": ("steps.now.remember", "memory"),
+    "thinking": ("activity.now.thinking", "think"),
 }
-# Why the scheduler holds a model call, by the gate's reason code. A code not
-# listed reads like a plain hold.
-_HELD_WORDS: Final[Mapping[str, str]] = {
-    "Priority": "Waiting for a higher-priority task",
-    "Resources": "Waiting for a free model slot",
-    "Reservation": "Waiting while another job uses the model",
-    "Memory": "Waiting for free memory",
-    "Battery": "Waiting for the battery",
-    "Thermal": "Waiting for the Mac to cool down",
-    "IdleOnly": "Waiting until the Mac is idle",
-}
+# The reasons the scheduler holds a model call, by the gate's reason code
+# (``activity.held.<code>``). A code not listed reads like a plain hold.
+_HELD_CODES: Final = frozenset(
+    {"Priority", "Resources", "Reservation", "Memory", "Battery", "Thermal", "IdleOnly"}
+)
 _BROWSER_READS: Final = frozenset(
     {"browser_read", "browser_find", "browser_back", "browser_tabs", "browser_wait"}
 )
@@ -429,6 +429,21 @@ _BROWSER_READS: Final = frozenset(
 def _file_name(arguments: Mapping[str, Any]) -> str:
     path = str(arguments.get("path") or "").rstrip("/")
     return path.rsplit("/", 1)[-1]
+
+
+def _activity(key: str, icon: str, **params: Any) -> ActivityText:
+    words = said(key, **params)
+    return ActivityText(said_in("en", words), icon, words)
+
+
+def _state(name: str) -> ActivityText:
+    key, icon = _STATES[name]
+    return _activity(key, icon)
+
+
+def _doing(verb: str, what: object, icon: str) -> ActivityText:
+    """``Reading notes.md``: *what* is a name, or a ``said`` of the words for it (``a file``)."""
+    return _activity(f"steps.now.{verb}", icon, what=what)
 
 
 def activity_text(
@@ -452,86 +467,75 @@ def activity_text(
     shown, never a command line, code or text. A tool this table does not
     know reads ``Using a tool``; no state and no tool reads ``Thinking``.
     """
-    if state == "held" and reason in _HELD_WORDS:
-        return ActivityText(_HELD_WORDS[reason], "held")
-    if state in _STATE_WORDS:
-        return _STATE_WORDS[state]
+    if state == "held" and reason in _HELD_CODES:
+        return _activity(f"activity.held.{reason}", "held")
+    if state in _STATES:
+        return _state(state)
     args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}
     name = tool.rsplit("__", 1)[-1] if tool.startswith("mcp__") else tool
     if name == "file_read":
-        return ActivityText(f"Reading {_file_name(args) or 'a file'}", "read")
+        return _doing("read", _file_name(args) or said("steps.aFile"), "read")
     if name == "file_write":
-        return ActivityText(f"Writing {_file_name(args) or 'a file'}", "write")
+        return _doing("write", _file_name(args) or said("steps.aFile"), "write")
     if name == "file_edit":
-        return ActivityText(f"Editing {_file_name(args) or 'a file'}", "write")
+        return _doing("edit", _file_name(args) or said("steps.aFile"), "write")
     if name == "git_status":
-        return ActivityText("Reading the git state", "read")
+        return _doing("read", said("steps.gitState"), "read")
     if name == "list_files":
         path = str(args.get("path") or "")
         label = display_path(path, root) if path else "."
-        return ActivityText(
-            (
-                "Looking through the folder"
-                if label == "."
-                else f"Looking through {label}"
-            ),
-            "read",
+        return _doing(
+            "look", said("steps.theFolder") if label == "." else label, "read"
         )
     if name == "shell_exec":
         command = " ".join(str(args.get("command") or "").split())
         tests = _TEST_COMMAND.search(command) is not None
-        return ActivityText(
-            "Running the tests" if tests else "Running a command", "run"
+        return _doing(
+            "run", said("steps.theTests" if tests else "steps.aCommand"), "run"
         )
     if name == "python_exec":
-        return ActivityText("Running Python", "run")
+        return _doing("run", "Python", "run")
     if name in ("recall", "search_memory", "remember"):
-        return _STATE_WORDS["remembering"]
+        return _state("remembering")
     if name == "browser_open":
         host = (urlsplit(str(args.get("url") or "")).hostname or "").removeprefix(
             "www."
         )
-        return ActivityText(f"Reading {host}" if host else "Opening a page", "web")
+        if host:
+            return _doing("read", host, "web")
+        return _doing("open", said("steps.aPage"), "web")
     if name == "browser_follow":
-        return ActivityText("Following a link", "web")
+        return _doing("follow", said("steps.aLink"), "web")
     if name == "browser_screenshot":
-        return ActivityText("Looking at the page", "web")
+        return _doing("lookAt", said("steps.thePage"), "web")
     if name in _BROWSER_READS:
-        return ActivityText("Reading the page", "web")
+        return _doing("read", said("steps.thePage"), "web")
     if not name:
-        return _STATE_WORDS["thinking"]
-    return ActivityText("Using a tool", "tool")
+        return _state("thinking")
+    return _doing("use", said("steps.aTool"), "tool")
 
 
-# The first word of an activity phrase, as a request says it: "Writing x" asks "Write x".
-_ASKED: Final[Mapping[str, str]] = {
-    "Reading": "Read",
-    "Writing": "Write",
-    "Editing": "Edit",
-    "Looking through": "Look through",
-    "Looking at": "Look at",
-    "Running": "Run",
-    "Remembering": "Remember",
-    "Opening": "Open",
-    "Following": "Follow",
-    "Using": "Use",
-}
+def request_said(
+    tool: str, arguments: object = None, *, root: str | None = None
+) -> dict[str, Any]:
+    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``.
+
+    The same words as :func:`activity_text`, put as a request (``steps.ask.*``
+    for ``steps.now.*``), so a command line, code or text is never shown.
+    """
+    words = activity_text(tool, arguments, root=root).words
+    key = str(words["key"])
+    if key.startswith("steps.now."):
+        verb = key.removeprefix("steps.now.")
+        return said(f"steps.ask.{verb}", **words["params"])
+    return words
 
 
 def request_words(
     tool: str, arguments: object = None, *, root: str | None = None
 ) -> str:
-    """What a call that asked for approval would do, in plain words: ``Write slides.md``.
-
-    The same words as :func:`activity_text`, put as a request (``Run a
-    command``, ``Read example.com``), so a command line, code or text is never
-    shown.
-    """
-    text = activity_text(tool, arguments, root=root).text
-    for doing, asked in _ASKED.items():
-        if text.startswith(doing + " "):
-            return asked + text[len(doing) :]
-    return text
+    """:func:`request_said` in English: ``Write slides.md``, ``Run a command``, ``Read example.com``."""
+    return said_in("en", request_said(tool, arguments, root=root))
 
 
 def event_activity(
@@ -557,24 +561,24 @@ def event_activity(
             resolved.add(str(data.get("request_id", "")))
         elif kind == "approval.requested":
             if str(data.get("request_id", "")) not in resolved:
-                return _STATE_WORDS["waiting"]
+                return _state("waiting")
         elif kind == "tool.started":
             if str(data.get("call_id", "")) not in finished:
                 return activity_text(
                     str(data.get("name") or ""), data.get("arguments"), root=root
                 )
         elif kind == "reflection.started":
-            return _STATE_WORDS["reflecting"]
+            return _state("reflecting")
         elif kind in ("recall", "memory"):
-            return _STATE_WORDS["remembering"]
+            return _state("remembering")
         elif kind in (
             "reflection",
             "step.started",
             "assistant.message",
             "turn.started",
         ):
-            return _STATE_WORDS["thinking"]
-    return _STATE_WORDS["thinking"]
+            return _state("thinking")
+    return _state("thinking")
 
 
 # An answer that says it is done: "Done.", "All done!", "已完成。". A surface

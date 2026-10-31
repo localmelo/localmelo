@@ -12,7 +12,7 @@
  * modules, served as they are.
  */
 
-import { t } from "./i18n.mjs";
+import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
@@ -25,7 +25,7 @@ import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
-import { allowState, blockCard, blockFacts } from "./blocked.mjs";
+import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
@@ -1433,8 +1433,8 @@ function failureActions(turn, {stopped, newest, can, error}) {
     ["settings", turn.status === "provider_error", t(address ? "failure.changeAddress" : "failure.openSettings"), () => openSettings()],
     ["tools", turn.status === "setup_error", t("failure.showTools"), () => drawer.open("tools")],
     ["copy", !stopped, t(first === "copy" ? "failure.copyDetails" : "failure.copyError"), async () => {
-      // The details stay in English, as the terminal prints them: they go into a bug report.
-      try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
+      // The words around the details read in the page's language; the codes, the run id and the error stay as they are.
+      try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\n${t("failure.copyRun", { id: turn.runId })}`); }
       catch { notify(t("failure.copyFailed")); }
     }],
   ].filter(([, shown]) => shown);
@@ -1473,14 +1473,15 @@ function statusNode(turn) {
   if (!stopped) {
     const details = el("details", "failure-details");
     details.append(el("summary", "", t("failure.details")));
-    // The fields stay in English, as the terminal prints them: they go into a bug report.
+    // The labels read in the page's language; the status, the cause, the error and the run id are copied as they are.
     const result = turn.result ?? {};
+    const field = (name, value) => t(`failure.field.${name}`, { value });
     const fields = [
-      `Status: ${turn.status}`, `Cause: ${turn.cause || "run"}`,
-      `Error: ${cleanOutput(error) || "no error message"}`,
-      `Steps: ${result.steps ?? turn.step ?? 0}`, `Attempts: ${result.attempts ?? turn.attempt ?? 0}`,
-      `Tool calls: ${result.n_tool ?? 0}`, `Tokens: ${turn.outputTokens}`,
-      `Duration: ${formatDuration(turnDuration(turn))}`, `Run: ${turn.runId}`,
+      field("status", turn.status), field("cause", turn.cause || "run"),
+      field("error", cleanOutput(error) || t("failure.noMessage")),
+      field("steps", result.steps ?? turn.step ?? 0), field("attempts", result.attempts ?? turn.attempt ?? 0),
+      field("tools", result.n_tool ?? 0), field("tokens", turn.outputTokens),
+      field("duration", formatDuration(turnDuration(turn))), field("run", turn.runId),
     ];
     details.append(el("pre", "", fields.join("\n")));
     node.append(details);
@@ -1693,16 +1694,17 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny.
   const review = request.review;
   const high = review?.verdict === "high";
+  const reviewed = high ? reviewWords(review, folder) : { title: "", reasons: [] };
   if (high) {
     card.dataset.impact = "high";
-    title = review.title || title;
+    title = reviewed.title || title;
     caption = t("approval.asksEveryTime", { tool });
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
-  if (high && review.reasons?.length) {
+  if (high && reviewed.reasons.length) {
     card.append(el("p", "approval-why", t("approval.why")));
     const reasons = el("ul", "approval-reasons");
-    for (const reason of review.reasons) reasons.append(el("li", "", reason));
+    for (const reason of reviewed.reasons) reasons.append(el("li", "", reason));
     card.append(reasons);
   }
   if (high && asked) {
@@ -2615,7 +2617,7 @@ function renderWorkers() {
       const link = document.createElement("a");
       link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
       link.append(el("strong", "", row.title || w("notRecorded")), el("span", "muted", [terminal ? "terminal" : row.source, row.model, row.status].map((v) => v == null || v === "" ? w("notRecorded") : String(v)).join(" · ")));
-      const started = row.started_at == null ? w("notRecorded") : new Date(row.started_at * 1000).toLocaleString();
+      const started = row.started_at == null ? w("notRecorded") : formatTime(new Date(row.started_at * 1000), "full");
       const duration = row.duration_s == null ? w("notRecorded") : formatDuration(row.duration_s);
       const times = w("rowTimes", {when: w(terminal ? "lastTurn" : "started"), started, duration});
       link.append(el("span", "muted", `${times}${row.parent_run ? w("rowParent", {parent: row.parent_run}) : ""}`));
@@ -2634,10 +2636,10 @@ function renderWorkers() {
     const session = state.session;
     const meta = el("dl", "worker-meta");
     const firstTurn = state.view.turns[0];
-    const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
+    const started = session.started_at == null ? null : formatTime(new Date(session.started_at * 1000), "full");
     const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
     const fields = terminal
-      ? [["model", session.model], ["workspace", session.workspace], ["created", new Date(session.created_at * 1000).toLocaleString()], ["tokens", session.tokens], ["status", session.status]]
+      ? [["model", session.model], ["workspace", session.workspace], ["created", formatTime(new Date(session.created_at * 1000), "full")], ["tokens", session.tokens], ["status", session.status]]
       : [["source", session.source], ["model", session.model], ["workspace", session.workspace], ["gitBranch", session.git_branch], ["gitHead", session.git_head], ["started", started], ["duration", duration == null ? null : formatDuration(duration)], ["steps", session.steps], ["tokens", session.tokens], ["status", session.status], ["exitCode", session.exit_code], ["parentRun", session.parent_run]];
     for (const [label, value] of fields) {
       meta.append(el("dt", "", w(label)), el("dd", "", value == null || value === "" ? w("notRecorded") : String(value)));

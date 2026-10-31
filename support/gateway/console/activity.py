@@ -25,12 +25,12 @@ from typing import TYPE_CHECKING, Any, Final
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from localmelo.support.gateway.i18n import t, t_in
+from localmelo.support.gateway.i18n import said_text, t, t_in
 from localmelo.support.sessions.display import (
     activity_text,
     drop_leading_ack,
     home_label,
-    request_words,
+    request_said,
     split_thinking,
     status_text,
 )
@@ -42,7 +42,7 @@ from localmelo.support.sessions.store import (
 
 from ..finishing import NOT_CONTINUED
 from .errors import ApiError
-from .running import TASK_OUTCOMES, TITLE_CHARS, _turn_outcome, item_activity
+from .running import TASK_OUTCOMES, TITLE_CHARS, _turn_outcome, item_activity, spoken
 
 if TYPE_CHECKING:
     from . import Console
@@ -245,7 +245,7 @@ async def _live(row: dict[str, Any], console: Console) -> None:
     text, _ = await item_activity(console, row["kind"], row["id"])
     if text.icon in ("wait", "held"):
         row["state"] = "waiting" if text.icon == "wait" else "held"
-    row.update(activity=text.text, icon=text.icon)
+    row.update(activity=spoken(text), icon=text.icon)
 
 
 async def _session_rows(
@@ -286,7 +286,7 @@ async def _task_rows(
             await _live(row, console)
         elif state in LIVE:
             text = activity_text(state=state, reason=console.gate.held(record.task_id))
-            row.update(activity=text.text, icon=text.icon)
+            row.update(activity=spoken(text), icon=text.icon)
         else:
             turn = sessions.get(record.task_id)
             ended = _ended(turn) if turn is not None else (state, state, "")
@@ -335,10 +335,12 @@ def approvals_of(events: Iterable[StoredEvent]) -> dict[str, list[dict[str, Any]
             ts = event.get("ts")
             asked[key] = {
                 "id": key[1],
-                "what": request_words(
-                    str(data.get("tool_name") or ""),
-                    data.get("arguments"),
-                    root=root if isinstance(root, str) else None,
+                "what": said_text(
+                    request_said(
+                        str(data.get("tool_name") or ""),
+                        data.get("arguments"),
+                        root=root if isinstance(root, str) else None,
+                    )
                 ),
                 "answer": "waiting",
                 "at": float(ts) if isinstance(ts, int | float) else 0.0,

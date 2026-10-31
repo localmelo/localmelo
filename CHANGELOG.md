@@ -46,6 +46,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Chinese, finished. Times and dates follow the page's language, not the
+  computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
+  `Oct 31` in English (an English computer on 24 hours keeps its clock), on
+  cards, the panel, task pages, Scheduled, Settings and the details of a
+  run. The panel's tab and every other place that said "Worker" say 后台
+  (后台任务 for a run); the model server's kind and the Settings choices
+  read in Chinese; and so do the status row (the context, and in developer
+  mode the cache, step and queue), a failed run's details and the line
+  **Copy details** copies, chore errors, the question and reasons on the
+  card for a high-impact step (Ask and Auto), a schedule's text with the
+  page's clock (`每个工作日 上午 8:30`), what each row says it is doing
+  (the macOS pill too) and the check-in's note. The status, the error text
+  and the run id are copied as they are, and the terminal and API clients
+  keep English. In the macOS app the menus, the pill and Melo's menu change
+  language at once when Settings changes it, without a restart.
+  `GET /api/sessions/{id}/status` also returns `parts` (the segments as
+  catalog keys and parameters) and a chore `when_said`; `segments` and
+  `when` are unchanged ([#360]).
+
+- Scheduled shows the time a chore is set for (`8:30`), not the few seconds
+  the start is spread by (`8:31`): a chore has `next_at` beside `next_run`,
+  which is still when the run starts, up to 120 seconds later. The line
+  "Wants to run a command" on the main chat's approval card reads in the
+  chosen language too ([#360]).
+
 - A run ends with a usable answer more often. The patient reflection gate
   (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
   defaults: a next step that is not new still continues once per run, and a
@@ -2943,3 +2968,4 @@ earlier milestones.
 [#356]: https://github.com/localmelo/localmelo/pull/356
 [#358]: https://github.com/localmelo/localmelo/pull/358
 [#359]: https://github.com/localmelo/localmelo/pull/359
+[#360]: https://github.com/localmelo/localmelo/pull/360

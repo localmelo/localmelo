@@ -129,7 +129,9 @@ output or log the header; same-user processes can still read the token file.
   `config_errors` is `Config.validate()` on the settings in use.
 - `model.backend_label` is the backend registry's label; for the `vllm` backend it
   is `oMLX` when the config file says `omlx` or a model listing of the server
-  did, else `OpenAI-compatible server`. `model.embedding`
+  did, else `OpenAI-compatible server` (in the language of the request when it
+  sends `X-LocalMelo-Language: zh-Hans`; a client that sends none reads
+  English). `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the
@@ -162,7 +164,7 @@ output or log the header; same-user processes can still read the token file.
   redacted). The counts are not capped. A store that cannot be read counts as
   nothing running; one call reads the task states by their index and the
   running turns of the CLI file by theirs.
-- `activity` says what the item is doing in plain words, and `icon` its kind:
+- `activity` says what the item is doing in plain words (in the language of the request when it sends `X-LocalMelo-Language`, as the macOS pill does; English otherwise), and `icon` its kind:
   `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
   scheduler holds its model call; when the reason is known it says why:
   `Waiting for a higher-priority task`, `Waiting for a free model slot`,
@@ -669,7 +671,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
@@ -679,6 +681,9 @@ Saved requests that run on a schedule (see [Chores that repeat](../guides/web-co
 - `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+- `next_at` is the time the schedule names for the next run (`08:30`), which the console shows; `next_run` is when the run starts, up to 120 seconds later, so chores do not all start on the minute. For an every-N-hours chore, which names no time, they are equal. Both are `null` while the chore is off.
+- `when_said` is `when` as words: a catalog key and its parameters, where a time of day is `{"clock": minutes after midnight}`. The page writes it in its own language and clock (`8:30 AM`, `上午 8:30`); `when` always writes the 24-hour clock (`8:30`), in the language of the request.
+- The check-in's note is written in the console's language: the `[console] language` setting, else the language the page asked for last, else English.
 
 A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 30 at 9:00` (in the page's language for the console), its first `next_run` is its time plus the jitter, and after its run the gateway switches it off: `enabled` false, `next_run` null, `last_run` and `last` kept. One due while the computer slept or the gateway was down runs at the next tick, and `late_min` then says how many minutes after its time it started (null when it started less than five minutes after it). It never waits for an earlier run to end.
 
@@ -1053,6 +1058,12 @@ the CLI's file.
   "session_id": "3f9c2a7b1d4e",
   "local": true,
   "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "parts": [
+    {"key": "status.cacheIdle", "params": {"share": "67%", "idle": "3m"}},
+    {"key": "status.ctx", "params": {"used": "1.0k", "limit": "8.0k"}},
+    {"key": "status.step", "params": {"step": 3}},
+    {"key": "status.tasks", "params": {"running": 1, "queued": 2, "held": 0}}
+  ],
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
@@ -1064,6 +1075,10 @@ the CLI's file.
   right: cache, context, step, tasks, then a sentence such as `1 task waits for
   you` (`N tasks wait for you`) while a held task waits for your approval. A
   segment with no data is left out.
+- `parts` is the same segments as words: a key of the console's catalogs
+  (`status.*`) and its parameters, one for each segment and in the same order.
+  `segments` is those words in English, as the terminal prints them; the web
+  console writes them in its own language.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is

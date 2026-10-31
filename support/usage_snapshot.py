@@ -10,6 +10,11 @@ The cache segment is the share of prompt tokens the server reported as cached.
 A server that sends no ``cached_tokens`` shows ``--``, never 0%. A local
 server's prefix cache is evicted by memory, not by time, so it shows the idle
 time since the last request and no countdown.
+
+The status row's segments are kept as words (:func:`status_parts`: a key of the
+console's catalog and its parameters, as ``said`` stores them), so the console
+can write them in its reader's language. The terminal's own segments
+(:func:`status_segments`) are the same words rendered in English.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from typing import Any
 
 from localmelo.support.progress_line import run_elapsed
 from localmelo.support.sessions.display import format_tokens
+from localmelo.support.words import t_in
 
 
 @dataclass(frozen=True)
@@ -35,9 +41,19 @@ class TaskCounts:
     waiting: int = 0
 
 
+def _words(key: str, /, **params: Any) -> dict[str, Any]:
+    """One segment of the status row as words: ``{"key", "params"}`` of the console's catalog."""
+    return {"key": key, "params": params}
+
+
+def _english(part: Mapping[str, Any]) -> str:
+    """A segment's words in English, as the terminal prints them."""
+    return t_in("en", part["key"], **part["params"])
+
+
 def waits_for_you(count: int) -> str:
     """The sentence for *count* tasks that wait for the person."""
-    return "1 task waits for you" if count == 1 else f"{count} tasks wait for you"
+    return _english(_words("status.waits", n=count))
 
 
 def _count(value: object) -> int | None:
@@ -135,6 +151,7 @@ class UsageSnapshot:
         return {
             "local": local,
             "segments": status_segments(self, local=local, now=now, tasks=tasks),
+            "parts": status_parts(self, local=local, now=now, tasks=tasks),
             "cache": {
                 "requests": self.requests,
                 "last_percent": _share(self.last_cached, self.last_prompt),
@@ -292,6 +309,89 @@ def _idle_text(seconds: float) -> str:
     return f"{minutes // 60}h{minutes % 60:02d}m"
 
 
+def status_parts(
+    snap: UsageSnapshot,
+    *,
+    local: bool,
+    now: float,
+    tasks: TaskCounts | None = None,
+    steps: bool = True,
+    words: bool = False,
+) -> list[dict[str, Any]]:
+    """The status row's segments as words, left to right: cache, ctx, steps, tasks, waiting.
+
+    Each is ``{"key", "params"}`` of the console's catalog (``status.*``); see
+    :func:`status_segments` for what they say. A segment with no data is left
+    out, and so are the steps with *steps* false.
+    """
+    parts: list[dict[str, Any]] = []
+    if snap.requests:
+        idle = ""
+        if local and snap.last_request_ts is not None:
+            gap = now - snap.last_request_ts
+            if gap >= 60:
+                idle = _idle_text(gap)
+        if snap.last_cached is None or not snap.last_prompt:
+            if not words:
+                parts.append(
+                    _words("status.cacheNoneIdle", idle=idle)
+                    if idle
+                    else _words("status.cacheNone")
+                )
+        else:
+            share = _percent(snap.last_cached, snap.last_prompt)
+            if words:
+                key = "status.cachedIdle" if idle else "status.cached"
+            else:
+                key = "status.cacheIdle" if idle else "status.cache"
+            parts.append(_words(key, share=share, idle=idle))
+    context = snap.context or {}
+    measured = _count(context.get("measured_prompt_tokens"))
+    if measured:
+        limit = _count(context.get("input_limit"))
+        if words:
+            parts.append(_context_part(measured, limit))
+        elif limit:
+            parts.append(
+                _words(
+                    "status.ctx",
+                    used=format_tokens(measured),
+                    limit=format_tokens(limit),
+                )
+            )
+        else:
+            parts.append(_words("status.ctxOpen", used=format_tokens(measured)))
+    if steps and snap.run_active and snap.progress is not None:
+        facts: dict[str, Any] = {"step": _count(snap.progress.get("step")) or 0}
+        attempt = _count(snap.progress.get("attempt")) or 1
+        if attempt >= 2:
+            facts["attempt"] = attempt
+        phase = snap.progress.get("phase")
+        if isinstance(phase, str) and phase:
+            facts["phase"] = phase
+        key = {
+            (False, False): "status.step",
+            (True, False): "status.stepAttempt",
+            (False, True): "status.stepPhase",
+            (True, True): "status.stepAttemptPhase",
+        }[("attempt" in facts, "phase" in facts)]
+        parts.append(_words(key, **facts))
+    if tasks is not None:
+        parts.append(
+            _words(
+                "status.tasksHeld" if tasks.held else "status.tasks",
+                running=tasks.running,
+                queued=tasks.queued,
+                held=tasks.held,
+            )
+        )
+        # The counts are for developers. A task that waits for the person is
+        # not: it gets a sentence of its own, which every mode draws.
+        if tasks.waiting > 0:
+            parts.append(_words("status.waits", n=tasks.waiting))
+    return parts
+
+
 def status_segments(
     snap: UsageSnapshot,
     *,
@@ -301,7 +401,7 @@ def status_segments(
     steps: bool = True,
     words: bool = False,
 ) -> list[str]:
-    """The status row's segments, left to right: cache, ctx, steps, tasks, waiting.
+    """The status row's segments in English, left to right: cache, ctx, steps, tasks, waiting.
 
     A segment with no data is left out, and so are the steps with *steps*
     false. Steps are the progress spec's level-0
@@ -312,56 +412,26 @@ def status_segments(
     With *words* (the terminal's default mode) the cache and the context read
     as words, ``83% cached`` and ``context 8% used``, and the cache waits until
     the server has reported a value instead of showing ``cache --``. The
-    console's status route keeps the compact segments.
+    console's status route keeps the compact segments, and sends them as
+    :func:`status_parts` too, for its reader's language.
     """
-    segments: list[str] = []
-    if snap.requests:
-        if snap.last_cached is None or not snap.last_prompt:
-            cache = "" if words else "cache --"
-        else:
-            share = _percent(snap.last_cached, snap.last_prompt)
-            cache = f"{share} cached" if words else f"cache {share}"
-        if cache:
-            if local and snap.last_request_ts is not None:
-                idle = now - snap.last_request_ts
-                if idle >= 60:
-                    cache += f"{',' if words else ''} idle {_idle_text(idle)}"
-            segments.append(cache)
-    context = snap.context or {}
-    measured = _count(context.get("measured_prompt_tokens"))
-    if measured:
-        limit = _count(context.get("input_limit"))
-        if words:
-            segments.append(context_words(measured, limit))
-        else:
-            segments.append(
-                f"ctx {format_tokens(measured)}"
-                + (f"/{format_tokens(limit)}" if limit else "")
-            )
-    if steps and snap.run_active and snap.progress is not None:
-        facts = [f"step {_count(snap.progress.get('step')) or 0}"]
-        attempt = _count(snap.progress.get("attempt")) or 1
-        if attempt >= 2:
-            facts.append(f"attempt {attempt}")
-        phase = snap.progress.get("phase")
-        if isinstance(phase, str) and phase:
-            facts.append(f"phase {phase}")
-        segments.append(" ".join(facts))
-    if tasks is not None:
-        text = f"tasks {tasks.running} running {tasks.queued} queued"
-        segments.append(text + (f" {tasks.held} held" if tasks.held else ""))
-        # The counts are for developers. A task that waits for the person is
-        # not: it gets a sentence of its own, which every mode draws.
-        if tasks.waiting > 0:
-            segments.append(waits_for_you(tasks.waiting))
-    return segments
+    return [
+        _english(part)
+        for part in status_parts(
+            snap, local=local, now=now, tasks=tasks, steps=steps, words=words
+        )
+    ]
+
+
+def _context_part(measured: int, limit: int | None) -> dict[str, Any]:
+    if limit:
+        return _words("status.context", share=_percent(measured, limit))
+    return _words("status.contextTokens", tokens=format_tokens(measured))
 
 
 def context_words(measured: int, limit: int | None = None) -> str:
     """The status bar's context in words: ``context 8% used``, or the tokens."""
-    if limit:
-        return f"context {_percent(measured, limit)} used"
-    return f"context {format_tokens(measured)} tokens"
+    return _english(_context_part(measured, limit))
 
 
 @dataclass(frozen=True)

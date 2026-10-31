@@ -25,6 +25,7 @@ spec = importlib.util.spec_from_file_location(
 assert spec and spec.loader
 build_app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build_app)
+LANGUAGE_HANDLER = 'static let name = "localmeloLanguage"'
 darwin = pytest.mark.skipif(
     sys.platform != "darwin", reason="Swift AppKit host is macOS-only"
 )
@@ -40,9 +41,9 @@ def swift(value: object) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
-def run_swift(tmp_path: Path, source: str) -> str:
+def run_swift(tmp_path: Path, source: str, *more: str) -> str:
     main = tmp_path / "main.swift"
-    main.write_text("import Foundation\n" + source, encoding="utf-8")
+    main.write_text("import AppKit\n" + source, encoding="utf-8")
     binary = tmp_path / "test-l10n"
     subprocess.run(
         [
@@ -50,6 +51,7 @@ def run_swift(tmp_path: Path, source: str) -> str:
             "swiftc",
             str(APP / "L10n.swift"),
             str(APP / "GatewayPolicy.swift"),
+            *(str(APP / name) for name in more),
             str(main),
             "-o",
             str(binary),
@@ -122,3 +124,84 @@ precondition(L10n.language == "en" && quitTitle(attached: false) == "Quit localm
         "退出会停止正在运行的 2 个任务和 1 个对话。不受影响：1 次运行。",
         "正在登录",
     ]
+
+
+@darwin
+def test_the_menus_write_their_titles_again_when_the_language_changes(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "Bundle"
+    build_app.write_localizations(resources)
+    zh = json.loads(
+        (ROOT / "support/gateway/static/i18n/zh-Hans.json").read_text("utf-8")
+    )
+    out = run_swift(
+        tmp_path,
+        f"""
+func titles(_ menu: NSMenu) -> String {{
+    menu.items.map {{ item in item.submenu.map {{ "\\(item.title)[\\(titles($0))]" }} ?? item.title }}.joined(separator: "|")
+}}
+let bundle = Bundle(path: {swift(str(resources))})!
+let appMenu = NSMenu()
+appMenu.addItem(withTitle: "", action: nil, keyEquivalent: "").word(.open)
+appMenu.addItem(withTitle: "", action: nil, keyEquivalent: ",").word(.settings)
+appMenu.addItem(.separator())
+appMenu.addItem(withTitle: "", action: nil, keyEquivalent: "q").word(.quit)
+let desktop = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+let modes = NSMenu()
+for mode in DesktopMode.allCases {{ modes.addItem(withTitle: "", action: nil, keyEquivalent: "").word(mode.menuWord) }}
+desktop.submenu = modes
+desktop.word(.desktop)
+appMenu.addItem(desktop)
+// A line the app writes itself, from what runs, is not a word of the menu: it is left as it is.
+appMenu.addItem(withTitle: "2 running", action: nil, keyEquivalent: "")
+// The menu bar holds a copy of the app menu; it keeps what each item says.
+let copy = appMenu.copy() as! NSMenu
+print(titles(appMenu))
+L10n.use("zh-Hans", bundle: bundle)
+retitle(appMenu)
+retitle(copy, attached: true)
+print(titles(appMenu))
+print(titles(copy))
+L10n.use("en", bundle: bundle)
+retitle(appMenu)
+print(titles(appMenu))
+precondition(languageRequest(["language": "zh-Hans"]) == "zh-Hans")
+precondition(languageRequest(["language": "en"]) == "en")
+precondition(languageRequest(["language": "fr"]) == nil)
+precondition(languageRequest(["lang": "en"]) == nil)
+precondition(languageRequest("en") == nil)
+""",
+        "PetPolicy.swift",
+        "MenuWords.swift",
+    )
+    t = zh.get
+    expected = [
+        "Open localmelo|Settings…||Quit localmelo|On the desktop"
+        "[Melo and the activity pill|Melo only|Nothing]|2 running",
+        f"{t('app.menu.open')}|{t('app.menu.settings')}||{t('app.menu.quit')}|"
+        f"{t('app.desktop.menu')}[{t('app.desktop.pill')}|{t('app.desktop.pet')}|"
+        f"{t('app.desktop.nothing')}]|2 running",
+        f"{t('app.menu.open')}|{t('app.menu.settings')}||{t('app.menu.quitAttached')}|"
+        f"{t('app.desktop.menu')}[{t('app.desktop.pill')}|{t('app.desktop.pet')}|"
+        f"{t('app.desktop.nothing')}]|2 running",
+        "Open localmelo|Settings…||Quit localmelo|On the desktop"
+        "[Melo and the activity pill|Melo only|Nothing]|2 running",
+    ]
+    assert out.splitlines() == expected
+    assert expected[0] != expected[1]
+
+
+def test_no_menu_title_is_written_where_a_language_change_cannot_reach_it() -> None:
+    """Menus take their titles from `MenuWord`; the console tells the app its language through `LanguageBridge`."""
+    for name in ("main.swift", "MenuBar.swift", "PetPanel.swift", "PillPanel.swift"):
+        source = (APP / name).read_text("utf-8")
+        for line in source.splitlines():
+            if "addItem(withTitle" in line or "NSMenuItem(title" in line:
+                assert "L10n" not in line and "quitTitle" not in line, f"{name}: {line}"
+    main = (APP / "main.swift").read_text("utf-8")
+    assert "LanguageBridge(" in main and "LanguageBridge.name" in main
+    page = (ROOT / "support/gateway/static/i18n.mjs").read_text("utf-8")
+    assert "localmeloLanguage" in page and LANGUAGE_HANDLER in (
+        APP / "FolderBridge.swift"
+    ).read_text("utf-8")

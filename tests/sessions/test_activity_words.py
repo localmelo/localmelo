@@ -12,8 +12,10 @@ from localmelo.support.sessions.display import (
     activity_text,
     drop_leading_ack,
     event_activity,
+    request_said,
     request_words,
 )
+from localmelo.support.words import said_in
 
 
 @pytest.mark.parametrize(
@@ -203,3 +205,43 @@ def test_a_reason_changes_only_a_held_state() -> None:
     assert activity_text(state="waiting", reason="Priority") == ActivityText(
         "Waiting for your approval", "wait"
     )
+
+
+@pytest.mark.parametrize(
+    "tool, arguments, kwargs, words",
+    [
+        ("file_read", {"path": "/w/notes.md"}, {}, "正在读取 notes.md"),
+        ("file_read", {}, {}, "正在读取 一个文件"),
+        ("shell_exec", {"command": "uv run pytest"}, {}, "正在运行 测试"),
+        ("python_exec", {"code": "1"}, {}, "正在运行 Python"),
+        (
+            "browser_open",
+            {"url": "https://www.example.com/a"},
+            {},
+            "正在读取 example.com",
+        ),
+        ("list_files", {"path": "/w"}, {"root": "/w"}, "正在浏览 文件夹"),
+        ("mcp__x__y", {}, {}, "正在使用 一个工具"),
+        ("", None, {}, "正在思考"),
+        ("", None, {"state": "waiting"}, "在等你批准"),
+        ("", None, {"state": "held", "reason": "Thermal"}, "在等 Mac 降温"),
+    ],
+)
+def test_the_same_words_are_kept_for_the_console_to_say_in_chinese(
+    tool: str, arguments: Any, kwargs: dict[str, str], words: str
+) -> None:
+    found = activity_text(tool, arguments, **kwargs)
+    assert said_in("zh-Hans", found.words) == words
+    # The terminal reads the English text, which is those words in English.
+    assert said_in("en", found.words) == found.text
+
+
+def test_a_request_is_the_same_words_put_as_a_request_in_any_language() -> None:
+    said = request_said("file_write", {"path": "/w/slides.md"})
+    assert said_in("en", said) == "Write slides.md"
+    assert said_in("zh-Hans", said) == "写入 slides.md"
+    assert (
+        said_in("zh-Hans", request_said("shell_exec", {"command": "ls"}))
+        == "运行 一条命令"
+    )
+    assert said_in("zh-Hans", request_said("", None)) == "正在思考"

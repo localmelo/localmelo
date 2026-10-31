@@ -19,6 +19,7 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Final, Literal
 
 from localmelo.support.gateway.i18n import said, said_text
+from localmelo.support.words import clock_words
 
 Kind = Literal["daily", "weekdays", "hours", "once"]
 KINDS: Final = ("daily", "weekdays", "hours", "once")
@@ -32,12 +33,18 @@ DEFAULT_MINUTE: Final = 9 * 60
 
 
 class ScheduleError(ValueError):
-    """A schedule that is not one of the kinds, or out of range."""
+    """A schedule that is not one of the kinds, or out of range.
+
+    *words* is the message as a :func:`said`, for an error a person can cause
+    from the page; the console says it in the reader's language.
+    """
+
+    def __init__(self, message: str, words: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.words = words
 
 
-def clock_text(minute: int) -> str:
-    """``8:30`` for 510 minutes after midnight."""
-    return f"{minute // 60}:{minute % 60:02d}"
+clock_text = clock_words
 
 
 @dataclass(frozen=True)
@@ -134,7 +141,7 @@ class Schedule:
             return said("schedule.hours", n=self.hours)
         if self.on is not None:
             return said("schedule.once", at=self.said_at())
-        return said(f"schedule.{self.kind}", time=clock_text(self.minute))
+        return said(f"schedule.{self.kind}", time={"clock": self.minute})
 
     def said_at(self) -> dict[str, Any]:
         """A one-time schedule's date and time without "once": ``Fri Oct 30 at 9:00``."""
@@ -146,7 +153,7 @@ class Schedule:
             weekday=said(f"time.weekday.{weekday}"),
             month=said(f"time.month.{month}"),
             day=self.on.day,
-            time=clock_text(self.minute),
+            time={"clock": self.minute},
         )
 
     def next_after(self, after: float, tz: tzinfo | None = None) -> float:
@@ -158,9 +165,14 @@ class Schedule:
         if self.on is not None:
             when = self.when(tz)
             if when <= after:
-                raise ScheduleError("That time has passed. Choose a new time.")
+                raise ScheduleError(
+                    "That time has passed. Choose a new time.",
+                    said("errors.timePassed"),
+                )
             if when > after + MAX_AHEAD.total_seconds():
-                raise ScheduleError("Reminders can be at most a year ahead.")
+                raise ScheduleError(
+                    "Reminders can be at most a year ahead.", said("errors.timeTooFar")
+                )
             return when
         if self.kind == "hours":
             return after + self.hours * 3600.0
