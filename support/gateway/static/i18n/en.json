@@ -530,6 +530,8 @@
   "errors.sessionDeleted": "This session was deleted.",
   "errors.sessionNotFound": "Session not found.",
   "errors.sincePast": "since must be a past time.",
+  "errors.sleepGone": "No such tidy-up run, or it was undone already.",
+  "errors.sleepVariant": "variant: must be one of {choices}.",
   "errors.storeUnavailable": "The session store is not available.",
   "errors.taskAsChat": "A task session cannot run as a chat.",
   "errors.taskChange": "A task session cannot be changed as a chat.",

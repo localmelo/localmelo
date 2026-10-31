@@ -45,7 +45,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 |---|---|---|
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
-| `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`, `import`. | `list -n N`, `forget ID`, `forget -y`, `import --undo BATCH` |
+| `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`, `import` (and `sleep` in developer mode). | `list -n N`, `forget ID`, `forget -y`, `import --undo BATCH` |
 | `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
@@ -153,7 +153,9 @@ dot. `melo -h all` lists the keys with their defaults.
 
 `melo memory VERB` sees and changes the notes melo keeps about you, the same ones the console's
 Memory tab lists (see [Memory across chats](../concepts/memory.md#memory-across-chats)). It reads and writes
-`~/.cache/localmelo/memory/` and never calls a model.
+`~/.cache/localmelo/memory/`. Listing and forgetting notes make no model request;
+`reindex` may embed notes and turns, and developer-only `sleep` may use the configured
+embedding and chat models as its variant requires.
 
 | Verb | What it does |
 |---|---|
@@ -162,6 +164,7 @@ Memory tab lists (see [Memory across chats](../concepts/memory.md#memory-across-
 | `melo memory status` | Whether memory across chats is on, the number of notes and of indexed chat turns, how it searches (by meaning with the embedding model, or by words only), the folder and the last reason the embedding model was not used. |
 | `melo memory import [-u BATCH]` | Offer the notes other assistants on this computer keep about you: a list of `Bring in N notes from M files`, `Show what they say` and `Not now` (piped input: a numbered question). The list starts on `Show what they say`. It writes nothing until the first row is chosen, then prints the batch; Esc, ctrl+c and end of input bring nothing in and record nothing (`Nothing brought in.`, exit 130 for Esc and ctrl+c, else 0). `-u BATCH` (`--undo`) takes that batch back and keeps notes you edited since (`Kept N notes you edited.`). Exit 1 when `--undo` finds no notes. |
 | `melo memory reindex` | Rebuild the chat index from the chats and give every note a vector of the embedding model now set. Turns that ended before the last "forget everything" stay out. Exit 1 while `melo serve` or the app runs, since it owns the chats. |
+| `melo memory sleep [VARIANT]` | Developer mode only (`[ui] mode = "developer"`; else exit 2). Tidy the notes with `off`, `rules`, `model` or `model+tags` (`[memory] sleep` when omitted), then print the run id, model-call count, any abort reason and each change (`O1` merge, `O2` newer value, `O3` recovered fact, `ADD`, `UPDATE`, `RETIRE`, `O4` named reference). Model variants share a twelve-request limit. Exit 1 while `melo serve` or the app runs. |
 
 ```text
 $ melo memory list

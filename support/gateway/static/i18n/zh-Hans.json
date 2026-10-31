@@ -513,6 +513,8 @@
   "errors.sessionDeleted": "这个会话已被删除。",
   "errors.sessionNotFound": "找不到这个会话。",
   "errors.sincePast": "since 必须是过去的时间。",
+  "errors.sleepGone": "没有这次整理，或者它已经撤销了。",
+  "errors.sleepVariant": "variant：只能是 {choices} 之一。",
   "errors.storeUnavailable": "会话存储不可用。",
   "errors.taskAsChat": "任务会话不能作为对话运行。",
   "errors.taskChange": "任务会话不能像对话那样更改。",
