@@ -23,6 +23,7 @@ import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
+import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -531,6 +532,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -736,6 +738,8 @@ function harness(routes, {mobile = false} = {}) {
     ...levels,
     ...modeChip,
     ...blocked,
+    parseCommand,
+    setupSlash,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
@@ -4445,6 +4449,8 @@ test('a message the main chat started as a task shows as the person\'s words and
   const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: '/task make slides'});
   const h = harness(defaultMode({...mainRoutes({
     'POST /sessions/m/turns': {status: 200, body: {echo: started}},
+    // /task is a slash command, so the page asks which commands there are before it sends the line.
+    'GET /commands': {commands: [{name: 'task', aliases: [], args: 'TEXT', help: {en: 'Start a task', 'zh-Hans': '开始任务'}, during_turn: false, keys: '', action: 'send'}], everyday: ['task']},
     'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → P1', undo: {level: 'auto'}})}},
   }), 'GET /settings': {mode: 'default'}}));
   await h.run('init()');
@@ -4890,4 +4896,209 @@ test('a task\'s page lists the steps that ran on an earlier approval, and Revoke
   assert.equal(h.net.callsTo('/sessions/m/approvals/e1')[0].method, 'DELETE');
   assert.match(panel(), /print\(1\).*Revoked/);
   assert.equal(labelled(h, 'Revoke'), null);
+});
+
+// ── Slash commands in the composer ──
+
+const SLASH = JSON.parse(readFileSync(new URL('../fixtures/slash_commands.json', import.meta.url), 'utf8'));
+const withCommands = (extra = {}) => baseRoutes({'GET /commands': SLASH, ...extra});
+const turnPosts = (h) => h.net.calls.filter((call) => call.method === 'POST' && call.path.endsWith('/turns'));
+const keyDown = (h, key, extra = {}) => {
+  const event = {key, keyCode: 0, isComposing: false, shiftKey: false, prevented: false, stopped: false, preventDefault() { event.prevented = true; }, stopPropagation() { event.stopped = true; }, ...extra};
+  h.element('input').listeners.keydown[0](event);
+  return event;
+};
+const typeInto = async (h, value) => {
+  h.element('input').value = value;
+  for (const fn of h.element('input').listeners.input) await fn({});
+  await settle();
+};
+
+test('a slash command typed in the composer runs on the page, answers in a local row and never reaches the model', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.element('input').value = '/help';
+  await h.run('send()');
+  assert.equal(h.element('input').value, '', 'The command leaves the composer');
+  assert.equal(turnPosts(h).length, 0, 'Nothing is sent to the model');
+  assert.equal(h.element('local-rows').hidden, false);
+  assert.match(h.text('local-rows'), /\/help.*\/new.*Start a new chat/);
+  h.element('input').value = '/nonsense now';
+  await h.run('send()');
+  assert.match(h.text('local-rows'), /Unknown command \/nonsense — \/help lists them/);
+  assert.equal(turnPosts(h).length, 0);
+  assert.equal(h.state().outbox.a, undefined, 'No pending message either');
+});
+
+test('a message that only looks like a command is sent as the person wrote it, and a sent message clears the rows', async () => {
+  const h = harness(withCommands({'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-2', turn: turnRow({id: 'turn-2', turn: 2, status: 'running', answer: null, finished_at: 0})}}}));
+  await h.run('init()');
+  h.element('input').value = '/help';
+  await h.run('send()');
+  assert.equal(h.element('local-rows').hidden, false);
+  // The terminal's rule: `//text` is a message as typed, and a leading space makes "/text" one.
+  h.element('input').value = '//etc is where it lives';
+  await h.run('send()');
+  assert.deepEqual(turnPosts(h).map((call) => call.body.text), ['//etc is where it lives']);
+  assert.equal(h.element('local-rows').hidden, true, 'The conversation moved on');
+  h.state().outbox = {};
+  h.element('input').value = ' /model is what I typed';
+  await h.run('send()');
+  assert.equal(turnPosts(h).length, 2);
+  assert.equal(turnPosts(h)[1].body.text, '/model is what I typed');
+});
+
+test('a command refused during a turn keeps its draft in the composer', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.state().view.turns[0].finishedAt = 0;
+  h.state().view.turns[0].status = 'running';
+  h.element('input').value = '/new';
+  await h.run('send()');
+  assert.equal(h.element('input').value, '/new');
+  assert.match(h.text('local-rows'), /\/new is not available while a turn runs \(Esc stops it\)\./);
+  assert.equal(h.state().activeId, 'a', 'The chat did not change');
+});
+
+test('a message that failed to send does not hold the commands back, a message being sent does', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.state().outbox.a = {clientRequestId: 'k1', text: 'unsent', state: 'failed', error: 'boom'};
+  h.element('input').value = '/new';
+  await h.run('send()');
+  assert.equal(h.state().activeId, null, 'The failed message waits in its chat; /new runs');
+  const busy = harness(withCommands());
+  await busy.run('init()');
+  busy.state().outbox.a = {clientRequestId: 'k2', text: 'sending', state: 'sending', error: ''};
+  busy.element('input').value = '/new';
+  await busy.run('send()');
+  assert.equal(busy.state().activeId, 'a');
+  assert.equal(busy.element('input').value, '/new', 'The draft stays');
+});
+
+test('the menu opens under a typed slash, takes the arrow keys, and Enter runs a command without arguments', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  await typeInto(h, '/');
+  assert.equal(h.element('slash-menu').hidden, false);
+  assert.equal(h.element('input').attributes['aria-expanded'], 'true');
+  await typeInto(h, '/ne');
+  const used = keyDown(h, 'Enter');
+  assert.equal(used.prevented, true, 'The menu took Enter; the composer did not send');
+  await settle();
+  assert.equal(h.state().activeId, null, '/new started a new chat');
+  assert.equal(h.element('slash-menu').hidden, true);
+  assert.equal(turnPosts(h).length, 0);
+  await typeInto(h, '/mod');
+  keyDown(h, 'Enter');
+  assert.equal(h.element('input').value, '/model ', 'A command with arguments waits for them');
+  await typeInto(h, '/mo');
+  const escape = keyDown(h, 'Escape');
+  assert.equal(escape.stopped, true, 'Escape closes the menu and nothing else');
+  assert.equal(h.element('slash-menu').hidden, true);
+  assert.equal(h.element('input').value, '/mo');
+});
+
+test('/verbose opens tool calls with their details, /thinking opens the thinking, and a card the person toggled stays as they left it', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  const turn = h.state().view.turns[0];
+  turn.items = [
+    {kind: 'tool', name: 'file_read', status: 'success', arguments: {path: 'a.txt'}, preview: 'a.txt', output: 'hello'},
+    {kind: 'thinking', text: 'hm', durationS: 2},
+  ];
+  await h.run('renderMessages(false)');
+  const cards = () => findNodes(h.element('messages'), (node) => node.classList?.contains('tool-card') || node.classList?.contains('thinking'));
+  assert.deepEqual(cards().map((card) => card.open), [false, false]);
+  h.element('input').value = '/verbose on';
+  await h.run('send()');
+  assert.deepEqual(cards().map((card) => card.open), [true, false], 'Tool calls open');
+  h.element('input').value = '/thinking on';
+  await h.run('send()');
+  assert.deepEqual(cards().map((card) => card.open), [true, true]);
+  assert.deepEqual(JSON.parse(h.local.getItem('localmelo-console-prefs')), {verbose: true, thinking: true, stream: true}, 'The choice is kept in this browser');
+  cards()[0].open = false;
+  cards()[0].listeners.toggle[0]();
+  h.element('input').value = '/verbose off';
+  await h.run('send()');
+  assert.equal(cards()[0].open, false);
+  assert.equal(turn.items[0].expanded, false, 'Only the person\'s own toggle is kept');
+  assert.equal(turn.items[1].expanded, undefined, 'Opening by /thinking is not');
+});
+
+test('/stream off shows a turn when it ends, but an approval it waits on still shows; /expand opens a call whole', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  const turn = h.state().view.turns[0];
+  const long = 'x'.repeat(3000);
+  turn.items = [{kind: 'tool', name: 'shell', status: 'success', arguments: {}, preview: 'ls', output: long}];
+  turn.finishedAt = 0;
+  turn.status = 'running';
+  await h.run('renderMessages(false)');
+  const toolCards = () => findNodes(h.element('messages'), (node) => node.classList?.contains('tool-card'));
+  assert.equal(toolCards().length, 1);
+  h.element('input').value = '/stream off';
+  await h.run('send()');
+  assert.equal(toolCards().length, 0, 'The steps wait for the end of the turn');
+  turn.finishedAt = 30;
+  turn.status = 'completed';
+  await h.run('renderMessages(false)');
+  assert.equal(toolCards().length, 1, 'They show once it ends');
+  h.element('input').value = '/expand 1.1';
+  await h.run('send()');
+  assert.equal(turn.items[0].showAll, true);
+  assert.equal(toolCards()[0].open, true);
+  assert.match(h.text('local-rows'), /Opened call 1\.1 \(shell\) with its whole output\./);
+  assert.ok(findNode(h.element('messages'), (node) => node.classList?.contains('tool-output') && node.textContent === long), 'The whole output');
+});
+
+test('/undo forgets the newest turn through the gateway and /title renames the chat', async () => {
+  const h = harness(withCommands({
+    'POST /sessions/a/undo': {turn_id: 'turn-1', undone: true},
+    'PATCH /sessions/a': (body) => ({session: session('a', {title: body.title})}),
+  }));
+  await h.run('init()');
+  h.element('input').value = '/undo';
+  await h.run('send()');
+  assert.deepEqual(h.net.calls.find((call) => call.path === '/sessions/a/undo').body, {turn_id: 'turn-1'});
+  h.element('input').value = '/title Rome plans';
+  await h.run('send()');
+  assert.equal(h.element('header-title').textContent, 'Rome plans');
+  assert.equal(turnPosts(h).length, 0);
+});
+
+test('/side names the new chat once its first message creates it', async () => {
+  const created = session('n', {title: 'Do it'});
+  const h = harness(withCommands({
+    'POST /sessions': {status: 201, body: {session: created, turn_id: 'turn-9', turn: turnRow({id: 'turn-9', turn: 1, status: 'running', answer: null, finished_at: 0})}},
+    'PATCH /sessions/n': (body) => ({session: {...created, title: body.title}}),
+    'GET /sessions/n': {session: created, pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/n/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
+  }));
+  await h.run('init()');
+  h.element('input').value = '/side Rome trip';
+  await h.run('send()');
+  assert.equal(h.state().activeId, null);
+  h.element('input').value = 'Plan it';
+  await h.run('send()');
+  await settle();
+  assert.deepEqual(h.net.calls.find((call) => call.method === 'PATCH' && call.path === '/sessions/n').body, {title: 'Rome trip'});
+});
+
+test('/exit in the app asks first and then asks the app to quit; in a tab it says to close the tab', async () => {
+  const posted = [];
+  const h = harness(withCommands());
+  h.context.webkit = {messageHandlers: {localmeloFolder: {postMessage() {}}, localmeloQuit: {postMessage: (body) => posted.push(body)}}};
+  await h.run('init()');
+  h.element('input').value = '/exit';
+  await h.run('send()');
+  assert.match(h.text('local-rows'), /Quit melo\? Quit Cancel/);
+  assert.deepEqual(posted, [], 'Nothing yet');
+  findNode(h.element('local-rows'), (node) => node.className === 'local-choice primary').click();
+  assert.equal(posted.length, 1, 'The app is asked once');
+  const tab = harness(withCommands());
+  await tab.run('init()');
+  tab.element('input').value = '/quit';
+  await tab.run('send()');
+  assert.match(tab.text('local-rows'), /Close this tab\. melo keeps running\./);
 });

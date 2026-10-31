@@ -243,7 +243,10 @@ class SessionRunner:
     ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
     that no note kept, or, whatever that says, a new value the user gave a
     subject an active note holds), and a completed turn is indexed; *index_only* (a
-    task's runner) only indexes.
+    task's runner) only indexes. *context*, when given, ends the text each
+    turn sends the model, after any recalled block: it is in neither the
+    stored turn nor the person's words, and a text that would not fit the
+    query limit is left out.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -268,6 +271,7 @@ class SessionRunner:
         pictures: bool = False,
         memory: ChatMemory | None = None,
         index_only: bool = False,
+        context: str = "",
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -292,6 +296,7 @@ class SessionRunner:
         self._pictures = pictures
         self._memory = None if self._worker else memory
         self._index_only = index_only
+        self._context = context
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -727,6 +732,8 @@ class SessionRunner:
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)
+            if self._context and len(text) + len(self._context) + 2 <= MAX_QUERY_LEN:
+                text = f"{text}\n\n{self._context}"
             before = await self._scan_folder(turn)
             returned = await turn.agent.run_task(text, **kwargs)
         except BaseException as exc:

@@ -236,6 +236,7 @@ async def test_the_status_of_a_worker_run_equals_the_terminal_fold(
 WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("POST", "/api/sessions/{session_id}/turns"): {"text": "no"},
     ("POST", "/api/sessions/{session_id}/retry"): {"turn_id": "t"},
+    ("POST", "/api/sessions/{session_id}/undo"): {"turn_id": "t"},
     ("POST", "/api/sessions/{session_id}/submissions/{client_request_id}/cancel"): {
         "text": "no"
     },

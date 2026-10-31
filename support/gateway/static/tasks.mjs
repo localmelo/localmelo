@@ -46,6 +46,28 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
+// What the task's chat knew about the person and the folder when the task began (its spec's
+// context_pack, one "- " line each): a folded list, and nothing when the task had no pack.
+export function packFold(doc, task) {
+  const lines = String(task?.spec?.context_pack ?? '').split('\n').map((line) => line.replace(/^- /, '')).filter(Boolean);
+  if (!lines.length) return null;
+  const fold = doc.createElement('details');
+  fold.className = 'task-pack';
+  const summary = doc.createElement('summary');
+  summary.textContent = t('tasks.pack.title');
+  const note = doc.createElement('p');
+  note.className = 'muted';
+  note.textContent = t('tasks.pack.note');
+  const list = doc.createElement('ul');
+  for (const line of lines) {
+    const item = doc.createElement('li');
+    item.textContent = line;
+    list.append(item);
+  }
+  fold.append(summary, note, list);
+  return fold;
+}
+
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
@@ -149,6 +171,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (blockedOf(task).length) nodes.push(blockedBox(task));
     if (earlierOf(task).length) nodes.push(earlierBox(task));
+    const pack = packFold(doc, task);
+    if (pack) nodes.push(pack);
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {

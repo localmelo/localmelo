@@ -98,6 +98,44 @@
 - **撤回。** 在对话的那一行、任务页面，或对话 **Details**（开发者模式）里的 **你在这里批准过的步骤** 中点 **撤回**，就收回这个批准：这一步会再问你；已经运行的不会撤销。批准只保存在内存里：重启网关或删除对话都会忘掉它们。
 - **在 Auto 中。** 任务里被 Auto 拦下的步骤也会显示在它的对话里，说明拦下了什么、为什么，并提供 **允许一次**。你之前在 Ask 下在这个对话里完全一样地允许过的步骤，在它的 Auto 任务里不会再被拦下，除非它是高影响的。
 
+<a id="slash-commands"></a>
+
+## 斜杠命令
+
+[终端](terminal.md#commands)的命令在这个页面和 [macOS 应用](macos-app.md)里都能用。在输入框开头输入 `/` 就能看到它们。
+
+- 输入框上方会打开一个菜单（与文件夹菜单、询问/自动菜单一样），随你输入而缩小范围。↑ 和 ↓ 移动，Enter 或 Tab 选定，Esc 关闭，也可以点按。选定后会填入 `/name ` 让你接着写；没有参数的命令按 Enter 就运行。
+- 命令不会发给模型。它的回答是对话下方的一行，你发送下一条消息时就会消失（`/clear` 会立即清除）。
+- 未知的名字会回答 `Unknown command /NAME — /help lists them`。`/etc/hosts is broken` 和 `//text` 是普通消息，与终端一致；要发送以命令开头的消息，请在前面加一个空格。
+- 会改变对话的命令在一轮运行时被拒绝（`/new is not available while a turn runs (Esc stops it).`），消息留在输入框里。
+- 命令列表就是终端自己的列表，由 [`GET /api/commands`](../reference/api-v2.md#get-apicommands) 以中英文提供。
+
+| 命令 | 在这个页面上 |
+|---|---|
+| `/help [command]` | 常用命令；`/help all` 列出全部，`/help NAME` 给出某个命令的详情。 |
+| `/model [name]` | 带名字：切换模型并保存，同样经过设置的检查。不带：打开设置里的模型服务器。 |
+| `/backend [url]` | 带地址：切换模型服务器并保存。不带：打开设置里的模型服务器。 |
+| `/new`、`/clear`、`/side [title]` | 新对话，由第一条消息创建，是主对话下的旁支对话；`/side` 给它命名，`/clear` 还会清除已显示的行。 |
+| `/chats`、`/sessions [filter]` | 打开对话列表，并按所给的词筛选。 |
+| `/resume [id\|title]` | 打开该 ID（或其开头）或标题的对话；匹配多个时显示筛选后的列表。 |
+| `/main` | 回到主对话。 |
+| `/task TEXT` | 在当前对话里开始一个任务。对话还没创建时，要等第一条消息。 |
+| `/answer TASK TEXT` | 回答一个在等你的任务。 |
+| `/status [all]` | 模型及其是否有回应、文件夹、对话、审批和上下文；`all`（以及开发者模式）还显示版本和网关。 |
+| `/usage` | 这个对话的轮次、工具调用、token 和用时。 |
+| `/progress` | 这一轮的步、尝试、阶段和上下文。 |
+| `/mcp` | 说明控制台暂时不支持 MCP 服务器。 |
+| `/undo`、`/retry` | 忘掉最近一轮已结束的轮次（文件改动保留），或把它再跑一次。 |
+| `/copy [turn]` | 把一个回答拷贝到剪贴板；不带数字时是最新的。 |
+| `/title [text]` | 查看或设置对话标题。 |
+| `/memory [window]` | 打开“记忆”标签页；`window` 显示模型的窗口。`/memory import` 留给导入界面。 |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
+| `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
+| `/attach`、`/attachments`、`/detach` | 控制台暂时不能附加文件，并会这样说明。 |
+| `/verbose`、`/thinking`、`/stream [on\|off]` | 页面如何显示对话，保存在这个浏览器里：展开工具调用、展开思考，或只在一轮结束时显示各步。 |
+| `/expand [turn.call]` | 展开一次工具调用及其完整输出。 |
+| `/exit`、`/quit` | 在应用里：先询问，再退出。在浏览器标签页里：说明关闭标签页即可，因为 melo 会继续运行。 |
+
 <a id="chores-that-repeat"></a>
 ## 定时事项
 
@@ -173,7 +211,7 @@
 
 <a id="inspect-workers"></a>
 
-在手机上，或在宽度不超过 700 px 的窗口里，页面会去掉小触摸屏用不上的内容。页眉在模型标签只写出模型名时把它去掉（输入框里已经显示模型），而在它发出警告时（`Model offline`、`No model`）保留。键盘提示（`Enter to send · Shift + Enter for a new line` 和 `⌘ K`）在触摸屏和窄窗口中都不显示。失败轮次的下一步操作是至少 44 px 高的按钮。
+在手机上，或在宽度不超过 700 px 的窗口里，页面会去掉小触摸屏用不上的内容。页眉在模型标签只写出模型名时把它去掉（输入框里已经显示模型），而在它发出警告时（`Model offline`、`No model`）保留。键盘提示（`Enter to send · Shift + Enter for a new line · / for commands` 和 `⌘ K`）在触摸屏和窄窗口中都不显示。失败轮次的下一步操作是至少 44 px 高的按钮。
 
 ## 查看 worker
 
@@ -188,6 +226,7 @@
 **Tasks**（`#/tasks`；默认模式下，有任务后才出现在侧边栏）列出调度器的任务，按最近更新排在前面，显示状态、优先级（仅开发者模式）和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、有证据时的证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。和 Workers 一样，打开这个视图时它会取代对话。页眉写 **Tasks**；开发者模式再加上 "Scheduler tasks"。
 
 - 已结束的任务以它的回答开头，排版与对话中相同，位于各项信息之上；没有完成的任务在同一处写出原因。它的步骤折叠在 **Steps** 下。
+- **melo 告诉任务的内容** 在任务开始时它所在的对话有笔记的情况下，折叠显示在任务页面上（参见 [记忆指南](memory.md)）：任务拿到的那些行，作为资料而不是指令。没有笔记的任务不显示这个折叠块。
 
 - 已停放或中断的任务会显示 **Resume**。页面先询问服务器，只有服务器要求时才请你确认：对话框会写 "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once."，并提供 **Resume anyway** 和 **Cancel**。按 Escape 即取消。在你选择 **Resume anyway** 之前不会记录任何东西；确认在五分钟内有效，网关重启后失效。
 - 请求运行工具的任务会显示状态 "Waiting for your approval"，以及和对话相同的批准卡片，包含 **Allow once**、**Allow for this task** 和 **Deny**（可附说明）。通过 `melo-task` 提交的任务也在这里等待批准，别处不会显示。回答后卡片消失，任务继续（允许）或收到拒绝（拒绝）；暂停或停止任务会撤回卡片。视图打开时，每 3 秒重新读取任务（或列表），只重绘有变化的部分，因此之后到达的请求会自动出现。
