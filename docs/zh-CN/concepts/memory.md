@@ -168,6 +168,29 @@ Where did I live before?
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。
 
+<a id="what-a-task-starts-with"></a>
+
+### 任务开始时带什么
+
+任务的 worker 自己没有长期记忆：不召回，也不写笔记。它对你的了解来自一小段**上下文包**，由发起任务的对话在创建任务时构建一次。worker 目前还没有使用它；这个包已经备好，等对话来调用。
+
+- 它是关于你和项目的信息，不是指令，第一行就这样说明。每一行的写法和召回块一致：`the user said “…”` 或 `a note to the user “…”`。
+- 内容按顺序是：你的 About you 和 Preferences 笔记（新的在前，从别的工具导入的也算）；任务所在项目文件夹的笔记；然后是和任务目标匹配的笔记，范围同上两类主题和项目。别的文件夹的项目笔记不会出现。
+- 绝不包含 People 和 Decisions 笔记。worker 会浏览网页、调用外部工具，所以只给它必需的最少内容。
+- 最多 1,500 个字符，超出时先去掉排名最低的行，不会把一行截成两半。记忆关闭或没有合适内容时为空。构建它不调用聊天模型；设置了嵌入模型时，任务目标也按语义匹配，沿用上面的 1.5 秒限制。
+
+<a id="side-chat-summaries"></a>
+
+### 侧边对话的摘要
+
+侧边对话结束时，它的摘要作为一条“过往对话”记入索引，挂在该对话名下（`Summary of chat “Fix CI”: …`；已脱敏，最多 2,000 个字符）。其他对话像召回一轮对话那样召回它，`Used … ▾` 显示为 `chat “Fix CI” · summary`。再次结束同一个对话会替换摘要；删除该对话会一并删除。它永远不是笔记，对话自己也不会召回自己的摘要。
+
+<a id="a-tasks-questions-are-not-your-notes"></a>
+
+### 任务的提问不是你的笔记
+
+任务卡住时会向发起它的对话提问。该对话用一轮内部对话来回答，标记为 `ask_owner`：请求是这一轮的文本，属于 agent 数据，不是你说的话。这一轮可以召回记忆来回答，但不会产生任何笔记：`remember` 回复 `Not remembered: this turn is a task's question, not the user's words.`，保存你陈述或更改的事实的检查什么也不做，这段文字不能证明你说过什么，也不会作为对话轮次进入索引。提问和回答合在一起记入任务名下（`Task asked: … Answer: …`），可像一轮对话那样召回，永远不是笔记。
+
 <a id="see-and-change-what-melo-remembers"></a>
 
 ### 查看和修改 melo 记得什么
@@ -199,6 +222,36 @@ Where did I live before?
 - 对话索引随时可以重建；你忘记的内容不会被重新索引。控制台或应用运行时由它们持有对话，所以 `reindex` 会请你先停掉它们（开发者模式下控制台的 Memory 标签页也是如此）。
 
 面板标签页背后的路由见 [API 参考](../reference/api-v2.md#memory-across-chats)。
+
+<a id="bring-in-memory-from-other-assistants"></a>
+
+### 导入其他助手的记忆
+
+melo 可以读取这台电脑上其他编程助手已经了解的关于你的信息，并保存为笔记，这样你不必从零开始。在你要求扫描之前，它什么都不读。
+
+- **扫描只看不写。** 它列出每个来源，说明 melo 会保留多少行、丢弃了什么；不写入任何内容，也不联网。
+- **每个来源一个选择**（默认开启，`Skip` 跳过某个来源），不会逐条笔记询问。完成后它会说 `Brought in 12 notes from … · Undo`。
+- **撤销会收回整批笔记**，被改动的行取代过的笔记会重新生效。
+- **导入的笔记和其他笔记一样被召回**，保持原来的语言，但不会固定在每个对话里；它们按笔记而不是指令来读。
+- **随时可以再扫描。** 已经是笔记的行会被跳过；你在同一位置改过的行会取代它旧文字的笔记。
+
+它读取什么，只在你的主目录之内，也不会跟随指向主目录之外的链接：
+
+| 来源 | 文件 |
+|---|---|
+| 指令文件 | `~/.claude/CLAUDE.md`、`$CLAUDE_CONFIG_DIR/CLAUDE.md`、`~/.cc-switch/claude-accounts/*/config/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.gemini/GEMINI.md`，以及它们用 `@path` 引入的文件（最多 4 层） |
+| 记忆笔记 | `~/.claude/projects/*/memory/*.md`，以及每个配置文件夹下的同类文件；笔记的 `type` 说明它是关于你（`user`、`feedback`）还是关于一个仍然存在的项目文件夹（`project`、`reference`） |
+| 记忆条目 | `~/.hermes/memories/USER.md` 和 `~/.hermes/memories/MEMORY.md`（或 `$HERMES_HOME` 下），每个 `§` 一条 |
+| 记忆数据库 | `~/.codex/memories_*.sqlite`，每一行的 `raw_memory`，以只读方式打开 |
+
+它不会保留：
+
+- 密钥，以及他人的私人信息：你的 git 配置里那个之外的邮箱地址、账号和 Apple ID 相关行、电话号码、写明姓名并带有编号的人。
+- 关于其他工具本身的行：它的工具调用、斜杠命令、钩子和设置文件。
+- 你已经有的笔记，以及两个来源共有的行（先出现的算数）。
+- 超过 256 KB 的文件、凭据文件、历史和对话记录一律不打开；每个来源最多 60 条笔记，每批最多 300 条。
+
+笔记就是那一行本身，经过整理，保持你的措辞和语言（第一人称的行会改用第二人称，和你自己的笔记一样）。不使用模型；笔记会显示它来自哪个文件的哪一行。路由见 [API 参考](../reference/api-v2.md#bring-in-memory-from-other-assistants)。
 
 <a id="reasoning-notes"></a>
 

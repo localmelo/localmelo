@@ -25,8 +25,9 @@ STATUSES = ("active", "superseded", "conflicted")
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE", "EDIT", "DELETE")
 # The signals a run admits by; its counters (RunResult ``admitted``) have one each.
 SIGNALS = ("rehearsal", "user_request", "user_statement", "outcome", "sleep")
-# What the store also accepts: the user's own tap on a proposal, or edit.
-STORE_SIGNALS = (*SIGNALS, "user_confirm", "user_edit")
+# What the store also accepts: the user's own tap on a proposal, or edit, and a
+# line brought in from a file another assistant keeps ("import").
+STORE_SIGNALS = (*SIGNALS, "user_confirm", "user_edit", "import")
 
 
 class LongTermSchemaError(Exception):

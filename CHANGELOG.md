@@ -26,6 +26,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a task** through the API is a submission like any other: the same
   `client_request_id` returns the same chat and task, a cancelled key makes
   none, and its cancel stops the task. [#NN]
+- A task can start with a short memory pack, a side chat's summary can be
+  recalled from other chats, and a task's questions to its owner chat are kept
+  apart from your notes: the pack holds your About you and Preferences notes,
+  the project's notes and the notes that match the objective (never People or
+  Decisions); a question from a task is agent data that no note is written
+  from. Nothing calls these yet. Part of #369. [#374]
+- Bring in what other coding assistants on this computer remember. A scan
+  (`GET /api/memory/import/scan`) reads the instruction and memory files they
+  keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
+  `~/.gemini/GEMINI.md`, `~/.hermes/memories/USER.md`, and more) and lists each
+  source with how many lines melo would keep and what it left out: secrets,
+  private data of other people, and lines about the other tool itself. It
+  writes nothing. `POST /api/memory/import` turns the sources you chose into
+  notes (at most 60 per source and 300 per batch, each with the file and line
+  it came from), and `DELETE /api/memory/import/{batch_id}` takes a batch back,
+  restoring what its notes replaced. A rescan adds only new lines; a line you
+  changed in the same place replaces its old note. Imported notes are recalled
+  but never pinned to every chat. Nothing runs unless asked. Part of #364.
+  [#372]
+- A lower-case "pin" without a code or digits after it is the verb, not a
+  PIN: "Pin dependency versions in uv.lock." is kept as a note; "my pin 4821"
+  is still refused. [#372]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the
@@ -3120,3 +3142,5 @@ earlier milestones.
 [#368]: https://github.com/localmelo/localmelo/pull/368
 [#370]: https://github.com/localmelo/localmelo/pull/370
 [#371]: https://github.com/localmelo/localmelo/pull/371
+[#372]: https://github.com/localmelo/localmelo/pull/372
+[#374]: https://github.com/localmelo/localmelo/pull/374

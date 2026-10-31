@@ -383,6 +383,8 @@
   "errors.defaultWorkspace": "无法创建默认工作区 {path}：{problem}",
   "errors.echoAnswered": "这已经回答过了。",
   "errors.forgetAllFlag": "全部忘记需要 ?all=true。",
+  "errors.importGone": "这次导入已经没有笔记了。",
+  "errors.importScanGone": "这次扫描已失效，请重新扫描。",
   "errors.listFailed": "无法列出 {url} 上的模型：{reason}",
   "errors.listLocalOnly": "只有本机的后端能列出模型；请输入模型名称。",
   "errors.mainDelete": "主对话一直都在，不能删除。",
