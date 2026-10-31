@@ -638,9 +638,10 @@ asks before commands and file changes.
   from what you asked. Its sandbox keeps a step's files in the folder and
   away from melo's sign-in, but a step that hands work to another app or
   program (opening an app or a script, scripting another app, code for
-  another language, a container or a background job) is judged by the
-  review, not walled off: such steps are blocked or checked by your model,
-  never run as routine.
+  another language, a package fetched and run, a background job) is judged
+  by the review, not walled off: such steps are blocked or checked by your
+  model, never run as routine. The sandbox also keeps a step from talking to
+  a container engine.
 - **What is blocked.** Installs, downloads, changes outside the folder,
   deletes, passwords and keys, system settings, code from the internet and
   the like, unless your own words ask for them; a change to localmelo itself
