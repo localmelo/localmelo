@@ -56,5 +56,6 @@ affected sections, owner and follow-up issue. Keep code, options, IDs and URLs
 identical. A second
 reviewer checks meaning, terminology and missing or added facts;
 a maintainer spot-checks. The glossary in [Maintaining the docs](project/documentation.md)
-records the established terms. Every twin must be reviewed before Docs-1
+records the established terms; the console's and the app's Chinese words follow the
+[interface glossary](zh-CN/STYLE.md#interface-glossary) of the Chinese style guide. Every twin must be reviewed before Docs-1
 closes.

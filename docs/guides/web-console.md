@@ -436,6 +436,18 @@ a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.
 
+<a id="language"></a>
+
+## Language
+
+The console speaks English or Simplified Chinese (简体中文).
+
+- It follows your browser's languages, or your Mac's in the macOS app: the first that is English or Simplified Chinese, else English. Traditional Chinese reads English.
+- To choose one, run `melo config set console.language zh-Hans` (or `en`; `auto` follows the system again) and reload the page.
+- The gateway writes its own words for the page in the same language: error messages, the panel's rows, the answers on cards in the main chat. The terminal and other API clients stay English.
+- Commands, paths, model names and the levels P0-P5 are never translated; the terms follow the [Chinese interface glossary](../zh-CN/STYLE.md#interface-glossary).
+- The sign-in page, the panel's Memory tab, the work and tool lines of a turn, Details, Workers and the setup card speak Chinese now; the main chat, Tasks, Scheduled and Settings follow in a later update.
+
 ## Developer mode
 
 **Connection settings → Developer** (in default mode **Settings**, where the toggle is

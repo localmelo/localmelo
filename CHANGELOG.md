@@ -7,6 +7,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Added
+
+- The web console and the macOS app speak Simplified Chinese. They follow the
+  browser's or the Mac's languages, and `melo config set console.language
+  zh-Hans` (or `en`, or `auto`) chooses one. The sign-in page, the Memory tab,
+  the work and tool lines of a turn, Details, Workers, the setup card, the
+  gateway's error messages and the app's window, menus, pill and quit dialog
+  are translated; the other screens follow. The terminal stays English. [#NN]
+
 ### Changed
 
 - The main chat always works in the default folder (`[gateway] workspace`,

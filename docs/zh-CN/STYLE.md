@@ -35,3 +35,37 @@
 ## 链接和语言
 
 使用有意义的链接文字和稳定标题；保留现有 URL 和片段标识符。段落要简短，术语要一致，平台注意事项要准确。英文页面是原文；在同一 PR 更新中文对应页，否则加上可见的带日期过期说明，注明英文原文的修订、受影响的章节、负责人和后续 issue。代码、选项、ID 和 URL 保持一致。由另一位审阅者检查语义、术语及事实的增删，维护者再抽查。既有术语见[维护文档](../project/documentation.md)（英文）中的术语表。Docs-1 结束之前每个对应页都必须经过审阅。
+
+<a id="interface-glossary"></a>
+
+## 界面术语
+
+网页控制台、macOS App 和网关写给页面的文字都用下表的译法，文档也用同样的词。词库是 `support/gateway/static/i18n/zh-Hans.json`，键与 `en.json` 一一对应。
+
+- 不翻译：命令（如 `melo console`）、路径、模型名、级别 P0-P5、HTTP 路由、状态值和配置键。
+- 计数写成数字加量词：“3 个任务”“2 条笔记”“1 次工具调用”；中文不分单复数。
+- 按钮用动词：“保存”“取消”“重试”；macOS 菜单沿用系统的译法：拷贝、粘贴、全选、撤销、重做。
+- 中文与数字或拉丁字母之间加空格，句中用全角标点；见[维护文档](../project/documentation.md)（英文）中的排版规则。
+
+| English | 中文 |
+|---|---|
+| main chat, side chat | 主对话，旁支对话 |
+| chat, task, terminal chat | 对话，任务，终端对话 |
+| worker run, Workers | worker 运行，Worker |
+| panel, tab, sidebar | 面板，标签页，侧边栏 |
+| Details | 详情 |
+| Memory (tab), note | 记忆，笔记 |
+| About you, Preferences, People, Projects, Decisions | 关于你，偏好，人物，项目，决定 |
+| Remember across chats, Forget, Undo | 跨对话记忆，忘记，撤销 |
+| approval, Waiting for your approval | 审批，在等你批准 |
+| allowed, denied, session grant | 已允许，已拒绝，会话授权 |
+| tool call, step, attempt, reflection | 工具调用，步，尝试，反思 |
+| Done, Stopped, Failed, Interrupted, Timed out | 完成，已停止，失败，已中断，超时 |
+| Working, Thinking, Running | 工作中，正在思考，运行中 |
+| model server, embedding model | 模型服务器，嵌入模型 |
+| folder, default folder, workspace | 文件夹，默认文件夹，工作区 |
+| Settings, developer mode | 设置，开发者模式 |
+| sign in, gateway | 登录，网关 |
+| menu-bar item, activity pill, Melo on your desktop | 菜单栏项，活动胶囊，桌面上的 Melo |
+| Scheduled (tab), chore | 定时，定时事项 |
+| Copy, Try again | 拷贝，重试 |
