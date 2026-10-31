@@ -1610,7 +1610,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   names the command its code runs (`grep -rn DEFAULT_WORKSPACE .`) rather
   than its first import. The `attention.card` event gains the state
   `answered` and the key `request_id`; a task created without a title gets a
-  short derived one ([#NN]).
+  short derived one ([#331]).
 
 - melo remembers two ways, and never asks you to confirm a note. When you ask ("remember
   that Sam has the lab keys", "keep in mind that…", "记住…", "别忘了…", "帮我记一下…"), the
@@ -2679,3 +2679,4 @@ earlier milestones.
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
 [#328]: https://github.com/localmelo/localmelo/pull/328
+[#331]: https://github.com/localmelo/localmelo/pull/331
