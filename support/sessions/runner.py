@@ -740,12 +740,13 @@ class SessionRunner:
     async def _keep_statements(self, turn: _Turn) -> None:
         """Keep the lasting facts the user stated that the model kept no note of.
 
-        It queues ``turn.memory`` again, whole, when it keeps one.
+        It queues ``turn.memory`` again, whole, when it keeps one. A cancel
+        does not stop a write under way.
         """
         if self._memory is None or self._index_only:
             return
         try:
-            await self._memory.keep_statements(turn.turn)
+            await asyncio.shield(self._memory.keep_statements(turn.turn))
         except asyncio.CancelledError:
             return  # the turn's own cancel counter still ends the run as cancelled
         except Exception:
