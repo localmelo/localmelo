@@ -18,9 +18,11 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.memory.block import strip_block
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
+from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.identity import NOTES_TEXT, PINNED_TEXT
@@ -194,6 +196,9 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
         f"{ASKS}\n\n{BLOCK_HEADER}\n- the user said “my group meeting is on "
         f"Thursdays” ({label}, {today()})"
     )
+    # The recall reports the size of exactly what was appended to the message.
+    assert asked["recall"]["block_chars"] == len(user) - len(ASKS)
+    assert strip_block(user) == ASKS
     system = request["messages"][0]["content"]
     assert NOTES_TEXT in system
     assert (
@@ -204,6 +209,23 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
     # The stored turn keeps only what was typed.
     session_id = (await store.list_sessions())[0].id
     assert [t.user_text for t in await store.list_turns(session_id)] == [ASKS]
+
+
+async def test_a_block_too_long_for_the_message_is_left_out_and_counted_as_zero(
+    memory: ChatMemory,
+    store: SessionStore,
+    stub: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await chat(memory, store, stub, tmp_path / "a", SAYS)
+    stub.requests.clear()
+    monkeypatch.setattr(runner_module, "MAX_QUERY_LEN", len(ASKS) + 10)
+    b = await chat(memory, store, stub, tmp_path / "b", ASKS)
+    (asked,) = memory_events(b)
+    assert asked["recall"]["used"] == 1 and asked["recall"]["block_chars"] == 0
+    (request,) = stub.requests
+    assert request["messages"][-1]["content"] == ASKS
 
 
 async def test_a_request_to_remember_reaches_the_model_as_kept_without_a_tool_call(

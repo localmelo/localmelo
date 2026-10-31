@@ -71,6 +71,7 @@ from localmelo.support.gateway.front_rules import (
     short_title,
     triage,
 )
+from localmelo.support.gateway.i18n import said, t, t_in
 from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
@@ -633,7 +634,7 @@ class Front:
         if routed.route == "delegate":
             work = route(composed, as_task=as_task).text
             if not work:
-                raise ApiError(400, "invalid_request", "Say what the task should do.")
+                raise ApiError(400, "invalid_request", t("errors.blankTask"))
             return await self.delegate(work, typed=typed, key=key, show=typed)
         if routed.route == "work":
             title = routed.title
@@ -645,7 +646,7 @@ class Front:
         if routed.route == "follow" and routed.task:
             record = await self.record(routed.task.task_id)
             if record is None:
-                return await self._failed("That task is gone.", typed)
+                return await self._failed(typed, "front.echo.gone")
             return await self.follow(record, composed, typed=typed, show=typed)
         if routed.route == "chore" and typed.strip() == composed.strip():
             return await self.propose_chore(typed)
@@ -671,6 +672,7 @@ class Front:
         return await self.echo(
             {
                 "echo": "chore", "line": f"Run this {when}?", "title": spec.title,
+                "said": said("front.echo.runThis", when=parsed.schedule.said()),
                 "text": spec.objective, "schedule": parsed.schedule.to_json(),
                 "when": when, "level": triage(parsed.work)[0],
             },
@@ -695,7 +697,7 @@ class Front:
         try:
             spec = TaskSpec.from_payload({"objective": work, "title": title or None})
         except TaskPolicyError as exc:
-            return await self._failed(f"Could not start a task: {exc}", show)
+            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         main = self.console.main_id
@@ -717,7 +719,7 @@ class Front:
                 spec, front_id=front_id, request_key=key
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
-            return await self._failed(f"Could not start a task: {exc}", show)
+            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         if turn is not None:
             self._count(turn)
         for event in reversed(await self._echoes() if repeated else []):
@@ -725,9 +727,10 @@ class Front:
             if data.get("echo") == "started" and data.get("task_id") == task["task_id"]:
                 return card_json(event)
         line = f"{word}: {task['title']} · {level_code(task['level'])}"
+        key = "front.echo.started" if word == "Started" else "front.echo.startedAgain"
         return await self._echo(
             "started", task["task_id"], task["title"], line, show, of,
-            level=task["level"], reason=task["reason"],
+            level=task["level"], reason=task["reason"], said=said(key, title=task["title"]),
         )  # fmt: skip
 
     def _count(self, turn: TurnInfo) -> None:
@@ -761,14 +764,15 @@ class Front:
             )
         except (SessionStoreError, TaskPolicyError, ValueError, RuntimeError) as exc:
             return await self._failed(
-                f"Could not send it to {record.title}: {_plain(exc)}", show
+                show, "front.echo.sendFailed", title=record.title, problem=_plain(exc)
             )
         if turn is not None:
             self._count(turn)
         word = "Continued" if how == "continued" else "Sent to"
+        key = "front.echo.continued" if how == "continued" else "front.echo.sentTo"
         return await self._echo(
             "sent", record.task_id, record.title, f"{word}: {record.title}", show, of,
-            how=how,
+            how=how, said=said(key, title=record.title),
         )  # fmt: skip
 
     async def control(
@@ -782,13 +786,13 @@ class Front:
         """Stop, pause, resume or move *task* first; the echo carries Undo."""
         record = await self.record(task.task_id)
         if record is None:
-            return await self._failed("That task is gone.", show)
+            return await self._failed(show, "front.echo.gone")
         if action == "first":
             return await self.set_level(record, 1, show=show, of=of)
         problem = await self._change(record, state=action)
         if problem:
             return await self._failed(
-                f"Could not {action} {record.title}: {problem}", show
+                show, f"front.echo.{action}Failed", title=record.title, problem=problem
             )
         undo = {"pause": {"state": "resume"}, "resume": {"state": "pause"}}
         now = await self.record(record.task_id)
@@ -796,9 +800,12 @@ class Front:
         later = action == "pause" and now is not None and now.state != "parked"
         word = "Pauses at its next step" if later else _DONE_WORDS[action]
         line = f"{word}: {record.title}"
+        done = {"stop": "stopped", "pause": "paused", "resume": "resumed"}[action]
+        key = "front.echo.pausesNext" if later else f"front.echo.{done}"
         return await self._echo(
             "control", record.task_id, record.title, line, show, of,
             action=action, undo=undo.get(action, {"again": True}),
+            said=said(key, title=record.title),
         )  # fmt: skip
 
     async def set_level(
@@ -814,12 +821,13 @@ class Front:
         problem = await self._change(record, level=level)
         if problem:
             return await self._failed(
-                f"Could not change {record.title}: {problem}", show
+                show, "front.echo.changeFailed", title=record.title, problem=problem
             )
         line = f"{record.title} → {level_code(level)}"
         return await self._echo(
             "level", record.task_id, record.title, line, show, of,
             level=level, undo={"level": before},
+            said=said("front.echo.level", title=record.title),
         )  # fmt: skip
 
     async def suggest(
@@ -843,6 +851,12 @@ class Front:
         extra: dict[str, Any] = {} if level is None else {"level": level}
         if action == "send":
             extra["text"] = text
+        if action == "level":
+            extra["said"] = said(
+                "front.echo.suggestLevel", title=record.title, level=level_code(level)
+            )
+        elif action in ("send", "stop", "pause", "resume", "first"):
+            extra["said"] = said(f"front.echo.suggest.{action}", title=record.title)
         return await self._echo(
             "suggest", record.task_id, record.title, f"Suggested: {what}", action=action, **extra
         )  # fmt: skip
@@ -859,8 +873,9 @@ class Front:
         if asks:
             data = {"echo": "ask", "text": turn.user_text, "words": turn.typed_text}
             await self.echo(
-                {**data, "turn_id": turn.id, "line": "Start this as a task?"}
-            )
+                {**data, "turn_id": turn.id, "line": "Start this as a task?",
+                 "said": said("front.echo.ask")}
+            )  # fmt: skip
         else:
             title = short_title(turn.typed_text or turn.user_text)
             await self.delegate(
@@ -883,7 +898,7 @@ class Front:
         """Store one echo in the main chat; *show* is the person's message it answers."""
         main = self.console.main_id
         if main is None:
-            raise ApiError(503, "store_unavailable", "The main chat is not open yet.")
+            raise ApiError(503, "store_unavailable", t("errors.mainNotOpen"))
         stored = await self.console.store.append_session_event(
             main, ECHO_EVENT, {**data, "typed": show} if show else data
         )
@@ -902,8 +917,14 @@ class Front:
         data = {"echo": kind, "task_id": task_id, "title": title, "line": line, **extra}
         return await self.echo(data if of is None else {**data, "of": of}, show)
 
-    async def _failed(self, line: str, show: str | None) -> dict[str, Any]:
-        return await self.echo({"echo": "failed", "line": line}, show)
+    async def _failed(
+        self, show: str | None, key: str, **params: str
+    ) -> dict[str, Any]:
+        """A line that says what could not be done: English, and its words for the reader."""
+        line = t_in("en", key, **params)
+        return await self.echo(
+            {"echo": "failed", "line": line, "said": said(key, **params)}, show
+        )
 
     async def _echoes(self, after_id: int = 0) -> list[StoredEvent]:
         main = self.console.main_id
@@ -923,11 +944,11 @@ class Front:
         found = await self._echoes(after_id=echo_id - 1)
         echo = found[0].event.get("data") if found and found[0].id == echo_id else None
         if not isinstance(echo, dict):
-            raise ApiError(404, "not_found", "Not found.")
+            raise ApiError(404, "not_found", t("errors.notFound"))
         if do != "level" and any(
             (e.event.get("data") or {}).get("of") == echo_id for e in found[1:]
         ):
-            raise ApiError(409, "already_answered", "This was answered already.")
+            raise ApiError(409, "already_answered", t("errors.echoAnswered"))
         kind = echo.get("echo")
         if kind in ("chore", "chore_saved"):
             return await self._act_chore(echo_id, echo, do)
@@ -938,7 +959,7 @@ class Front:
             )
         record = await self.record(str(echo.get("task_id", "")))
         if record is None:
-            raise ApiError(404, "not_found", "That task is gone.")
+            raise ApiError(404, "not_found", t("front.echo.gone"))
         if do == "level" and kind in ("started", "level"):
             number = level_number(level)
             if number is None:
@@ -973,7 +994,10 @@ class Front:
             )
         if do == "cancel" and echo.get("echo") == "chore":
             line = f"Not saved: {title}"
-            return await self._echo("undone", "", title, line, of=echo_id)
+            return await self._echo(
+                "undone", "", title, line, of=echo_id,
+                said=said("front.echo.notSaved", title=title),
+            )  # fmt: skip
         try:
             if do == "save" and echo.get("echo") == "chore":
                 chore = await store.create(
@@ -986,12 +1010,16 @@ class Front:
                 line = f"Saved: {title} · {chore.schedule.describe()}"
                 return await self.echo(
                     {"echo": "chore_saved", "chore_id": chore.chore_id, "title": title,
-                     "line": line, "of": echo_id}
+                     "line": line, "of": echo_id,
+                     "said": said("front.echo.saved", title=title, when=chore.schedule.said())}
                 )  # fmt: skip
             if do == "undo" and echo.get("echo") == "chore_saved":
                 await store.delete(str(echo.get("chore_id", "")))
                 line = f"Undone: {title} is not saved"
-                return await self._echo("undone", "", title, line, of=echo_id)
+                return await self._echo(
+                    "undone", "", title, line, of=echo_id,
+                    said=said("front.echo.unsaved", title=title),
+                )  # fmt: skip
         except ChoreError as exc:
             raise ApiError(409, "invalid_transition", str(exc)) from exc
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
@@ -1014,7 +1042,9 @@ class Front:
             )
         problem = await self._change(record, **undo)
         if problem:
-            raise ApiError(409, "invalid_transition", f"Could not undo: {problem}")
+            raise ApiError(
+                409, "invalid_transition", t("errors.undoFailed", problem=problem)
+            )
         now = await self.record(record.task_id) or record
         state = (
             f"back to {level_code(now.level)}"
@@ -1022,8 +1052,24 @@ class Front:
             else "paused" if undo.get("state") == "pause" else "going again"
         )
         line = f"Undone: {record.title} is {state}"
+        words = (
+            said(
+                "front.echo.undoneLevel",
+                title=record.title,
+                level=level_code(now.level),
+            )
+            if "level" in undo
+            else said(
+                (
+                    "front.echo.undonePaused"
+                    if undo.get("state") == "pause"
+                    else "front.echo.undoneAgain"
+                ),
+                title=record.title,
+            )
+        )
         return await self._echo(
-            "undone", record.task_id, record.title, line, of=echo_id
+            "undone", record.task_id, record.title, line, of=echo_id, said=words
         )
 
 

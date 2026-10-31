@@ -23,6 +23,7 @@ from localmelo.support.gateway.chore_store import (
     ChoreStaleError,
 )
 from localmelo.support.gateway.front_rules import level_number, triage
+from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.sessions.store import SessionStoreError
@@ -114,7 +115,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if own is not None:
             info = await console.store.get_session(own)
             if info is None or info.kind not in ("chat", "front"):
-                raise ApiError(404, "not_found", "Not found.")
+                raise ApiError(404, "not_found", t("errors.notFound"))
         chores = await _call(console, runner.store.list_chores(own))
         return JSONResponse(
             content={

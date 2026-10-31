@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
+from localmelo.support.gateway.i18n import t, t_in
 from localmelo.support.sessions.display import (
     activity_text,
     drop_leading_ack,
@@ -64,21 +65,15 @@ TASK_STATES: Final = {
     **TASK_OUTCOMES,
 }
 # A task that failed because it could not use its folder (it never runs in
-# another one), as its row and its card say it.
-FOLDER_REFUSED: Final = "Could not use its folder"
-UNTITLED: Final = {
-    "chat": "Chat",
-    "task": "Task",
-    "run": "Worker run",
-    "terminal": "Terminal chat",
-}
+# another one), as its row says it and, in English, its card.
+FOLDER_REFUSED: Final = t_in("en", "activity.folderRefused")
 _MARKUP: Final = re.compile(r"^[\s#>*_`-]+")
 _SENTENCE: Final = re.compile(r"(?<=[.!?])\s|(?<=[。！？])")
 # What the run writes in place of an answer: `[interrupt: …]`, `[no answer: …]`.
 _MARKER: Final = re.compile(r"^\s*\[(interrupt|no answer|answer not kept)\b[^\]]*\]")
 _MARKER_WORDS: Final = {
-    "interrupt": "Stopped before answering",
-    "no answer": "Ended without an answer",
+    "interrupt": "activity.marker.interrupt",
+    "no answer": "activity.marker.noAnswer",
     "answer not kept": "",
 }
 _FENCE: Final = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
@@ -95,8 +90,6 @@ _PATH: Final = re.compile(
 )
 _PICTURE_SUFFIXES: Final = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic")
 _PATH_END: Final = ".,;:!?)"
-MADE_PICTURE: Final = "Made a picture"
-WROTE_CODE: Final = "Wrote some code"
 # A card carries this many lines of an answer, each cut at this many characters.
 CARD_LINES: Final = 2
 LINE_CHARS: Final = 120
@@ -130,8 +123,14 @@ def _no_paths(text: str) -> str:
         found.group().rstrip(_PATH_END).lower().endswith(_PICTURE_SUFFIXES)
         and len(label) <= 4
     ):
-        return MADE_PICTURE
+        return t("activity.madePicture")
     return _PATH.sub(_named, text)
+
+
+def _marker_words(marker: str) -> str:
+    """What a run's own marker (``[interrupt: …]``) says happened."""
+    key = _MARKER_WORDS[marker]
+    return t(key) if key else ""
 
 
 def result_line(note: str, answer: str) -> str:
@@ -146,13 +145,13 @@ def result_line(note: str, answer: str) -> str:
     raw = note or split_thinking(answer or "")[1]
     marker = _MARKER.match(raw)
     if marker:
-        return _MARKER_WORDS[marker.group(1)]
+        return _marker_words(marker.group(1))
     kept = drop_leading_ack([line for line in raw.splitlines() if line.strip()])
     if kept is not None:
         raw = "\n".join(kept)
     text = " ".join(_prose(raw).split())
     if raw.strip() and not text:
-        return WROTE_CODE
+        return t("activity.wroteCode")
     text = _no_paths(_MARKUP.sub("", text))
     first = _SENTENCE.split(text, maxsplit=1)[0]
     if len(first) <= RESULT_CHARS:
@@ -183,7 +182,7 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
     raw = split_thinking(answer or "")[1]
     marker = _MARKER.match(raw)
     if marker:
-        return _MARKER_WORDS[marker.group(1)]
+        return _marker_words(marker.group(1))
     lines = [line for line in _FENCE.sub("\n", raw).splitlines() if line.strip()]
     code = [line for line in lines if _CODE_LINE.search(line)]
     if len(lines) >= 3 and 2 * len(code) >= len(lines):
@@ -195,7 +194,7 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
     rows = [row for row in rows if row]
     kept = drop_leading_ack(rows)
     if kept is None:
-        return rows[0] if rows else (WROTE_CODE if raw.strip() else "")
+        return rows[0] if rows else (t("activity.wroteCode") if raw.strip() else "")
     if len(kept) == 1:
         kept = [part for part in _SENTENCE.split(kept[0]) if part.strip()]
     return "\n".join(_cut(_no_paths(row), LINE_CHARS) for row in kept[:count])
@@ -218,7 +217,7 @@ def _row(
     return {
         "kind": kind,
         "id": owner,
-        "title": (title or UNTITLED[kind])[:TITLE_CHARS],
+        "title": (title or t(f"activity.untitled.{kind}"))[:TITLE_CHARS],
         "state": state,
         "activity": "",
         "icon": more.pop("icon", state),
@@ -293,7 +292,7 @@ async def _task_rows(
             ended = _ended(turn) if turn is not None else (state, state, "")
             result = ended[2] or (record.wait_reason if state == "failed" else "")
             if record.wait_reason == "invalid_workspace" and state == "failed":
-                result = FOLDER_REFUSED
+                result = t("activity.folderRefused")
             elif state == "failed" and record.wait_reason.startswith(NOT_CONTINUED):
                 result = record.wait_reason
             row.update(icon=ended[1] if state == "done" else state, result=result)
@@ -458,7 +457,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if since is None:
             since = local_midnight(now)
         elif not math.isfinite(since) or since > now:
-            raise ApiError(400, "invalid_request", "since must be a past time.")
+            raise ApiError(400, "invalid_request", t("errors.sincePast"))
         return JSONResponse(
             content=await day_activity(
                 console, max(since, now - MAX_SPAN_S), session_id

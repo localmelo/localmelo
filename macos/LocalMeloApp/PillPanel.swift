@@ -138,7 +138,7 @@ final class PillView: NSView {
         close.onPress = { [weak self] in self?.onDismiss?() }
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityCustomActions([NSAccessibilityCustomAction(name: "Hide until the next task") { [weak self] in
+        setAccessibilityCustomActions([NSAccessibilityCustomAction(name: L10n.t("app.pill.hide", "Hide until the next task")) { [weak self] in
             self?.onDismiss?()
             return true
         }])
@@ -300,14 +300,14 @@ final class DesktopMenu: NSObject {
     private var current = DesktopMode.pill
 
     func makeItem() -> NSMenuItem {
-        let menu = NSMenu(title: "On the desktop")
+        let menu = NSMenu(title: desktopMenuTitle)
         for mode in DesktopMode.allCases {
             let item = menu.addItem(withTitle: mode.title, action: #selector(pick(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
             items.append(item)
         }
-        let entry = NSMenuItem(title: "On the desktop", action: nil, keyEquivalent: "")
+        let entry = NSMenuItem(title: desktopMenuTitle, action: nil, keyEquivalent: "")
         entry.submenu = menu
         show(current)
         return entry

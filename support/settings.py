@@ -33,6 +33,7 @@ SECTIONS = (
     "sessions",
     "cli",
     "ui",
+    "console",
     "scheduler",
     "browser",
     "gateway",

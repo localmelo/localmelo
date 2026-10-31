@@ -48,6 +48,7 @@ KEYS = {
     "select_tokens",
     "candidates",
     "used",
+    "block_chars",
 }
 
 
@@ -259,6 +260,7 @@ async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
             assert data is not None and set(data["recall"]) == KEYS
             assert data["recall"]["retriever"] == "llm"
             assert data["recall"]["used"] == len(data["used"])
+            assert data["recall"]["block_chars"] == len(found.block)
             assert all(
                 isinstance(data["recall"][key], int)
                 for key in ("embed_ms", "search_ms", "select_ms", "candidates")

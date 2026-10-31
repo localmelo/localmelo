@@ -12,6 +12,7 @@
  * modules, served as they are.
  */
 
+import { t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
@@ -160,11 +161,11 @@ function mainActive() {
 
 /** A chat not sent yet: under a main chat, it is a side chat. */
 function newTitle() {
-  return S.main ? "New side chat" : "New chat";
+  return t(S.main ? "chat.newSide" : "chat.new");
 }
 
 function title(session) {
-  return isMain(session) ? "Main chat" : session?.title || newTitle();
+  return isMain(session) ? t("chat.main") : session?.title || newTitle();
 }
 
 // The newest card id this page has heard of, and the one before it: a card from the open side
@@ -223,7 +224,7 @@ function lock(message = "") {
 /** One `/api` call; an API v2 error keeps its code, message and details. */
 async function api(path, { body, method, allowLocked = false } = {}) {
   if (!S.authenticated && !allowLocked) {
-    const error = new Error("Workspace is locked");
+    const error = new Error(t("chat.locked"));
     error.status = 401;
     throw error;
   }
@@ -233,14 +234,14 @@ async function api(path, { body, method, allowLocked = false } = {}) {
   });
   if (response.status === 401) {
     lock();
-    const error = new Error("Workspace is locked");
+    const error = new Error(t("chat.locked"));
     error.status = 401;
     throw error;
   }
   const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(
-      payload?.error?.message || `Request failed (${response.status})`,
+      payload?.error?.message || t("chat.requestFailed", { status: response.status }),
     );
     error.status = response.status;
     error.code = payload?.error?.code || "";
@@ -327,14 +328,14 @@ function machineLine(machine) {
   const parts = [];
   let label = "";
   if (machine.readable === false) {
-    parts.push("GPU lock unreadable");
-    label = "GPU lock unreadable";
+    parts.push(t("machine.unreadable"));
+    label = t("machine.unreadable");
   } else if (machine.lock === "foreign") {
-    const holder = machine.holder || "another session";
+    const holder = machine.holder || t("machine.anotherSession");
     const purpose = machine.purpose || "";
-    const mode = machine.gate === "wait" ? "(chats wait)" : "(recorded)";
-    const stale = machine.stale ? " · ETA passed" : "";
-    const prefix = `GPU lock: ${holder}`;
+    const mode = t(machine.gate === "wait" ? "machine.waits" : "machine.recorded");
+    const stale = machine.stale ? t("machine.etaPassed") : "";
+    const prefix = t("machine.lock", { holder });
     const suffix = ` ${mode}${stale}`;
     // Keep the mode (and holder) visible in the header: spend the line's
     // character budget on the purpose only after the suffix has room.
@@ -348,13 +349,13 @@ function machineLine(machine) {
     parts.push(`${prefix}${short ? ` · ${short}` : ""}${suffix}`);
     label = `${prefix}${purpose ? ` · ${purpose}` : ""}${suffix}`;
   } else if (machine.lock === "self") {
-    const stale = machine.stale ? " · ETA passed" : "";
-    parts.push(`GPU lock: yours${stale}`);
+    const stale = machine.stale ? t("machine.etaPassed") : "";
+    parts.push(`${t("machine.yours")}${stale}`);
     label = parts[parts.length - 1];
   }
   if (machine.on_ac === false && typeof machine.battery_pct === "number") {
     const state = machine.battery_state ? ` · ${machine.battery_state}` : "";
-    const battery = `Battery ${Math.round(machine.battery_pct)}%${state}`;
+    const battery = `${t("machine.battery", { pct: Math.round(machine.battery_pct) })}${state}`;
     parts.push(battery);
     label = label ? `${label} · ${battery}` : battery;
   }
@@ -390,15 +391,15 @@ function setupShown() {
 
 /** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
 function connectionState({ turn, held, pending, session }) {
-  if (!S.online) return { text: "Gateway offline", offline: true };
+  if (!S.online) return { text: t("header.offline"), offline: true };
   if (developerMode) {
-    const text = turn ? (held ? holdText(held) : pending > 0 ? "Approval needed" : "Working") : session ? "Ready" : "New chat";
+    const text = turn ? (held ? holdText(held) : t(pending > 0 ? "header.approvalNeeded" : "header.working")) : session ? t("header.ready") : t("chat.new");
     return { text, offline: false };
   }
   const model = S.health?.model;
-  if (S.health?.configured === false) return { text: "No model", offline: true };
-  if (S.health?.model_server?.reachable === false) return { text: "Model offline", offline: true };
-  return { text: model?.name || model?.backend_label || "Model", offline: false };
+  if (S.health?.configured === false) return { text: t("header.noModel"), offline: true };
+  if (S.health?.model_server?.reachable === false) return { text: t("header.modelOffline"), offline: true };
+  return { text: model?.name || model?.backend_label || t("header.model"), offline: false };
 }
 
 /**
@@ -420,7 +421,7 @@ function applyChrome() {
 /** Under a chat's title: its folder in default mode, its model and its folder in developer mode. */
 function chatSubtitle(model, folder) {
   if (!folder) return model;
-  return developerMode ? `${model} · ${folder}` : `In ${folder}`;
+  return developerMode ? `${model} · ${folder}` : t("folder.chip", { name: folder });
 }
 
 /** A chat's second line in the sidebar: its folder, which tells chats apart; a developer sees the model first. */
@@ -444,7 +445,7 @@ function syncUI() {
     // lock instead of a mutation inside a hidden live region.
     chip.hidden = !machine.text || !developerMode;
     chip.textContent = machine.text;
-    chip.setAttribute("aria-label", machine.label || "Machine status");
+    chip.setAttribute("aria-label", machine.label || t("machine.status"));
     chip.title = machine.label;
   }
   const model = S.health?.model ?? null;
@@ -454,45 +455,45 @@ function syncUI() {
   document.title = `localmelo · ${session ? title(session) : newTitle()}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
   const storeBanner = $("store-banner");
   const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
-  setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : "");
+  setTextIfChanged(storeBanner, storeError ? t("header.storeError", { problem: S.health.sessions.store_error || t("header.storeUnavailable") }) : "");
   storeBanner.hidden = !storeBanner.textContent;
   $("offline-banner").hidden = S.online;
   const setup = setupShown();
   setupCard.show(setup);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
-  input.placeholder = setup ? "Connect a model to start" : COMPOSER_PLACEHOLDER;
+  input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
   const fresh = S.ready && !S.activeId && !setup && !workerMode;
   folderPicker.update(fresh);
   $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
   const modelBanner = $("model-banner");
-  setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? "No model is configured yet. Open connection settings to connect one." : "");
+  setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? t("header.noModelBanner") : "");
   modelBanner.hidden = !modelBanner.textContent;
   refreshStreamNotice();
   $("header-model").textContent = session
-    ? chatSubtitle(session.model || "Your configured model", session.workspace_label)
+    ? chatSubtitle(session.model || t("header.yourConfiguredModel"), session.workspace_label)
     : model?.name
       ? `${model.name} · ${model.backend_label}`
-      : "Connect your model to get started";
+      : t("header.connectModel");
   const connection = connectionState({ turn, held, pending, session });
   $("connection-label").textContent = connection.text;
   $("connection-dot").classList.toggle("offline", connection.offline);
   // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
   $("connection-btn").classList.toggle("names-model", !developerMode && !connection.offline);
   if (developerMode) $("connection-btn").removeAttribute("aria-label");
-  else $("connection-btn").setAttribute("aria-label", `Model: ${connection.text}. Open settings.`);
+  else $("connection-btn").setAttribute("aria-label", t("header.modelLabel", { model: connection.text }));
   // Unhide before the text write, so a screen reader announces the wait.
   const lockBanner = $("lock-banner");
-  const lockNote = !developerMode && held === LOCK_HOLD ? "Waiting for this Mac's GPU, your chat starts when it is free." : "";
+  const lockNote = !developerMode && held === LOCK_HOLD ? t("header.gpuWait") : "";
   if (lockNote) lockBanner.hidden = false;
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
-  $("model-btn").textContent = model?.name ? `${model.name}  ⌄` : "Choose a model  ⌄";
+  $("model-btn").textContent = `${model?.name || t("header.chooseModel")}  ⌄`;
   $("send-btn").hidden = !!turn;
   $("stop-btn").hidden = !turn;
   $("stop-btn").disabled = !turn || S.cancelling.has(turn.id);
-  $("stop-btn").textContent = turn && S.cancelling.has(turn.id) ? "■ Stopping…" : "■ Stop";
+  $("stop-btn").textContent = `■ ${t(turn && S.cancelling.has(turn.id) ? "header.stopping" : "common.stop")}`;
   const sending = pendingOutbox();
   $("send-btn").disabled =
     setup ||
@@ -503,7 +504,7 @@ function syncUI() {
   // Run as a task: the main chat starts the message as a task, without asking the model.
   $("task-btn").hidden = !mainActive() || !!turn;
   $("task-btn").disabled = $("send-btn").disabled;
-  $("run-status").textContent = turn ? (held ? holdText(held) : developerMode ? "Running on your backend" : "Working…") : "";
+  $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -511,28 +512,28 @@ function syncUI() {
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
   if (taskMode) {
-    $("header-title").textContent = "Tasks";
+    $("header-title").textContent = t("tasks.title");
     // "Scheduler" is the developer's word for what people call tasks.
-    $("header-model").textContent = developerMode ? "Scheduler tasks" : "";
-    document.title = "localmelo · Tasks";
+    $("header-model").textContent = developerMode ? t("header.schedulerTasks") : "";
+    document.title = `localmelo · ${t("tasks.title")}`;
   } else if (workerMode) {
-    const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
+    const heading = workers.state.mode === "detail" ? workers.state.session?.title || t("header.workerRun") : t("header.workers");
     $("header-title").textContent = heading;
-    $("header-model").textContent = "Read-only history";
+    $("header-model").textContent = t("header.readOnly");
     document.title = `localmelo · ${heading}`;
   }
   const welcome = $("welcome-description");
   if (welcome) {
     welcome.textContent = mainActive()
-      ? "This is your main chat. Side chats and tasks report back here."
+      ? t("chat.welcomeMain")
       : session
-        ? `${session.model || "Your model"} is ready. Start a conversation below.`
-        : "A quiet space to think, build, and explore with your own model.";
+        ? t("chat.welcomeReady", { model: session.model || t("chat.yourModel") })
+        : t("chat.welcome");
   }
   // Worker history of earlier days (the panel's Workers tab lists today's): the main chat's empty state links to it.
   $("welcome-workers").hidden = !mainActive() || !(developerMode || sections.workers);
-  setTextIfChanged($("new-label"), S.main ? "New side chat" : "New chat");
-  setTextIfChanged($("list-label"), S.main ? "Side chats" : "Chats");
+  setTextIfChanged($("new-label"), newTitle());
+  setTextIfChanged($("list-label"), t(S.main ? "chat.sideChats" : "chat.chats"));
 }
 
 // ── The session list ──
@@ -580,7 +581,7 @@ function renderSessions() {
   }
   const shown = S.sessions.filter((session) => `${title(session)} ${session.model || ""}`.toLowerCase().includes(query));
   if (shown.length === 0) {
-    const empty = el("p", "list-empty", query ? "No matching chats." : main ? "Side chats you start appear here." : "Your conversations will appear here.");
+    const empty = el("p", "list-empty", t(query ? "chat.noMatch" : main ? "chat.noSideChats" : "chat.noChats"));
     $("session-list").append(empty);
   }
   const groups = main ? byDay(shown, nowSeconds()) : [{ label: "", sessions: [...shown].sort((left, right) => (right.updated_at || 0) - (left.updated_at || 0)) }];
@@ -618,21 +619,21 @@ function mainRow(main, unread) {
   const info = el("button", "session-info");
   info.type = "button";
   info.dataset.initial = "M";
-  info.title = "Main chat";
+  info.title = t("chat.main");
   if (active) info.setAttribute("aria-current", "page");
   const asking = (main.pending_approvals || 0) > 0;
   const meta = asking
-    ? "Needs your approval"
+    ? t("chat.needsApproval")
     : main.busy
-      ? main.held ? "Waiting" : "Working"
+      ? t(main.held ? "chat.waiting" : "header.working")
       : unread
-        ? unread.state === "waiting" ? `${unread.title || "A side chat"} needs you` : `New: ${unread.title || "a result"}`
+        ? unread.state === "waiting" ? t("chat.needsYou", { title: unread.title || t("chat.aSideChat") }) : t("chat.newResult", { title: unread.title || t("chat.aResult") })
         : "";
   const when = shortTime(Math.max(main.updated_at || 0, Number(main.last_card?.ts) || 0), nowSeconds());
   const dot = asking || unread
-    ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${asking ? "Approval needed" : "New results"}" title="${asking ? "Approval needed" : "New results"}"></span>`
+    ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}" title="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}"></span>`
     : "";
-  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">Main chat</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
+  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">${esc(t("chat.main"))}</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
   info.addEventListener("click", () => {
     openSession(main.id);
   });
@@ -651,16 +652,17 @@ function sessionRow(session, active) {
   info.title = title(session);
   if (session.id === active) info.setAttribute("aria-current", "page");
   const asking = session.pending_approvals > 0;
-  const marker = asking || !session.busy ? "" : session.held ? "Waiting · " : "Working · ";
-  const dot = asking ? '<span class="attention-dot" role="img" aria-label="Approval needed" title="Approval needed"></span>' : "";
-  info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${marker}${esc(chatMeta(session))}</div>`;
+  const marker = asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
+  const needed = esc(t("header.approvalNeeded"));
+  const dot = asking ? `<span class="attention-dot" role="img" aria-label="${needed}" title="${needed}"></span>` : "";
+  info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${esc(marker)}${esc(chatMeta(session))}</div>`;
   info.addEventListener("click", () => {
     openSession(session.id);
   });
   const close = el("button", "session-close", "×");
   close.type = "button";
-  close.setAttribute("aria-label", `Close chat: ${title(session)}`);
-  close.title = "Close chat";
+  close.setAttribute("aria-label", t("chat.closeChatLabel", { title: title(session) }));
+  close.title = t("chat.closeChat");
   close.disabled = workerMode || !!session.busy || (session.pending_approvals || 0) > 0;
   close.addEventListener("click", () => {
     deleteSession(session.id);
@@ -767,10 +769,10 @@ async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
   } catch (error) {
     if (error.status === 404) {
       forgetSession(id);
-      notify("This chat expired or the gateway restarted. Create a new chat to continue.", { sticky: true });
+      notify(t("chat.expired"), { sticky: true });
       return;
     }
-    notify("Could not load the chat: " + error.message, { sticky: true });
+    notify(t("chat.loadFailed", { problem: error.message }), { sticky: true });
   }
   startStream(id);
 }
@@ -874,7 +876,7 @@ async function refreshApproval(id, requestId) {
     renderMessages(false);
   } catch (error) {
     if (S.activeId === id && S.view?.pending.has(requestId)) {
-      notify("Could not load approval details: " + error.message, {sticky: true});
+      notify(t("chat.approvalLoadFailed", { problem: error.message }), {sticky: true});
     }
   }
 }
@@ -915,10 +917,7 @@ function scheduleReconnect() {
     } catch (error) {
       if (error.status === 404) {
         forgetSession(id);
-        notify(
-          "This chat expired or the gateway restarted. Create a new chat to continue.",
-          { sticky: true },
-        );
+        notify(t("chat.expired"), { sticky: true });
         return;
       }
     }
@@ -983,7 +982,7 @@ function refreshStreamNotice() {
   banner.hidden = S.stream.status !== "paused";
   if (banner.hidden) return;
   const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
-  setTextIfChanged($("stream-banner-text"), `Live updates paused. Reconnecting in ${seconds}s…`);
+  setTextIfChanged($("stream-banner-text"), t("chat.reconnecting", { n: seconds }));
 }
 
 // ── Rendering the turns ──
@@ -1055,7 +1054,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   runningCards.clear();
   const nodes = mainActive() ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
-    const earlier = button("earlier-turns link-button", earlierLoading ? "Loading earlier turns…" : "Show earlier turns", loadEarlier);
+    const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);
     earlier.disabled = earlierLoading;
     nodes.unshift(earlier);
   }
@@ -1110,7 +1109,7 @@ async function loadEarlier() {
     renderMessages(false, true);
     scroller.scrollTop = top + scroller.scrollHeight - height;
   } catch (error) {
-    if (S.view === view) notify("Could not load earlier turns: " + error.message, {sticky: true});
+    if (S.view === view) notify(t("chat.earlierFailed", { problem: error.message }), {sticky: true});
   } finally {
     earlierLoading = false;
     renderMessages(false, true);
@@ -1161,7 +1160,7 @@ async function actOnEcho(echo, does, level) {
     // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
     panel.refresh();
   } catch (error) {
-    notify(error.message || "Could not change the task. Try again.");
+    notify(error.message || t("panel.taskChangeFailed"));
   }
   renderMessages(false);
   syncUI();
@@ -1219,7 +1218,7 @@ function userNode(turn) {
       el(
         "p",
         "turn-caption",
-        "Retried below · not in melo's memory · its file changes stay",
+        t("chat.retriedBelow"),
       ),
     );
   }
@@ -1239,7 +1238,7 @@ function assistantNode(turn, newest = false) {
   icon.height = 28;
   // The live row, the work box and the failure card word every state, so the face is decoration there. A
   // finished answer with no work box above it has nothing else saying the turn is done.
-  icon.alt = face === "done" && shownItems(turn).length === 0 ? "Done" : "";
+  icon.alt = face === "done" && shownItems(turn).length === 0 ? t("chat.done") : "";
   // The idle face blinks (CSS only: an eyes-closed patch fades in over it); the other faces have no patch.
   let mark = icon;
   if (face === "idle") {
@@ -1251,7 +1250,7 @@ function assistantNode(turn, newest = false) {
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
-      article.append(el("p", "turn-caption", "Best effort"));
+      article.append(el("p", "turn-caption", t("chat.bestEffort")));
       article.append(answerNode(turn.answer));
     }
     article.append(...picturesOf(turn), statusNode(turn));
@@ -1310,16 +1309,16 @@ function actionsNode(turn) {
   const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
   const parts = [
     formatDuration(turnDuration(turn)),
-    steps === 1 ? "1 step" : `${steps} steps`,
-    turn.outputTokens > 0 ? `${formatTokens(turn.outputTokens)} tokens` : "",
+    t("turns.steps", { n: steps }),
+    turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
   ].filter(Boolean);
   actions.append(el("span", "", parts.join(" · ")));
   actions.append(
-    button("copy-button", "Copy response", async () => {
+    button("copy-button", t("chat.copyResponse"), async () => {
       try {
         await navigator.clipboard.writeText(turn.answer);
       } catch {
-        notify("Clipboard unavailable. Select the response text to copy it.");
+        notify(t("chat.copyResponseFailed"));
       }
     }),
   );
@@ -1341,29 +1340,29 @@ const localBackend = () => ["mlc", "ollama", "vllm", "sglang"].includes(S.health
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
 function failureHint(turn, can, error) {
   const own = [];
-  if (can.continue) own.push("Continue picks up where it stopped.");
-  if (can.retry) own.push("Try again starts over.");
+  if (can.continue) own.push(t("failure.continueHint"));
+  if (can.retry) own.push(t("failure.retryHint"));
+  // Sentences are joined as the language writes them: a space in English, nothing in Chinese.
+  const sentences = (first) => [first, ...own].join(t("common.sentenceGap"));
   switch (turn.status) {
     case "provider_error": {
       if (serverUnreachable(turn.status, error)) {
-        if (S.health?.model?.backend && !localBackend()) return "Check your network connection, then try again.";
+        if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
-        return `Is your model server still running${where ? ` at ${where}` : ""}? Start it, then try again.`;
+        return where ? t("failure.serverDownAt", { where }) : t("failure.serverDown");
       }
       return localBackend()
-        ? `Is the model server running at ${S.health?.model_server?.url_label || "the configured address"}? Start it, or open model settings to change the address.`
-        : "Check the API key and the model name in model settings.";
+        ? t("failure.serverAt", { where: S.health?.model_server?.url_label || t("failure.configuredAddress") })
+        : t("failure.checkKey");
     }
-    case "budget_exhausted": return ["melo used all its steps before it finished.", ...own].join(" ");
-    case "timeout": return ["The run took too long and was stopped.", ...own].join(" ");
-    case "stuck": return "melo repeated itself. Rephrase the request, or try again.";
-    case "failed": return error === UNFINISHED_ANSWER
-      ? "The model's reply held only its thinking. Try again, or rephrase the request."
-      : "Try again, or rephrase the request.";
-    case "gate_stopped": return "melo judged that another attempt would not help. Rephrase the request, or try again.";
-    case "context_budget_exceeded": return "This chat no longer fits the model's context window. Start a new chat, or shorten the request.";
-    case "setup_error": return "An MCP server failed to start. Show tools lists what is set up; fix it, then try again.";
-    case "crashed": return "This is a bug in localmelo. Copy the details into a bug report. The log is in the terminal running melo serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
+    case "budget_exhausted": return sentences(t("failure.budget"));
+    case "timeout": return sentences(t("failure.timeout"));
+    case "stuck": return t("failure.stuck");
+    case "failed": return t(error === UNFINISHED_ANSWER ? "failure.thinkingOnly" : "failure.failed");
+    case "gate_stopped": return t("failure.gate");
+    case "context_budget_exceeded": return t("failure.context");
+    case "setup_error": return t("failure.setup");
+    case "crashed": return t("failure.crashed");
     default: return "";
   }
 }
@@ -1373,13 +1372,14 @@ function failureActions(turn, {stopped, newest, can, error}) {
   const first = nextAction(turn.status, turn.cause, error);
   const address = serverUnreachable(turn.status, error) && localBackend();
   const offered = [
-    ["continue", can.continue, "Continue", () => queueMessage("Continue the task from where you stopped.")],
-    ["retry", can.retry, "Try again", () => retryTurn(turn)],
-    ["settings", turn.status === "provider_error", address ? "Change the server address" : "Open model settings", () => openSettings()],
-    ["tools", turn.status === "setup_error", "Show tools", () => drawer.open("tools")],
-    ["copy", !stopped, first === "copy" ? "Copy details" : "Copy error", async () => {
+    ["continue", can.continue, t("failure.continue"), () => queueMessage(t("failure.continueMessage"))],
+    ["retry", can.retry, t("failure.retry"), () => retryTurn(turn)],
+    ["settings", turn.status === "provider_error", t(address ? "failure.changeAddress" : "failure.openSettings"), () => openSettings()],
+    ["tools", turn.status === "setup_error", t("failure.showTools"), () => drawer.open("tools")],
+    ["copy", !stopped, t(first === "copy" ? "failure.copyDetails" : "failure.copyError"), async () => {
+      // The details stay in English, as the terminal prints them: they go into a bug report.
       try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
-      catch { notify("Clipboard unavailable. Select the error text to copy it."); }
+      catch { notify(t("failure.copyFailed")); }
     }],
   ].filter(([, shown]) => shown);
   const has = (key) => offered.some(([name]) => name === key);
@@ -1389,7 +1389,7 @@ function failureActions(turn, {stopped, newest, can, error}) {
     const action = button(key === primary ? "primary-button" : "link-button", label, run);
     if (key === "retry") {
       action.disabled = retrying;
-      action.title = "Run this message again from the start. Files it changed stay changed.";
+      action.title = t("failure.retryTitle");
     }
     actions.append(action);
   }
@@ -1416,7 +1416,8 @@ function statusNode(turn) {
   node.append(failureActions(turn, {stopped, newest, can, error}));
   if (!stopped) {
     const details = el("details", "failure-details");
-    details.append(el("summary", "", "Details"));
+    details.append(el("summary", "", t("failure.details")));
+    // The fields stay in English, as the terminal prints them: they go into a bug report.
     const result = turn.result ?? {};
     const fields = [
       `Status: ${turn.status}`, `Cause: ${turn.cause || "run"}`,
@@ -1439,7 +1440,7 @@ async function retryTurn(turn) {
   try {
     await api(`/sessions/${encodeURIComponent(id)}/retry`, {body: {turn_id: turn.id}});
   } catch (error) {
-    notify("Could not retry the turn: " + error.message, {sticky: true});
+    notify(t("failure.retryFailed", { problem: error.message }), {sticky: true});
   } finally {
     retrying = false;
   }
@@ -1465,7 +1466,7 @@ function workGroup(turn) {
   const group = workBox(summary, open);
   // A finished turn without tool calls is one line over its reasoning: the reasoning is the
   // group's body, not a second "Thought" disclosure inside it.
-  const inline = Boolean(turn.finishedAt) && summary === "Thought";
+  const inline = Boolean(turn.finishedAt) && summary === t("turns.summary.thought");
   if (group.tagName === "DETAILS") {
     group.addEventListener("toggle", () => {
       if (group.open !== open) turn.userToggledGroup = group.open;
@@ -1493,9 +1494,8 @@ function itemNode(item, turn, context = {}) {
       if (context.inline) return el("div", "thinking-body", item.text);
       const card = el("details", "thinking");
       card.open = item.expanded === true;
-      const duration =
-        item.durationS === null ? "" : ` for ${formatDuration(item.durationS)}`;
-      card.append(el("summary", "", `Thought${duration}`));
+      card.append(el("summary", "", item.durationS === null ? t("turns.summary.thought")
+        : t("tool.thoughtFor", { duration: formatDuration(item.durationS) })));
       const body = el("div", "thinking-body", item.text);
       card.append(body);
       card.addEventListener("toggle", () => {
@@ -1549,10 +1549,10 @@ const chatApproval = {
 
 // "5 lines removed, 1 added": the size of what a file write replaces.
 function diffSummary({added, removed}) {
-  const lines = (count) => `${count} ${count === 1 ? "line" : "lines"}`;
-  if (!added && !removed) return "No changes";
-  if (!removed) return `${lines(added)} added`;
-  return added ? `${lines(removed)} removed, ${added} added` : `${lines(removed)} removed`;
+  const lines = (n) => t("diff.lines", { n });
+  if (!added && !removed) return t("diff.none");
+  if (!removed) return t("diff.added", { lines: lines(added) });
+  return added ? t("diff.both", { lines: lines(removed), n: added }) : t("diff.removed", { lines: lines(removed) });
 }
 
 // The rows of a diff, numbered, each with a sign so that colour is not the only cue; the removed
@@ -1563,7 +1563,7 @@ function diffBox(rows) {
     const line = el("div", `diff-row diff-${row.kind}`);
     if (row.kind === "gap") {
       line.setAttribute("role", "separator");
-      line.setAttribute("aria-label", "Unchanged lines skipped");
+      line.setAttribute("aria-label", t("diff.skipped"));
       line.append(el("span", "diff-num"), el("span", "diff-sign"), el("span", "diff-text", "…"));
     } else {
       const tag = row.kind === "removed" ? "del" : row.kind === "added" ? "ins" : "span";
@@ -1588,49 +1588,50 @@ function approvalCard(request, view = chatApproval, asked = "") {
   card.id = `approval-card-${id}`;
   card.dataset.requestId = id;
   card.setAttribute("role", "region");
-  card.setAttribute("aria-label", "Approval needed");
+  card.setAttribute("aria-label", t("approval.needed"));
   const tool = String(request.tool_name || "tool");
   const args = request.arguments || {};
-  const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || "the workspace";
+  const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || t("approval.theWorkspace");
   const folder = workspace.replace(/\/+$/, "").split("/").pop() || workspace;
-  const scope = view.scope || "chat";
+  const scope = t(`approval.scope.${view.scope === "task" ? "task" : "chat"}`);
   // A plain question, with the tool id in a caption and what "Allow for this chat" covers.
-  let title = `Let melo use ${tool}?`;
+  let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let covers = `using ${tool}`;
-  let what = "Arguments";
+  let rule = t("approval.rule.tool", { tool, scope });
+  let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
   if (tool === "shell_exec") {
-    what = "Command";
-    title = `Run this command in ${folder}?`;
+    what = t("approval.command");
+    title = t("approval.runCommand", { folder });
     caption = `${tool} · ${workspace}`;
     content = typeof args.command === "string" ? args.command : JSON.stringify(args.command ?? "");
   } else if (tool === "python_exec") {
-    what = "Python code";
-    title = `Run this Python code in ${folder}?`;
+    what = t("approval.pythonCode");
+    title = t("approval.runPython", { folder });
     caption = `${tool} · ${workspace}`;
     content = String(args.code ?? "");
   } else if (tool === "file_write") {
     const target = request.target;
-    const path = target?.path_label || String(args.path ?? "the file");
+    const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
-    what = "File content";
-    covers = "writing files";
+    what = t("approval.fileContent");
+    rule = t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
-    if (diff) what = `Changes to ${path}`;
-    caption = !target ? `${tool} · checking the file` : diff ? `${diffSummary(diff)} · ${tool}` : tool;
-    title = !target ? `Write ${path}?` : !target.exists ? `Create ${path}?` : diff ? `Replace ${path}?` : `Replace ${path} (${formatBytes(target.size_bytes)})?`;
+    if (diff) what = t("approval.changesTo", { path });
+    caption = !target ? t("approval.checkingFile", { tool }) : diff ? `${diffSummary(diff)} · ${tool}` : tool;
+    title = !target ? t("approval.write", { path }) : !target.exists ? t("approval.create", { path })
+      : diff ? t("approval.replace", { path }) : t("approval.replaceSize", { path, size: formatBytes(target.size_bytes) });
   } else if (tool.startsWith("browser:")) {
     // A site melo wants to open in Safari: one question per site and chat.
     const site = String(args.site || tool.slice(8));
-    what = "What melo will do";
-    title = `Let melo open ${site}?`;
-    caption = "browser · read only";
-    covers = `opening ${site}`;
-    content = `melo wants to open ${site} in Safari and read it. Safari opens it in its own window; your sign-ins are not used.`;
+    what = t("approval.willDo");
+    title = t("approval.openSite", { site });
+    caption = t("approval.browserCaption");
+    rule = t("approval.rule.open", { site, scope });
+    content = t("approval.siteContent", { site });
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny.
@@ -1639,18 +1640,18 @@ function approvalCard(request, view = chatApproval, asked = "") {
   if (high) {
     card.dataset.impact = "high";
     title = review.title || title;
-    caption = `${tool} · asks every time`;
+    caption = t("approval.asksEveryTime", { tool });
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (high && review.reasons?.length) {
-    card.append(el("p", "approval-why", "Why melo asks"));
+    card.append(el("p", "approval-why", t("approval.why")));
     const reasons = el("ul", "approval-reasons");
     for (const reason of review.reasons) reasons.append(el("li", "", reason));
     card.append(reasons);
   }
   if (high && asked) {
     const text = asked.length > 200 ? `${asked.slice(0, 200).trimEnd()}…` : asked;
-    card.append(el("p", "approval-asked", `You asked: “${text}”`));
+    card.append(el("p", "approval-asked", t("approval.youAsked", { text })));
   }
   if (why) card.append(el("p", "approval-note", why));
   const lines = diff ? diff.rows : content.split("\n");
@@ -1664,7 +1665,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   if (shown.length) card.append(body);
   if (canFold && !state.showAll && lines.length > 20) {
     const count = diff ? lines.filter((row) => row.kind !== "gap").length : lines.length;
-    card.append(button("link-button", `Show all ${count} lines`, () => {
+    card.append(button("link-button", t("approval.showLines", { n: count }), () => {
       state.showAll = true;
       view.rerender();
     }));
@@ -1672,12 +1673,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
-  const once = button(high ? "outline-button" : "primary-button", "Allow once", () => view.answer(request, state, "once"));
+  const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", `Allow for this ${scope}`, () => view.answer(request, state, "session"));
+  const session = button("outline-button", t("approval.allowFor", { scope }), () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
-  const deny = button(high ? "primary-button" : "quiet-button", "Deny", () => {
+  const deny = button(high ? "primary-button" : "quiet-button", t("common.deny"), () => {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
@@ -1690,14 +1691,13 @@ function approvalCard(request, view = chatApproval, asked = "") {
   else actions.append(once, session, deny);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";
-  let rule = `melo will not ask again before ${covers} in this ${scope}.`;
-  if (high) rule = `A ${scope}-wide allow never covers installs, downloads or changes outside ${workspace}.`;
-  else if (command) rule = `“Allow for this ${scope}” lets routine ${tool === "shell_exec" ? "shell commands" : "Python code"} run without asking for the rest of this ${scope}. Installs, downloads and changes outside ${workspace} still ask.`;
+  if (high) rule = t("approval.rule.high", { scope, workspace });
+  else if (command) rule = t(tool === "shell_exec" ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (!high) session.setAttribute("aria-describedby", grant.id);
   card.append(grant);
-  const note = "Tell melo what to do instead (optional)";
+  const note = t("approval.instead");
   const label = el("label", "", note);
   const reason = el("input", "deny-reason");
   reason.value = state.reason;
@@ -1715,9 +1715,9 @@ function approvalCard(request, view = chatApproval, asked = "") {
     state.reason = reason.value.slice(0, 500);
     counter.textContent = `${state.reason.length} / 500`;
   });
-  const confirm = button("outline-button", "Deny", () => view.answer(request, state, "deny"));
+  const confirm = button("outline-button", t("common.deny"), () => view.answer(request, state, "deny"));
   confirm.dataset.approvalConfirm = "";
-  const back = button("quiet-button", "Back", () => {
+  const back = button("quiet-button", t("approval.back"), () => {
     state.deny = false;
     denyView.hidden = true;
     actions.hidden = false;
@@ -1744,11 +1744,10 @@ function approvalCard(request, view = chatApproval, asked = "") {
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false
-      ? "Approval arguments were truncated or changed; they cannot safely be allowed here. You can deny or stop the run."
-      : "Complete approval details are not available; allow is disabled."));
+      ? t("approval.truncated") : t("approval.incomplete")));
   }
   if (request.arguments_complete !== true || (tool === "file_write" && !request.target)) {
-    card.append(button("link-button", "Reload approval details", () => view.reload(id)));
+    card.append(button("link-button", t("approval.reload"), () => view.reload(id)));
   }
   const controls = [once, ...(high ? [] : [session]), deny, confirm];
   const enable = () => {
@@ -1775,7 +1774,7 @@ async function answerApproval(request, state, choice) {
     });
   } catch (error) {
     state.submitting = false;
-    notify("Could not answer approval: " + error.message, {sticky: true});
+    notify(t("approval.answerFailed", { problem: error.message }), {sticky: true});
     messageSnapshot = "";
     renderMessages(false);
   }
@@ -1843,7 +1842,7 @@ function toolBody(item, context = {}) {
   const entries = Object.entries(item.arguments ?? {});
   if (entries.length > 0) {
     const section = el("div", "tool-section");
-    section.append(el("h4", "", "Arguments"));
+    section.append(el("h4", "", t("tool.arguments")));
     const pre = el("pre", "tool-arguments");
     pre.textContent = entries
       .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
@@ -1859,7 +1858,7 @@ function toolBody(item, context = {}) {
     const node = document.createElement("img");
     node.className = "tool-image";
     node.loading = "lazy";
-    node.alt = `Image from ${item.name}`;
+    node.alt = t("tool.imageFrom", { tool: item.name });
     node.src = `/api/sessions/${encodeURIComponent(context.sessionId ?? S.activeId ?? "")}/blobs/${encodeURIComponent(image.sha256)}`;
     node.title = `${image.mime_type} · ${formatBytes(image.size_bytes)}`;
     body.append(node);
@@ -1869,7 +1868,7 @@ function toolBody(item, context = {}) {
 
 function outputBlock(item, context = {}) {
   const section = el("div", "tool-section");
-  section.append(el("h4", "", "Output"));
+  section.append(el("h4", "", t("tool.output")));
   const text = cleanOutput(item.output);
   const lines = text.split("\n");
   const shown =
@@ -1881,7 +1880,7 @@ function outputBlock(item, context = {}) {
   const hidden = item.outputChars || text.length;
   if (shown !== text) {
     section.append(
-      button("link-button", `Show all ${hidden} characters`, () => {
+      button("link-button", t("tool.showAll", { n: hidden }), () => {
         item.showAll = true;
         if (context.readOnly) context.render();
         else renderMessages(false);
@@ -1889,11 +1888,11 @@ function outputBlock(item, context = {}) {
     );
   }
   section.append(
-    button("link-button", "Copy output", async () => {
+    button("link-button", t("tool.copyOutput"), async () => {
       try {
         await navigator.clipboard.writeText(text);
       } catch {
-        notify("Clipboard unavailable. Select the output to copy it.");
+        notify(t("tool.copyFailed"));
       }
     }),
   );
@@ -1933,8 +1932,8 @@ function liveText(turn, now) {
   const parts = [activity(turn, activityOptions(turn, now))];
   parts.push(formatDuration(Math.max(0, now - turn.startedAt)));
   parts.push(...liveFacts(turn));
-  if (turn.outputTokens > 0) parts.push(`${formatTokens(turn.outputTokens)} tokens`);
-  parts.push("Esc to stop");
+  if (turn.outputTokens > 0) parts.push(t("chat.tokens", { n: formatTokens(turn.outputTokens) }));
+  parts.push(t("chat.escToStop"));
   return parts.join(" · ");
 }
 
@@ -1953,13 +1952,13 @@ function outboxNode(entry, slot) {
   const bubble = el("div", "user-bubble", entry.text);
   article.append(bubble);
   const status = el("p", "outbox-state");
-  if (entry.state === "sending") status.textContent = "Sending…";
-  else if (entry.state === "checking") status.textContent = "Checking…";
+  if (entry.state === "sending") status.textContent = t("outbox.sending");
+  else if (entry.state === "checking") status.textContent = t("outbox.checking");
   else {
-    const label = entry.unknown ? "Outcome unknown" : "Not sent";
+    const label = t(entry.unknown ? "outbox.unknown" : "outbox.notSent");
     status.append(el("span", "", entry.error ? `${label}: ${entry.error} · ` : `${label} · `));
     status.append(
-      button("link-button", "Retry", () => {
+      button("link-button", t("outbox.retry"), () => {
         entry.state = "sending";
         renderMessages(false);
         syncUI();
@@ -1967,7 +1966,7 @@ function outboxNode(entry, slot) {
       }),
     );
     status.append(
-      button("link-button", "Cancel and keep draft", () => {
+      button("link-button", t("outbox.cancel"), () => {
         cancelSend(slot, entry);
       }),
     );
@@ -2179,7 +2178,7 @@ async function stop() {
     await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
   } catch (error) {
     if (error.status !== 409 && error.status !== 404) {
-      notify("Could not stop the response: " + error.message, { sticky: true });
+      notify(t("chat.stopFailed", { problem: error.message }), { sticky: true });
     }
   } finally {
     S.cancelling.delete(turn.id);
@@ -2216,7 +2215,7 @@ async function deleteSession(id) {
     renderSessions();
     syncUI();
   } catch (error) {
-    notify("Could not close the chat: " + error.message, { sticky: true });
+    notify(t("chat.closeFailed", { problem: error.message }), { sticky: true });
   }
 }
 
@@ -2270,7 +2269,7 @@ async function setLevel(level) {
     const listed = S.sessions.find((item) => item.id === id);
     if (listed) listed.level = previous;
     if (S.view?.session?.id === id) S.view.session.level = previous;
-    notify("Could not change the chat level: " + error.message, { sticky: true });
+    notify(t("chat.levelFailed", { problem: error.message }), { sticky: true });
   }
   sessionListSnapshot = "";
   renderSessions();
@@ -2463,7 +2462,7 @@ function turnSteps(turn, sessionId, render, empty) {
   if (empty) return [el("p", "muted", empty)];
   const summary = workSummary(turn, {});
   const group = workBox(summary, true);
-  const inline = Boolean(turn.finishedAt) && summary === "Thought";
+  const inline = Boolean(turn.finishedAt) && summary === t("turns.summary.thought");
   for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
   return [group];
 }
@@ -2515,15 +2514,16 @@ function renderWorkers() {
   const root = $("worker-panel");
   const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.tagName === "H1";
   const terminal = state.mode === "detail" ? state.session?.kind === "terminal" : state.kind === "terminal";
-  const title = el("h1", "", state.mode === "list" ? "Workers" : state.session?.title || (terminal ? "Terminal chat" : "Worker run"));
+  const w = (key, params) => t(`workersView.${key}`, params);
+  const title = el("h1", "", state.mode === "list" ? w("title") : state.session?.title || w(terminal ? "terminalChat" : "workerRun"));
   title.tabIndex = -1;
-  const nodes = [title, el("p", "muted", state.mode === "list" ? "Read-only history" : terminal ? "Read-only terminal chat, secrets redacted" : "Read-only worker run")];
+  const nodes = [title, el("p", "muted", w(state.mode === "list" ? "readOnly" : terminal ? "readOnlyTerminal" : "readOnlyRun"))];
   if (state.mode === "detail") {
-    const back = document.createElement("a"); back.href = "#/workers"; back.textContent = "Back to workers"; nodes.push(back);
+    const back = document.createElement("a"); back.href = "#/workers"; back.textContent = w("back"); nodes.push(back);
   }
   if (state.mode === "list") {
     const kinds = el("div", "worker-kinds");
-    for (const [value, text] of [["worker", "Worker runs"], ["terminal", "Terminal chats"]]) {
+    for (const [value, text] of [["worker", w("runs")], ["terminal", w("terminalChats")]]) {
       const chip = button("secondary-button", text, () => {
         if (state.kind === value) return;
         state.kind = value; state.filters = {status: "", source: "", parent: ""}; workers.list();
@@ -2544,32 +2544,33 @@ function renderWorkers() {
       return control;
     };
     const statuses = [...new Set(["running", "completed", "crashed", "budget_exhausted", "stuck", "cancelled", ...state.rows.map((row) => row.status).filter(Boolean), state.filters.status].filter(Boolean))];
-    const status = select("Status", "status", [["", "All statuses"], ...statuses.map((s) => [s, s])], state.filters.status);
+    const status = select(w("status"), "status", [["", w("allStatuses")], ...statuses.map((s) => [s, s])], state.filters.status);
     // Source and parent run describe a run; a terminal chat has neither.
-    const source = terminal ? null : select("Source", "source", [["", "All sources"], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
+    const source = terminal ? null : select(w("source"), "source", [["", w("allSources")], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
     const parent = document.createElement("input"); parent.value = state.filters.parent;
-    if (!terminal) { const label = el("label", "", "Parent run"); label.append(parent); filters.append(label); }
-    const apply = document.createElement("button"); apply.type = "submit"; apply.className = "primary-button"; apply.textContent = "Apply"; filters.append(apply);
-    filters.append(button("secondary-button", "Clear filters", () => { state.filters = {status: "", source: "", parent: ""}; workers.list(); }));
+    if (!terminal) { const label = el("label", "", w("parentRun")); label.append(parent); filters.append(label); }
+    const apply = document.createElement("button"); apply.type = "submit"; apply.className = "primary-button"; apply.textContent = w("apply"); filters.append(apply);
+    filters.append(button("secondary-button", w("clear"), () => { state.filters = {status: "", source: "", parent: ""}; workers.list(); }));
     filters.addEventListener("submit", (event) => { event.preventDefault(); state.filters = {status: status.value, source: source?.value ?? "", parent: parent.value.trim()}; workers.list(); });
     nodes.push(filters);
     for (const row of state.rows) {
       const link = document.createElement("a");
       link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
-      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [terminal ? "terminal" : row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
-      const started = row.started_at == null ? "Not recorded" : new Date(row.started_at * 1000).toLocaleString();
-      const duration = row.duration_s == null ? "Not recorded" : formatDuration(row.duration_s);
-      link.append(el("span", "muted", `${terminal ? "Last turn" : "Started"}: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
+      link.append(el("strong", "", row.title || w("notRecorded")), el("span", "muted", [terminal ? "terminal" : row.source, row.model, row.status].map((v) => v == null || v === "" ? w("notRecorded") : String(v)).join(" · ")));
+      const started = row.started_at == null ? w("notRecorded") : new Date(row.started_at * 1000).toLocaleString();
+      const duration = row.duration_s == null ? w("notRecorded") : formatDuration(row.duration_s);
+      const times = w("rowTimes", {when: w(terminal ? "lastTurn" : "started"), started, duration});
+      link.append(el("span", "muted", `${times}${row.parent_run ? w("rowParent", {parent: row.parent_run}) : ""}`));
       nodes.push(link);
     }
-    if (!state.loading && !state.error && !state.rows.length) nodes.push(el("p", "", Object.values(state.filters).some(Boolean) ? "No runs match these filters." : terminal ? "No terminal chats yet." : "No worker runs yet."));
-    if (state.nextCursor) nodes.push(button("secondary-button", "Load more", () => workers.list({more: true})));
+    if (!state.loading && !state.error && !state.rows.length) nodes.push(el("p", "", w(Object.values(state.filters).some(Boolean) ? "noMatch" : terminal ? "noTerminal" : "noRuns")));
+    if (state.nextCursor) nodes.push(button("secondary-button", w("loadMore"), () => workers.list({more: true})));
   }
-  const announcement = el("p", "worker-announcement", state.loading ? (state.mode === "list" ? "Loading workers…" : "Loading worker run…") : state.error);
+  const announcement = el("p", "worker-announcement", state.loading ? w(state.mode === "list" ? "loading" : "loadingRun") : state.error);
   announcement.setAttribute("role", "status"); announcement.setAttribute("aria-live", "polite");
   nodes.push(announcement);
   if (state.error) {
-    nodes.push(button("secondary-button", "Retry", () => state.mode === "list" ? workers.list() : workers.detail(state.selectedId)));
+    nodes.push(button("secondary-button", w("retry"), () => state.mode === "list" ? workers.list() : workers.detail(state.selectedId)));
   }
   if (state.mode === "detail" && state.session && state.view) {
     const session = state.session;
@@ -2578,20 +2579,20 @@ function renderWorkers() {
     const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
     const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
     const fields = terminal
-      ? [["Model", session.model], ["Workspace", session.workspace], ["Created", new Date(session.created_at * 1000).toLocaleString()], ["Tokens", session.tokens], ["Status", session.status]]
-      : [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : formatDuration(duration)], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]];
+      ? [["model", session.model], ["workspace", session.workspace], ["created", new Date(session.created_at * 1000).toLocaleString()], ["tokens", session.tokens], ["status", session.status]]
+      : [["source", session.source], ["model", session.model], ["workspace", session.workspace], ["gitBranch", session.git_branch], ["gitHead", session.git_head], ["started", started], ["duration", duration == null ? null : formatDuration(duration)], ["steps", session.steps], ["tokens", session.tokens], ["status", session.status], ["exitCode", session.exit_code], ["parentRun", session.parent_run]];
     for (const [label, value] of fields) {
-      meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
+      meta.append(el("dt", "", w(label)), el("dd", "", value == null || value === "" ? w("notRecorded") : String(value)));
     }
     nodes.push(meta, workerStatus.element);
-    if (state.unsupported) nodes.push(el("p", "muted", "Some recorded event types cannot be shown."));
-    if (state.view.turns.length > 1 && !terminal) nodes.push(el("p", "", "This run has multiple recorded turns."));
-    if (!state.view.turns.length) nodes.push(el("p", "", "No recorded turn."));
-    if (session.status === "running") nodes.push(el("p", "", terminal ? "A turn is running. New steps appear as they are recorded." : "Run not finished. New steps appear as they are recorded."));
-    nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
+    if (state.unsupported) nodes.push(el("p", "muted", w("unsupported")));
+    if (state.view.turns.length > 1 && !terminal) nodes.push(el("p", "", w("multipleTurns")));
+    if (!state.view.turns.length) nodes.push(el("p", "", w("noTurn")));
+    if (session.status === "running") nodes.push(el("p", "", w(terminal ? "turnRunning" : "runRunning")));
+    nodes.push(button("secondary-button", w("refresh"), () => workers.detail(state.selectedId)));
     for (const turn of state.view.turns) {
-      nodes.push(el("h2", "", terminal ? "You" : "Brief"), el("p", "worker-brief", turn.userText || (terminal ? "No message recorded." : "No brief recorded.")), el("h2", "", "Work"));
-      nodes.push(...turnWork(turn, session.id, renderWorkers, state.eventCounts[turn.turn] ? "" : "No recorded events."));
+      nodes.push(el("h2", "", w(terminal ? "you" : "brief")), el("p", "worker-brief", turn.userText || w(terminal ? "noMessage" : "noBrief")), el("h2", "", w("work")));
+      nodes.push(...turnWork(turn, session.id, renderWorkers, state.eventCounts[turn.turn] ? "" : w("noEvents")));
     }
   }
   root.replaceChildren(...nodes);
@@ -2696,7 +2697,7 @@ const showSettings = setupSettings({
       setHealth(await api("/health"));
       syncUI();
     } catch (error) {
-      notify("Settings saved, but health could not be refreshed: " + error.message, {sticky: true});
+      notify(t("chat.settingsRefreshFailed", { problem: error.message }), {sticky: true});
     }
   },
 });
@@ -2763,7 +2764,7 @@ async function init() {
     try {
       globalThis.history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
     } catch {
-      lock("Could not clear the sign-in link. Close this tab and try again.");
+      lock(t("signIn.clearFailed"));
       return;
     }
     try {
@@ -2780,18 +2781,18 @@ async function init() {
         body: JSON.stringify({code}),
       });
       if (response.status !== 204) {
-        lock("This sign-in link is invalid or expired. Get a new link and try again.");
+        lock(t("signIn.expired"));
         return;
       }
     } catch {
-      lock("Could not sign in. Get a new link and try again.");
+      lock(t("signIn.failed"));
       return;
     }
   }
   try {
     setHealth(await api("/health", {allowLocked: true}));
   } catch (error) {
-    lock(error.status === 401 ? "" : "Could not reach the gateway. Open a new sign-in link to try again.");
+    lock(error.status === 401 ? "" : t("signIn.unreachable"));
     return;
   }
   S.authenticated = true;
@@ -2925,7 +2926,7 @@ $("reconnect-btn").addEventListener("click", async () => {
   } catch (error) {
     if (S.activeId === id && error.status === 404) {
       forgetSession(id);
-      notify("This chat expired or the gateway restarted. Create a new chat to continue.", {sticky: true});
+      notify(t("chat.expired"), {sticky: true});
       return;
     }
   }

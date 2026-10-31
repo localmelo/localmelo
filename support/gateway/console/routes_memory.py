@@ -14,6 +14,7 @@ from the chats.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
@@ -22,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import config
-from localmelo.support.memory.recall import chat_label, day, origin
+from localmelo.support.gateway.i18n import current, t
+from localmelo.support.memory.recall import chat_label, chat_title, day
 
 from .errors import ApiError
 
@@ -58,6 +60,31 @@ async def _chats(console: Console, ids: set[str]) -> dict[str, Any]:
     return found
 
 
+def _from_words(info: Any, label: str, gone: bool, at: float, surface: str) -> str:
+    """Where a note came from, in the reader's language; in English, :func:`origin`'s words."""
+    when = time.localtime(at)
+    month = time.strftime("%b", when) if current() == "en" else when.tm_mon
+    on = t("memoryRows.day", month=month, day=when.tm_mday)
+    if gone:
+        return t("memoryRows.fromDeleted", day=on)
+    if info is None:
+        return t("memoryRows.from", chat=label, day=on)
+    title = chat_title(info.title)
+    kind = {"front": "main", "task": "task", "front_bg": "mainTask"}.get(
+        info.kind, "terminal" if surface == "cli" and info.kind == "chat" else "chat"
+    )
+    chat = (
+        t("memoryRows.chat.main")
+        if kind == "main"
+        else (
+            t(f"memoryRows.chat.{kind}", title=title)
+            if title
+            else t(f"memoryRows.chat.{kind}Untitled")
+        )
+    )
+    return t("memoryRows.from", chat=chat, day=on)
+
+
 def _row(
     entry: StoredEntry, console: Console, chats: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -68,8 +95,8 @@ def _row(
     gone = (
         chats is not None and bool(entry.session_id) and entry.session_id not in chats
     )
-    if chats and entry.session_id in chats:
-        info = chats[entry.session_id]
+    info = chats.get(entry.session_id) if chats else None
+    if info is not None:
         label = chat_label(info.kind, info.title, surface)
     return {
         "id": entry.id,
@@ -77,7 +104,7 @@ def _row(
         "topic": str(prov.get("topic") or ""),
         "quote": str(prov.get("quote") or ""),
         "source": f"you said it · {label}, {day(entry.created_at)}",
-        "from": origin(label, gone, entry.created_at),
+        "from": _from_words(info, label, gone, entry.created_at, surface),
         "chat_gone": gone,
         "edited": bool(prov.get("edited")),
         "session_id": entry.session_id,
@@ -129,7 +156,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         except ValueError as exc:
             raise ApiError(400, "invalid_request", str(exc)) from exc
         if entry is None:
-            raise ApiError(404, "not_found", "That note is not in melo's memory.")
+            raise ApiError(404, "not_found", t("errors.noteGone"))
         await _identity_changed(console, pinned)
         chats = await _chats(console, {entry.session_id})
         return _row(entry, console, chats if console.store_state() == "ok" else None)
@@ -140,7 +167,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     ) -> Response:
         pinned = await console.memory.pinned_quotes()
         if not await console.memory.delete_record(record_id, undo=undo):
-            raise ApiError(404, "not_found", "That note is not in melo's memory.")
+            raise ApiError(404, "not_found", t("errors.noteGone"))
         await _identity_changed(console, pinned)
         return Response(status_code=204)
 
@@ -149,9 +176,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         everything: bool = Query(False, alias="all")
     ) -> dict[str, int]:
         if not everything:
-            raise ApiError(
-                400, "invalid_request", "Forgetting everything needs ?all=true."
-            )
+            raise ApiError(400, "invalid_request", t("errors.forgetAllFlag"))
         pinned = await console.memory.pinned_quotes()
         notes, turns = await console.memory.forget_all()
         await _identity_changed(console, pinned)

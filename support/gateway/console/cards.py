@@ -13,6 +13,11 @@ A waiting card carries its ``request_id``. When that approval is answered, a
 card with state ``answered``, the same ``request_id`` and the answer in words as
 its ``line`` follows it: the page shows the one card with the answer in place
 of its Review. An answer is no news, so it never counts as the newest card.
+
+A card is stored in English. One whose line is the console's own words also
+keeps them as ``said`` (a catalog key and its parameters, see
+:func:`~localmelo.support.gateway.i18n.said`), and is read in the language
+the console page asks for.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
+from localmelo.support.gateway.i18n import current, said, said_text, t_in, using
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     clean_output,
@@ -31,7 +37,7 @@ from localmelo.support.sessions.display import (
 from localmelo.support.sessions.store import StoredEvent
 
 from ..finishing import NOT_CONTINUED, not_committed
-from .activity import FOLDER_REFUSED, answer_lines, answer_word
+from .activity import answer_lines, answer_word
 
 if TYPE_CHECKING:
     from . import Console
@@ -61,25 +67,35 @@ _WHERE: Final = ("path", "url")
 # Cards of the main chat looked through for the one an answer follows.
 _LOOK_BACK: Final = 200
 _ERROR_CHARS: Final = 100
-# How an approval's answer reads on a card; a grant for a task is for the task.
+# How an approval's answer reads on a card (the catalog's ``cards.answer.*``);
+# a grant for a task is for the task.
 _ANSWERS: Final = {
-    "allowed once": "Allowed once",
-    "allowed for this chat": "Allowed for this chat",
-    "allowed automatically": "Allowed automatically",
-    "denied": "Denied",
-    "no answer": "No answer in time",
-    "withdrawn": "Not run: it stopped first",
+    "allowed once": "allowedOnce",
+    "allowed for this chat": "allowedForChat",
+    "allowed automatically": "allowedAutomatically",
+    "denied": "denied",
+    "no answer": "noAnswer",
+    "withdrawn": "withdrawn",
 }
 
 
+def _words(key: str, **params: str) -> dict[str, Any]:
+    """A card's line in English, with its words kept for the reader's language."""
+    return {"line": t_in("en", key, **params), "said": said(key, **params)}
+
+
 def card_json(event: StoredEvent) -> dict[str, Any]:
-    """One card as the page reads it: its event id, time and data."""
+    """One card as the page reads it: its event id, time and data, its line in the reader's language."""
     data = event.event.get("data")
-    return {
+    card = {
         "id": event.id,
         "ts": event.event.get("ts"),
         **(data if isinstance(data, dict) else {}),
     }
+    words = card.get("said")
+    if current() != "en" and isinstance(words, dict):
+        card["line"] = said_text(words)
+    return card
 
 
 class MainChatCards:
@@ -149,6 +165,11 @@ class MainChatCards:
             return
         heard, self._heard_events = self._heard_events, []
         self._unanswered = None
+        # What is stored reads the same to every reader: English, whoever asked.
+        with using("en"):
+            await self._write(main, heard)
+
+    async def _write(self, main: str, heard: list[StoredEvent]) -> None:
         for stored in heard:
             # A card is best effort: a source deleted meanwhile, a store that
             # closed or a task that is gone leaves the main chat without it.
@@ -203,26 +224,31 @@ class MainChatCards:
             info.id, limit=1, before=turn + 1 if turn else None
         )
         last = turns[-1] if turns else None
+        ended: dict[str, Any]
         note = ""
         if state == "failed" and info.kind == "task":
             note = (await self._console.workers.tasks.get_task(info.id)).wait_reason
         if state == "done":
-            line = answer_lines(last.answer) if last is not None else ""
+            ended = {"line": answer_lines(last.answer) if last is not None else ""}
         elif note.startswith(NOT_CONTINUED):
             # A continued run that never began: its last turn is an older one.
-            line = note
+            ended = {"line": note}
         elif last is not None and last.status != "completed":
-            line = _reason(last.status, last.cause, last.result)
+            ended = {"line": _reason(last.status, last.cause, last.result)}
         else:
             record = await self._console.workers.tasks.get_task(info.id)
-            line = record.wait_reason or "Stopped before it finished"
             if record.wait_reason == "invalid_workspace":
                 problem = await self._console.workers.folder_problem(info.id)
-                line = f"{FOLDER_REFUSED}: {problem}"
+                ended = _words("cards.folderRefused", problem=problem)
+            elif record.wait_reason:
+                ended = {"line": record.wait_reason}
+            else:
+                ended = _words("cards.stoppedEarly")
         if info.kind == "task" and last is not None:
             # A task whose commit is all that is left says so, with the command.
-            line = await not_committed(last.answer, info.workspace) or line
-        return {**card, "state": state, "line": line}
+            left = await not_committed(last.answer, info.workspace)
+            ended = {"line": left} if left else ended
+        return {**card, "state": state, **ended}
 
     async def _answer_card(
         self, card: dict[str, Any], data: dict[str, Any]
@@ -239,10 +265,15 @@ class MainChatCards:
         if not asked or asked not in self._unanswered:
             return None
         self._unanswered.discard(asked)
-        word = _ANSWERS.get(answer_word(data), "Answered")
-        if card["source_kind"] == "task":
-            word = word.replace("this chat", "this task")
-        return {**card, "state": "answered", "request_id": asked, "line": word}
+        name = _ANSWERS.get(answer_word(data), "answered")
+        if card["source_kind"] == "task" and name == "allowedForChat":
+            name = "allowedForTask"
+        return {
+            **card,
+            "state": "answered",
+            "request_id": asked,
+            **_words(f"cards.answer.{name}"),
+        }
 
     async def _read_unanswered(self) -> set[str]:
         """The request ids of the newest waiting cards that no answer follows."""

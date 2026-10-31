@@ -307,6 +307,16 @@ def test_build_assembles_locked_runtime_and_swift(
     for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
         (root / "macos/art/akita" / name).parent.mkdir(parents=True, exist_ok=True)
         (root / "macos/art/akita" / name).write_bytes(name.encode())
+    # The console's catalogs: their app.* keys become the bundle's strings.
+    catalogs = root / "support/gateway/static/i18n"
+    catalogs.mkdir(parents=True)
+    (catalogs / "en.json").write_text(
+        '{"app.menu.open": "Open localmelo", "running.more": "and {n} more"}'
+    )
+    (catalogs / "zh-Hans.json").write_text(
+        '{"app.menu.open": "打开 localmelo", "running.more": "还有 {n} 个"}',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(build_app, "ROOT", root)
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
@@ -382,6 +392,13 @@ def test_build_assembles_locked_runtime_and_swift(
     # Alerts and the Dock show the icon the plist names, which is in the bundle when it is signed.
     assert (output / "Contents/Resources" / plist["CFBundleIconFile"]).is_file()
     assert summary in capsys.readouterr().out.splitlines()
+    # English is the source; Chinese comes from its catalog, the app's keys only.
+    assert plist["CFBundleDevelopmentRegion"] == "en"
+    assert plist["CFBundleLocalizations"] == ["en", "zh-Hans"]
+    chinese = resources / "zh-Hans.lproj/Localizable.strings"
+    assert (
+        chinese.read_text(encoding="utf-8") == '"app.menu.open" = "打开 localmelo";\n'
+    )
     with pytest.raises(FileExistsError):
         build_app.build(output)
     shutil.rmtree(output)

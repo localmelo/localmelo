@@ -3,6 +3,7 @@ import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {LEVELS, levelLabel} from './levels.mjs';
+import {t} from './i18n.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -24,19 +25,15 @@ export const GLYPHS = {
   wait: '!', held: '◷', queued: '◷', paused: '‖', read: '▤', write: '✎', run: '>_', web: '⊕',
   memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●',
 };
-const TABS = [['activity', 'Activity', '≡'], ['workers', 'Workers', '⚙'], ['scheduled', 'Scheduled', '◷'], ['memory', 'Memory', '◎']];
-const EMPTY_WORKERS = {
-  chat: 'This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.',
-  all: 'No workers yet today. When Melo hands a task to a worker, or you run one yourself, it is listed here, running first.',
-};
-// A row's state in words, and how an approval was answered.
-const STATE_WORDS = {running: 'Working', waiting: 'Waiting for your approval', held: 'Waiting for the model', queued: 'Waiting to start',
-  paused: 'Paused', done: 'Done', failed: 'Failed', stopped: 'Stopped'};
-const ANSWERS = {waiting: 'Waiting for you', 'allowed once': 'Allowed once', 'allowed for this chat': 'Allowed for this chat',
-  'allowed automatically': 'Allowed automatically', denied: 'Denied', 'no answer': 'No answer in time', withdrawn: 'Not run: it stopped first'};
+// A tab's words are `panel.tab.<id>`; the workers' empty note `panel.emptyWorkers.<scope>`.
+const TABS = [['activity', '≡'], ['workers', '⚙'], ['scheduled', '◷'], ['memory', '◎']];
+// A row's state in words (`panel.state.<state>`), and how an approval was answered (`panel.answer.<key>`).
+const STATES = new Set(['running', 'waiting', 'held', 'queued', 'paused', 'done', 'failed', 'stopped']);
+const ANSWERS = {waiting: 'waiting', 'allowed once': 'allowedOnce', 'allowed for this chat': 'allowedChat',
+  'allowed automatically': 'allowedAuto', denied: 'denied', 'no answer': 'noAnswer', withdrawn: 'withdrawn'};
+const stateWords = (state) => (STATES.has(state) ? t(`panel.state.${state}`) : '');
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
-const OPEN = {chat: 'Open chat', task: 'Open task', run: 'Open run', terminal: 'Open terminal chat'};
 const SHOWN = 8;
 const STEPS = 8;
 const REFRESH_MS = 30000;
@@ -50,24 +47,26 @@ const base = (path) => String(path ?? '').replace(/\/+$/, '').split('/').pop();
 export function stepWords(name, args, done = false) {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
   const a = args && typeof args === 'object' ? args : {};
-  const say = (now, past, what = '') => `${done ? past : now}${what ? ` ${what}` : ''}`;
-  if (tool === 'file_read') return say('Reading', 'Read', base(a.path) || 'a file');
-  if (tool === 'file_write') return say('Writing', 'Wrote', base(a.path) || 'a file');
-  if (tool === 'list_files') return say('Looking through', 'Looked through', base(a.path) || 'the folder');
-  if (tool === 'file_edit') return say('Editing', 'Edited', base(a.path) || 'a file');
-  if (tool === 'git_status') return say('Reading', 'Read', 'the git state');
-  if (tool === 'shell_exec') return TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? say('Running', 'Ran', 'the tests') : say('Running', 'Ran', 'a command');
-  if (tool === 'python_exec') return say('Running', 'Ran', 'Python');
-  if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('Remembering', 'Remembered');
+  // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
+  const say = (verb, what = '') => t(`steps.${done ? 'done' : 'now'}.${verb}`, {what});
+  const file = base(a.path) || t('steps.aFile');
+  if (tool === 'file_read') return say('read', file);
+  if (tool === 'file_write') return say('write', file);
+  if (tool === 'list_files') return say('look', base(a.path) || t('steps.theFolder'));
+  if (tool === 'file_edit') return say('edit', file);
+  if (tool === 'git_status') return say('read', t('steps.gitState'));
+  if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
+  if (tool === 'python_exec') return say('run', 'Python');
+  if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('remember');
   if (tool === 'browser_open') {
     let host = '';
     try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }
-    return host ? say('Reading', 'Read', host) : say('Opening', 'Opened', 'a page');
+    return host ? say('read', host) : say('open', t('steps.aPage'));
   }
-  if (tool === 'browser_follow') return say('Following', 'Followed', 'a link');
-  if (tool === 'browser_screenshot') return say('Looking at', 'Looked at', 'the page');
-  if (tool.startsWith('browser_')) return say('Reading', 'Read', 'the page');
-  return say('Using', 'Used', 'a tool');
+  if (tool === 'browser_follow') return say('follow', t('steps.aLink'));
+  if (tool === 'browser_screenshot') return say('lookAt', t('steps.thePage'));
+  if (tool.startsWith('browser_')) return say('read', t('steps.thePage'));
+  return say('use', t('steps.aTool'));
 }
 
 /**
@@ -75,19 +74,20 @@ export function stepWords(name, args, done = false) {
  * `scoped` is that chat's rows and what runs is read from them instead of the whole console.
  */
 export function headline(health, scoped = null) {
-  if (!health) return {text: 'Connecting…', mood: 'idle', fix: false};
-  if (health.configured === false) return {text: 'No model set up yet', mood: 'error', fix: true};
-  if (health.model_server?.reachable === false) return {text: 'Model server not reachable', mood: 'error', fix: true};
+  if (!health) return {text: t('panel.head.connecting'), mood: 'idle', fix: false};
+  if (health.configured === false) return {text: t('panel.head.noModel'), mood: 'error', fix: true};
+  if (health.model_server?.reachable === false) return {text: t('panel.head.unreachable'), mood: 'error', fix: true};
   const status = health.status ?? {};
   const count = scoped ? scoped.filter((row) => row.state === 'running' || row.state === 'held').length
     : Object.values(status.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
-  if (scoped ? scoped.some((row) => row.state === 'waiting') : status.waiting?.length) return {text: 'Waiting for you', mood: 'waiting', fix: false, count};
-  if (count > 0) return {text: `Working on ${count === 1 ? '1 thing' : `${count} things`}`, mood: 'working', fix: false, count};
+  if (scoped ? scoped.some((row) => row.state === 'waiting') : status.waiting?.length) return {text: t('panel.head.waiting'), mood: 'waiting', fix: false, count};
+  if (count > 0) return {text: t('panel.head.working', {n: count}), mood: 'working', fix: false, count};
   const recent = scoped && !scoped.some((row) => row.id === status.recent?.id) ? null : status.recent;
   const mood = recent && recent.ended_s_ago < 8 && recent.outcome !== 'stopped' ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
   const model = health.model?.name;
   const server = health.model?.backend_label;
-  return {text: model ? `Connected · ${model}${server ? ` on ${server}` : ''}` : 'Connected', mood, fix: false, count: 0};
+  const text = !model ? t('panel.head.connected') : server ? t('panel.head.connectedModelOn', {model, server}) : t('panel.head.connectedModel', {model});
+  return {text, mood, fix: false, count: 0};
 }
 
 export function setupPanel({
@@ -135,18 +135,18 @@ export function setupPanel({
   status.setAttribute('role', 'status');
   const head = node('header', 'panel-head');
   const handle = button('panel-handle', '', () => setSheet(false));
-  handle.setAttribute('aria-label', 'Close activity');
+  handle.setAttribute('aria-label', t('panel.closeActivity'));
   head.append(handle, ring, node('h2', 'panel-name', 'Melo'), status);
   const tablist = node('div', 'panel-tabs');
   tablist.setAttribute('role', 'tablist');
   tablist.setAttribute('aria-label', 'Melo');
-  const tabs = TABS.map(([id, label, glyph]) => {
+  const tabs = TABS.map(([id, glyph]) => {
     const tab = button('panel-tab', '', () => select(id));
     tab.id = `panel-tab-${id}`;
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-controls', 'panel-body');
     tab.dataset.tab = id;
-    tab.append(node('span', 'panel-tab-glyph', glyph), node('span', '', label));
+    tab.append(node('span', 'panel-tab-glyph', glyph), node('span', '', t(`panel.tab.${id}`)));
     tab.firstChild.setAttribute('aria-hidden', 'true');
     return tab;
   });
@@ -189,13 +189,13 @@ export function setupPanel({
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
     frame.classList.toggle('blinks', said.mood === 'idle');
     const nodes = [node('span', 'panel-dot'), node('span', '', said.text)];
-    if (said.fix) nodes.push(button('link-button', 'Open settings', () => openSettings()));
+    if (said.fix) nodes.push(button('link-button', t('common.openSettings'), () => openSettings()));
     status.replaceChildren(...nodes);
     const waiting = said.mood === 'waiting';
     chip.dataset.mood = said.mood;
     chip.replaceChildren(Object.assign(node('img'), {src: `/assets/akita/face-${said.mood}.png`, alt: '', width: 24, height: 24}),
       node('span', '', [said.count || '', waiting ? '!' : ''].filter(Boolean).join(' · ')));
-    chip.setAttribute('aria-label', `Activity: ${said.text}`);
+    chip.setAttribute('aria-label', t('panel.chipLabel', {text: said.text}));
   }
 
   // ── Activity ──
@@ -215,7 +215,7 @@ export function setupPanel({
   // A worker's second line says its state in words, then what it does or how it ended.
   // A held worker says why in the server's words (`Waiting for a free model slot`).
   const workerLine = (row) => (row.state === 'held' && row.activity ? row.activity
-    : [STATE_WORDS[row.state], row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · '));
+    : [stateWords(row.state), row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · '));
   function rowNode(row, worker = false) {
     const item = node('li', 'activity-row');
     item.dataset.state = row.state;
@@ -226,7 +226,7 @@ export function setupPanel({
     const text = node('span', 'activity-text');
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
     // A task names the folder it works in (its chat's, unless it was given one).
-    if (row.folder) text.append(node('span', 'activity-folder', `In ${row.folder}`));
+    if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
     headButton.append(icon(row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);
@@ -241,7 +241,8 @@ export function setupPanel({
     const open = state.folds.has(key(row));
     const box = node('div', 'approval-fold');
     box.dataset.waiting = String(waiting > 0);
-    const toggler = button('approval-toggle', `${asked.length} approval${asked.length === 1 ? '' : 's'}${waiting ? `, ${waiting} waiting` : ''}`, () => {
+    const approvals = t('panel.approvals', {n: asked.length});
+    const toggler = button('approval-toggle', waiting ? t('panel.approvalsWaiting', {approvals, n: waiting}) : approvals, () => {
       if (!state.folds.delete(key(row))) state.folds.add(key(row));
       drawBody();
     });
@@ -254,14 +255,14 @@ export function setupPanel({
       const entry = node('li', 'approval-item');
       entry.dataset.answer = item.answer === 'waiting' ? 'waiting' : item.answer.startsWith('allowed') ? 'allowed' : item.answer === 'denied' ? 'denied' : 'other';
       entry.append(node('span', 'approval-what', item.what), node('time', 'approval-time', timeOf(item.at)),
-        node('span', 'approval-answer', ANSWERS[item.answer] ?? item.answer));
+        node('span', 'approval-answer', item.answer in ANSWERS ? t(`panel.answer.${ANSWERS[item.answer]}`) : item.answer));
       if (item.answer === 'waiting') {
         // Only the gateway's own chats and tasks are answered here; the full card, with the content, is one link away.
         const mine = ['chat', 'task'].includes(row.kind);
         const busy = state.busy === `approval:${item.id}`;
-        const choices = mine ? [button('outline-button', 'Allow once', () => answer(row, item, 'once')), button('outline-button', 'Deny', () => answer(row, item, 'deny'))] : [];
+        const choices = mine ? [button('outline-button', t('common.allowOnce'), () => answer(row, item, 'once')), button('outline-button', t('common.deny'), () => answer(row, item, 'deny'))] : [];
         for (const choice of choices) choice.disabled = busy;
-        const review = node('a', 'activity-open', 'Review');
+        const review = node('a', 'activity-open', t('common.review'));
         review.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
         review.addEventListener('click', () => setSheet(false));
         const choose = node('span', 'approval-choices');
@@ -284,7 +285,7 @@ export function setupPanel({
       await api(`/approvals/${encodeURIComponent(item.id)}`, {body: {choice}});
     } catch (error) {
       state.noticeFor = key(row);
-      state.notice = error?.status === 409 ? 'It was answered already.' : error?.message || 'Could not send the answer. Try again.';
+      state.notice = error?.status === 409 ? t('panel.answeredAlready') : error?.message || t('panel.answerFailed');
     }
     state.busy = '';
     await refresh();
@@ -296,7 +297,7 @@ export function setupPanel({
     item.dataset.state = running ? 'running' : failed ? 'failed' : 'done';
     item.append(node('span', 'activity-mark', running ? '●' : failed ? '✗' : '✓'),
       node('span', 'activity-step-label', step.label ?? stepWords(step.name, step.arguments, !running)),
-      node('span', 'activity-step-time', running ? 'now' : step.durationS == null ? '' : formatDuration(step.durationS)));
+      node('span', 'activity-step-time', running ? t('panel.stepNow') : step.durationS == null ? '' : formatDuration(step.durationS)));
     item.firstChild.setAttribute('aria-hidden', 'true');
     return item;
   }
@@ -304,9 +305,9 @@ export function setupPanel({
     const box = node('div', 'activity-detail');
     const turn = live.state.view?.turns?.at(-1);
     const steps = turn ? turn.items.filter((item) => item.kind === 'tool') : [];
-    if (live.state.loading && !turn) box.append(node('p', 'panel-note', 'Loading the steps…'));
+    if (live.state.loading && !turn) box.append(node('p', 'panel-note', t('panel.loadingSteps')));
     else if (steps.length) {
-      if (steps.length > STEPS) box.append(node('p', 'panel-note', `${steps.length - STEPS} earlier steps`));
+      if (steps.length > STEPS) box.append(node('p', 'panel-note', t('panel.earlierSteps', {n: steps.length - STEPS})));
       const list = node('ol', 'activity-steps');
       list.append(...steps.slice(-STEPS).map(stepNode));
       // Between calls a running turn is thinking or waiting: its row's words close the list.
@@ -317,12 +318,12 @@ export function setupPanel({
       const output = cleanOutput(String([...steps].reverse().find((step) => step.output)?.output ?? '')).trimEnd();
       if (output) box.append(node('pre', 'activity-output', output.split('\n').slice(-3).join('\n')));
     } else if (turn || row.state === 'queued') {
-      box.append(node('p', 'panel-note', row.state === 'queued' ? 'Not started yet.' : LIVE.has(row.state) ? 'Thinking…' : 'Answered without steps.'));
+      box.append(node('p', 'panel-note', t(row.state === 'queued' ? 'panel.notStarted' : LIVE.has(row.state) ? 'panel.thinking' : 'panel.noSteps')));
     }
     if (live.state.error) box.append(node('p', 'panel-note', live.state.error));
     const actions = node('div', 'activity-actions');
     if (row.kind === 'task' && LIVE.has(row.state)) actions.append(...taskActions(row));
-    const link = node('a', 'activity-open', row.state === 'waiting' ? 'Review' : OPEN[row.kind]);
+    const link = node('a', 'activity-open', t(row.state === 'waiting' ? 'common.review' : `panel.open.${row.kind}`));
     link.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
     link.addEventListener('click', () => setSheet(false));
     actions.append(link);
@@ -334,13 +335,13 @@ export function setupPanel({
     const paused = row.state === 'paused';
     const busy = state.busy === key(row);
     const nodes = [
-      button('outline-button', paused ? 'Resume' : 'Pause', () => act(row, {state: paused ? 'resume' : 'pause'})),
-      button('outline-button', 'Stop', () => act(row, {state: 'stop'})),
+      button('outline-button', t(paused ? 'common.resume' : 'common.pause'), () => act(row, {state: paused ? 'resume' : 'pause'})),
+      button('outline-button', t('common.stop'), () => act(row, {state: 'stop'})),
     ];
     // P0 to P4 run; P5 is on hold, which Pause and Resume set.
     if (!paused && Number.isInteger(row.level) && row.level < LEVELS.length - 1) {
       const menu = node('select', 'activity-level');
-      menu.setAttribute('aria-label', 'Priority');
+      menu.setAttribute('aria-label', t('common.priority'));
       LEVELS.slice(0, -1).forEach((_, level) => {
         const option = node('option', '', levelLabel(level));
         option.value = String(level);
@@ -362,7 +363,7 @@ export function setupPanel({
       await api(`/tasks/${encodeURIComponent(row.id)}`, {method: 'PATCH', body: change});
     } catch (error) {
       state.noticeFor = key(row);
-      state.notice = error?.message || 'Could not change the task. Try again.';
+      state.notice = error?.message || t('panel.taskChangeFailed');
     }
     state.busy = '';
     await refresh();
@@ -392,32 +393,32 @@ export function setupPanel({
     const now = rows.filter((row) => LIVE.has(row.state));
     const done = rows.filter((row) => !LIVE.has(row.state));
     const list = (these) => { const element = node('ul', 'activity-list'); element.append(...these.map((row) => rowNode(row, worker))); return element; };
-    const nodes = [node('h3', 'panel-section', 'Now')];
-    nodes.push(now.length ? list(now) : node('p', 'panel-calm', worker ? 'No worker is running' : 'Nothing running'));
-    nodes.push(node('h3', 'panel-section', 'Today'));
+    const nodes = [node('h3', 'panel-section', t('common.now'))];
+    nodes.push(now.length ? list(now) : node('p', 'panel-calm', t(worker ? 'panel.noWorkerRunning' : 'panel.nothingRunning')));
+    nodes.push(node('h3', 'panel-section', t('time.today')));
     const shown = state.all ? done : done.slice(0, SHOWN);
-    nodes.push(done.length ? list(shown) : node('p', 'panel-note', 'Nothing finished yet today.'));
+    nodes.push(done.length ? list(shown) : node('p', 'panel-note', t('panel.nothingDone')));
     const foot = node('div', 'panel-foot');
-    if (done.length > shown.length) foot.append(button('link-button', `Earlier today (${done.length - shown.length})`, () => { state.all = true; drawBody(); }));
+    if (done.length > shown.length) foot.append(button('link-button', t('panel.earlierToday', {n: done.length - shown.length}), () => { state.all = true; drawBody(); }));
     foot.append(...footLinks(links));
     if (foot.children.length) nodes.push(foot);
-    if (state.more) nodes.push(node('p', 'panel-note', 'More ran today than this list shows.'));
-    if (state.unavailable.length) nodes.push(node('p', 'panel-note', 'Part of today could not be read.'));
+    if (state.more) nodes.push(node('p', 'panel-note', t('panel.more')));
+    if (state.unavailable.length) nodes.push(node('p', 'panel-note', t('panel.partUnread')));
     return nodes;
   }
   function activityNodes() {
-    if (!state.loaded) return [node('p', 'panel-note', state.error || 'Loading today…')];
+    if (!state.loaded) return [node('p', 'panel-note', state.error || t('panel.loadingToday'))];
     return dayNodes(state.rows, false, []);
   }
   // The workers of this scope: the tasks and the worker runs, running ones first. Terminal chats are not workers.
   function workersNodes() {
-    if (!state.loaded) return [node('p', 'panel-note', state.error || 'Loading the workers…')];
+    if (!state.loaded) return [node('p', 'panel-note', state.error || t('panel.loadingWorkers'))];
     const workers = state.rows.filter((row) => row.kind === 'task' || row.kind === 'run');
-    const links = [[['task'], 'All tasks', '#/tasks'], [['run', 'terminal'], 'All worker runs', '#/workers']];
+    const links = [[['task'], t('panel.allTasks'), '#/tasks'], [['run', 'terminal'], t('panel.allRuns'), '#/workers']];
     if (workers.length) return dayNodes(workers, true, links);
     const foot = node('div', 'panel-foot');
     foot.append(...footLinks(links));
-    return [node('p', 'panel-soon', EMPTY_WORKERS[state.scope]), ...(foot.children.length ? [foot] : [])];
+    return [node('p', 'panel-soon', t(`panel.emptyWorkers.${state.scope === 'chat' ? 'chat' : 'all'}`)), ...(foot.children.length ? [foot] : [])];
   }
 
   function drawBody() {
@@ -455,7 +456,7 @@ export function setupPanel({
         scope: page.scope === 'chat' ? 'chat' : 'all', loaded: true, error: '', fetchedAt: clock(), day: since});
     } catch {
       if (mine !== reads) return;
-      if (!state.loaded) state.error = 'Could not read today’s activity. It is tried again shortly.';
+      if (!state.loaded) state.error = t('panel.readFailed');
       state.seen = null; // the next health poll asks again
     }
     const open = state.rows.find((row) => key(row) === state.open);

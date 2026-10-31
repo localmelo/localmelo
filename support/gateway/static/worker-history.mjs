@@ -1,3 +1,4 @@
+import {t} from './i18n.mjs';
 import {applyEvent, newTurn, newView} from './turns.mjs';
 
 const SUPPORTED_EVENTS = new Set([
@@ -79,12 +80,12 @@ export function workerHistory(api, changed, every = defaultEvery, {
   let stopPolling = null;
   const follow = {id: null, source: null, retry: null, draw: null};
   const fail = (error, detail) => {
-    if (error.status === 503) return 'Worker history is unavailable.';
-    if (detail && error.status === 404) return 'Worker run not found.';
+    if (error.status === 503) return t('workers.unavailable');
+    if (detail && error.status === 404) return t('workers.notFound');
     if (!detail && ([404, 405].includes(error.status) || (error.status === 400 && /kind/i.test(error.message || '')))) {
-      return `This server does not support ${state.kind === 'terminal' ? 'terminal chats' : 'worker history'} yet.`;
+      return t(state.kind === 'terminal' ? 'workers.noTerminal' : 'workers.noHistory');
     }
-    return detail ? 'Could not load this worker run. Try again.' : 'Could not load workers. Try again.';
+    return t(detail ? 'workers.runFailed' : 'workers.listFailed');
   };
   function listPath(cursor) {
     const params = new URLSearchParams({kind: state.kind, limit: String(PAGE)});
@@ -141,7 +142,7 @@ export function workerHistory(api, changed, every = defaultEvery, {
     try {
       const run = await readRun(id);
       if (epoch !== state.epoch) return;
-      if (!readable(run.session)) { state.error = 'Worker run not found.'; return; }
+      if (!readable(run.session)) { state.error = t('workers.notFound'); return; }
       showRun(id, run);
       startFollow(id);
     } catch (error) {

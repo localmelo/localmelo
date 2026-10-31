@@ -114,9 +114,9 @@ func menuTitle(_ state: MenuBarState) -> String {
 func menuBarLabel(_ state: MenuBarState) -> String {
     switch state {
     case .unknown: return "localmelo"
-    case .idle: return "localmelo, nothing running"
-    case .running(let n): return "localmelo, \(n) running"
-    case .waiting: return "localmelo, waiting for your approval"
+    case .idle: return L10n.t("app.bar.idle", "localmelo, nothing running")
+    case .running(let n): return L10n.t("app.bar.running", "localmelo, {n} running", ["n": String(n)])
+    case .waiting: return L10n.t("app.bar.waiting", "localmelo, waiting for your approval")
     }
 }
 
@@ -124,33 +124,36 @@ func menuBarLabel(_ state: MenuBarState) -> String {
 func menuStatusLine(_ state: MenuBarState) -> String? {
     switch state {
     case .unknown: return nil
-    case .idle: return "Nothing running"
-    case .running(let n), .waiting(running: let n): return n > 0 ? "\(n) running" : "Nothing running"
+    case .idle: return L10n.t("app.bar.nothing", "Nothing running")
+    case .running(let n), .waiting(running: let n):
+        return n > 0 ? L10n.t("app.bar.count", "{n} running", ["n": String(n)]) : L10n.t("app.bar.nothing", "Nothing running")
     }
-}
-
-private func counted(_ n: Int, _ noun: String) -> String {
-    "\(n) \(noun)\(n == 1 ? "" : "s")"
 }
 
 /// The quit dialog's text: what quitting stops, in the words people use for it. Quitting stops the
 /// gateway and so its chats and tasks; runs and terminal chats belong to other processes and go on.
 func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
-    let generic = "Quitting stops anything that is running."
+    let generic = L10n.t("app.quit.generic", "Quitting stops anything that is running.")
     guard let counts = counts else {
-        return statusKnown ? generic : "Could not check what is running. " + generic
+        return statusKnown ? generic : L10n.t("app.quit.unknown", "Could not check what is running. {generic}", ["generic": generic])
     }
-    let stops = [(counts.tasks, "task"), (counts.chats, "chat")]
-        .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
-    let goes = [(counts.runs, "run"), (counts.terminal, "terminal chat")]
-        .filter { n, _ in n > 0 }.map { n, noun in counted(n, noun) }
+    let and = L10n.t("app.quit.and", " and ")
+    var stops: [String] = [], goes: [String] = []
+    if counts.tasks > 0 { stops.append(L10n.plural("app.quit.tasks", counts.tasks, one: "{n} task", other: "{n} tasks")) }
+    if counts.chats > 0 { stops.append(L10n.plural("app.quit.chats", counts.chats, one: "{n} chat", other: "{n} chats")) }
+    if counts.runs > 0 { goes.append(L10n.plural("app.quit.runs", counts.runs, one: "{n} run", other: "{n} runs")) }
+    if counts.terminal > 0 {
+        goes.append(L10n.plural("app.quit.terminal", counts.terminal, one: "{n} terminal chat", other: "{n} terminal chats"))
+    }
     var text = generic
     if stops.count == 1 {
-        text = "Quitting stops \(stops[0])."
+        text = L10n.t("app.quit.stopsOne", "Quitting stops {what}.", ["what": stops[0]])
     } else if stops.count > 1 {
-        text = "Quitting stops what is running: \(stops.joined(separator: " and "))."
+        text = L10n.t("app.quit.stopsAll", "Quitting stops what is running: {what}.", ["what": stops.joined(separator: and)])
     }
-    if !goes.isEmpty { text += " Not affected: \(goes.joined(separator: " and "))." }
+    if !goes.isEmpty {
+        text += L10n.t("app.quit.notAffected", " Not affected: {what}.", ["what": goes.joined(separator: and)])
+    }
     return text
 }
 
@@ -254,11 +257,20 @@ func attachConfirmed(status: Int?, gatewayHeader: String?, endpoint: GatewayEndp
 }
 
 func quitTitle(attached: Bool) -> String {
-    attached ? "Quit localmelo (the gateway keeps running)" : "Quit localmelo"
+    attached ? L10n.t("app.menu.quitAttached", "Quit localmelo (the gateway keeps running)")
+        : L10n.t("app.menu.quit", "Quit localmelo")
 }
 
 /// An attached gateway that ends was stopped elsewhere (`melo serve stop`, say).
-let attachedStoppedMessage = "The gateway it was using has stopped. Try Again starts a new one."
+var attachedStoppedMessage: String {
+    L10n.t("app.fail.attachedStopped", "The gateway it was using has stopped. Try Again starts a new one.")
+}
+
+/// Another process listens on the port the gateway was to use.
+func portHeldMessage(_ port: Int) -> String {
+    L10n.t("app.fail.portHeld", "Port {port} is held by another process. Stop the existing listener and try again.",
+           ["port": String(port)])
+}
 
 /// The port in the gateway's startup line `Gateway: http://HOST:PORT`, where
 /// HOST may be an IPv6 address in brackets. Any other line gives nil.
@@ -303,15 +315,15 @@ func isGatewayPage(_ url: URL, port: Int) -> Bool {
 
 func storeFailureMessage(_ health: GatewayHealth) -> String {
     let hint = health.reason == "owned"
-        ? " Stop the other gateway and try again."
-        : " Check the gateway log and session store permissions, then try again."
-    return "The gateway session store is unavailable: \(health.error).\(hint)"
+        ? L10n.t("app.fail.storeOwned", " Stop the other gateway and try again.")
+        : L10n.t("app.fail.storeCheck", " Check the gateway log and session store permissions, then try again.")
+    return L10n.t("app.fail.store", "The gateway session store is unavailable: {error}.{hint}", ["error": health.error, "hint": hint])
 }
 
 /// The line under "Starting localmelo…", from what the app knows so far.
 func startStepText(portKnown: Bool, ready: Bool) -> String {
-    if ready { return "Opening your workspace" }
-    return portKnown ? "Signing in" : "Starting the local server"
+    if ready { return L10n.t("app.start.opening", "Opening your workspace") }
+    return portKnown ? L10n.t("app.start.signingIn", "Signing in") : L10n.t("app.start.server", "Starting the local server")
 }
 
 /// What the window offers when the gateway cannot start or stops, in button order.
@@ -320,9 +332,9 @@ enum FailureAction: CaseIterable {
 
     var title: String {
         switch self {
-        case .tryAgain: return "Try Again"
-        case .openLog: return "Open Log"
-        case .quit: return "Quit"
+        case .tryAgain: return L10n.t("app.action.tryAgain", "Try Again")
+        case .openLog: return L10n.t("app.action.openLog", "Open Log")
+        case .quit: return L10n.t("app.action.quit", "Quit")
         }
     }
 }
@@ -335,14 +347,15 @@ struct FailureNotice {
 
 /// The window's failure text. `ready` is true once the console had loaded.
 func failureNotice(reason: String, ready: Bool) -> FailureNotice {
-    FailureNotice(title: ready ? "localmelo stopped" : "localmelo could not start",
+    FailureNotice(title: ready ? L10n.t("app.fail.stopped", "localmelo stopped") : L10n.t("app.fail.couldNotStart", "localmelo could not start"),
                   reason: reason, actions: FailureAction.allCases)
 }
 
 /// What the window says when the gateway quits on its own: no signal or status, which mean nothing to
 /// most people and go to the log. `detail` is a fact worth saying, such as who holds the port now.
 func gatewayExitMessage(detail: String = "") -> String {
-    "Its background service quit unexpectedly.\(detail) Try Again starts it again; Open Log shows what happened."
+    L10n.t("app.fail.exited", "Its background service quit unexpectedly.{detail} Try Again starts it again; Open Log shows what happened.",
+           ["detail": detail])
 }
 
 /// The same exit as the log records it.

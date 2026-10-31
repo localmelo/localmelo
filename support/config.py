@@ -72,6 +72,8 @@ RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
 REASONING_TAGS = ("explicit", "closing_only", "none")
 UI_MODES = ("default", "developer")
+# The console's and the app's language: "auto" follows the system.
+CONSOLE_LANGUAGES = ("auto", "en", "zh-Hans")
 STATUS_LINES = ("auto", "off")
 CLI_COLORS = ("auto", "16", "256", "truecolor")
 CLI_BACKGROUNDS = ("auto", "dark", "light")
@@ -160,6 +162,17 @@ class UiConfig:
     """The ``[ui]`` table: ``mode`` decides which options ``melo --help`` shows."""
 
     mode: str = "default"  # default | developer
+
+
+@dataclass
+class ConsoleConfig:
+    """The ``[console]`` table: the language of the web console and the macOS app.
+
+    ``auto`` follows the browser's or the Mac's preferred languages; ``en`` and
+    ``zh-Hans`` (Simplified Chinese) choose one. The terminal is always English.
+    """
+
+    language: str = "auto"  # auto | en | zh-Hans
 
 
 @dataclass
@@ -368,6 +381,7 @@ class Config:
     sessions: SessionsConfig = field(default_factory=SessionsConfig)
     cli: CliConfig = field(default_factory=CliConfig)
     ui: UiConfig = field(default_factory=UiConfig)
+    console: ConsoleConfig = field(default_factory=ConsoleConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -589,6 +603,15 @@ class Config:
         if self.ui.mode in UI_MODES:
             return []
         return [f"[ui] mode={self.ui.mode!r} is not one of {UI_MODES}"]
+
+    def _validate_console(self) -> list[str]:
+        """``[console] language`` is ``auto`` or a language the console has."""
+        if self.console.language in CONSOLE_LANGUAGES:
+            return []
+        return [
+            f"[console] language={self.console.language!r} "
+            f"is not one of {CONSOLE_LANGUAGES}"
+        ]
 
     def _validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
@@ -844,6 +867,7 @@ class Config:
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
+            *self._validate_console(),
             *self._validate_request_timeout(),
         ]
 
@@ -854,6 +878,10 @@ class Config:
     def ui_errors(self) -> list[str]:
         """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
         return self._validate_ui()
+
+    def console_errors(self) -> list[str]:
+        """The ``[console]`` errors alone: the language is display only, so a bad one warns."""
+        return self._validate_console()
 
     def pricing_errors(self) -> list[str]:
         """What is wrong in ``[pricing]``; display only, so a bad table warns.
@@ -1125,6 +1153,9 @@ def _load_file() -> Config:
     # A bad mode is kept so Config.ui_errors can report it.
     if isinstance(data.get("ui"), dict):
         cfg.ui.mode = data["ui"].get("mode", cfg.ui.mode)
+    # A bad language is kept for Config.console_errors; the console reads it as auto.
+    if isinstance(data.get("console"), dict):
+        cfg.console.language = data["console"].get("language", cfg.console.language)
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -1452,6 +1483,10 @@ def save(cfg: Config) -> None:
         lines.append("")
     if cfg.ui != UiConfig():
         lines.extend(["[ui]", f"mode = {_toml_value(cfg.ui.mode)}", ""])
+    if cfg.console != ConsoleConfig():
+        lines.extend(
+            ["[console]", f"language = {_toml_value(cfg.console.language)}", ""]
+        )
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

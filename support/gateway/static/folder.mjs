@@ -8,6 +8,8 @@
  * A browser has no handler, so "Choose a folder…" opens a path field. The page only keeps the
  * pick (`pick(path)`); the chat's first message sends it as `workspace`. `null` is the default.
  */
+import {t} from "./i18n.mjs";
+
 const bare = (path) => String(path ?? "").replace(/\/+$/, "");
 const labelOf = (path, sessions) => sessions.find((item) => item.workspace === path)?.workspace_label || path;
 
@@ -67,7 +69,7 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
     const mark = node("span", "folder-mark", choice.current ? "✓" : "");
     mark.setAttribute("aria-hidden", "true");
     button.append(mark, text);
-    if (choice.kind === "default") button.append(node("span", "folder-tag", "Default"));
+    if (choice.kind === "default") button.append(node("span", "folder-tag", t("folder.default")));
     button.addEventListener("click", () => select(choice.path));
     return button;
   }
@@ -112,7 +114,7 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
     if (/^(\/|~\/)\S/.test(text)) select(text);
     else {
       $("folder-path").setAttribute("aria-invalid", "true");
-      hint.textContent = `That is not a full path. ${plain}`;
+      hint.textContent = t("folder.notFullPath", {hint: plain});
     }
   }
 
@@ -120,7 +122,7 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
     const {fallback, current} = state();
     const shown = await bridge()?.postMessage({action: "reveal", path: current ?? fallback}).catch(() => false);
     if (shown === true) toggle(false);
-    else notify("melo could not open this folder in Finder. It may not exist yet.");
+    else notify(t("folder.finderFailed"));
   }
 
   $("folder-btn").addEventListener("click", () => toggle(!open));
@@ -140,7 +142,7 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
       const label = current === null ? fallback : labelOf(current, sessions);
       $("folder-picker").hidden = !visible || !label;
       if ($("folder-picker").hidden) toggle(false);
-      put("folder-text", `In ${folderName(label)}`);
+      put("folder-text", t("folder.chip", {name: folderName(label)}));
       put("folder-full", label);
     },
     isOpen: () => open,

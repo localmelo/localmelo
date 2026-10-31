@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import glob
 import hashlib
+import json
 import os
 import plistlib
 import shutil
@@ -85,6 +86,8 @@ ASSETS = {
 # Melo the Akita puppy's pictures (the desktop pet, the portrait, the small faces) are committed in macos/art/akita,
 # made by scripts/build_pet_assets.py when the art changes. The build copies the folder as it is, with its anchors.json.
 PICTURES = "macos/art/akita"
+# The console's catalogs: their `app.*` keys are the app's words (see L10n.swift).
+CATALOGS = "support/gateway/static/i18n"
 
 # Resolve every link, including a Homebrew-style link to this launcher. No build
 # paths or shell-interpreted user arguments are embedded in the bundle.
@@ -215,6 +218,32 @@ def precompile(interpreter: Path, python: Path, site: Path) -> None:
     (site / "localmelo-bundle.pth").write_text(
         "import sys; sys.dont_write_bytecode = True\n"
     )
+
+
+def strings_file(catalog: dict[str, object]) -> str:
+    """The ``Localizable.strings`` of a catalog's ``app.*`` keys; a count keeps its ``other`` form."""
+    lines = []
+    for key, entry in sorted(catalog.items()):
+        if not key.startswith("app."):
+            continue
+        text = str(entry["other"] if isinstance(entry, dict) else entry)
+        quoted = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        lines.append(f'"{key}" = "{quoted}";')
+    return "\n".join(lines) + "\n"
+
+
+def write_localizations(resources: Path) -> list[str]:
+    """One ``<language>.lproj/Localizable.strings`` per catalog; the languages, English first."""
+    languages = []
+    for path in sorted((ROOT / CATALOGS).glob("*.json")):
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+        folder = resources / f"{path.stem}.lproj"
+        folder.mkdir(parents=True)
+        (folder / "Localizable.strings").write_text(
+            strings_file(catalog), encoding="utf-8"
+        )
+        languages.append(path.stem)
+    return sorted(languages, key=lambda name: name != "en")
 
 
 def sign(app: Path) -> None:
@@ -351,6 +380,7 @@ def build(output: Path) -> None:
         ) in ASSETS.items():  # the app icon, and the logo of the menu-bar item
             shutil.copy2(ROOT / "macos/assets" / asset, contents / "Resources" / name)
         shutil.copytree(ROOT / PICTURES, contents / "Resources/akita")
+        languages = write_localizations(contents / "Resources")
         verify_links(python)
         run(
             [
@@ -378,6 +408,9 @@ def build(output: Path) -> None:
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": version,
                     "CFBundleVersion": "1",
+                    # English is the source; the app follows the console's language.
+                    "CFBundleDevelopmentRegion": "en",
+                    "CFBundleLocalizations": languages,
                     "NSHighResolutionCapable": True,
                     "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
                 },

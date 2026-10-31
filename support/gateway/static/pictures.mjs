@@ -1,3 +1,4 @@
+import { t } from "./i18n.mjs";
 import { formatBytes } from "./turns.mjs";
 
 /**
@@ -29,16 +30,16 @@ export function pictureRow(pictures, expanded = false) {
 
 /** What stands in for a picture the gateway would not serve, by its HTTP status. */
 export function failureNote(status) {
-  if (status === 404) return "No longer in the folder";
-  if (status === 413) return "Too large to preview";
-  if (status === 415) return "Not a picture file";
-  if (status === 403) return "Outside the chat's folder";
-  return "Cannot be shown";
+  if (status === 404) return t("pictures.gone");
+  if (status === 413) return t("pictures.tooLarge");
+  if (status === 415) return t("pictures.notPicture");
+  if (status === 403) return t("pictures.outside");
+  return t("pictures.cannotShow");
 }
 
 /** The size line of a preview: `84 KB`, with `updated` for a file the turn changed. */
 export function pictureFacts(picture) {
-  return [formatBytes(picture.size), picture.state === "modified" ? "updated" : ""].filter(Boolean).join(" · ");
+  return [formatBytes(picture.size), picture.state === "modified" ? t("pictures.updated") : ""].filter(Boolean).join(" · ");
 }
 
 /**
@@ -57,7 +58,7 @@ export function picturesNode({ doc, pictures, sessionId, expanded = false, open,
   };
   const row = node("div", "pictures");
   row.setAttribute("role", "group");
-  row.setAttribute("aria-label", pictures.length === 1 ? "Picture from this turn" : "Pictures from this turn");
+  row.setAttribute("aria-label", t(pictures.length === 1 ? "pictures.rowLabel.one" : "pictures.rowLabel.many"));
   const grid = node("div", "picture-grid");
   row.append(grid);
   const { shown, more } = pictureRow(pictures, expanded);
@@ -90,11 +91,11 @@ export function picturesNode({ doc, pictures, sessionId, expanded = false, open,
     grid.append(tile);
   }
   if (pictures.length > PICTURES_SHOWN) {
-    const label = more > 0 ? `+${more} more` : "Show fewer";
+    const label = more > 0 ? t("pictures.more", { n: more }) : t("pictures.fewer");
     const toggler = node("button", "link-button picture-more", label);
     toggler.type = "button";
     toggler.setAttribute("aria-expanded", more > 0 ? "false" : "true");
-    if (more > 0) toggler.setAttribute("aria-label", `Show ${more} more ${more === 1 ? "picture" : "pictures"}`);
+    if (more > 0) toggler.setAttribute("aria-label", t("pictures.moreLabel", { n: more }));
     toggler.addEventListener("click", toggle);
     row.append(toggler);
   }
@@ -116,7 +117,7 @@ export function setupPictureBox({ dialog }) {
   const image = node("img");
   image.alt = "";
   const caption = node("p", "picture-box-caption");
-  const close = node("button", "outline-button", "Close");
+  const close = node("button", "outline-button", t("common.close"));
   close.type = "button";
   const bar = node("div", "picture-box-bar");
   bar.append(caption, close);

@@ -6,6 +6,7 @@
  * deletes it (`DELETE /api/memory/records/{id}?undo=true`). "Not remembered: …" says why a
  * statement was not kept. Nothing here fetches: `workspace.js` passes the undo.
  */
+import { language, t } from "./i18n.mjs";
 
 function list(value) {
   return Array.isArray(value) ? value.filter((item) => item !== null && typeof item === "object") : [];
@@ -24,12 +25,12 @@ export function readMemory(data) {
 }
 
 export function usedLabel(count) {
-  return `Used ${count} ${count === 1 ? "memory" : "memories"}`;
+  return t("memory.used", { n: count });
 }
 
-/** A note inside a sentence: "Remembered: you prefer…", a name keeps its capital. */
+/** A note inside an English sentence: "Remembered: you prefer…", a name keeps its capital. */
 export function inline(text) {
-  return /^Your?\b/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+  return language() === "en" && /^Your?\b/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
 }
 
 /** The nodes under a message: `{doc, memory, open, toggle, undo}`; [] for none. */
@@ -62,10 +63,10 @@ export function memoryNodes({ doc, memory, open, toggle, undo }) {
     }
   }
   for (const note of memory.remembered) {
-    const line = el("p", "", `${note.undone ? "Forgotten" : "Remembered"}: ${inline(note.text)}`);
-    if (!note.undone) line.append(el("span", "", " · "), action("Undo", () => undo(note)));
+    const line = el("p", "", t(note.undone ? "memory.forgotten" : "memory.remembered", { note: inline(note.text) }));
+    if (!note.undone) line.append(el("span", "", " · "), action(t("memory.undo"), () => undo(note)));
     box.append(line);
   }
-  if (memory.refused) box.append(el("p", "", `Not remembered: ${memory.refused}`));
+  if (memory.refused) box.append(el("p", "", t("memory.notRemembered", { reason: memory.refused })));
   return [box];
 }
