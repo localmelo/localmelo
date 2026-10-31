@@ -50,7 +50,7 @@ export function readCard(row) {
   const data = row?.data && typeof row.data === "object" ? {...row.data, id: row.id, ts: row.ts} : row;
   const id = Number(data?.id);
   if (!Number.isFinite(id) || !data?.source_id) return null;
-  const state = ["done", "failed", "waiting"].includes(data.state) ? data.state : "done";
+  const state = ["done", "failed", "waiting", "answered"].includes(data.state) ? data.state : "done";
   return {
     id,
     at: Number(data.at) || Number(data.ts) || 0,
@@ -59,7 +59,27 @@ export function readCard(row) {
     sourceKind: data.source_kind === "task" ? "task" : "chat",
     title: String(data.title || (data.source_kind === "task" ? "A task" : "A side chat")),
     line: String(data.line ?? ""),
+    // A waiting card and the answer that follows it share this.
+    ...(data.request_id ? {requestId: String(data.request_id)} : {}),
   };
+}
+
+/**
+ * *cards* as the person reads them: a waiting card whose approval was answered becomes an answered
+ * card in its place, with the answer in words, and the answer's own row goes. An answer whose
+ * waiting card is not on the page (yet) shows nothing.
+ */
+export function foldAnswers(cards) {
+  const answers = new Map();
+  for (const card of cards) {
+    if (card.state === "answered" && card.requestId) answers.set(card.requestId, card);
+  }
+  return cards
+    .filter((card) => card.state !== "answered")
+    .map((card) => {
+      const answer = card.state === "waiting" && card.requestId ? answers.get(card.requestId) : null;
+      return answer ? {...card, state: "answered", line: answer.line} : card;
+    });
 }
 
 /** *cards* with *more* added once each, oldest first. */
@@ -82,7 +102,7 @@ export function timeline(turns, cards, now, echoes = []) {
   const at = (item) => (item.kind === "turn" ? Number(item.turn.startedAt) || 0 : item[item.kind].at);
   const items = [
     ...turns.map((turn) => ({kind: "turn", turn})),
-    ...cards.map((card) => ({kind: "card", card})),
+    ...foldAnswers(cards).map((card) => ({kind: "card", card})),
     ...echoes.map((echo) => ({kind: "echo", echo})),
   ].sort((left, right) => at(left) - at(right));
   const kept = [];
@@ -124,7 +144,11 @@ export function byDay(sessions, now) {
 /** A card's words: its mark, its heading and its action. */
 export function cardWords(card) {
   const open = card.sourceKind === "task" ? "Open task" : "Open side chat";
-  if (card.state === "waiting") return {mark: "!", heading: `${card.title} needs your approval`, action: "Review"};
+  if (card.state === "waiting") return {mark: "!", heading: `Needs your approval: ${card.title}`, action: "Review"};
+  // An answered approval has nothing left to review: it says how it was answered.
+  if (card.state === "answered") {
+    return {mark: card.line.startsWith("Allowed") ? "✓" : card.line.startsWith("Denied") ? "✕" : "·", heading: `Approval for ${card.title}`, action: open};
+  }
   if (card.state === "failed") return {mark: "✕", heading: `Did not finish: ${card.title}`, action: open};
   return {mark: "✓", heading: `Done: ${card.title}`, action: open};
 }
@@ -140,13 +164,16 @@ export function cardNode({doc, card, open}) {
   const words = cardWords(card);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
+  if (card.state === "answered") node.dataset.answer = words.mark === "✓" ? "allowed" : words.mark === "✕" ? "denied" : "other";
   node.dataset.cardId = String(card.id);
   node.setAttribute("aria-label", words.heading);
   const mark = el("span", "main-card-mark", words.mark);
   mark.setAttribute("aria-hidden", "true");
   const text = el("div", "main-card-text");
   text.append(el("p", "main-card-title", words.heading));
-  if (card.line) text.append(el("p", "main-card-line", card.line));
+  // Cards written before a card said what it asks kept a line that repeats the heading.
+  const line = card.state === "waiting" && card.line === "Waiting for your approval" ? "" : card.line;
+  if (line) text.append(el("p", "main-card-line", line));
   const action = el("button", card.state === "waiting" ? "outline-button" : "link-button", words.action);
   action.type = "button";
   action.addEventListener("click", () => open(card));

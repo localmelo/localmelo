@@ -316,7 +316,11 @@ button:hover:not(:disabled) {
 .main-card[data-state="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card-text { min-width: 0; }
 .main-card-title { margin: 3px 0 0; font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
-.main-card-line { margin: 2px 0 0; color: var(--ink-2); font-size: var(--text-small); overflow-wrap: anywhere; }
+.main-card-line { margin: 2px 0 0; color: var(--ink-2); font-size: var(--text-small); overflow-wrap: anywhere; white-space: pre-line; }
+/* An answered approval is a settled fact: no warning colour, a quieter weight. */
+.main-card[data-state="answered"] { padding-block: 9px; background: transparent; }
+.main-card[data-state="answered"] .main-card-title { font-weight: 500; }
+.main-card[data-answer="denied"] .main-card-mark { color: var(--error); }
 .main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
@@ -1835,10 +1839,37 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
   font-size: var(--text-title);
 }
 /* The Live section keeps the chat's link buttons, not the card's bordered ones. */
-.task-live .link-button {
+.task-live .link-button,
+.task-answer .link-button {
   padding: 4px 8px 4px 0;
   border: 0;
   background: none;
+}
+/* A task that ended opens with its answer, set as a chat sets one, then the facts. */
+.task-answer {
+  margin: 16px 0 8px;
+  padding-bottom: 8px;
+  max-width: 720px;
+}
+.task-answer[hidden],
+.task-live[hidden] {
+  display: none;
+}
+.task-answer .turn-status {
+  margin-top: 0;
+}
+/* Its work folds under Steps: a quiet line to open, the steps as they were in the chat. */
+.task-steps {
+  margin: 24px 0 8px;
+}
+.task-steps > summary {
+  cursor: pointer;
+  font-size: var(--text-title);
+  font-weight: 600;
+  min-height: 24px;
+}
+.task-steps[open] > summary {
+  margin-bottom: 8px;
 }
 .task-actions {
   display: flex;
