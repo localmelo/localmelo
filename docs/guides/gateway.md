@@ -1,82 +1,49 @@
 # Gateway and HTTP API
 
-The gateway serves the agent over HTTP: an API for your own programs, and a
-web workspace for running the agent in your browser. This page shows how to
-start it, keep it private, call its API, use the web workspace, and run it at
-login on macOS.
+The gateway serves the agent over HTTP: an API for your own programs and a web workspace in your browser. Start it, keep it private, and run it at login on macOS.
 
 ## Start the gateway
+
+![The web console while a chat runs: the question, a working card and the input box.](../assets/img/console-live.webp)
 
 ```bash
 melo serve
 ```
 
-The old spellings (`melo --serve`, `--daemon`, `--gateway-login`,
-`--gateway-rotate-token`, `--enable-playground`, `--allow-unconfigured`) still
-work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new)
-lists them.
+The old spellings (`melo --serve`, `--daemon`, `--gateway-login`, `--gateway-rotate-token`, `--enable-playground`, `--allow-unconfigured`) still work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new) lists them.
 
-- When there is no config file yet, `melo serve` asks first, as `melo setup`
-  does: it prints `Found a model server at …` and asks `Use this model
-  server?`, and the full backend menu follows only after `Use another server`
-  or in developer mode, and with
-  no server running it prints the commands that start one; see [Configuration](configure.md#set-up-with-the-wizard).
-  Without a terminal it cannot ask, so it prints
-  `melo: no backend is configured; run melo setup in a terminal`
-  and exits with code 1.
-- `melo serve --force` starts the gateway without running
-  the wizard even when no backend is configured or the config file has
-  validation errors, so a client or the web console can inspect
-  `GET /api/health` and save a configuration through `PUT /api/settings`.
-- `--url` and `--model` are usage errors with `melo serve`: the
-  gateway uses the config file.
-- It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
-  file. `--host` and `--port` change them for one run, as in
-  `melo serve --port 9401`.
-- It prints the model, the embedding and its addresses:
+- With no config file yet, `melo serve` asks first, as `melo setup` does (`Found a model server at …`, `Use this model server?`; see [Configuration](configure.md#set-up-with-the-wizard)); without a terminal it prints `melo: no backend is configured; run melo setup in a terminal` and exits with code 1.
+- `melo serve --force` starts the gateway without the wizard even when no backend is configured or the config file has validation errors, so a client or the web console can inspect `GET /api/health` and save a configuration through `PUT /api/settings`.
+- `--url` and `--model` are usage errors with `melo serve`: the gateway uses the config file.
+- It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config file; `--host` and `--port` change them for one run, as in `melo serve --port 9401`.
+- Starting does not contact the model server: run a task to check it. Press Ctrl+C to stop the gateway.
 
-  ```text
-    Starting localmelo gateway ...
-    Model: qwen3:8b on Ollama
-    Embedding: none
-    Gateway: http://127.0.0.1:8401
-    Web console: opened in your browser (melo console opens it again).
-  ```
+It prints the model, the embedding and its addresses:
 
-  The last line appears once the gateway listens. At a terminal on this
-  computer, `melo serve` opens the web console in your default browser, signed
-  in (`BROWSER` picks another browser). Over SSH, in a pipe, as a login service
-  and in the macOS app's gateway it opens none; it prints `Web UI:  http://127.0.0.1:8401/`
-  and `Sign in: run melo console -p 8401 in another terminal` instead. If no
-  browser starts, it prints the one-use link, as `melo console` does.
+```text
+  Starting localmelo gateway ...
+  Model: qwen3:8b on Ollama
+  Embedding: none
+  Gateway: http://127.0.0.1:8401
+  Web console: opened in your browser (melo console opens it again).
+```
 
-- Starting does not contact the model server. Run a task to check it.
-- Press Ctrl+C to stop the gateway.
+- The last line appears once the gateway listens. At a terminal on this computer, `melo serve` opens the web console in your default browser, signed in (`BROWSER` picks another browser).
+- Over SSH, in a pipe, as a login service and in the macOS app's gateway it opens none; it prints `Web UI:  http://127.0.0.1:8401/` and `Sign in: run melo console -p 8401 in another terminal` instead.
+- If no browser starts, it prints the one-use link, as `melo console` does.
 
 ## Keep the gateway private
 
 > [!WARNING]
 > The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
 
-Start the gateway: at a terminal on this computer `melo serve` opens the web
-console in your browser, signed in. Run `melo console` to open it again; over
-SSH, or when no browser starts, it prints a single-use link to open within 60
-seconds, and exits 1 when no gateway listens on the port. For a nondefault
-port, add `--port PORT`. Do not share the link. The page exchanges its fragment for an
-HttpOnly, SameSite=Strict cookie valid for up to 30 days and removes the
-fragment. Run `melo console --reset` to replace the private token file.
-All gateways using that file reject old credentials; revocation of open event
-streams takes effect within about 250 ms. One event already being sent may
-still complete.
+- At a terminal on this computer `melo serve` opens the web console in your browser, signed in; `melo console` opens it again.
+- Over SSH, or when no browser starts, `melo console` prints a single-use link to open within 60 seconds (do not share it) and exits 1 when no gateway listens on the port; for a nondefault port add `--port PORT`.
+- The page exchanges the link's fragment for an HttpOnly, SameSite=Strict cookie valid for up to 30 days, and removes the fragment.
+- `melo console --reset` replaces the private token file: all gateways using it reject old credentials, and open event streams are cut within about 250 ms (one event already being sent may still complete).
+- The bearer token is generated on first use at `~/.cache/localmelo/gateway/auth/token` (directory 0700, file 0600); non-browser clients send `Authorization: Bearer <token>` on every `/api/` and `/v1/` request, including health, streams and blobs, and a missing or invalid credential returns 401.
 
-The bearer is generated on first use and stored at
-`~/.cache/localmelo/gateway/auth/token` (directory 0700, file 0600). For
-non-browser clients send `Authorization: Bearer <token>` on every `/api/`
-and `/v1/` request, including health, streams and blobs. A missing or invalid
-credential returns 401. The page and static assets are public bootstrap only.
-Keep tokens out of URLs, logs and shell history; supplying a header on a command
-line can expose it to local process inspection. This token is separate from
-model-server credentials.
+The page and static assets are public bootstrap only. Keep tokens out of URLs, logs and shell history (a header on a command line can be read by local process inspection); this token is separate from model-server credentials.
 
 On the default host, only programs on your computer can reach the gateway.
 Web pages can still send it requests through your browser, so the gateway
@@ -104,15 +71,8 @@ A refused request under `/api/` uses [API v2](../reference/api-v2.md)'s envelope
   reach the gateway, such as `http://0.0.0.0:8401/`, get 421.
 - curl and scripts normally send no `Origin` header; Host and authentication
   checks still apply.
-- Every response tells the browser not to show it in a frame, with
-  `X-Frame-Options: DENY` and a `Content-Security-Policy` that ends
-  `frame-ancestors 'none'`, so a page on another site cannot embed the web
-  workspace and trick you into clicking in it. A response with a policy of
-  its own, such as a blob's `default-src 'none'; sandbox`, keeps one header
-  with both. Every response also carries `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`,
-  `Cross-Origin-Resource-Policy: same-origin` and
-  `Permissions-Policy: camera=(), microphone=(), geolocation=()`.
+- Every response tells the browser not to show it in a frame (`X-Frame-Options: DENY` and a `Content-Security-Policy` that ends `frame-ancestors 'none'`), so a page on another site cannot embed the web workspace; a response with a policy of its own, such as a blob's `default-src 'none'; sandbox`, keeps one header with both.
+- Every response also carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` and `Permissions-Policy: camera=(), microphone=(), geolocation=()`.
 - The checks are on when the host is `localhost` or a loopback IP address:
   `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
@@ -179,8 +139,6 @@ melo serve uninstall
 - For the background service, run `melo serve uninstall`. A plain `kill`
   does not help: launchd starts the gateway again.
 
-Stopping closes every session, a session running a task included: if one is
-still busy, its agent is closed and the task ends as `crashed`. SIGTERM
-first waits up to 3 seconds for runs in flight, then cancels the ones left:
-the client's request fails and the run ends `crashed`. A `DELETE` request no
-longer closes a busy session: it returns 409 until the task ends.
+- Stopping closes every session; a session still running a task has its agent closed, and the task ends as `crashed`.
+- SIGTERM first waits up to 3 seconds for runs in flight, then cancels the ones left: the client's request fails and the run ends `crashed`.
+- A `DELETE` request does not close a busy session: it returns 409 until the task ends.

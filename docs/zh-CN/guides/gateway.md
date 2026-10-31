@@ -2,11 +2,13 @@
 
 # 网关与 HTTP API
 
-网关通过 HTTP 提供智能体服务：既为你自己的程序提供 API，也提供可在浏览器中运行智能体的网页工作区。本页介绍如何启动网关、确保其私密、调用 API、使用网页工作区，以及在 macOS 登录时运行网关。
+网关通过 HTTP 提供智能体服务：为你自己的程序提供 API，并在浏览器中提供网页工作区。启动它、确保其私密，并在 macOS 登录时运行它。
 
 <a id="start-the-gateway"></a>
 
 ## 启动网关
+
+![运行中的网页控制台：问题、一张工作卡片和输入框。](../../assets/img/console-live.webp)
 
 ```bash
 melo serve
@@ -14,24 +16,25 @@ melo serve
 
 旧写法（`melo --serve`、`--daemon`、`--gateway-login`、`--gateway-rotate-token`、`--enable-playground`、`--allow-unconfigured`）仍然可用，macOS 应用和启动脚本就在用；完整对照见[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)。
 
-- 如果还没有配置文件，`melo serve` 会像 `melo setup` 一样先提问：显示 `Found a model server at …` 并询问 `Use this model server?`；只有选择 `Use another server` 或处于开发者模式时，才出现完整的后端菜单，没有服务器在运行时则输出启动服务器的命令；参见[使用向导配置](configure.md#set-up-with-the-wizard)。如果没有终端，网关无法提问，因此会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
+- 还没有配置文件时，`melo serve` 会像 `melo setup` 一样先提问（`Found a model server at …`、`Use this model server?`；参见[使用向导配置](configure.md#set-up-with-the-wizard)）；如果没有终端，它会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
 - 即使没有配置后端或配置文件存在验证错误，`melo serve --force` 也会跳过向导并启动网关，让客户端或网页控制台通过 `GET /api/health` 检查状态，并通过 `PUT /api/settings` 保存配置。
 - `--url` 和 `--model` 与 `melo serve` 同时使用属于用法错误：网关使用配置文件。
-- 网关监听 `127.0.0.1:8401`，即配置文件中 `[gateway]` 的默认值。`--host` 和 `--port` 可以更改单次运行的地址和端口，例如 `melo serve --port 9401`。
-- 启动时会输出模型、嵌入和地址：
+- 网关监听 `127.0.0.1:8401`，即配置文件中 `[gateway]` 的默认值；`--host` 和 `--port` 可以更改单次运行的地址和端口，例如 `melo serve --port 9401`。
+- 启动时不会连接模型服务器：运行一个任务来检查连接。按 Ctrl+C 停止网关。
 
-  ```text
-    Starting localmelo gateway ...
-    Model: qwen3:8b on Ollama
-    Embedding: none
-    Gateway: http://127.0.0.1:8401
-    Web console: opened in your browser (melo console opens it again).
-  ```
+启动时会输出模型、嵌入和地址：
 
-  最后一行在网关开始监听后才出现。在本机终端里运行 `melo serve` 时，它会用默认浏览器打开已登录的网页控制台（`BROWSER` 环境变量可指定其他浏览器）。通过 SSH、管道、作为登录服务运行，或在 macOS 应用的网关里，它不会打开浏览器，而是改为输出 `Web UI:  http://127.0.0.1:8401/` 和 `Sign in: run melo console -p 8401 in another terminal`。如果没有浏览器能启动，它会像 `melo console` 一样输出一次性链接。
+```text
+  Starting localmelo gateway ...
+  Model: qwen3:8b on Ollama
+  Embedding: none
+  Gateway: http://127.0.0.1:8401
+  Web console: opened in your browser (melo console opens it again).
+```
 
-- 启动时不会连接模型服务器。运行一个任务来检查连接。
-- 按 Ctrl+C 停止网关。
+- 最后一行在网关开始监听后才出现。在本机终端里运行 `melo serve` 时，它会用默认浏览器打开已登录的网页控制台（`BROWSER` 环境变量可指定其他浏览器）。
+- 通过 SSH、管道、作为登录服务运行，或在 macOS 应用的网关里，它不会打开浏览器，而是改为输出 `Web UI:  http://127.0.0.1:8401/` 和 `Sign in: run melo console -p 8401 in another terminal`。
+- 如果没有浏览器能启动，它会像 `melo console` 一样输出一次性链接。
 
 <a id="keep-the-gateway-private"></a>
 
@@ -40,9 +43,13 @@ melo serve
 > [!WARNING]
 > 网关只允许绑定回环地址，访问受保护的 API 需要 bearer 令牌或浏览器会话 cookie。持有令牌者可以使用你的权限执行操作。私有令牌文件无法防范以同一操作系统用户身份运行的恶意进程、浏览器扩展或被攻陷的同源代码。浏览器 cookie 不按端口隔离：针对特定端口的名称不能构成抵御同一主机上其他服务的安全边界。不要通过代理暴露网关。
 
-启动网关：在本机终端里，`melo serve` 会在浏览器中打开已登录的网页控制台。运行 `melo console` 可再次打开；通过 SSH 或没有浏览器能启动时，它会输出一次性链接，请在 60 秒内打开，该端口上没有网关在监听时则以退出码 1 结束。如果使用非默认端口，请加上 `--port PORT`。不要分享该链接。页面会用链接的片段交换一个有效期最长为 30 天、具有 HttpOnly 和 SameSite=Strict 属性的 cookie，然后移除该片段。运行 `melo console --reset` 可替换私有令牌文件。所有使用该文件的网关都会拒绝旧凭证；对已打开的事件流撤销凭证约在 250 毫秒内生效。一个正在发送的事件仍可能发送完成。
+- 在本机终端里，`melo serve` 会在浏览器中打开已登录的网页控制台；运行 `melo console` 可再次打开。
+- 通过 SSH 或没有浏览器能启动时，`melo console` 会输出一次性链接，请在 60 秒内打开（不要分享它），该端口上没有网关在监听时则以退出码 1 结束；如果使用非默认端口，请加上 `--port PORT`。
+- 页面会用链接的片段交换一个有效期最长为 30 天、具有 HttpOnly 和 SameSite=Strict 属性的 cookie，然后移除该片段。
+- 运行 `melo console --reset` 可替换私有令牌文件：所有使用该文件的网关都会拒绝旧凭证，已打开的事件流约在 250 毫秒内被切断（一个正在发送的事件仍可能发送完成）。
+- bearer 令牌在首次使用时生成，存储于 `~/.cache/localmelo/gateway/auth/token`（目录权限为 0700，文件权限为 0600）；非浏览器客户端的每个 `/api/` 和 `/v1/` 请求都应发送 `Authorization: Bearer <token>`，包括健康检查、流和 blob 请求，凭证缺失或无效时返回 401。
 
-bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway/auth/token`（目录权限为 0700，文件权限为 0600）。非浏览器客户端的每个 `/api/` 和 `/v1/` 请求都应发送 `Authorization: Bearer <token>`，包括健康检查、流和 blob 请求。凭证缺失或无效时返回 401。页面和静态资源仅作为公开的引导资源。不要将令牌放入 URL、日志或 shell 历史记录；在命令行中提供请求头可能使其暴露于本地进程检查。此令牌与模型服务器凭证相互独立。
+页面和静态资源仅作为公开的引导资源。不要将令牌放入 URL、日志或 shell 历史记录（在命令行中提供请求头可能使其暴露于本地进程检查）；此令牌与模型服务器凭证相互独立。
 
 使用默认主机地址时，只有你电脑上的程序能访问网关。网页仍可通过你的浏览器向网关发送请求，因此网关会拒绝并非发往自身的请求：
 
@@ -63,7 +70,8 @@ bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway
 
 - 使用 `http://127.0.0.1:8401/` 或 `http://localhost:8401/` 打开网页工作区，并替换为你的端口；若设置了 `host = "::1"`，则使用 `http://localhost:8401/` 或 `http://[::1]:8401/`。其他能访问网关的地址，例如 `http://0.0.0.0:8401/`，会收到 421。
 - curl 和脚本通常不发送 `Origin` 请求头；Host 和身份验证检查仍然适用。
-- 每个响应都会通过 `X-Frame-Options: DENY` 和以 `frame-ancestors 'none'` 结尾的 `Content-Security-Policy` 告诉浏览器不要在框架中显示该响应，以防其他网站的页面嵌入网页工作区并诱骗你在其中点击。带有自身策略的响应，例如使用 `default-src 'none'; sandbox` 的 blob，会保留一个包含两者的响应头。每个响应还带有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。
+- 每个响应都会告诉浏览器不要在框架中显示它（`X-Frame-Options: DENY` 和以 `frame-ancestors 'none'` 结尾的 `Content-Security-Policy`），以防其他网站的页面嵌入网页工作区；带有自身策略的响应，例如使用 `default-src 'none'; sandbox` 的 blob，会保留一个包含两者的响应头。
+- 每个响应还带有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。
 - 当主机为 `localhost` 或回环 IP 地址时，这些检查会启用：包括 `127.0.0.1`、`::1` 或 `127.0.0.0/8` 中的其他地址。请求仍须以 `127.0.0.1`、`localhost` 或 `[::1]` 指定网关，因此请使用这三个主机地址之一：例如使用 `127.0.0.2` 时，浏览器也会收到 421。
 - 非回环地址绑定（包括 `0.0.0.0`）会在启动时被拒绝。
 - 不支持通过反向代理或 Tailscale Serve 远程访问。
@@ -106,4 +114,6 @@ melo serve uninstall
 - 在网关所在的终端中按 Ctrl+C。
 - 对于后台服务，运行 `melo serve uninstall`。单纯使用 `kill` 无济于事：launchd 会再次启动网关。
 
-停止时会关闭所有会话，包括正在运行任务的会话：如果会话仍在忙碌，其智能体会被关闭，任务以 `crashed` 结束。收到 SIGTERM 后，网关会先等待运行中的任务最多 3 秒，然后取消剩余任务：客户端请求会失败，运行以 `crashed` 结束。`DELETE` 请求不再关闭忙碌的会话：它会返回 409，直到任务结束。
+- 停止时会关闭所有会话；仍在运行任务的会话，其智能体会被关闭，任务以 `crashed` 结束。
+- 收到 SIGTERM 后，网关会先等待运行中的任务最多 3 秒，然后取消剩余任务：客户端请求会失败，运行以 `crashed` 结束。
+- `DELETE` 请求不会关闭忙碌的会话：它会返回 409，直到任务结束。
