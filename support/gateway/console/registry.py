@@ -40,6 +40,7 @@ from localmelo.support.sessions.agents import (
 )
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
+    ApprovalLedger,
     AskFunction,
     ChatMode,
     ChatPolicy,
@@ -206,11 +207,15 @@ class ConsoleSessions:
         idle_close_s: float = IDLE_CLOSE_S,
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
+        ledger: ApprovalLedger | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
         self._store = store
         self._broker = broker
+        # The person's Allows in each chat, which its tasks may use (#369).
+        self.ledger = ledger or ApprovalLedger()
+        self.ledger.grants_of = self.grants
         self._settings = settings
         self._gate = gate
         self._memory = memory
@@ -252,6 +257,11 @@ class ConsoleSessions:
 
     def get(self, session_id: str) -> OpenSession | None:
         return self._sessions.get(session_id)
+
+    def grants(self, session_id: str) -> frozenset[str]:
+        """The tools chat *session_id* holds a grant of now (none while it is not open)."""
+        entry = self._sessions.get(session_id)
+        return frozenset() if entry is None else entry.policy.allowed_tools
 
     def entries(self) -> list[OpenSession]:
         return list(self._sessions.values())
@@ -536,10 +546,12 @@ class ConsoleSessions:
             if (
                 isinstance(decision, ApprovalDecision)
                 and decision.allow
-                and decision.remember
-                and offers_grant(request.review)
+                and decision.origin == "user"
             ):
-                granted_at[request.tool_name] = self._clock()
+                # The person's Allow: this chat's tasks may run the same step (#369).
+                self.ledger.record(current, request)
+                if decision.remember and offers_grant(request.review):
+                    granted_at[request.tool_name] = self._clock()
             return decision
 
         return timed

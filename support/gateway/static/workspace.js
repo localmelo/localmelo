@@ -23,6 +23,7 @@ import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
+import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
@@ -30,7 +31,7 @@ import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
 import {
   activity,
   applyEvent,
@@ -84,6 +85,8 @@ const S = {
   defaultMode: "ask", // The mode new chats start in, as `GET /api/settings` says it.
   modeSaving: false,
   allowing: {}, // Allow once under way or failed, by the block's request id: "allowing" or the error.
+  // A task's step Auto blocked, allowed once from its chat's card: `{until, used}` by request id (#369).
+  cardAllows: {},
   drafts: {},
   outbox: {},
   cancelling: new Set(),
@@ -485,6 +488,7 @@ function syncUI() {
   $("offline-banner").hidden = S.online;
   const setup = setupShown();
   setupCard.show(setup);
+  importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
   input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
@@ -1059,6 +1063,9 @@ function viewSnapshot() {
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
     S.allowing,
+    Object.entries(S.cardAllows).map(([id, {until, used}]) => [id, used, until > nowSeconds()]),
+    // A task's approval drawn in its chat's card, as last read (#369).
+    showsItems(view) ? [...taskApprovals.entries()] : null,
     Object.entries(view?.session?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()]),
     developerMode,
     prefs,
@@ -1086,7 +1093,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   const focusRequest = focusCard !== container ? focusCard?.dataset?.requestId : null;
   const focusKey = focusRequest ? focus?.dataset?.approvalFocus : null;
   const focusState = focusRequest ? approvalStates.get(focusRequest) : null;
-  if (focusState?.composing && view?.pending.has(focusRequest)) return;
+  if (focusState?.composing && (view?.pending.has(focusRequest) || taskApprovals.get(focusRequest)?.request)) return;
   const selection = focusKey === "reason" ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
   // A reply box the person types in keeps its focus and caret (its words are kept by row).
   const replyFor = focus?.dataset?.replyFor ?? null;
@@ -1181,10 +1188,13 @@ function mainNodes(view, turns) {
   const ended = new Set((view?.cards ?? []).filter((card) => ["done", "failed", "stopped"].includes(card.state)).map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
-    if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard, resume: continueCard })];
+    if (item.kind === "card") {
+      const card = item.card;
+      return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card) })];
+    }
     if (item.kind === "echo") {
       const echo = item.echo;
-      const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
+      const gone = echoDone(echo, done, ended) || dismissed.has(echo.id);
       return echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
     }
     return [el("div", "day-divider", item.label)];
@@ -1264,6 +1274,104 @@ async function continueCard(card, button) {
     button.disabled = false;
     notify(error.message || t("panel.taskChangeFailed"));
   }
+}
+
+// ── A task's approvals in the chat that owns it (#369) ──
+
+// A waiting task's approval as last read, by request id: `{request}`, or `{gone: true}` once it was
+// answered or is not found. While melo writes its explanation, it is read again, a bounded number of times.
+const taskApprovals = new Map();
+const EXPLAIN_POLL_MS = 1500;
+const EXPLAIN_TRIES = 16;
+
+/** The approval card a waiting task's card holds, or null until it is read (or when there is none). */
+function taskApprovalNode(card) {
+  if (card.state !== "waiting" || card.sourceKind !== "task" || !card.requestId || workerMode) return null;
+  const found = taskApprovals.get(card.requestId);
+  if (!found) {
+    readTaskApproval(card.requestId);
+    return null;
+  }
+  if (!found.request) return null;
+  const request = found.request;
+  return approvalCard(request, {
+    rerender: () => { messageSnapshot = ""; renderMessages(false, true); },
+    answer: answerTaskApproval,
+    reload: () => readTaskApproval(String(request.request_id)),
+    workspace: request.workspace_label,
+    scope: "task",
+  });
+}
+
+async function readTaskApproval(id, tries = 0) {
+  const known = taskApprovals.get(id);
+  if (known?.gone || known?.reading) return;
+  taskApprovals.set(id, { ...(known ?? {}), reading: true });
+  try {
+    const { approval } = await api(`/approvals/${encodeURIComponent(id)}`);
+    if (taskApprovals.get(id)?.gone) return;
+    taskApprovals.set(id, { request: approval });
+    // The text comes after the card: read it again until it is there, or settled without it.
+    if (approval.explanation?.state === "pending" && tries < EXPLAIN_TRIES) {
+      setTimeout(() => readTaskApproval(id, tries + 1), EXPLAIN_POLL_MS);
+    }
+  } catch (error) {
+    // Answered or gone: the card's answer comes on the stream. Another failure leaves the card's Review.
+    taskApprovals.set(id, error?.status === 404 ? { gone: true } : { failed: true });
+  }
+  renderMessages(false, true);
+}
+
+/** An answer to a task's approval from its chat: the same route and the same choices as the task's page. */
+async function answerTaskApproval(request, state, choice) {
+  const id = String(request.request_id);
+  if (workerMode || state.submitting || approvalNow() - state.mountedAt < 500) return;
+  if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
+  state.submitting = true;
+  messageSnapshot = "";
+  renderMessages(false, true);
+  try {
+    await api(`/approvals/${encodeURIComponent(id)}`, {
+      body: { choice, ...(choice === "deny" ? { reason: state.reason } : {}) },
+    });
+    taskApprovals.set(id, { gone: true });
+  } catch (error) {
+    state.submitting = false;
+    notify(t("approval.answerFailed", { problem: error.message }), { sticky: true });
+  }
+  messageSnapshot = "";
+  renderMessages(false, true);
+}
+
+/** What a blocked task step's card needs for Allow once: where it stands, and the request. */
+function cardAllow(card) {
+  const facts = cardBlock(card);
+  if (!facts) return null;
+  const given = S.cardAllows[facts.requestId] ?? {};
+  const busy = S.allowing[facts.requestId];
+  return {
+    allowing: allowState({ until: given.until ?? null, used: given.used ?? null, now: nowSeconds() }),
+    busy: busy === "allowing" ? "allowing" : false,
+    developer: developerMode,
+    error: busy && busy !== "allowing" ? busy : "",
+    onAllow: () => allowCardBlock(card, facts),
+  };
+}
+
+/** Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. */
+async function allowCardBlock(card, facts) {
+  S.allowing[facts.requestId] = "allowing";
+  renderMessages(false, true);
+  try {
+    const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/allow`, { method: "POST" });
+    const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
+    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
+    delete S.allowing[facts.requestId];
+    panel.refresh();
+  } catch (error) {
+    S.allowing[facts.requestId] = error.message || t("panel.taskChangeFailed");
+  }
+  renderMessages(false, true);
 }
 
 /** A card's Open: the side chat, or the task. */
@@ -1788,6 +1896,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
       view.rerender();
     }));
   }
+  card.append(...explanationNodes(request.explanation));
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
@@ -1800,6 +1909,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
@@ -1815,6 +1925,11 @@ function approvalCard(request, view = chatApproval, asked = "") {
   grant.id = `approval-scope-${id}`;
   if (!high) session.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const kept = !high && request.remembered === true
+    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    : null;
+  if (kept) card.append(kept);
   const note = t("approval.instead");
   const label = el("label", "", note);
   const reason = el("input", "deny-reason");
@@ -1840,6 +1955,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (kept) kept.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -1859,6 +1975,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false
@@ -1876,6 +1993,24 @@ function approvalCard(request, view = chatApproval, asked = "") {
   enable();
   setTimeout(enable, Math.max(0, 500 - (approvalNow() - state.mountedAt)));
   return card;
+}
+
+/**
+ * melo's explanation of a task's step (#369), under the step and the review's reasons: words for the
+ * person to read, labelled as melo's. The step, the buttons and what an answer approves come from code.
+ */
+function explanationNodes(explanation) {
+  if (explanation?.state === "pending") return [el("p", "approval-explaining", t("approval.explaining"))];
+  const text = explanation?.state === "ready" ? String(explanation.text ?? "").trim() : "";
+  if (!text) return [];
+  const box = el("section", "approval-explain");
+  box.setAttribute("aria-label", t("approval.explanation"));
+  box.append(
+    el("p", "approval-explain-label", t("approval.explanation")),
+    el("p", "approval-explain-text", text),
+    el("p", "approval-explain-note", t("approval.explanationNote")),
+  );
+  return [box];
 }
 
 async function answerApproval(request, state, choice) {
@@ -2900,6 +3035,8 @@ const modeChip = setupModeChip({
   },
   openSettings: () => openSettings("chats"),
 });
+// The main chat's one-time offer to bring in what other assistants on this Mac know (import-card.mjs).
+const importCard = setupImportCard({ root: $("import-card"), hero: $("welcome"), api });
 const setupCard = setupModelCard({
   root: $("setup-card"),
   api,
@@ -3000,6 +3137,8 @@ const slash = setupSlash({
     panel.select("memory", { focus: true });
     if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
   },
+  // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
+  memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
   openDrawer: (tab) => drawer.open(tab),
   settingsSaved,
   setMode: setChatMode,

@@ -598,6 +598,26 @@ async def test_setup_card_module_is_served_and_the_shell_has_its_card(
     assert "setup-btn" not in page.text and "POSSIBILITY" not in page.text
 
 
+async def test_import_card_module_is_served_and_the_shell_has_its_hidden_card(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/import-card.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "setupImportCard" in response.text and "importSection" in response.text
+    page = (await client.get("/")).text
+    card = re.search(r'<section\b[^>]*\bid="import-card"[^>]*>', page)
+    assert card and " hidden" in card.group(
+        0
+    ), "the card is hidden until the page shows it"
+    # In the conversation area, after the welcome and before the messages.
+    assert (
+        page.index('id="welcome"')
+        < page.index('id="import-card"')
+        < page.index('id="messages"')
+    )
+
+
 async def test_the_shell_has_the_folder_chip_and_the_starters_in_place_of_the_cards(
     client: httpx.AsyncClient,
 ) -> None:

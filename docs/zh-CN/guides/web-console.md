@@ -87,6 +87,17 @@
 - **回答从不代替批准。** melo 的回答只是给任务的信息。需要你批准的步骤仍然问你（或 Auto 的审查），和以前一样。任务的话从不算作你的话：在 Auto 中它们不能放行 melo 拦下的步骤，melo 不会把它们当作你说过的话记住，melo 处理这个问题的那一轮也没有重试。
 - 每次运行一个任务最多问 3 次。被删除的旁支对话，它的任务的问题会交给主对话，标为 `From <task title>`，正在等你回答的问题也一样。
 
+<a id="approvals-a-task-asks-for"></a>
+## 任务需要的批准
+
+- **在开始它的对话里问你。** 任务中需要你批准的一步，会显示在那个对话的卡片里（`Needs your approval: Fix CI`，中文界面为「需要你批准：Fix CI」）：代码显示的这一步、melo 为什么要问，以及 **允许一次**、**在这个任务里允许** 和 **拒绝**。任务页面上是同一张卡片。
+- **melo 解释，你决定。** 对你自己的任务和定时事项，在这一步下面，**melo 的说明** 用几句话讲任务在做什么、为什么需要这一步、可能出什么问题、每个回答会怎样。它根据任务的标题和目标、这一步本身以及审查给出的理由来写，从不读取工具的输出；最多需要 20 秒，没有它卡片也照常可用。它不能批准任何事：这一步、按钮以及你的回答放行什么，都由代码决定。由其他程序或 melo 自己开始的任务没有说明。
+- **同样的一步不问第二次。** 你在某个对话或它的任务里允许过一步之后，这个对话后来的任务遇到完全相同的一步（同一个工具、同样的命令或文件内容、同一个文件夹，melo 为它读过的文件也没有变化）时，只要 melo 的规则读过这一步的全部并认为它是常规的（Python 代码、shell 命令或文件写入），就不再询问而直接运行。卡片会在按钮下面说明：`Your Allow also lets this chat's tasks run this exact step later without asking, until you revoke it.`（中文界面为「你的允许也会让这个对话的任务之后遇到完全相同的这一步时不再询问，直到你撤回。」）对话里会显示 `Used your approval from 2:02 PM`（中文界面为「用了你 下午 2:02 的批准」）和 **撤回**，任务页面在 **按你之前的批准运行** 下列出它。只要有一个参数不同，或者在别的文件夹里运行，就会再问。melo 会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会先被检查，你的批准才会再次算数。
+- **“在这个对话里允许”也覆盖它的任务。** 你在某个对话里允许的工具，在这个对话的任务里也可以不问就运行它的常规步骤，和在对话里一样。别的对话的批准从不算数。
+- **哪些每次都问。** 高影响的步骤（安装、下载、删除、把数据发出去、改动文件夹之外的内容、使用你的密钥、修改 melo 自己）不管你之前允许过多少次，每次都问。melo 无法看清全部内容的步骤（文件太大读不了、运行时才拼出来的命令）也一样，melo 的规则不读的工具（网页或 MCP 工具，比如支付发票的工具）的每次调用也一样。定时事项，以及由其他程序或 melo 自己开始的任务，从不使用、也从不记录你的批准。Auto 的 **允许一次** 只放行这一步一次，从不记录。你用自己的网关令牌创建的任务（`melo task new`）算是你的，会使用主对话的批准。
+- **撤回。** 在对话的那一行、任务页面，或对话 **Details**（开发者模式）里的 **你在这里批准过的步骤** 中点 **撤回**，就收回这个批准：这一步会再问你；已经运行的不会撤销。批准只保存在内存里：重启网关或删除对话都会忘掉它们。
+- **在 Auto 中。** 任务里被 Auto 拦下的步骤也会显示在它的对话里，说明拦下了什么、为什么，并提供 **允许一次**。之前的批准从不解除 Auto 的拦截：Auto 只拦下不是常规的步骤，而这些步骤从不被记住。
+
 <a id="slash-commands"></a>
 
 ## 斜杠命令
@@ -117,7 +128,7 @@
 | `/undo`、`/retry` | 忘掉最近一轮已结束的轮次（文件改动保留），或把它再跑一次。 |
 | `/copy [turn]` | 把一个回答拷贝到剪贴板；不带数字时是最新的。 |
 | `/title [text]` | 查看或设置对话标题。 |
-| `/memory [window]` | 打开“记忆”标签页；`window` 显示模型的窗口。`/memory import` 留给导入界面。 |
+| `/memory [window\|import]` | 打开“记忆”标签页；`window` 显示模型的窗口；`import` 还会按下 **Look for notes**，列出其他助手保存的文件（记忆关闭时会有一行说明）。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
 | `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
 | `/attach`、`/attachments`、`/detach` | 控制台暂时不能附加文件，并会这样说明。 |
@@ -178,6 +189,10 @@
 - **Edit** 打开笔记供改写；**Save** 保存新文字（看起来像密码或密钥的文字会被拒绝并说明原因）。**Delete** 会问 `Forget this note?`，选项是 **Keep it** 和 **Forget it**。
 - **Forget everything…** 在删除之前说明将删除什么：`This removes 12 notes and melo's search index of 48 chat turns. Your chats stay. It cannot be undone.` **Keep everything** 排在第一位。开发者模式下，**Rebuild search index** 会重新读取对话。
 - 没有任何记忆时，标签页说明记忆怎样开始：在对话里告诉 melo 一件关于你自己的事（如 `I prefer short answers`），或让它记住某件事。
+
+**From other assistants**（Memory 标签页底部）导入这台 Mac 上其他助手已经了解的关于你的信息。**Look for notes** 列出含有笔记的文件，样子和下面首次运行的卡片一样；**Bring them in** 写入勾选的文件，标签页会说 `Brought in 4 notes.`。每一批都会继续列为 `4 notes brought in · Oct 31`，并带自己的 **Undo**；导入的笔记会写明 `From the file CLAUDE.md, Oct 31`。
+
+主对话在已连接模型且记忆开启时第一次打开，会显示一张卡片 `melo found notes on this Mac from other assistants`，每个文件一行：路径（`~/.claude/CLAUDE.md`）、`3 notes`、一个复选框（默认勾选），以及 **See what is in it**，展开后显示示例行和舍弃了什么（`2 left out: secrets, other people’s details`）。**Bring them in** 写入勾选的文件，卡片显示 `Brought in 6 notes · Undo`；**Undo** 收回这一批，但会保留你之后编辑过的笔记（`Taken back. Kept 1 note you edited.`）。**Not now** 关闭卡片，它不会再回来；如果 melo 无法保存这个回答，卡片会说明，下次可能还会再问。在你按下 **Bring them in** 之前不会写入任何内容；什么都没找到时不显示卡片。
 
 关闭一个产生过笔记的对话时会问 `Also forget the 2 notes from this chat?`：**Keep the notes**（第一位）、**Forget the 2 notes too** 或 **Don’t delete the chat**。
 
