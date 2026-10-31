@@ -54,8 +54,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
-  title drops a level word that opens its request (`no rush:`, `today`,
-  `今天`, the urgency and ease words) when more text follows it. A task worker
+  title drops a level word that opens its request and is followed by a colon or
+  comma (`no rush:`, `today,`, `今天：`) when more text follows it. A task worker
   is told to run the tests that cover the code it changed, found by searching
   the tests for the names it changed, not only the test files it edited. [#NN]
 - A `file_edit` that cannot apply fails at once and asks no one: the text to
