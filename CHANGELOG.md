@@ -346,6 +346,78 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   panel's activity list ("Could not continue: …") instead of repeating the
   earlier run's reason ([#344]).
 
+- The main chat remembers its own past. The chat keeps only its newest messages
+  in view (64 on a local server), so what you said thirty turns ago in the same
+  chat was gone, while a turn from another chat could come back, and the chat's
+  instructions said it remembered the whole conversation, which invited it to
+  make things up. Now the turns of the chat that have left that window are
+  recalled like turns of other chats, marked `this chat, Oct 30`, and the ones
+  still in view are not; `search_memory` finds them too. The instructions say what
+  is true: the chat sees the recent messages, and older parts of the conversation,
+  earlier chats and notes come back with your message when they match ([#370]).
+
+- Notes the model keeps get kept, and it never claims a save it did not make.
+  A note passes when its values match what you typed and most of its other
+  words do: every number or word with a digit, weekday, capitalised name and
+  quoted phrase must be in your words, and so must 4 in 5 of the other content
+  words. "Your replies" now matches your "reply" (`-ies` ends in `y`), and
+  `said`, `told`, `then`, `each`, `use`, `also`, `always` and `every` are
+  never looked for, so a preference worded a little differently is kept, while
+  `C15` for `C14` or Thursday for Wednesday is still refused, and so is a note
+  in another language than your message (the refusal says to write it in the
+  language you used). The chat's instructions no longer tell it when it may
+  say a fact is noted: quoting the tool's answers made the model copy them into
+  replies instead of calling the tool, and a rule about claiming saves made it
+  refuse facts it recalled that were never kept as notes. They now say that
+  what memory brings back answers the question whether or not it was kept as a
+  note. A sentence left out of the chat index because it looked like a password
+  now reads `[left out]` there, not `[not kept]`, which the model read as "this
+  was never kept". When a reply says it noted a fact and no note was kept, melo keeps what
+  the reply named after the same checks (your words, no secret, the newer value
+  replaces the old one) and shows it with Undo. The fact must read as a
+  statement: written to you ("Your flight to Faro is at gate 9") or about
+  someone else ("Prof. Duarte's office is in the Atrium Wing", where the "." of
+  a title no longer ends it), not a fragment such as "gate 9 for Faro"; when it
+  cannot, nothing is kept and the turn's `turn.memory` event has
+  `unsaved_claim: true`. A bare "Noted, thanks!" claims nothing. A note with
+  "running" is no longer refused for a "run" you typed (`-ing` and `-ed` drop
+  the doubled consonant they brought), and the note tool's examples no longer
+  include a Chinese preference sentence, which pulled English notes into
+  Chinese. A request to be
+  reminded at a time is scheduled, never kept as a note. The sentence quoted
+  under a note ("you said …") is no longer cut at a title or an abbreviation
+  (`Mr.`, `Prof.`, `Dr.`, `St.`, `vs.`, `No. 5`, an initial such as `J. Smith`), which had
+  shown "My piano teacher is Mr." and made the chat answer that your note was
+  cut off; the same cut had saved a "remember that …" request as "Your piano
+  teacher is Mr.". A note about someone else may not become one about you: for
+  "Marco's studio is on Main Street." a note "Your studio is on Main Street."
+  is refused, with the wording to use ("Marco's …"), and so is the reverse.
+  A different fact about the same person no longer replaces the first: "Tom
+  Briggs's office is in room 9C." had replaced "Your manager is Tom Briggs."
+  (a note about someone else had no subject, so the two shared words, his
+  name, counted as the same fact), and "Who is my manager?" lost its answer.
+  A note about someone else ("Name's X is …", "Dr. Yuki Tanaka's …",
+  "马可的工作室在…") now has its owner and attribute as its subject, and a note
+  whose subject the other's words do not hold never replaces it by shared
+  words alone; a new value of the same fact still does ("…room 9C" then
+  "…room 12A"). A change you state replaces the old note even when the chat
+  only asks about it: with the note "Your weekly sync is on Wednesday.", typing
+  "My weekly sync is on Friday." and getting "I previously noted it as
+  Wednesday. Would you like me to change it?" left Wednesday active and the
+  later question got a mixed answer. When the chat kept no note that turn, melo
+  now keeps each plain statement you typed that gives a new value to a subject
+  an active note holds, with Undo, whatever `keep_statements` says; a statement
+  of a new subject or a question is still left to the chat. "You have a weekly
+  sync on Wednesdays." and "Your weekly sync is on Friday." are one subject
+  (the same for "have/has/had a X on/at/in/every Y"), so the second replaces the
+  first. A reply that opens with a short interjection, "Got it — I've noted that
+  Dr. Kowalski's office is on Pine Street.", keeps the fact named after "I've
+  noted", not the words before it. A floor is not a city: "你住在3楼。" no
+  longer replaces "You live in Utrecht." (a value with a digit or a unit word
+  such as 楼/floor/apartment is another kind than a place or a name, for home,
+  job, name and timezone), and "我搬到7楼了" / "I moved to Berlin." now state a
+  new home ([#370]).
+
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
   file…") no longer ends the turn: the work starts as a task, or a question asks
@@ -3029,3 +3101,4 @@ earlier milestones.
 [#365]: https://github.com/localmelo/localmelo/pull/365
 [#367]: https://github.com/localmelo/localmelo/pull/367
 [#368]: https://github.com/localmelo/localmelo/pull/368
+[#370]: https://github.com/localmelo/localmelo/pull/370

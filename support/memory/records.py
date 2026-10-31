@@ -14,16 +14,20 @@ judgement: after the turn, a plain first-person statement of a lasting fact
 that names a subject ("I live in …", "my advisor is …", "call me …",
 "我的…是…") and that no note of the turn kept becomes one (:func:`statements`);
 a question, a to-do, a hypothetical, a negation or someone else's opinion
-never does. Each record
-has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
+never does. Whatever that setting says, when the turn kept no note, code also
+keeps a plain statement that gives a new value to a subject an active note holds
+(:func:`changes`: "My weekly sync is on Friday." after "Your weekly sync is on
+Wednesday."). Each record has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
 and where it was said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
 Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
 kept, not recalled, and comes back with an undo of the new one. The subject is
 what a note is about without its value (:func:`subject`); with an embedding
 model, a note close in meaning that differs from an old one in one short span
-is the same subject too (:func:`value_apart`). A new record lists the turns
-whose facts it replaced (``provenance["replaces"]``), so recall can rank them
+is the same subject too (:func:`value_apart`). A third party's fact names its
+owner as well, so "Tom Briggs's office is in room 9C." never replaces "Your
+manager is Tom Briggs.", whatever words they share. A new record lists the
+turns whose facts it replaced (``provenance["replaces"]``), so recall can rank them
 below it. Chat turns follow the same rule among themselves: of two turns whose
 typed words state one subject with different values, the older is replaced by
 the newer (:func:`newer_turns`), with or without a note.
@@ -114,7 +118,8 @@ _SUBJECTS: Final = tuple(
         (
             "home",
             rf"{_WHO} (?:live|lives|reside|resides) (?:in|at|on|near)\b"
-            r"|(?:我|你|用户)(?:现在)?住在",
+            r"|(?:我|你|用户)(?:现在)?住在"
+            rf"|\b(?:i|you|we|user)(?:'ve| have)? moved to\b|(?:我|你|用户)搬(?:到|去)",
         ),
         (
             "job",
@@ -125,15 +130,30 @@ _SUBJECTS: Final = tuple(
 )
 # The subjects a verb names: a statement of one needs no lexicon marker.
 _VERB_SUBJECTS: Final = frozenset(key for key, _ in _SUBJECTS)
+# A verb key's value is a "unit" (a floor, a room, a number) or a "place"/"name";
+# a unit never replaces a place ("Utrecht" and "3楼" are different things).
+_UNIT = re.compile(
+    r"\d|[楼层室号栋]|单元"
+    r"|\b(?:floors?|apts?|apartments?|rooms?|units?|suites?|buildings?)\b"
+)
 # "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject, and how Y
 # relates to it (:func:`_relation`) tells a name from a day or a description.
-_OWNED = re.compile(
-    r"^(?:my|your|our|(?:the )?user['’]s) ((?:[\w'’-]+ ){0,5}?[\w'’-]+) "
-    r"(?:is|are|was|were)\b ?(.*)$"
-)
+_ATTRIBUTE = r"((?:[\w'’-]+ ){0,5}?[\w'’-]+) (?:is|are|was|were)\b ?(.*)$"
+_OWNED = re.compile(rf"^(?:my|your|our|(?:the )?user['’]s) {_ATTRIBUTE}")
 _OWNED_ZH = re.compile(
     r"^(?:我|你|用户)的?([^\s，,。是叫姓]{1,12}?)(?:现在|也)?([是叫姓].*)$"
 )
+# "You have a weekly sync on Wednesdays" says what "Your weekly sync is on
+# Wednesday" says: X is the subject and the value relates to it as "on".
+_HAVE = re.compile(
+    r"^(?:i|you|we|(?:the )?user)(?: now| currently)? (?:have|has|had) "
+    r"(?:(?:a|an|my|your|our) )?((?:[\w'’-]+ ){0,4}?[\w'’-]+) "
+    r"(?:on|at|in|every)\b"
+)
+# What follows a third party's "Name's" / "NAME的": "office is in room 9C",
+# "工作室在中山路88号" (a place is "在", which the user's own form leaves alone).
+_THIRD = re.compile(rf"^{_ATTRIBUTE}")
+_THIRD_ZH = re.compile(r"^([^\s，,。是叫姓在]{1,12}?)(?:现在|也)?([是叫姓在].*)$")
 _RELATIONS: Final = frozenset({"called", "named", "on", "at", "in", "from"})
 _DESCRIBES: Final = frozenset(
     {"a", "an", "very", "so", "really", "quite", "too", "not", "always", "never"}
@@ -149,7 +169,8 @@ _ALSO_ASKS = re.compile(
     re.IGNORECASE,
 )
 # Words a note adds when it restates what was said ("The user prefers…",
-# "You go by…"); they are never what has to be found in the user's words.
+# "You said: …", "You go by…") and function words a paraphrase swaps ("then",
+# "each", "use"); they are never what has to be found in the user's words.
 _FRAMING: Final = frozenset(
     [
         "user",
@@ -170,12 +191,36 @@ _FRAMING: Final = frozenset(
         "named",
         "remember",
         "note",
+        "said",
+        "say",
+        "says",
+        "told",
+        "tell",
+        "tells",
+        "then",
+        "each",
+        "every",
+        "use",
+        "also",
+        "always",
     ]
 )
+# Terms that are values: a change in one is a different fact. A word is a value
+# when it has a digit, is a number word or a weekday, is capitalised inside a
+# sentence or sits in a quoted span; every CJK character or pair is one too.
+_VALUE_WORD = re.compile(
+    r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty"
+    r"|forty|fifty|hundred|thousand|(?:mon|tues|wednes|thurs|fri|satur|sun)day"
+)
+_QUOTED = re.compile(r"\"([^\"]+)\"|“([^”]+)”|「([^」]+)」")
+_SENTENCE = re.compile(r"(?<=[.!?。！？])\s+|\n")
+# What share of a note's other content words the evidence must hold.
+WORDS_FOUND: Final = 0.8
 _CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么")
 _CJK_FRAMING = re.compile("希望被叫作|希望被称为|用户")
 _POSSESSIVE = re.compile(r"(?<=\w)['’]s\b")
 _WORD = re.compile(r"[a-z0-9_]+")
+_CASED = re.compile(r"[A-Za-z0-9_]+")
 _CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
 # The never-kept classes: passwords and codes, card and ID numbers.
 _SECRET_WORDS = re.compile(
@@ -226,8 +271,13 @@ _PASSING_WORDS: Final = (
     "delayed cancelled canceled crashed frozen blocked finished"
 )
 _PASSING: Final = frozenset(_PASSING_WORDS.split())
-# A title's "." ends no sentence: the joiner holds it to the name after it.
-_TITLE = re.compile(r"\b(Dr|Mr|Mrs|Ms|Mx|Prof|St|Jr|Sr|Mt)\.\s+")
+# The "." of a title ("Mr."), "vs.", "No. 5", an "etc." that goes on and an
+# initial ("J. Smith") ends no sentence: the joiner holds it to the word after.
+_HELD = re.compile(
+    r"\b(?:Dr|Mr|Mrs|Ms|Mx|Prof|St|Jr|Sr|Mt|vs)\.[^\S\n]+"
+    r"|\betc\.[^\S\n]+(?=[a-z\d])|\bNo\.[^\S\n]+(?=\d)"
+    r"|(?<![\w.'\u2019])[A-HJ-Z]\.[^\S\n]+(?=[A-Z][a-z])"
+)
 _JOINER: Final = "\u2060"
 # A sentence that may carry a request to remember (:func:`said` reads its fact).
 _MAY_ASK = re.compile(
@@ -334,6 +384,69 @@ def topic_of(sentence: str, *, request: bool) -> str:
     return "people" if request else "about"
 
 
+# How a reply says it kept a note (:func:`claimed`); group ``x`` starts the fact.
+_AT = r"(?:^|(?<=[.!?。！？\n]))\s*"
+_LEAD = r"\s*(?:[—–:：,]|--?)\s*"
+_CLAIMS: Final = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        _AT + r"Remembered[:：]\s*(?P<x>.+)",
+        _AT + r"Noted" + _LEAD + r"(?P<x>.+)",
+        _AT
+        + r"Got it"
+        + _LEAD
+        + r"(?P<x>(?=\S)(?!I(?:'ve| have|'ll| will) (?:noted|remember)\b)"
+        + r"(?=[\s\S]*\bnoted\b).+)",
+        r"\bI(?:'ve| have) noted(?: that)?\s+(?P<x>.+)",
+        r"\bI(?:'ll| will) remember(?: that)?\s+(?!to\b)(?P<x>.+)",
+        r"(?:记下了|记住了)[：:，,]\s*(?P<x>.+)",
+        r"已记住[：:]\s*(?P<x>.+)",
+    )
+)
+_CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
+_NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
+_TO_USER = re.compile(r"\b(?:you|your|yours)\b|[你您]", re.IGNORECASE)
+# X reads as a statement of a fact when it has a verb or copula, or a possessive.
+_STATEMENT = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|lives|works|starts|leaves|meets|teaches"
+    r"|coaches)\b|['\u2019]s\b|[是在叫有住]",
+    re.IGNORECASE,
+)
+CLAIM_TERMS: Final = 3
+
+
+def claimed(answer: str) -> str | None:
+    """The fact *answer* says it noted, as a note sentence: ``None`` when it does
+    not claim a save, ``""`` when it does and names no statement.
+
+    The first claim counts: ``Remembered: X``, ``Noted — X`` (or ``:``/``,``),
+    ``I've noted (that) X``, ``I'll remember (that) X``, ``Got it — X`` with a
+    ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``. X ends where its
+    sentence does ("Prof." or "Mrs." does not end it, :data:`_HELD`), or at a
+    ``(``. X must read as a statement: written to the user (``you``, ``your``,
+    ``yours``, ``你``, ``您``) or with a verb, copula or possessive
+    (:data:`_STATEMENT`: "Prof. Duarte's office is in the Atrium Wing."); the
+    facts about another person are notes too. Otherwise X of at least
+    :data:`CLAIM_TERMS` content words is a claim of nothing usable (``""``), and a
+    shorter one ("Noted, thanks!") is no claim.
+    """
+    text = answer.replace("**", "").replace("__", "")
+    found = [m for pattern in _CLAIMS if (m := pattern.search(text))]
+    if not found:
+        return None
+    rest = _HELD.sub(
+        lambda m: m.group().rstrip() + _JOINER,
+        text[min(found, key=lambda m: m.start()).start("x") :],
+    )
+    fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
+    note = finished(_release(_NOTED_TAIL.sub("", fact)))
+    if _TO_USER.search(note):
+        return note
+    if len(note_terms(note)) < CLAIM_TERMS:
+        return None
+    return note if _STATEMENT.search(note) else ""
+
+
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
     """The records the user's *typed* text asks for, and whether one was refused.
 
@@ -345,18 +458,18 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return [], False
     # A ";" joins two statements as often as it joins two clauses.
-    joined = re.sub(r"\s*[;；]\s*", "\n", typed)
     joined = "\n".join(
         _ALSO_ASKS.sub("remember that ", sentence, count=1)
-        for _, sentence in split_sentences(joined)
+        for sentence in _split(typed, hold=True)
     )
     signals = classify_user_text(joined)
-    found = list(signals.request_facts)
+    facts = [_release(f) for f in signals.facts]
+    found = [_release(f) for f in signals.request_facts]
     # A request whose words after the marker did not read as a fact alone
     # ("Remember, I'm allergic to peanuts.") keeps the whole sentence.
-    found += [f for f in signals.facts if classify_user_text(f).remember]
+    found += [f for f in facts if classify_user_text(f).remember]
     # A statement is not kept by rule, but one with a secret still says so.
-    refused = any(sensitive(s) for s in signals.facts)
+    refused = any(sensitive(s) for s in facts)
     out: list[Candidate] = []
     for sentence in found:
         if sensitive(sentence):
@@ -370,13 +483,26 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     return out, refused
 
 
+def _split(text: str, *, hold: bool = False) -> list[str]:
+    """The sentences of *text*: a ";" ends one too, a title or abbreviation
+    such as "Mr." or an initial such as "J." does not (:data:`_HELD`). With
+    *hold* the joiner stays in them, for a reader that splits again."""
+    joined = _HELD.sub(lambda m: m.group().rstrip() + _JOINER, text)
+    joined = re.sub(r"\s*[;；]\s*", "\n", joined)
+    return [s if hold else _release(s) for _, s in split_sentences(joined)]
+
+
+def _release(sentence: str) -> str:
+    """*sentence* with the joiner of :func:`_split` read back as a space."""
+    return sentence.replace(_JOINER, " ")
+
+
 def _sentences(typed: str) -> list[str]:
-    """The sentences of the user's *typed* words (a ";" ends one too, a title
-    such as "Dr." does not); none for a message too long to be a statement."""
+    """The sentences of the user's *typed* words (:func:`_split`); none for a
+    message too long to be a statement."""
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return []
-    joined = _TITLE.sub("\\1." + _JOINER, re.sub(r"\s*[;；]\s*", "\n", typed))
-    return [s.replace("." + _JOINER, ". ") for _, s in split_sentences(joined)]
+    return _split(typed)
 
 
 def _plain(sentence: str) -> str:
@@ -460,6 +586,24 @@ def statements(typed: str) -> list[Candidate]:
     return out
 
 
+def changes(typed: str, active: Iterable[StoredEntry]) -> list[Candidate]:
+    """The plain statements of *typed* (:func:`statements`) that state a new value
+    of a subject an *active* note holds ("My weekly sync is on Friday." beside
+    "Your weekly sync is on Wednesday."): the user's change to an old note.
+    A statement of a subject no note names is not one, nor is one a note says."""
+    held: dict[str, set[str]] = {}
+    for entry in active:
+        if key := subject_key(entry.text):
+            held.setdefault(key, set()).add(normalise(entry.text))
+    return [
+        cand
+        for cand in statements(typed)
+        if (key := subject_key(cand.text))
+        and key in held
+        and normalise(cand.text) not in held[key]
+    ]
+
+
 def covered(cand: Candidate, notes: Iterable[Written]) -> bool:
     """Whether one of *notes* (kept in the same turn) already says *cand*: the
     same subject, or most of the same content words."""
@@ -525,13 +669,12 @@ def _evidence(texts: Sequence[str]) -> set[str]:
     return found
 
 
-def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
+def _missing(note: str, evidence: Sequence[str]) -> list[str]:
     """The content words of *note* that none of the *evidence* texts holds.
 
     A word counts when the evidence has it after stemming, or a word at most
     two letters longer that starts with it ("named" finds "name"); the words a
     note adds to restate a fact ("The user prefers…") need not be found.
-    ``[]`` means grounded.
     """
     words = _evidence(evidence)
     ascii_words = [w for w in words if w.isascii()]
@@ -547,16 +690,141 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     ]
 
 
+def _flagged(note: str) -> set[str]:
+    """The stemmed words of *note* that are values by their form: every word of
+    a quoted span, and a capitalised word that does not start its sentence."""
+    words = [
+        word
+        for group in _QUOTED.findall(note)
+        for span in group
+        for word in tokenize(normalise(span))
+    ]
+    for sentence in _SENTENCE.split(note):
+        words += [w.lower() for w in _CASED.findall(sentence)[1:] if w[0].isupper()]
+    return {_stem(word) for word in words if word.isascii()}
+
+
+def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
+    """The content words of *note* that the *evidence* texts lack, when that is
+    too much: ``[]`` means grounded.
+
+    The wording may vary, the values may not. Every value (a number or a word
+    with a digit, a weekday, a capitalised word inside a sentence, a quoted
+    span, a Chinese or Japanese character or pair) must be found, and so must
+    at least :data:`WORDS_FOUND` of the other content words (:func:`_missing`
+    says when one is found). The words listed are all the missing ones, values
+    first.
+    """
+    gone = _missing(note, evidence)
+    if not gone:
+        return []
+    flagged = _flagged(note)
+
+    def is_value(term: str) -> bool:
+        return (
+            not term.isascii()
+            or term in flagged
+            or _VALUE_WORD.fullmatch(term) is not None
+            or any(char.isdigit() for char in term)
+        )
+
+    values = [term for term in gone if is_value(term)]
+    others = [term for term in note_terms(note) if not is_value(term)]
+    lost = [term for term in gone if term not in values]
+    if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
+        return []
+    return values + lost
+
+
+def other_script(words: Sequence[str], evidence: Sequence[str]) -> bool:
+    """Whether one of *words* is in a script none of the *evidence* texts uses
+    (Chinese words in a note about an English message, or the other way round)."""
+    cjk = any(_CJK_RUN.search(text) for text in evidence)
+    latin = any(re.search("[A-Za-z]", text) for text in evidence)
+    return any(
+        (word.isascii() and word.isalpha() and not latin)
+        or (not word.isascii() and not cjk)
+        for word in words
+    )
+
+
 def quote_for(note: str, said: Sequence[str]) -> str:
     """The sentence of *said* that holds most of *note*'s words: the user's quote."""
     terms = set(note_terms(note))
     best, score = "", 0
     for text in said:
-        for _, sentence in split_sentences(re.sub(r"\s*[;；]\s*", "\n", text)):
-            hits = len(terms - set(unsupported(note, [sentence])))
+        for sentence in _split(text):
+            hits = len(terms - set(_missing(note, [sentence])))
             if hits > score:
                 best, score = sentence, hits
     return best[:MAX_RECORD_CHARS]
+
+
+# Whose a sentence is, by its first words (:func:`wrong_owner`): the user's ("my",
+# "your", "我的", "你的") or a named third party's ("Marco's …", "马可的 …"). A
+# "Name's" before a determiner or an adverb is "Name is" ("John's my advisor").
+_OWNER_EN = re.compile(
+    r"(?:(?P<user>(?i:my|our|your|the user['’]s))\b"
+    r"|(?P<name>(?:(?:Dr|Mr|Mrs|Ms|Mx|Prof|St|Mt)\.\s+)?[A-Z][\w-]+(?:\s+[A-Z][\w-]+)*)"
+    r"['’]s(?!\s+(?i:my|our|your|his|her|their|the|an?|not|now|also|still|just|going"
+    r"|been|got|so|here|there|one)\b))"
+)
+_OWNER_ZH = re.compile(
+    r"(?:(?P<user>(?:我|咱|你|您)们?|用户)|(?P<name>[^\s的，,。！？]{1,6}?))的"
+)
+# What "Name's" is not a name: a contraction ("That's why …") or a time word.
+_NOT_OWNERS = re.compile(
+    r"it|that|there|here|what|who|where|when|why|how|let|this|he|she"
+    r"|today|tomorrow|yesterday|tonight"
+)
+_NOT_NAME_ZH = re.compile(
+    "[我你您他她它咱这那在是有和与把被让从到每]|^(?:今|明|昨|周末|现在)"
+)
+
+
+def _owner(sentence: str) -> str | None:
+    """Whose *sentence* is: ``"user"``, a third party's name, or ``None`` when its
+    first words say none (or not clearly: a contraction, a time word)."""
+    text = sentence.strip()
+    if found := _OWNER_EN.match(text):
+        name = found["name"]
+        if found["user"]:
+            return "user"
+        low = name.lower()
+        bad = _NOT_OWNERS.fullmatch(low) or _VALUE_WORD.fullmatch(low)
+        return None if bad else name
+    if found := _OWNER_ZH.match(text):
+        name = found["name"]
+        return "user" if found["user"] else None if _NOT_NAME_ZH.search(name) else name
+    return None
+
+
+def wrong_owner(note: str, quote: str) -> str:
+    """The refusal of *note* when it is about someone else than *quote*, the
+    typed sentence it matches best, is; ``""`` when they agree or say nothing.
+
+    A note about a person the user named ("马可的工作室…") that says "你的工作室…"
+    would come back as a fact about the user, and the other way round. The name
+    must be missing from the other sentence, so "Anna's car" for "My sister
+    Anna's car" is no mix-up.
+    """
+    said, kept = _owner(quote), _owner(note)
+    if not said or not kept or (said == "user") == (kept == "user"):
+        return ""
+    name = kept if said == "user" else said
+    other = quote if said == "user" else note
+    if name.split()[-1].lower() in other.lower():
+        return ""
+    own = "'s …" if name.isascii() else "的…"
+    if said == "user":
+        return (
+            f"Not remembered: the user said that about themselves, not about {name}. "
+            f"Write the note to the user: “{'Your …' if name.isascii() else '你的…'}”."
+        )
+    return (
+        f"Not remembered: that is about {name}, not the user. "
+        f"Write the note about them: “{name}{own}”."
+    )
 
 
 def _relation(value: str) -> str:
@@ -565,6 +833,8 @@ def _relation(value: str) -> str:
     "a doctor", "橙色的"), or ``""`` for a plain value ("Juno", "小宇")."""
     if value[:1] in ("叫", "姓"):
         return value[0]
+    if value[:1] == "在":
+        return "at"
     if value[:1] == "是":
         return "desc" if value.endswith("的") else ""
     words = [w for w in value.split() if w not in _STILL]
@@ -572,18 +842,47 @@ def _relation(value: str) -> str:
     return first if first in _RELATIONS else "desc" if first in _DESCRIBES else ""
 
 
+def _third_party(text: str) -> tuple[str, str] | None:
+    """:func:`_subject` of "Tom Briggs's office is in room 9C" or "马可的工作室在
+    中山路88号": the owner's name with the attribute, never the user's own
+    subject. ``None`` unless *text* starts with a third party's possessive;
+    ``("", "")`` when it says no "X is Y" of them."""
+    owner = _owner(text)
+    if owner is None or owner == "user":
+        return None
+    sentence = text.strip()
+    found = _OWNER_EN.match(sentence)
+    pattern, joint = _THIRD, "'s "
+    if found is None:
+        found = _OWNER_ZH.match(sentence)
+        pattern, joint = _THIRD_ZH, "的"
+    read = pattern.match(normalise(sentence[found.end() :])) if found else None
+    if read is None:
+        return "", ""
+    attribute = read.group(1)
+    if joint != "的":
+        words = _TOKEN.findall(_POSSESSIVE.sub("", attribute))
+        attribute = " ".join(stem(w) for w in words if w not in _ARTICLES)
+    return normalise(owner) + joint + attribute, _relation(read.group(2))
+
+
 def _subject(text: str) -> tuple[str, str]:
     """:func:`subject` and the relation of its value (:func:`_relation`)."""
+    if (third := _third_party(text)) is not None:
+        return third
     folded = normalise(text)
     for key, pattern in _SUBJECTS:
-        if pattern.search(folded):
-            return key, ""
+        if found := pattern.search(folded):
+            return key, "unit" if _UNIT.search(folded[found.start() :]) else ""
     if found := _OWNED.match(folded):
         words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
         stems = " ".join(stem(w) for w in words if w not in _ARTICLES)
         return stems, _relation(found.group(2))
     if found := _OWNED_ZH.match(folded):
         return found.group(1), _relation(found.group(2))
+    if found := _HAVE.match(folded):
+        words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
+        return " ".join(stem(w) for w in words if w not in _ARTICLES), "on"
     return "", ""
 
 
@@ -593,7 +892,10 @@ def subject(text: str) -> str:
     "I live in Lisbon", "You live in Utrecht" and "The user lives in Utrecht"
     are ``home``; "my weekly sync is on Friday" is ``weekly sync``; "我的健身
     教练是小宇" is ``健身教练``. Look-alikes keep apart: "flight to porto" is
-    not "flight to faro", "书法课" is not "游泳课".
+    not "flight to faro", "书法课" is not "游泳课". A third party's own fact
+    names its owner too: "Tom Briggs's office is in room 9C" is ``tom briggs's
+    office`` and "马可的工作室在中山路88号" is ``马可的工作室``, never the user's
+    ``manager`` or ``工作室``.
     """
     return _subject(text)[0]
 
@@ -629,6 +931,17 @@ def value_apart(text: str, other: str) -> bool:
     return longest <= VALUE_TOKENS and frame >= max(2.0, value)
 
 
+def _lacks(subject_: str, text: str) -> bool:
+    """Whether *text* lacks a word of the subject *subject_* names (an owner, an
+    attribute). A subject a verb names ("home", "name") has no words of its own."""
+    if not subject_ or subject_ in _VERB_SUBJECTS:
+        return False
+    tokens = _TOKEN.findall(normalise(text))
+    words = {*tokens, *(stem(w) for w in tokens)}
+    wanted = _TOKEN.findall(subject_.replace("'s ", " "))
+    return any(w not in words for w in wanted if w not in _CJK_FILLER)
+
+
 def _near(vector: Sequence[float] | None, model: str, entry: StoredEntry) -> bool:
     """Whether *vector* (of *model*) and *entry*'s are close in meaning."""
     mine, theirs = unit(vector), unit(entry.vector)
@@ -649,9 +962,12 @@ def decide(
 
     An old record of the same :func:`subject`, its value related the same way
     ("is on", "is called", a plain value), is replaced, whatever its topic; two
-    records that name different subjects never replace each other. Else, with
-    vectors, one close in meaning and :func:`value_apart`; else one of the
-    same *kind* that shares most content words ("said again in other words").
+    records that name different subjects never replace each other, and the
+    fallback to shared words refuses a record that names a subject the other's
+    text does not hold ("Your manager is Tom Briggs." beside "Tom Briggs's
+    office is in room 9C."). Else, with vectors, one close in meaning and
+    :func:`value_apart`; else one of the same *kind* that shares most content
+    words ("said again in other words").
     """
     folded = normalise(text)
     mine, how = _subject(text)
@@ -662,11 +978,15 @@ def decide(
         if normalise(entry.text) == folded:
             return "IGNORE", entry.id
         theirs, their_how = _subject(entry.text)
+        if mine == theirs and mine in _VERB_SUBJECTS and how != their_how:
+            continue
         if mine and theirs and (mine != theirs or how == their_how):
             score = 1.0 if mine == theirs else 0.0
         elif _near(vector, embed_model, entry) and value_apart(text, entry.text):
             score = 1.0
-        elif not kind or entry.kind == kind:
+        elif (not kind or entry.kind == kind) and not (
+            _lacks(mine, entry.text) or _lacks(theirs, text)
+        ):
             score = overlap(tokens, content_tokens(entry.text))
         else:
             score = 0.0

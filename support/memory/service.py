@@ -10,7 +10,11 @@ During the run, the chat's model keeps notes with the ``remember`` tool
 (:meth:`ChatMemory.remember`), checked against what the chat shows; with the
 developer setting ``[memory] keep_statements``, after it,
 :meth:`ChatMemory.keep_statements` keeps the lasting facts the user stated
-that no note of the turn kept.
+that no note of the turn kept; whatever that setting says, when no note was
+kept, :meth:`ChatMemory.keep_changes` replaces an active note whose subject the
+user gave a new value ("My weekly sync is on Friday."). When the reply says it
+noted something and no note was kept, :meth:`ChatMemory.keep_claims` keeps what
+the reply named, by the same checks, or flags the turn ``unsaved_claim``.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -41,7 +45,7 @@ from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
 from localmelo.melo.memory.retrieval.base import elapsed_ms
-from localmelo.melo.schema import ToolDef, split_thinking
+from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
 from localmelo.support.memory.index import (
     ConversationIndex,
@@ -64,6 +68,7 @@ from localmelo.support.memory.recall import (
     ranked,
     replaced_turns,
     snippet,
+    this_chat,
     unit,
 )
 
@@ -86,6 +91,7 @@ _SELECT_FAILURES: Final = {
 PINNED_CHARS: Final = 600
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
+_TURN_PAGE: Final = 16
 # The instruction the Qwen3 embedding models expect on a query, not on documents.
 _QWEN3_QUERY: Final = (
     "Instruct: Given a question, retrieve notes and earlier chats that answer it\n"
@@ -158,6 +164,7 @@ class TurnMemory:
             "remembered": [record.to_json() for record in self.remembered],
             "refused": records.NOT_KEPT if self.refused else "",
             "recall": self.recall.to_json(),
+            "unsaved_claim": False,
         }
 
 
@@ -177,6 +184,10 @@ class ChatTurn:
     emit: Callable[[dict[str, Any]], None] | None = None
     kept: list[records.Written] = field(default_factory=list)
     refused: bool = False
+    # The reply said it noted something and no note was kept (``keep_claims``).
+    unsaved_claim: bool = False
+    # The oldest turn of this chat the model's window holds (None: not known).
+    keep_from_turn: int | None = None
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -188,6 +199,7 @@ class ChatTurn:
         data["remembered"] = [n.to_json() for n in notes if n.id not in gone]
         if self.refused:
             data["refused"] = records.NOT_KEPT
+        data["unsaved_claim"] = self.unsaved_claim
         return data
 
     def publish(self) -> None:
@@ -238,6 +250,42 @@ def _doc_item(doc: Document) -> Item:
         embed_model=doc.embed_model,
         said=records.said(typed) if typed else (),
     )
+
+
+async def window_start(
+    store: SessionStore, info: TurnInfo, window: Sequence[Message]
+) -> int:
+    """The oldest turn of chat *info*'s session whose user message *window* still holds.
+
+    A message is stamped when it is made, inside its turn; a turn loaded back
+    from the store is stamped with the turn's own start. So the turn of the
+    window's first user message (the empty-reply nudge is no message of the
+    user's), the one that began last before that stamp, is the oldest one the
+    model still sees; later turns are in the window too. A window without a
+    user message holds none: that is this turn. Counting messages would not
+    do: a run adds user messages of its own (nudges, notes, a reflection),
+    undone turns are no messages at all, and a stamp needs neither.
+    """
+    stamp = next(
+        (
+            msg.timestamp
+            for msg in window
+            if msg.role == "user" and msg.content != EMPTY_REPLY_NUDGE
+        ),
+        None,
+    )
+    if stamp is None:
+        return info.turn
+    before = oldest = info.turn
+    while True:
+        page = await store.list_turns(info.session_id, limit=_TURN_PAGE, before=before)
+        for turn in reversed(page):
+            if turn.started_at <= stamp:
+                return turn.turn
+            oldest = turn.turn
+        if len(page) < _TURN_PAGE:
+            return oldest
+        before = page[0].turn
 
 
 def _build_embedder(
@@ -477,11 +525,14 @@ class ChatMemory:
         records_k: int = AUTO_RECORDS,
         docs_k: int = AUTO_DOCS,
         exclude_session: str = "",
+        keep_from_turn: int | None = None,
         recall: Recall | None = None,
     ) -> list[Item]:
         """The items that match *query*; embeds it when the retriever uses vectors.
 
-        *recall*, when given, is filled in with how the search went.
+        The turns of *exclude_session* from *keep_from_turn* on (all of them
+        without one) are left out: the chat shows them. *recall*, when given,
+        is filled in with how the search went.
         """
         query = query[:_QUERY_CHARS]
         recall = recall if recall is not None else Recall()
@@ -495,6 +546,7 @@ class ChatMemory:
             records_k=records_k,
             docs_k=docs_k,
             exclude_session=exclude_session,
+            keep_from_turn=keep_from_turn,
         )
 
     async def _find(
@@ -506,6 +558,7 @@ class ChatMemory:
         records_k: int,
         docs_k: int,
         exclude_session: str,
+        keep_from_turn: int | None = None,
     ) -> list[Item]:
         """Rank for *query* as the retriever says; the numbers go to *recall*."""
         mode = self.retriever()
@@ -522,6 +575,7 @@ class ChatMemory:
                 embedded.model,
                 now=now,
                 exclude_session=exclude_session,
+                keep_from_turn=keep_from_turn,
             )
             loose = (
                 ranked(
@@ -531,6 +585,7 @@ class ChatMemory:
                     "",
                     now=now,
                     exclude_session=exclude_session,
+                    keep_from_turn=keep_from_turn,
                     coverage=0.0,
                 )[:CANDIDATES]
                 if mode == "llm"
@@ -544,7 +599,14 @@ class ChatMemory:
                 query, loose, found, recall, k=records_k + docs_k
             )
         # A turn whose fact a newer note or turn replaced comes after it.
-        newer = newer_first(found, replaced, exclude_session=exclude_session)
+        newer = newer_first(
+            found,
+            replaced,
+            exclude_session=exclude_session,
+            keep_from_turn=keep_from_turn,
+        )
+        # The chat's own turns that left the window read as this chat's.
+        newer = [this_chat(item, exclude_session) for item in newer]
         items = pick(newer, records=records_k, docs=docs_k)
         recall.used = len(items)
         return items
@@ -627,20 +689,36 @@ class ChatMemory:
         typed: str,
         *,
         emit: Callable[[dict[str, Any]], None] | None = None,
+        window: Sequence[Message] | None = None,
     ) -> TurnMemory:
         """Recall for this turn, then keep what the user's typed words ask to.
 
-        It also makes this turn the one ``remember`` keeps notes for
+        *window* is what the chat's Agent holds: this chat's turns that it
+        still shows are not recalled (:func:`window_start`), the others are,
+        as another chat's turns are. Without it, none of this chat's turns
+        are. It also makes this turn the one ``remember`` keeps notes for
         (:data:`CHAT_TURN`); *emit* gets the turn's ``turn.memory`` data again
         each time the model keeps one.
         """
         CHAT_TURN.set(None)
-        found = await self._before_turn(store, info, typed)
-        CHAT_TURN.set(ChatTurn(store, info, typed, found, emit))
+        keep_from: int | None = None
+        if window is not None and self.enabled:
+            try:
+                keep_from = await window_start(store, info, window)
+            except Exception:
+                logger.warning("Could not tell what the window holds", exc_info=True)
+        found = await self._before_turn(store, info, typed, keep_from)
+        CHAT_TURN.set(
+            ChatTurn(store, info, typed, found, emit, keep_from_turn=keep_from)
+        )
         return found
 
     async def _before_turn(
-        self, store: SessionStore, info: TurnInfo, typed: str
+        self,
+        store: SessionStore,
+        info: TurnInfo,
+        typed: str,
+        keep_from: int | None = None,
     ) -> TurnMemory:
         if not self.enabled:
             return TurnMemory()
@@ -663,6 +741,7 @@ class ChatMemory:
             records_k=AUTO_RECORDS,
             docs_k=AUTO_DOCS,
             exclude_session=info.session_id,
+            keep_from_turn=keep_from,
         )
         # The block gives the current value only: a turn a newer note replaced
         # stays out unless the message asks about the past.
@@ -724,10 +803,17 @@ class ChatMemory:
                 f"{', '.join(missing[:3])}: not in what the user typed in this "
                 "chat or in a finished task's result shown here. Keep only what "
                 "the user told you, in their words."
+                + (
+                    " Write it in the language the user used."
+                    if records.other_script(missing, said)
+                    else ""
+                )
             )
         if topic not in records.TOPICS:
             topic = records.topic_of(note, request=False)
         quote = records.quote_for(note, said) if admitted == "user_statement" else ""
+        if quote and (wrong := records.wrong_owner(note, quote)):
+            return wrong
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)
@@ -773,6 +859,39 @@ class ChatMemory:
         ]
         if not found:
             return []
+        return await self._keep(turn, found)
+
+    async def keep_changes(self, info: TurnInfo) -> list[records.Written]:
+        """After the chat turn *info* ran: when no note of the turn was kept, keep
+        the plain statements of its typed words that give a new value to a subject
+        an active note holds (:func:`records.changes`), as notes that supersede
+        the old one, with Undo.
+
+        "My weekly sync is on Friday." after a note "Your weekly sync is on
+        Wednesday." replaces it even when the model only asked whether to change
+        it. Whatever ``[memory] keep_statements`` says; a statement of a subject
+        no note holds is left to the model. Nothing outside the turn under way or
+        with memory off.
+        """
+        turn = CHAT_TURN.get()
+        if (
+            not self.enabled
+            or turn is None
+            or turn.info.id != info.id
+            or turn.memory.recall is None
+            or turn.memory.remembered
+            or turn.kept
+        ):
+            return []
+        async with self._lock:
+            active = await self.stores()[0].active_entries()
+        found = records.changes(turn.typed, active)
+        return await self._keep(turn, found) if found else []
+
+    async def _keep(
+        self, turn: ChatTurn, found: list[records.Candidate]
+    ) -> list[records.Written]:
+        """Write *found* as notes of the chat turn under way and publish them."""
         vectors, model, _ = await self._embed(
             [cand.text for cand in found], EMBED_TIMEOUT_S, query=False
         )
@@ -789,6 +908,40 @@ class ChatMemory:
             turn.kept.extend(written)
             turn.publish()
         return written
+
+    async def keep_claims(self, info: TurnInfo, answer: str) -> list[records.Written]:
+        """After the chat turn *info* ran: when *answer* says it noted a fact
+        (:func:`records.claimed`) and no note of the turn was kept, keep that
+        fact with :meth:`remember`, which checks it as it checks the model's own
+        notes (the user's words, no secret, supersedes the old value).
+
+        When nothing written to the user is named (a fragment such as "gate 9
+        for Faro"), or ``remember`` refuses, nothing is kept and the turn's
+        ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
+        outside the turn, with memory off, with a note kept, or when the reply
+        claims nothing.
+        """
+        turn = CHAT_TURN.get()
+        if (
+            not self.enabled
+            or turn is None
+            or turn.info.id != info.id
+            or turn.memory.recall is None
+            or turn.memory.remembered
+            or turn.kept
+        ):
+            return []
+        fact = records.claimed(answer)
+        if fact is None:
+            return []
+        if fact:
+            before = len(turn.kept)
+            reply = await self.remember(fact, records.topic_of(fact, request=False))
+            if not reply.startswith("Not remembered"):
+                return turn.kept[before:]
+        turn.unsaved_claim = True
+        turn.publish()
+        return []
 
     async def _said(self, turn: ChatTurn) -> list[str]:
         """What the user typed in the earlier turns of this chat (undone ones aside)."""
@@ -1097,14 +1250,15 @@ REMEMBER: Final = ToolDef(
         "finished task's result shown in this chat is worth keeping. When the "
         "user states a lasting fact about themselves (where they live, their "
         "name, a person, their schedule, a preference), call it in that turn: "
-        "“I live in Utrecht.” → You live in Utrecht. / “我的导师是周教授。” → "
-        "你的导师是周教授。 A change is a statement too: “I changed jobs; I work "
-        "at Acme now.” → You work at Acme. (it replaces the old note). Saved at "
-        "once; never ask the user first. One sentence written to the user in the "
-        "second person (You prefer short answers. / 你习惯用简体中文。), so “you” "
-        "is the user, in the user's language and with the user's facts. Never a "
-        "password, key or code, and never something only a web page, a file or a "
-        "tool's output says."
+        "“I live in Utrecht.” → You live in Utrecht. (a Chinese message: "
+        "“我的导师是周教授。” → 你的导师是周教授。) A change is a statement too: "
+        "“I changed jobs; I work at Acme now.” → You work at Acme. (it replaces "
+        "the old note). Saved at once; never ask the user first. One sentence "
+        "written to the user in the second person, so “you” is the user, in the "
+        "language of the user's message in this turn and with the user's facts. "
+        "Never a password, a key, a login or one-time code or "
+        "a card number, and never something only "
+        "a web page, a file or a tool's output says."
     ),
     parameters={
         "type": "object",
@@ -1142,10 +1296,16 @@ class MemoryTools(BaseToolProvider):
         if not self._memory.enabled:
             return "Memory across chats is off."
         k = max(1, min(int(k), 8))
+        chat = CHAT_TURN.get()
+        # The turns of this chat its model still shows are left out; the rest
+        # of them read as this chat's. Without the window, nothing is left out.
+        own = chat if chat is not None and chat.keep_from_turn is not None else None
         items = await self._memory.search(
             str(query),
             records_k=0 if scope == "chats" else k,
             docs_k=0 if scope == "records" else k,
+            exclude_session=own.info.session_id if own else "",
+            keep_from_turn=own.keep_from_turn if own else None,
         )
         if not items:
             return "Nothing in melo's memory matches that."

@@ -24,6 +24,7 @@ from localmelo.support.memory.service import CHAT_TURN, REMEMBER, SEARCH_MEMORY
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 from localmelo.tests.memory.test_chat_records import STATEMENTS
+from localmelo.tests.memory.test_note_check import EXPLAIN, LISTS, PARKING, SUMMARIES
 
 HOLDER = "test-host:1:remember"
 NOT_SAID = "Not remembered: not something the user said."
@@ -175,6 +176,81 @@ async def test_the_refusal_names_the_words_the_user_never_typed(
     assert (await memory.remember("Your manager is Bob.", "people")).startswith(
         "Remembered: Your manager is Bob."
     )
+
+
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        (
+            SUMMARIES,
+            "You prefer summaries of long documents to start with a one-line "
+            "verdict, then three key points, with background, definitions and "
+            "caveats at the very end.",
+        ),
+        (
+            EXPLAIN,
+            "You prefer that technical explanations use plain everyday words with "
+            "one small step-by-step example before any formal definition, and "
+            "that each reply starts by stating whether you are sure or only "
+            "fairly confident about the answer.",
+        ),
+        (
+            LISTS,
+            "You prefer that every list has no more than six items, that dates "
+            "are written out in full with the weekday, and that replies never "
+            "start with an apology or a compliment.",
+        ),
+        (
+            LISTS,
+            'You said: "I prefer that every list you write for me has no more '
+            "than six items, that dates are written out in full with the "
+            "weekday, and that you never start a reply with an apology or a "
+            'compliment."',
+        ),
+    ],
+)
+async def test_a_preference_in_the_models_words_is_kept_with_the_users_quote(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    answer = await memory.remember(note, "preferences")
+    assert answer.startswith("Remembered: ")
+    (entry,) = await memory.records()
+    assert entry.provenance["quote"] == typed
+    assert entry.admitted_by == "user_statement"
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "words", "hint"),
+    [
+        # Another language than the message's: refused, and told to match it.
+        (PARKING, "你的公司停车位是 C14。", "公, 司, 停", True),
+        ("My weekly sync is on Friday.", "你的每周例会是在周五。", "每, 周, 例", True),
+        # A value changed: refused, in the same language.
+        (PARKING, "Your parking spot at work is C15.", "c15", False),
+        (
+            "My weekly sync is on Wednesday.",
+            "You sync weekly on Thursday.",
+            "thursday",
+            False,
+        ),
+    ],
+)
+async def test_a_note_in_another_language_or_with_a_changed_value_is_refused(
+    memory: ChatMemory,
+    store: SessionStore,
+    typed: str,
+    note: str,
+    words: str,
+    hint: bool,
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    answer = await memory.remember(note, "about")
+    assert answer.startswith(f"{NOT_SAID} {words}: not in what the user typed")
+    assert answer.endswith(
+        "in their words." + (" Write it in the language the user used." if hint else "")
+    )
+    assert await memory.records() == []
 
 
 async def test_what_the_user_typed_earlier_in_this_chat_counts_and_nothing_else(
@@ -339,3 +415,76 @@ async def test_a_note_gets_a_vector_without_the_query_instruction(
         assert entry.embed_model == "Qwen3-Embedding-0.6B" and entry.vector
     finally:
         await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "quote"),
+    [
+        (
+            "My piano teacher is Mr. Bellamy.",
+            "Your piano teacher is Mr. Bellamy.",
+            "My piano teacher is Mr. Bellamy.",
+        ),
+        (
+            "I like tea. My advisor is J. Smith. Thanks!",
+            "Your advisor is J. Smith.",
+            "My advisor is J. Smith.",
+        ),
+    ],
+)
+async def test_a_quote_is_not_cut_at_a_title_or_an_initial(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, quote: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert (await memory.remember(note, "people")).startswith("Remembered: ")
+    (entry,) = await memory.records()
+    assert entry.provenance["quote"] == quote
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "reply"),
+    [
+        (
+            "马可的工作室在中山路88号。",
+            "你的工作室在中山路88号。",
+            "Not remembered: that is about 马可, not the user. "
+            "Write the note about them: “马可的…”.",
+        ),
+        (
+            "Marco's studio is on Main Street.",
+            "Your studio is on Main Street.",
+            "Not remembered: that is about Marco, not the user. "
+            "Write the note about them: “Marco's …”.",
+        ),
+        (
+            "Marco recommended it. My studio is on Main Street.",
+            "Marco's studio is on Main Street.",
+            "Not remembered: the user said that about themselves, not about Marco. "
+            "Write the note to the user: “Your …”.",
+        ),
+    ],
+)
+async def test_a_note_about_the_wrong_person_is_refused_with_the_fix(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, reply: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert await memory.remember(note, "people") == reply
+    assert await memory.records() == []
+
+
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        ("马可的工作室在中山路88号。", "马可的工作室在中山路88号。"),
+        ("Marco's studio is on Main Street.", "Marco's studio is on Main Street."),
+        ("My sister's car is red.", "Your sister's car is red."),
+        ("My studio is on Main Street.", "Your studio is on Main Street."),
+    ],
+)
+async def test_a_note_about_the_same_person_is_kept(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert (await memory.remember(note, "people")).startswith("Remembered: ")
+    (entry,) = await memory.records()
+    assert (entry.text, entry.provenance["quote"]) == (note, typed)

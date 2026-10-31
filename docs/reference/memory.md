@@ -29,6 +29,11 @@ reply's turn (a tool-call message with its results, never split). By default
 (`chunk`) the window drops whole units at once, so the history starts at the
 same unit for several steps and a server's prompt cache can reuse it.
 
+In the web console and the app, a turn of the chat that has left the window is not lost:
+[memory across chats](../concepts/memory.md#memory-across-chats) recalls it with the
+next message that matches, as `this chat`, and `search_memory` finds it too. A turn whose
+question the window still shows is not recalled.
+
 `--window-eviction slide` (or `[agent] window_eviction = "slide"`) is the
 earlier behavior: the oldest unit leaves at every step once the window is
 full, so from about the eleventh step each request starts its history one unit
