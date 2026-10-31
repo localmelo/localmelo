@@ -6,6 +6,49 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 - Ollama is the alternative on other systems.
 - A cloud API needs only a key in an environment variable.
 
+## Setup preview
+
+- With no backend saved and no server found, terminal first run and `melo setup`
+  show a short, read-only preview. Supported Apple-silicon Macs get oMLX with
+  Qwen3 4B Instruct (4-bit): the download upper bound, cached amount and free
+  space, with one warning when needed. Other systems show manual guidance
+  without cache estimates for an unsupported installer.
+  With a backend already saved and no server found, `melo setup` opens the full
+  backend menu instead.
+- The summary is printed once. The list then offers `Check again`,
+  `Show how to set one up`, `Enter an address` and `Quit`. `Show how to set one
+  up` prints at most six plain numbered steps: download oMLX, optionally check
+  its checksum, open it and move it to Applications, download the model, start
+  the server, then choose `Enter an address` in melo. Automatic setup is coming
+  soon. A `Check again` that finds no server prints the summary again only if
+  the cached amount or free space changed.
+- Developer mode prints the full details once and keeps a `Review setup plan`
+  menu with a lifetime option, manual steps and `Details`. Exact versions,
+  checksums, cache paths, per-volume disk readings, plan digest and the proposed
+  port are in `Details` or developer mode, not the default summary.
+- RAM uses GiB (shown as GB), with the exact byte count in `Details`; less than
+  16 GB is a speed warning, not a manual-only restriction. The pinned model is
+  about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB on macOS 15 or 0.88 GB on
+  macOS 26/27. The remaining download includes both. Expansion/staging overhead
+  is unmeasured; disk payload is only a lower bound. Nothing installs,
+  downloads, starts or saves settings.
+- The steps come from the same pinned recipe. They keep the model in the
+  standard Hugging Face cache, use a separate server settings directory, and
+  disable oMLX's additional cache scan so this instance serves only the chosen
+  snapshot. Install the official app yourself and copy the shown commands only
+  when ready. The suggested high port is an example, not a reserved port;
+  select a free one before starting and enter its address in melo. These commands
+  run independently; stop the manual server yourself with Ctrl+C. The planned
+  lifetime does not manage it. Cache precedence is `HF_HUB_CACHE`, then legacy
+  `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then the XDG/standard default.
+  The proposed server state is under `~/.cache/localmelo/server-setup/`.
+  Pipes and `TERM=dumb` show a manual-guide link instead of picker choices;
+  slow or unavailable setup checks do not block the manual path.
+- A direct snapshot's served model ID can be its revision hash, not the
+  repository name. Use the ID the server lists. Rechecking an address only
+  lists models; it does not load one. The web/app setup card and already
+  configured or explicitly addressed runs keep their existing behavior.
+
 ## Serve a model with oMLX
 
 - [oMLX](https://github.com/jundot/omlx) serves MLX models through an OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later.

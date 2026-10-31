@@ -710,6 +710,41 @@ button:hover:not(:disabled) {
 .setup-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
 .setup-card .link-button { padding: 0; font-size: var(--text-small); }
 @media (max-width: 700px) { .setup-card .primary-button { width: 100%; min-height: 44px; } }
+/* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
+.import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
+.import-card:has(.import-done) { grid-template-columns: 1fr auto; align-items: center; padding-block: var(--space-3); }
+.import-card h2 { margin: 0; font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
+.import-card p { margin: 0; font-size: var(--text-small); line-height: 18px; color: var(--ink-2); }
+.import-sources, .import-samples, .import-batches { margin: 0; padding: 0; list-style: none; }
+.import-sources { display: grid; gap: var(--space-1); }
+.import-source { border-radius: var(--radius-control); background: var(--raised); }
+.import-source:has(input:checked) { background: var(--tint); }
+.import-pick { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); cursor: pointer; }
+.import-pick input { flex: none; margin: 0; accent-color: var(--accent); }
+.import-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font: var(--text-small)/18px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
+.import-count { flex: none; font-size: var(--text-caption); color: var(--ink-2); }
+.import-more { padding: 0 var(--space-3) var(--space-2) 38px; font-size: var(--text-small); color: var(--ink-2); }
+.import-more summary { width: fit-content; color: var(--accent); font-size: var(--text-caption); cursor: pointer; }
+.import-samples { margin-top: var(--space-1); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.import-samples li { margin: 2px 0; overflow-wrap: anywhere; }
+.import-left { margin: var(--space-1) 0 0; color: var(--warn); font-size: var(--text-small); }
+.import-note { margin: 0; color: var(--ink-2); font-size: var(--text-small); }
+.import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.import-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
+.import-card .link-button, .memory-import .link-button { padding: 0; font-size: var(--text-small); }
+.import-done { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.import-ok { color: var(--ok); font-weight: 600; }
+.import-fault { grid-column: 1 / -1; margin: 0; color: var(--error); font-size: var(--text-small); }
+.memory-import { display: grid; gap: var(--space-2); padding: var(--space-3) 0 0; border-top: 1px solid var(--line); }
+.memory-sub { margin: 0; font-size: var(--text-body); font-weight: 600; }
+.memory-import .primary-button { min-height: 32px; padding: 6px 14px; font-size: var(--text-small); }
+.memory-import .outline-button { justify-self: start; }
+.import-batch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; color: var(--ink-2); font-size: var(--text-small); }
+@media (max-width: 700px) {
+  .import-card .primary-button { width: 100%; min-height: 44px; }
+  .import-card .link-button, .import-close, .memory-import .link-button, .memory-import .primary-button { min-height: 44px; }
+  .import-more summary { padding-block: var(--space-2); }
+}
 #messages:empty {
   display: none;
 }
@@ -765,6 +800,11 @@ button:hover:not(:disabled) {
 .blinks.portrait .welcome-mascot { margin: 0 auto; }
 .blinks.portrait::after { background-image: url(/assets/akita/sit-idle-blink.png); }
 .blinks.face::after { background-image: url(/assets/akita/face-idle-blink.png); }
+/* While the import card is offered (import-card.mjs), the hero shrinks to the portrait alone, so the card and its buttons fit above the composer. */
+.welcome.compact { padding: var(--space-5) 0 0; }
+.welcome.compact .blinks.portrait { margin-bottom: 0; }
+.welcome.compact .welcome-mascot { width: 54px; height: 70px; margin-bottom: 0; }
+.welcome.compact > h1, .welcome.compact > p { display: none; }
 /* Blinks at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing). */
 @keyframes melo-blink {
   0%, 38.18% { opacity: 0; }
@@ -1856,6 +1896,10 @@ dialog::backdrop {
 .task-steps[open] > summary {
   margin-bottom: 8px;
 }
+.task-pack { margin: 16px 0 8px; }
+.task-pack > summary { cursor: pointer; font-weight: 600; min-height: 24px; }
+.task-pack[open] > summary { margin-bottom: 8px; }
+.task-pack ul { margin: 8px 0 0; padding-left: 20px; }
 .task-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2390,4 +2434,45 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .block-why, .block-step, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }
+}
+
+/* Slash commands: the menu over the composer, and the local rows a command answers with. Commands are code, so
+   they are monospace: the name in the accent, its arguments muted, its words in the ink of a hint. The menu and
+   a /help table are one grid, so the names, arguments and words line up from row to row. */
+.composer { position: relative; }
+.slash-menu, .local-table { display: grid; grid-template-columns: max-content minmax(0, 17ch) minmax(0, 1fr); column-gap: var(--space-3); align-content: start; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2)); z-index: 20; max-height: min(340px, 45dvh); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.slash-item, .local-help { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; }
+.slash-item { padding: 6px var(--space-2); border-radius: var(--radius-control); cursor: pointer; }
+.slash-item[aria-selected="true"] { background: var(--tint); box-shadow: inset 2px 0 0 var(--accent); }
+.slash-item:hover { background: var(--soft); }
+.slash-name, .slash-args, .local-label { font: var(--text-small)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
+.slash-name { grid-column: 1; color: var(--accent); font-weight: 600; }
+.slash-args { grid-column: 2; color: var(--ink-3); overflow-wrap: anywhere; }
+.slash-help { grid-column: 3; min-width: 0; overflow: hidden; color: var(--ink-2); font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
+.local-help .slash-help { white-space: normal; }
+.slash-empty, .slash-foot { grid-column: 1 / -1; padding: var(--space-2); color: var(--ink-3); font-size: var(--text-caption); }
+.slash-foot { margin-top: var(--space-1); border-top: 1px solid var(--line); }
+.local-rows { max-width: 800px; margin: 0 auto; padding-top: var(--space-4); }
+.local-row { margin: 0 0 var(--space-4); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.local-command { display: flex; gap: var(--space-2); margin-bottom: var(--space-1); }
+.local-command::before { content: "›"; color: var(--ink-3); }
+.local-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); margin-top: 2px; color: var(--ink-2); font-size: var(--text-small); }
+.local-label { flex: none; min-width: 11ch; color: var(--ink-3); }
+.local-text { min-width: 0; overflow-wrap: anywhere; }
+.local-text[data-tone="muted"] { color: var(--ink-3); }
+.local-text[data-tone="ok"] { color: var(--ok); }
+.local-text[data-tone="warn"] { color: var(--warn); }
+.local-text[data-tone="error"] { color: var(--error); }
+.local-table { margin-top: 2px; }
+.local-choice { margin-left: var(--space-2); padding: 3px var(--space-3); background: none; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--ink); font-size: var(--text-small); }
+.local-choice.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+@media (max-width: 700px) {
+  .slash-menu, .local-table { grid-template-columns: max-content minmax(0, 1fr); }
+  .slash-args { display: none; }
+  .slash-help { grid-column: 2; }
+  .slash-item { padding: 10px var(--space-2); }
+  .slash-help { white-space: normal; }
+  .slash-foot { display: none; }
+  .local-choice { min-height: 44px; }
 }

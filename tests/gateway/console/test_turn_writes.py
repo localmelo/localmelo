@@ -319,6 +319,57 @@ async def test_retry_of_an_older_turn_is_not_latest_turn(tmp_path: Path) -> None
         assert response.json()["error"]["code"] == "not_latest_turn"
 
 
+async def test_undo_forgets_the_newest_finished_turn_and_runs_nothing(
+    tmp_path: Path,
+) -> None:
+    """``/undo`` in the console: the turn is undone, no model call follows."""
+    async with console_with(tmp_path, answer("first"), answer("second")) as (
+        _console,
+        client,
+        llms,
+    ):
+        body = await _create(client, tmp_path, "Hi there")
+        session_id = body["session"]["id"]
+        first = await _wait_turn(client, session_id)
+        calls = sum(len(llm.requests) for llm in llms)
+
+        response = await client.post(
+            f"/api/sessions/{session_id}/undo", json={"turn_id": first["id"]}
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"turn_id": first["id"], "undone": True}
+        turns = (await client.get(f"/api/sessions/{session_id}/turns")).json()["turns"]
+        assert [turn["undone"] for turn in turns] == [True]
+        assert sum(len(llm.requests) for llm in llms) == calls
+        again = await client.post(
+            f"/api/sessions/{session_id}/undo", json={"turn_id": first["id"]}
+        )
+        assert again.status_code == 409
+        assert again.json()["error"]["code"] == "not_latest_turn"
+        assert again.json()["error"]["message"] == (
+            "Only the newest finished turn can be undone."
+        )
+
+
+async def test_undo_of_an_older_turn_is_not_latest_turn(tmp_path: Path) -> None:
+    async with console_with(
+        tmp_path, answer("first"), answer("second"), answer("third")
+    ) as (_console, client, _):
+        body = await _create(client, tmp_path, "Hi there")
+        session_id = body["session"]["id"]
+        first = await _wait_turn(client, session_id)
+        await _post_turn(client, session_id, "and again")
+        await _wait_turn(client, session_id)
+
+        response = await client.post(
+            f"/api/sessions/{session_id}/undo", json={"turn_id": first["id"]}
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "not_latest_turn"
+
+
 async def test_stop_ends_a_running_turn(tmp_path: Path) -> None:
     async with console_with(tmp_path) as (_console, client, _):
         body = await _create(client, tmp_path, "Hi there")

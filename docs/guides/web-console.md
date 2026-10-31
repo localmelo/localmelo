@@ -116,7 +116,7 @@ connection problems without replacing other notices.
 On a phone, or in a window 700 px wide or less, the page leaves out what a small
 touch screen does not need. The header drops the model chip while it only names the
 model, since the composer shows it, and keeps the chip when it warns (`Model offline`,
-`No model`). The keyboard hints (`Enter to send · Shift + Enter for a new line` and
+`No model`). The keyboard hints (`Enter to send · Shift + Enter for a new line · / for commands` and
 `⌘ K`) go, on touch screens and in narrow windows alike. The next steps of a failed
 turn are buttons at least 44 px tall.
 
@@ -189,6 +189,44 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **No answer in 10 minutes.** If melo neither answers nor asks you within 10 minutes of starting on the question, the task goes on with its best option and says so in its report (`No answer for “Fix tests”; it goes on with its best option`). Stopping the task ends the wait at once and stops melo's work on it; a restart marks the question expired.
 - **Answers never approve.** melo's answer is information for the task. A step that needs your approval still asks you (or Auto's review), as before. The task's words never count as yours: in Auto they allow no step melo blocked, melo never remembers them as something you said, and melo's turn on the question has no Retry.
 - A task asks at most 3 times per run. A side chat that was deleted hands its tasks' questions to the main chat, marked `From <task title>`, a question that waits for your answer included.
+
+<a id="slash-commands"></a>
+
+## Slash commands
+
+The commands of the [terminal](terminal.md#commands) work on this page and in the [app](macos-app.md). Type `/` at the start of the message box to see them.
+
+- A menu opens above the box, as the folder and Ask/Auto menus do, and narrows as you type. ↑ and ↓ move, Enter or Tab picks, Esc closes it, and a click picks. A pick fills in `/name ` for you to finish; a command with no arguments runs on Enter.
+- A command is never sent to the model. Its answer is a row under the conversation, which goes when you send your next message (`/clear` clears it at once).
+- An unknown name answers `Unknown command /NAME — /help lists them`. `/etc/hosts is broken` and `//text` are messages, as in the terminal; to send a message that starts like a command, begin it with a space.
+- A command that changes the chat is refused while a turn runs (`/new is not available while a turn runs (Esc stops it).`), and the message stays in the box.
+- The list is the terminal's own, served by [`GET /api/commands`](../reference/api-v2.md#get-apicommands) in English and Chinese.
+
+| Command | On this page |
+|---|---|
+| `/help [command]` | The everyday commands; `/help all` lists every one and `/help NAME` gives one command's details. |
+| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. |
+| `/backend [url]` | With a URL: switch the model server and save it. Alone: open Settings at the model server. |
+| `/new`, `/clear`, `/side [title]` | A new chat, made by its first message and a side chat under the main chat; `/side` names it, and `/clear` also removes the rows shown. |
+| `/chats`, `/sessions [filter]` | Open the chat list, filtered by the word. |
+| `/resume [id\|title]` | Open the chat with that ID (or its start) or title; with several matches, the filtered list. |
+| `/main` | Back to the main chat. |
+| `/task TEXT` | Start a task in the open chat. In a chat not made yet it waits for the first message. |
+| `/answer TASK TEXT` | Answer a task that waits for you. |
+| `/status [all]` | The model and whether it answers, the folder, the chat, the approvals and the context; `all` (and developer mode) adds the version and the gateway. |
+| `/usage` | The chat's turns, tool calls, tokens and time. |
+| `/progress` | The step, attempt, phase and context of this turn. |
+| `/mcp` | Says that MCP servers are not part of the console yet. |
+| `/undo`, `/retry` | Forget the newest finished turn (its file changes stay), or run it again. |
+| `/copy [turn]` | Copy an answer to the clipboard; without a number, the latest. |
+| `/title [text]` | Show or set the chat's title. |
+| `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
+| `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
+| `/attach`, `/attachments`, `/detach` | The console takes no files yet, and says so. |
+| `/verbose`, `/thinking`, `/stream [on\|off]` | How the page shows a chat, kept in this browser: tool calls open, thinking open, or steps shown only when a turn ends. |
+| `/expand [turn.call]` | Open a tool call with its whole output. |
+| `/exit`, `/quit` | In the app: ask, then quit. In a browser tab: say to close the tab, since melo keeps running. |
 
 ## Chores that repeat
 
@@ -302,6 +340,18 @@ its handle closes it. The [macOS app](macos-app.md) now opens at 1280 × 800 so 
 - With nothing remembered, the tab says how memory starts: tell melo something about yourself in a chat, such as `I
   prefer short answers`, or ask it to remember something.
 
+**From other assistants** (the foot of the Memory tab) brings in what other assistants on this Mac know about you.
+**Look for notes** lists the files that hold notes, as in the first-run card below; **Bring them in** writes the checked
+ones and the tab says `Brought in 4 notes.` Each batch stays listed as `4 notes brought in · Oct 31` with its own
+**Undo**, and an imported note says `From the file CLAUDE.md, Oct 31`.
+
+The first time the main chat opens with a model connected and memory on, it shows one card, `melo found notes on this Mac
+from other assistants`, with a row per file: its path (`~/.claude/CLAUDE.md`), `3 notes`, a checkbox (checked), and
+**See what is in it**, which shows the sample lines and what was left out (`2 left out: secrets, other people’s
+details`). **Bring them in** writes the checked files and the card says `Brought in 6 notes · Undo`; **Undo** takes the
+batch back and keeps any note you have edited since (`Taken back. Kept 1 note you edited.`). **Not now** closes the card, and it does not come back; if melo cannot save that answer, the card says so, and may ask again next time. Nothing is written until you press **Bring them
+in**, and a search that finds nothing shows no card.
+
 Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: **Keep the notes** (first),
 **Forget the 2 notes too**, or **Don’t delete the chat**.
 
@@ -392,6 +442,9 @@ run). Like Workers, the view replaces the chat while it is open. The header says
 
 - A task that ended opens with its answer, set as in a chat, above its facts. A task that
   did not complete says why in the same place. Its steps are folded under **Steps**.
+- **What melo told the task** is folded on the page when the task began with notes from its
+  chat (see [Tasks start with them](memory.md#notes-melo-keeps-about-you)): the lines it was given,
+  as information, not instructions. A task with no notes shows no fold.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A

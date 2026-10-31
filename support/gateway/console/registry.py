@@ -1008,6 +1008,34 @@ class ConsoleSessions:
             entry.last_used = self._clock()
             return turn, resumed
 
+    async def _undo_newest(
+        self, session_id: str, turn_id: str, words: str, *, retry: bool = False
+    ) -> tuple[OpenSession, TurnInfo]:
+        """Undo the newest finished turn (under the session's lock), then resume.
+
+        409 ``session_busy`` while a turn runs, and 409 ``not_latest_turn``
+        (with the catalog's *words*) for a turn that is not the newest
+        finished one. With *retry*, a turn the person did not type (a task's
+        question) is refused: its words are not theirs to send.
+        """
+        entry = await self.open(session_id)
+        entry.resumed = None
+        if entry.runner.busy:
+            raise ApiError(
+                409,
+                "session_busy",
+                t("errors.turnRunning"),
+            )
+        latest = await self._latest_finished_turn(session_id)
+        if latest is None or latest.id != turn_id:
+            raise ApiError(409, "not_latest_turn", t(words))
+        if retry and latest.origin:
+            raise ApiError(409, "not_retryable", t("errors.retryAsk"))
+        undone = await entry.runner.undo()
+        if undone is None:
+            raise ApiError(409, "not_latest_turn", t(words))
+        return entry, undone
+
     async def start_internal(self, session_id: str, text: str, origin: str) -> TurnInfo:
         """Begin a turn the person did not type (a task's question, #369) in an idle chat.
 
@@ -1037,31 +1065,9 @@ class ConsoleSessions:
         ``undo()`` ended with.
         """
         async with self.lock(session_id):
-            entry = await self.open(session_id)
-            entry.resumed = None
-            if entry.runner.busy:
-                raise ApiError(
-                    409,
-                    "session_busy",
-                    t("errors.turnRunning"),
-                )
-            latest = await self._latest_finished_turn(session_id)
-            if latest is None or latest.id != turn_id:
-                raise ApiError(
-                    409,
-                    "not_latest_turn",
-                    t("errors.retryNewest"),
-                )
-            if latest.origin:
-                # A task's question (#369): its words are not the person's to send.
-                raise ApiError(409, "not_retryable", t("errors.retryAsk"))
-            undone = await entry.runner.undo()
-            if undone is None:
-                raise ApiError(
-                    409,
-                    "not_latest_turn",
-                    t("errors.retryNewest"),
-                )
+            entry, undone = await self._undo_newest(
+                session_id, turn_id, "errors.retryNewest", retry=True
+            )
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
             self._note_turn_start(session_id)
@@ -1071,6 +1077,20 @@ class ConsoleSessions:
             )
             entry.last_used = self._clock()
             return turn, resumed
+
+    async def undo(self, session_id: str, turn_id: str) -> TurnInfo:
+        """Forget the newest finished turn (``/undo``); its file changes stay.
+
+        The errors are :meth:`retry`'s. The turn comes back as the store
+        held it when it was undone.
+        """
+        async with self.lock(session_id):
+            entry, undone = await self._undo_newest(
+                session_id, turn_id, "errors.undoNewest"
+            )
+            await self._reconcile(entry)
+            entry.last_used = self._clock()
+            return undone
 
     async def change_workspace(self, session_id: str, workspace: str) -> SessionInfo:
         """Move *session_id* to *workspace*, with a new Agent on its conversation.

@@ -550,5 +550,5 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, closeSheet: () => setSheet(false), openSheet: () => setSheet(true)};
+  return {update, refresh, follow, select, state, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

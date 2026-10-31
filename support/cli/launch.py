@@ -208,7 +208,8 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     cfg = config.load()
     if cfg.is_configured:
         return _configured(cfg, args.chat_model, args)
-    setup = onboard.run_first_setup()
+    developer = bool(getattr(args, "developer", False)) or cfg.ui.mode == "developer"
+    setup = onboard.run_first_setup(developer=developer)
     if setup is None:
         return 0
     if setup.saved:
@@ -324,6 +325,17 @@ def run_interactive(
         return 1
     if isinstance(choice, int):
         return choice
+    # Once per computer, to a person at a terminal: bring in what other assistants already know.
+    from localmelo.support.cli import memory_import
+
+    try:
+        memory_import.first_run()
+    except EOFError:
+        print("\nSetup cancelled.")
+        return 0
+    except KeyboardInterrupt:
+        print("\nSetup cancelled.")
+        return 130
     explicit = {
         name
         for name in (

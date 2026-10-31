@@ -84,7 +84,8 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     }
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
-    if (path === '/memory/records') return {on: true, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/records') return {on: h.memoryOn !== false, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/import/scan') return {batch_id: 'b1', sources: [], partial: false, home: '/h'};
     if (path.startsWith('/chores')) {
       const id = new URL(path, 'http://x').searchParams.get('session_id') ?? '';
       return {chores: h.chores?.(id) ?? [], checkin: {on: true, every_min: 30, next_at: 86400 * 400 + 1800, last_at: null}, scope: id ? 'chat' : 'all'};
@@ -621,3 +622,17 @@ test('Scheduled lists the check-in and the chores of the open chat, and reads th
   await settle();
   assert.equal(h.calls.filter(([, path]) => path.startsWith('/chores')).length, 3);
 });
+
+test('lookForNotes opens the Memory tab\'s "Look for notes" (the console\'s /memory import), and says no when memory is off', async () => {
+  const h = harness();
+  h.panel.select('memory');
+  assert.equal(await h.panel.lookForNotes(), true);
+  assert.ok(h.calls.some(([method, path]) => method === 'GET' && path === '/memory/import/scan'), 'the files were looked at');
+  assert.match(h.body().text(), /From other assistants.*No notes found on this Mac\./);
+  const off = harness();
+  off.memoryOn = false;
+  off.panel.select('memory');
+  assert.equal(await off.panel.lookForNotes(), false);
+  assert.ok(!off.calls.some(([, path]) => path === '/memory/import/scan'), 'with memory off nothing is scanned');
+});
+

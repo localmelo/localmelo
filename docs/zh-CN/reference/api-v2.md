@@ -195,6 +195,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
 - `language` 是 `[console] language`，即控制台的语言：`auto`、`en` 或 `zh-Hans`。
 - `approvals` 是 `[approvals] mode`，即新对话开始时的模式：`ask` 或 `auto`（文件中的其他值按 `ask` 读取）。
+- 当 `[browser] driver` 不是 `off` 时，`browser` 为 true：melo 可以在 Safari 中读网页（见[浏览](../guides/browsing.md)）。
 - `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
@@ -213,6 +214,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
 - `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
+- `browser` 可选：`true` 把 `[browser] driver` 设为 `safari-automation`，`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
@@ -543,6 +545,24 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
 - 终端对话以同样方式流式提供，并经过脱敏。当它的某个轮次在终端的租约下运行时它处于活动状态，因此该轮次结束时流也结束；请再次读取会话对象，查看是否有另一个轮次在运行。
 
+## GET /api/commands
+
+终端的斜杠命令，供控制台的 `/` 菜单和命令行使用。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/commands
+```
+
+```json
+{"commands": [{"name": "exit", "aliases": ["quit"], "args": "", "help": {"en": "Quit", "zh-Hans": "退出"},
+               "during_turn": true, "keys": "ctrl+d", "action": "exit"}, "..."],
+ "everyday": ["chats", "side", "main", "task", "answer", "retry", "..."]}
+```
+
+- 列表就是终端自己的命令表，顺序相同，所以终端里新增的命令会出现在这里。`help` 是 `en` 和 `zh-Hans` 的一行说明；`args` 是用法文字（`[name]`、`PATH`）；`keys` 是效果相同的按键。
+- `during_turn` 为 `true`（一轮运行时可用）、`false`（那时被拒绝）或 `"show"`（那时只有不带参数才可用）。`action` 是页面对该命令的处理；`everyday` 是 `/help` 先列出的命令。
+- 一条消息只有以 `/` 加小写名字开头、后面是空白或结尾时才是命令。页面自己运行命令，从不把它发给对话。
+
 ## GET /api/sessions/{id}/status
 
 终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。这些段是终端开发者模式的紧凑写法；终端的默认模式用文字表述同样的数字。
@@ -632,7 +652,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 400 | `invalid_workspace` | 文件夹不是绝对路径或 `~/` 开头，已不再是目录，或者无法创建默认工作区 |
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
-| 409 | `not_latest_turn` | 重试所指的轮次不是最新已结束的那一个 |
+| 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
 | 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
@@ -704,6 +724,18 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
 - 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
+
+## POST /api/sessions/{id}/undo
+
+忘掉最近一轮已结束的轮次（`/undo`）。它的文件改动保留。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/undo \
+  -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
+```
+
+- 回答为 200 `{"turn_id": "…", "undone": true}`。该轮次被标记为已撤销（发出 `turn.undone` 事件），Agent 的对话里不再有它，也不运行任何东西：之后不会有模型调用。
+- 错误与重试路由相同，只是措辞为撤销：任务会话返回 409 `task_session_read_only`，不是最新的、已结束且未撤销的轮次返回 409 `not_latest_turn`，轮次运行期间返回 409 `session_busy`。
 
 ## POST /api/turns/{turn_id}/cancel
 
@@ -925,7 +957,7 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -936,11 +968,12 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 {"batch_id": "e86b19186930", "written_ids": [1, 2], "skipped": 0, "event": {"type": "memory.import", "data": {"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "written": 2}]}}}
 ```
 
-- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。
+- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。`home` 是用户的主文件夹，客户端据此把 `path` 写成 `~/…`。
 - `POST /api/memory/import` 写入所选 `source_ids` 的笔记（一批最多 300 条），返回新笔记的 id；`skipped` 统计这些来源中没有写入的笔记（已经是笔记、超过批次上限，或该来源已写入过）。扫描已不存在（网关保留最近四次）时返回 404 `not_found`；来源 id 未知或记忆已关闭时返回 400 `invalid_request`。
+- `GET /api/memory/import/offer` 在记忆开启、且这台电脑上从未提议过导入笔记时返回 `{"pending": true}`；首次运行的卡片先问它，再扫描。对它发 `DELETE` 记下“暂不”，返回 `{"pending": false}`；记录无法写入时返回 `{"pending": true}`（提议仍然有效）。写入笔记（`POST /api/memory/import`）也算提议已经做过，扫描不算。记录是记忆文件夹里的 `import_offer.json`，控制台、App 和终端共用。
 - `memory.import` 事件（`batch_id`，以及每个来源的 `id`、`harness`、`written`）放在响应的 `event` 里：记忆没有可用来发送它的会话通道。
-- `DELETE /api/memory/import/{batch_id}` 收回整批：删除它的笔记，让被它们取代的笔记重新生效，并返回 `{"batch_id": "e86b19186930", "removed": 2}`；没有剩余笔记的批次返回 404 `not_found`。
-- 它写入的笔记会在 `GET /api/memory/records` 中显示 `imported` 为 true、带 `batch_id`，`source` 形如 `imported from the file CLAUDE.md, Oct 31`。
+- `DELETE /api/memory/import/{batch_id}` 收回整批：删除它的笔记，让被它们取代的笔记重新生效，并返回 `{"batch_id": "e86b19186930", "removed": 2}`。用户之后改写过的笔记会保留（它已经是用户自己的了）；此时返回里还有 `"kept": 1`（这类笔记的数量），且只在这时才有。既没有可收回的笔记、也没有保留的笔记的批次返回 404 `not_found`。
+- 它写入的笔记会在 `GET /api/memory/records` 中显示 `imported` 为 true、带 `batch_id`，`source` 形如 `imported from the file CLAUDE.md, Oct 31`；它的 `from` 用读者的语言写成 `from the file CLAUDE.md, Oct 31`（中文是“来自文件 CLAUDE.md，10月31日”）。
 
 ## GET /api/sessions/{id}/runs
 

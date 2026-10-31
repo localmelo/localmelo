@@ -114,6 +114,8 @@ class SettingsPutBody(_SettingsBaseBody):
     language: StrictStr | None = None
     # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
     approvals: StrictStr | None = None
+    # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
+    browser: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -390,6 +392,7 @@ def settings_json() -> dict[str, Any]:
         "approvals": (
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
+        "browser": cfg.browser.driver != "off",
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -506,6 +509,9 @@ def _build_candidate(
         candidate.console.language = language
     if approvals is not None:
         candidate.approvals.mode = approvals
+    browser = getattr(body, "browser", None)
+    if browser is not None:
+        candidate.browser.driver = "safari-automation" if browser else "off"
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -575,6 +581,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("language")
     if before.approvals.mode != after.approvals.mode:
         changed.append("approvals")
+    if before.browser.driver != after.browser.driver:
+        changed.append("browser")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
