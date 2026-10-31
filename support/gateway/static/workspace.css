@@ -2315,7 +2315,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .mode-menu-foot { margin: var(--space-1) 0 0; padding: var(--space-2); border-top: 1px solid var(--line); font-size: var(--text-caption); color: var(--ink-3); }
 .mode-menu-foot a { color: var(--accent); }
 
-.block-card { margin: var(--space-3) 0 0; padding: var(--space-3) var(--space-4); background: var(--warn-tint); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: inset 3px 0 0 var(--warn); }
+/* Spaced like the work box above it: the reply under it gets the same gap (#339). */
+.block-card { margin: 0 0 14px; padding: var(--space-3) var(--space-4); background: var(--warn-tint); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: inset 3px 0 0 var(--warn); }
 .block-head { display: flex; align-items: baseline; gap: var(--space-2); }
 .block-mark { flex: none; color: var(--warn); }
 .block-title { margin: 0; font-size: var(--text-reading); font-weight: 600; }
@@ -2333,7 +2334,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-blocked h2 { margin-bottom: 0; }
 .task-blocked > p { margin: 0; }
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
-.task-block > .block-card { margin-top: 0; }
+.task-block > .block-card { margin: 0; }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
