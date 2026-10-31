@@ -15,7 +15,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (or "N tasks wait for you") while a task waits for your approval; the status
   route's `tasks` object gains `waiting` for that count. An Activity row for
   an answer that opens with "Done." shows what the answer says next, as the
-  main chat's card already did ([#NN]).
+  main chat's card already did ([#346]).
 - Settings is organized by subject: Model server, Memory, Chats and folders,
   Scheduled and Appearance in a list on the left, the chosen one on the right
   (a sheet on a phone), and Developer in developer mode. Each section has a
@@ -2821,3 +2821,4 @@ earlier milestones.
 [#343]: https://github.com/localmelo/localmelo/pull/343
 [#344]: https://github.com/localmelo/localmelo/pull/344
 [#345]: https://github.com/localmelo/localmelo/pull/345
+[#346]: https://github.com/localmelo/localmelo/pull/346
