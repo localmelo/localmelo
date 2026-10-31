@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Settings is organized by subject: Model server, Memory, Chats and folders,
+  Scheduled and Appearance in a list on the left, the chosen one on the right
+  (a sheet on a phone), and Developer in developer mode. Each section has a
+  title, a line of help and labelled controls. The Model server section shows
+  the chat and embedding models' state (`Connected · <model> · checked 12 s
+  ago`) and the server address, with **Test connection** and **Change…**.
+  Every change saves on its own, says `Saved` and offers **Undo**; only the
+  connection form keeps a button (**Save connection**). Memory chooses how Melo
+  finds notes, Chats and folders the default folder (or a recent one), and in
+  the macOS app Appearance holds **Melo on the desktop**, the same choice as
+  its menu. Developer lists every setting `melo -h all` lists, by section,
+  with its value and its `config.toml` key. `GET /api/settings` adds
+  `memory_retriever`, `developer_settings` and `run_options`, `PUT
+  /api/settings` takes `memory_retriever`, and a failed `POST
+  /api/settings/test` names the model that did not answer (`failed`) ([#345]).
+
 - The main chat always works in the default folder (`[gateway] workspace`,
   else `~/localmelo-workspace`): a changed default applies at its next turn,
   where before it kept the folder of its first turn. A task works in the
@@ -2797,3 +2813,4 @@ earlier milestones.
 [#342]: https://github.com/localmelo/localmelo/pull/342
 [#343]: https://github.com/localmelo/localmelo/pull/343
 [#344]: https://github.com/localmelo/localmelo/pull/344
+[#345]: https://github.com/localmelo/localmelo/pull/345

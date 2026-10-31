@@ -462,6 +462,7 @@ def test_settings_test_endpoint_success_failure_and_timeout(
     assert resp.json() == {
         "ok": False,
         "error": "chat probe failed: connection refused",
+        "failed": "chat",
     }
 
     async def slow_probe(cfg: Config) -> None:
@@ -963,3 +964,112 @@ def test_a_server_a_listing_named_omlx_is_saved_as_omlx_until_the_url_changes(
     assert saved["chat_backend"] == "vllm", "the API keeps one key for the backend"
     put(other, saved["revision"])
     assert tomllib.loads(isolated_config.read_text())["chat_backend"] == "vllm"
+
+
+def test_a_failed_test_names_the_model_that_did_not_answer(
+    client: TestClient,
+) -> None:
+    body = {
+        "chat_backend": "mlc",
+        "embedding_backend": "mlc",
+        "workspace": "~/ws",
+        "sections": {
+            "mlc": {
+                "chat_url": "http://127.0.0.1:9/v1",
+                "chat_model": "m",
+                "embedding_url": "http://127.0.0.1:9/v1",
+                "embedding_model": "e",
+            }
+        },
+    }
+    for message, part in (
+        ("embedding probe failed: [mlc] refused", "embedding"),
+        ("embedding probe returned an empty vector", "embedding"),
+        ("chat probe failed: refused", "chat"),
+    ):
+
+        async def fail(cfg: Config, message: str = message) -> None:
+            raise ProbeError(message)
+
+        with mock.patch.object(routes_settings, "probe_all", fail):
+            answer = client.post("/api/settings/test", json=body).json()
+        assert answer == {"ok": False, "error": message, "failed": part}
+
+    async def other(cfg: Config) -> None:
+        raise ValueError("embedding probe in a message that is not a probe's")
+
+    with mock.patch.object(routes_settings, "probe_all", other):
+        answer = client.post("/api/settings/test", json=body).json()
+    assert answer["failed"] == "chat"
+
+
+def test_the_settings_carry_how_memory_finds_notes_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["memory_retriever"] == "auto"
+    words = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], memory_retriever="bm25")
+    )
+    assert words.status_code == 200 and words.json()["memory_retriever"] == "bm25"
+    assert config.load().memory.retriever == "bm25"
+    assert 'retriever = "bm25"' in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(words.json()["revision"]))
+    assert kept.json()["memory_retriever"] == "bm25", "absent leaves it as it is"
+    unknown = client.put(
+        "/api/settings",
+        json=_put_body(kept.json()["revision"], memory_retriever="vectors"),
+    )
+    assert unknown.status_code == 400
+    assert unknown.json()["error"]["code"] == "invalid_request"
+    # Meaning needs an embedding model: the file's own check refuses it, and writes nothing.
+    meaning = client.put(
+        "/api/settings",
+        json=_put_body(kept.json()["revision"], memory_retriever="embedding"),
+    )
+    assert meaning.status_code == 400
+    assert meaning.json()["error"]["code"] == "invalid_settings"
+    assert config.load().memory.retriever == "bm25"
+
+
+def test_the_developer_section_lists_every_key_by_section_with_its_value(
+    client: TestClient,
+) -> None:
+    from localmelo.support import settings as setting_keys
+    from localmelo.support.option_tiers import OPTION_ROWS, SHORT_ROWS
+
+    config.save(
+        Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(chat_url="http://127.0.0.1:9/v1", chat_model="m"),
+            scheduler=SchedulerConfig(n_srv=4),
+        )
+    )
+    body = client.get("/api/settings").json()
+    groups = body["developer_settings"]
+    listed = [row["key"] for group in groups for row in group["keys"]]
+    assert listed == list(setting_keys.catalog()), "every key, in the help's order"
+    sections = [group["section"] for group in groups]
+    assert sections == [s for s in setting_keys.SECTIONS if s in sections]
+    rows = {row["key"]: row for group in groups for row in group["keys"]}
+    assert set(rows["agent.reasoning"]) == {
+        "key",
+        "value",
+        "default",
+        "flag",
+        "issue",
+        "file",
+    }
+    assert rows["scheduler.n_srv"]["value"] == "4"
+    assert rows["scheduler.n_srv"]["default"] == "8"
+    assert rows["agent.reasoning"]["flag"] == "--reasoning"
+    assert rows["agent.reasoning"]["issue"] == "#183"
+    assert rows["memory.retriever"]["issue"] == "#299"
+    assert rows["agent.attempt_policy"]["file"] is False
+    assert rows["agent.attempt_policy"]["value"] == "reflect"
+    assert body["run_options"] == [
+        {"option": f"{names} {meta}".strip(), "text": text}
+        for names, meta, text in OPTION_ROWS[SHORT_ROWS:]
+    ]

@@ -41,7 +41,7 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 - A starting view shows Melo, `Starting localmelo…` and the step: `Starting the local server`, `Signing in`, `Opening your workspace`.
 - If the gateway does not start within 20 seconds, or stops later, the view says why and offers **Try Again**, **Open Log** and **Quit**.
 - The log is `~/Library/Logs/LocalMelo/gateway.log`; a problem never shows a dialog or closes the app.
-- The first-run setup is the console's settings dialog; the app uses the usual config and chats in `~/.cache/localmelo`.
+- The first-run setup is the console's **Settings** (its **Model server** section); the app uses the usual config and chats in `~/.cache/localmelo`.
 
 ## The menu-bar item
 
@@ -86,6 +86,7 @@ While the window is put away and something runs or waits, a small pill takes Mel
 - It shows "Done: …" for 6 seconds and "Stopped: …" for 10, and "Model server not reachable" while the model server is down. Then Melo comes back, wagging after a "Done".
 - Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
 - **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
+- The window's **Settings → Appearance → Melo on the desktop** is the same choice: it shows what the menus show, and a change there is a change in the menus.
 - It breathes only while it works, and stands still under Reduce Motion, in Low Power Mode, when the Mac runs hot or while it is covered. VoiceOver reads one button: "Melo is reading example.com. Opens the chat."
 
 ## Quit and the gateway
