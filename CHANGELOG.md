@@ -9,6 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task's approvals go through the chat that started it, and the same
+  approved step is not asked twice. A task's step that needs you shows in its
+  chat's card with the whole approval card, and **melo's explanation** under
+  the step says what the task is doing, why it needs the step, what could go
+  wrong and what each answer does; it decides nothing. Once you allowed a step
+  in a chat or one of its tasks, that chat's later tasks run the exact same
+  step (same tool, command or file, same folder) without asking, with a row
+  `Used your approval from 14:02` and **Revoke**; "Allow for this chat" covers
+  the chat's tasks too. High-impact and unreviewed steps ask every time, tasks
+  you did not start never use your approvals, and Auto's Allow once is never
+  remembered. A step Auto blocked in a task shows in its chat with **Allow
+  once**. The task's page and the chat's Details list what ran this way, with
+  Revoke. Part of #369. [#NN]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the

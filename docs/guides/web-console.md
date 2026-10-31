@@ -190,6 +190,16 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Answers never approve.** melo's answer is information for the task. A step that needs your approval still asks you (or Auto's review), as before. The task's words never count as yours: in Auto they allow no step melo blocked, melo never remembers them as something you said, and melo's turn on the question has no Retry.
 - A task asks at most 3 times per run. A side chat that was deleted hands its tasks' questions to the main chat, marked `From <task title>`, a question that waits for your answer included.
 
+## Approvals a task asks for
+
+- **Asked in the chat that started it.** A task's step that needs your approval shows in that chat, inside its card (`Needs your approval: Fix CI`): the step as code shows it, why melo asks, and **Allow once**, **Allow for this task** and **Deny**. The task's page shows the same card.
+- **melo explains, you decide.** Under the step, **melo's explanation** says in a few sentences what the task is doing, why it needs this step, what could go wrong and what each answer does. melo writes it from the task's title and goal, the step and the review's reasons, never from what a tool printed; it takes up to 20 seconds, and the card works without it. It cannot approve anything: the step, the buttons and what your answer allows come from code.
+- **The same step is not asked twice.** Once you allowed a step in a chat or in one of its tasks, that chat's later tasks run the exact same step (same tool, same command or file content, same folder, the files it reads unchanged) without asking. The chat shows `Used your approval from 14:02` with **Revoke**, and the task's page lists it under **Ran on your earlier approval**. A step that differs in one argument, or runs in another folder, asks.
+- **"Allow for this chat" covers its tasks.** A tool you allowed for a chat runs its routine steps in that chat's tasks too, as in the chat. Another chat's approvals never count.
+- **What always asks.** A high-impact step (installs, downloads, deletes, sends data out, changes outside the folder, uses your keys, changes melo itself) asks every time, however often you allowed it before; so does a step melo could not review. A task you did not start (one another program or melo's own routine started) never uses or records your approvals. Auto's **Allow once** is one step, once, and is never recorded.
+- **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. Approvals live in memory: restarting the gateway or deleting the chat forgets them.
+- **In Auto.** A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once**. A step you allowed exactly in that chat before, in Ask, is not blocked again in its Auto tasks, unless it is high-impact.
+
 ## Chores that repeat
 
 ![The main chat asks "Run this every weekday at 8:30?" with Save chore, Just once and Cancel](../assets/img/chore-proposal.webp)
