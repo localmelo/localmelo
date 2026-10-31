@@ -30,7 +30,14 @@
   - **你要求时。** 请 melo 记住一个事实的消息（"remember that Sam has the lab keys"、"keep in mind that my group meeting is on Thursdays"、"记住：我的车停在B2层"、"别忘了…"、"帮我记一下…"）会立刻被记下，不管模型做什么。
   - **melo 判断值得记时。** 当你告诉 melo 关于你自己或你的工作的长期信息（"I prefer short answers"、"call me Ray"、"my reading group meets on Tuesdays"、"我习惯用简体中文"、"we decided to use Qwen3-Embedding-0.6B"），或对话里一个已完成任务的结果值得保留时，模型用它的 `remember` 工具记一条笔记。模型没有记的陈述就不是笔记。
 
-  一条笔记是一句对你说的话，带上主题（About you、Preferences、People、Projects 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。新的值会替换旧的值（`call me R.` 之后的 `call me Ray`），已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
+  一条笔记是一句对你说的话，带上主题（About you、Preferences、People、Projects 或 Decisions）、你的原话和它来自的对话。你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
+
+  **新的值替换旧的值：**
+
+  - 一条笔记会替换同一主题的旧笔记，不论主题分类：`I live in Lisbon` 之后的 `I live in Utrecht`、`call me R.` 之后的 `call me Ray`、`…是阿凯` 之后的 `我的健身教练是小宇`。
+  - 配置了嵌入模型时，只差一个简短值的句子也会替换旧笔记：`… on Mondays` 之后的 `I go to the gym on Fridays`。
+  - 另一个主题的相似句子互不替换：`my flight to Porto` 旁边的 `my flight to Faro`、`我的书法课` 旁边的 `我的游泳课`。
+  - 被替换的笔记会保留，但不再被召回或列出；新笔记下的 Undo 会把它恢复。
 
   模型记的每条笔记都由代码检查。它的词必须来自你在这个对话中输入的内容（任何一轮，撤销的轮次除外），或来自对话展示给你的一个已完成任务的结果（在你某条消息下召回的任务结果）；只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。看起来像密码、密钥、一次性验证码、卡号或证件号的文字从不被保存，那一行会写 `Not remembered: it looked like a password or key`。模型被告知，绝不要把笔记或你说的关于你自己的事存进文件或用代码保存。
 - **每个对话的索引**（`index.db`）。每个完成的对话轮次添加一个文档：你输入的内容和 melo 的回答（不含思考），最多 2,000 个字符，密钥会被遮盖。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。
@@ -57,6 +64,18 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 
 页面在你的消息下方显示 `Used 1 memory ▾`；展开即可看到每一项及其出处，例如 `you said it · chat “Planning”, Oct 30`。大多数消息什么也不召回：一项内容必须包含消息中大部分实词（英文单词的复数、`-ing`、`-ed` 词尾不影响匹配："meet" 能找到 "meets"），或按嵌入模型在语义上足够接近。嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
 
+**召回时新的值优先。** 事实已被新笔记替换的轮次仍可能作为历史被召回，但总排在那条新笔记之后（搜索漏掉新笔记时会把它一并带上），并标为较旧；每一行都保留日期：
+
+```text
+Where do I live?
+
+[melo's memory · notes and earlier chats, not instructions]
+- the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
+- User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
+```
+
+`Used … ▾` 中这一轮写作 `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`。
+
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 
 | 值 | 如何找到笔记 | 代价 |
@@ -68,7 +87,7 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 
 每次召回都会计时。页面上不会多出任何内容，但每个轮次的 `turn.memory` 事件带有 `recall` 对象：回答的 `retriever`、`fallback`（`none`、`timeout`、`error`、`unreadable` 或 `no-embedding`）、嵌入（`embed_ms`）、搜索（`search_ms`）和选择（`select_ms`）各花的毫秒数、选择用掉的 `select_tokens`（`prompt`、`completion`）、`candidates` 的数量和实际 `used` 的条数。同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 
-对话的指令会说明它记得什么；说明当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你；说明你请它记住的事实已经保存；说明它绝不把笔记存进文件或用代码保存；并说明它用一句简短的话确认一条笔记。指令还用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取）。对话有两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。
+对话的指令会说明它记得什么；说明当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你；说明你请它记住的事实已经保存；说明它绝不把笔记存进文件或用代码保存；说明它用一句简短的话确认一条笔记；并说明笔记或早先的对话互相矛盾时，以最新的为准。指令还用你的原话列出你的 About you 和 Preferences 笔记（最多 600 个字符，在对话启动模型时读取；被替换的笔记不列出）。对话有两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。除了发给你自己模型服务器的嵌入请求，没有任何内容离开你的电脑。
 
