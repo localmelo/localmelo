@@ -174,7 +174,7 @@ async def _identity_changed(console: Console, pinned: str) -> None:
 def _developer(console: Console) -> None:
     """404 unless developer mode (or the console's ``dev_routes``) is on."""
     if console.cfg.ui.mode != "developer" and not console.options.dev_routes:
-        raise ApiError(404, "not_found", "Not found.")
+        raise ApiError(404, "not_found", t("errors.notFound"))
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -300,7 +300,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 400,
                 "invalid_request",
-                f"variant: Must be one of {config.MEMORY_SLEEP}.",
+                t("errors.sleepVariant", choices=", ".join(config.MEMORY_SLEEP)),
             )
         chats = console.store if console.store_state() == "ok" else None
         pinned = await console.memory.pinned_quotes()
@@ -323,7 +323,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         pinned = await console.memory.pinned_quotes()
         undone = await console.memory.undo_sleep(run_id)
         if undone is None:
-            raise ApiError(404, "not_found", "No such sleep run, or it was undone.")
+            raise ApiError(404, "not_found", t("errors.sleepGone"))
         await _identity_changed(console, pinned)
         return undone
 
