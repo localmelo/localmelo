@@ -27,11 +27,11 @@ export function whenWords(at, now) {
   return `${label} at ${clock}`;
 }
 
-/** The second line of a row: when it runs next, and how the last run went. */
-export function rowLine(chore, now) {
-  const parts = [chore.enabled ? `Next ${whenWords(chore.next_run, now)}` : 'Off'];
-  if (chore.last) parts.push(`Last: ${[RAN[chore.last.state] ?? chore.last.state, chore.last.line].filter(Boolean).join(' · ')}`);
-  return parts.join(' · ');
+/** The lines under a row's title: when it runs next, then how the last run went. */
+export function rowLines(chore, now) {
+  const lines = [chore.enabled ? `Next ${whenWords(chore.next_run, now)}` : 'Off'];
+  if (chore.last) lines.push(`Last: ${[RAN[chore.last.state] ?? chore.last.state, chore.last.line].filter(Boolean).join(' · ')}`);
+  return lines;
 }
 
 export function setupScheduledTab({doc, api, chat = () => '', developer = () => false, clock = Date.now}) {
@@ -176,7 +176,8 @@ export function setupScheduledTab({doc, api, chat = () => '', developer = () => 
     const text = button('sched-head', '', () => { state.open = open ? null : chore.id; state.edit = state.ask = null; draw(); });
     text.setAttribute('aria-expanded', String(open));
     const words = node('span', 'sched-text');
-    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', chore.when), node('span', 'sched-line', rowLine(chore, now())));
+    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', chore.when),
+      ...rowLines(chore, now()).map((line) => node('span', 'sched-line', line)));
     text.append(words);
     head.append(text, toggle(`${chore.title} on`, chore.enabled, async () => {
       const done = await put(chore, {enabled: !chore.enabled});

@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CHECKIN, EMPTY, rowLine, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
+import {CHECKIN, EMPTY, rowLines, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
 
 class Element {
   constructor(tag) {
@@ -65,11 +65,11 @@ test('the words: when something runs, and how the last run went', () => {
   assert.match(whenWords(at(30, 21, 5), now), /^Friday at 9:05\s?PM$/i);
   assert.match(whenWords(at(35, 8, 30), now), /^Nov 4 at 8:30\s?AM$/, 'a week or more ahead is a date');
   assert.equal(whenWords(null, now), '');
-  assert.match(rowLine(chore('a'), now), /^Next today at 8:30\s?AM$/i);
-  assert.equal(rowLine(chore('a', {enabled: false}), now), 'Off');
-  assert.match(rowLine(chore('a', {last: {state: 'done', line: 'Three meetings today.'}}), now), /· Last: Done · Three meetings today\.$/);
-  assert.match(rowLine(chore('a', {last: {state: 'failed', line: 'Stopped before it finished'}}), now), /Last: Did not finish · Stopped before it finished$/);
-  assert.match(rowLine(chore('a', {last: {state: 'running', line: ''}}), now), /Last: Running now$/);
+  assert.match(rowLines(chore('a'), now)[0], /^Next today at 8:30\s?AM$/i);
+  assert.deepEqual(rowLines(chore('a', {enabled: false}), now), ['Off']);
+  assert.deepEqual(rowLines(chore('a', {last: {state: 'done', line: 'Three meetings today.'}}), now).slice(1), ['Last: Done · Three meetings today.']);
+  assert.deepEqual(rowLines(chore('a', {last: {state: 'failed', line: 'Stopped before it finished'}}), now).slice(1), ['Last: Did not finish · Stopped before it finished']);
+  assert.deepEqual(rowLines(chore('a', {last: {state: 'running', line: ''}}), now).slice(1), ['Last: Running now']);
 });
 
 test('with no chores the tab says how to add one, under the check-in with its switch and next time', async () => {
@@ -103,7 +103,7 @@ test('each chore shows its title, when it runs, its next run and its last result
     chore('b', {title: 'Check disk', when: 'every 2 hours', enabled: false, next_run: null})]});
   await h.tab.show();
   const [first, second] = h.rows();
-  assert.match(first.text(), /^Calendar brief every weekday at 8:30 Next today at 8:30\s?AM · Last: Done · Three meetings today\./i);
+  assert.match(first.text(), /^Calendar brief every weekday at 8:30 Next today at 8:30\s?AM Last: Done · Three meetings today\./i);
   assert.equal(second.text(), 'Check disk every 2 hours Off');
   assert.deepEqual(h.switches().map((item) => item.attributes['aria-checked']), ['true', 'true', 'false']);
   assert.equal(second.dataset.enabled, 'false');
