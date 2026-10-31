@@ -1033,6 +1033,28 @@ def test_the_settings_carry_how_memory_finds_notes_and_save_it_only_when_sent(
     assert config.load().memory.retriever == "bm25"
 
 
+def test_the_settings_carry_the_console_language_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["language"] == "auto"
+    chinese = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], language="zh-Hans")
+    )
+    assert chinese.status_code == 200 and chinese.json()["language"] == "zh-Hans"
+    assert config.load().console.language == "zh-Hans"
+    assert 'language = "zh-Hans"' in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(chinese.json()["revision"]))
+    assert kept.json()["language"] == "zh-Hans", "absent leaves it as it is"
+    traditional = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], language="zh-Hant")
+    )
+    assert traditional.status_code == 400
+    assert traditional.json()["error"]["code"] == "invalid_request"
+    assert config.load().console.language == "zh-Hans"
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

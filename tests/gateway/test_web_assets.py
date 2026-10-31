@@ -303,7 +303,7 @@ async def test_chat_url_placeholder_matches_the_omlx_hint(
     parser = InputPlaceholders()
     parser.feed(page.text)
     # oMLX's server listens on port 8000 by default. The plain hint beside the field shows that address
-    # as its example, and the developer's wording (settings.mjs) still names oMLX.
+    # as its example, and the developer's wording (the catalog's, for settings.mjs) still names oMLX.
     placeholder = parser.placeholders["s-chat-url"]
     assert placeholder == "http://127.0.0.1:8000/v1"
     assert f"such as {placeholder}." in page.text
@@ -313,7 +313,12 @@ async def test_chat_url_placeholder_matches_the_omlx_hint(
         == "s-chat-url-hint"
     )
     settings = await client.get("/assets/settings.mjs")
-    assert "oMLX supports the OpenAI-compatible adapter." in settings.text
+    assert "settings.${set}.${name}" in settings.text
+    words = (await client.get("/assets/i18n/en.json")).json()
+    assert (
+        "oMLX supports the OpenAI-compatible adapter."
+        in words["settings.developer.urlHint"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -729,7 +734,7 @@ async def test_the_shell_pins_the_main_chat_and_drops_the_chats_switch(
     parent = re.search(r'<button\b[^>]*\bid="header-parent"[^>]*>([^<]*)<', page)
     assert parent is not None and parent.group(1) == "Main chat"
     assert "hidden" in parent.group(0)
-    workers = re.search(r'id="welcome-workers"[^>]*hidden><a href="#/workers">', page)
+    workers = re.search(r'id="welcome-workers"[^>]*hidden><a href="#/workers"', page)
     assert workers is not None
     module = (await client.get("/assets/main-chat.mjs")).text
     assert "export function timeline" in module

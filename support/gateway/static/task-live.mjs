@@ -1,3 +1,4 @@
+import {t} from './i18n.mjs';
 import {applyEvent} from './turns.mjs';
 import {foldWorkerTurns, readTurns} from './worker-history.mjs';
 
@@ -39,7 +40,7 @@ export function taskLive({api, changed, open = defaultOpen, schedule = setTimeou
     } catch (error) {
       if (mine !== reads) return;
       // A task that never wrote a session has nothing to show.
-      state.error = error?.status === 404 ? '' : 'Could not load the live view.';
+      state.error = error?.status === 404 ? '' : t('taskLive.loadFailed');
     }
     state.loading = false;
     if (wants && state.view) { startFollow(); connect(); }

@@ -8,10 +8,10 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
+import {language, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
 const DAY_S = 86400;
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function startOfDay(ts) {
   const day = new Date(ts * 1000);
@@ -19,14 +19,18 @@ function startOfDay(ts) {
   return day.getTime() / 1000;
 }
 
-/** "Today", "Yesterday", "Oct 28", or "Oct 28, 2025" for another year. */
+const daysAgo = (ts, now) => Math.round((startOfDay(now) - startOfDay(ts)) / DAY_S);
+
+/** "Today", "Yesterday", "Oct 28", or "Oct 28, 2025" for another year (in Chinese, 10月28日). */
 export function dayLabel(ts, now) {
-  const days = Math.round((startOfDay(now) - startOfDay(ts)) / DAY_S);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
+  const days = daysAgo(ts, now);
+  if (days <= 0) return t("time.today");
+  if (days === 1) return t("time.yesterday");
   const day = new Date(ts * 1000);
-  const label = `${MONTHS[day.getMonth()]} ${day.getDate()}`;
-  return day.getFullYear() === new Date(now * 1000).getFullYear() ? label : `${label}, ${day.getFullYear()}`;
+  // English names the month (`Oct`); Chinese numbers it (`10月`).
+  const month = language() === "en" ? day.toLocaleString("en-US", {month: "short"}) : day.getMonth() + 1;
+  const params = {month, day: day.getDate(), year: day.getFullYear()};
+  return day.getFullYear() === new Date(now * 1000).getFullYear() ? t("time.monthDay", params) : t("time.monthDayYear", params);
 }
 
 /** "7:35 PM", as this computer writes a time (the panel's rows write it the same way). */
@@ -37,7 +41,7 @@ export function clock(ts) {
 /** A time beside a row: the clock today, else the day. */
 export function shortTime(ts, now) {
   if (!ts) return "";
-  return dayLabel(ts, now) === "Today" ? clock(ts) : dayLabel(ts, now);
+  return daysAgo(ts, now) <= 0 ? clock(ts) : dayLabel(ts, now);
 }
 
 export function isMain(session) {
@@ -56,8 +60,11 @@ export function readCard(row) {
     state,
     sourceId: String(data.source_id),
     sourceKind: data.source_kind === "task" ? "task" : "chat",
-    title: String(data.title || (data.source_kind === "task" ? "A task" : "A side chat")),
-    line: String(data.line ?? ""),
+    title: String(data.title || t(data.source_kind === "task" ? "mainChat.aTask" : "mainChat.aSideChat")),
+    // A card the gateway worded keeps its words: it reads in the page's language, whoever stored it.
+    line: saidText(data.said) ?? String(data.line ?? ""),
+    // How an approval was answered (`allowedOnce`, `denied`, …), when the card kept its words.
+    ...(String(data.said?.key ?? "").startsWith("cards.answer.") ? {answer: data.said.key.slice(13)} : {}),
     // A waiting card and the answer that follows it share this.
     ...(data.request_id ? {requestId: String(data.request_id)} : {}),
   };
@@ -77,7 +84,7 @@ export function foldAnswers(cards) {
     .filter((card) => card.state !== "answered")
     .map((card) => {
       const answer = card.state === "waiting" && card.requestId ? answers.get(card.requestId) : null;
-      return answer ? {...card, state: "answered", line: answer.line} : card;
+      return answer ? {...card, state: "answered", line: answer.line, answer: answer.answer} : card;
     });
 }
 
@@ -142,14 +149,18 @@ export function byDay(sessions, now) {
 
 /** A card's words: its mark, its heading and its action. */
 export function cardWords(card) {
-  const open = card.sourceKind === "task" ? "Open task" : "Open side chat";
-  if (card.state === "waiting") return {mark: "!", heading: `Needs your approval: ${card.title}`, action: "Review"};
-  // An answered approval has nothing left to review: it says how it was answered.
+  const open = t(card.sourceKind === "task" ? "mainChat.openTask" : "mainChat.openSideChat");
+  const title = card.title;
+  if (card.state === "waiting") return {mark: "!", heading: t("mainChat.card.waiting", {title}), action: t("common.review")};
+  // An answered approval has nothing left to review: it says how it was answered (cards stored before
+  // they kept their words say it in English).
   if (card.state === "answered") {
-    return {mark: card.line.startsWith("Allowed") ? "✓" : card.line.startsWith("Denied") ? "✕" : "·", heading: `Approval for ${card.title}`, action: open};
+    const allowed = card.answer ? card.answer.startsWith("allowed") : card.line.startsWith("Allowed");
+    const denied = card.answer ? card.answer === "denied" : card.line.startsWith("Denied");
+    return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
-  if (card.state === "failed") return {mark: "✕", heading: `Did not finish: ${card.title}`, action: open};
-  return {mark: "✓", heading: `Done: ${card.title}`, action: open};
+  if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
+  return {mark: "✓", heading: t("mainChat.card.done", {title}), action: open};
 }
 
 /** One card's node: `{doc, card, open}`; `open` gets the card. Its day is the divider above it. */
@@ -170,8 +181,10 @@ export function cardNode({doc, card, open}) {
   mark.setAttribute("aria-hidden", "true");
   const text = el("div", "main-card-text");
   text.append(el("p", "main-card-title", words.heading));
-  // Cards written before a card said what it asks kept a line that repeats the heading.
-  const line = card.state === "waiting" && card.line === "Waiting for your approval" ? "" : card.line;
+  // Cards written before a card said what it asks kept a line that repeats the heading (in English, when
+  // they were stored before cards kept their words).
+  const repeats = [t("turns.activity.approval"), "Waiting for your approval"].includes(card.line);
+  const line = card.state === "waiting" && repeats ? "" : card.line;
   if (line) text.append(el("p", "main-card-line", line));
   const action = el("button", card.state === "waiting" ? "outline-button" : "link-button", words.action);
   action.type = "button";
@@ -214,17 +227,19 @@ export function answered(echoes) {
 /** An echo's buttons: `[label, do]`; a level change opens the level list. */
 export function echoActions(echo, done) {
   if (done || !echo.task_id && !["ask", "chore", "chore_saved"].includes(echo.kind)) return [];
-  if (echo.kind === "chore") return [["Save chore", "save"], ["Just once", "once"], ["Cancel", "cancel"]];
-  if (echo.kind === "chore_saved") return [["Undo", "undo"]];
+  const undo = [t("mainChat.echo.undo"), "undo"];
+  if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
+  if (echo.kind === "chore_saved") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {
-    return echo.kind === "started" ? [["Change", "level"]] : [["Undo", "undo"]];
+    return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"]] : [undo];
   }
-  if (echo.kind === "control") return [["Undo", "undo"]];
+  if (echo.kind === "control") return [undo];
   if (echo.kind === "suggest") {
-    const word = echo.action === "level" ? `Set to ${levelCode(echo.level)}` : echo.action;
+    if (echo.action === "level") return [[t("mainChat.echo.setTo", {level: levelCode(echo.level)}), "apply"]];
+    const word = ["stop", "pause", "resume", "first"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
-  if (echo.kind === "ask") return [["Start as a task", "start"], ["Not now", "dismiss"]];
+  if (echo.kind === "ask") return [[t("mainChat.echo.start"), "start"], [t("mainChat.echo.notNow"), "dismiss"]];
   return [];
 }
 
@@ -251,7 +266,9 @@ export function echoNodes({doc, echo, done = false, act}) {
   const mark = el("span", "echo-mark", MARKS[echo.action] ?? MARKS[echo.kind] ?? "·");
   mark.setAttribute("aria-hidden", "true");
   const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
-  const words = level === null ? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
+  // An echo the gateway worded keeps its words for the page's language; the level is the chip.
+  const own = saidText(echo.said);
+  const words = level === null || own !== null ? own ?? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
   // The words, the level and the buttons wrap together, under the words.
   const body = el("div", "echo-body");
   body.append(el("p", "echo-text", words));
@@ -287,7 +304,7 @@ export function echoNodes({doc, echo, done = false, act}) {
 function levelList({el, echo, act}) {
   const list = el("span", "echo-levels");
   list.setAttribute("role", "radiogroup");
-  list.setAttribute("aria-label", "Priority");
+  list.setAttribute("aria-label", t("common.priority"));
   LEVELS.forEach((_, level) => {
     const item = el("button", "echo-level-item", levelLabel(level));
     item.type = "button";

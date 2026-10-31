@@ -7,6 +7,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Added
+
+- The web console and the macOS app speak Simplified Chinese. They follow the
+  browser's or the Mac's languages; **Settings → Appearance → Language**
+  (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`
+  chooses one. Every screen is translated: the main chat with its cards and
+  lines, the panel's tabs, Tasks, Workers, Settings, the sign-in page, the
+  gateway's messages, and the app's menus, pill and quit dialog. The terminal
+  stays English. [#350]
+
 ### Changed
 
 - A task's page in default mode no longer shows an empty "Recovery card"
@@ -2843,3 +2853,4 @@ earlier milestones.
 [#345]: https://github.com/localmelo/localmelo/pull/345
 [#346]: https://github.com/localmelo/localmelo/pull/346
 [#348]: https://github.com/localmelo/localmelo/pull/348
+[#350]: https://github.com/localmelo/localmelo/pull/350

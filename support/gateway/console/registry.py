@@ -29,6 +29,7 @@ from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
+from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import DEFAULT_WORKSPACE
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
@@ -323,11 +324,9 @@ class ConsoleSessions:
                 503, "store_unavailable", display.home_label(str(exc))
             ) from exc
         if info is None:
-            raise ApiError(404, "not_found", "Session not found.")
+            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         if info.kind == "task":
-            raise ApiError(
-                409, "task_session_read_only", "A task session cannot run as a chat."
-            )
+            raise ApiError(409, "task_session_read_only", t("errors.taskAsChat"))
         workspace = info.workspace
         if info.kind == "front":
             # The main chat keeps no folder of its own: it works in the
@@ -353,8 +352,11 @@ class ConsoleSessions:
                 raise ApiError(
                     400,
                     "invalid_workspace",
-                    f"Could not create the default workspace "
-                    f"{display.home_label(workspace)}: {exc}",
+                    t(
+                        "errors.defaultWorkspace",
+                        path=display.home_label(workspace),
+                        problem=exc,
+                    ),
                 ) from exc
         self.check_workspace(workspace)
 
@@ -488,7 +490,7 @@ class ConsoleSessions:
             raise ApiError(
                 409,
                 "session_busy",
-                "A turn is already running in this session.",
+                t("errors.turnRunning"),
             )
         agent = entry.agent
         entry.kept = list(agent.conversation())
@@ -604,8 +606,7 @@ class ConsoleSessions:
             raise ApiError(
                 400,
                 "invalid_workspace",
-                f"The workspace {display.home_label(workspace)} no longer exists. "
-                "Change it in the header.",
+                t("errors.workspaceGone", path=display.home_label(workspace)),
             )
 
     def _default_workspace(self) -> str:
@@ -626,8 +627,11 @@ class ConsoleSessions:
             raise ApiError(
                 400,
                 "invalid_workspace",
-                f"Could not create the default workspace "
-                f"{display.home_label(path)}: {exc}",
+                t(
+                    "errors.defaultWorkspace",
+                    path=display.home_label(path),
+                    problem=exc,
+                ),
             ) from exc
         return os.path.realpath(path)
 
@@ -646,8 +650,11 @@ class ConsoleSessions:
                 raise ApiError(
                     400,
                     "invalid_workspace",
-                    f"Could not create the default workspace "
-                    f"{display.home_label(path)}: {exc}",
+                    t(
+                        "errors.defaultWorkspace",
+                        path=display.home_label(path),
+                        problem=exc,
+                    ),
                 ) from exc
             return os.path.realpath(path)
         if not isinstance(workspace, str) or not (
@@ -656,14 +663,14 @@ class ConsoleSessions:
             raise ApiError(
                 400,
                 "invalid_workspace",
-                "The workspace must be an absolute path or start with ~/.",
+                t("errors.workspacePath"),
             )
         path = os.path.expanduser(workspace)
         if not os.path.isdir(path):
             raise ApiError(
                 400,
                 "invalid_workspace",
-                f"Not a directory: {display.home_label(path)}",
+                t("errors.notDirectory", path=display.home_label(path)),
             )
         return os.path.realpath(path)
 
@@ -900,21 +907,21 @@ class ConsoleSessions:
                 raise ApiError(
                     409,
                     "session_busy",
-                    "A turn is already running in this session.",
+                    t("errors.turnRunning"),
                 )
             latest = await self._latest_finished_turn(session_id)
             if latest is None or latest.id != turn_id:
                 raise ApiError(
                     409,
                     "not_latest_turn",
-                    "Only the newest finished turn can be tried again.",
+                    t("errors.retryNewest"),
                 )
             undone = await entry.runner.undo()
             if undone is None:
                 raise ApiError(
                     409,
                     "not_latest_turn",
-                    "Only the newest finished turn can be tried again.",
+                    t("errors.retryNewest"),
                 )
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
@@ -939,14 +946,13 @@ class ConsoleSessions:
                 raise ApiError(
                     409,
                     "task_session_read_only",
-                    "A task workspace cannot be changed as a chat.",
+                    t("errors.taskWorkspace"),
                 )
             if current is not None and current.kind == "front":
                 raise ApiError(
                     409,
                     "main_chat_folder",
-                    "The main chat works in the default folder. Change the "
-                    "default in Settings, or start a side chat in another folder.",
+                    t("errors.mainFolder"),
                 )
             entry = self._sessions.get(session_id)
             if entry is None or entry.agent is None:
@@ -959,7 +965,7 @@ class ConsoleSessions:
                 raise ApiError(
                     409,
                     "session_busy",
-                    "A turn is already running in this session.",
+                    t("errors.turnRunning"),
                 )
             settings = self._settings()
             old_root = entry.agent.workspace_root
@@ -991,7 +997,7 @@ class ConsoleSessions:
                     raise ApiError(
                         409,
                         "session_busy",
-                        "A turn is already running in this session.",
+                        t("errors.turnRunning"),
                     ) from exc
                 raise
             old, entry.agent = entry.agent, agent
@@ -1093,38 +1099,32 @@ class ConsoleSessions:
         # Do not wait behind an opening or queued start: it has already claimed
         # the session, even if the runner has not registered a turn yet.
         if lock.locked() or lock.pending:
-            raise ApiError(
-                409, "session_busy", "A turn is already running in this session."
-            )
+            raise ApiError(409, "session_busy", t("errors.turnRunning"))
         async with lock:
             info = await self._store.get_session(session_id)
             if info is not None and info.kind == "task":
                 raise ApiError(
                     409,
                     "task_session_read_only",
-                    "A task session cannot be deleted as a chat.",
+                    t("errors.taskDelete"),
                 )
             if info is not None and info.kind == "front":
                 raise ApiError(
                     409,
                     "main_chat",
-                    "The main chat is always there: it cannot be deleted.",
+                    t("errors.mainDelete"),
                 )
             entry = self._sessions.get(session_id)
             if entry is not None and (
                 entry.runner.busy or self._broker.pending(session_id)
             ):
-                raise ApiError(
-                    409, "session_busy", "A turn is already running in this session."
-                )
+                raise ApiError(409, "session_busy", t("errors.turnRunning"))
             try:
                 deleted = await self._store.delete_session(session_id)
             except SessionBusyError as exc:
-                raise ApiError(
-                    409, "session_busy", "A turn is already running in this session."
-                ) from exc
+                raise ApiError(409, "session_busy", t("errors.turnRunning")) from exc
             if not deleted:
-                raise ApiError(404, "not_found", "Session not found.")
+                raise ApiError(404, "not_found", t("errors.sessionNotFound"))
             if self._memory is not None:
                 try:
                     await self._memory.forget_session(session_id)

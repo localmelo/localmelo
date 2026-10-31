@@ -303,12 +303,13 @@ final class PetController: NSObject {
 
     private func menu() -> NSMenu {
         let menu = NSMenu()
-        for (title, action) in [("Open localmelo", #selector(menuOpen)), ("Hide Melo", #selector(menuHide))] {
+        for (title, action) in [(L10n.t("app.menu.open", "Open localmelo"), #selector(menuOpen)),
+                                (L10n.t("app.pet.hide", "Hide Melo"), #selector(menuHide))] {
             menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
         }
         menu.addItem(desktop.makeItem())
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: quitTitle(attached: false), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
             .target = NSApp
         return menu
     }

@@ -772,6 +772,25 @@ test('the developer switch saves the mode at once and the Developer section appe
   assert.equal(h.element('settings-tab-developer').hidden, true);
 });
 
+test('the language saves like any setting, then the page loads again in it', async () => {
+  let reloads = 0;
+  const h = harness({'GET /settings': full({language: 'auto'}), 'PUT /settings': (body) => full({language: body.language, revision: 'rev2'})},
+    new Map(), () => false, {reloadPage: () => { reloads += 1; }});
+  await h.open('appearance');
+  assert.equal(h.element('s-language-row').hidden, false);
+  assert.equal(h.element('s-language-auto').checked, true);
+  h.element('s-language-zh-Hans').checked = true;
+  await h.element('s-language-zh-Hans').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.language, 'zh-Hans');
+  assert.equal(h.puts().at(-1).options.body.revision, 'rev1');
+  assert.equal(reloads, 1);
+  // A gateway that does not report its language offers no choice.
+  const older = harness({'GET /settings': full()});
+  await older.open('appearance');
+  assert.equal(older.element('s-language-row').hidden, true);
+});
+
 test('the Developer section lists every key by section, with its value, option and issue', async () => {
   const groups = [
     {section: 'agent', keys: [

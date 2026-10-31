@@ -428,6 +428,18 @@ a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.
 
+<a id="language"></a>
+
+## Language
+
+The console speaks English or Simplified Chinese (简体中文).
+
+- **Automatic** follows your browser's languages, or your Mac's in the macOS app: the first that is English or Simplified Chinese, else English. Traditional Chinese reads English.
+- To choose one, open **Settings → Appearance → Language**: **Automatic**, **English** or **简体中文**. The page reloads in it. In a terminal, `melo config set console.language zh-Hans` (or `en`, or `auto`) does the same; reload the page after it.
+- Every screen follows: the main chat and its cards, the panel's tabs, Tasks, Workers, Settings and the sign-in page.
+- The gateway writes its own words for the page in the same language: error messages, the panel's rows, the main chat's cards and the lines it adds after your messages (`Started: …`, `Saved: …`). The terminal and other API clients stay English.
+- Commands, paths, model names and the levels P0-P5 are never translated; the terms follow the [Chinese interface glossary](../zh-CN/STYLE.md#interface-glossary). Melo answers in the language you write in, whatever the setting.
+
 ## Settings
 
 **Settings** in the sidebar (or **Settings…** in the macOS app's menu) has one section per
@@ -445,8 +457,9 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
   folder panel, or a path field in a browser) and the recent folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
-- **Appearance**: the theme (System, Light, Dark, kept in this browser), **Melo on the
-  desktop** in the macOS app (the same choice as its menu), and **Developer mode**.
+- **Appearance**: the theme (System, Light, Dark, kept in this browser), the
+  [language](#language) (Automatic, English, 简体中文), **Melo on the desktop** in the macOS
+  app (the same choice as its menu), and **Developer mode**.
 - **Developer** (developer mode only): every setting `melo -h all` lists, grouped by section,
   with its value, its `config.toml` key in small type, the old option that sets it and, for a
   comparison, the issue that decides it; then the options that set one run. They are

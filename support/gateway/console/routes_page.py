@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
+from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import SessionInfo, SessionStoreError
 
 from .bodies import Body
@@ -39,7 +40,7 @@ async def _require_session(console: Console, session_id: str) -> SessionInfo:
     except SessionStoreError as exc:
         raise await console.store_api_error(exc, session_id) from exc
     if info is None:
-        raise ApiError(404, "not_found", "Session not found.")
+        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info
 
 

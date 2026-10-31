@@ -12,6 +12,7 @@
  * facts of a first turn. A string that reads differently here is a bug.
  */
 
+import { t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
 
 const SEPARATOR = " · ";
@@ -19,7 +20,6 @@ const SEPARATOR = " · ";
 const LIMITED_TOOLS = new Set(["shell_exec", "python_exec"]);
 const SESSION_TOOL_TIMEOUT_S = 600;
 const ITEM_MARKS = {done: "✓", current: "◐", skipped: "–", pending: "○"};
-const SIMILAR_HINT = "like a similar task:";
 
 // ── Values ──
 
@@ -112,7 +112,7 @@ export function formatTokens(count) {
 /** `format_bytes`: `412 bytes`, `1.2 KB`, `312 KB`, `12 MB`; decimal, cut. */
 export function formatBytes(count) {
   let value = Math.max(0, Math.trunc(Number(count) || 0));
-  if (value < 1_000) return `${value} bytes`;
+  if (value < 1_000) return t("turns.bytes", {n: value});
   for (const unit of ["KB", "MB", "GB", "TB"]) {
     value /= 1_000;
     if (value < 1_000 || unit === "TB") {
@@ -138,7 +138,7 @@ export function wallRange(lo, hi) {
   return lowMinutes === highMinutes ? `${lowMinutes} min` : `${lowMinutes}-${highMinutes} min`;
 }
 
-const stepsWord = (count) => (count === 1 ? "1 step" : `${count} steps`);
+const stepsWord = (count) => t("turns.steps", {n: count});
 const stepRange = (lo, hi) => (lo === hi ? `${lo}` : `${lo}-${hi}`);
 
 /** `printable`: one line, with control and format characters as `?`. */
@@ -188,7 +188,7 @@ export function itemsText(items, level) {
 /** The hint a similar match's past facts follow; `_similar_hint`. */
 function similarHint(title) {
   const text = typeof title === "string" ? printable(title).trim() : "";
-  return text ? `like ${text}:` : SIMILAR_HINT;
+  return text ? t("turns.past.like", {title: text}) : t("turns.past.likeSimilar");
 }
 
 /** `past_facts`: (steps text, times text, a single past run). */
@@ -198,14 +198,14 @@ export function pastFacts(past, level, hint = null) {
   if (level >= 2) {
     const lo = num(past.wall_lo_s);
     const hi = num(past.wall_hi_s);
-    return [null, lo === null || hi === null ? null : `past runs ${wallRange(lo, hi)}`, false];
+    return [null, lo === null || hi === null ? null : t("turns.past.runs", {range: wallRange(lo, hi)}), false];
   }
   if (runs <= 1) {
     const steps = int(past.last_steps) ?? int(past.steps_hi);
     const wall = num(past.last_wall_s) ?? num(past.wall_hi_s);
     if (steps === null) return [null, null, false];
     return [
-      `${hint || "last time"} ${stepsWord(steps)}`,
+      `${hint || t("turns.past.lastTime")} ${stepsWord(steps)}`,
       wall === null ? null : runElapsed(wall),
       true,
     ];
@@ -216,7 +216,7 @@ export function pastFacts(past, level, hint = null) {
   const lo = num(past.wall_lo_s);
   const hi = num(past.wall_hi_s);
   return [
-    `${hint || "past"} ${stepRange(loSteps, hiSteps)} steps`,
+    `${hint || t("turns.past.past")} ${t("turns.steps", {n: stepRange(loSteps, hiSteps)})}`,
     lo === null || hi === null ? null : wallRange(lo, hi),
     false,
   ];
@@ -240,7 +240,7 @@ export function formatPast(payload, width = Number.POSITIVE_INFINITY) {
   const [pastSteps, pastTimes, single] = pastFacts(data.past, level, hint);
   const items = itemsText(data.items, level);
   let itemsTitle = null;
-  if (level === 1) itemsTitle = similar ? (pastSteps ? "its steps:" : hint) : "last time:";
+  if (level === 1) itemsTitle = similar ? (pastSteps ? t("turns.past.itsSteps") : hint) : t("turns.past.lastTimeSteps");
   const merge = single && level === 1;
 
   const compose = (dropped) => {
@@ -248,11 +248,11 @@ export function formatPast(payload, width = Number.POSITIVE_INFINITY) {
     const withTimes =
       pastTimes && !dropped.has("past_times")
         ? past
-          ? `${past}, ${pastTimes}`
+          ? t("turns.past.withTimes", {steps: past, times: pastTimes})
           : pastTimes
         : past;
     const shown = dropped.has("items") ? null : items;
-    if (shown && merge && withTimes) return `${withTimes}: ${shown}`;
+    if (shown && merge && withTimes) return t("turns.past.merged", {facts: withTimes, steps: shown});
     const parts = [];
     if (withTimes) parts.push(withTimes);
     if (shown) parts.push(itemsTitle ? `${itemsTitle} ${shown}` : shown);
@@ -272,72 +272,33 @@ export function formatPast(payload, width = Number.POSITIVE_INFINITY) {
   return kept.slice(0, Math.max(0, width - 1)).join("") + "…";
 }
 
-// status -> {word, severity, title}; `(status, cause)` rows win.
+// status -> [the catalog's `turns.status.<name>` words, severity]; `(status, cause)` rows win.
 const STATUS_TEXT = {
-  completed: {word: "Done", severity: "ok", title: "Done"},
-  cancelled: {word: "Stopped", severity: "stopped", title: "Stopped"},
-  failed: {word: "Failed", severity: "warn", title: "A check stopped the run"},
-  stuck: {
-    word: "Stuck",
-    severity: "warn",
-    title: "Stopped: the same calls kept repeating",
-  },
-  gate_stopped: {
-    word: "Stopped after reflection",
-    severity: "warn",
-    title: "Stopped after reflection",
-  },
-  budget_exhausted: {word: "Out of steps", severity: "warn", title: "Ran out of steps"},
-  context_budget_exceeded: {word: "Context too large", severity: "warn", title: "Context budget exceeded"},
-  timeout: {word: "Timed out", severity: "warn", title: "Timed out"},
-  provider_error: {
-    word: "Model server error",
-    severity: "error",
-    title: "Could not get an answer from the model server",
-  },
-  setup_error: {
-    word: "Tools failed to start",
-    severity: "error",
-    title: "Tools could not start",
-  },
-  crashed: {
-    word: "Crashed",
-    severity: "error",
-    title: "Something went wrong inside localmelo",
-  },
-  "crashed|run": {
-    word: "Crashed",
-    severity: "error",
-    title: "Something went wrong inside localmelo",
-  },
-  "crashed|crash": {
-    word: "Interrupted",
-    severity: "warn",
-    title: "Interrupted: melo stopped unexpectedly",
-  },
-  "cancelled|user_stop": {word: "Stopped", severity: "stopped", title: "Stopped by you"},
-  "cancelled|crash": {
-    word: "Interrupted",
-    severity: "warn",
-    title: "Interrupted: melo stopped unexpectedly",
-  },
-  "cancelled|shutdown": {
-    word: "Interrupted",
-    severity: "warn",
-    title: "Interrupted: melo stopped before this turn finished",
-  },
-  "cancelled|closed": {
-    word: "Stopped",
-    severity: "stopped",
-    title: "Stopped: the session was closed",
-  },
-  "cancelled|takeover": {
-    word: "Stopped",
-    severity: "stopped",
-    title: "Stopped: another melo window took over this session",
-  },
-  "cancelled|park": {word: "Parked", severity: "stopped", title: "Parked"},
+  completed: ["done", "ok"],
+  cancelled: ["stopped", "stopped"],
+  failed: ["failed", "warn"],
+  stuck: ["stuck", "warn"],
+  gate_stopped: ["reflected", "warn"],
+  budget_exhausted: ["outOfSteps", "warn"],
+  context_budget_exceeded: ["context", "warn"],
+  timeout: ["timeout", "warn"],
+  provider_error: ["provider", "error"],
+  setup_error: ["setup", "error"],
+  crashed: ["crashed", "error"],
+  "crashed|run": ["crashed", "error"],
+  "crashed|crash": ["interrupted", "warn"],
+  "cancelled|user_stop": ["stoppedByYou", "stopped"],
+  "cancelled|crash": ["interrupted", "warn"],
+  "cancelled|shutdown": ["shutdown", "warn"],
+  "cancelled|closed": ["closed", "stopped"],
+  "cancelled|takeover": ["takeover", "stopped"],
+  "cancelled|park": ["parked", "stopped"],
 };
+
+/** A row of STATUS_TEXT in words: `{word, severity, title}`. */
+function statusWords([name, severity]) {
+  return {word: t(`turns.status.${name}.word`), severity, title: t(`turns.status.${name}.title`)};
+}
 
 // How a provider's error starts when it could not connect at all
 // (`UNREACHABLE_PREFIX` in `support/providers/_http.py`; a test keeps the two equal).
@@ -368,15 +329,15 @@ export const UNFINISHED_ANSWER = "melo did not finish an answer";
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
   if (serverUnreachable(status, error)) {
-    return {...STATUS_TEXT.provider_error, title: "Could not reach the model server"};
+    return {...statusWords(STATUS_TEXT.provider_error), title: t("turns.status.unreachable")};
   }
   if (status === "failed" && error === UNFINISHED_ANSWER) {
-    return {...STATUS_TEXT.failed, title: UNFINISHED_ANSWER};
+    return {...statusWords(STATUS_TEXT.failed), title: t("turns.status.unfinished")};
   }
   const found =
     STATUS_TEXT[`${status}|${cause}`] ?? STATUS_TEXT[status] ?? null;
-  if (found !== null) return found;
-  const unknown = status || "Unknown";
+  if (found !== null) return statusWords(found);
+  const unknown = status || t("turns.status.unknown");
   return {word: unknown, severity: "warn", title: unknown};
 }
 
@@ -464,41 +425,35 @@ export function approvalTag(status, errorCategory, approval) {
     .join(" ");
   if (origin === "withdrawn") {
     if (status !== "cancelled") return null;
-    return {short: "not run", long: "Not run: the turn was stopped"};
+    return {short: t("turns.approval.withdrawn.short"), long: t("turns.approval.withdrawn.long")};
   }
   if (origin === "error") {
-    return {short: "approval failed", long: "Approval failed; the call did not run"};
+    return {short: t("turns.approval.error.short"), long: t("turns.approval.error.long")};
   }
   if (origin === "timeout") {
-    return {short: "not answered in time", long: "Not approved in time"};
+    return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
   }
   if (approval.allowed) {
     if (origin === "session") {
-      return {
-        short: "allowed by a session grant",
-        long: "Allowed by a grant for this session",
-      };
+      return {short: t("turns.approval.grant.short"), long: t("turns.approval.grant.long")};
     }
     if (origin === "policy") {
-      return {short: "auto-allowed", long: "Allowed: approvals are set to auto"};
+      return {short: t("turns.approval.auto.short"), long: t("turns.approval.auto.long")};
     }
     if (approval.remember) {
-      return {short: "allowed for the session", long: "Allowed by you for this session"};
+      return {short: t("turns.approval.session.short"), long: t("turns.approval.session.long")};
     }
-    return {short: "allowed", long: "Allowed once by you"};
+    return {short: t("turns.approval.once.short"), long: t("turns.approval.once.long")};
   }
   if (origin === "policy") {
-    return {
-      short: reason ? `denied by policy: ${reason}` : "denied by policy",
-      long: reason
-        ? `Denied by the approval policy: ${reason}`
-        : "Denied by the approval policy",
-    };
+    return reason
+      ? {short: t("turns.approval.policy.shortReason", {reason}), long: t("turns.approval.policy.longReason", {reason})}
+      : {short: t("turns.approval.policy.short"), long: t("turns.approval.policy.long")};
   }
   if (origin === "user" && (status === "blocked" || errorCategory === "approval_denied")) {
     return reason
-      ? {short: `denied: ${reason}`, long: `Denied by you: ${reason}`}
-      : {short: "denied", long: "Denied by you"};
+      ? {short: t("turns.approval.denied.shortReason", {reason}), long: t("turns.approval.denied.longReason", {reason})}
+      : {short: t("turns.approval.denied.short"), long: t("turns.approval.denied.long")};
   }
   return null;
 }
@@ -636,11 +591,16 @@ function clipped(text, max = 160) {
 
 /** The one muted line a `note`, `inbox.accepted`, `memory` or `recall` event shows. */
 function factLine(type, data) {
-  if (type === "note") return `Note${data.kind ? ` (${data.kind})` : ""}: ${clipped(data.text)}`;
-  if (type === "inbox.accepted") return `Message accepted: ${clipped(data.text)}`;
-  if (type === "memory") return `Memory ${data.action ?? "decision"}${data.kind ? `: ${data.kind}` : ""}`;
+  if (type === "note") {
+    return data.kind ? t("turns.fact.noteKind", {kind: data.kind, text: clipped(data.text)}) : t("turns.fact.note", {text: clipped(data.text)});
+  }
+  if (type === "inbox.accepted") return t("turns.fact.accepted", {text: clipped(data.text)});
+  if (type === "memory") {
+    const action = data.action ?? "decision";
+    return data.kind ? t("turns.fact.memoryKind", {action, kind: data.kind}) : t("turns.fact.memory", {action});
+  }
   const hits = Array.isArray(data.hits) ? data.hits.length : 0;
-  return `Recalled ${hits} ${hits === 1 ? "item" : "items"}${data.trigger ? ` (${data.trigger})` : ""}`;
+  return data.trigger ? t("turns.fact.recalledWhy", {n: hits, trigger: data.trigger}) : t("turns.fact.recalled", {n: hits});
 }
 
 /** The newest tool card of *callId*, made when no `tool.started` came first. */
@@ -726,7 +686,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       turn.maxSteps = int(data.max_steps) ?? 30;
       turn.approvalsOn = data.approval !== false;
       if (data.approval === false) {
-        turn.items.unshift({kind: "notice", noticeKind: "yolo", step: 0, message: "No approvals for this turn (--yolo)."});
+        turn.items.unshift({kind: "notice", noticeKind: "yolo", step: 0, message: t("turns.yolo")});
       }
       break;
     }
@@ -1025,7 +985,7 @@ export const LOCK_HOLD = "Reservation";
 
 /** What a held call says: the GPU lock in plain words, as the console's banner does; any other hold keeps its code. */
 export function holdText(held) {
-  return held === LOCK_HOLD ? "Waiting for this Mac's GPU" : `Waiting: ${held}`;
+  return held === LOCK_HOLD ? t("turns.hold.gpu") : t("turns.hold.other", {held});
 }
 
 /**
@@ -1042,25 +1002,25 @@ export function holdText(held) {
  */
 export function workSummary(turn, {held = ""} = {}) {
   const calls = toolCount(turn);
-  const callWord = calls === 1 ? "1 tool call" : `${calls} tool calls`;
+  const callWord = t("turns.summary.calls", {n: calls});
   if (!turn.finishedAt) {
-    const activity = held ? holdText(held) : "Working";
+    const activity = held ? holdText(held) : t("turns.summary.working");
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
   if (turn.status === "completed" && calls === 0) {
-    return turn.items.some((item) => item.kind === "thinking") ? "Thought" : "";
+    return turn.items.some((item) => item.kind === "thinking") ? t("turns.summary.thought") : "";
   }
   const duration = formatDuration(turnDuration(turn));
   if (turn.status === "completed") {
-    const parts = [`Worked for ${duration}`, callWord];
+    const parts = [t("turns.summary.workedFor", {duration}), callWord];
     const failed = failedCount(turn);
     const denied = deniedCount(turn);
-    if (failed) parts.push(`${failed} failed`);
-    if (denied) parts.push(`${denied} denied`);
+    if (failed) parts.push(t("turns.summary.failed", {n: failed}));
+    if (denied) parts.push(t("turns.summary.denied", {n: denied}));
     return parts.join(SEPARATOR);
   }
   const word = statusText(turn.status, turn.cause).word;
-  const parts = [`${word} after ${duration}`];
+  const parts = [t("turns.summary.endedAfter", {word, duration})];
   if (calls > 0) parts.push(callWord);
   return parts.join(SEPARATOR);
 }
@@ -1073,21 +1033,21 @@ export function workSummary(turn, {held = ""} = {}) {
  */
 export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0} = {}) {
   if (held) return holdText(held);
-  if (pending > 0) return "Waiting for your approval";
-  if (cancelling) return "Stopping";
+  if (pending > 0) return t("turns.activity.approval");
+  if (cancelling) return t("turns.activity.stopping");
   if (turn.retryUntil > now) {
-    return `Retrying in ${Math.ceil(turn.retryUntil - now)}s`;
+    return t("turns.activity.retrying", {n: Math.ceil(turn.retryUntil - now)});
   }
   const reflection = [...turn.items]
     .reverse()
     .find((item) => item.kind === "reflection" && item.status === "running");
-  if (reflection !== undefined) return "Reflecting";
+  if (reflection !== undefined) return t("turns.activity.reflecting");
   const tool = [...turn.items]
     .reverse()
     .find((item) => item.kind === "tool" && item.status === "running");
-  if (tool !== undefined) return `Running ${tool.name}`;
-  if (turn.step > 0) return "Thinking";
-  return "Starting";
+  if (tool !== undefined) return t("turns.activity.running", {tool: tool.name});
+  if (turn.step > 0) return t("turns.activity.thinking");
+  return t("turns.activity.starting");
 }
 
 /**
@@ -1101,23 +1061,23 @@ export function liveFacts(turn) {
   const parts = [];
   const progress = isObject(turn.progress) ? turn.progress : null;
   if (progress === null) {
-    if (turn.step > 0) parts.push(`step ${turn.step}/${turn.maxSteps || 30}`);
-    if (turn.attempt >= 2) parts.push(`attempt ${turn.attempt}`);
+    if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 30}));
+    if (turn.attempt >= 2) parts.push(t("turns.facts.attempt", {n: turn.attempt}));
     return parts;
   }
   const step = int(progress.step) ?? 0;
   const attempt = int(progress.attempt) ?? 0;
-  if (step > 0) parts.push(`step ${step}`);
-  if (attempt >= 2) parts.push(`attempt ${attempt}`);
+  if (step > 0) parts.push(t("turns.facts.step", {step}));
+  if (attempt >= 2) parts.push(t("turns.facts.attempt", {n: attempt}));
   if (progress.phase) {
     const cycle = int(progress.cycle) ?? 0;
-    parts.push(cycle > 0 ? `${progress.phase} (cycle ${cycle})` : String(progress.phase));
+    parts.push(cycle > 0 ? t("turns.facts.cycle", {phase: progress.phase, n: cycle}) : String(progress.phase));
   }
   const tests = objectOf(progress.tests);
   const passed = int(tests.passed);
   const total = int(tests.total);
   // `progress_line.py` shows a count only when both are there.
-  if (passed !== null && total !== null) parts.push(`tests ${passed}/${total}`);
+  if (passed !== null && total !== null) parts.push(t("turns.facts.tests", {passed, total}));
   return parts;
 }
 
@@ -1136,18 +1096,18 @@ export function toolState(item, {held = "", now = 0} = {}) {
       if (held) return {state: "held", mark: "●", text: holdText(held)};
       let clock = item.startedTs ? toolElapsed(now - item.startedTs) : "0:00";
       if (LIMITED_TOOLS.has(item.name)) {
-        clock += ` of ${toolElapsed(SESSION_TOOL_TIMEOUT_S)}`;
+        clock = t("turns.tool.clockOf", {clock, limit: toolElapsed(SESSION_TOOL_TIMEOUT_S)});
       }
-      return {state: "running", mark: "●", text: `Running${SEPARATOR}${clock}`};
+      return {state: "running", mark: "●", text: `${t("turns.tool.running")}${SEPARATOR}${clock}`};
     }
     case "waiting_approval":
-      return {state: "waiting_approval", mark: "●", text: "Needs approval"};
+      return {state: "waiting_approval", mark: "●", text: t("turns.tool.needsApproval")};
     case "success": {
       // The terminal's order: the time, then a non-zero exit, then the tag.
       const extra = [];
       if (duration !== null) extra.push(duration);
       if (item.exitCode !== null && item.exitCode !== 0) {
-        extra.push(`exit ${item.exitCode}`);
+        extra.push(t("turns.tool.exit", {code: item.exitCode}));
       }
       if (tag) extra.push(tag.short);
       return {state: "success", mark: "✓", text: extra.join(SEPARATOR)};
@@ -1155,7 +1115,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
     case "error":
     case "timeout":
     case "crashed": {
-      const word = {error: "Failed", timeout: "Timed out", crashed: "Crashed"}[item.status];
+      const word = t(`turns.tool.${item.status}`);
       return {
         state: item.status,
         mark: "✗",
@@ -1164,28 +1124,28 @@ export function toolState(item, {held = "", now = 0} = {}) {
     }
     case "blocked": {
       const first = cleanOutput(item.error).trim().split("\n")[0] ?? "";
-      const text = tag ? tag.short : first ? `blocked: ${first}` : "blocked";
+      const text = tag ? tag.short : first ? t("turns.tool.blockedWhy", {reason: first}) : t("turns.tool.blocked");
       return {state: "blocked", mark: "⊘", text};
     }
     case "cancelled": {
       if (item.approval?.origin === "withdrawn") {
-        return {state: "cancelled", mark: "◌", text: "not run"};
+        return {state: "cancelled", mark: "◌", text: t("turns.tool.notRun")};
       }
       return {
         state: "cancelled",
         mark: "⊘",
-        text: duration === null ? "stopped" : `stopped after ${duration}`,
+        text: duration === null ? t("turns.tool.stopped") : t("turns.tool.stoppedAfter", {duration}),
       };
     }
     case "interrupted":
       return {
         state: "interrupted",
         mark: "⊘",
-        text: "Interrupted: may have partly run",
+        text: t("turns.tool.interrupted"),
       };
     case "not_run":
     default:
-      return {state: "not_run", mark: "◌", text: "not run"};
+      return {state: "not_run", mark: "◌", text: t("turns.tool.notRun")};
   }
 }
 
@@ -1200,15 +1160,15 @@ function firstLine(text) {
 /** A reflection's summary line, as `support/cli/render.py` words it. */
 export function reflectionLine(item) {
   const attempt = item.attempt;
-  if (item.status === "running") return `Reflecting after attempt ${attempt}…`;
+  if (item.status === "running") return t("turns.reflection.running", {n: attempt});
   if (item.readable === false) {
     return item.continueRun
-      ? `Reflection after attempt ${attempt} could not be read; the run continues.`
-      : `Reflection after attempt ${attempt} could not be read, and the run's budget is used up.`;
+      ? t("turns.reflection.unreadable", {n: attempt})
+      : t("turns.reflection.unreadableEnd", {n: attempt});
   }
   // The terminal shows the rationale's first line after the action and the
   // duration in parentheses with a space, not another ` · ` part.
-  let line = `Reflected after attempt ${attempt}: ${String(item.action ?? "")}`;
+  let line = t("turns.reflection.done", {n: attempt, action: String(item.action ?? "")});
   const first = firstLine(item.rationale);
   if (first) line += `${SEPARATOR}${first}`;
   if (item.durationS !== null) line += ` (${formatDuration(item.durationS)})`;

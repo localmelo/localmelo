@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Final, Literal
 
+from localmelo.support.gateway.i18n import said
+
 Kind = Literal["daily", "weekdays", "hours"]
 KINDS: Final = ("daily", "weekdays", "hours")
 MAX_HOURS: Final = 24
@@ -88,6 +90,12 @@ class Schedule:
             return "every hour" if self.hours == 1 else f"every {self.hours} hours"
         day = "every weekday" if self.kind == "weekdays" else "every day"
         return f"{day} at {clock_text(self.minute)}"
+
+    def said(self) -> dict[str, Any]:
+        """:meth:`describe` as words a record keeps for the reader's language."""
+        if self.kind == "hours":
+            return said("schedule.hours", n=self.hours)
+        return said(f"schedule.{self.kind}", time=clock_text(self.minute))
 
     def next_after(self, after: float, tz: tzinfo | None = None) -> float:
         """The first time strictly after *after* (epoch seconds) this schedule is due."""

@@ -10,6 +10,8 @@
  * server runs, it shows the commands that start one and asks again every few seconds, so the
  * model appears without a click; a hidden card or tab asks nothing.
  */
+import {t} from "./i18n.mjs";
+
 const RECHECK_MS = 3000;
 
 const host = (url) => {
@@ -52,31 +54,30 @@ export function setupModelCard({
 
   /** The words of the card's state, and its main action. */
   function copy() {
-    const who = data?.name || "a model server";
+    const who = data?.name || t("setup.aServer");
     const where = host(data?.url);
-    if (phase === "checking") return {title: "Looking for a model server on this Mac…"};
+    if (phase === "checking") return {title: t("setup.looking")};
     if (phase === "connecting") {
-      return {title: `Connecting to ${who}…`, text: "Checking that the model answers. One that is not loaded yet can take a minute."};
+      return {title: t("setup.connecting", {server: who}), text: t("setup.connectingText")};
     }
     if (phase === "failed") {
-      const title = data ? `Could not connect to ${who}` : "Could not look for a model server";
-      return {title, text: failure, label: "Try again", run: data ? use : detect};
+      const title = data ? t("setup.connectFailed", {server: who}) : t("setup.lookFailed");
+      return {title, text: failure, label: t("setup.tryAgain"), run: data ? use : detect};
     }
     if (data.state === "found") {
-      return {title: `Found ${who} on this Mac`, text: `Running at ${where}.`, label: "Use this model", run: use};
+      return {title: t("setup.found", {server: who}), text: t("setup.runningAt", {address: where}), label: t("setup.use"), run: use};
     }
     if (data.state === "needs_key") {
-      const text = `The server at ${where} asks for a key, and localmelo does not send keys to servers on this Mac. If it is oMLX, turn on “Allow inference without API key” in its settings.`;
-      return {title: "A model server needs an API key", text, label: "Check again", run: detect};
+      return {title: t("setup.needsKey"), text: t("setup.needsKeyText", {address: where}), label: t("setup.checkAgain"), run: detect};
     }
     const answered = data.url !== "";
     const {name, commands, note, guide} = data.start;
     return {
-      title: answered ? `Found ${who}, but no model is ready` : "No model server is running on this Mac",
-      text: answered ? `It answered at ${where}: ${data.problem}.` : `To start one with ${name}, run this in a terminal:`,
+      title: answered ? t("setup.noModel", {server: who}) : t("setup.none"),
+      text: answered ? t("setup.answeredAt", {address: where, problem: data.problem}) : t("setup.startOne", {server: name}),
       commands: answered ? [] : commands,
-      note: answered ? "" : `${note} melo finds the server by itself.`,
-      label: "Check again",
+      note: answered ? "" : t("setup.note", {note}),
+      label: t("setup.checkAgain"),
       run: detect,
       guide,
     };
@@ -94,7 +95,7 @@ export function setupModelCard({
       row.append(radio);
     }
     row.append(el("span", "setup-model-id", id));
-    if (data.loaded.includes(id)) row.append(el("span", "setup-loaded", "Loaded"));
+    if (data.loaded.includes(id)) row.append(el("span", "setup-loaded", t("setup.loaded")));
     return row;
   }
 
@@ -114,20 +115,20 @@ export function setupModelCard({
       const block = el("pre", "setup-commands", commands.join("\n"));
       block.tabIndex = 0;
       block.setAttribute("role", "group");
-      block.setAttribute("aria-label", "Commands");
+      block.setAttribute("aria-label", t("setup.commands"));
       parts.push(block, el("p", "", note));
     }
     const main = label ? button("primary-button", label, run) : null;
     if (list) {
       const group = el("fieldset", "setup-models");
-      group.append(el("legend", "", "Pick the model to use"));
+      group.append(el("legend", "", t("setup.pick")));
       group.append(...data.models.map((id) => modelRow(id, (value) => {
         picked = value;
         main.disabled = false;
       })));
       parts.push(group);
       if (data.loaded.length < data.models.length) {
-        parts.push(el("p", "", "A model that is not loaded yet can take minutes and a lot of memory to load."));
+        parts.push(el("p", "", t("setup.slowLoad")));
       }
       main.disabled = !picked;
     } else if (found && phase === "ready") {
@@ -135,21 +136,21 @@ export function setupModelCard({
     }
     const actions = el("div", "setup-actions");
     if (main) actions.append(main);
-    if (found && !list && data.models.length > 1) actions.append(button("link-button", "Choose another…", choose));
-    if (phase === "failed" || (phase === "ready" && !found)) actions.append(button("link-button", "Enter a server address…", openSettings));
+    if (found && !list && data.models.length > 1) actions.append(button("link-button", t("setup.another"), choose));
+    if (phase === "failed" || (phase === "ready" && !found)) actions.append(button("link-button", t("setup.address"), openSettings));
     if (commands.length) {
-      const copyButton = button("link-button", "Copy commands", async () => {
+      const copyButton = button("link-button", t("setup.copy"), async () => {
         try {
           await writeText(commands.join("\n"));
-          copyButton.textContent = "Copied";
+          copyButton.textContent = t("setup.copied");
         } catch {
-          copyButton.textContent = "Copy failed: select the commands";
+          copyButton.textContent = t("setup.copyFailed");
         }
       });
       actions.append(copyButton);
     }
     if (guide) {
-      const link = el("a", "link-button", "Read the model servers guide");
+      const link = el("a", "link-button", t("setup.guide"));
       Object.assign(link, {href: guide, target: "_blank", rel: "noopener noreferrer"});
       actions.append(link);
     }
@@ -232,7 +233,7 @@ export function setupModelCard({
       };
       await api("/settings", {method: "PUT", body: {...candidate, revision: settings.revision}});
       const test = await api("/settings/test", {body: candidate});
-      if (test.ok !== true) throw new Error(test.error || "The model did not answer.");
+      if (test.ok !== true) throw new Error(test.error || t("setup.noAnswer"));
       if (mine !== version) return;
       phase = "ready"; // Saved and answering: the page may hide the card now.
       await connected();

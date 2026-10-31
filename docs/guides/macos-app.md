@@ -43,6 +43,14 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 - The log is `~/Library/Logs/LocalMelo/gateway.log`; a problem never shows a dialog or closes the app.
 - The first-run setup is the console's **Settings** (its **Model server** section); the app uses the usual config and chats in `~/.cache/localmelo`.
 
+<a id="language"></a>
+
+## Language
+
+- The window, the menus, the pill, the pet's menu and the quit dialog speak the console's language: English or Simplified Chinese, chosen from your Mac's preferred languages.
+- **Settings → Appearance → Language** (or `melo config set console.language zh-Hans`, `en` or `auto`) chooses one for the app and the console. The window changes at once; the menus, the pill and the dialogs change the next time the app opens.
+- The console in the app picks its language the same way, from the Mac's languages; see [Web console: language](web-console.md#language).
+
 ## The menu-bar item
 
 | You see | It means |

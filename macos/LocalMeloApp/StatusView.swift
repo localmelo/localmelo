@@ -125,7 +125,7 @@ final class StatusView: NSView {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isIndeterminate = true
-        spinner.setAccessibilityLabel("Starting localmelo")
+        spinner.setAccessibilityLabel(L10n.t("app.start.label", "Starting localmelo"))
         working.spacing = 8
         working.addArrangedSubview(spinner)
         working.addArrangedSubview(step)
@@ -161,7 +161,7 @@ final class StatusView: NSView {
     /// `ready` is true once the gateway is up and the console is loading: Melo stops working and waits calmly.
     func showStarting(step text: String, ready: Bool) {
         portraitView.show(startPortrait(failed: false, ready: ready))
-        title.stringValue = "Starting localmelo…"
+        title.stringValue = L10n.t("app.start.title", "Starting localmelo…")
         step.stringValue = text
         working.isHidden = false
         reason.isHidden = true
