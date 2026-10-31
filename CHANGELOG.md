@@ -30,6 +30,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
 - A resumed task waits its turn by level: a task that comes back after an approval is admitted by level and then age, whatever order the answers came in, and when every worker slot is taken a higher-level queued task makes the lowest worker park at its next step boundary (never in the middle of a tool) and queue again. A chat counts as focused only while a call of its turn is running and for `[scheduler] focus_s` seconds (new, default 10; the window was 30) after its last call or keystroke, so an open chat with no turn running leaves the server's free slots to tasks. A held task says why in the panel and the activity rows (`Waiting for a higher-priority task`, `Waiting for a free model slot`) ([#332]).
 
+- Priorities read as P0 to P5 everywhere a person sees one. A menu says what
+  each means (`P1 · today`, `P3 · when there is time`, `P4 · only when the
+  computer is idle`, `P5 · on hold until you start it`), a chip shows the code
+  with its meaning as a tooltip, and the main chat's lines, the panel's list,
+  the Scheduled tab, the terminal's task bar and list and `melo task` all use
+  the same codes in both modes; before, default mode used the words (Now,
+  Today, Normal, Whenever, If idle, Later) and only developer mode showed the
+  codes. Typing is unchanged: "today", "no rush", "later", the old words,
+  `P1` and `1` still set the same levels. The API still answers `level_word`
+  beside `level` ([#343]).
+
 ### Security
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
@@ -2775,3 +2786,4 @@ earlier milestones.
 [#334]: https://github.com/localmelo/localmelo/pull/334
 [#335]: https://github.com/localmelo/localmelo/pull/335
 [#342]: https://github.com/localmelo/localmelo/pull/342
+[#343]: https://github.com/localmelo/localmelo/pull/343

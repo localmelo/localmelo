@@ -105,7 +105,7 @@ test('a card node opens its source', () => {
 test('echoes stay in the timeline, never folded like cards, and a later echo answers an earlier one', () => {
   const now = 1_800_000_000;
   const echoes = mainChat.mergeEchoes([], [
-    {id: 2, ts: now - 50, data: {echo: 'started', task_id: 't', title: 'Slides', level: 2, line: 'Started: Slides · Normal'}},
+    {id: 2, ts: now - 50, data: {echo: 'started', task_id: 't', title: 'Slides', level: 2, line: 'Started: Slides · P2'}},
     {id: 3, ts: now - 40, data: {echo: 'control', action: 'pause', task_id: 't', line: 'Paused: Slides'}},
     {id: 4, ts: now - 30, data: {echo: 'undone', task_id: 't', of: 3, line: 'Undone: Slides is going again'}},
     {id: 5, ts: now - 20, data: {echo: 'nonsense'}},
@@ -117,8 +117,7 @@ test('echoes stay in the timeline, never folded like cards, and a later echo ans
   assert.deepEqual([...mainChat.answered(echoes)], [3]);
   assert.deepEqual(mainChat.echoActions(echoes[1], false), [['Undo', 'undo']]);
   assert.deepEqual(mainChat.echoActions(echoes[1], true), []);
-  assert.deepEqual(mainChat.echoActions({kind: 'suggest', action: 'level', level: 1, task_id: 't'}, false), [['Set to Today', 'apply']]);
-  assert.deepEqual(mainChat.LEVELS, ['Now', 'Today', 'Normal', 'Whenever', 'If idle', 'Later']);
+  assert.deepEqual(mainChat.echoActions({kind: 'suggest', action: 'level', level: 1, task_id: 't'}, false), [['Set to P1', 'apply']]);
 });
 
 test('a message sent to a task is an echo line with no buttons; a suggested one sends on a tap', () => {
@@ -235,7 +234,7 @@ test('a chore proposal is drawn as the question, the work it would repeat and th
   const [bubble, line] = mainChat.echoNodes({doc, echo, act: (...args) => acted.push(args.slice(1))});
   assert.equal(bubble.children[0].textContent, 'every weekday at 8:30, brief me on my calendar');
   const text = (node) => [node.textContent, ...node.children.map(text)].filter(Boolean).join(' | ');
-  assert.equal(text(line), '◷ | Run this every weekday at 8:30? | Normal | brief me on my calendar | Save chore | Just once | Cancel');
+  assert.equal(text(line), '◷ | Run this every weekday at 8:30? | P2 | , normal | brief me on my calendar | Save chore | Just once | Cancel');
   const buttons = made.filter((node) => node.tag === 'button');
   assert.deepEqual(buttons.map((node) => node.className), ['outline-button', 'link-button', 'link-button']);
   buttons.forEach((node) => node.handlers.click());
