@@ -76,8 +76,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   offered to pick from, and a task that is done or still working says so. A
   question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话`
   is answered in the main chat instead of being offered as a task. A task the
-  main chat starts is named in 3 to 8 words in your language, not by the first
-  words of your message, and a task held on an approval reads `Needs your
+  main chat starts begins at once and is renamed in 3 to 8 words in your
+  language, not by the first words of your message, when the model answers (a
+  name you gave it meanwhile stays), and a task held on an approval reads `Needs your
   approval` in the Activity row (a wait for a model slot keeps `Waiting for
   the model`). [#NN]
 - Chinese, finished. Times and dates follow the page's language, not the

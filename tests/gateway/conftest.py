@@ -45,6 +45,10 @@ def _close_stores(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         store._release_owner()
 
 
+# The real request for a title, kept for the one test that checks it.
+REAL_ASK_TITLE = Front._ask_title
+
+
 @pytest.fixture(autouse=True)
 def _no_title_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     """A task's title is asked of the model only in production.

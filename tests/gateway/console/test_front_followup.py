@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
@@ -32,6 +34,7 @@ from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import short_title
 from localmelo.tests.sessions.helpers import answer, tool_call
 
+from ..conftest import REAL_ASK_TITLE
 from .conftest import HOLDER, run_result
 from .test_front import _echoes, _four_steps, _say, _start, _task, front_console
 from .test_turn_writes import _wait_turn
@@ -545,23 +548,56 @@ class Titles:
         return self.reply
 
 
-async def test_a_task_code_starts_is_named_by_the_model_in_a_few_words(
+async def _session_title(console: Console, task_id: str) -> str:
+    info = await console.store.get_session(task_id)
+    assert info is not None
+    return info.title
+
+
+async def _title_events(console: Console, task_id: str) -> list[str]:
+    events = await console.store.list_events(task_id)
+    return [
+        e.event["data"]["title"] for e in events if e.event["type"] == "session.title"
+    ]
+
+
+async def test_a_task_starts_at_once_and_is_named_by_the_model_when_it_answers(
     tmp_path: Path,
 ) -> None:
-    titles = Titles('"Hide the recovery card in default mode."\nbecause it is empty')
-    async with front_console(tmp_path, titler=titles) as (console, client, llm):
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def slow(request: str) -> str:
+        asked.append(request)
+        await release.wait()
+        return '"Hide the recovery card in default mode."\nbecause it is empty'
+
+    async with front_console(tmp_path, titler=slow) as (console, client, llm):
         echo = (await _say(client, console, FIX)).json()["echo"]
-        assert echo["line"] == "Started: Hide the recovery card in default mode · P1"
-        record = await _task(console, echo["task_id"])
-        assert record.title == "Hide the recovery card in default mode"
-        assert record.spec["objective"] == FIX
-        assert titles.asked == [FIX]
+        # The answer did not wait for the title: the task runs under the first words.
+        first = short_title(FIX)
+        assert echo["line"] == f"Started: {first} · P1"
+        task_id = echo["task_id"]
+        assert (await _task(console, task_id)).title == first
+        assert await _session_title(console, task_id) == first
+        assert asked == [FIX]
+        release.set()
+        await console.front.drain()
+        # The task, its session and the event the page reads all say the new title.
+        title = "Hide the recovery card in default mode"
+        record = await _task(console, task_id)
+        assert (record.title, record.spec["objective"]) == (title, FIX)
+        assert await _session_title(console, task_id) == title
+        assert await _title_events(console, task_id) == [title]
+        assert [
+            r["title"] for r in (await client.get("/api/tasks")).json()["tasks"]
+        ] == [title]
         assert llm.requests == []
-        # The same for /task, once the request is longer than a title.
-        longer = "/task " + FIX + " " + FIX
-        again = (await _say(client, console, longer)).json()["echo"]
-        assert again["title"] == "Hide the recovery card in default mode"
-        assert titles.asked[-1] == FIX + " " + FIX
+        # The same for /task once the request is longer than a title.
+        again = (await _say(client, console, "/task " + FIX + " " + FIX)).json()["echo"]
+        await console.front.drain()
+        assert (await _task(console, again["task_id"])).title == title
+        assert asked[-1] == FIX + " " + FIX
 
 
 async def test_a_short_request_is_its_own_title_and_asks_no_model(
@@ -572,6 +608,7 @@ async def test_a_short_request_is_its_own_title_and_asks_no_model(
         echo = (await _say(client, console, "/task make slides from notes.md")).json()[
             "echo"
         ]
+        await console.front.drain()
         assert echo["line"] == "Started: make slides from notes.md · P2"
         assert titles.asked == []
 
@@ -583,28 +620,94 @@ async def test_a_short_request_is_its_own_title_and_asks_no_model(
         "",
         "Fix",
         "The title of this work is a very long sentence that goes on and on and on",
+        short_title(FIX),  # the model's title is the first words: nothing changes
     ],
 )
-async def test_a_title_the_model_cannot_give_falls_back_to_the_first_words(
+async def test_a_title_the_model_cannot_give_leaves_the_first_words(
     tmp_path: Path, reply: str | Exception
 ) -> None:
     async with front_console(tmp_path, titler=Titles(reply)) as (console, client, _):
         echo = (await _say(client, console, FIX)).json()["echo"]
-        assert echo["title"] == short_title(FIX)
+        await console.front.drain()
+        record = await _task(console, echo["task_id"])
+        assert record.title == await _session_title(console, record.task_id)
+        assert record.title == short_title(FIX)
+        assert await _title_events(console, record.task_id) == []
 
 
-async def test_a_title_that_takes_too_long_falls_back(
+async def test_a_title_that_takes_too_long_leaves_the_first_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(front_module, "TITLE_TIMEOUT_S", 0.05)
 
     async def slow(request: str) -> str:
         await asyncio.sleep(5)
-        return "Too late"
+        return "Too late for this task"
 
     async with front_console(tmp_path, titler=slow) as (console, client, _):
         echo = (await _say(client, console, FIX)).json()["echo"]
-        assert echo["title"] == short_title(FIX)
+        await console.front.drain()
+        assert (await _task(console, echo["task_id"])).title == short_title(FIX)
+        assert await _title_events(console, echo["task_id"]) == []
+
+
+async def test_a_task_the_person_renamed_meanwhile_keeps_their_name(
+    tmp_path: Path,
+) -> None:
+    release = asyncio.Event()
+
+    async def late(request: str) -> str:
+        await release.wait()
+        return "Hide the recovery card in default mode"
+
+    async with front_console(tmp_path, titler=late) as (console, client, _):
+        echo = (await _say(client, console, FIX)).json()["echo"]
+        task_id = echo["task_id"]
+        assert await console.store.rename_session(task_id, "My own name")
+        release.set()
+        await console.front.drain()
+        assert await _session_title(console, task_id) == "My own name"
+        assert await _title_events(console, task_id) == ["My own name"]
+        # The task row was not named either: its first words stay for the list.
+        assert (await _task(console, task_id)).title == short_title(FIX)
+
+
+async def test_the_title_request_asks_at_the_lowest_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, int]] = []
+
+    class Provider(BaseLLMProvider):
+        async def chat(self, messages: list[Message], tools: Any = None) -> Message:
+            gate = holder[0].gate
+            seen.extend(
+                (name, gate.level(name))
+                for name in list(gate._levels)  # noqa: SLF001
+                if name.startswith("title:")
+            )
+            return Message(role="assistant", content="Hide the recovery card now")
+
+        async def close(self) -> None:
+            pass
+
+    class Backend:
+        def build_chat_provider(self, cfg: Any) -> Provider:
+            return Provider()
+
+    holder: list[Console] = []
+    async with front_console(tmp_path) as (console, client, _):
+        holder.append(console)
+        monkeypatch.setattr(
+            "localmelo.support.backends.registry.get_backend", lambda name: Backend()
+        )
+        # The suite's stand-in refuses the request; call the real one.
+        title = await REAL_ASK_TITLE(console.front, FIX)
+        assert title == "Hide the recovery card now"
+        assert [level for _, level in seen] == [4]
+        # Its bookkeeping goes with the request.
+        assert not [
+            n for n in console.gate._levels if n.startswith("title:")
+        ]  # noqa: SLF001
 
 
 async def test_the_model_names_its_own_tasks_without_a_second_request(

@@ -1028,6 +1028,19 @@ class TaskStore:
             )
         return (rows[0][0], rows[0][1], rows[0][2]) if rows else None
 
+    async def set_title(self, task_id: str, title: str, *, was: str) -> bool:
+        """Name the task *title* while it is still called *was*; ``False`` if it is not.
+
+        The task's session has its own title (the session store renames it);
+        this is the row the task list and its page read.
+        """
+        async with self._store.component_transaction("task_title") as conn:
+            cursor = await conn.execute(
+                "UPDATE tasks SET title = ? WHERE task_id = ? AND title = ?",
+                (title, task_id, was),
+            )
+            return bool(cursor.rowcount)
+
     async def priority_events(self, task_id: str) -> list[dict[str, Any]]:
         async with self._store.component_transaction("task_events") as conn:
             rows = await _rows(

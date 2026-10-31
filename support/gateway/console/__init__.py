@@ -399,6 +399,7 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
+        await self.front.aclose()
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()

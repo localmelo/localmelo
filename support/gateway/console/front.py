@@ -186,6 +186,14 @@ def handoff_text(typed: str, *, asks: bool) -> str:
     return ASK_TEXT if asks else STARTED_TEXT
 
 
+def wants_title(request: str) -> bool:
+    """Whether *request* is too long to be its own title (one line that fits one is)."""
+    text = request.strip()
+    return "\n" in text or len(text) > (
+        TITLE_CHARS_ZH if is_chinese(text) else TITLE_CHARS
+    )
+
+
 def clean_title(raw: str) -> str:
     """A model's reply as a task title, or ``""`` when it is not one.
 
@@ -620,6 +628,8 @@ class Front:
         self._acting = asyncio.Lock()
         # When the main chat's last turn read the tasks that ended.
         self._seen_at = time.time()
+        # The requests for a task's title that are still out.
+        self._naming: set[asyncio.Task[None]] = set()
 
     def typed(self) -> str:
         """What the person typed in the running turn, never an attachment ("" with none).
@@ -872,16 +882,24 @@ class Front:
     ) -> dict[str, Any]:
         """Start *work* as a task the main chat owns, at the level the person's words give."""
         level, reason = triage(typed)
-        # The model's task_create gives a title; every other start names its work here.
-        title = title or await self.titled(work)
         try:
-            spec = TaskSpec.from_payload({"objective": work, "title": title or None})
+            spec = TaskSpec.from_payload(
+                {
+                    "objective": work,
+                    "title": title or short_title(typed.strip() or work),
+                }
+            )
         except TaskPolicyError as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         main = self.console.main_id
-        return await self._start(spec, main, show=show, key=key, turn=turn, of=of)
+        # The task starts at once, under the request's first words; the model's
+        # task_create brings a title of its own, any other long request is named later.
+        echo = await self._start(spec, main, show=show, key=key, turn=turn, of=of)
+        if not title and echo.get("echo") == "started" and wants_title(work):
+            self._name_later(str(echo["task_id"]), spec.title, work)
+        return echo
 
     async def _start(
         self,
@@ -1048,27 +1066,47 @@ class Front:
             action=action, **extra,
         )  # fmt: skip
 
-    async def titled(self, request: str) -> str:
-        """A short title that names *request*'s work, in its language (3-8 words).
+    def _name_later(self, task_id: str, first_words: str, request: str) -> None:
+        """Ask the model for the task's title without holding the task back."""
+        task = asyncio.create_task(self._name(task_id, first_words, request))
+        self._naming.add(task)
+        task.add_done_callback(self._naming.discard)
 
-        A request that is short is its own title. A longer one asks the model
-        once, with the words ``task_create`` uses for its title; when the model
-        does not answer in time, or not with a title, the request's first words
-        stand in. The tasks the model starts itself already come with a title.
+    async def _name(self, task_id: str, first_words: str, request: str) -> None:
+        """Give *task_id* a title that names its work (3-8 words, the request's language).
+
+        The task already runs under *first_words*. The model is asked once,
+        with the words ``task_create`` uses for its title and the lowest level,
+        so it never waits ahead of real work; when it does not answer in time,
+        or not with a title, the first words stay. The title replaces them
+        only while the task still has them: a task the person renamed meanwhile
+        keeps their name, and a title equal to the first words changes nothing.
         """
-        plain = short_title(request)
-        text = request.strip()
-        if "\n" not in text and len(text) <= (
-            TITLE_CHARS_ZH if is_chinese(text) else TITLE_CHARS
-        ):
-            return plain
         ask = self.console.options.titler or self._ask_title
         try:
-            raw = await asyncio.wait_for(ask(text[:TITLE_INPUT_CHARS]), TITLE_TIMEOUT_S)
-        except Exception as exc:  # no model, no answer in time: code's words
-            logger.info("The task's title is its first words: %s", exc)
-            return plain
-        return clean_title(raw) or plain
+            raw = await asyncio.wait_for(
+                ask(request.strip()[:TITLE_INPUT_CHARS]), TITLE_TIMEOUT_S
+            )
+            title = clean_title(raw)
+            if title and title != first_words:
+                store = self.console.store
+                if await store.rename_session(task_id, title, only_if=first_words):
+                    await self.console.workers.tasks.set_title(
+                        task_id, title, was=first_words
+                    )
+        except (
+            Exception
+        ) as exc:  # no model, no answer in time, a store gone: first words
+            logger.info("The task keeps its first words as its title: %s", exc)
+
+    async def drain(self) -> None:
+        """Wait for the title requests that are out (the tests', and the close's)."""
+        await asyncio.gather(*list(self._naming), return_exceptions=True)
+
+    async def aclose(self) -> None:
+        for task in list(self._naming):
+            task.cancel()
+        await self.drain()
 
     async def _ask_title(self, request: str) -> str:
         from localmelo.support.backends.registry import get_backend
@@ -1077,6 +1115,7 @@ class Front:
         inner = get_backend(cfg.chat_backend).build_chat_provider(thinking_off(cfg))
         # A session of its own for each title, dropped from the gate when it is done.
         session = f"title:{self.console.main_id}:{time.time_ns()}"
+        self.console.gate.set_level(session, 4)  # P4, the lowest a chat's call has
         gate = self.console.gate.client(session)
         try:
             reply = await GatedLLM(inner, gate).chat(
