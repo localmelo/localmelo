@@ -162,6 +162,23 @@ What a chat is told about memory:
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 
+### What a task starts with
+
+A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows about you comes in one short **context pack** that the chat that started it builds once, when the task is created. Workers do not use it yet; the pack is ready for the chat to call.
+
+- It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
+- In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out.
+- Never in it: People and Decisions notes. A worker browses and calls outside tools, so it gets the least that it needs.
+- At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. Building it asks no chat model; with an embedding model set up, the objective is matched by meaning too, with the 1.5 s limit above.
+
+### Side-chat summaries
+
+When a side chat ends, its summary is indexed under that chat as one earlier-chat entry (`Summary of chat “Fix CI”: …`; secrets redacted, at most 2,000 characters). Any other chat recalls it like a turn, and `Used … ▾` names it `chat “Fix CI” · summary`. Ending the chat again replaces the summary; deleting the chat deletes it. It is never a note, and the chat itself never recalls its own summary.
+
+### A task's questions are not your notes
+
+A task asks its owner chat when it is stuck. The owner chat answers it in an internal turn, marked `ask_owner`: the request is the turn's text, and it is agent data, not your words. The owner chat may recall memory to answer, but nothing from that turn becomes a note: `remember` replies `Not remembered: this turn is a task's question, not the user's words.`, the checks that keep a fact you stated or changed do nothing, the turn's text is no proof that you said something, and it is not indexed as a chat turn. The question and the answer are indexed together under the task (`Task asked: … Answer: …`), recallable like a turn and never a note.
+
 ### See and change what melo remembers
 
 ![The Memory tab of the console's panel: notes melo keeps about you, each with its source chat, Edit and Delete.](../assets/img/memory-tab.webp)

@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task can start with a short memory pack, a side chat's summary can be
+  recalled from other chats, and a task's questions to its owner chat are kept
+  apart from your notes: the pack holds your About you and Preferences notes,
+  the project's notes and the notes that match the objective (never People or
+  Decisions); a question from a task is agent data that no note is written
+  from. Nothing calls these yet. Part of #369. [#374]
 - Bring in what other coding assistants on this computer remember. A scan
   (`GET /api/memory/import/scan`) reads the instruction and memory files they
   keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -3113,3 +3119,4 @@ earlier milestones.
 [#370]: https://github.com/localmelo/localmelo/pull/370
 [#371]: https://github.com/localmelo/localmelo/pull/371
 [#372]: https://github.com/localmelo/localmelo/pull/372
+[#374]: https://github.com/localmelo/localmelo/pull/374
