@@ -23,6 +23,7 @@ from localmelo.melo.schema import Message
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.cards import CARD_EVENT
+from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
     ASK_TEXT,
     ECHO_EVENT,
@@ -41,9 +42,12 @@ from .test_turn_writes import _create, _post_turn, _wait_turn, console_with
 
 @contextlib.asynccontextmanager
 async def front_console(
-    tmp_path: Path, *replies: Message
+    tmp_path: Path, *replies: Message, chores: ChoreOptions | None = None
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, ScriptedLLM]]:
-    """A console whose main chat runs a FrontAgent on *replies*; workers never start."""
+    """A console whose main chat runs a FrontAgent on *replies*; workers never start.
+
+    *chores* replaces the chore clock, beats and summary of the console.
+    """
     llm = ScriptedLLM(replies)
     holder: list[Console] = []
 
@@ -67,6 +71,7 @@ async def front_console(
             front_builder=front,
             probe=FakeProbe(),
             gate=quiet_gate(),
+            chores=chores,
         ),
     )
     holder.append(console)

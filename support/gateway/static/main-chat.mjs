@@ -158,8 +158,8 @@ export function cardNode({doc, card, open}) {
 
 // ── Echoes: what the main chat did with a task ──
 
-const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed"]);
-const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!",
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "chore", "chore_saved", "checkin"]);
+const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", chore: "◷", chore_saved: "◷", checkin: "◷",
   stop: "■", pause: "‖", resume: "▶", first: "↑"};
 
 /** An echo as the page keeps it, from an `echoes` row or an `attention.echo` frame; null if unusable. */
@@ -187,7 +187,9 @@ export function answered(echoes) {
 
 /** An echo's buttons: `[label, do]`; a level change opens the level list. */
 export function echoActions(echo, done) {
-  if (done || !echo.task_id && echo.kind !== "ask") return [];
+  if (done || !echo.task_id && !["ask", "chore", "chore_saved"].includes(echo.kind)) return [];
+  if (echo.kind === "chore") return [["Save chore", "save"], ["Just once", "once"], ["Cancel", "cancel"]];
+  if (echo.kind === "chore_saved") return [["Undo", "undo"]];
   if (echo.kind === "started" || echo.kind === "level") {
     return echo.kind === "started" ? [["Change", "level"]] : [["Undo", "undo"]];
   }
@@ -233,9 +235,11 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
     chip.dataset.level = String(level);
     body.append(chip);
   }
+  // A chore's proposal names the work it would repeat, under the question.
+  if (echo.kind === "chore" && echo.text) body.append(el("p", "echo-sub", echo.text));
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done)) {
-    const button = el("button", does === "start" ? "outline-button" : "link-button", label);
+    const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);
     button.type = "button";
     button.addEventListener("click", () => {
       if (does !== "level") return act(echo, does);
