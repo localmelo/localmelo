@@ -336,6 +336,7 @@
   "errors.mainNotOpen": "The main chat is not open yet.",
   "errors.messageCancelled": "This message was cancelled before it started.",
   "errors.messageIdUsed": "This message id was already used for a different message.",
+  "errors.modeNotChat": "Only a chat in this window has Ask and Auto.",
   "errors.noAttachments": "attachments: files are not supported yet; send the text alone",
   "errors.noChatUrl": "url: No chat URL is configured.",
   "errors.noFolder": "This chat has no folder yet.",

@@ -339,6 +339,8 @@ file's revision.
   `auto`, `bm25`, `embedding` or `llm`.
 - `language` is `[console] language`, the console's language: `auto`, `en`
   or `zh-Hans`.
+- `approvals` is `[approvals] mode`, the mode a new chat starts in: `ask` or
+  `auto` (another value in the file reads `ask`).
 - `developer_settings` is every key `melo -h all` lists, grouped by section
   in its order (`""` is the top level): `value` is the one in use and
   `default` the default, both as the help prints them; `flag` is the old
@@ -375,6 +377,9 @@ sessions.
 - `language` is optional: `auto`, `en` or `zh-Hans` sets `[console] language`
   (other values are 400 `invalid_request`); omitted, the saved value is kept.
   The page loads again to show the new language.
+- `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
+  new chats start in (other values are 400 `invalid_request`); omitted, the
+  saved value is kept. Chats made before keep their own mode.
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
@@ -564,6 +569,20 @@ the shape of a session's; empty when none; answer one with `POST
 /api/approvals/{request_id}`, as for a chat), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
+
+A task keeps the [mode](#ask-and-auto) its chat had when it was made
+(`approvals`, `ask` or `auto`); a later switch of the chat does not change
+it. A task in Auto asks nobody, so nothing holds it, and its calls run
+under the write sandbox. Its object adds `blocked`, the steps Auto blocked
+(oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
+`review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
+allowed step ran, else `null`), and `allowances` as a chat's. The task goes
+on without a blocked step. `POST
+/api/tasks/{task_id}/blocks/{request_id}/allow` allows it once (as for a
+chat) and sends the go-ahead message to the task: 202 `{"task": ...,
+"message": "queued"}` for a task that has not finished (it reads it at its
+next step), `"continued"` for one that has (it runs again); 404 `not_found`
+for no such block, 409 `not_allowable` for one that cannot be allowed.
 
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
@@ -1183,6 +1202,8 @@ Create a session, usually with its first turn.
 - A create makes a side chat of the [main chat](#get-apisessions): `kind`
   `chat`, `main` false. The main chat already exists; write to it with
   `POST /api/sessions/{id}/turns`.
+- `approvals` is optional: `ask` or `auto`, the new chat's
+  [mode](#ask-and-auto); absent, `[approvals] mode`.
 - `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
   created with mode `0700` when missing. Another value must be absolute or
   start with `~/` and be an existing directory; anything else is 400
@@ -1323,7 +1344,8 @@ event stream, or from `pending_approvals`.
 
 ## PATCH /api/sessions/{id}
 
-Rename the session, move it to another folder, or both.
+Rename the session, move it to another folder, switch it between Ask and
+Auto, or several at once.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
@@ -1342,7 +1364,56 @@ Rename the session, move it to another folder, or both.
   forgotten. The rules are a create's: absolute or `~/`, an existing
   directory, else 400 `invalid_workspace`. 409 `session_busy` while a turn
   runs; a refused move leaves the row as it was.
-- The answer is 200 with the session after both changes.
+- `approvals` is `ask` or `auto`: the chat's [mode](#ask-and-auto) from its
+  next step; a call already waiting for an answer keeps waiting. It is set
+  in the session's `meta` in one transaction that keeps the other keys, and
+  `session.updated` carries the new `meta`. A session that is not a console
+  chat (`chat` or `front`) is 409 `not_a_chat`.
+- The answer is 200 with the session after the changes.
+
+## Ask and Auto
+
+Each console chat has a mode (#339): `ask` (melo asks before commands and
+file changes) or `auto` (nobody is asked; routine steps run, a risky or
+off-request step is blocked and explained). Every session object carries:
+
+- `approvals`: the chat's mode; a task's is the mode its chat had when the
+  task was made. The main chat has `[approvals] mode` until it is set.
+- `allowances`: the steps allowed once in this chat since the gateway
+  started, `step_key` -> when the allowance runs out (Unix seconds); kept
+  after it was used or ran out, so a page can say so.
+
+A blocked step is the `tool.finished` record of its call with an
+`approval` of origin `auto` and `allowed` false (see
+[events](events.md)). In Auto the chat's calls run under the write sandbox
+of `[agent] confine_writes`: a write outside the folder and the temporary
+folders fails, and its output starts with a line that says so.
+
+### POST /api/sessions/{id}/blocks/{request_id}/allow
+
+Allow once the step blocked with `approval.request_id` *request_id*, and send
+the person's message that asks melo to go ahead.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
+```
+
+```json
+{"step_key": "051aab7c5a9691e4d449b7a140164314", "until": 1793401344.2, "turn_id": "9a84…", "turn": {"user_text": "Go ahead with the step melo blocked: install software.", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- The server finds the block in the chat's records; the client never sends
+  a key. The allowance covers that exact step (`step_key`) with the kinds of
+  step the block named, once, for 30 minutes, in memory: a restart forgets
+  it. The retried call is recorded with origin `user` and
+  `allowance: "once"`.
+- The message (in the console's language) starts a turn as
+  `POST /api/sessions/{id}/turns` does; 202 with that turn.
+- 404 `not_found` for no such block in this chat; 409 `not_allowable` for a
+  step that changes localmelo itself or a call a stopped turn did not run;
+  409 `session_busy` while a turn runs (nothing is allowed then); 409
+  `task_session_read_only` for a task (see below) and `not_a_chat` for
+  another kind.
 
 ## DELETE /api/sessions/{id}
 

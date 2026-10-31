@@ -432,6 +432,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 console.sessions.change_workspace(session_id, body.workspace),
                 session_id,
             )
+        if body.approvals is not None and info.kind not in ("chat", "front"):
+            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         if body.approvals is not None:
             await _sessions_call(
                 console,
@@ -464,6 +466,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         info = await _require_session(console, session_id)
         if info.kind == "task":
             raise ApiError(409, "task_session_read_only", t("errors.taskChange"))
+        if info.kind not in ("chat", "front"):
+            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         approval = await _store_call(
             console, find_block(console.store, session_id, request_id), session_id
         )

@@ -241,6 +241,19 @@
 
 只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
 
+<a id="auto-mode"></a>
+
+## 自动模式
+
+在 **Auto**（自动）下，melo 不问就做：常规步骤直接运行，有风险的步骤或你没要求的步骤会被拦下并说明原因。默认的 **Ask**（询问）会在运行命令和更改文件前先问你。
+
+- **切换。** 输入框下方模型旁边的按钮写着 **Ask** 或 **Auto**；它的菜单“melo 在这个对话里怎么做”从 melo 的下一步起切换这个对话（已经在等待的卡片保持不变）。新对话以 设置 → 对话与文件夹 → **新对话开始时**（`[approvals] mode`）中的模式开始；主对话在你为它选定模式之前跟随这个设置。
+- **会运行什么。** 在对话文件夹内、不安装、不下载、不发送、不删除任何东西的步骤。melo 无法判断的步骤先交给你的模型，只有在它属于常规且是你要求的内容时才会运行。在自动模式下，写入文件夹之外的操作即使没有被规则发现也会失败：它的输出写着 `writing outside the workspace is not allowed in auto mode`。
+- **会拦下什么。** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、来自网络的代码等，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行。该步骤的那一行写着 `blocked: installs software`，工作内容下方的卡片说明拦下了什么、为什么，并显示这一步，melo 的回答会给出其他办法。
+- **允许它。** **Allow once**（允许一次）在 30 分钟内只运行这一步一次，并以你的名义发送“Go ahead with the step melo blocked: install software.”；或者回复“继续”。使用密码或密钥、更改系统设置、设置以后自动运行的东西、运行来自网络的代码或 melo 无法检查的代码的步骤，需要点按钮。melo 工作时按钮会等待；之后卡片写着 `Allowed once · ran at 14:02` 或 `Allowance expired`。
+- **任务。** 任务保留创建它时所在对话的模式。任务页面显示 **模式**，并列出 **被拦下的步骤**，每一项都能打开同样的卡片；任务在没有这些步骤的情况下继续，在那里点 **Allow once** 会把消息发给这个任务。
+- 允许只保存在内存中：重启 localmelo 后会忘记。
+
 <a id="persistence-and-limits"></a>
 
 ## 持久化与限制

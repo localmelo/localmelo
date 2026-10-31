@@ -194,6 +194,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）。
 - `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
 - `language` 是 `[console] language`，即控制台的语言：`auto`、`en` 或 `zh-Hans`。
+- `approvals` 是 `[approvals] mode`，即新对话开始时的模式：`ask` 或 `auto`（文件中的其他值按 `ask` 读取）。
 - `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
@@ -211,6 +212,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
+- `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
@@ -311,6 +313,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
 /api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
+
+任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。任务在没有被拦下步骤的情况下继续。`POST
+/api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
+"message": "queued"}`（它在下一步读到消息），已结束的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`。
 
 明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
 
@@ -627,6 +633,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - 创建得到的是[主对话](#get-apisessions)的一个旁支对话：`kind` 为 `chat`，`main` 为 false。主对话已经存在；向它发消息请用 `POST /api/sessions/{id}/turns`。
+- `approvals` 是可选的：`ask` 或 `auto`，即新对话的[模式](#ask-and-auto)；缺失时取 `[approvals] mode`。
 - `workspace` 是可选的。缺失或为 `null` 时为 `~/localmelo-workspace`，不存在时以权限 `0700` 创建。其他值必须是绝对路径或以 `~/` 开头，并且是现有目录；其他任何情况都是 400 `invalid_workspace`，且不会创建智能体。
 - `turn` 是可选的。不带它时，回答是仅含 `session` 的 201，会话等待 `POST /api/sessions/{id}/turns`。
 - `session.model` 是本请求中设置的对话模型。第一条消息的文本会成为标题：空白被折叠，最多 60 个字符，超出时以 `…` 结尾。
@@ -717,7 +724,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 ## PATCH /api/sessions/{id}
 
-重命名会话、把它移动到另一个文件夹，或两者同时进行。
+重命名会话、把它移动到另一个文件夹、在 Ask 和 Auto 之间切换，或同时进行其中几项。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
@@ -731,7 +738,35 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话对任一变更都返回 409 `task_session_read_only`。
 - `title` 会被去除首尾空白，且必须为 1 到 200 个字符；其他长度返回 400 `invalid_request`。重命名的标题永远不会被自动标题替换。
 - `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话的工具授权会被遗忘。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
-- 两项变更之后，回答为 200，附带会话。
+- `approvals` 是 `ask` 或 `auto`：从下一步起对话的[模式](#ask-and-auto)；已经在等待回答的调用继续等待。它在一个事务中写入会话的 `meta`，并保留其他键；`session.updated` 带有新的 `meta`。不是控制台对话（`chat` 或 `front`）的会话返回 409 `not_a_chat`。
+- 变更之后，回答为 200，附带会话。
+
+<a id="ask-and-auto"></a>
+
+## Ask 和 Auto
+
+每个控制台对话都有一个模式（#339）：`ask`（melo 在运行命令和更改文件前先问你）或 `auto`（不问任何人；常规步骤直接运行，有风险或超出请求的步骤会被拦下并说明原因）。每个会话对象都带有：
+
+- `approvals`：对话的模式；任务的模式是创建任务时其对话的模式。主对话在被设定之前取 `[approvals] mode`。
+- `allowances`：自网关启动以来在这个对话中被允许一次的步骤，`step_key` -> 允许的到期时间（Unix 秒）；用过或过期后仍保留，便于页面说明。
+
+被拦下的步骤是其调用的 `tool.finished` 记录，带有来源为 `auto` 且 `allowed` 为 false 的 `approval`（见[事件](events.md)）。在 Auto 下，对话的调用在 `[agent] confine_writes` 的写入沙箱中运行：写入文件夹和临时文件夹之外会失败，其输出以一行说明开头。
+
+### POST /api/sessions/{id}/blocks/{request_id}/allow
+
+允许一次以 `approval.request_id` 为 *request_id* 被拦下的步骤，并以本人的名义发送让 melo 继续的消息。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
+```
+
+```json
+{"step_key": "051aab7c5a9691e4d449b7a140164314", "until": 1793401344.2, "turn_id": "9a84…", "turn": {"user_text": "Go ahead with the step melo blocked: install software.", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- 服务器在对话的记录中找到被拦下的步骤；客户端从不发送键。允许只涵盖那个确切的步骤（`step_key`）以及拦下时所列的步骤类别，只运行一次，30 分钟内有效，保存在内存中：重启后会被忘记。重试的调用记录为来源 `user` 且带 `allowance: "once"`。
+- 这条消息（使用控制台的语言）会像 `POST /api/sessions/{id}/turns` 一样开始一个轮次；返回 202，附带该轮次。
+- 对话中没有这个被拦下的步骤时返回 404 `not_found`；更改 localmelo 本身的步骤或已停止轮次未运行的调用返回 409 `not_allowable`；轮次运行期间返回 409 `session_busy`（此时不会允许任何东西）；任务（见下文）返回 409 `task_session_read_only`，其他类型返回 `not_a_chat`。
 
 ## DELETE /api/sessions/{id}
 

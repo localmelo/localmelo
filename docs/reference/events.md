@@ -344,7 +344,8 @@ The number of `tool.started` events is `RunResult.n_tool`.
   `{error, ms}`) and `step_key` (32 hex characters: the same step in the same
   folder); a step allowed once has `allowance: "once"`. Origin `auto` with
   `allowed: false` is a step auto mode blocked; `reason` then names it in a few
-  words (`installs software`). See
+  words (`installs software`); the console's
+  [Allow once](api-v2.md#ask-and-auto) finds it by `request_id`. See
   [Approve tool calls](../guides/python.md#approve-tool-calls).
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
@@ -694,7 +695,7 @@ and `"run_id": ""`.
 | `turn.pictures` | A console turn made pictures: after its run's last event, before `turn.finished`. Absent when it made none, and in the terminal's file. | `turn`, `turn_id`, `pictures` |
 | `turn.memory` | What [memory across chats](../concepts/memory.md#memory-across-chats) did for a console turn, before its run's first event, on every turn with memory on, and again, whole and the same shape, each time the chat's model keeps a note with `remember` or tries to keep a secret (the newest one counts): `used` (`[{kind: record\|chat, id, text, source, session_id, turn, at}]`, what was recalled into the message), `remembered` (`[{id, text, topic}]`, the notes the turn kept: those the typed text asked for, then the model's), `refused` (why something was not kept, or `""`) and `recall` (how the search went: `{retriever: bm25\|embedding\|llm, fallback: none\|timeout\|error\|unreadable\|no-embedding, embed_ms, search_ms, select_ms, select_tokens: {prompt, completion}, candidates, used, block_chars}` (`block_chars`: the length of the block memory added to the message, 0 when none), the numbers `[memory] retriever` is compared by; the stored turn's `result` repeats it as `memory_recall`). Absent with memory off, and in the terminal's file. | `turn`, `turn_id`, `used`, `remembered`, `refused`, `recall` |
 | `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
-| `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `workspace_label`, `meta` |
+| `session.updated` | The session's model, workspace or `meta` changes (a console chat's mode is `meta.approvals`, `ask` or `auto`). | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
 | `approval.resolved` | That request is answered or withdrawn. | `request_id`, `call_id`, `tool_name`, `outcome`, `origin`, `reason`, `remember` |
 

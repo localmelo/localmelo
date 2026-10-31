@@ -317,7 +317,14 @@ A call that installs software, downloads files, changes files outside the folder
 - The command, code or file content shows exactly as it will run, wrapped and never cut; control characters and text-reordering characters show escaped with a warning line.
 - The panel shows at most 8 lines of the body, then `… +N lines (v views all)`.
 - `--yolo` runs every tool without asking, and the status bar says `⚠ YOLO: no approvals`; developer mode adds the tool's permission tier (see [Permission tiers](tools-mcp.md#permission-tiers)).
-- `/approvals auto` turns on auto mode: nothing asks. Routine steps run; a high-impact step is blocked unless your own words ask for it, and a step melo cannot judge goes to your model first. A blocked step does not run, its row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways. Say "go ahead" to let it try again. `/approvals ask` turns it off.
+### Auto mode
+
+In auto mode nothing asks: routine steps run, and a risky step or one you did not ask for is blocked and explained.
+
+- **Switch:** `/approvals auto` turns it on for this chat, `/approvals ask` turns it off. `[approvals] mode` (the console's **New chats start in**, or `-X approvals.mode=auto` for one run) starts the terminal's own chat in it.
+- **What runs:** steps inside the folder that install, download, send or delete nothing; a step melo cannot judge goes to your model first. Its `shell_exec` and `python_exec` calls run in the write sandbox, so a write outside the folder fails even when no rule caught it.
+- **What is blocked:** installs, downloads, changes outside the folder, deletes, passwords and keys, system settings and code from the internet, unless your own words ask for them; a change to localmelo itself never runs. The row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways.
+- **Allow it:** say "go ahead" and melo tries again; your model checks that your words ask for it. A step only a click can allow (passwords or keys, system settings, something that runs later, code from the internet or code melo cannot check) needs the console's **Allow once**.
 
 ### The workspace
 

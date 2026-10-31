@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Auto mode in the console and the app: an **Ask / Auto** chip beside the
+  model switches a chat from melo's next step, and Settings → Chats and
+  folders → **New chats start in** (`[approvals] mode`) picks how new chats
+  start (the terminal's own chat too). A step Auto blocked reads
+  `blocked: installs software` in its row, with a card under the work that
+  says what and why, shows the step and offers **Allow once**: that exact step
+  runs once within 30 minutes, after the message "Go ahead with the step melo
+  blocked: …", or reply "go ahead"; a change to localmelo itself can never be
+  allowed. A task keeps the mode of the chat it came from, shows it on its
+  page and lists its blocked steps with the same card; in Auto nothing holds
+  it. Calls Auto decides run in the write sandbox, so a write outside the
+  folder fails even when no rule caught it. Also: an edit that adds a second
+  call melo cannot read now counts; only the running localmelo is "localmelo
+  itself", not another copy of its source; a step's names for the "did you ask
+  for it" check come from its commands and code, not its other strings; and
+  the browser's site question respects a stopped turn. [#NN]
 - The web console and the macOS app speak Simplified Chinese. They follow the
   browser's or the Mac's languages; **Settings → Appearance → Language**
   (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`

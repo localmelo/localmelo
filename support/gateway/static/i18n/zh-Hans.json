@@ -321,6 +321,7 @@
   "errors.mainNotOpen": "主对话还没有打开。",
   "errors.messageCancelled": "这条消息在开始前已被取消。",
   "errors.messageIdUsed": "这个消息 ID 已被另一条消息使用。",
+  "errors.modeNotChat": "只有这个窗口里的对话才有“询问”和“自动”。",
   "errors.noAttachments": "attachments：还不支持文件，请只发送文字",
   "errors.noChatUrl": "url：没有配置对话 URL。",
   "errors.noFolder": "这个对话还没有文件夹。",
