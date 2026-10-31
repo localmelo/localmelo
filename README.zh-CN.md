@@ -36,12 +36,16 @@
 
 ## 安装
 
+<!-- usage:install -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/install.dark.svg"><img alt="终端: 安装" src="docs/assets/usage/install.light.svg"></picture>
+
 ```bash
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 uv sync --extra gateway
 source .venv/bin/activate
 ```
+<!-- /usage -->
 
 请保留目录名 `localmelo`：软件包就是从这个目录构建的。不使用 uv 时，请看[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)。
 
@@ -49,9 +53,13 @@ source .venv/bin/activate
 
 在搭载 Apple 芯片的 Mac 上，在克隆下来的目录里运行一条命令，就能构建应用并安装到 `~/Applications`，不需要管理员权限：
 
+<!-- usage:app-install -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/app-install.dark.svg"><img alt="终端: 构建 App" src="docs/assets/usage/app-install.light.svg"></picture>
+
 ```bash
 uv run python scripts/build_macos_app.py --install
 ```
+<!-- /usage -->
 
 - 从 Spotlight 打开 localmelo：网页控制台外面的一个原生窗口。
 - 菜单栏显示有多少对话和任务在运行，以及何时有一个在等你；窗口收起时，一个小胶囊说明 Melo 正在做什么。
@@ -61,23 +69,35 @@ uv run python scripts/build_macos_app.py --install
 
 在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，推荐使用模型服务器 [oMLX](https://github.com/jundot/omlx)。把每个模型放进 `~/models` 下各自的文件夹（[方法](docs/zh-CN/guides/model-servers.md#serve-a-model-with-omlx)），然后提供这个文件夹：
 
+<!-- usage:omlx-serve-readme -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/omlx-serve-readme.dark.svg"><img alt="终端: 提供模型" src="docs/assets/usage/omlx-serve-readme.light.svg"></picture>
+
 ```bash
 brew tap jundot/omlx https://github.com/jundot/omlx
 brew install jundot/omlx/omlx
 omlx serve --model-dir ~/models --port 8000
 ```
+<!-- /usage -->
 
 在第二个终端里运行一个任务：
+
+<!-- usage:readme-run-omlx -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/readme-run-omlx.dark.svg"><img alt="终端: 用 oMLX 运行任务" src="docs/assets/usage/readme-run-omlx.light.svg"></picture>
 
 ```bash
 melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
+<!-- /usage -->
 
 使用 [Ollama](https://ollama.com) 时，先运行 `ollama pull qwen3:8b` 下载模型，然后运行：
+
+<!-- usage:readme-run-ollama -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/readme-run-ollama.dark.svg"><img alt="终端: 用 Ollama 运行任务" src="docs/assets/usage/readme-run-ollama.light.svg"></picture>
 
 ```bash
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
+<!-- /usage -->
 
 - 单独运行 `melo` 可以对话；第一次运行会找到正在运行的服务器并保存配置。
 - `melo serve` 启动网关，并在浏览器中打开网页控制台。
