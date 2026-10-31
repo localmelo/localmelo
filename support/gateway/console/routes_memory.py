@@ -17,7 +17,9 @@ was never made (the first run's card) and ``DELETE`` on it records "Not now" and
 whether the offer is still open (it is when the record could not be written).
 ``PUT /api/memory`` switches
 ``[memory] across_chats`` and ``POST /api/memory/reindex`` rebuilds the index
-from the chats.
+from the chats. In developer mode (``[ui] mode = "developer"``; anywhere else
+404), ``POST /api/memory/sleep`` runs one sleep (:mod:`localmelo.support.memory.sleep`)
+and answers its report, and ``DELETE /api/memory/sleep/{run_id}`` undoes that run.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import config
@@ -47,6 +49,15 @@ class EditBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: StrictStr
+
+
+class SleepBody(BaseModel):
+    """Request body of ``POST /api/memory/sleep``: the variant, else ``[memory] sleep``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    variant: StrictStr | None = None
+    budget: StrictInt | None = Field(default=None, ge=1, le=100)
 
 
 class ImportBody(BaseModel):
@@ -158,6 +169,12 @@ async def _identity_changed(console: Console, pinned: str) -> None:
     """
     if await console.memory.pinned_quotes() != pinned:
         await console.sessions.settings_changed()
+
+
+def _developer(console: Console) -> None:
+    """404 unless developer mode (or the console's ``dev_routes``) is on."""
+    if console.cfg.ui.mode != "developer" and not console.options.dev_routes:
+        raise ApiError(404, "not_found", t("errors.notFound"))
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -274,6 +291,41 @@ def add_routes(app: FastAPI, console: Console) -> None:
         chats = console.store if console.store_state() == "ok" else None
         notes, turns = await console.memory.reindex(chats)
         return {"notes": notes, "turns": turns}
+
+    @app.post("/api/memory/sleep")
+    async def memory_sleep(body: SleepBody | None = None) -> dict[str, Any]:
+        _developer(console)
+        variant = body.variant if body else None
+        if variant is not None and variant not in config.MEMORY_SLEEP:
+            raise ApiError(
+                400,
+                "invalid_request",
+                t("errors.sleepVariant", choices=", ".join(config.MEMORY_SLEEP)),
+            )
+        chats = console.store if console.store_state() == "ok" else None
+        pinned = await console.memory.pinned_quotes()
+        try:
+            report = await console.memory.sleep(
+                variant,
+                chats=chats,
+                budget=(
+                    body.budget if body and console.cfg.ui.mode == "developer" else None
+                ),
+            )
+        except NotImplementedError as exc:
+            raise ApiError(501, "not_built", str(exc)) from exc
+        await _identity_changed(console, pinned)
+        return report.to_json()
+
+    @app.delete("/api/memory/sleep/{run_id}")
+    async def memory_sleep_undo(run_id: str) -> dict[str, Any]:
+        _developer(console)
+        pinned = await console.memory.pinned_quotes()
+        undone = await console.memory.undo_sleep(run_id)
+        if undone is None:
+            raise ApiError(404, "not_found", t("errors.sleepGone"))
+        await _identity_changed(console, pinned)
+        return undone
 
 
 __all__: list[str] = []

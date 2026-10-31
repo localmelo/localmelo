@@ -52,6 +52,8 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+from localmelo.support.cli.hanging import Hung
+from localmelo.support.cli.hanging import prefix as hung_prefix
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.steps import StepRow, call_status
 from localmelo.support.cli.text import (
@@ -1470,7 +1472,7 @@ class TurnRenderer:
         """``  Changed + hello.py (+1), ~ README.md (+3 −1)``, or ``None`` when none changed."""
         return changed_text(self._changes(), self.out.width, self.symbols)
 
-    def _change_body(self, snapshot: Snapshot) -> Text:
+    def _change_body(self, snapshot: Snapshot) -> Hung:
         """A file write's change: ``+1 −1 lines``, or ``new file, 12 lines``.
 
         With /verbose the diff's hunks follow, dim, removed lines in the
@@ -1480,22 +1482,23 @@ class TurnRenderer:
         if not target.exists:
             count = len(snapshot.new.splitlines())
             body = Text(no_wrap=True, overflow="ellipsis")
-            body.append(f"  {self.symbols.connector} ", style="muted")
             body.append("new file", style="file_new")
             body.append(f", {count} line" + ("" if count == 1 else "s"), style="muted")
-            return body
+            return Hung(body, self.symbols)
         if not target.diffable:
             # No text was read (too large, binary, not regular): no counts
             # are known, and the panel said why.
-            return Text(
-                f"  {self.symbols.connector} changed; no diff shown",
-                style="muted",
-                no_wrap=True,
-                overflow="ellipsis",
+            return Hung(
+                Text(
+                    "changed; no diff shown",
+                    style="muted",
+                    no_wrap=True,
+                    overflow="ellipsis",
+                ),
+                self.symbols,
             )
         rows, _, _ = edits.diff(target.text or "", snapshot.new)
         body = Text(no_wrap=True, overflow="ellipsis")
-        body.append(f"  {self.symbols.connector} ", style="muted")
         body.append(f"+{snapshot.added}", style="ok_text")
         body.append(" ")
         body.append(f"{self.symbols.minus}{snapshot.removed}", style="error")
@@ -1504,15 +1507,15 @@ class TurnRenderer:
             width = max(1, self.out.width - 6)
             for row in rows:
                 if row.kind == "…":
-                    body.append("\n      " + self.symbols.ellipsis, style="muted")
+                    body.append("\n  " + self.symbols.ellipsis, style="muted")
                     continue
                 sign = {"+": "+", "-": self.symbols.minus, " ": " "}[row.kind]
                 style = {"+": "ok", "-": "error", " ": "muted"}[row.kind]
                 number = row.old if row.kind == "-" else row.new
                 text = clean_output(row.text)
                 line = cut_cells(f"{number:4} {sign} {text}", width)
-                body.append("\n      " + line, style=style)
-        return body
+                body.append("\n  " + line, style=style)
+        return Hung(body, self.symbols)
 
     def _arguments_of(self, data: Mapping[str, Any]) -> object:
         """The arguments a finished call was started with (tool.started's)."""
@@ -1544,7 +1547,7 @@ class TurnRenderer:
         ref: str = "",
         limit: int = BLOCK_LINES,
         first_style: str = "",
-    ) -> Text:
+    ) -> Hung:
         """A call's output under its header, *limit* lines, then the rest's count.
 
         With one line shown, the count shares its row when the row has room:
@@ -1568,10 +1571,8 @@ class TurnRenderer:
             beside = ""
         body = Text(no_wrap=True, overflow="ellipsis")
         for number, line in enumerate(shown):
-            prefix = f"  {self.symbols.connector} " if number == 0 else "    "
             if number:
                 body.append("\n")
-            body.append(prefix, style="muted")
             room = width - cells(beside)
             body.append(
                 cut_cells(line, room, self.symbols.ellipsis),
@@ -1580,8 +1581,8 @@ class TurnRenderer:
         if beside:
             body.append(beside, style="muted")
         elif marker:
-            body.append(f"\n    {self.symbols.ellipsis} {marker}", style="muted")
-        return body
+            body.append(f"\n{self.symbols.ellipsis} {marker}", style="muted")
+        return Hung(body, self.symbols)
 
     def _print_result(self, result: RunResult, *, footer: bool) -> None:
         symbols = self.symbols
@@ -1978,7 +1979,7 @@ def live_rows(
         if live.tool_limit_s:
             clock += f" of {tool_elapsed(live.tool_limit_s)}"
         preview, _ = escape_arguments(" ".join(live.preview.split("\n")))
-        start = f"  {symbols.connector} {plain(live.tool)}  "
+        start = f"{hung_prefix(symbols)}{plain(live.tool)}  "
         room = width - cells(start) - cells(dot + clock)
         shown = cut_cells(preview, room, symbols.ellipsis) if room >= 4 else ""
         line = cut_cells(start + shown + dot + clock, width, symbols.ellipsis)

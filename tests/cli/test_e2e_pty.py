@@ -580,5 +580,7 @@ def test_a_command_is_echoed_in_the_scrollback(melo: Callable[..., Melo]) -> Non
     pyte.Stream(screen).feed(term.output.decode("utf-8", "replace"))
     rows = [row.rstrip() for row in screen.display]
     echo = rows.index("› /help attach")
-    assert rows[echo - 1] == "" and rows[echo + 1] == "/attach PATH", rows
+    # The output hangs under the echo, behind the connector.
+    assert rows[echo - 1] == "" and rows[echo + 1] == "  └ /attach PATH", rows
+    assert rows[echo + 2].startswith("    ") and "Stage a text file" in rows[echo + 2]
     assert term.quit() == 0

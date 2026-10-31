@@ -18,6 +18,7 @@ from rich.text import Text
 from localmelo.melo.schema import RunResult, ToolInfo, ToolTier
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+from localmelo.support.cli.hanging import Hung
 from localmelo.support.cli.output import RecordingOut, TerminalOut
 from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
@@ -187,15 +188,18 @@ def test_a_failure_keeps_three_lines_with_the_first_in_the_error_style() -> None
     turn = Turn()
     error = "boom\nline2\nline3\nline4\nline5"
     parts = _block(turn, name="python_exec", status="error", error=error)
-    body = parts[-1]
-    assert isinstance(body, Text)
-    assert body.plain.splitlines()[0] == "  └ boom"
-    assert body.plain.splitlines()[-1] == "    … +2 lines (/expand 1.1)"
+    body = _hung_text(parts[-1])
+    assert body.plain.splitlines()[0] == "boom"
+    assert body.plain.splitlines()[-1] == "… +2 lines (/expand 1.1)"
     assert [
         body.plain[span.start : span.end]
         for span in body.spans
         if span.style == "error"
     ] == ["boom"]
+    shown = RecordingOut(80)
+    shown.print(parts[-1])
+    assert shown.text().splitlines()[0] == "  └ boom"
+    assert shown.text().splitlines()[-1] == "    … +2 lines (/expand 1.1)"
 
 
 def test_a_command_that_exited_nonzero_keeps_three_lines() -> None:
@@ -237,6 +241,13 @@ def test_a_turn_of_three_calls_leaves_at_most_twelve_rows_before_the_answer() ->
     assert len(record) <= 12, "\n".join(record)
     # Developer mode keeps today's detail: the same turn takes far more rows.
     assert len(_record_rows(_tour(Turn(developer=True)))) >= 24
+
+
+def _hung_text(part: Any) -> Text:
+    """The text a block hangs under its connector (what the Hung holds)."""
+    assert isinstance(part, Hung)
+    assert isinstance(part.body, Text)
+    return part.body
 
 
 def _block(turn: Turn, **data: Any) -> list[Any]:
@@ -295,8 +306,7 @@ def test_a_nonzero_exit_reads_as_a_failure_while_the_event_says_success() -> Non
     )
     styles = {header.plain[s.start : s.end]: s.style for s in header.spans}
     assert styles["✗"] == "error" and styles["exit 1"] == "error"
-    body = _block(Turn(), output="F..\nmore", exit_code=1)[-1]
-    assert isinstance(body, Text)
+    body = _hung_text(_block(Turn(), output="F..\nmore", exit_code=1)[-1])
     assert [body.plain[s.start : s.end] for s in body.spans if s.style == "error"] == [
         "F.."
     ]
