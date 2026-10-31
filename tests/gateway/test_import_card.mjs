@@ -110,6 +110,20 @@ test('the offer is one row per file with a checked box, the notes, and a disclos
   assert.deepEqual(h.paths(), ['GET /memory/import/offer', 'GET /memory/import/scan'], 'looking wrote nothing');
 });
 
+test('the page asks to show the card on every change and the card does not redraw: an opened disclosure stays open', async () => {
+  const h = harness();
+  h.card.show(true);
+  await settle();
+  const list = h.root.findAll((node) => node.className === 'import-sources')[0];
+  const more = h.root.findAll((node) => node.tagName === 'DETAILS')[0];
+  more.open = true;
+  h.root.boxes()[0].toggle(false);
+  for (let again = 0; again < 3; again += 1) h.card.show(true);
+  assert.equal(h.root.findAll((node) => node.className === 'import-sources')[0], list, 'the list is the same node');
+  assert.equal(more.open, true);
+  assert.equal(h.root.boxes()[0].checked, false, 'a box the person unchecked stays unchecked');
+});
+
 test('"Bring them in" sends only the checked files, shows the work, then "Brought in N notes · Undo"', async () => {
   const h = harness({written: [1, 2]});
   let release;
@@ -279,6 +293,20 @@ test('the Memory tab: "Look for notes" shows the files, "Bring them in" writes t
   assert.deepEqual(h.calls.at(-1), ['DELETE', '/memory/import/b1', undefined]);
   assert.match(h.text(), /Taken back\./);
   assert.doesNotMatch(h.text(), /brought in ·/);
+});
+
+test('the Memory tab redraws the section only when it changed: an opened disclosure survives a reload of the notes', async () => {
+  const h = tab();
+  await h.tab.show();
+  h.tab.root.button('Look for notes').click();
+  await settle();
+  const more = h.tab.root.findAll((node) => node.tagName === 'DETAILS')[0];
+  more.open = true;
+  h.tab.root.boxes()[1].toggle(false);
+  await h.tab.show();
+  await h.tab.reload();
+  assert.equal(h.tab.root.findAll((node) => node.tagName === 'DETAILS')[0], more, 'the same node');
+  assert.deepEqual(h.tab.root.boxes().map((box) => box.checked), [true, false]);
 });
 
 test('the Memory tab: nothing found, a refused look, past batches without a look, and memory switched off', async () => {

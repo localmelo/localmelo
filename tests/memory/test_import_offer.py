@@ -66,3 +66,11 @@ async def test_a_refused_write_does_not_close_the_offer(
     with pytest.raises(ValueError):
         await memory.import_apply(plan, ["claude-nope"])
     assert memory.import_pending()
+
+
+def test_a_folder_that_cannot_be_written_is_logged_not_raised(tmp_path: Path) -> None:
+    """Notes already written must not turn into an error because the record could not be."""
+    blocker = tmp_path / "file"
+    blocker.write_text("not a folder")
+    offer.mark(str(blocker / "memory"), "brought")
+    assert not offer.offered(str(blocker / "memory"))

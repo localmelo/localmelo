@@ -713,6 +713,7 @@ button:hover:not(:disabled) {
 @media (max-width: 700px) {
   .import-card .primary-button { width: 100%; min-height: 44px; }
   .import-card .link-button, .import-close, .memory-import .link-button, .memory-import .primary-button { min-height: 44px; }
+  .import-more summary { padding-block: var(--space-2); }
 }
 #messages:empty {
   display: none;

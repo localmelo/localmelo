@@ -195,6 +195,7 @@ export function setupImportCard({root, api}) {
   return {
     /** Show or hide the card; the first time it is shown it asks whether to offer. */
     show(visible) {
+      if (visible === shown) return; // the page asks on every change: the card keeps what the person opened
       shown = visible;
       if (visible && !started) ask();
       else render();
@@ -234,6 +235,7 @@ export function importSection({doc, api, rows, reload, redraw}) {
   let chosen = new Set();
   let line = "";
   let fault = "";
+  let drawn = ""; // What the section shows now: the tab redraws on every read, and a redraw would close a disclosure.
 
   async function working(work, fallback) {
     busy = true;
@@ -267,6 +269,10 @@ export function importSection({doc, api, rows, reload, redraw}) {
   }, "importCard.undoFailed");
 
   function draw() {
+    const past = batches(rows());
+    const now = JSON.stringify([phase, busy, line, fault, scan?.batchId, past]);
+    if (now === drawn) return;
+    drawn = now;
     const parts = [el(doc, "h3", "memory-sub", t("memoryTab.import.title")), el(doc, "p", "memory-line", t("memoryTab.import.lead"))];
     if (phase === "found") {
       const go = button(doc, "primary-button", busy ? t("importCard.working") : t("importCard.bring"), bring);
@@ -286,7 +292,6 @@ export function importSection({doc, api, rows, reload, redraw}) {
     }
     if (line) parts.push(el(doc, "p", "import-note", line));
     if (fault) parts.push(el(doc, "p", "memory-fault", fault));
-    const past = batches(rows());
     if (past.length) {
       const list = el(doc, "ul", "import-batches");
       for (const batch of past) {
