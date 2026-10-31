@@ -355,10 +355,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   now reads `[left out]` there, not `[not kept]`, which the model read as "this
   was never kept". When a reply says it noted a fact and no note was kept, melo keeps what
   the reply named after the same checks (your words, no secret, the newer value
-  replaces the old one, written to you: "Your flight to Faro is at gate 9", not
-  "gate 9 for Faro") and shows it with Undo; when it cannot, nothing is kept
-  and the turn's `turn.memory` event has `unsaved_claim: true`. A bare "Noted,
-  thanks!" claims nothing. A request to be
+  replaces the old one) and shows it with Undo. The fact must read as a
+  statement: written to you ("Your flight to Faro is at gate 9") or about
+  someone else ("Prof. Duarte's office is in the Atrium Wing", where the "." of
+  a title no longer ends it), not a fragment such as "gate 9 for Faro"; when it
+  cannot, nothing is kept and the turn's `turn.memory` event has
+  `unsaved_claim: true`. A bare "Noted, thanks!" claims nothing. A note with
+  "running" is no longer refused for a "run" you typed (`-ing` and `-ed` drop
+  the doubled consonant they brought), and the note tool's examples no longer
+  include a Chinese preference sentence, which pulled English notes into
+  Chinese. A request to be
   reminded at a time is scheduled, never kept as a note. The sentence quoted
   under a note ("you said …") is no longer cut at a title or an abbreviation
   (`Mr.`, `Prof.`, `Dr.`, `St.`, `vs.`, `No. 5`, an initial such as `J. Smith`), which had
