@@ -37,7 +37,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   changed file is one melo cannot read; and a step with parts melo cannot
   read is never allowed by words alone. The terminal tags a blocked
   step `blocked: installs software`; events record each decision, and a run
-  without approvals has no `reviews` in `run.finished` ([#NN]).
+  without approvals has no `reviews` in `run.finished` ([#352]).
 - A task's page in default mode no longer shows an empty "Recovery card"
   heading (developer mode still does). The status row in default mode leaves
   out the queue's counts, a held task's too, and says "1 task waits for you"
@@ -2873,3 +2873,4 @@ earlier milestones.
 [#346]: https://github.com/localmelo/localmelo/pull/346
 [#348]: https://github.com/localmelo/localmelo/pull/348
 [#350]: https://github.com/localmelo/localmelo/pull/350
+[#352]: https://github.com/localmelo/localmelo/pull/352
