@@ -213,8 +213,8 @@ export function setupPanel({
     return mark;
   }
   // A worker's second line says its state in words, then what it does or how it ended.
-  // A held worker says why in the server's words (`Waiting for a free model slot`).
-  const workerLine = (row) => (row.state === 'held' && row.activity ? row.activity
+  // A held or waiting worker says why in the server's words (`Waiting for a free model slot`, `Waiting on you`).
+  const workerLine = (row) => (['held', 'waiting'].includes(row.state) && row.activity ? row.activity
     : [stateWords(row.state), row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · '));
   function rowNode(row, worker = false) {
     const item = node('li', 'activity-row');
@@ -227,6 +227,8 @@ export function setupPanel({
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
     // A task names the folder it works in (its chat's, unless it was given one).
     if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
+    // A task a side chat started says so in the whole day's list.
+    if (row.from) text.append(node('span', 'activity-folder activity-from', t('chat.fromChat', {title: row.from})));
     headButton.append(icon(row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);
@@ -481,6 +483,7 @@ export function setupPanel({
     Object.assign(state, {chat: now, rows: [], more: false, unavailable: [], loaded: false, error: '', scope: 'all', notice: '', all: false});
     state.folds.clear();
     closeRow();
+    scheduled.rescope(); // its list is read again by the refresh below, when the tab is open
     drawHeader();
     drawBody();
     return refresh();

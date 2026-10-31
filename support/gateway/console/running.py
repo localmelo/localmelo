@@ -66,6 +66,20 @@ async def live_tasks(console: Console) -> list[Any] | None:
     return [record for record in records if record.state in COUNTED]
 
 
+async def waiting_by_chat(console: Console) -> dict[str, int]:
+    """How many tasks wait for the person's answer, by the chat that started them.
+
+    A task of a chat that is gone counts for the main chat, which holds its card.
+    """
+    waiting: dict[str, int] = {}
+    for record in await live_tasks(console) or []:
+        if record.state != "held" or record.wait_reason not in WAITS_FOR_YOU:
+            continue
+        owner = await console.effective_owner(record.front_id) or ""
+        waiting[owner] = waiting.get(owner, 0) + 1
+    return waiting
+
+
 def task_counts(live: list[Any] | None) -> TaskCounts | None:
     """The queue the status row and health report, from :func:`live_tasks`."""
     if live is None:
@@ -220,6 +234,9 @@ async def item_activity(
     changed = float(events[0].event.get("ts") or 0) if events else 0.0
     if kind in ("chat", "task") and console.broker.pending(owner):
         return activity_text(state="waiting"), changed
+    if kind == "task" and (asked := console.asks.activity(owner)) is not None:
+        # Waiting on its chat's answer, or on the person's (#369).
+        return asked, changed
     if kind in ("chat", "task") and (reason := console.gate.held(owner)):
         return activity_text(state="held", reason=reason), changed
     found = event_activity(stored.event for stored in events)

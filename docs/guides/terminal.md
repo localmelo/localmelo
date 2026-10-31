@@ -59,7 +59,8 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 - `/chats` lists the main chat and its side chats (arrow keys and Enter), `/side [title]` starts a side chat in this folder, and `/main` goes back. The status bar names the open chat.
 - An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
-- A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task, as in the console.
+- A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task in the open chat, as in the console; an echo about another chat's task ends with `from` and that chat's name.
+- When a task asks the chat for help, a muted line reads `Task “Fix tests” asks: <problem>` and melo's answer follows, with no message of yours above it. Then `→ melo answered “Fix tests” · <answer>`, or `! “Fix tests” needs your answer: <question>`: when only that task waits, answer it in a message here (`→ Sent to “Fix tests” as your answer`; **Undo** is in `melo console` for 10 seconds); when several wait, the line says `several wait: /answer Fix tests …`.
 - `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/approvals`, `/browser` and `/mcp` work in the terminal's own chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
 
 ### Which model server
@@ -150,7 +151,8 @@ When the model is not the saved default, a row after the folder gives the server
 | `/chats` | In the main chat: the main chat and its side chats as a list; Enter opens one, `New side chat` starts one. |
 | `/side [title]` | In the main chat: a side chat in this folder, made by its first message. `/new` and `/clear` do the same there. |
 | `/main` | Back to the main chat from a side chat. |
-| `/task TEXT` | In the main chat: start a task, as `/task` does in the console. |
+| `/task TEXT` | Start a task in the open chat, the main chat or a side chat, as `/task` does in the console; the task belongs to that chat. A side chat starts with its first message, so `/task` waits for it. |
+| `/answer TASK TEXT` | Answer a task that waits for you in the open chat, by its title (`/answer Fix tests: B`); with only one waiting, `/answer B` is enough. |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
 - `/new`, `/clear`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the draft stays and the hint says `/model is not available while a turn runs (esc stops it).`

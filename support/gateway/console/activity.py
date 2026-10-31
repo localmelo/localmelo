@@ -11,7 +11,9 @@ source that cannot be read adds nothing and is named in ``unavailable``.
 With ``session_id`` the list follows that chat: a side chat's own row and the
 tasks it started, with the main chat (or no ``session_id``) listing all of
 the day. Each row also carries the approvals its session asked for today, in
-plain words with how they were answered, and a task's row its ``folder``.
+plain words with how they were answered, and a task's row its ``folder``. In
+the whole day's list a task a side chat started also carries ``from``, that
+chat's title.
 """
 
 from __future__ import annotations
@@ -452,6 +454,23 @@ async def _scope(console: Console, session_id: str | None) -> str | None:
     return session_id
 
 
+async def _name_owners(console: Console, rows: list[dict[str, Any]]) -> None:
+    """Put ``from`` (the side chat's title) on each task row of a side chat, for the whole day's list."""
+    titles = {row["id"]: row["title"] for row in rows if row["kind"] == "chat"}
+    for row in rows:
+        owner = row.get("_chat")
+        if row["kind"] != "task" or not owner or owner == console.main_id:
+            continue
+        if owner not in titles:
+            try:
+                info = await console.store.get_session(owner)
+            except (SessionStoreError, OSError, AttributeError):
+                info = None
+            titles[owner] = info.title if info is not None else ""
+        if titles[owner]:
+            row["from"] = titles[owner]
+
+
 async def day_activity(
     console: Console, since: float, session_id: str | None = None
 ) -> dict[str, Any]:
@@ -492,6 +511,8 @@ async def day_activity(
     chat = await _scope(console, session_id)
     if chat is not None:
         rows = [row for row in rows if chat in (row["id"], row.get("_chat"))]
+    else:
+        await _name_owners(console, rows)
     for row in rows:
         row.pop("_chat", None)
     rows.sort(key=lambda row: (row["state"] in LIVE, row["at"]), reverse=True)

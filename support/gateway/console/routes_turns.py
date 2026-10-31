@@ -25,7 +25,10 @@ from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     go_ahead_text,
 )
+from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
+from localmelo.support.gateway.task_policy import TaskPolicyError
+from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionInfo,
@@ -38,12 +41,20 @@ from localmelo.support.sessions.submissions import (
     SubmissionRepeated,
     SubmissionWithdrawn,
     check_client_request_id,
+    check_submission,
 )
 
 from .bodies import Body
 from .errors import ApiError
 from .registry import STOP_REASON
 from .shapes import submission_json, turn_json
+from .task_submissions import (
+    conflict,
+    created,
+    lock_name,
+    started_echo,
+    submission_of,
+)
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -67,7 +78,7 @@ class TurnRequest(Body):
     text: str
     attachments: list[_Attachment] = []
     client_request_id: str | None = None
-    # The composer's Run as a task: the main chat starts it as a task.
+    # The composer's Run as a task: the chat starts it as a task.
     as_task: bool = False
 
 
@@ -215,6 +226,96 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
+async def _create_for_task(
+    console: Console, body: CreateRequest, composed: str, key: str | None
+) -> JSONResponse:
+    """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
+
+    The answer is 201 with the chat and the task's ``echo``, and no turn. A
+    task that cannot start leaves no chat behind; one that is admitted keeps
+    its chat. With a *key* (the turn's ``client_request_id``) the create is a
+    submission like any other: a cancelled key is 409 ``submission_withdrawn``,
+    one accepted for another message 409 ``submission_conflict``, and a repeat
+    answers 200 with the chat and echo the first made (``repeated``), the echo
+    written again if the gateway stopped between the task and it. Creates of a
+    key go one at a time, with its cancel.
+    """
+    assert body.turn is not None
+    text = body.turn.text
+    # After the creates of a message under the key, and with the cancel of the key;
+    # a cancel may still overtake a create of a message while it builds.
+    async with console.sessions.keyed(key), console.sessions.keyed(lock_name(key)):
+        if key is not None:
+            found = await _store_call(console, console.store.get_submission(None, key))
+            try:
+                check_submission(found, composed)
+            except SubmissionRepeated:
+                raise conflict() from None
+            except SubmissionError as exc:
+                raise _submission_error(exc) from exc
+            made = await created(console, key, composed)
+            if made is not None:
+                record, info = made
+                echo = await started_echo(console, record, info, text)
+                return JSONResponse(
+                    content={
+                        "session": console.session_body(info),
+                        "echo": echo,
+                        "repeated": True,
+                    }
+                )
+        entry, _ = await _sessions_call(
+            console,
+            console.sessions.create(body.workspace, None, mode=body.approvals),
+        )
+        chat = entry.session_id
+        try:
+            echo = await _store_call(
+                console,
+                console.front_for(chat).route(
+                    text, composed, as_task=True, key=None, create_key=key
+                ),
+                chat,
+            )
+            if echo is None or echo.get("echo") != "started":
+                # The task did not start: its echo says why, and the chat has nothing.
+                raise ApiError(
+                    400, "invalid_request", str((echo or {}).get("line") or "")
+                )
+            await _store_call(
+                console,
+                console.store.rename_session(chat, short_title(composed)),
+                chat,
+            )
+        except BaseException:
+            if not await _admitted(console, chat, key):
+                with contextlib.suppress(Exception):
+                    await console.sessions.delete(chat)
+            raise
+        info = await _require_session(console, chat)
+        return JSONResponse(
+            status_code=201,
+            content={"session": console.session_body(info), "echo": echo},
+        )
+
+
+async def _refuse_task_key(console: Console, key: str | None) -> None:
+    """A create of a message under a key a chat was made for a task under: 409 ``submission_conflict``."""
+    if key is not None and await console.workers.tasks.by_create_key(key) is not None:
+        raise conflict()
+
+
+async def _admitted(console: Console, chat: str, key: str | None) -> bool:
+    """Whether the create already made its task: then its chat stays, and a retry finds both."""
+    tasks = console.workers.tasks
+    try:
+        if key is not None:
+            return await tasks.by_create_key(key) is not None
+        return any(record.front_id == chat for record in await tasks.list_tasks())
+    except Exception:
+        return True  # unknown: a chat kept is better than a task with no owner
+
+
 # ── Routes ──
 
 
@@ -230,11 +331,17 @@ def add_routes(app: FastAPI, console: Console) -> None:
             first = (body.turn.text, composed)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
+        if body.turn is not None and body.turn.as_task:
+            return await _create_for_task(console, body, composed, key)
         try:
             entry, turn = await _sessions_call(
                 console,
                 console.sessions.create(
-                    body.workspace, first, client_request_id=key, mode=body.approvals
+                    body.workspace,
+                    first,
+                    client_request_id=key,
+                    mode=body.approvals,
+                    admit=lambda: _refuse_task_key(console, key),
                 ),
             )
         except SubmissionRepeated as exc:
@@ -264,19 +371,30 @@ def add_routes(app: FastAPI, console: Console) -> None:
         composed = _turn_text(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
-        if info.kind == "front":
-            # Code's rules first: a task to start or to change takes no model call.
+        if info.kind in ("front", "chat"):
+            # Code's rules first: a task to start or to change takes no model
+            # call. A side chat has the same rules as the main chat, and its
+            # tasks are its own.
             echo = await _store_call(
                 console,
-                console.front.route(body.text, composed, as_task=body.as_task, key=key),
+                console.front_for(session_id).route(
+                    body.text, composed, as_task=body.as_task, key=key
+                ),
                 session_id,
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
+            if console.asks.holds(session_id):
+                # The chat is answering a task's question: the message waits,
+                # shown as queued, and runs as the chat's next turn (#369).
+                echo = await _store_call(
+                    console,
+                    console.asks.queue(session_id, body.text, composed, key),
+                    session_id,
+                )
+                return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
-            raise ApiError(
-                400, "invalid_request", "as_task: tasks start from the main chat"
-            )
+            raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:
             turn, resumed = await _sessions_call(
                 console,
@@ -342,6 +460,34 @@ def add_routes(app: FastAPI, console: Console) -> None:
         composed = _compose(body)
         if scope is not None:
             await _require_session(console, scope)
+        # A key that made a chat for a task is stopped with the task, and a cancel
+        # waits for a create of the same key that is under way.
+        async with console.sessions.keyed(lock_name(key) if scope is None else None):
+            made = await created(console, key, composed) if scope is None else None
+            if made is not None:
+                return await _stop_created(console, made, key)
+            return await _withdraw(console, scope, key, composed)
+
+    async def _stop_created(
+        console: Console, made: tuple[Any, Any], key: str
+    ) -> JSONResponse:
+        record, info = made
+        try:
+            await console.workers.update(record.task_id, state="stop")
+            stopped = True
+        except (TaskStoreError, TaskPolicyError, ValueError):
+            stopped = False  # it ended already
+        return JSONResponse(
+            status_code=202 if stopped else 200,
+            content={
+                "submission": submission_of(record, info, key),
+                "cancelling": stopped,
+            },
+        )
+
+    async def _withdraw(
+        console: Console, scope: str | None, key: str, composed: str
+    ) -> JSONResponse:
         try:
             submission = await _store_call(
                 console,
@@ -511,9 +657,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
     ) -> Response:
         """Delete a chat; its notes stay unless ``?notes=forget``."""
         console.require_store()
+        # One transition: its unfinished tasks, chores and waiting cards are the
+        # main chat's when it is gone.
         await _sessions_call(
             console,
-            console.sessions.delete(session_id, forget_notes=notes == "forget"),
+            console.delete_chat(session_id, forget_notes=notes == "forget"),
             session_id,
         )
         return Response(status_code=204)

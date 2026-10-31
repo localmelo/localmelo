@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 # What the page does for each command: one id per behaviour, which
 # ``static/slash-actions.mjs`` answers. A command added to the terminal
-# (``/answer`` of the task questions, say) needs its line here.
+# needs its line here.
 PAGE_ACTIONS: Final[dict[str, str]] = {
     "model": "model",
     "backend": "backend",
@@ -54,6 +54,7 @@ PAGE_ACTIONS: Final[dict[str, str]] = {
     "resume": "resume",
     "main": "main",
     "task": "send",
+    "answer": "send",
 }
 
 

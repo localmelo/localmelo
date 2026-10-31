@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import asdict
-from typing import Any, cast
+from typing import Any, Final, Protocol, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import (
@@ -22,6 +22,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
 )
+from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
@@ -33,7 +34,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message, ToolDef, split_thinking
 from localmelo.support.config import Config
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
@@ -132,8 +133,100 @@ WORKER_GUIDE = (
     "your last two steps for what the task asks you to "
     "finish, such as the commit and your report. Tools run with HOME set to "
     "a fresh folder of this task, so a test suite that refuses the real home "
-    "runs; your real home stays readable."
+    "runs; your real home stays readable. When something blocks you that the "
+    "task's chat may know or decide, call ask_owner with every field; never stop "
+    "just to ask the person in your report."
 )
+# ask_owner's fields, in the order the chat reads them (#369).
+_ASK_HINTS: Final = {
+    "background": "The task in one or two sentences.",
+    "situation": "Where the work stands now.",
+    "problem": "What blocks it.",
+    "likely_causes": "What probably causes it.",
+    "options": "The ways forward you see.",
+    "help_needed": "What the chat should do or decide.",
+    "if_unsolvable": "What to tell the person if nobody can solve it.",
+}
+ASK_FIELDS: Final = tuple(_ASK_HINTS)
+ASK_FIELD_CHARS: Final = 600
+# Asks one run of a task may make.
+MAX_ASKS: Final = 3
+# The executor's bound on one ask: its own clock is the owner's (10 minutes from
+# the chat's internal turn), and a question to the person has none.
+_ASK_CALL_MS: Final = 30 * 86_400_000.0
+ASK_TOOL: Final = ToolDef(
+    name="ask_owner",
+    description=(
+        "Ask the chat that started this task, when something blocks you that it "
+        "may know or decide. Every field is required and short. The chat answers, "
+        "or asks the person; the answer is this call's result. At most 3 per run."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            name: {"type": "string", "description": hint}
+            for name, hint in _ASK_HINTS.items()
+        },
+        "required": list(ASK_FIELDS),
+    },
+    semantic_tags=["task"],
+    # It changes nothing: like the task tools, it asks no approval.
+    annotations={"readOnlyHint": True},
+)
+
+
+class OwnerChannel(Protocol):
+    """The chat a task asks when it is stuck (``console.asks.OwnerAsks``)."""
+
+    async def ask(self, task_id: str, fields: dict[str, str]) -> str:
+        """Ask *task_id*'s chat; the answer, or why there is none."""
+
+    async def reply(
+        self, task_id: str, text: str, ask_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Answer *task_id*'s pending ask with the person's words; ``None`` when none waits."""
+
+    def waiting(self, task_id: str) -> dict[str, Any] | None:
+        """*task_id*'s pending ask: ``ask_id``, ``chat_id``, ``chat_title`` and ``on``."""
+
+
+class AskOwner(BaseToolProvider):
+    """``ask_owner`` for one run of a task: at most :data:`MAX_ASKS` asks."""
+
+    def __init__(self, task_id: str, owner: Callable[[], OwnerChannel | None]) -> None:
+        self._task_id = task_id
+        self._owner = owner
+        self._asked = 0
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ASK_TOOL, function=self.ask, timeout_ms=_ASK_CALL_MS
+            )
+        ]
+
+    async def close(self) -> None:
+        return None
+
+    async def ask(self, **fields: Any) -> str:
+        clean: dict[str, str] = {}
+        for name in ASK_FIELDS:
+            value = fields.get(name)
+            text = value.strip() if isinstance(value, str) else ""
+            if not text:
+                return f"Not asked: fill {name}"
+            if len(text) > ASK_FIELD_CHARS:
+                return f"Not asked: {name} has at most {ASK_FIELD_CHARS} characters"
+            clean[name] = text
+        owner = self._owner()
+        if self._asked >= MAX_ASKS or owner is None:
+            why = f"you asked {MAX_ASKS} times" if owner else "no chat can answer"
+            return (
+                f"Not asked: {why}; go on with your best option and say so in "
+                "your report"
+            )
+        self._asked += 1
+        return await owner.ask(self._task_id, clean)
 
 
 class WorkerSearch(BaseToolProvider):
@@ -358,6 +451,10 @@ class TaskWorkers:
         # Auto mode's policy of each task in Auto, kept across its runs for
         # the steps allowed once (#339).
         self._auto: dict[str, AutoPolicy] = {}
+        # The chat a task asks when it is stuck (#369); the console sets it.
+        self.owner: OwnerChannel | None = None
+        # What each running task did last, for task_get (see live()).
+        self._live: dict[str, dict[str, Any]] = {}
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -461,9 +558,13 @@ class TaskWorkers:
         *,
         front_id: str | None = None,
         request_key: str | None = None,
+        create_key: str | None = None,
         origin: Origin = "user",
     ) -> tuple[dict, bool]:
         """Create a task from a spec trusted code made (the main chat's, or a chore's).
+
+        *create_key* is the key of a chat made for the task (``POST /api/sessions``
+        with ``as_task``): a repeat of it returns the task already made.
 
         The spec's level and reason are kept as given: the main chat computes
         them from the person's own words. *front_id* is the owner chat, the
@@ -482,7 +583,9 @@ class TaskWorkers:
         async with self._lock:
             if self._closed:
                 raise RuntimeError("workers are closed")
-            existing = await self.tasks.find_existing_request(
+            existing = (
+                await self.tasks.by_create_key(create_key) if create_key else None
+            ) or await self.tasks.find_existing_request(
                 spec, origin=origin, front_id=front or self.front_id, request_key=key
             )
             if existing is not None:
@@ -514,6 +617,7 @@ class TaskWorkers:
                 origin=origin,
                 workspace=workspace,
                 request_key=key,
+                create_key=create_key,
                 task_id=task_id,
                 front_id=front or self.front_id,
                 meta={"approvals": mode},
@@ -605,6 +709,9 @@ class TaskWorkers:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined:
             raise TaskStoreError("worker cleanup failed; slot held until restart")
+        if self.owner is not None and await self.owner.reply(task_id, text):
+            # It waited on an answer: the person's words are the answer.
+            return await self.get(task_id), "answered"
         async with self._lock:
             if self._closed:
                 raise RuntimeError("workers are closed")
@@ -1634,6 +1741,8 @@ class TaskWorkers:
             and runner.busy
             and task_id not in self._approval_points
             and not self.broker.pending(task_id)
+            # A worker waiting for its chat's answer is left alone, like an approval.
+            and not (self.owner is not None and self.owner.waiting(task_id))
             and not (
                 {task_id}
                 & (
@@ -1921,7 +2030,10 @@ class TaskWorkers:
                     wrap_embedding=lambda inner: _WorkerEmbedding(
                         inner, client, self._ready[task_id]
                     ),
-                    tools=[WorkerSearch(workspace)],
+                    tools=[
+                        WorkerSearch(workspace),
+                        AskOwner(task_id, lambda: self.owner),
+                    ],
                 )
             except BaseException:
                 self._homes.discard(home)
@@ -1935,6 +2047,7 @@ class TaskWorkers:
                 memory=self.memory,
                 index_only=True,
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
+                observe=lambda event: self._observe(task_id, event),
             )
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -2198,6 +2311,7 @@ class TaskWorkers:
                 self._approval_points.pop(task_id, None)
                 self._runners.pop(task_id, None)
                 self._runs.pop(task_id, None)
+                self._live.pop(task_id, None)
                 if unread and not self._closed:
                     # Messages that came after the run's last step: the task
                     # goes on with them as its next turn.
@@ -2237,7 +2351,28 @@ class TaskWorkers:
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).
         body["out_of_steps"] = is_out_of_steps(record.state, record.wait_reason)
+        # The question it waits on (#369): "Waiting on <chat>" or "Waiting on you".
+        owner = self.owner
+        body["ask"] = owner.waiting(record.task_id) if owner is not None else None
         return body
+
+    def _observe(self, task_id: str, event: AgentEvent) -> None:
+        """Keep what a running task did last, as its events come (no store read)."""
+        live, data = self._live.setdefault(task_id, {}), event.data
+        if event.type == "run.started":
+            live["budget"] = data.get("max_steps")
+        elif event.type == "step.started":
+            live["step"] = data.get("step")
+        elif event.type == "tool.started":
+            live["action"] = (str(data.get("name", "")), data.get("arguments"))
+        elif event.type == "assistant.message":
+            said = split_thinking(str(data.get("content") or ""))[1].strip()
+            if said:
+                live["left"] = said
+
+    def live(self, task_id: str) -> dict[str, Any]:
+        """A running task's step and budget, last action and last plan note, read live."""
+        return dict(self._live.get(task_id, {}))
 
     async def _reconcile(self) -> int:
         async with self._lock:

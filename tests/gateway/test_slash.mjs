@@ -366,15 +366,15 @@ test('every command of the terminal has a page action, and runs without reaching
     assert.ok(command.action, `/${command.name} names its page action`);
     assert.equal(typeof actions[command.action], 'function', `/${command.name} -> ${command.action}`);
   }
-  const argument = {copy: '', model: 'qwen3', backend: 'http://127.0.0.1:9/v1', side: 'Rome', title: 'Rome', expand: '', memory: '', approvals: 'ask', browser: 'on', verbose: 'on', thinking: 'on', stream: 'off', resume: 'Rome', sessions: 'Rome', help: 'all', status: 'all', task: 'plan a trip'};
+  const argument = {copy: '', model: 'qwen3', backend: 'http://127.0.0.1:9/v1', side: 'Rome', title: 'Rome', expand: '', memory: '', approvals: 'ask', browser: 'on', verbose: 'on', thinking: 'on', stream: 'off', resume: 'Rome', sessions: 'Rome', help: 'all', status: 'all', task: 'plan a trip', answer: 't1 yes'};
   for (const command of LIST) {
-    const p = page({routes: ROUTES, state: {turns: [TURN], main: command.name === 'task'}});
+    const p = page({routes: ROUTES, state: {turns: [TURN], main: false}});
     const line = `/${command.name}${argument[command.name] ? ` ${argument[command.name]}` : ''}`;
     const done = await p.slash.handle(line);
     assert.equal(done, true, line);
     assert.ok(!p.rows.children.some((row) => /Unknown command|Could not load/.test(text(row))), `${line}: ${rowTexts(p)}`);
-    // Nothing goes to the model: only /task is a line the main chat's own rules read.
-    assert.deepEqual(p.sent, command.name === 'task' ? ['/task plan a trip'] : [], line);
+    // Nothing goes to the model: only /task and /answer are lines a chat's own rules read.
+    assert.deepEqual(p.sent, ['task', 'answer'].includes(command.name) ? [line] : [], line);
     assert.ok(!p.calls.some((call) => call.path.endsWith('/turns')), line);
   }
 });
@@ -454,14 +454,17 @@ test('/chats, /sessions and /resume pick a chat; /main goes back to the main cha
   assert.match(lastRow(none), /This gateway has no main chat\./);
 });
 
-test('/task goes to the main chat as the line the chat reads; elsewhere it says where to start', async () => {
+test('/task and /answer go to the open chat as the line its own rules read; a chat not sent yet has none to own', async () => {
   const main = page({state: {main: true}});
   await main.slash.handle('/task make slides');
   assert.deepEqual(main.sent, ['/task make slides']);
   const side = page();
-  await side.slash.handle('/task make slides');
-  assert.deepEqual(side.sent, []);
-  assert.match(lastRow(side), /Tasks start from the main chat: \/main, then \/task …/);
+  await side.slash.handle('/answer t1 use Postgres');
+  assert.deepEqual(side.sent, ['/answer t1 use Postgres']);
+  const fresh = page({state: {id: null}});
+  await fresh.slash.handle('/task make slides');
+  assert.deepEqual(fresh.sent, []);
+  assert.match(lastRow(fresh), /Send this chat's first message first, then \/task …/);
 });
 
 test('/model and /backend save through the settings route, or open the model panel without a value', async () => {

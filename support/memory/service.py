@@ -746,6 +746,8 @@ class ChatMemory:
         each time the model keeps one.
         """
         CHAT_TURN.set(None)
+        if is_owner_question(info):
+            typed = ""  # a turn the person did not begin holds no words of theirs
         keep_from: int | None = None
         if window is not None and self.enabled:
             try:
@@ -823,8 +825,9 @@ class ChatMemory:
     async def remember(self, text: str, topic: str = "") -> str:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
-        Refused: outside a chat's turn, a secret, and words the user did not
-        type in this chat and no finished task's result shown in it holds.
+        Refused: outside a chat's turn, in a turn the person did not begin
+        (``TurnInfo.origin``), a secret, and words the user did not type in
+        this chat and no finished task's result shown in it holds.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:

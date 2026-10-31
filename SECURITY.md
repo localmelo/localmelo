@@ -77,6 +77,12 @@ those tools can do.
   confined. Auto is a reviewer, not a wall: a step that hands work to another
   app or program is judged by the review (blocked, or checked by your model),
   not walled off by the sandbox.
+- **A chat's answer to a task never approves.** When a task asks its chat
+  for help, the chat answers in a turn of its own (`origin` `ask_owner`).
+  That turn has no tool that grants an approval, and the question and the
+  answer reach each side framed as data, not instructions. A step that needs
+  approval is still decided by you (or Auto's review), never by one agent
+  for another.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;

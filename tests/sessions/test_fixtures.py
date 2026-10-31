@@ -23,7 +23,10 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.events import EVENT_FIELDS, OPTIONAL_EVENT_FIELDS
-from localmelo.support.sessions.store import SESSION_EVENT_FIELDS
+from localmelo.support.sessions.store import (
+    OPTIONAL_SESSION_EVENT_FIELDS,
+    SESSION_EVENT_FIELDS,
+)
 
 EVENTS = Path(__file__).resolve().parents[1] / "fixtures" / "events"
 
@@ -100,10 +103,11 @@ def test_each_line_is_one_envelope_with_the_pinned_keys(name: str) -> None:
         if type_ not in EVENT_FIELDS and type_ not in SESSION_EVENT_FIELDS:
             pytest.fail(f"{name}: unknown event type {type_!r}")
         pinned = EVENT_FIELDS.get(type_)
+        optional = OPTIONAL_EVENT_FIELDS.get(type_, frozenset())
         if pinned is None:
             pinned = SESSION_EVENT_FIELDS[type_]
+            optional = OPTIONAL_SESSION_EVENT_FIELDS.get(type_, frozenset())
         # Recorded before an optional key existed, an event may lack it.
-        optional = OPTIONAL_EVENT_FIELDS.get(type_, frozenset())
         assert pinned - optional <= set(event["data"]) <= pinned, (name, type_)
 
 

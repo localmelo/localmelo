@@ -102,8 +102,9 @@ export function createActions(host) {
       if (!host.openMain()) throw new Error(t('slash.noMain'));
     },
 
-    send({text}) {
-      if (!state().main) throw new Error(t('slash.taskMain'));
+    // /task and /answer are lines the chat's own rules read: they go to the open chat as a message.
+    send({name, text}) {
+      if (!state().id) throw new Error(t('slash.taskFirst', {name}));
       return host.send(text);
     },
 

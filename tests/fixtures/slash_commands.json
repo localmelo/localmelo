@@ -343,8 +343,20 @@
       "aliases": [],
       "args": "TEXT",
       "help": {
-        "en": "Start a task from the main chat: /task TEXT",
-        "zh-Hans": "从主对话开始一个任务：/task 内容"
+        "en": "Start a task in this chat: /task TEXT",
+        "zh-Hans": "在这个对话里开始一个任务：/task 内容"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "send"
+    },
+    {
+      "name": "answer",
+      "aliases": [],
+      "args": "TASK TEXT",
+      "help": {
+        "en": "Answer a task that waits for you",
+        "zh-Hans": "回答一个在等你的任务"
       },
       "during_turn": false,
       "keys": "",
@@ -368,6 +380,7 @@
     "side",
     "main",
     "task",
+    "answer",
     "retry",
     "status",
     "help",

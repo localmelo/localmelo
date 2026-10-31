@@ -19,13 +19,14 @@ import contextlib
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
@@ -124,6 +125,8 @@ async def default_builder(
     session_id: str,
     gate: ChatGate | None = None,
     memory: ChatMemory | None = None,
+    tools: Sequence[BaseToolProvider] = (),
+    agent_class: type[Agent] | None = None,
 ) -> Agent:
     """A started Agent for *workspace*, from the shared session builder.
 
@@ -132,7 +135,8 @@ async def default_builder(
     the providers are wrapped in :class:`GatedLLM` and
     :class:`GatedEmbedding` for *session_id*, so every call this Agent makes
     waits for its slot like a workspace chat's. *memory* gives the chat
-    memory across chats (see :func:`build_session_agent`).
+    memory across chats (see :func:`build_session_agent`); *tools* and
+    *agent_class* give a side chat its task tools and its Agent class.
     """
 
     llm = None if gate is None else gate.client(session_id)
@@ -149,6 +153,8 @@ async def default_builder(
         ),
         identify=True,
         memory=memory,
+        tools=tools,
+        agent_class=agent_class,
     )
 
 
@@ -760,6 +766,16 @@ class ConsoleSessions:
             )
         return os.path.realpath(path)
 
+    @contextlib.asynccontextmanager
+    async def keyed(self, client_request_id: str | None) -> AsyncIterator[None]:
+        """Run one create of *client_request_id* at a time, so a repeat finds what the first made."""
+        lock = self._create_lock(client_request_id)
+        try:
+            async with lock or contextlib.nullcontext():
+                yield
+        finally:
+            self._release_create_lock(client_request_id, lock)
+
     def _create_lock(self, client_request_id: str | None) -> asyncio.Lock | None:
         """The lock of *client_request_id*'s create, or ``None`` for an unkeyed one."""
         if client_request_id is None:
@@ -788,6 +804,7 @@ class ConsoleSessions:
         *,
         client_request_id: str | None = None,
         mode: ChatMode | None = None,
+        admit: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Create a session, usually with its first turn (``POST /api/sessions``).
 
@@ -803,7 +820,11 @@ class ConsoleSessions:
         try:
             async with lock or contextlib.nullcontext():
                 return await self._create_locked(
-                    workspace, first, client_request_id, mode or self.new_chat_mode()
+                    workspace,
+                    first,
+                    client_request_id,
+                    mode or self.new_chat_mode(),
+                    admit,
                 )
         finally:
             # Outside the block: the lock this task took is free again, so
@@ -816,6 +837,7 @@ class ConsoleSessions:
         first: tuple[str, str] | None,
         client_request_id: str | None,
         mode: ChatMode = "ask",
+        admit: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
@@ -825,6 +847,8 @@ class ConsoleSessions:
             # costs neither, and a rejected key writes no row.
             found = await self._store.get_submission(None, client_request_id)
             check_submission(found, composed or "")
+            if admit is not None:
+                await admit()
         path = self._resolve_workspace(workspace)
         settings = self._settings()
         model = self._settings_model()
@@ -985,13 +1009,14 @@ class ConsoleSessions:
             return turn, resumed
 
     async def _undo_newest(
-        self, session_id: str, turn_id: str, words: str
+        self, session_id: str, turn_id: str, words: str, *, retry: bool = False
     ) -> tuple[OpenSession, TurnInfo]:
         """Undo the newest finished turn (under the session's lock), then resume.
 
         409 ``session_busy`` while a turn runs, and 409 ``not_latest_turn``
         (with the catalog's *words*) for a turn that is not the newest
-        finished one.
+        finished one. With *retry*, a turn the person did not type (a task's
+        question) is refused: its words are not theirs to send.
         """
         entry = await self.open(session_id)
         entry.resumed = None
@@ -1004,10 +1029,31 @@ class ConsoleSessions:
         latest = await self._latest_finished_turn(session_id)
         if latest is None or latest.id != turn_id:
             raise ApiError(409, "not_latest_turn", t(words))
+        if retry and latest.origin:
+            raise ApiError(409, "not_retryable", t("errors.retryAsk"))
         undone = await entry.runner.undo()
         if undone is None:
             raise ApiError(409, "not_latest_turn", t(words))
         return entry, undone
+
+    async def start_internal(self, session_id: str, text: str, origin: str) -> TurnInfo:
+        """Begin a turn the person did not type (a task's question, #369) in an idle chat.
+
+        :class:`SessionBusyError` while a turn runs. The turn has the chat's
+        mode; the chat does not take the scheduler's focus for it.
+        """
+        async with self.lock(session_id):
+            entry = await self.open(session_id)
+            if entry.runner.busy:
+                raise SessionBusyError(f"Session {session_id} is running a turn")
+            entry.resumed = None
+            if self._gate is not None:
+                self._gate.turn_start(session_id)
+            turn = await entry.runner.start_turn(
+                text, approval=entry.policy, origin=origin
+            )
+            entry.last_used = self._clock()
+            return turn
 
     async def retry(
         self, session_id: str, turn_id: str
@@ -1020,7 +1066,7 @@ class ConsoleSessions:
         """
         async with self.lock(session_id):
             entry, undone = await self._undo_newest(
-                session_id, turn_id, "errors.retryNewest"
+                session_id, turn_id, "errors.retryNewest", retry=True
             )
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
