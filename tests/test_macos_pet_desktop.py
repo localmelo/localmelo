@@ -613,3 +613,35 @@ portrait.loops(PetEnvironment())
 precondition(portrait.isBlinking)
 """,
     )
+
+
+@darwin
+def test_the_console_settings_may_read_and_choose_what_is_on_the_desktop(
+    tmp_path: Path,
+) -> None:
+    run_swift(
+        tmp_path,
+        ["GatewayPolicy.swift", "PetPolicy.swift"],
+        r"""
+precondition(desktopRequest(["action": "get"]) == .get)
+for mode in DesktopMode.allCases {
+    precondition(desktopRequest(["action": "set", "mode": mode.rawValue]) == .set(mode))
+}
+let refused: [Any] = [["action": "set"], ["action": "set", "mode": "dog"], ["action": "set", "mode": 1],
+                      ["action": "bogus"], ["mode": "pet"], "get", 7, [String: Any]()]
+precondition(refused.allSatisfy { desktopRequest($0) == nil })
+""",
+    )
+
+
+def test_the_desktop_bridge_is_registered_with_the_folder_bridge_and_removed_with_it() -> (
+    None
+):
+    main = (APP / "main.swift").read_text()
+    bridge = (APP / "FolderBridge.swift").read_text()
+    assert 'static let name = "localmeloDesktop"' in bridge
+    assert "acceptsBridgeMessage(" in bridge.split("final class DesktopBridge")[1]
+    assert main.count("name: DesktopBridge.name)") == 1
+    assert main.count("removeScriptMessageHandler(forName: DesktopBridge.name") == 1
+    # The answer is the choice in force: the same one the menus show.
+    assert "self?.pet?.setDesktop(mode)" in main

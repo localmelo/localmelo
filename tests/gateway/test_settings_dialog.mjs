@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {setupSettings} from '../../support/gateway/static/settings.mjs';
+import {checkedWords, keyWords, setupSettings} from '../../support/gateway/static/settings.mjs';
 
 function deferred() {
   let resolve;
@@ -25,27 +25,36 @@ function fixture(overrides = {}) {
   };
 }
 
-function harness(routes, storage = new Map(), developer = () => false) {
+function node(tag, id = '') {
+  return {
+    tag, id, value: '', textContent: '', hidden: false, disabled: false, open: false, checked: false, className: '',
+    children: [], handlers: {}, dataset: {}, attributes: {}, tabIndex: 0,
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    removeAttribute(name) { delete this.attributes[name]; },
+    addEventListener(type, handler) { (this.handlers[type] ||= []).push(handler); },
+    async emit(type, extra = {}) { for (const handler of this.handlers[type] || []) await handler({target: this, preventDefault() {}, ...extra}); },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    showModal() { this.open = true; },
+    close() { this.open = false; for (const handler of this.handlers.close || []) handler(); },
+    focus() { globalThis.document.activeElement = this; },
+  };
+}
+
+/** The words a built node shows: its own text and its children's, in order. */
+function words(item) {
+  return [item.textContent, ...(item.children || []).map(words)].filter(Boolean).join(' ');
+}
+
+function harness(routes, storage = new Map(), developer = () => false, options = {}) {
   const nodes = new Map();
   const calls = [];
   const element = (id) => {
-    if (!nodes.has(id)) {
-      const node = {
-        id, value: '', textContent: '', hidden: false, disabled: false, open: false,
-        children: [], handlers: {}, dataset: {}, checked: false, attributes: {},
-        setAttribute(name, value) { this.attributes[name] = String(value); },
-        addEventListener(type, handler) { (this.handlers[type] ||= []).push(handler); },
-        async emit(type) { for (const handler of this.handlers[type] || []) await handler({target: this}); },
-        append(child) { this.children.push(child); },
-        replaceChildren(...children) { this.children = children; },
-        showModal() { this.open = true; },
-        close() { this.open = false; for (const handler of this.handlers.close || []) handler(); },
-      };
-      nodes.set(id, node);
-    }
+    if (!nodes.has(id)) nodes.set(id, node('element', id));
     return nodes.get(id);
   };
-  globalThis.document = {documentElement: {dataset: {}}, getElementById: element, createElement: (tag) => ({tag, value: '', textContent: ''})};
+  globalThis.document = {documentElement: {dataset: {}}, activeElement: null, getElementById: element, createElement: (tag) => node(tag)};
   globalThis.localStorage = storage instanceof Map ? {
     getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value),
@@ -57,9 +66,14 @@ function harness(routes, storage = new Map(), developer = () => false) {
     return typeof handler === 'function' ? await handler(options.body) : handler;
   };
   let saved = [];
-  const open = setupSettings({api, onSaved: (value) => { saved.push(value); }, developer});
-  return {element, calls, open, saved};
+  const tabs = [];
+  const open = setupSettings({api, onSaved: (value) => { saved.push(value); }, developer,
+    openTab: (id) => tabs.push(id), clock: () => NOW, ...options});
+  return {element, calls, open, saved, tabs, puts: () => calls.filter((call) => call.options.method === 'PUT')};
 }
+
+const NOW = Date.UTC(2026, 9, 31, 12, 0, 0);
+const flush = async () => { for (let i = 0; i < 12; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
 
 async function change(h, id, value, event = 'input') {
   const node = h.element(id);
@@ -67,16 +81,46 @@ async function change(h, id, value, event = 'input') {
   await node.emit(event);
 }
 
-test('settings section buttons switch visible panels', async () => {
+test('the sections are a tablist: a click or the arrow keys choose one, and only its panel shows', async () => {
   const h = harness({'GET /settings': fixture()});
   await h.open();
-  await h.element('settings-tab-theme').emit('click');
-  assert.equal(h.element('settings-panel-theme').hidden, false);
-  assert.equal(h.element('settings-panel-model').hidden, true);
-  assert.equal(h.element('settings-tab-theme').attributes['aria-pressed'], 'true');
-  await h.element('settings-tab-test').emit('click');
-  assert.equal(h.element('settings-panel-theme').hidden, true);
-  assert.equal(h.element('settings-panel-test').hidden, false);
+  const shown = () => SECTION_IDS.filter((id) => !h.element(`settings-panel-${id}`).hidden);
+  assert.deepEqual(shown(), ['model']);
+  assert.equal(h.element('settings-tab-model').attributes['aria-selected'], 'true');
+  assert.equal(h.element('settings-tab-model').tabIndex, 0);
+  await h.element('settings-tab-appearance').emit('click');
+  assert.deepEqual(shown(), ['appearance']);
+  assert.equal(h.element('settings-tab-appearance').attributes['aria-selected'], 'true');
+  assert.equal(h.element('settings-tab-model').attributes['aria-selected'], 'false');
+  assert.equal(h.element('settings-tab-model').tabIndex, -1);
+  await h.element('settings-tab-appearance').emit('keydown', {key: 'ArrowDown'});
+  assert.deepEqual(shown(), ['model'], 'the list wraps: Developer is not listed in default mode');
+  assert.equal(document.activeElement, h.element('settings-tab-model'));
+  await h.element('settings-tab-model').emit('keydown', {key: 'End'});
+  assert.deepEqual(shown(), ['appearance']);
+  await h.element('settings-tab-appearance').emit('keydown', {key: 'Home'});
+  await h.element('settings-tab-model').emit('keydown', {key: 'ArrowUp'});
+  assert.deepEqual(shown(), ['appearance']);
+  assert.equal(h.element('settings-tab-developer').hidden, true);
+});
+
+test('on a phone the list comes first, a section opens as a sheet and Back returns to the list', async () => {
+  const h = harness({'GET /settings': fixture()}, new Map(), () => false, {narrow: () => true});
+  await h.open();
+  assert.equal(h.element('settings-frame').dataset.view, 'list');
+  await h.element('settings-tab-model').emit('keydown', {key: 'ArrowDown'});
+  assert.equal(h.element('settings-frame').dataset.view, 'list', 'the arrows move along the list without opening');
+  assert.equal(h.element('settings-tab-memory').attributes['aria-selected'], 'true');
+  await h.element('settings-tab-memory').emit('click');
+  assert.equal(h.element('settings-frame').dataset.view, 'section');
+  assert.equal(h.element('settings-panel-memory').hidden, false);
+  await h.element('settings-back').emit('click');
+  assert.equal(h.element('settings-frame').dataset.view, 'list');
+  assert.equal(document.activeElement, h.element('settings-tab-memory'));
+  const desk = harness({'GET /settings': fixture()});
+  await desk.open('chats');
+  assert.equal(desk.element('settings-frame').dataset.view, 'section', 'a wide dialog shows the list and the section');
+  assert.equal(desk.element('settings-panel-chats').hidden, false);
 });
 
 test('load, discover, save and notify with revision and only writable selected fields', async () => {
@@ -94,14 +138,17 @@ test('load, discover, save and notify with revision and only writable selected f
   await change(h, 's-chat-model', 'manual-model');
   await change(h, 's-embed-backend', 'vllm', 'change');
   await change(h, 's-embed-model', 'manual-embedding');
-  await change(h, 's-workspace', '/new/workspace');
+  await change(h, 's-workspace', '/typed/but/not/used');
   await h.element('create-btn').emit('click');
   assert.deepEqual(h.calls.at(-1), {path: '/settings', options: {method: 'PUT', body: {
-    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '/new/workspace', revision: 'rev1', mode: 'default',
+    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '~/ws', revision: 'rev1', mode: 'default',
     sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'manual-model'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'manual-embedding'}},
-  }}});
+  }}}, 'the folder is saved by the Chats section, never with the connection');
   assert.equal(h.saved[0].revision, 'rev2');
-  assert.equal(h.element('settings-dialog').open, false);
+  assert.equal(h.element('settings-dialog').open, true, 'saving keeps Settings open');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: the connection.');
+  assert.equal(h.element('settings-undo').hidden, false);
+  assert.equal(h.element('s-editor').hidden, true, 'the form closes on a save');
 });
 
 test('unconfigured defaults, cloud manual model and safe key status', async () => {
@@ -276,7 +323,7 @@ test('connection test sends unsaved candidate and reports probe and request fail
     chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '~/ws',
     sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'draft'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'embed'}},
   }}});
-  assert.equal(h.element('settings-test-status').textContent, 'Backend reachable');
+  assert.equal(h.element('settings-test-status').textContent, 'Connected. Both models answered just now.');
   result = {ok: false, error: 'connection refused\nmore details'};
   await h.element('settings-test').emit('click');
   assert.equal(h.element('settings-test-status').textContent, 'Could not connect: connection refused');
@@ -295,7 +342,7 @@ test('connection test invalidates stale results on edits, reload, and close', as
   const first = h.element('settings-test').emit('click');
   assert.equal(h.element('settings-test-status').textContent, 'Testing…');
   assert.equal(h.element('settings-test').disabled, true);
-  await change(h, 's-workspace', '/other');
+  await change(h, 's-chat-model', 'other');
   const second = h.element('settings-test').emit('click');
   requests[0].resolve({ok: true});
   await first;
@@ -326,54 +373,25 @@ test('cloud candidate includes key environment name but never key status or revi
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
 
-test('the developer toggle loads the saved mode, lists options read-only and saves the mode', async () => {
-  const advanced = [{option: '--host', tier: 'advanced', issue: ''}, {option: '--retriever', tier: 'experimental', issue: '#4'}];
-  const value = fixture({mode: 'default', advanced_options: advanced});
-  const h = harness({'GET /settings': value, 'PUT /settings': {...value, mode: 'developer'}});
-  await h.open();
-  assert.equal(h.element('s-developer').checked, false);
-  assert.equal(h.element('s-developer-options').hidden, true);
-  assert.deepEqual(h.element('s-developer-list').children.map((row) => row.textContent),
-    ['--host: advanced', '--retriever: experimental, decided in #4']);
-  h.element('s-developer').checked = true;
-  await h.element('s-developer').emit('change');
-  assert.equal(h.element('s-developer-options').hidden, false);
-  await h.element('settings-tab-developer').emit('click');
-  assert.equal(h.element('settings-panel-developer').hidden, false);
-  await h.element('create-btn').emit('click');
-  assert.equal(h.calls.at(-1).options.body.mode, 'developer');
-  assert.equal(h.saved[0].mode, 'developer');
-});
+const SECTION_IDS = ['model', 'memory', 'chats', 'scheduled', 'appearance', 'developer'];
 
-const PANELS = ['model', 'test', 'theme', 'developer'];
-
-test('default mode stacks Model with its test, Appearance and the Developer toggle, without the file', async () => {
-  const h = harness({'GET /settings': fixture({mode: 'default'})});
-  await h.open();
-  assert.equal(h.element('settings-dialog').dataset.layout, 'plain');
-  assert.equal(h.element('settings-tabs').hidden, true);
-  assert.deepEqual(PANELS.map((name) => h.element(`settings-panel-${name}`).hidden), [false, false, false, false]);
-  assert.equal(h.element('settings-head-model').hidden, false);
-  assert.equal(h.element('settings-meta').hidden, true);
-  assert.equal(h.element('settings-title').textContent, 'Settings');
-  assert.equal(h.element('settings-theme-legend').textContent, 'Appearance');
-  assert.equal(h.element('settings-file').textContent, 'File: ~/.cache/localmelo/config.toml', 'The ids stay in the page');
-});
-
-test('developer mode keeps the tabs, the file and its revision, and the layout is chosen before the settings load', async () => {
+test('developer mode lists the Developer section, and the layout is chosen before the settings load', async () => {
   const slow = deferred();
   const h = harness({'GET /settings': () => slow.promise}, new Map(), () => true);
   const opening = h.open();
-  assert.equal(h.element('settings-dialog').dataset.layout, 'tabs', 'No frame draws the other layout first');
+  assert.equal(h.element('settings-dialog').dataset.layout, 'developer', 'No frame draws the other layout first');
+  assert.equal(h.element('settings-tab-developer').hidden, false);
   slow.resolve(fixture({mode: 'developer'}));
   await opening;
-  assert.equal(h.element('settings-tabs').hidden, false);
-  assert.deepEqual(PANELS.map((name) => h.element(`settings-panel-${name}`).hidden), [false, true, true, true]);
-  assert.equal(h.element('settings-tab-model').attributes['aria-pressed'], 'true');
-  assert.equal(h.element('settings-head-model').hidden, true);
-  assert.equal(h.element('settings-meta').hidden, false);
-  assert.equal(h.element('settings-title').textContent, 'Connection settings');
-  assert.equal(h.element('settings-theme-legend').textContent, 'Theme');
+  assert.equal(h.element('settings-tab-developer').hidden, false);
+  assert.equal(h.element('s-recall-key').hidden, false, 'the config key shows beside the choice');
+  assert.equal(h.element('settings-file').textContent, 'File ~/.cache/localmelo/config.toml');
+  assert.equal(h.element('settings-revision').textContent, 'revision rev1');
+  const plain = harness({'GET /settings': fixture({mode: 'default'})});
+  await plain.open('developer');
+  assert.equal(plain.element('settings-tab-developer').hidden, true);
+  assert.equal(plain.element('settings-panel-model').hidden, false, 'a section that is not listed opens Model server');
+  assert.equal(plain.element('s-recall-key').hidden, true);
 });
 
 const NAMES = ['settings-description', 's-adapter-label', 's-chat-url-label', 's-chat-url-hint'];
@@ -382,7 +400,7 @@ test('default mode names the server and its address in plain words', async () =>
   const h = harness({'GET /settings': fixture({mode: 'default'})});
   await h.open();
   assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
-    'Changes apply to your next message.',
+    'The models Melo runs on, and the server that serves them. Changes apply to your next message.',
     'Model server',
     'Server address',
     'The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.',
@@ -413,8 +431,8 @@ test('developer mode keeps the technical words of the dialog', async () => {
 test('a mode written in the file by hand wins over what the page believed', async () => {
   const h = harness({'GET /settings': fixture({mode: 'developer'})});
   await h.open();
-  assert.equal(h.element('settings-dialog').dataset.layout, 'tabs');
-  assert.equal(h.element('settings-tabs').hidden, false);
+  assert.equal(h.element('settings-dialog').dataset.layout, 'developer');
+  assert.equal(h.element('settings-tab-developer').hidden, false);
 });
 
 test('a server that lists an embedding model offers "Remember across chats with <model>?", and the answer is saved', async () => {
@@ -459,4 +477,364 @@ test('unchecking the offer turns the embedding model off, and the switch is sent
   const body = h.calls.at(-1).options.body;
   assert.equal(body.embedding_backend, 'none');
   assert.equal(body.across_chats, false);
+});
+
+// --- One change at a time: each saves with the revision it read, says "Saved" and offers Undo. ---
+
+const full = (overrides = {}) => fixture({mode: 'default', across_chats: true, memory_retriever: 'auto',
+  file_label: '~/.cache/localmelo/config.toml', ...overrides});
+
+test('a switch saves at once with the revision it read, says Saved, and Undo puts the old value back', async () => {
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full(),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, across_chats: body.across_chats ?? true}),
+  });
+  await h.open();
+  assert.equal(h.element('settings-foot').hidden, true, 'nothing to say yet');
+  assert.equal(h.element('s-across-chats').checked, true);
+  h.element('s-across-chats').checked = false;
+  await h.element('s-across-chats').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', across_chats: false}, 'only the change, over the settings as read');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Remember across chats is off.');
+  assert.equal(h.element('settings-foot').hidden, false);
+  assert.equal(h.element('settings-undo').hidden, false);
+  assert.equal(h.saved.length, 1, 'the page refreshes what a save changes');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body.across_chats, true);
+  assert.equal(h.puts().at(-1).options.body.revision, 'rev2', 'Undo uses the revision the save returned');
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Remember across chats is on.');
+  assert.equal(h.element('settings-undo').hidden, true, 'an undo is not undone');
+  assert.equal(h.element('s-across-chats').checked, true);
+});
+
+test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
+  const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
+  const h = harness({'GET /settings': full(), 'PUT /settings': () => { throw conflict; }});
+  await h.open();
+  h.element('s-across-chats').checked = false;
+  await h.element('s-across-chats').emit('change');
+  await flush();
+  assert.equal(h.element('s-across-chats').checked, true, 'the saved value shows again');
+  assert.equal(h.element('create-error').textContent, 'The settings file changed since it was loaded. Reload and retry.');
+  assert.equal(h.element('settings-reload').hidden, false);
+  assert.equal(h.element('settings-saved-text').textContent, '');
+});
+
+test('nothing saves before a server is chosen, and a change waits while another is saving', async () => {
+  const none = harness({'GET /settings': full({chat_backend: '', revision: ''})});
+  await none.open();
+  none.element('s-across-chats').checked = false;
+  await none.element('s-across-chats').emit('change');
+  await flush();
+  assert.equal(none.puts().length, 0);
+  assert.equal(none.element('create-error').textContent, 'Choose a model server in Model server first.');
+  assert.equal(none.element('s-across-chats').checked, true);
+  assert.equal(none.element('s-editor').hidden, false, 'the form is open for a first setup');
+  const slow = deferred();
+  const h = harness({'GET /settings': full(), 'PUT /settings': () => slow.promise});
+  await h.open();
+  h.element('s-across-chats').checked = false;
+  await h.element('s-across-chats').emit('change');
+  assert.equal(h.element('s-developer').disabled, true, 'the other switches wait');
+  h.element('s-recall-bm25').checked = true;
+  await h.element('s-recall-bm25').emit('change');
+  assert.equal(h.puts().length, 1);
+  slow.resolve(full({revision: 'rev2', across_chats: false}));
+  await flush();
+  assert.equal(h.element('s-developer').disabled, false);
+  assert.equal(h.element('s-recall-auto').checked, true, 'the choice made while saving is not kept');
+});
+
+test('how Melo finds notes: the plain two by default, all four with the key in developer mode', async () => {
+  const shown = (h) => ['auto', 'bm25', 'embedding', 'llm'].filter((name) => !h.element(`s-recall-row-${name}`).hidden);
+  const plain = harness({'GET /settings': full(), 'PUT /settings': (body) => full({revision: 'rev2', memory_retriever: body.memory_retriever})});
+  await plain.open('memory');
+  assert.deepEqual(shown(plain), ['auto', 'bm25']);
+  assert.equal(plain.element('s-recall-auto').checked, true);
+  plain.element('s-recall-bm25').checked = true;
+  await plain.element('s-recall-bm25').emit('change');
+  await flush();
+  assert.equal(plain.puts().at(-1).options.body.memory_retriever, 'bm25');
+  assert.equal(plain.element('settings-saved-text').textContent, 'Saved: Melo finds notes by words only.');
+  assert.equal(plain.element('settings-note-memory').textContent, 'On · words only');
+  await plain.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(plain.puts().at(-1).options.body.memory_retriever, 'auto');
+  const set = harness({'GET /settings': full({memory_retriever: 'llm'})});
+  await set.open('memory');
+  assert.deepEqual(shown(set), ['auto', 'bm25', 'llm'], 'a value set in developer mode still shows, checked');
+  assert.equal(set.element('s-recall-llm').checked, true);
+  const dev = harness({'GET /settings': full({mode: 'developer'})}, new Map(), () => true);
+  await dev.open('memory');
+  assert.deepEqual(shown(dev), ['auto', 'bm25', 'embedding', 'llm']);
+});
+
+test('the model rows say Connected, the model and when it was checked, and a test updates each row', async () => {
+  const health = {model_server: {url_label: 'http://localhost/v1', reachable: true, error: '', checked_s_ago: 12}};
+  let answer = {ok: false, error: 'embedding probe failed: refused', failed: 'embedding'};
+  const value = full({embedding_backend: 'mlc', sections: {...fixture().sections,
+    mlc: {chat_url: 'http://localhost/v1', chat_model: 'old', embedding_url: 'http://localhost/v1', embedding_model: 'emb'}}});
+  const h = harness({'GET /settings': value, 'POST /settings/test': () => answer}, new Map(), () => false, {health: () => health});
+  await h.open();
+  assert.equal(h.element('s-chat-state').dataset.text, 'Connected · old · checked 12 s ago');
+  assert.equal(h.element('s-chat-state').dataset.state, 'ok');
+  assert.equal(h.element('s-embed-state').dataset.text, 'Not checked yet · emb');
+  assert.equal(h.element('s-server-address').textContent, 'http://localhost/v1');
+  assert.equal(h.element('s-server-kind').textContent, 'MLC');
+  assert.equal(h.element('settings-note-model').textContent, 'Connected · old');
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('s-chat-state').dataset.text, 'Connected · old · checked just now');
+  assert.equal(h.element('s-embed-state').dataset.text, 'Not answering · emb · checked just now');
+  assert.equal(h.element('s-embed-state').dataset.state, 'error');
+  answer = {ok: false, error: 'chat probe failed: refused', failed: 'chat'};
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('s-chat-state').dataset.text, 'Not reachable · old · checked just now');
+  assert.equal(h.element('s-embed-state').dataset.text, 'Not checked yet · emb');
+  health.model_server = {reachable: false, checked_s_ago: 200};
+  await change(h, 's-chat-model', 'old2');
+  assert.equal(h.element('s-chat-state').dataset.text, 'Not reachable · old · checked 3 min ago', 'an edit drops the test');
+  const off = harness({'GET /settings': full()}, new Map(), () => false, {health: () => ({model_server: {reachable: null}})});
+  await off.open();
+  assert.equal(off.element('s-chat-state').dataset.text, 'Checking · old');
+  assert.equal(off.element('s-embed-state').dataset.text, 'Off · notes are found by words only');
+});
+
+test('a cloud server says whether its key is set and names the variable, never the key', async () => {
+  const h = harness({'GET /settings': full({chat_backend: 'openai'}), 'GET /settings/key-status?name=OPENAI_API_KEY': {set: true}});
+  await h.open();
+  assert.equal(h.element('s-chat-state').dataset.text, 'Key is set · cloud');
+  assert.equal(h.element('s-server-kind').textContent, 'OpenAI · key in OPENAI_API_KEY');
+  assert.equal(h.element('s-server-address').textContent, "The service's own address");
+});
+
+test('saving the connection offers Undo, which sends the old connection without the key status', async () => {
+  const value = full({chat_backend: 'openai'});
+  const h = harness({
+    'GET /settings': value,
+    'GET /settings/key-status?name=OPENAI_API_KEY': {set: true},
+    'PUT /settings': (body) => full({chat_backend: body.chat_backend, revision: 'rev2'}),
+  });
+  await h.open();
+  await h.element('s-change').emit('click');
+  assert.equal(h.element('s-editor').hidden, false);
+  assert.equal(h.element('s-change').attributes['aria-expanded'], 'true');
+  await change(h, 's-adapter', 'mlc', 'change');
+  await h.element('create-btn').emit('click');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  const body = h.puts().at(-1).options.body;
+  assert.equal(body.revision, 'rev2');
+  assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', base_url: '', chat_model: 'cloud'}});
+  assert.equal(body.chat_backend, 'openai');
+  assert.equal(JSON.stringify(body).includes('api_key_set'), false);
+});
+
+test('Cancel puts the saved connection back in the form', async () => {
+  const h = harness({'GET /settings': full()});
+  await h.open();
+  await h.element('s-change').emit('click');
+  await change(h, 's-chat-model', 'draft');
+  await h.element('s-editor-cancel').emit('click');
+  assert.equal(h.element('s-editor').hidden, true);
+  assert.equal(h.element('s-chat-model').value, 'old');
+});
+
+test('the default folder changes from a typed path, the app\'s panel or a recent folder, each with Undo', async () => {
+  const sessions = [{workspace: '/Users/me/notes', workspace_label: '~/notes', updated_at: 2},
+    {workspace: '/Users/me/site', workspace_label: '~/site', updated_at: 3}, {workspace: '/w', workspace_label: '~/ws', updated_at: 4}];
+  const put = (body) => full({workspace: body.workspace, revision: 'rev2'});
+  const h = harness({'GET /settings': full(), 'PUT /settings': put}, new Map(), () => false, {sessions: () => sessions});
+  await h.open('chats');
+  assert.equal(h.element('s-folder').textContent, '~/ws');
+  assert.equal(h.element('settings-note-chats').textContent, 'ws');
+  const rows = h.element('s-recent').children;
+  assert.deepEqual(rows.map(words), ['site ~/site Make default', 'notes ~/notes Make default'], 'newest first, the default left out');
+  await h.element('s-folder-change').emit('click');
+  assert.equal(h.element('s-folder-edit').hidden, false, 'a browser types the path');
+  await change(h, 's-workspace', 'relative/path');
+  await h.element('s-folder-use').emit('click');
+  assert.equal(h.element('s-workspace').attributes['aria-invalid'], 'true');
+  assert.equal(h.puts().length, 0);
+  await change(h, 's-workspace', '~/projects');
+  await h.element('s-folder-use').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.workspace, '~/projects');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: New chats start in ~/projects.');
+  assert.equal(h.element('s-folder-edit').hidden, true);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.workspace, '~/ws');
+  const recent = h.element('s-recent').children[0].children[1].children[0];
+  await recent.emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.workspace, '~/site');
+  const asked = [];
+  const app = harness({'GET /settings': full(), 'PUT /settings': put}, new Map(), () => false,
+    {folders: () => ({postMessage: async (message) => { asked.push(message); return '/Users/me/picked'; }})});
+  await app.open('chats');
+  await app.element('s-folder-change').emit('click');
+  await flush();
+  assert.deepEqual(asked, [{action: 'choose'}]);
+  assert.equal(app.element('s-folder-edit').hidden, true, 'the app uses its own panel');
+  assert.equal(app.puts().at(-1).options.body.workspace, '/Users/me/picked');
+});
+
+test('the check-in switch shows the next time, saves with PUT /checkin and can be undone', async () => {
+  const next = NOW / 1000 + 1800;
+  const h = harness({
+    'GET /settings': full(),
+    'GET /chores': {chores: [], checkin: {on: true, every_min: 30, next_at: next}},
+    'PUT /checkin': (body) => ({checkin: {on: body.on, every_min: 30, next_at: body.on ? next : null}}),
+  });
+  await h.open('scheduled');
+  await flush();
+  assert.equal(h.element('s-checkin').checked, true);
+  assert.match(h.element('s-checkin-state').dataset.text, /^On · next check-in today at /);
+  assert.equal(h.element('s-checkin-hint').textContent, 'Every 30 min while localmelo runs · uses the model only if something is due');
+  assert.equal(h.element('settings-note-scheduled').textContent, 'Check-in on');
+  h.element('s-checkin').checked = false;
+  await h.element('s-checkin').emit('change');
+  assert.deepEqual(h.calls.at(-1), {path: '/checkin', options: {method: 'PUT', body: {on: false}}});
+  assert.equal(h.element('s-checkin-state').dataset.text, 'Off');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: the check-in is off.');
+  await h.element('settings-undo').emit('click');
+  assert.deepEqual(h.calls.at(-1).options.body, {on: true});
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: the check-in is on.');
+  const down = harness({'GET /settings': full()});
+  await down.open('scheduled');
+  await flush();
+  assert.equal(down.element('s-checkin').disabled, true, 'no schedule read, no switch');
+  assert.equal(down.element('s-checkin-state').dataset.text, 'Could not read the schedule');
+});
+
+test('Melo on the desktop shows only in the app, mirrors its menu and saves through it', async () => {
+  const browser = harness({'GET /settings': full()});
+  await browser.open('appearance');
+  await flush();
+  assert.equal(browser.element('s-desktop-row').hidden, true);
+  const said = [];
+  let mode = 'pet';
+  const bridge = {postMessage: async (message) => { said.push(message); if (message.action === 'set') mode = message.mode; return mode; }};
+  const h = harness({'GET /settings': full()}, new Map(), () => false, {desktop: () => bridge});
+  await h.open('appearance');
+  await flush();
+  assert.equal(h.element('s-desktop-row').hidden, false);
+  assert.equal(h.element('s-desktop-pet').checked, true, 'the choice the menu shows');
+  h.element('s-desktop-nothing').checked = true;
+  await h.element('s-desktop-nothing').emit('change');
+  assert.deepEqual(said.at(-1), {action: 'set', mode: 'nothing'});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Nothing on the desktop.');
+  await h.element('settings-undo').emit('click');
+  assert.deepEqual(said.at(-1), {action: 'set', mode: 'pet'});
+  assert.equal(h.element('s-desktop-pet').checked, true);
+  const refused = harness({'GET /settings': full()}, new Map(), () => false,
+    {desktop: () => ({postMessage: async (message) => (message.action === 'get' ? 'pill' : Promise.reject(new Error('refused')))})});
+  await refused.open('appearance');
+  await flush();
+  refused.element('s-desktop-pet').checked = true;
+  await refused.element('s-desktop-pet').emit('change');
+  assert.equal(refused.element('s-desktop-pill').checked, true, 'the app\'s choice stands');
+  assert.match(refused.element('create-error').textContent, /did not take the change/);
+});
+
+test('the theme saves in this browser and Undo returns to the one before', async () => {
+  const storage = new Map();
+  const h = harness({'GET /settings': full()}, storage);
+  await h.open('appearance');
+  h.element('settings-theme-dark').checked = true;
+  await h.element('settings-theme-dark').emit('change');
+  assert.equal(storage.get('localmelo-console.theme'), 'dark');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: the dark theme.');
+  assert.equal(h.element('settings-note-appearance').textContent, 'Dark theme');
+  await h.element('settings-undo').emit('click');
+  assert.equal(document.documentElement.dataset.theme, 'system');
+  assert.equal(storage.get('localmelo-console.theme'), 'system');
+});
+
+test('the developer switch saves the mode at once and the Developer section appears', async () => {
+  const h = harness({'GET /settings': full(), 'PUT /settings': (body) => full({mode: body.mode, revision: 'rev2'})});
+  await h.open('appearance');
+  assert.equal(h.element('s-developer').checked, false);
+  h.element('s-developer').checked = true;
+  await h.element('s-developer').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.mode, 'developer');
+  assert.equal(h.saved.at(-1).mode, 'developer');
+  assert.equal(h.element('settings-tab-developer').hidden, false);
+  assert.equal(h.element('settings-panel-appearance').hidden, false, 'the section in view stays');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.mode, 'default');
+  assert.equal(h.element('settings-tab-developer').hidden, true);
+});
+
+test('the Developer section lists every key by section, with its value, option and issue', async () => {
+  const groups = [
+    {section: 'agent', keys: [
+      {key: 'agent.reasoning', value: 'legacy', default: 'legacy', flag: '--reasoning', issue: '#183', file: true},
+      {key: 'agent.window_messages', value: '32', default: 'unset', flag: '--window-messages', issue: '', file: true}]},
+    {section: '', keys: [{key: 'request_timeout_s', value: 'unset', default: 'unset', flag: '--request-timeout', issue: '', file: true}]},
+    {section: 'agent', keys: [{key: 'agent.attempt_policy', value: 'reflect', default: 'reflect', flag: '--attempt-policy', issue: '#185', file: false}]},
+  ];
+  const runs = [{option: '--mcp PATH', text: 'MCP servers to use (mcpServers JSON file)'}];
+  const h = harness({'GET /settings': full({mode: 'developer', developer_settings: groups, run_options: runs})}, new Map(), () => true);
+  await h.open('developer');
+  const blocks = h.element('s-developer-options').children;
+  assert.deepEqual(blocks.filter((item) => item.tag === 'h4').map((item) => item.textContent), ['Agent', 'General', 'Agent', 'Options for one run']);
+  const rows = blocks[1].children;
+  assert.equal(words(rows[0]), 'Reasoning agent.reasoning · --reasoning · comparison, #183 legacy');
+  assert.equal(rows[0].children[1].dataset.default, 'true');
+  assert.equal(words(rows[1]), 'Window messages agent.window_messages · --window-messages 32');
+  assert.equal(rows[1].children[1].dataset.default, 'false', 'a value that is not the default stands out');
+  assert.equal(words(blocks[3].children[0]), 'Request timeout (s) request_timeout_s · --request-timeout unset');
+  assert.match(words(blocks[5].children[0]), /one run only/);
+  assert.equal(words(blocks[7].children[0]), 'MCP servers to use (mcpServers JSON file) --mcp PATH');
+  assert.equal(h.element('settings-note-developer').textContent, '4 settings');
+});
+
+test('Open Memory and Open Scheduled hand over to the panel\'s tabs', async () => {
+  const h = harness({'GET /settings': full()});
+  await h.open('memory');
+  await h.element('s-open-memory').emit('click');
+  await h.element('s-open-scheduled').emit('click');
+  assert.deepEqual(h.tabs, ['memory', 'scheduled']);
+});
+
+test('the phone\'s list says the state of each section on its second line', async () => {
+  const h = harness({'GET /settings': full(), 'GET /chores': {chores: [], checkin: {on: false}}}, new Map(), () => false,
+    {health: () => ({model_server: {reachable: false, checked_s_ago: 3}})});
+  await h.open();
+  await flush();
+  assert.deepEqual(['model', 'memory', 'chats', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
+    ['Not reachable · old', 'On · words and meaning', 'ws', 'Check-in off', 'System theme']);
+});
+
+test('checked words read naturally', () => {
+  assert.equal(checkedWords(0), 'checked just now');
+  assert.equal(checkedWords(42), 'checked 42 s ago');
+  assert.equal(checkedWords(185), 'checked 3 min ago');
+  assert.match(checkedWords(7200, NOW), /^checked at /);
+  assert.equal(keyWords('scheduler.n_srv'), 'N srv');
+  assert.equal(keyWords('mcp_config'), 'MCP config');
+  assert.equal(keyWords('endpoint.embedding_url'), 'Embedding URL');
+});
+
+test('a change saved while Settings closes still refreshes the page, and a named section opens on a phone', async () => {
+  const slow = deferred();
+  const h = harness({'GET /settings': full(), 'PUT /settings': () => slow.promise});
+  await h.open('memory');
+  h.element('s-across-chats').checked = false;
+  await h.element('s-across-chats').emit('change');
+  h.element('settings-dialog').close();
+  slow.resolve(full({revision: 'rev2', across_chats: false}));
+  await flush();
+  assert.equal(h.saved.length, 1, 'the save happened: the page hears of it');
+  assert.equal(h.element('settings-saved-text').textContent, '', 'and nothing is drawn in a closed dialog');
+  const phone = harness({'GET /settings': full()}, new Map(), () => false, {narrow: () => true});
+  await phone.open('model');
+  assert.equal(phone.element('settings-frame').dataset.view, 'section', '"Change the server address" lands on its section');
 });

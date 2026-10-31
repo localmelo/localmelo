@@ -302,10 +302,18 @@ file's revision.
     "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
   },
   "mode": "default",
+  "across_chats": true,
+  "memory_retriever": "auto",
   "advanced_options": [
     {"option": "--host", "tier": "advanced", "issue": ""},
     {"option": "--retriever", "tier": "experimental", "issue": "#4"}
   ],
+  "developer_settings": [
+    {"section": "agent", "keys": [
+      {"key": "agent.reasoning", "value": "legacy", "default": "legacy", "flag": "--reasoning", "issue": "#183", "file": true}
+    ]}
+  ],
+  "run_options": [{"option": "--mcp PATH", "text": "MCP servers to use (mcpServers JSON file)"}],
   "file_label": "~/.cache/localmelo/config.toml",
   "revision": "5d41402abc4b2a76"
 }
@@ -325,8 +333,16 @@ file's revision.
 - `mode` is `[ui] mode` (`default` or `developer`; any other saved value
   reads as `default`). `advanced_options` lists the advanced and experimental
   `melo` options from the tier table (`issue` is the deciding issue of an
-  experimental one, `""` otherwise); the console shows them read-only in
-  developer mode.
+  experimental one, `""` otherwise).
+- `memory_retriever` is `[memory] retriever`, how a chat finds its notes:
+  `auto`, `bm25`, `embedding` or `llm`.
+- `developer_settings` is every key `melo -h all` lists, grouped by section
+  in its order (`""` is the top level): `value` is the one in use and
+  `default` the default, both as the help prints them; `flag` is the old
+  option that sets the key, `issue` the issue that decides a comparison, and
+  a key with `file` false is for one run only (its value is its default).
+  `run_options` are the help's option rows past the everyday ones. The
+  console's Developer section shows both, read-only.
 
 ## PUT /api/settings
 
@@ -349,6 +365,12 @@ sessions.
   only what the console and `melo --help` show.
 - `across_chats` is optional: a boolean that sets `[memory] across_chats`; omitted,
   the saved value is kept.
+- `memory_retriever` is optional: `auto`, `bm25`, `embedding` or `llm` sets
+  `[memory] retriever` (other values are 400 `invalid_request`; `embedding`
+  without an embedding model is 400 `invalid_settings`); omitted, the saved
+  value is kept.
+- The console saves one change at a time: the loaded `revision` with only the
+  changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
   `settings_changed`. Two concurrent `PUT` requests that read the same
   `revision` can both pass the check; the last writer wins, and `os.replace`
@@ -381,8 +403,10 @@ is a failed probe. These probes can contact the supplied host.
 {"ok": true}
 ```
 
-- Field or validation errors return 400 first. A failed or timed-out probe
-  returns HTTP 200 with `{"ok": false, "error": "..."}`.
+- Field or validation errors return 400 first. A failed probe returns HTTP
+  200 with `{"ok": false, "error": "...", "failed": "chat"}` (`failed` is
+  `embedding` when the embedding probe failed); a timed-out one has no
+  `failed`.
 
 ## GET /api/settings/key-status
 
