@@ -168,6 +168,8 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 参数 | 必须是 JSON 对象。内置工具的每个参数还必须符合声明的类型：`shell_exec` 的 `command` 使用列表时，会以 `Arguments for shell_exec: 'command' must be of type string, not array` 拒绝。 |
 | 级别和模式 | 由它们决定，而非命令的写法（详见下文）。 |
 | 工作区根目录 | 设置时，`file_read` 和 `file_write` 的路径必须在其中（见[设置工作区根目录时](#with-a-workspace-root)）。 |
+| 提交 | `shell_exec` 或 `python_exec` 调用若要做一次 git 提交，且其中有一行把功劳归于 melo 或某个 AI，会在询问任何人之前被拒绝：命名 melo 或 AI 的 `Co-Authored-By` 署名行、`Generated with` 行、会话链接。署名真人的行没有问题。错误会提示去掉那一行后重新提交。 |
+| 文件编辑 | `file_edit` 的 `old` 文本在文件里找不到或出现多次时，会在审批策略被询问之前立刻失败，错误说明该怎么做（重新读取文件；多取几行上下文）。 |
 | 审批策略 | 设置时，级别不是 `read` 或明确标记的工具会等待策略决策，文件路径之后会再次检查（见[权限级别](#permission-tiers)和[设置审批策略时](#with-an-approval-policy)）。 |
 
 各模式如何对待 `shell_exec`：
@@ -243,7 +245,8 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 限制不覆盖的情况 | `~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。 |
 | `list_files` | 受同样的限制；不带路径（或路径为空）时列出根目录。它打开文件夹时不跟随符号链接，也不会进入其中的链接，因此指向根目录之外的链接显示为 `name@`，其目标不会被列出。 |
 | 打开文件 | 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。 |
-| 大小 | `file_read` 最多读取 200,000 字节。超过该大小或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。 |
+| 大小 | `file_read` 最多读取 200,000 字节。超过该大小或文本超过 50,000 字符的文件会按整行截断，末尾为 `... [truncated: the file has <n> lines; showing 1-<k>; read more with start_line=<k+1>]`（只有一行的文件为 `... [truncated: the file has <size> bytes]`）。 |
+| 行范围 | `file_read` 接受 `start_line` 和 `end_line`（从 1 开始计数，含两端），长文件因此可以分段读取。读到的部分末尾为 `... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`，读到文件末尾时除外（此时为 `showing 801-1240`）；`start_line` 超出文件末尾会报错，并说明文件有多少行。melo 只统计前 64 MB 的行数（更长的文件报告为 `N+`）。 |
 | 命令 | `shell_exec` 和 `python_exec` 在拥有独立进程组的子进程中运行，超时或取消会终止它及其启动的所有进程；根目录只决定它们的启动目录。它们不受范围限制，可以访问任何路径；但在 macOS 上，worker 运行和保存的任务会拒绝它们在工作区之外的写入（`AgentOptions(confine_writes=True)`）。 |
 | 输入 | Shell 命令的标准输入是 `/dev/null`；`python_exec` 通过管道接收代码（绝不通过 argv），随后将 fd 0 指向 `/dev/null`，因此 `input()` 得到 EOF，两者都不读取 melo 所在的终端。 |
 | 环境 | 子进程获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；`--url` 运行会忽略该设置。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。 |
@@ -294,7 +297,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
 - 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
 
-规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。
+规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 

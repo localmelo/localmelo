@@ -154,6 +154,8 @@ Before a tool runs, localmelo checks the call:
 | The arguments | A JSON object. A built-in's arguments also need the declared types: `shell_exec` with a list for `command` is refused with `Arguments for shell_exec: 'command' must be of type string, not array`. |
 | The tier and the mode | They decide, never the command's spelling (details below). |
 | The workspace root | With one, the path of `file_read` and `file_write` must be inside it (see [With a workspace root](#with-a-workspace-root)). |
+| A commit | A `shell_exec` or `python_exec` call that makes a git commit and has a line that credits melo or an AI is refused before anyone is asked: a `Co-Authored-By` trailer naming melo or an AI, a `Generated with` line, a session link. A trailer that names a person is fine. The error says to commit again without the line. |
+| A file edit | A `file_edit` whose `old` text is missing from the file, or occurs more than once, fails at once with an error that says what to do (read the file again; take more lines around it), before the approval policy is asked. |
 | The approval policy | With one, a tool whose tier is not `read`, or that is marked, waits for its decision, and a file path is checked again (see [Permission tiers](#permission-tiers) and [With an approval policy](#with-an-approval-policy)). |
 
 How the mode treats `shell_exec`:
@@ -225,7 +227,8 @@ A direct run with `--workspace DIR` and an agent built in Python with `AgentOpti
 | What the fence misses | `~` is not expanded, a path spelled in another letter case than the root is refused, and hard links are not detected. |
 | `list_files` | Fenced the same way; no path (or an empty one) lists the root. It opens a folder without following a symlink and never enters a link inside it, so a link that points out of the root shows as `name@` and its target stays unlisted. |
 | Opening files | The file tools open the resolved path without following symlinks, so a symlink that takes the file's place after the check is refused. Anything but a regular file, such as a FIFO, is refused with `Not a regular file: <path>`. |
-| Size | `file_read` reads at most 200,000 bytes. A file over that, or whose text is longer than 50,000 characters, is cut to 50,000 characters, which end with `... [truncated: the file has <size> bytes]`. |
+| Size | `file_read` reads at most 200,000 bytes. A file over that, or whose text is longer than 50,000 characters, is cut to whole lines, which end with `... [truncated: the file has <n> lines; showing 1-<k>; read more with start_line=<k+1>]` (a file of one line: `... [truncated: the file has <size> bytes]`). |
+| Line ranges | `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long file is read in parts. A part ends with `... [the file has 1,240 lines; showing 1-400; read more with start_line=401]` unless it reaches the end of the file (then `showing 801-1240`); a `start_line` past the end is an error that says how many lines there are. melo counts the lines of the first 64 MB (a longer file reports `N+`). |
 | Commands | `shell_exec` and `python_exec` run in a child process with a process group of its own, which a timeout or a cancellation kills with every process it started; a root only sets the directory they start in. They are not fenced: they reach any path, except that a worker run or a saved task on macOS refuses their writes outside the workspace (`AgentOptions(confine_writes=True)`). |
 | Input | A shell command's standard input is `/dev/null`; `python_exec` gets its code on a pipe (never in argv) and then points fd 0 at `/dev/null`, so `input()` gets EOF and neither reads the terminal melo runs in. |
 | Environment | The child gets `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`, plus `AgentOptions(tool_env={...})`. Config-backed direct runs, the UI and console sessions also resolve the extra names in `[agent] tool_env`; `--url` runs ignore that setting. An MCP server gets the same base plus its own `env`, not the agent's extra names. |
@@ -272,7 +275,7 @@ It is high-impact when it:
 - sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, opens a network service other computers can reach, or sends a file from outside the workspace or an email;
 - changes localmelo itself, or runs code built at run time (`exec` of computed text, `eval "$x"`).
 
-A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`.
+A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`. It is also undecided, with a reason that says why, when it goes by the exit status of a pipeline without `pipefail`: the status of `pytest | tail` is `tail`'s, so Python that reads it (`.returncode`, `check=True`), or `pytest | tail && git commit`, goes on after failed tests. `set -o pipefail` makes it the test's.
 
 A high-impact call gets its own card in the web console and its own panel in the terminal (see [the web console](web-console.md#approvals-and-failures) and [the terminal](terminal.md#approvals)). Each:
 
