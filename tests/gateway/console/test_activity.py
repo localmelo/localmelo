@@ -447,6 +447,40 @@ def test_a_stop_answer_says_what_is_left(answer: str, left: str) -> None:
     assert left_line(answer) == left
 
 
+@pytest.mark.parametrize(
+    ("answer", "bare"),
+    [
+        ("Fixed it. Remaining: run the tests.", "run the tests."),
+        ("Fixed it. REMAINING：run the tests.", "run the tests."),
+        ("Fixed it. What's left: run the tests.", "run the tests."),
+        ("Fixed it. What is left: run the tests.", "run the tests."),
+        ("Fixed it. Left: run the tests.", "run the tests."),
+        ("代码已改好。剩下：运行测试。", "运行测试。"),
+        ("代码已改好。还剩：运行测试。", "运行测试。"),
+        ("代码已改好。还剩下: 运行测试。", "运行测试。"),
+        # No label: the sentence stays as it is.
+        ("Fixed it. Still need to run the tests.", "Still need to run the tests."),
+        (
+            "Fixed it. Done except for the final commit.",
+            "Done except for the final commit.",
+        ),
+        # A label alone has nothing after it: the next sentence that says it is used.
+        ("Remaining:\nStill need to run the tests.", "Still need to run the tests."),
+    ],
+)
+def test_the_task_page_shows_what_is_left_without_the_answers_own_label(
+    answer: str, bare: str
+) -> None:
+    assert left_line(answer, bare=True) == bare
+
+
+def test_a_card_and_a_row_keep_the_sentence_as_the_answer_wrote_it() -> None:
+    assert (
+        left_line("Fixed it. Remaining: run the tests.") == "Remaining: run the tests."
+    )
+    assert left_line("代码已改好。剩下：运行测试。") == "剩下：运行测试。"
+
+
 def test_a_long_sentence_of_what_is_left_is_cut_at_a_word() -> None:
     got = left_line("Remaining: " + "word " * 60)
     assert got.startswith("Remaining: word") and got.endswith("…")

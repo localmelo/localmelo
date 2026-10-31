@@ -544,7 +544,8 @@ Tools run with the user's permissions, not in a sandbox.
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,
-  the sentence of its stop answer that says what is left (`""` when none does).
+  the sentence of its stop answer that says what is left, without a label that opens it
+  (`Remaining:`, `What's left:`, `剩下：`; `""` when no sentence says it).
   `POST /api/tasks/{task_id}/continue` (no body) runs it again from where it
   stopped, in its own session, with the console's words "Continue the task from
   where you stopped." as its next turn: 202 `{"task": ..., "message":

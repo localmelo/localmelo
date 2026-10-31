@@ -208,7 +208,8 @@ async def test_a_task_that_ran_out_of_steps_continues_from_its_page(
     page = client.get(url).json()["task"]
     # Stored as failed, read as a stop with what is left.
     assert (page["state"], page["out_of_steps"]) == ("failed", True)
-    assert page["left"] == "Remaining: run the tests and commit."
+    # The page's row is called "What is left": the answer's own label is dropped.
+    assert page["left"] == "run the tests and commit."
     listed = client.get("/api/tasks").json()["tasks"]
     assert [row["out_of_steps"] for row in listed] == [True]
     assert "left" not in listed[0]  # only a task's own page reads its answer

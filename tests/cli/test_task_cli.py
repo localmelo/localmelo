@@ -527,7 +527,7 @@ _STOPPED = {
     "title": "Fix it",
     "level": 2,
     "wait_reason": "Out of steps",
-    "left": "Remaining: run the tests and commit.",
+    "left": "run the tests and commit.",
 }
 
 
@@ -538,7 +538,7 @@ def test_a_task_that_ran_out_of_steps_reads_stopped_for_a_person() -> None:
         "  Title: Fix it",
         "  Level: P2",
         "  Ran out of steps: continue it from the console.",
-        "  Left: Remaining: run the tests and commit.",
+        "  Left: run the tests and commit.",
     ]
     listed = _run(["list"], {"tasks": [_STOPPED, {**_STOPPED, "out_of_steps": False}]})
     assert [row.split()[2] for row in listed.splitlines()[1:]] == ["stopped", "failed"]

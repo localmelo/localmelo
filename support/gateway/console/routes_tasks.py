@@ -150,7 +150,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if task.get("out_of_steps"):
             # What the run says is left, for the page's "What is left" row.
             turns = await console.store.list_turns(task_id, limit=1)
-            task["left"] = left_line(turns[-1].answer) if turns else ""
+            task["left"] = left_line(turns[-1].answer, bare=True) if turns else ""
         return JSONResponse(content={"task": _approvals(console, task)})
 
     @app.patch("/api/tasks/{task_id}")

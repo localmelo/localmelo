@@ -2549,7 +2549,9 @@ function turnStatus(turn) {
     line.dataset.severity = info.severity;
     line.append(statusMarkNode(info.severity), el("span", "", info.title));
     nodes.push(line);
-    const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
+    // A run that used all its steps says so in the title; its raw cause ("Max steps reached") is for a developer.
+    const quiet = turn.status === "completed" || (turn.status === "budget_exhausted" && !developerMode);
+    const error = quiet ? "" : cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0];
     if (error) {
       const text = el("p", "failure-error", error);
       text.dataset.severity = info.severity;

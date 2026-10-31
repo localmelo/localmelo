@@ -210,25 +210,39 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
 # A sentence of a stop answer that says what is left undone.
 _LEFT: Final = re.compile(
     r"\b(?:remaining|remains?|left to|still (?:need|needs|has|have) to|not (?:yet )?"
-    r"(?:done|committed|tested|run)|untested|uncommitted|next step|to-?do|except for)\b"
+    r"(?:done|committed|tested|run)|untested|uncommitted|next step|to-?do|except for|"
+    r"what['’]?s left|what is left)\b|\bleft\s*[:：]"
     r"|剩下|还剩|还需要?|尚未|未(?:完成|提交|测试|运行)|下一步|待完成|还没",
     re.IGNORECASE,
 )
 
 
-def left_line(answer: str) -> str:
+# A label the stop answer puts before what is left; the task page names the row itself.
+_LEFT_LABEL: Final = re.compile(
+    r"^\s*(?:remaining|what['’]?s left|what is left|left|still to do|"
+    r"剩下|还剩下?|剩余|待完成)\s*[:：]\s*",
+    re.IGNORECASE,
+)
+
+
+def left_line(answer: str, *, bare: bool = False) -> str:
     """The sentence of a stop answer that says what is left to do, or ``""``.
 
     ``Done except for the final commit: git add … && git commit …`` gives
     that sentence, cut as a card's lines are; an answer that names nothing
-    left gives ``""`` and the caller shows the answer's own lines.
+    left gives ``""`` and the caller shows the answer's own lines. A card and
+    a row show the sentence as the answer wrote it; with *bare* a label that
+    opens it (``Remaining: run the tests``, ``还剩下：运行测试``) is dropped,
+    for the task page, whose row is called "What is left" already.
     """
     raw = _FENCE.sub("\n", split_thinking(answer or "")[1])
     for line in raw.splitlines():
         row = " ".join(_MARKUP.sub("", line).replace("`", "").replace("**", "").split())
         for part in _SENTENCE.split(row):
             if _LEFT.search(part):
-                return _cut(_no_paths(part), LINE_CHARS)
+                text = _LEFT_LABEL.sub("", part) if bare else part
+                if text.strip():
+                    return _cut(_no_paths(text), LINE_CHARS)
     return ""
 
 

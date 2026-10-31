@@ -3447,12 +3447,12 @@ test('a task that ran out of steps reads stopped with what is left, and Continue
   const calls = [];
   const h = await openTask({
     'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: true, wait_reason: 'Out of steps',
-      left: 'Remaining: run the tests and commit.'})},
+      left: 'run the tests and commit.'})},
     'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', out_of_steps: false}), message: 'continued'}}; },
   });
   const text = flatten(h.element('task-panel'));
   assert.match(text, /State\s*stopped/);
-  assert.match(text, /What is left\s*Remaining: run the tests and commit\./);
+  assert.match(text, /What is left\s*run the tests and commit\./);
   assert.doesNotMatch(text, /Out of steps/, 'the stored reason is not shown as a wait');
   assert.doesNotMatch(text, /failed/);
   assert.equal(labelled(h, 'Stop'), null, 'a finished task cannot be stopped');
@@ -3461,6 +3461,20 @@ test('a task that ran out of steps reads stopped with what is left, and Continue
   assert.match(flatten(h.element('task-panel')), /Continuing from where it stopped\./);
   assert.match(flatten(h.element('task-panel')), /State\s*queued/);
   assert.equal(labelled(h, 'Continue'), null, 'it has gone on, so there is nothing to continue');
+});
+
+const outOfStepsTurn = () => turnRow({user_text: 'Objective of t1', status: 'budget_exhausted', answer: 'Fixed the check. Remaining: run the tests.',
+  result: {status: 'budget_exhausted', result: '', error: 'Max steps reached', duration_s: 10, n_tool: 3, steps: 30}, events: [liveStarted, liveTool(2)]});
+
+test('a task that ran out of steps says so once in default mode, and a developer also sees the raw cause', async () => {
+  const stopped = {state: 'failed', card: '', out_of_steps: true, wait_reason: 'Out of steps', left: 'run the tests.'};
+  const routes = {'GET /tasks/t1': {task: taskRow('t1', stopped)}, [TURNS_T1]: {turns: [outOfStepsTurn()], has_earlier: false}};
+  const plain = await openTask({...routes, 'GET /settings': {mode: 'default'}});
+  assert.match(flatten(answerBox(plain)), /Ran out of steps/);
+  assert.doesNotMatch(flatten(answerBox(plain)), /Max steps reached/, 'the raw cause repeats the title');
+  const developer = await openTask(routes);
+  assert.match(flatten(answerBox(developer)), /Ran out of steps/);
+  assert.match(flatten(answerBox(developer)), /Max steps reached/);
 });
 
 test('a task that failed for another reason stays failed and offers no Continue', async () => {
