@@ -259,28 +259,37 @@ class Console:
         if front is not None:
             await front.aclose()
 
-    async def waiting_cards(self, chat_id: str) -> list[dict[str, Any]]:
-        """The cards of side chat *chat_id* that still ask the person for an answer, read before it is deleted."""
-        with contextlib.suppress(Exception):
-            await self.cards.flush()  # one written for a task that waits now is not lost
-        return await self.cards.waiting_in(chat_id)
+    async def delete_chat(self, chat_id: str, *, forget_notes: bool = False) -> None:
+        """Delete side chat *chat_id*; its unfinished work and waiting cards are the main chat's.
 
-    async def hand_over(self, chat_id: str, waiting: list[dict[str, Any]]) -> None:
-        """A side chat was deleted: its unfinished tasks and chores, and the cards that wait for the person, are the main chat's now.
-
-        A finished task keeps its record. The tasks' news and cards go to the
-        main chat from here on.
+        One transition, held against the cards: no card is written while it runs,
+        so none is lost with the chat, and what is delivered meanwhile is written
+        to the main chat after it. The chat's unfinished tasks, and the ones that
+        end meanwhile, become the main chat's (a finished one keeps its record), so
+        their cards and their news agree; so do its chores and the approvals that
+        still wait for the person, on a card written again in the main chat.
         """
         main = self.main_id
-        moved = set(await self.workers.tasks.rehome(chat_id, main))
-        await self.chore_runner.store.rehome(chat_id, main)
-        for card in waiting:
-            if main is not None and card.get("source_id") in moved:
-                await self.store.append_session_event(main, CARD_EVENT, card)
+        async with self.cards.holding():
+            waiting = await self.cards.waiting_in(chat_id)
+            going = await self.workers.tasks.unfinished(chat_id)
+            await self.sessions.delete(chat_id, forget_notes=forget_notes)
+            moved = set(await self.workers.tasks.rehome(chat_id, main, also=going))
+            await self.chore_runner.store.rehome(chat_id, main)
+            pending = {
+                request.request_id
+                for task_id in moved
+                for request in self.broker.pending(task_id)
+            }
+            for card in waiting:
+                if main is not None and card.get("request_id") in pending:
+                    await self.store.append_session_event(main, CARD_EVENT, card)
         try:
+            # Its tasks' open questions go to the main chat too (#369).
             await self.asks.hand_over(chat_id)
         except Exception:
             logger.exception("Could not move a deleted chat's open questions")
+        await self.forget_front(chat_id)
 
     async def _side_agent(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str

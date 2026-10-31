@@ -2029,20 +2029,18 @@ class SessionStore:
         ]
 
     async def events_of_type_anywhere(
-        self, type_: str, *, after_id: int = 0, limit: int = 200
+        self, type_: str, *, before_id: int | None = None, limit: int = 200
     ) -> list[StoredEvent]:
-        """The newest *limit* events of one type in any session with ids above *after_id*, in id order."""
-        sql = (
-            "SELECT id, session_id, turn, event FROM events "
-            "WHERE type = ? AND id > ? ORDER BY id DESC LIMIT ?"
-        )
+        """A page of the events of one type in any session, newest first: *limit* of them with ids below *before_id*."""
+        sql = "SELECT id, session_id, turn, event FROM events WHERE type = ?"
+        args: list[Any] = [type_]
+        if before_id is not None:
+            sql += " AND id < ?"
+            args.append(before_id)
         async with self._lock:
             conn = await self._ready()
-            rows = await _rows(conn, sql, (type_, after_id, limit))
-        return [
-            StoredEvent(row[0], row[1], row[2], json.loads(row[3]))
-            for row in reversed(rows)
-        ]
+            rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
+        return [StoredEvent(row[0], row[1], row[2], json.loads(row[3])) for row in rows]
 
     async def rename_session(
         self, session_id: str, title: str, *, only_if: str | None = None

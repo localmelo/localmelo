@@ -28,8 +28,10 @@ the console page asks for.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.support.gateway.i18n import (
@@ -189,11 +191,28 @@ class MainChatCards:
         # One flush at a time, so a caller that finds nothing left to write
         # returns only when the writing another one began is done.
         async with self._flushing:
-            heard, self._heard_events = self._heard_events, []
-            self._unanswered = None
-            # What is stored reads the same to every reader: English, whoever asked.
-            with using("en"):
-                await self._write(main, heard)
+            await self._write_heard(main)
+
+    async def _write_heard(self, main: str) -> None:
+        heard, self._heard_events = self._heard_events, []
+        self._unanswered = None
+        # What is stored reads the same to every reader: English, whoever asked.
+        with using("en"):
+            await self._write(main, heard)
+
+    @contextlib.asynccontextmanager
+    async def holding(self) -> AsyncIterator[None]:
+        """Write what is heard, then write no card until the block ends.
+
+        What is heard meanwhile waits, and is written after it to whoever owns
+        its task by then: a chat that changes hands inside the block (a deleted
+        side chat's tasks) is not written to.
+        """
+        main = self._main_id
+        async with self._flushing:
+            if main is not None:
+                await self._write_heard(main)
+            yield
 
     async def _write(self, main: str, heard: list[StoredEvent]) -> None:
         for stored in heard:

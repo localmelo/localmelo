@@ -20,7 +20,6 @@ from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS
 from localmelo.support.gateway.front_rules import (
     TaskRef,
     named_tasks,
-    names_job,
     route,
 )
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -237,22 +236,6 @@ async def test_a_task_the_model_made_up_is_offered_not_started_in_the_main_chat(
         assert (offer["echo"], offer["text"]) == ("ask", "summarize report.md")
 
 
-def test_a_job_is_the_persons_when_its_words_are() -> None:
-    typed = "can you make slides from my notes today, urgent"
-    assert names_job(typed, "Slides", "Make 6 slides")
-    assert names_job(
-        "research three laptops for me", "Laptop research", "Compare three laptops"
-    )
-    assert not names_job("summarize report.md", "Clean up", "Delete the other folder")
-    assert not names_job(
-        "summarize report.md",
-        "Remove old folders",
-        "Delete old folders, then summarize the report",
-    )
-    assert not names_job("", "Slides", "Make slides")
-    assert names_job("把笔记做成幻灯片", "笔记幻灯片", "做幻灯片")
-
-
 # ── 6, 7. A deleted chat's unfinished tasks and waiting cards are the main chat's ──
 
 
@@ -392,20 +375,19 @@ async def test_a_summary_that_lands_while_the_news_is_read_is_told_once(
         client,
         models,
     ):
-        real = console.cards.flush
+        real = console.front._load
         landed: list[bool] = []
 
-        async def flush_and_land() -> None:
+        async def load_and_land() -> None:
             await real()
             if not landed:  # once, in the middle of the first reading
                 landed.append(True)
                 text = "Landed during the read."
                 await console.front.side_done("late-chat", "Late", text, time.time())
 
-        console.cards.flush = flush_and_land  # type: ignore[method-assign]
+        console.front._load = load_and_land  # type: ignore[method-assign]
         await _say(client, console, "first")
         await _wait_turn(client, str(console.main_id))
-        console.cards.flush = real  # type: ignore[method-assign]
         await _say(client, console, "second")
         await _wait_turn(client, str(console.main_id))
         assert 'side chat "Late": Landed during the read.' in _asked(models["main"], 0)
@@ -575,21 +557,22 @@ async def test_a_key_used_for_another_message_is_a_conflict_and_makes_no_chat(
         assert await _chats(console) == [made.json()["session"]["id"]]
 
 
-async def test_a_key_used_by_a_task_in_a_chat_returns_that_chat(tmp_path: Path) -> None:
+async def test_a_key_a_message_to_a_chat_used_is_not_the_create_scopes(
+    tmp_path: Path,
+) -> None:
     async with chats_console(tmp_path) as (console, client, _):
         side = await _side(client, tmp_path, "Trip plan")
         sent = await _post_turn(
             client, side, "/task Find hotels", client_request_id="create-4"
         )
         assert sent.status_code == 200, sent.text
-        again = await client.post(
-            "/api/sessions", json=_as_task_body("/task Find hotels", "create-4")
+        # A message to a chat has the chat's scope; a create has its own.
+        made = await client.post(
+            "/api/sessions", json=_as_task_body("Find hotels", "create-4")
         )
-        # The same job under the same key: the chat that has it, not a second one.
-        assert again.status_code == 200, again.text
-        assert again.json()["session"]["id"] == side
-        assert again.json()["repeated"] is True
-        assert await _chats(console) == [side]
+        assert made.status_code == 201, made.text
+        assert made.json()["session"]["id"] != side
+        assert len(await _chats(console)) == 2
 
 
 async def test_an_as_task_create_whose_task_does_not_start_leaves_no_chat(
