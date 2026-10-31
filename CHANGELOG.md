@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task can start with a short memory pack, a side chat's summary can be
+  recalled from other chats, and a task's questions to its owner chat are kept
+  apart from your notes: the pack holds your About you and Preferences notes,
+  the project's notes and the notes that match the objective (never People or
+  Decisions); a question from a task is agent data that no note is written
+  from. Nothing calls these yet. Part of #369. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the
