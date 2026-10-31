@@ -579,8 +579,11 @@ _PIPELINE_NO: Final = re.compile(
 
 
 # What is said in quotation marks is mentioned, not asked: "the log says “删除 a.md”".
+# An ASCII single quote opens a span only after a non-letter and closes before one, so the
+# apostrophes of "don't", "it's" and "users'" open nothing.
 _QUOTED: Final = re.compile(
     r'"[^"]*"|“[^”]*”|`[^`]*`|「[^」]*」|『[^』]*』|«[^»]*»|‘[^’]*’(?=\W|$)'
+    r"|(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
 )
 # A prohibition before a Chinese change verb in the same clause: do not, stop, no, never.
 _NO_ZH: Final = re.compile(
@@ -590,14 +593,41 @@ _NO_ZH: Final = re.compile(
 _CLAUSE_ZH: Final = re.compile(r"[，,、；;：:]")
 
 
-def _asked_zh(first: str) -> bool:
-    """Whether a change verb of *first* (one Chinese sentence) is asked for: one a prohibition earlier in its clause does not govern."""
-    for verb in _CHANGE_ZH.finditer(first):
-        starts = [found.end() for found in _CLAUSE_ZH.finditer(first[: verb.start()])]
-        clause = first[(starts[-1] if starts else 0) : verb.start()]
-        if not _NO_ZH.search(clause):
+def _forbidden_zh(first: str, at: int) -> bool:
+    """Whether a prohibition governs the change verb at *at* in *first*.
+
+    One in its own clause does. So does one earlier in an enumeration it
+    belongs to: after 、 whatever follows, and after a comma a clause that
+    opens with a verb when the clause before it holds one
+    ("不要删除 a.md、修改 b.md", "不要删除 a.md，修改 b.md"); a clause with words of
+    its own ("，请修复 b.md") or a ；/： ends it.
+    """
+    marks = [(found.start(), found.group()) for found in _CLAUSE_ZH.finditer(first)]
+    end = at
+    while True:
+        before = [mark for mark in marks if mark[0] < end]
+        start = before[-1][0] + 1 if before else 0
+        clause = first[start:end]
+        if _NO_ZH.search(clause):
             return True
-    return False
+        if not before:
+            return False
+        where, mark = before[-1]
+        earlier = [m for m in marks if m[0] < where]
+        previous = first[(earlier[-1][0] + 1 if earlier else 0) : where]
+        if mark == "、" or (
+            mark in "，," and not clause.strip() and _CHANGE_ZH.search(previous)
+        ):
+            end = where
+            continue
+        return False
+
+
+def _asked_zh(first: str) -> bool:
+    """Whether a change verb of *first* (one Chinese sentence) is asked for: one no prohibition governs."""
+    return any(
+        not _forbidden_zh(first, verb.start()) for verb in _CHANGE_ZH.finditer(first)
+    )
 
 
 def names_files(text: str) -> bool:

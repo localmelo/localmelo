@@ -545,7 +545,18 @@ def test_other_messages_are_not_brief_questions(typed: str) -> None:
         ("日志里写着“删除 report.md”，帮我解释一下", False),
         ("日志里写着「删除 report.md」", False),
         ('Say "delete report.md" to me', False),
+        ("日志里写着 '删除 report.md'，只解释这行日志。", False),
+        ("Fix 'a.py' and commit", True),
+        ("Fix tests/a.py, it's broken", True),
+        ("Please don't delete a.md; it's working, just explain it", False),
+        # One prohibition over a list of verbs, after 、 or a comma.
+        ("不要删除 a.md、修改 b.md，只解释这两个文件的用途。", False),
+        ("不要删除 a.md，修改 b.md，只解释这两个文件的用途。", False),
+        ("请勿删除 a.md、b.md、修改 c.md", False),
         # A request with a prohibition elsewhere, or a quote around the file, still is one.
+        ("修复 a.md、更新 b.md", True),
+        ("不要删除 a.md，请修复 b.md", True),
+        ("别担心，修复 a.py", True),
         ("请修复 tests/a.py，不要删除 b.py", True),
         ("修改 docs/a.md，别动其他文件", True),
         ("分别修复 a.py 和 b.py", True),
