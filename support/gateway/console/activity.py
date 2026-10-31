@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 
 from localmelo.support.sessions.display import (
     activity_text,
+    drop_leading_ack,
     home_label,
     request_words,
     split_thinking,
@@ -98,10 +99,6 @@ WROTE_CODE: Final = "Wrote some code"
 # A card carries this many lines of an answer, each cut at this many characters.
 CARD_LINES: Final = 2
 LINE_CHARS: Final = 120
-# An answer that only says it is done: "Done.", "All done", "已完成。".
-_ACK: Final = r"(?:done|completed?|finished|all done|ok(?:ay)?|已完成|完成了?|好了)"
-_ONLY_ACK: Final = re.compile(rf"^{_ACK}[\s.!。！]*$", re.IGNORECASE)
-_LEAD_ACK: Final = re.compile(rf"^{_ACK}(?:[.!](?=\s)|[。！])\s*", re.IGNORECASE)
 
 
 def _prose(text: str) -> str:
@@ -142,12 +139,16 @@ def result_line(note: str, answer: str) -> str:
     It is plain words: a run's own marker (``[interrupt: …]``) reads as what
     happened, a path reads as ``Made a picture`` or the file's name, and
     code gives way to the first sentence around it (``Wrote some code`` when
-    there is none).
+    there is none). A ``Done.`` that opens the answer gives way to what the
+    run says after it, as it does on the chat's card.
     """
     raw = note or split_thinking(answer or "")[1]
     marker = _MARKER.match(raw)
     if marker:
         return _MARKER_WORDS[marker.group(1)]
+    kept = drop_leading_ack([line for line in raw.splitlines() if line.strip()])
+    if kept is not None:
+        raw = "\n".join(kept)
     text = " ".join(_prose(raw).split())
     if raw.strip() and not text:
         return WROTE_CODE
@@ -191,10 +192,9 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
         for line in lines
     ]
     rows = [row for row in rows if row]
-    kept = [row for row in rows if not _ONLY_ACK.match(row)]
-    if not kept:
+    kept = drop_leading_ack(rows)
+    if kept is None:
         return rows[0] if rows else (WROTE_CODE if raw.strip() else "")
-    kept[0] = _LEAD_ACK.sub("", kept[0]) or kept[0]
     if len(kept) == 1:
         kept = [part for part in _SENTENCE.split(kept[0]) if part.strip()]
     return "\n".join(_cut(_no_paths(row), LINE_CHARS) for row in kept[:count])
