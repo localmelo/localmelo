@@ -16,7 +16,12 @@ from dataclasses import asdict
 from typing import Any, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
+    AutoPolicy,
+)
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
@@ -30,6 +35,13 @@ from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
+from localmelo.support.gateway.auto_blocks import (
+    BlockError,
+    allowable,
+    blocked_steps,
+    find_block,
+    go_ahead_text,
+)
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
     GateCall,
@@ -86,7 +98,12 @@ from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_cache_options,
 )
-from localmelo.support.sessions.approvals import ApprovalBroker, RememberingPolicy
+from localmelo.support.sessions.approvals import (
+    ApprovalBroker,
+    ChatMode,
+    RememberingPolicy,
+    chat_mode,
+)
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
@@ -332,6 +349,9 @@ class TaskWorkers:
         self._homes: set[str] = set()
         # Messages each task reads at its next step.
         self._inboxes: dict[str, TaskInbox] = {}
+        # Auto mode's policy of each task in Auto, kept across its runs for
+        # the steps allowed once (#339).
+        self._auto: dict[str, AutoPolicy] = {}
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -477,6 +497,12 @@ class TaskWorkers:
                     raise
                 refused = True
                 workspace = inherited or configured_root(self.settings())
+            # The task keeps the mode its chat has now (#339): Ask or Auto.
+            owner = await self.store.get_session(front or self.front_id or "")
+            mode = chat_mode(
+                owner.meta if owner is not None else None,
+                self._new_chat_mode() if owner and owner.kind == "front" else "ask",
+            )
             record, repeated = await self.tasks.create_task(
                 spec,
                 origin=origin,
@@ -484,6 +510,7 @@ class TaskWorkers:
                 request_key=key,
                 task_id=task_id,
                 front_id=front or self.front_id,
+                meta={"approvals": mode},
                 _recovery_proof=True,
             )
             if not repeated and refused:
@@ -505,6 +532,11 @@ class TaskWorkers:
                     )
                 await self._schedule()
             return await self._body(record), repeated
+
+    def _new_chat_mode(self) -> ChatMode:
+        """``[approvals] mode``: the main chat's mode until the person picks one."""
+        approvals = getattr(self.settings(), "approvals", None)
+        return chat_mode({"approvals": getattr(approvals, "mode", "ask")})
 
     async def _chat_folder(self, front_id: str | None) -> str | None:
         """The folder a task of *front_id* inherits: a side chat's own, else None.
@@ -583,6 +615,27 @@ class TaskWorkers:
                 )
             self._inboxes.setdefault(task_id, TaskInbox()).put(text)
             return await self._body(current), "queued"
+
+    async def allow_once(self, task_id: str, request_id: str) -> tuple[dict, str]:
+        """Allow once a step auto mode blocked in *task_id*, and ask it to go ahead.
+
+        The block is found in the task's records; the allowance is kept in
+        the task's :class:`AutoPolicy`, and the message goes as the person's
+        (:meth:`message`): queued for a running task, or continuing a
+        finished one. :class:`BlockError` for an unknown block or one that
+        cannot be allowed.
+        """
+        await self.tasks.get_task(task_id)
+        approval = await find_block(self.store, task_id, request_id)
+        if approval is None:
+            raise BlockError("not_found")
+        allowed = allowable(approval)
+        if allowed is None:
+            raise BlockError("not_allowable")
+        key, categories = allowed
+        policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
+        policy.allow_once(key, categories)
+        return await self.message(task_id, go_ahead_text(categories))
 
     async def _continue(
         self, current: TaskRecord, text: str, *, level: int | None, reason: str
@@ -1806,6 +1859,9 @@ class TaskWorkers:
             client = self.gate.client(task_id)
             home, tool_env = task_home(task_id)
             self._homes.add(home)
+            # Ask or Auto, as the task was made (#339).
+            task_session = await self.store.get_session(task_id)
+            task_mode = chat_mode(task_session.meta if task_session else None)
             try:
                 agent = await build_session_agent(
                     cfg=self.settings(),
@@ -1875,7 +1931,10 @@ class TaskWorkers:
                     answer.cancel()
                     await asyncio.gather(answer, return_exceptions=True)
 
-            policy = RememberingPolicy(runner.observe(paused_ask))
+            policy: ApprovalPolicy = RememberingPolicy(runner.observe(paused_ask))
+            if task_mode == "auto":
+                # Nobody is asked, so nothing holds the task (#339).
+                policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
             async with self._lock:
                 self._runners[task_id] = runner
                 if (
@@ -2135,6 +2194,15 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
+        # Ask or Auto, fixed when the task was made, and what Auto blocked (#339).
+        body["approvals"] = chat_mode(session.meta if session else None)
+        body["blocked"] = (
+            await blocked_steps(self.store, record.task_id)
+            if body["approvals"] == "auto"
+            else []
+        )
+        policy = self._auto.get(record.task_id)
+        body["allowances"] = dict(policy.given) if policy is not None else {}
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
         return body

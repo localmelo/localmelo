@@ -34,6 +34,7 @@ SECTIONS = (
     "cli",
     "ui",
     "console",
+    "approvals",
     "scheduler",
     "browser",
     "gateway",

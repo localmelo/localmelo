@@ -81,8 +81,8 @@ _HARMLESS = [
     "/dev/fd",
 ]
 _CACHES = [".cache/uv", "Library/Caches/black", ".npm"]
-_APP = ("/Applications/LocalMelo.app",)
-# localmelo's own source: an editable install runs from here.
+# Where the running localmelo is imported from: an editable install's
+# source, or the package inside the app bundle (see _running).
 _SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), *[".."] * 3))
 # Local files the review reads for one call, at most: those it runs, and
 # the changed files a runner (pytest…) runs.
@@ -126,7 +126,13 @@ class Context:
 
 @dataclass
 class Findings:
-    """High-impact categories with their reasons; the undecided reasons."""
+    """High-impact categories with their reasons; the undecided reasons.
+
+    ``hits`` has one ``(category, site, reason)`` for each finding as the
+    rules met it, ``?`` for a doubt, repeats kept; ``site`` is the call or
+    command the rules were reading (``Findings.site``), else the reason. An
+    edit is judged by the hits it adds (see ``files.written``).
+    """
 
     high: dict[str, list[str]] = field(default_factory=dict)
     unsure: list[str] = field(default_factory=list)
@@ -139,6 +145,8 @@ class Findings:
     # Changed files a runner runs that melo did not read, as they are now.
     changed: list[str] = field(default_factory=list)
     ran_runner: bool = False
+    site: str = ""
+    hits: list[tuple[str, str, str]] = field(default_factory=list)
 
     def take(self, path: str, *, key: bool = True) -> str | None:
         """*path*'s text when the review may read it (once, at most
@@ -169,11 +177,13 @@ class Findings:
         return text
 
     def add(self, category: str, reason: str) -> None:
+        self.hits.append((category, self.site or reason, reason))
         self.high.setdefault(category, [])
         if reason not in self.high[category]:
             self.high[category].append(reason)
 
     def doubt(self, reason: str) -> None:
+        self.hits.append(("?", self.site or reason, reason))
         if reason not in self.unsure:
             self.unsure.append(reason)
 
@@ -218,17 +228,29 @@ def resolve(ctx: Context, raw: str, cwd: str | None = None) -> str | None:
     return os.path.realpath(os.path.join(cwd or ctx.root, text))
 
 
-@functools.lru_cache(maxsize=32)
-def _places(home: str, root: str) -> dict[str, tuple[str, ...]]:
-    """The folders of :func:`where` for one home and workspace.
+def _running(source: str) -> str:
+    """The folder of the running localmelo: the app bundle around *source*, else *source*."""
+    parts = source.split(os.sep)
+    for i in range(len(parts) - 1, 0, -1):
+        if parts[i].endswith(".app"):
+            return os.sep.join(parts[: i + 1])
+    return source
 
-    localmelo's source counts as itself, unless the workspace is that
-    source or inside it: then the person works on localmelo.
+
+@functools.lru_cache(maxsize=32)
+def _places(home: str, root: str, source: str) -> dict[str, tuple[str, ...]]:
+    """The folders of :func:`where` for one home, workspace and running localmelo.
+
+    Only the running localmelo counts as itself (*source*, the folder it is
+    imported from, or the app bundle around it), with its settings: another
+    copy of the source or another app is a folder like any other. It does
+    not count when the workspace is inside it: the person works on it.
     """
     later = [*(os.path.join(home, p) for p in _PERSISTENCE), f"{root}/.git/hooks"]
-    source = () if under(root, _SOURCE) else (_SOURCE,)
+    running = _running(source)
+    own = () if under(root, running) else (running,)
     return {
-        "self": (f"{home}/.cache/localmelo", *_APP, f"{home}{_APP[0]}", *source),
+        "self": (f"{home}/.cache/localmelo", *own),
         "persistence": (*later, f"{root}/.envrc", f"{root}/.git/config", *_LAUNCHD),
         "credentials": tuple(
             os.path.join(home, p) for p in _CREDENTIALS if not p.startswith(_ANYWHERE)
@@ -252,7 +274,7 @@ def secret_name(text: str) -> bool:
 def where(ctx: Context, path: str, *, write: bool) -> str:
     """self, credentials, persistence, system, harmless, root, inside or outside."""
     home, root = ctx.home.rstrip("/"), ctx.root
-    places = _places(home, root)
+    places = _places(home, root, _SOURCE)
     if write and any(under(path, p) for p in (ctx.prefix, *places["self"])):
         return "self"
     if write and any(under(path, p) for p in places["persistence"]):

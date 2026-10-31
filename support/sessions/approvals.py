@@ -19,7 +19,11 @@ from typing import Final, Literal
 
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
+    ApprovalPolicy,
     ApprovalRequest,
+    AutoPolicy,
+    ReviewMode,
+    review_mode,
 )
 from localmelo.melo.contracts.review import covered_by_grant, offers_grant
 
@@ -78,6 +82,55 @@ class RememberingPolicy:
         ):
             self._granted.add(request.tool_name)
         return decision
+
+
+ChatMode = Literal["ask", "auto"]
+
+
+def chat_mode(meta: object, default: ChatMode = "ask") -> ChatMode:
+    """A session's mode from its ``meta`` (``approvals``), else *default*.
+
+    The main chat has *default* (the settings' mode for new chats) until
+    the person picks one; any other session without one is ``ask``.
+    """
+    found = meta.get("approvals") if isinstance(meta, dict) else None
+    if found in ("ask", "auto"):
+        return "auto" if found == "auto" else "ask"
+    return "auto" if default == "auto" else "ask"
+
+
+class ChatPolicy:
+    """One chat's policy: Ask (a :class:`RememberingPolicy`) or Auto (#339).
+
+    :attr:`mode` is read at every decision, so a switch applies from the
+    chat's next step; a call already waiting for a person keeps waiting.
+    The Ask policy keeps its grants and the :class:`AutoPolicy` its
+    allowances across switches. ``inner`` is the policy of the mode now,
+    for :func:`~localmelo.melo.contracts.approvals.find_auto`.
+    """
+
+    def __init__(self, ask: AskFunction, mode: ChatMode = "ask") -> None:
+        self.mode: ChatMode = mode
+        self.ask = RememberingPolicy(ask)
+        self.auto = AutoPolicy()
+
+    @property
+    def inner(self) -> ApprovalPolicy:
+        return self.auto if self.mode == "auto" else self.ask
+
+    @property
+    def allowed_tools(self) -> frozenset[str]:
+        return self.ask.allowed_tools
+
+    def forget(self, tool_name: str | None = None) -> None:
+        """Take back one grant, or every grant (allowances stay)."""
+        self.ask.forget(tool_name)
+
+    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
+        return "auto" if self.mode == "auto" else review_mode(self.ask, request)
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.inner.decide(request)
 
 
 @dataclass

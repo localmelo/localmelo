@@ -74,6 +74,8 @@ REASONING_TAGS = ("explicit", "closing_only", "none")
 UI_MODES = ("default", "developer")
 # The console's and the app's language: "auto" follows the system.
 CONSOLE_LANGUAGES = ("auto", "en", "zh-Hans")
+# How a new chat works: melo asks before risky steps, or auto mode (#339).
+APPROVAL_MODES = ("ask", "auto")
 STATUS_LINES = ("auto", "off")
 CLI_COLORS = ("auto", "16", "256", "truecolor")
 CLI_BACKGROUNDS = ("auto", "dark", "light")
@@ -173,6 +175,18 @@ class ConsoleConfig:
     """
 
     language: str = "auto"  # auto | en | zh-Hans
+
+
+@dataclass
+class ApprovalsConfig:
+    """The ``[approvals]`` table: the mode a new chat starts in (#339).
+
+    ``ask``: melo asks before it runs commands or changes files. ``auto``:
+    nobody is asked; routine steps run, risky steps and steps the person did
+    not ask for are blocked and explained. Each chat keeps its own mode.
+    """
+
+    mode: str = "ask"  # ask | auto
 
 
 @dataclass
@@ -382,6 +396,7 @@ class Config:
     cli: CliConfig = field(default_factory=CliConfig)
     ui: UiConfig = field(default_factory=UiConfig)
     console: ConsoleConfig = field(default_factory=ConsoleConfig)
+    approvals: ApprovalsConfig = field(default_factory=ApprovalsConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -611,6 +626,14 @@ class Config:
         return [
             f"[console] language={self.console.language!r} "
             f"is not one of {CONSOLE_LANGUAGES}"
+        ]
+
+    def _validate_approvals(self) -> list[str]:
+        """``[approvals] mode`` is ``ask`` or ``auto``."""
+        if self.approvals.mode in APPROVAL_MODES:
+            return []
+        return [
+            f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
         ]
 
     def _validate_request_timeout(self) -> list[str]:
@@ -868,6 +891,7 @@ class Config:
             *self._validate_cli(),
             *self._validate_ui(),
             *self._validate_console(),
+            *self._validate_approvals(),
             *self._validate_request_timeout(),
         ]
 
@@ -1156,6 +1180,8 @@ def _load_file() -> Config:
     # A bad language is kept for Config.console_errors; the console reads it as auto.
     if isinstance(data.get("console"), dict):
         cfg.console.language = data["console"].get("language", cfg.console.language)
+    if isinstance(data.get("approvals"), dict):
+        cfg.approvals.mode = data["approvals"].get("mode", cfg.approvals.mode)
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -1487,6 +1513,8 @@ def save(cfg: Config) -> None:
         lines.extend(
             ["[console]", f"language = {_toml_value(cfg.console.language)}", ""]
         )
+    if cfg.approvals != ApprovalsConfig():
+        lines.extend(["[approvals]", f"mode = {_toml_value(cfg.approvals.mode)}", ""])
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

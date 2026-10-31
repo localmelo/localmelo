@@ -24,6 +24,7 @@ import json
 import os
 import re
 import textwrap
+from collections import Counter
 from collections.abc import Callable
 
 from localmelo.melo.checker.review.paths import Context, Findings, shown
@@ -122,18 +123,26 @@ def _findings(ctx: Context, path: str, text: str) -> Findings:
 
 
 def _added(f: Findings, new: Findings, old: Findings, lead: str) -> None:
-    """*new*'s findings that *old* lacks, in *f*, each reason after *lead*."""
+    """*new*'s findings that *old* lacks, in *f*, each reason after *lead*.
+
+    Findings compare by category and site (the call or command), counted:
+    a second call like one the file had already, even with the same words
+    for a reason, is added; a call moved or a file reflowed adds nothing.
+    """
 
     def said(reason: str) -> str:
         return f"{lead} {reason[:1].lower()}{reason[1:]}"
 
-    for category, reasons in new.high.items():
-        for reason in reasons:
-            if reason not in old.high.get(category, []):
-                f.add(category, said(reason))
-    for reason in new.unsure:
-        if reason not in old.unsure:
+    had = Counter((category, site) for category, site, _ in old.hits)
+    for category, site, reason in new.hits:
+        if category == "self":
+            continue  # running it later is judged then
+        if had[(category, site)] > 0:
+            had[(category, site)] -= 1
+        elif category == "?":
             f.doubt(said(reason))
+        else:
+            f.add(category, said(reason))
     f.paths += [p for p in new.paths if p not in old.paths]
 
 

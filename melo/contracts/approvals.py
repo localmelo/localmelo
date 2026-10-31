@@ -220,7 +220,8 @@ class AutoPolicy:
     included) for :data:`ALLOW_ONCE_S` of wall-clock time; the next call of
     that step runs once, with origin ``user``, when its review finds no
     category the allowance did not cover. Allowances live in this object
-    only.
+    only; :attr:`given` keeps when each one given runs out, also once it was
+    used or ran out, so a surface can tell a step allowed before.
     """
 
     def __init__(
@@ -230,6 +231,7 @@ class AutoPolicy:
         self.task = task
         self._clock = clock
         self._allowed: dict[str, tuple[float, frozenset[str]]] = {}
+        self.given: dict[str, float] = {}
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         return "auto"
@@ -240,7 +242,9 @@ class AutoPolicy:
         *categories* are those of the blocked step the user saw: a run of
         it whose review finds any other is not allowed by this.
         """
-        self._allowed[key] = (self._clock() + ALLOW_ONCE_S, frozenset(categories))
+        until = self._clock() + ALLOW_ONCE_S
+        self._allowed[key] = (until, frozenset(categories))
+        self.given[key] = until
 
     def allowed_once(self, key: str) -> bool:
         """Whether *key* has an allowance that has not run out (it is not used)."""

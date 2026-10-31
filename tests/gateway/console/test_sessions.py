@@ -33,6 +33,9 @@ SESSION_KEYS = {
     "held",
     # True for the main chat only; every chat of kind "chat" is a side chat.
     "main",
+    # Ask or Auto, and the steps allowed once in this chat (#339).
+    "approvals",
+    "allowances",
 }
 
 
@@ -166,7 +169,7 @@ async def test_a_session_with_its_tokens_and_agent_state(
     assert body["tokens"] == 7
 
     entry = await open_session(console.sessions, turn.session_id)
-    entry.policy._granted.add("python_exec")
+    entry.policy.ask._granted.add("python_exec")
     entry.granted_at["python_exec"] = 123.0
     body = client.get(f"/api/sessions/{turn.session_id}").json()
     assert body["agent"] == "open"
@@ -237,7 +240,7 @@ async def test_a_pending_high_impact_call_carries_its_review_and_is_never_grante
         review=review,
     )
     # The chat holds a routine grant of the tool from an hour ago.
-    entry.policy._granted.add("shell_exec")
+    entry.policy.ask._granted.add("shell_exec")
     entry.granted_at["shell_exec"] = 123.0
     deciding = asyncio.create_task(entry.policy.decide(request))
     for _ in range(10):

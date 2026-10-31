@@ -21,8 +21,9 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 TMP_DIR = ".melo-tmp"
@@ -242,6 +243,69 @@ class WriteConfinement:
             + f"; write in {self.root}, and put scratch files in $TMPDIR."
         )
         return f"{line}\n"
+
+
+class Confinement(Protocol):
+    """What a shell or Python child's start asks of a confinement."""
+
+    def argv(self, argv: Sequence[str]) -> list[str]: ...
+
+    def env(self) -> dict[str, str]: ...
+
+    def note(self, text: str) -> str: ...
+
+
+class AutoConfinement:
+    """The confinement of the calls auto mode decides (#339); off for the rest.
+
+    An Agent that confines nothing of its own still keeps the writes of an
+    auto-mode call in its workspace: nobody approves those calls, so the
+    profile is the floor under the review. The Agent sets :attr:`on` for
+    each call and calls :meth:`ready` (blocking: run it in a thread) before
+    one runs with it on; the profile is made once, by :func:`confine`. While
+    :attr:`on` is false a child starts as it would without it. When the
+    profile cannot be made, a call with it on fails with why, never
+    unconfined.
+    """
+
+    def __init__(self, root: str, env: Callable[[], Mapping[str, str]]) -> None:
+        self.root = root
+        self.on = False
+        self._env = env
+        self._made: WriteConfinement | None = None
+        self._error = ""
+        self._tried = False
+
+    def ready(self) -> None:
+        """Make the profile, the first time only (off macOS there is none)."""
+        if self._tried:
+            return
+        self._tried = True
+        try:
+            self._made = confine(self.root, self._env())
+        except ConfinementError as exc:
+            self._error = str(exc)
+
+    @property
+    def refused(self) -> int:
+        return 0 if self._made is None else self._made.refused
+
+    def argv(self, argv: Sequence[str]) -> list[str]:
+        if not self.on:
+            return list(argv)
+        if self._error or not self._tried:
+            raise ConfinementError(
+                self._error or "auto mode's confinement is not ready"
+            )
+        return list(argv) if self._made is None else self._made.argv(argv)
+
+    def env(self) -> dict[str, str]:
+        return self._made.env() if self.on and self._made is not None else {}
+
+    def note(self, text: str) -> str:
+        if not self.on or self._made is None:
+            return ""
+        return self._made.note(text).replace("in this run", "in auto mode")
 
 
 def _refused_path(line: str, at: int) -> str | None:

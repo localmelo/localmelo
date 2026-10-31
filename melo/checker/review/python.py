@@ -563,6 +563,7 @@ class _Review:
     def run(self, tree: ast.AST) -> None:
         self.passed(tree)
         for node in self.later:
+            self.f.site = _site(node)
             if isinstance(node, ast.Call):
                 self.call(node)
                 self.code_write(node)
@@ -590,6 +591,7 @@ class _Review:
         for node in nodes:
             if not isinstance(node, ast.Name | ast.Attribute):
                 continue
+            self.f.site = _site(node)
             name = self.name(node)
             if name.split(".")[0] == "ctypes":
                 self.f.doubt("Uses ctypes, which melo cannot check.")
@@ -1002,6 +1004,14 @@ def _join(sep: str, parts: tuple[Any, ...]) -> Any:
     return None
 
 
+def _site(node: ast.AST) -> str:
+    """A finding's site: the call or name as code, without layout or comments."""
+    try:
+        return "py:" + ast.unparse(node)[:300]
+    except (ValueError, RecursionError):
+        return "py:" + type(node).__name__
+
+
 def review_python(ctx: Context, f: Findings, code: str) -> None:
     if ctx.depth > shell.MAX_DEPTH:
         return f.doubt("Nests code too deeply for melo to check.")
@@ -1009,4 +1019,8 @@ def review_python(ctx: Context, f: Findings, code: str) -> None:
         tree = ast.parse(code)
     except (SyntaxError, ValueError):
         return  # it fails without effect
-    _Review(ctx, f, tree).run(tree)
+    site = f.site
+    try:
+        _Review(ctx, f, tree).run(tree)
+    finally:
+        f.site = site

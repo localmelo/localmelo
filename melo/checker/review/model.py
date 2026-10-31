@@ -289,36 +289,64 @@ def names(text: str) -> set[str]:
     return {word for word in found if len(word) >= 3 and word not in STOP_WORDS}
 
 
-def step_names(tool_name: str, arguments: Mapping[str, Any]) -> set[str]:
-    """The names a call acts on: its argv words, or its code's literals.
+# Python calls whose first argument is a command: its words count as names.
+_RUNS_COMMAND: Final = ("subprocess.", "os.system", "os.popen", "os.exec", "os.spawn")
 
-    Comments and docstrings do not count: a step cannot name what the user
-    asked for by a comment. Python gives its string literals and the
-    modules it imports; a command its words; a file tool its path.
+
+def _dotted(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return f"{base}.{node.attr}" if base else ""
+    return ""
+
+
+def _argv_words(node: ast.Call) -> list[str]:
+    """The literal words of the command a process call runs."""
+    first = node.args[0] if node.args else None
+    for keyword in node.keywords:
+        if first is None and keyword.arg == "args":
+            first = keyword.value
+    if isinstance(first, ast.List | ast.Tuple):
+        return [
+            str(e.value)
+            for e in first.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return [first.value]
+    return []
+
+
+def step_names(tool_name: str, arguments: Mapping[str, Any]) -> set[str]:
+    """The names a call acts on: its argv words and the names in its code.
+
+    Python gives the names it uses (variables, attributes, modules it
+    imports) and the words of the commands it runs, never another string
+    literal, comment or docstring: a step cannot name what the user asked
+    for by text it does not act on. A command gives its words; a file tool
+    its path.
     """
     if tool_name == "python_exec":
         try:
             tree = ast.parse(str(arguments.get("code") or ""))
         except (SyntaxError, ValueError, RecursionError):
             return set()
-        docs = {
-            id(node.value)
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
-        }
-        words = [
-            str(node.value)
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in docs
-        ]
-        words += [
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import | ast.ImportFrom)
-            for alias in node.names
-        ]
+        words: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                words.append(node.id)
+            elif isinstance(node, ast.Attribute):
+                words.append(node.attr)
+            elif isinstance(node, ast.alias):
+                words.append(node.name)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                words.append(node.module)
+            elif isinstance(node, ast.Call) and _dotted(node.func).startswith(
+                _RUNS_COMMAND
+            ):
+                words += _argv_words(node)
         return names(" ".join(words))
     if tool_name == "shell_exec":
         command = arguments.get("command")

@@ -21,6 +21,8 @@ import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictur
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
+import * as modeChip from '../../support/gateway/static/mode.mjs';
+import * as blocked from '../../support/gateway/static/blocked.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -527,6 +529,8 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -729,6 +733,8 @@ function harness(routes, {mobile = false} = {}) {
     memoryNodes,
     ...mainChat,
     ...levels,
+    ...modeChip,
+    ...blocked,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },

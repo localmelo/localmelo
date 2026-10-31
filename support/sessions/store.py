@@ -1787,6 +1787,38 @@ class SessionStore:
             for row in reversed(rows)
         ]
 
+    async def auto_records(
+        self, session_id: str, *, limit: int = 100
+    ) -> list[StoredEvent]:
+        """The ``tool.finished`` events of auto mode's blocks and allowances (#339).
+
+        A block has ``approval.origin`` ``auto`` and is not allowed; an
+        allowance used has ``approval.allowance`` ``once``. The newest
+        *limit* (1..1000), in id order.
+        """
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT id, turn, event FROM events WHERE session_id = ? "
+                "AND type = 'tool.finished' AND ("
+                "(json_extract(event, '$.data.approval.origin') = 'auto' AND "
+                "json_extract(event, '$.data.approval.allowed') = 0) OR "
+                "json_extract(event, '$.data.approval.allowance') = 'once') "
+                "ORDER BY id DESC LIMIT ?",
+                (session_id, limit),
+            )
+        return [
+            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
+            for row in reversed(rows)
+        ]
+
     async def day_turns(
         self, since: float, kinds: Collection[str], *, limit: int = 100
     ) -> list[DayTurn]:
@@ -1997,11 +2029,14 @@ class SessionStore:
         model: str | None = None,
         workspace: str | None = None,
         meta: Mapping[str, Any] | None = None,
+        meta_update: Mapping[str, Any] | None = None,
     ) -> SessionInfo:
         """Change the given fields; ``None`` leaves a field as it is (T-12).
 
-        *meta* replaces the whole object. Writes ``session.updated`` with the
-        values after the update.
+        *meta* replaces the whole object; *meta_update* sets its keys in the
+        stored object in the same transaction, keeping the others (a chat's
+        mode, #339). Writes ``session.updated`` with the values after the
+        update.
         """
         meta_text = None if meta is None else _meta_text(meta)
         async with self._lock:
@@ -2009,6 +2044,11 @@ class SessionStore:
             self._check_writable()
             async with self._transaction(conn, "update_session") as stored:
                 await self._require_session(conn, session_id)
+                if meta_update is not None:
+                    current = await self._get_session(conn, session_id)
+                    assert current is not None
+                    merged = {**(meta or current.meta), **meta_update}
+                    meta_text = _meta_text(merged)
                 now = self._clock()
                 await conn.execute(
                     "UPDATE sessions SET model = COALESCE(?, model), "

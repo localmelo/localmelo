@@ -201,6 +201,14 @@ def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]
 def review_shell(ctx: Context, f: Findings, command: str) -> None:
     if ctx.depth > MAX_DEPTH:
         return f.doubt("Nests commands too deeply for melo to check.")
+    site = f.site
+    try:
+        _review_shell(ctx, f, command)
+    finally:
+        f.site = site
+
+
+def _review_shell(ctx: Context, f: Findings, command: str) -> None:
     text, bodies = _heredocs(_uncomment(command))
     try:
         segments = _segments(text)
@@ -209,6 +217,8 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
     cwd, before, url, bare_before = ctx.root, "", "", False
     said: str | None = None  # what the last command printed, when literal
     for op, argv, redirs in segments:
+        # A finding's site: the command as its words (see Findings.hits).
+        f.site = "sh:" + " ".join([op, *argv, *(k + t for k, t in redirs)])[:300]
         body, writes = None, []
         for kind, target in redirs:
             if kind in _WRITES and not target.isdigit():

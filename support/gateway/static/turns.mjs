@@ -12,6 +12,7 @@
  * facts of a first turn. A string that reads differently here is a bug.
  */
 
+import { blockWords } from "./blocked.mjs";
 import { t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
 
@@ -432,6 +433,20 @@ export function approvalTag(status, errorCategory, approval) {
   }
   if (origin === "timeout") {
     return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
+  }
+  // Auto mode (#339): a block says why in a few words; a routine call has no tag.
+  if (origin === "auto" && !approval.allowed) {
+    const words = blockWords(approval);
+    return words
+      ? {short: t("turns.approval.blocked.shortReason", {reason: words}), long: t("turns.approval.blocked.longReason", {reason: words})}
+      : {short: t("turns.approval.blocked.short"), long: t("turns.approval.blocked.long")};
+  }
+  if (approval.allowed && approval.allowance === "once") {
+    return {short: t("turns.approval.allowedOnce"), long: t("turns.approval.once.long")};
+  }
+  if (origin === "auto") {
+    const asked = isObject(approval.review) && Array.isArray(approval.review.categories) && approval.review.categories.length > 0;
+    return asked ? {short: t("turns.approval.asked.short"), long: t("turns.approval.asked.long")} : null;
   }
   if (approval.allowed) {
     if (origin === "session") {

@@ -24,6 +24,8 @@ import { setupPanel } from "./panel.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
+import { modeOf, setupModeChip } from "./mode.mjs";
+import { allowState, blockCard, blockFacts } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
@@ -77,6 +79,10 @@ const S = {
   activeId: null,
   newWorkspace: null, // The folder picked for the next new chat; null is the server's default.
   defaultWorkspace: "", // That default, as `GET /api/settings` says it.
+  newMode: null, // Ask or Auto picked for the next new chat; null is the settings' mode.
+  defaultMode: "ask", // The mode new chats start in, as `GET /api/settings` says it.
+  modeSaving: false,
+  allowing: {}, // Allow once under way or failed, by the block's request id: "allowing" or the error.
   drafts: {},
   outbox: {},
   cancelling: new Set(),
@@ -466,6 +472,7 @@ function syncUI() {
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
   const fresh = S.ready && !S.activeId && !setup && !workerMode;
   folderPicker.update(fresh);
+  modeChip.update();
   $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
   const modelBanner = $("model-banner");
   setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? t("header.noModelBanner") : "");
@@ -1023,6 +1030,10 @@ function viewSnapshot() {
     mainActive() ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
     mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
+    // Allow once (#339): a request under way, and each allowance still open or run out.
+    S.allowing,
+    Object.entries(view?.session?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()]),
+    developerMode,
   ]);
 }
 
@@ -1248,6 +1259,7 @@ function assistantNode(turn, newest = false) {
   label.append(mark, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
+  article.append(...blockedCards(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
       article.append(el("p", "turn-caption", t("chat.bestEffort")));
@@ -1258,6 +1270,50 @@ function assistantNode(turn, newest = false) {
     article.append(answerNode(turn.answer), ...picturesOf(turn), actionsNode(turn));
   }
   return article;
+}
+
+// The steps auto mode blocked in a turn (#339), each a card under the work, with Allow once.
+function blockedCards(turn) {
+  const view = S.view;
+  if (!view) return [];
+  const cards = [];
+  for (const item of turn.items) {
+    if (item.kind !== "tool" || item.status !== "blocked") continue;
+    const facts = blockFacts(item);
+    if (!facts || !facts.category) continue;
+    cards.push(blockCard(document, facts, {
+      allowing: allowState({ until: view.session?.allowances?.[facts.stepKey] ?? null, used: usedAt(view, facts.stepKey, item.startedTs), now: nowSeconds() }),
+      busy: S.allowing[facts.requestId] === "allowing" ? "allowing" : runningTurn() ? "running" : false,
+      developer: developerMode,
+      error: S.allowing[facts.requestId] && S.allowing[facts.requestId] !== "allowing" ? S.allowing[facts.requestId] : "",
+      onAllow: () => allowOnce(view, facts),
+    }));
+  }
+  return cards;
+}
+
+/** When a later call of the step *key* ran on its Allow once, or null. */
+function usedAt(view, key, after) {
+  for (const turn of view.turns) {
+    for (const item of turn.items) {
+      if (item.kind === "tool" && item.approval?.allowance === "once" && item.approval?.step_key === key && item.startedTs >= after) return item.startedTs || after;
+    }
+  }
+  return null;
+}
+
+async function allowOnce(view, facts) {
+  S.allowing[facts.requestId] = "allowing";
+  renderMessages(false, true);
+  try {
+    const body = await api(`/sessions/${encodeURIComponent(view.id)}/blocks/${encodeURIComponent(facts.requestId)}/allow`, { method: "POST" });
+    if (view.session) view.session.allowances = { ...(view.session.allowances ?? {}), [body.step_key]: body.until };
+    delete S.allowing[facts.requestId];
+  } catch (error) {
+    S.allowing[facts.requestId] = error.message;
+  }
+  renderMessages(false, true);
+  syncUI();
 }
 
 // What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo".
@@ -2015,10 +2071,12 @@ async function submit(slot, key, text) {
         body: {
           turn: { text, client_request_id: key },
           ...(S.newWorkspace ? { workspace: S.newWorkspace } : {}),
+          ...(S.newMode ? { approvals: S.newMode } : {}),
         },
       });
       if (S.outbox[slot]?.clientRequestId !== key) return;
       const created = body.session;
+      S.newMode = null;
       forgetDraft("new", text);
       delete S.outbox.new;
       delete S.outbox[created.id];
@@ -2655,6 +2713,7 @@ async function refreshMode(saved) {
     // The macOS app reads this to decide what its menu offers (an app has no other way to know the mode).
     document.documentElement.dataset.mode = developerMode ? "developer" : "default";
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
+    S.defaultMode = modeOf(settings.approvals);
   } catch { /* Keep the last known mode and folder. */ }
 }
 // The panel beside the chat: Melo, what runs now and what ran today. Below 900 px it is a sheet behind the face chip.
@@ -2701,9 +2760,9 @@ const showSettings = setupSettings({
     }
   },
 });
-function openSettings() {
+function openSettings(section) {
   drawer.close();
-  return showSettings();
+  return showSettings(section);
 }
 const folderPicker = setupFolderPicker({
   doc: document,
@@ -2715,6 +2774,41 @@ const folderPicker = setupFolderPicker({
   notify: (message) => notify(message),
   // Only the macOS app registers this handler; a browser has none.
   bridge: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
+});
+// Ask or Auto (#339): the chat's mode, switched from its next step; before a chat exists, the next new chat's.
+const modeChip = setupModeChip({
+  doc: document,
+  state: () => {
+    const session = S.activeId ? activeSession() : null;
+    return {
+      mode: session ? modeOf(session.approvals) : S.newMode ?? S.defaultMode,
+      fallback: S.defaultMode,
+      visible: S.ready && !workerMode && !setupShown() && (!session || session.kind !== "task"),
+      busy: S.modeSaving,
+    };
+  },
+  pick: async (mode) => {
+    const id = S.activeId;
+    if (!id) {
+      S.newMode = mode === S.defaultMode ? null : mode;
+      return;
+    }
+    S.modeSaving = true;
+    modeChip.update();
+    try {
+      const body = await api(`/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { approvals: mode } });
+      for (const session of [listed(id), S.view?.id === id ? S.view.session : null]) {
+        if (session) Object.assign(session, body.session);
+      }
+      notify(t("auto.switched", { mode: t(`auto.mode.${mode}`) }));
+    } catch (error) {
+      notify(t("auto.switchFailed", { problem: error.message }), { sticky: true });
+    } finally {
+      S.modeSaving = false;
+      syncUI();
+    }
+  },
+  openSettings: () => openSettings("chats"),
 });
 const setupCard = setupModelCard({
   root: $("setup-card"),
@@ -2957,6 +3051,7 @@ $("level-menu").addEventListener("keydown", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (folderPicker.isOpen() && !event.target.closest?.(".folder-picker")) folderPicker.close();
+  if (modeChip.isOpen() && !event.target.closest?.(".mode-picker")) modeChip.close();
   if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
   if (running.isOpen() && !event.target.closest?.(".running-picker")) running.toggle(false);
 });
@@ -3014,6 +3109,11 @@ document.addEventListener("keydown", (event) => {
   if (folderPicker.isOpen()) {
     folderPicker.close();
     $("folder-btn").focus();
+    return;
+  }
+  if (modeChip.isOpen()) {
+    modeChip.close();
+    $("mode-btn").focus();
     return;
   }
   if (S.levelsOpen) {
