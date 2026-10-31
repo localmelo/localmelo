@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- What a side chat's task ended with is kept in memory: other chats recall its
+  summary like an earlier turn (`chat “<title>” · summary`), never as a note.
+  The chat's own answers are already recalled as its turns. Part of #369.
+  [#388]
 - In the terminal, what a `/` command prints hangs under the command behind a
   quiet `└` (`|` with ASCII symbols), indented one step: later lines line up
   under the first, a wrapped line continues under itself, and warnings and
@@ -3250,3 +3254,4 @@ earlier milestones.
 [#384]: https://github.com/localmelo/localmelo/pull/384
 [#385]: https://github.com/localmelo/localmelo/pull/385
 [#387]: https://github.com/localmelo/localmelo/pull/387
+[#388]: https://github.com/localmelo/localmelo/pull/388
