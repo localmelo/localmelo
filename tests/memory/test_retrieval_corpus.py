@@ -739,7 +739,7 @@ def _call(**fields: Any) -> dict[str, Any]:
         (_call(seq=True), "seq must be an integer >= 0"),
         (
             _call(kind="chat"),
-            "kind must be one of plan, reflect, retrieve, estimate, got 'chat'",
+            "kind must be one of plan, reflect, retrieve, estimate, review, got 'chat'",
         ),
         (_call(step=-1), "step must be an integer >= 0"),
         (_call(step="2"), "step must be an integer >= 0"),
@@ -1391,7 +1391,7 @@ def test_a_missing_column_is_named(tmp_path: Path) -> None:
         (
             "UPDATE llm_calls SET kind = 'chat' WHERE task_id = 't-en' AND seq = 1",
             "llm_calls row t-en/1: kind must be one of plan, reflect, retrieve, "
-            "estimate, got 'chat'",
+            "estimate, review, got 'chat'",
         ),
         (
             "UPDATE llm_calls SET tool_calls_json = '[{' WHERE task_id = 't-zh' "

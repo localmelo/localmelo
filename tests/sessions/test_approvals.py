@@ -18,7 +18,6 @@ from localmelo.support.sessions.approvals import (
     RESOLVED_IDS_KEPT,
     ApprovalBroker,
     RememberingPolicy,
-    RoutineOnlyPolicy,
 )
 
 
@@ -243,17 +242,15 @@ async def test_a_high_impact_answer_never_grants_the_tool() -> None:
     assert policy.allowed_tools == frozenset()
 
 
-async def test_routine_only_runs_routine_calls_and_asks_about_the_rest() -> None:
-    asked: list[ApprovalRequest] = []
-
+async def test_a_grant_is_silent_only_for_its_tool() -> None:
+    # Under a grant the gate lets the user's model review an undecided call
+    # first (the routine-only policy of the old terminal auto mode is gone:
+    # auto mode is AutoPolicy now, tested in tests/agent/test_auto_mode.py).
     async def ask(req: ApprovalRequest) -> ApprovalDecision:
-        asked.append(req)
-        return ApprovalDecision(False, "no")
+        return ApprovalDecision(True, remember=True)
 
-    policy = RoutineOnlyPolicy(RememberingPolicy(ask))
-    allowed = ApprovalDecision(True, origin="policy")
-    assert await policy.decide(reviewed(ActionReview("routine"))) == allowed
-    assert await policy.decide(reviewed(None)) == allowed
-    assert await policy.decide(reviewed(HIGH)) == ApprovalDecision(False, "no")
-    assert await policy.decide(reviewed(UNDECIDED)) == ApprovalDecision(False, "no")
-    assert [r.review for r in asked] == [HIGH, UNDECIDED]
+    policy = RememberingPolicy(ask)
+    assert not policy.silent_for(reviewed(UNDECIDED))
+    await policy.decide(reviewed(ActionReview("routine")))
+    assert policy.silent_for(reviewed(UNDECIDED))
+    assert not policy.silent_for(request("shell_exec"))

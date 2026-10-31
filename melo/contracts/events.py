@@ -140,7 +140,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "pruned",
             }
         ),
-        "run.finished": frozenset({"result"}),
+        "run.finished": frozenset({"result", "reviews"}),
     }
 )
 # Keys that a stored event from an older release may lack. Events the agent
@@ -149,6 +149,8 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "assistant.message": frozenset({"prefix"}),
+        # A run's reviews (#339): None without an approval policy.
+        "run.finished": frozenset({"reviews"}),
         "reflection": frozenset(
             {
                 "prefix",

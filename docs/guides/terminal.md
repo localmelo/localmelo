@@ -317,6 +317,7 @@ A call that installs software, downloads files, changes files outside the folder
 - The command, code or file content shows exactly as it will run, wrapped and never cut; control characters and text-reordering characters show escaped with a warning line.
 - The panel shows at most 8 lines of the body, then `… +N lines (v views all)`.
 - `--yolo` runs every tool without asking, and the status bar says `⚠ YOLO: no approvals`; developer mode adds the tool's permission tier (see [Permission tiers](tools-mcp.md#permission-tiers)).
+- `/approvals auto` turns on auto mode: nothing asks. Routine steps run; a high-impact step is blocked unless your own words ask for it, and a step melo cannot judge goes to your model first. A blocked step does not run, its row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways. Say "go ahead" to let it try again. `/approvals ask` turns it off.
 
 ### The workspace
 

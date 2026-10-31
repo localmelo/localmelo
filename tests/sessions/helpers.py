@@ -103,7 +103,7 @@ def core_event(
             "prefix": None,
             "duration_s": 0.1,
         },
-        "run.finished": {"result": run_result()},
+        "run.finished": {"result": run_result(), "reviews": None},
     }
     payload = dict(defaults[type_])
     payload.update(data)

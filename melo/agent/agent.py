@@ -54,6 +54,7 @@ from localmelo.melo.agent._captured_history import (
     split_image_notes,
 )
 from localmelo.melo.agent._chat import (
+    BLOCKED_ANSWER_NOTE,
     BUDGET_ACCOUNTING,
     BUDGET_HOOK,
     CALL_RECORDER,
@@ -73,6 +74,7 @@ from localmelo.melo.agent._chat import (
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._step_review import RunReviews, StepReviewer, answer_on_block
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import ToolImageStore
 from localmelo.melo.agent.options import (
@@ -99,6 +101,11 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    AutoPolicy,
+    ReviewMode,
+    block_note,
+    find_auto,
+    review_mode,
 )
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
@@ -107,7 +114,12 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
-from localmelo.melo.contracts.review import SELF_DENIAL, ActionReview
+from localmelo.melo.contracts.review import (
+    SELF_DENIAL,
+    ActionReview,
+    block_words,
+    step_key,
+)
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -1253,6 +1265,9 @@ class _RunState:
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
     approval: ApprovalPolicy | None = None
+    # The calls the gate reviewed, the model reviews sent and auto mode's
+    # blocks (#339); run.finished carries the summary when a policy ran.
+    reviews: RunReviews = dataclasses.field(default_factory=RunReviews)
     # Whether working memory holds the run's query.
     query_in_memory: bool = False
     # The id of the call whose approval the policy is deciding, or "".
@@ -1456,6 +1471,11 @@ def _is_cancellation(exc: BaseException) -> TypeGuard[asyncio.CancelledError]:
     return task is not None and task.cancelling() > 0
 
 
+def _reviews_of(run: _RunState) -> dict[str, Any] | None:
+    """What ``run.finished`` reports of the run's reviews: only when a policy ran."""
+    return None if run.approval is None else run.reviews.summary()
+
+
 def _check_approval(approval: object) -> None:
     """Raise ``TypeError`` unless *approval* is ``None`` or an approval policy.
 
@@ -1478,13 +1498,19 @@ class _ApprovalGate:
     run (see :meth:`Executor.execute_structured`). It builds the
     :class:`ApprovalRequest` from the request that would run, asks the
     run's policy, and keeps what came of it in :attr:`asked` for the
-    call's ``tool.finished`` event. While the policy decides,
+    call's ``tool.finished`` event. While the review and the policy decide,
     ``run.waiting_call_id`` names the call, so that a cancellation there
     closes the call as not started (see :meth:`Agent._on_cancelled`).
 
     With a *checker*, the request carries the call's review (#279), kept in
     :attr:`review` for the denial text; a call that would change localmelo
     itself (the ``self`` category) is denied without asking the policy.
+    With a *reviewer*, the user's model settles a call the rules left open
+    when the policy would let it run without a person (a session grant, or
+    auto mode; see :mod:`localmelo.melo.agent._step_review`). In auto mode
+    (#339) a denial is a block: the model reads the note of
+    :func:`~localmelo.melo.contracts.approvals.block_note`, and a second
+    block of the same kind sets ``run.reviews.stop``.
 
     The run's cancellation propagates, and the prompt counts as withdrawn.
     The policy fails closed otherwise: an exception it raises, a
@@ -1501,6 +1527,7 @@ class _ApprovalGate:
         workspace_root: str | None,
         tier: ToolTier,
         checker: Checker | None = None,
+        reviewer: StepReviewer | None = None,
     ) -> None:
         self._policy = policy
         self._run = run
@@ -1508,35 +1535,78 @@ class _ApprovalGate:
         self._workspace_root = workspace_root
         self._tier = tier
         self._checker = checker
+        self._reviewer = reviewer
         self.review: ActionReview | None = None
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
         self.asked: dict[str, Any] | None = None
+        self._mode: ReviewMode = "ask"
+        self._key = ""
+        self._allowance = False
 
     async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
         run, call = self._run, self._call
+        preview = call_preview(request.tool_name, request.arguments)
         if self._checker is not None:
             self.review = self._checker.review_action(
                 ActionReviewPayload(
                     request.tool_name, dict(request.arguments), self._workspace_root
                 )
             )
+            run.reviews.count(self.review)
         asking = ApprovalRequest(
             request_id=uuid.uuid4().hex,
             run_id=run.task_id,
             call_id=call.id,
             tool_name=request.tool_name,
             arguments=copy.deepcopy(request.arguments),
-            preview=call_preview(request.tool_name, request.arguments),
+            preview=preview,
             workspace_root=self._workspace_root,
             tier=self._tier,
             review=self.review,
         )
-        if self.review is not None and "self" in self.review.categories:
-            self._record(asking, origin="policy", reason=SELF_DENIAL)
-            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
+        self._mode = review_mode(self._policy, asking)
+        auto = find_auto(self._policy) if self._mode == "auto" else None
+        if self.review is not None and (
+            self._mode != "ask" or self.review.verdict != "routine"
+        ):
+            self._key = step_key(
+                request.tool_name, request.arguments, self._workspace_root
+            )
         run.waiting_call_id = call.id
         try:
+            if (
+                self._reviewer is not None
+                and self.review is not None
+                and not (auto is not None and auto.allowed_once(self._key))
+            ):
+                self.review = await self._reviewer.review(
+                    run.reviews,
+                    tool_name=request.tool_name,
+                    arguments=dict(request.arguments),
+                    preview=preview,
+                    review=self.review,
+                    mode=self._mode,
+                    key=self._key,
+                    workspace=self._workspace_root,
+                )
+                asking = dataclasses.replace(asking, review=self.review)
+            run.reviews.calls.append(
+                (
+                    request.tool_name,
+                    preview,
+                    "routine" if self.review is None else self.review.verdict,
+                )
+            )
+            if self.review is not None and "self" in self.review.categories:
+                run.waiting_call_id = ""
+                if self._mode == "auto":
+                    self._record(asking, origin="auto", reason=SELF_DENIAL)
+                    return ApprovalDecision(
+                        False, self._block(asking, auto), origin="auto"
+                    )
+                self._record(asking, origin="policy", reason=SELF_DENIAL)
+                return ApprovalDecision(False, SELF_DENIAL, origin="policy")
             decided: object = await self._policy.decide(asking)
         except asyncio.CancelledError as exc:
             if _is_cancellation(exc):
@@ -1562,6 +1632,8 @@ class _ApprovalGate:
             )
             self._record(asking, origin="error", reason=_exception_text(no_decision))
             raise no_decision
+        if self._mode == "auto" and decided.allow and decided.origin == "user":
+            self._allowance = True  # nobody is asked in auto mode: an allowance
         self._record(
             asking,
             origin=decided.origin,
@@ -1569,7 +1641,31 @@ class _ApprovalGate:
             reason=decided.reason,
             remember=decided.remember,
         )
+        if not decided.allow and decided.origin == "auto":
+            return dataclasses.replace(
+                decided, reason=self._block(asking, auto, decided.reason)
+            )
         return decided
+
+    def _block(
+        self, asking: ApprovalRequest, auto: AutoPolicy | None, words: str = ""
+    ) -> str:
+        """Keep an auto-mode block and return the note the model reads."""
+        task = auto is not None and auto.task
+        changed = auto is not None and auto.has_allowances()
+        if self._reviewer is None:
+            return block_note(self.review, words=words, task=task, changed=changed)
+        return self._reviewer.blocked(
+            self._run.reviews,
+            review=self.review,
+            key=self._key,
+            call_id=self._call.id,
+            preview=asking.preview,
+            words=words or block_words(self.review),
+            task=task,
+            workspace=self._workspace_root,
+            changed=changed,
+        )
 
     def _record(
         self,
@@ -1584,7 +1680,9 @@ class _ApprovalGate:
 
         *origin* is the decision's, ``"error"`` when the policy failed (the
         reason is then the failure), or ``"withdrawn"`` when the run was
-        cancelled while the policy decided.
+        cancelled while the policy decided. In auto mode, and for a call
+        that is not plainly routine, the record also holds the ``mode``, the
+        ``review`` and the ``step_key``; an allowance used is ``"once"``.
         """
         self.asked = {
             "request_id": asking.request_id,
@@ -1593,6 +1691,17 @@ class _ApprovalGate:
             "remember": remember,
             "origin": origin,
         }
+        review = self.review
+        if self._mode == "auto":
+            self.asked["mode"] = "auto"
+        if review is not None and (
+            self._mode == "auto" or review.verdict != "routine" or review.by == "model"
+        ):
+            self.asked["review"] = review.to_json()
+            if self._key:
+                self.asked["step_key"] = self._key
+        if self._allowance:
+            self.asked["allowance"] = "once"
 
 
 class _ToolAsk:
@@ -1602,6 +1711,11 @@ class _ToolAsk:
     tool's own call, so a policy that keeps grants by name keeps one per name.
     It has the call's id, so a surface shows the question with the call. The
     run's cancellation propagates, and the prompt counts as withdrawn.
+
+    In auto mode (#339) a site the browser would open is reviewed first:
+    routine when the user's words name it, otherwise the user's model asks
+    whether it serves the request (cached per site for the chat), and a
+    block is kept as the gate keeps one.
     """
 
     def __init__(
@@ -1610,32 +1724,76 @@ class _ToolAsk:
         run: _RunState,
         call: ToolCall,
         workspace_root: str | None,
+        reviewer: StepReviewer | None = None,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
+        self._reviewer = reviewer
 
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision:
-        decided: object = await self._policy.decide(
-            ApprovalRequest(
-                request_id=uuid.uuid4().hex,
-                run_id=self._run.task_id,
-                call_id=self._call.id,
-                tool_name=tool_name,
-                arguments=copy.deepcopy(dict(arguments)),
-                preview=preview,
-                workspace_root=self._workspace_root,
-                tier="network",
-            )
+        request = ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=tool_name,
+            arguments=copy.deepcopy(dict(arguments)),
+            preview=preview,
+            workspace_root=self._workspace_root,
+            tier="network",
         )
+        reviewer = self._reviewer
+        auto = review_mode(self._policy, request) == "auto" and reviewer is not None
+        key = step_key(tool_name, request.arguments, self._workspace_root)
+        if auto and reviewer is not None:
+            site = str(arguments.get("site") or "")
+            if reviewer.names_host(site):
+                review = ActionReview(
+                    "routine", (), (f"Opens {site}, which you named.",)
+                )
+            else:
+                review = await reviewer.review(
+                    self._run.reviews,
+                    tool_name=tool_name,
+                    arguments=dict(request.arguments),
+                    preview=preview,
+                    review=ActionReview(
+                        "undecided",
+                        (),
+                        (f"Opens {site}, a site the request did not name.",),
+                    ),
+                    mode="auto",
+                    key=key,
+                    workspace=self._workspace_root,
+                )
+            request = dataclasses.replace(request, review=review)
+        decided: object = await self._policy.decide(request)
         if not isinstance(decided, ApprovalDecision):
             raise TypeError(
                 f"the approval policy returned {type(decided).__name__}, "
                 "not an ApprovalDecision"
             )
+        if (
+            auto
+            and reviewer is not None
+            and not decided.allow
+            and decided.origin == "auto"
+        ):
+            policy = find_auto(self._policy)
+            note = reviewer.blocked(
+                self._run.reviews,
+                review=request.review,
+                key=key,
+                call_id=self._call.id,
+                preview=preview,
+                words=decided.reason,
+                task=policy is not None and policy.task,
+                workspace=self._workspace_root,
+            )
+            return dataclasses.replace(decided, reason=note)
         return decided
 
 
@@ -1947,6 +2105,9 @@ class Agent:
             max_calls=self.options.max_calls,
             reserve_answer=self.options.answer_on_stop,
         )
+        # The user's model reviews steps the rules leave open, under a grant
+        # or in auto mode; it keeps this chat's blocks and the user's words.
+        self._reviewer = StepReviewer(lambda: self.chat)
 
         names = (
             None
@@ -4008,9 +4169,16 @@ class Agent:
                 self.executor.workspace_root,
                 tier,
                 self.checker,
+                self._reviewer,
             )
             ask_slot = TOOL_ASK.set(
-                _ToolAsk(run.approval, run, call, self.executor.workspace_root)
+                _ToolAsk(
+                    run.approval,
+                    run,
+                    call,
+                    self.executor.workspace_root,
+                    self._reviewer,
+                )
             )
         try:
             exec_request = ExecutionRequest(
@@ -4998,6 +5166,8 @@ class Agent:
                 )
                 self.hippo.working.append(inserted)
                 run.pinned.append(inserted)
+                for _, text in pending:
+                    self._reviewer.user_message(text)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -5198,6 +5368,11 @@ class Agent:
                 inflight.cut_before.append(cut)
             await self._do_memorize(task.task_id, inflight, run)
             run.inflight = None
+            if run.reviews.stop:
+                # Auto mode blocked the same kind of step twice: the run
+                # answers with the explanation instead of trying again.
+                await self._answer_on_block(task, run)
+                return step + 1, ""
 
             # Stuck detection (one fingerprint per step)
             fingerprints.append(self._make_fingerprint(calls, inflight.results))
@@ -5454,6 +5629,8 @@ class Agent:
                 0 if self._confinement is None else self._confinement.refused
             ),
         )
+        # The user's own words, which a step review reads (never tool output).
+        self._reviewer.user_message(query)
         prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
         budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
@@ -5642,7 +5819,7 @@ class Agent:
                         )
                         run.outcome = outcome
                         run.report_progress(ended=run.status)
-                        run.events.run_finished(outcome)
+                        run.events.run_finished(outcome, _reviews_of(run))
             await self._learn(run, query, outcome)
             return outcome
         finally:
@@ -6144,7 +6321,7 @@ class Agent:
                 task, run, stats, time.perf_counter() - started
             )
             run.report_progress(ended=run.status)
-            run.events.run_finished(run.outcome)
+            run.events.run_finished(run.outcome, _reviews_of(run))
         if cancelled is not None:
             raise cancelled
 
@@ -6416,6 +6593,40 @@ class Agent:
             return
         run.result = run.last_text
         run.answer_thinking = run.last_text_thinking
+
+    async def _answer_on_block(self, task: TaskRecord, run: _RunState) -> None:
+        """End a run that auto mode stopped, its answer the explanation (#339).
+
+        One request without tools (:meth:`Chat.final_answer` with
+        :data:`BLOCKED_ANSWER_NOTE`) over the working window, whose last tool
+        message is the block's note. A request that fails, or a blank reply,
+        leaves a fixed answer that names the blocked step. The run ends
+        ``completed``.
+        """
+        window = list(self.hippo.working.get_window())
+        answer, thinking = "", ""
+        try:
+            reply = _split_inline_reasoning(
+                await self.chat.final_answer(
+                    window, task.query, None, note=BLOCKED_ANSWER_NOTE
+                )
+            )
+            answer, thinking = reply.content.strip(), reply.thinking
+        except CallBudgetError as exc:
+            logger.info(
+                "No call left to explain the block of %s: %s", task.task_id, exc
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not ask for the explanation of a block in %s: %s",
+                task.task_id,
+                _exception_text(exc),
+            )
+        if not answer:
+            blocked = run.reviews.blocked
+            answer = answer_on_block(blocked[-1]["title"] if blocked else "")
+        run.answer_thinking = thinking
+        run.end("completed", result=answer)
 
     async def _answer_on_stop(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: one more request for the answer a stopped run lacks.

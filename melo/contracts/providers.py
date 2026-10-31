@@ -29,9 +29,10 @@ LLM_REQUEST_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 # The call kinds: runs send "plan" and "reflect", Chat.estimate_steps sends
-# "estimate", and melo-retrieve's retrieval requests "retrieve". History's
-# llm_calls rows and melo-retrieve's reader of them share this vocabulary.
-LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate")
+# "estimate", melo-retrieve's retrieval requests "retrieve", and the review
+# of a step the rules left open "review" (#339). History's llm_calls rows and
+# melo-retrieve's reader of them share this vocabulary.
+LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate", "review")
 
 
 class ProviderError(Exception):

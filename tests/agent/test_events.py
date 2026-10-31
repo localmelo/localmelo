@@ -473,7 +473,8 @@ class TestSequence:
         # Only the integer fields of usage.
         assert answer.data["usage"] == {"total_tokens": 5}
         assert (answer.data["step"], answer.data["tool_calls"]) == (2, [])
-        assert done.data == {"result": result.to_dict()}
+        # No approval policy: no reviews (#339).
+        assert done.data == {"result": result.to_dict(), "reviews": None}
         assert RunResult(**done.data["result"]) == result
 
     @pytest.mark.asyncio
@@ -608,7 +609,7 @@ class TestFields:
                 "image_allowance",
                 "pruned",
             },
-            "run.finished": {"result"},
+            "run.finished": {"result", "reviews"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
 
     @pytest.mark.asyncio

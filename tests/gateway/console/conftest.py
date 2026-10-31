@@ -321,7 +321,7 @@ def core_event(
             "approval": None,
             "exit_code": None,
         },
-        "run.finished": {"result": run_result()},
+        "run.finished": {"result": run_result(), "reviews": None},
     }
     payload = dict(defaults[type_])
     payload.update(data)

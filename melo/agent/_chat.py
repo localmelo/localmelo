@@ -273,6 +273,15 @@ REFLECTION_TRANSCRIPT_INTRO = "The end of this attempt, written out as text:"
 # give carries at most this many characters of the window written out as text
 # (the newest), then the latest reflection, then this note.
 ANSWER_EVIDENCE_CHARS = 24_000
+# The closing request of a run auto mode stopped after a second block (#339).
+BLOCKED_ANSWER_NOTE = (
+    "Auto mode stopped this run: a step it needs was blocked again, and no "
+    "further step can be taken. Do not call any tool. Write your answer to the "
+    "user now, in plain words: what was blocked and why, why the task needed it, "
+    "other ways to reach the goal (without that step, or with something the user "
+    "can do), and that they can allow the step once from the chat or say so in "
+    "their next message."
+)
 ANSWER_ON_STOP_NOTE = (
     "The run has stopped and no further step can be taken. Give your final "
     "answer to the original task from the evidence above alone, in the answer "
@@ -1239,6 +1248,8 @@ class Chat:
         short: Sequence[Message],
         query: str,
         reflections: list[ReflectionEntry] | None = None,
+        *,
+        note: str = "",
     ) -> Message:
         """One request, no tools, for the answer that a stopped run did not give.
 
@@ -1246,7 +1257,8 @@ class Chat:
         task, the turns of *short* written out as text
         (:func:`render_transcript`; only the newest
         :data:`ANSWER_EVIDENCE_CHARS` characters), the block of *reflections*
-        and :data:`ANSWER_ON_STOP_NOTE`. The call is of kind ``reflect`` and
+        and *note* (:data:`ANSWER_ON_STOP_NOTE` by default; a run auto mode
+        stopped passes :data:`BLOCKED_ANSWER_NOTE`). The call is of kind ``reflect`` and
         counts as auxiliary; it may use the call that ``max_calls`` keeps for it.
         """
         evidence = render_transcript(short)
@@ -1263,7 +1275,7 @@ class Chat:
         parts.extend(
             self.reflection_message(entry).content for entry in reflections or ()
         )
-        parts.append(ANSWER_ON_STOP_NOTE)
+        parts.append(note or ANSWER_ON_STOP_NOTE)
         system = self._fixed_system() if self.fixed_prefix else self.system_prompt
         messages = [
             Message(role="system", content=system),

@@ -173,7 +173,7 @@ asyncio.run(main())
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
-| `run.finished` | Last. | `result` |
+| `run.finished` | Last. | `result`, `reviews` |
 
 ### run.started
 
@@ -335,8 +335,16 @@ The number of `tool.started` events is `RunResult.n_tool`.
   before the policy would have been asked. Otherwise it is
   `{request_id, allowed, reason, remember, origin}`, where `origin` is the
   decision's
-  (`user`, `session`, `policy` or `timeout`), `error` when the policy failed,
-  or `withdrawn` when the run was cancelled while the policy decided. See
+  (`user`, `session`, `policy`, `timeout` or `auto`), `error` when the policy
+  failed, or `withdrawn` when the run was cancelled while the policy decided.
+  In auto mode, and for a call whose review is not plainly routine, it also has
+  `mode` (`"auto"`), `review` (the review: `verdict`, `categories`, `reasons`,
+  `paths`, `by` (`rules` or `model`), `rules_version` and, when the model was
+  asked, `model`: `{verdict, category, fits_request, user_asked, reason, ms}` or
+  `{error, ms}`) and `step_key` (32 hex characters: the same step in the same
+  folder); a step allowed once has `allowance: "once"`. Origin `auto` with
+  `allowed: false` is a step auto mode blocked; `reason` then names it in a few
+  words (`installs software`). See
   [Approve tool calls](../guides/python.md#approve-tool-calls).
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
@@ -588,6 +596,11 @@ ends the run's `run.progress` events, never the run.
 
 - `result`: the run's `RunResult`, as `RunResult.to_dict()`. Nothing in it
   is clipped, so `RunResult(**event.data["result"])` rebuilds it.
+- `reviews`: `null` for a run without an approval policy. Otherwise the calls
+  the rules found `routine`, `high` and `undecided`, the `model` reviews the run
+  sent, and `blocked`: the steps auto mode blocked, each
+  `{call_id, title, step_key}`. Events stored before this key have no
+  `reviews`.
 
 `run.finished` comes also when `run_task` raises because the run was
 cancelled; it then holds the `RunResult` that `run_task` would have
