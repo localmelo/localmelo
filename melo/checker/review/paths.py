@@ -5,8 +5,8 @@ from __future__ import annotations
 import fnmatch
 import functools
 import hashlib
-import os
 import ipaddress
+import os
 import re
 import socket
 from dataclasses import dataclass, field, replace
