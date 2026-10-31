@@ -33,6 +33,9 @@ from localmelo.melo.memory.notes import split_sentences
 from localmelo.support.memory.records import sensitive
 
 DOC_CHARS: Final = 2_000
+# A side chat's summary is the one document at this turn of its session; a
+# task's exchanges take the turns below it.
+SUMMARY_TURN: Final = -1
 
 _SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -101,6 +104,11 @@ def document_text(typed: str, answer: str, *, title: str = "") -> str:
     return redact_secrets("\n".join(parts)[:DOC_CHARS])[0]
 
 
+def plain_text(text: str) -> str:
+    """A summary's or an exchange's text: secrets left out and redacted, bounded."""
+    return redact_secrets(_kept(" ".join(text.split()))[:DOC_CHARS])[0]
+
+
 def typed_of(text: str) -> str:
     """What the user typed, in a chat turn's document text (:func:`document_text`)."""
     head = text.split("\nmelo: ", 1)[0]
@@ -150,6 +158,17 @@ class ConversationIndex:
             ),
         )
         await conn.commit()
+
+    async def next_special_turn(self, session_id: str) -> int:
+        """The next free turn number below 0 of a session, for an exchange
+        (a summary uses :data:`SUMMARY_TURN`; a chat's turns start at 0)."""
+        conn = await self._ready()
+        async with conn.execute(
+            "SELECT MIN(turn) FROM documents WHERE session_id = ?", (session_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        low = int(row[0]) if row and row[0] is not None else 0
+        return min(low, SUMMARY_TURN) - 1
 
     async def ids(self) -> set[int]:
         conn = await self._ready()

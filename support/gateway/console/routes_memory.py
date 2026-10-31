@@ -7,7 +7,11 @@ outlives a deleted chat, and says so. ``PATCH /api/memory/records/{id}`` rewords
 one, ``DELETE /api/memory/records/{id}`` removes it and its vector and blanks the
 text of its decision rows (with ``?undo=true``, a turn's "Undo", the note it
 replaced is current again), and ``DELETE /api/memory/records?all=true`` forgets
-every note and the index of every chat. ``PUT /api/memory`` switches
+every note and the index of every chat. ``GET /api/memory/import/scan`` lists
+what other assistants' files hold (no writes), ``POST /api/memory/import`` writes
+the chosen sources of a scan as notes (the ``memory.import`` event is in the
+response: memory has no session channel) and ``DELETE /api/memory/import/{batch_id}``
+takes the batch back. ``PUT /api/memory`` switches
 ``[memory] across_chats`` and ``POST /api/memory/reindex`` rebuilds the index
 from the chats. In developer mode (``[ui] mode = "developer"``; anywhere else
 404), ``POST /api/memory/sleep`` runs one sleep (:mod:`localmelo.support.memory.sleep`)
@@ -49,6 +53,15 @@ class SleepBody(BaseModel):
 
     variant: StrictStr | None = None
     budget: StrictInt | None = Field(default=None, ge=1, le=100)
+
+
+class ImportBody(BaseModel):
+    """Request body of ``POST /api/memory/import``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: StrictStr
+    source_ids: list[StrictStr]
 
 
 class SwitchBody(BaseModel):
@@ -109,12 +122,16 @@ def _row(
     info = chats.get(entry.session_id) if chats else None
     if info is not None:
         label = chat_label(info.kind, info.title, surface)
+    imported = prov.get("source") == "import"
     return {
         "id": entry.id,
         "text": entry.text,
         "topic": str(prov.get("topic") or ""),
         "quote": str(prov.get("quote") or ""),
-        "source": f"you said it · {label}, {day(entry.created_at)}",
+        "source": f"{'imported from' if imported else 'you said it ·'} {label}, "
+        f"{day(entry.created_at)}",
+        "imported": imported,
+        "batch_id": str(prov.get("batch_id") or ""),
         "from": _from_words(info, label, gone, entry.created_at, surface),
         "chat_gone": gone,
         "edited": bool(prov.get("edited")),
@@ -198,6 +215,27 @@ def add_routes(app: FastAPI, console: Console) -> None:
         notes, turns = await console.memory.forget_all()
         await _identity_changed(console, pinned)
         return {"notes": notes, "turns": turns}
+
+    @app.get("/api/memory/import/scan")
+    async def memory_import_scan() -> dict[str, Any]:
+        return (await console.memory.import_scan()).to_json()
+
+    @app.post("/api/memory/import")
+    async def memory_import(body: ImportBody) -> dict[str, Any]:
+        plan = console.memory.import_plan(body.batch_id)
+        if plan is None:
+            raise ApiError(404, "not_found", t("errors.importScanGone"))
+        try:
+            return await console.memory.import_apply(plan, body.source_ids)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_request", str(exc)) from exc
+
+    @app.delete("/api/memory/import/{batch_id}")
+    async def memory_import_undo(batch_id: str) -> dict[str, Any]:
+        removed = await console.memory.undo_import(batch_id)
+        if not removed:
+            raise ApiError(404, "not_found", t("errors.importGone"))
+        return {"batch_id": batch_id, "removed": removed}
 
     @app.put("/api/memory")
     async def memory_switch(body: SwitchBody) -> dict[str, bool]:

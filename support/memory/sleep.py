@@ -23,7 +23,8 @@ the older note is superseded. A note the user reworded is left alone unless a
 newer typed statement of its subject contradicts it. A watermark
 (``meta.sleep_until`` of ``index.db``) keeps a second run from redoing a turn;
 a run that hit the cap leaves it, and the next run goes on. :func:`undo` puts a
-run back exactly: what it superseded is current again, what it wrote is gone.
+run back: what it superseded is current again; what it wrote becomes inactive
+history, excluded from recall and removed only by explicit forgetting.
 """
 
 from __future__ import annotations
@@ -144,6 +145,7 @@ class SleepTurn:
 async def sleep_turns(chats: SessionStore, since: float) -> list[SleepTurn]:
     """The chat turns that finished after *since* with a ``turn.memory`` event
     (memory was on): completed, not undone, not a task's or a worker's."""
+    from localmelo.support.memory.service import is_owner_question
     from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
 
     out: list[SleepTurn] = []
@@ -159,8 +161,7 @@ async def sleep_turns(chats: SessionStore, since: float) -> list[SleepTurn]:
         for turn in await chats.list_turns(session.id):
             if turn.status != "completed" or turn.undone:
                 continue
-            # #369 adds this origin to worker questions delivered into a chat.
-            if getattr(turn, "origin", "") == "ask_owner":
+            if is_owner_question(turn):
                 continue
             typed = turn.typed_text if turn.attachments else turn.user_text
             before, previous = previous, typed

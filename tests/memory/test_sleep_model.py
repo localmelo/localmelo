@@ -447,15 +447,16 @@ async def test_timeout_preserves_rules_and_the_watermark(
     assert await memory.records() == []
 
 
+@pytest.mark.parametrize("origin", ["ask_owner", "user_rule"])
 async def test_owner_question_is_not_a_candidate_or_previous_context(
-    chats: SessionStore, monkeypatch: pytest.MonkeyPatch
+    chats: SessionStore, monkeypatch: pytest.MonkeyPatch, origin: str
 ) -> None:
     from types import SimpleNamespace
 
     await rules.chat(chats, "I'm allergic to peanuts.")
 
     async def owner_turns(*args: Any, **kwargs: Any) -> list[Any]:
-        return [SimpleNamespace(status="completed", undone=False, origin="ask_owner")]
+        return [SimpleNamespace(status="completed", undone=False, origin=origin)]
 
     monkeypatch.setattr(chats, "list_turns", owner_turns)
     assert await sleep.sleep_turns(chats, 0) == []
