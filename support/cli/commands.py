@@ -79,12 +79,43 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("browser", (), "[on|off]", "Show or switch web browsing in Safari", "show"),
     Command("mcp", (), "", "Show the MCP servers", True),
+    Command("chats", (), "", "Pick the main chat or a side chat", False),
+    Command("side", (), "[title]", "Start a side chat in this folder", False),
+    Command("main", (), "", "Go back to the main chat", False),
+)
+
+# What the main chat leaves to the terminal's own chat: the commands that act
+# on its Agent or its file (-X cli.chat=local opens that chat).
+LOCAL_ONLY: Final = frozenset(
+    {
+        "model",
+        "backend",
+        "undo",
+        "copy",
+        "retry",
+        "attach",
+        "attachments",
+        "detach",
+        "sessions",
+        "resume",
+        "title",
+        "usage",
+        "approvals",
+        "browser",
+        "mcp",
+    }
 )
 
 # What /help shows without "all": three groups of the commands a new user needs.
 HELP_GROUPS: Final = (
     ("Conversation", ("new", "retry", "undo", "copy")),
     ("Model", ("model", "status")),
+    ("Help", ("help", "exit")),
+)
+# The same in the main chat.
+MAIN_HELP_GROUPS: Final = (
+    ("Chats", ("chats", "side", "main")),
+    ("Model", ("status",)),
     ("Help", ("help", "exit")),
 )
 
@@ -125,11 +156,13 @@ def help_text(
     *,
     everything: bool = False,
     width: int = 80,
+    main_chat: bool = False,
 ) -> RenderableType:
     """``/help``: the everyday commands, ``/help all`` every command and the keys, or one's details.
 
     *everything* (developer mode) makes the bare ``/help`` the long one. A row too
-    long for *width* continues under its description.
+    long for *width* continues under its description. In the *main_chat*, the
+    commands of the terminal's own chat are left out.
     """
     if topic == "all":
         everything, topic = True, ""
@@ -145,9 +178,11 @@ def help_text(
         ]
         usage = f"/{command.name} {command.args}".rstrip()
         return Text(f"{usage}\n  {command.line()}\n  During a turn: {during}")
-    groups = list(HELP_GROUPS)
+    groups = list(MAIN_HELP_GROUPS if main_chat else HELP_GROUPS)
     if everything:
-        named = {name for _, names in HELP_GROUPS for name in names}
+        named = {name for _, names in groups for name in names}
+        if main_chat:
+            named |= LOCAL_ONLY
         groups.append(("More", tuple(c.name for c in COMMANDS if c.name not in named)))
     column = max(cells(f"/{name}") for _, names in groups for name in names) + 2
     lines: list[Text] = []

@@ -687,7 +687,8 @@ token total.
   "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
   "agent": "open",
-  "tokens": 18512
+  "tokens": 18512,
+  "last_event_id": 412
 }
 ```
 
@@ -702,6 +703,9 @@ token total.
   first open since the gateway started, and a closed Agent reads `paused`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
+- `last_event_id` is the id of the session's newest stored event (0 for
+  none): a client that streams `GET /api/sessions/{id}/events?after=` this
+  id hears only what comes next.
 - A `pending_approvals` entry's `arguments_complete` is true only when the
   JSON-safe `arguments` preserve the original values without clipping or
   conversion. Clients should not allow a request when it is false or missing;
@@ -713,7 +717,8 @@ token total.
   question for a `high` call ("Install software?") and `""` otherwise;
   `reasons` are at most three sentences that say why melo asks ("Installs
   playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
-  redacted. A `high` call asks every time and the card offers no `session`
+  redacted. `categories` are the rules' categories, strongest first
+  (`install`, `download`, `outside_write`, ...). A `high` call asks every time and the card offers no `session`
   answer.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder

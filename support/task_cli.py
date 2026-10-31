@@ -400,22 +400,28 @@ def connect(gateway: str | None = None, *, timeout: float = 10) -> httpx.Client:
         if ":" in host and not (host.startswith("[") and host.endswith("]")):
             host = f"[{host}]"
         url = address(f"http://{host}:{cfg.port}")
+    return httpx.Client(
+        base_url=url,
+        headers=client_headers(url),
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    )
+
+
+def client_headers(url: str) -> dict[str, str]:
+    """What a client of the gateway at *url* sends: its token and the Host it checks.
+
+    Raises :class:`ClientError` when the token cannot be read safely.
+    """
     try:
         token = read_token(token_path())
     except (OSError, ValueError) as exc:
         raise ClientError(
             "gateway token unavailable or unsafe; start melo serve or check permissions"
         ) from exc
-    return httpx.Client(
-        base_url=url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Host": f"{'[::1]' if urlsplit(url).hostname == '::1' else '127.0.0.1'}:{urlsplit(url).port}",
-        },
-        timeout=timeout,
-        follow_redirects=False,
-        trust_env=False,
-    )
+    host = "[::1]" if urlsplit(url).hostname == "::1" else "127.0.0.1"
+    return {"Authorization": f"Bearer {token}", "Host": f"{host}:{urlsplit(url).port}"}
 
 
 def _developer() -> bool:
