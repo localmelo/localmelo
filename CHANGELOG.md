@@ -12,7 +12,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Note tidying skips facts whose values an active note already holds, using
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
-  secret-redacted verdict; applied changes carry the same label. [#NN]
+  secret-redacted verdict; applied changes carry the same label. [#389]
 
 - Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
   and `model+tags`; `-X memory.sleep=rules`, listed by
@@ -35,11 +35,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   reasoning is separated before parsing. Undo restores preexisting conflicts
   while preserving later changes. New chat activity or a configured
   `[memory] sleep_lock` stops model work; reports include refused proposals,
-  skipped parse failures and elapsed time. Part of #363. [#NN]
+  skipped parse failures and elapsed time. Part of #363. [#389]
 - Sleep reports retain each change's quoted evidence and ordered before texts.
   Sleep undo preserves inactive history without recalling or listing it;
   explicit user forgetting still physically erases that history and linked
-  versions. No export or training is implemented. Part of #363. [#NN]
+  versions. No export or training is implemented. Part of #363. [#389]
 - What a side chat's task ended with is kept in memory: other chats recall its
   summary like an earlier turn (`chat “<title>” · summary`), never as a note.
   The chat's own answers are already recalled as its turns. Part of #369.
@@ -3286,3 +3286,4 @@ earlier milestones.
 [#385]: https://github.com/localmelo/localmelo/pull/385
 [#387]: https://github.com/localmelo/localmelo/pull/387
 [#388]: https://github.com/localmelo/localmelo/pull/388
+[#389]: https://github.com/localmelo/localmelo/pull/389
