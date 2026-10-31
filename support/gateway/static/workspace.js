@@ -1157,6 +1157,8 @@ async function actOnEcho(echo, does, level) {
   try {
     const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}) } });
     if (S.view && mainActive()) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
+    panel.refresh();
   } catch (error) {
     notify(error.message || "Could not change the task. Try again.");
   }
@@ -2582,6 +2584,21 @@ function setRoute(id) {
   }
 }
 
+/** `#/scheduled`: the chat that is open (the main chat when none is) with the panel on its Scheduled tab. */
+function scheduledRoute() {
+  return (globalThis.location?.hash || "") === "#/scheduled";
+}
+
+async function showScheduled() {
+  leaveWorkers();
+  const id = S.activeId || S.main?.id || "";
+  if (id && S.activeId !== id) await openSession(id);
+  else if (id) setRoute(id); // the address names the chat again
+  panel.select("scheduled");
+  // Below 900 px the panel is a sheet; wider, it already sits beside the chat.
+  if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+}
+
 function hashId() {
   const match = /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.location?.hash || "");
   return match ? match[1] : "";
@@ -2768,6 +2785,7 @@ async function init() {
   const fromWorker = workerRoute();
   const fromTask = taskRoute();
   const fromHash = hashId();
+  const wantsScheduled = scheduledRoute();
   const wantsNew = (globalThis.location?.hash || "") === "#/new";
   let wanted = "";
   if (fromHash) {
@@ -2789,6 +2807,7 @@ async function init() {
     renderMessages(true);
     syncUI();
   }
+  if (wantsScheduled && S.authenticated) await showScheduled();
   if (!S.authenticated) return;
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") await checkSubmission(slot, entry.clientRequestId);
@@ -2916,6 +2935,7 @@ globalThis.addEventListener?.("hashchange", async () => {
   if (task !== null) { showTasks(task); return; }
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
+  if (scheduledRoute()) { await showScheduled(); return; }
   const wasWorker = workerMode;
   leaveWorkers();
   const id = hashId();

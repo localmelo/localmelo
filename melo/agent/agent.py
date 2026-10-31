@@ -46,6 +46,7 @@ from localmelo.melo.agent._brief_gate import (
     check_commands,
     failure_message,
 )
+from localmelo.melo.agent._call_budget import CallBudgetError, is_budget_refusal
 from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._captured_history import (
     capture_result,
@@ -1184,6 +1185,9 @@ class _RunState:
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
     answered_on_stop: bool = False
+    # How the run ended on its own limit or on a refusal: "calls" (max_calls) or
+    # "refused" (a request refused for a budget or rate limit, with answer_on_stop).
+    early_stop: str = ""
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none, and the result of a
     # final boundary whose reflection is unreadable (reflection_gate="flags").
@@ -1939,6 +1943,8 @@ class Agent:
                 else REFLECTION_PROMPT
             ),
             identity=self.options.identity or "",
+            max_calls=self.options.max_calls,
+            reserve_answer=self.options.answer_on_stop,
         )
 
         names = (
@@ -4963,6 +4969,7 @@ class Agent:
         run.read_streak = 0
 
         for step in range(budget):
+            self.chat.check_call_budget()  # before the step starts, not inside it
             if budget - step == 2:
                 await self._deadline_check(run)
             reflection = run.reflection_msg
@@ -5232,7 +5239,10 @@ class Agent:
           With ``attempt_policy="reflect"`` the last reflection's best
           effort, if any, is the result, or the latest planning text when
           that reflection was unreadable (``reflection_gate="flags"``, see
-          :meth:`_run_reflective_attempts`). With ``answer_on_stop``, a
+          :meth:`_run_reflective_attempts`). Also the end of a run whose next
+          request would pass ``max_calls``: the error says ``Call budget
+          reached``, and the result is the latest text the model wrote in the
+          run, if any. With ``answer_on_stop``, a
           ``gate_stopped`` or ``budget_exhausted`` run with no result asks
           once more for one (see :meth:`_answer_on_stop`);
         - ``context_budget_exceeded``: the pinned request cannot fit the
@@ -5241,7 +5251,11 @@ class Agent:
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
           chat request after its retries, or an embedding request. The
-          error is the provider's message; no traceback is logged;
+          error is the provider's message; no traceback is logged. With
+          ``answer_on_stop``, a request refused for a budget or rate limit
+          (see :func:`~localmelo.melo.agent._call_budget.is_budget_refusal`)
+          still gets the extra request for an answer, and the latest text the
+          model wrote in the run is the result when that fails too;
         - ``setup_error``: the tool providers could not be set up at the
           start of the first run (see :meth:`_ensure_tools`): one failed
           to start, or a provided tool has the name of a registered tool.
@@ -5537,12 +5551,10 @@ class Agent:
                             candidate.text = checked
                             self.hippo.propose(candidate)
                         run.remember_request = signals.remember
-                    if self.options.attempt_policy == "none":
-                        await self._run_single_attempt(task, query, run)
-                    else:
-                        await self._run_reflective_attempts(task, query, run)
+                    await self._run_attempts(task, query, run)
                     if self.options.answer_on_stop:
                         await self._answer_on_stop(task, run)
+                    self._keep_best_effort(run)
             except _ToolSetupError as exc:
                 # Reported in the result, not a crash: no traceback.
                 logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
@@ -6331,6 +6343,8 @@ class Agent:
         }
         if opts.answer_on_stop:
             config["answer_on_stop"] = True
+        if opts.max_calls is not None:
+            config["max_calls"] = opts.max_calls
         if opts.window_eviction != "slide":
             config["window_eviction"] = opts.window_eviction
         if opts.reflect_tool_guard:
@@ -6357,17 +6371,54 @@ class Agent:
             config["keep_decision_text"] = opts.keep_decision_text
         return config
 
+    async def _run_attempts(self, task: TaskRecord, query: str, run: _RunState) -> None:
+        """Run the attempts of *run*, as ``attempt_policy`` says.
+
+        Two ends are handled here instead of leaving the run to its handlers
+        in :meth:`run_task`, so :meth:`_answer_on_stop` can still ask: the
+        request that ``max_calls`` stops (:class:`CallBudgetError`) ends the
+        run ``budget_exhausted``, and, with ``answer_on_stop``, a request the
+        server refuses for a budget or rate limit ends it ``provider_error``
+        as before, with the run marked as refused. Any other error goes on.
+        """
+        try:
+            if self.options.attempt_policy == "none":
+                await self._run_single_attempt(task, query, run)
+            else:
+                await self._run_reflective_attempts(task, query, run)
+        except CallBudgetError as exc:
+            logger.info("Task %s stopped at its call budget: %s", task.task_id, exc)
+            run.early_stop = "calls"
+            run.end("budget_exhausted", error=str(exc))
+        except ProviderError as exc:
+            if not (self.options.answer_on_stop and is_budget_refusal(exc)):
+                raise
+            logger.info("Task %s was refused by the server: %s", task.task_id, exc)
+            run.early_stop = "refused"
+            run.end("provider_error", error=str(exc) or _exception_text(exc))
+
+    def _keep_best_effort(self, run: _RunState) -> None:
+        """A run that stopped on ``max_calls`` or a refusal, with no answer: its latest text."""
+        if not run.early_stop or run.result.strip():
+            return
+        run.result = run.last_text
+        run.answer_thinking = run.last_text_thinking
+
     async def _answer_on_stop(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: one more request for the answer a stopped run lacks.
 
-        Only for a run that ended ``gate_stopped`` or ``budget_exhausted``
-        with a blank result. The request (:meth:`Chat.final_answer`) carries
-        the working window and the latest reflection. A non-blank reply
-        becomes the run's result (its ``<think>`` block removed), the status
-        stays, and ``RunResult.answered_on_stop`` is true. A request that
-        fails, or a blank reply, leaves the run as it was.
+        Only for a run that ended ``gate_stopped`` or ``budget_exhausted``,
+        or ``provider_error`` after the server refused a request for a budget
+        or rate limit (see :meth:`_run_attempts`), with a blank result. The
+        request (:meth:`Chat.final_answer`) carries the working window and the
+        latest reflection. A non-blank reply becomes the run's result (its
+        ``<think>`` block removed), the status stays, and
+        ``RunResult.answered_on_stop`` is true. A request that fails or that
+        ``max_calls`` leaves no call for, or a blank reply, leaves the run as
+        it was.
         """
-        if run.status not in ("gate_stopped", "budget_exhausted") or run.result.strip():
+        stopped = run.status in ("gate_stopped", "budget_exhausted")
+        if run.result.strip() or not (stopped or run.early_stop == "refused"):
             return
         # The reflection comes as its own block: leave out the request and reply
         # of its exchange and the message that carries it in the window.
@@ -6379,6 +6430,9 @@ class Agent:
             reply = await self.chat.final_answer(
                 window, task.query, self.hippo.working.get_reflections()
             )
+        except CallBudgetError as exc:
+            logger.info("No call left to answer task %s on stop: %s", task.task_id, exc)
+            return
         except Exception as exc:
             logger.warning(
                 "Could not ask for an answer on stop for task %s: %s",

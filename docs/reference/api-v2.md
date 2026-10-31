@@ -613,6 +613,23 @@ proves that an older process stopped or that its effects happened only once.
 The route is also reachable at `/api/v2/tasks/{task_id}/resume` for clients
 that address API v2 by its version; other task routes use the `/api` prefix.
 
+## Chores
+
+Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
+
+```json
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0}}
+```
+
+- `GET /api/chores` answers `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`, oldest first. `?session_id=ID` of a side chat keeps that chat's own and gives `"scope": "chat"`; the main chat's id, an empty or no `session_id` lists all. An unknown or non-chat id is 404 `not_found`.
+- `POST /api/chores` takes `request` (required, at most 100,000 characters), `schedule`, and optional `title` (at most 200; default derived from the request), `level` (`Today`, `Normal`, `Whenever`, `If idle`, or 1 to 4; default from the request's words, as for a task) and `front_id` (a chat; default the main chat). `schedule` is `{"kind": "daily" | "weekdays", "at": "HH:MM"}` (local time) or `{"kind": "hours", "every": 1..24}`; other keys are refused. A bad body is 400 `invalid_request`; 50 chores are the most (409 `chore_limit`). Answers 201 `{"chore"}`; the first `next_run` is the schedule's next time plus a jitter of up to 120 s.
+- `PATCH /api/chores/{id}` takes the `revision` read plus `title`, `request`, `schedule`, `level` and `enabled` (at least one). A stale revision is 409 `stale_revision`, an unknown chore 404 `not_found`. A new `schedule` or `enabled: true` plans `next_run` from now (a missed day is not run); `enabled: false` sets it to null.
+- `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
+- `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
+- `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+
+`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
+
 ## GET /api/sessions
 
 The newest sessions first. Only `chat` sessions are listed by default: the
@@ -858,17 +875,26 @@ starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`), `ask` (`Start this as a task?`, with `text`, the
-  whole message, `words`, what was typed, and `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
-  message it answers; `of` is the echo it answers.
+  whole message, `words`, what was typed, and `turn_id`), `chore` (a repeating
+  phrase code read: `Run this every weekday at 8:30?`, with `title`, `text`
+  (the work), `schedule`, `when` and `level`), `chore_saved` (with `chore_id`),
+  `checkin` (the check-in's note, with `items`), `undone` or `failed`. `line` is
+  the plain words; `typed` is the message it answers; `of` is the echo it
+  answers.
 - `as_task` on any session but the main chat is 400 `invalid_request`. A
   repeated `client_request_id` of a delegation answers the same echo.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
 - `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
-  "level", "level"?: "Today" | "P1" | 1}` answers 200 `{"echo"}`: Undo a
-  `control` or `level` echo (a stop starts the task again as a new task),
-  apply a `suggest`, start an `ask`, or set a `started` or `level` echo's
-  task to the person's level. Undo, apply and start answer once (409
-  `already_answered`); an unknown echo or task is 404.
+  "level" | "save" | "once" | "cancel", "level"?: "Today" | "P1" | 1}` answers
+  200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
+  again as a new task) or a `chore_saved` one (the chore is deleted), apply a
+  `suggest`, start an `ask`, or set a `started` or `level` echo's task to the
+  person's level. On a `chore` echo, `save` keeps the chore (a `chore_saved`
+  echo answers), `once` starts its work as one task and `cancel` keeps
+  nothing (an `undone` echo answers). Each answers once (409
+  `already_answered`); an unknown echo or task is 404, `save` with 50 chores
+  already kept is 409 `invalid_transition`, and a `do` that does not fit the
+  echo is 400 `invalid_request`.
 
 ## GET /api/sessions/{id}/events
 

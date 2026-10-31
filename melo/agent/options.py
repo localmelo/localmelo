@@ -275,8 +275,22 @@ class AgentOptions:
       window and the latest reflection), in the format the task asks for,
       ``unknown`` allowed. The run keeps its status; its ``result`` is that
       answer and ``RunResult.answered_on_stop`` is true. The request counts
-      in ``n_aux``. A failed request leaves the run as it was. Default
-      false: nothing changes.
+      in ``n_aux``. A failed request leaves the run as it was. It also
+      answers a run that ends ``provider_error`` because the server refused a
+      request for a budget or rate limit (HTTP 429, or an error that says the
+      budget is used), as long as ``max_calls`` allows one more request: the
+      status stays and the error is the server's. When no request is left,
+      or the request fails, the refused run's ``result`` is the latest text
+      the model wrote in the run, if any. Default false: nothing changes.
+    - ``max_calls``: a limit on the model requests one run sends (planning,
+      reflection and auxiliary requests, a retried request once per
+      attempt). Before the request that would pass it, the run stops and ends
+      ``budget_exhausted`` with the error ``Call budget reached: ...``. With
+      ``answer_on_stop`` the last call is kept for the answer: the run stops
+      after ``max_calls - 1`` requests and the answer request is the last one;
+      without it the run may send ``max_calls`` requests. A stopped run's
+      ``result`` is that answer, else the latest text the model wrote in the
+      run, else empty. ``None`` (the default) sets no limit: nothing changes.
     - ``confine_writes``: when true, the ``shell_exec`` and ``python_exec``
       children start, on macOS, under a ``sandbox-exec`` profile that
       refuses every file write outside the workspace (the
@@ -364,6 +378,7 @@ class AgentOptions:
     tool_images_keep: int = 3
     tool_images_retire: int = 2
     answer_on_stop: bool = False
+    max_calls: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -396,6 +411,14 @@ class AgentOptions:
                 raise ValueError(
                     "context_window must exceed output_reserve plus safety_margin"
                 )
+        if self.max_calls is not None and (
+            isinstance(self.max_calls, bool)
+            or not isinstance(self.max_calls, int)
+            or self.max_calls < 2
+        ):
+            raise ValueError(
+                f"max_calls must be None or an int >= 2, got {self.max_calls!r}"
+            )
         for name in (
             "max_steps",
             "steps_per_attempt",

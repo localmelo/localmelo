@@ -47,6 +47,7 @@ from . import (
     activity,
     errors,
     front,
+    routes_chores,
     routes_details,
     routes_memory,
     routes_page,
@@ -58,6 +59,7 @@ from . import (
     routes_turns,
 )
 from .cards import MainChatCards
+from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
 from .front import Front, FrontAgent, build_front_agent
 from .probe import ModelServerProbe, Probe
@@ -118,6 +120,8 @@ class ConsoleOptions:
     # The main chat's Agent; None builds the front (FrontAgent), or, when a
     # test passes its own *builder*, the main chat runs on that one.
     front_builder: AgentBuilder | None = None
+    # The chore clock and check-in; a test replaces the clock, the beats and the summary.
+    chores: ChoreOptions | None = None
 
 
 class Console:
@@ -167,6 +171,7 @@ class Console:
         # cards that come back to it from side chats and tasks.
         self.main_id: str | None = None
         self.cards = MainChatCards(self)
+        self.chore_runner = ChoreRunner(self, self.options.chores)
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
@@ -268,6 +273,7 @@ class Console:
         routes_pictures.add_routes(app, self)
         routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
+        routes_chores.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
@@ -298,6 +304,7 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            self.chore_runner.start()
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_open_reason = (
@@ -364,6 +371,7 @@ class Console:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self.chore_runner.aclose()
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()

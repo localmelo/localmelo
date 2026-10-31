@@ -46,7 +46,7 @@ localmelo 将把你的前台对话（通道）、worker 任务和聊天共享在
 
 ## 任务、worker 与调度器存储（S3a）
 
-网关的 `sessions.db` 在会话表旁边有一个 `scheduler` 组件。`support/gateway/task_store.py` 在一个 `BEGIN IMMEDIATE` 事务中创建版本 4，包含 `tasks`、`task_deps`、`priority_events`、`questions`、`sched_rules`、`sched_log`、`idle_windows`、`park_priority` 和恢复存储，并在 `tasks(state, level_eff)`、`priority_events(task_id, ts)` 和 `sched_log(ts)` 上建立索引。`TaskStore.open()` 还会原子地迁移版本 1、2 和 3，并把组件版本记录在 `schema_components` 中。`PRAGMA user_version` 仍属于会话 schema，终端 `melo` 从不创建该组件或读取它的表；比 4 更新的组件会被拒绝。控制台在打开存储器之后调用 `TaskStore.open()`。网关取得会话文件的所有者锁：第二个网关进程会被拒绝，而不是并发迁移或写入同一个文件。
+网关的 `sessions.db` 在会话表旁边有一个 `scheduler` 组件。`support/gateway/task_store.py` 在一个 `BEGIN IMMEDIATE` 事务中创建版本 6，包含 `tasks`、`task_deps`、`priority_events`、`questions`、`sched_rules`、`sched_log`、`idle_windows`、`park_priority`、恢复存储以及 `chores` 和 `chore_meta`，并在 `tasks(state, level_eff)`、`priority_events(task_id, ts)` 和 `sched_log(ts)` 上建立索引。`TaskStore.open()` 还会原子地迁移版本 1 到 5，并把组件版本记录在 `schema_components` 中。`PRAGMA user_version` 仍属于会话 schema，终端 `melo` 从不创建该组件或读取它的表；比 6 更新的组件会被拒绝。版本 6 增加两张定时事项的表（`support/gateway/chore_store.py`），不改动任何已有的行。控制台在打开存储器之后调用 `TaskStore.open()`。网关取得会话文件的所有者锁：第二个网关进程会被拒绝，而不是并发迁移或写入同一个文件。
 
 版本 3 增加了休眠的恢复来源信息、持久的操作回执和进程身份记录。恢复的准备和提交都推进共享的停放代次；被中断的恢复会把待处理的暂停保留到显式恢复或出现最终结果为止。缺失的来源信息和缺失的进程记录都表示未知，而不是任务从未运行或其进程已经消失的证明。内部的旧版收养接缝会记录显式的孤儿风险确认，但它本身不排队也不启动任务。版本 4 增加了每次执行的捕获状态、进程身份检查和带门的子进程原语。worker 在释放子进程之前通过那道门记录一次启动的进程组，并在第一个工具提供方启动之前（MCP 提供方可以自己启动一个服务器）以及在每个任意代码工具的入口标记捕获未完成；存储中断时会重试该标记最多 10 秒，然后拒绝那一次调用。不受支持的平台，或身份/记录失败，只有在标记提交之后才释放子进程。目前还没有任何东西读取这些证据，因此 Resume 仍然被栅栏挡住；进程验证、受控的重启调度和面向用户的确认仍是后续工作。
 

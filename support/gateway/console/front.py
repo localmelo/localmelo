@@ -24,6 +24,7 @@ import asyncio
 import copy
 import dataclasses
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from fastapi import FastAPI
@@ -35,6 +36,8 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import NO_ANSWER_LABEL, RunResult, ToolDef
 from localmelo.support.config import LocalBackendConfig
 from localmelo.support.gateway.chat_gate import GatedEmbedding, GatedLLM
+from localmelo.support.gateway.chore_schedule import Schedule, parse_phrase
+from localmelo.support.gateway.chore_store import ChoreError
 from localmelo.support.gateway.front_rules import (
     FINISHED,
     Action,
@@ -44,6 +47,7 @@ from localmelo.support.gateway.front_rules import (
     is_question,
     level_number,
     level_word,
+    norm,
     route,
     triage,
 )
@@ -90,6 +94,10 @@ _STATE_WORDS: Final = {
     "cancelled": "stopped",
     "expired": "expired",
 }
+# A polite request is not a question about the schedule: "every day at 9, can you brief me?".
+_REQUEST: Final = re.compile(
+    r"^(?:please\b|(?:can|could|would|will)\s+you\b)|^(?:请|能不能|你能)"
+)
 _REFUSED: Final = (
     "Not done: a change to a task needs the user's own words naming it. The user "
     "sees a one-tap suggestion instead; say so in one short sentence."
@@ -428,7 +436,35 @@ class Front:
             return await self.delegate(work, typed=typed, key=key, show=typed)
         if routed.route == "control" and routed.task and routed.action:
             return await self.control(routed.task, routed.action, show=typed)
+        if routed.route == "chore" and typed.strip() == composed.strip():
+            return await self.propose_chore(typed)
         return None
+
+    async def propose_chore(self, typed: str) -> dict[str, Any] | None:
+        """ "Run this every weekday at 8:30?" for a repeating phrase code can read, else ``None``.
+
+        Nothing is saved here: the card's Save chore, Just once and Cancel
+        decide. A question about a schedule, a schedule code does not read
+        ("every Monday") and a message with an attachment go on to the model.
+        """
+        parsed = parse_phrase(typed)
+        if parsed is None:
+            return None
+        if is_question(parsed.work) and not _REQUEST.match(norm(parsed.work)):
+            return None
+        try:
+            spec = TaskSpec.from_payload({"objective": parsed.work})
+        except TaskPolicyError:
+            return None
+        when = parsed.schedule.describe()
+        return await self.echo(
+            {
+                "echo": "chore", "line": f"Run this {when}?", "title": spec.title,
+                "text": spec.objective, "schedule": parsed.schedule.to_json(),
+                "when": when, "level": triage(parsed.work)[0],
+            },
+            show=typed,
+        )  # fmt: skip
 
     # ── Tasks: start, change, suggest ──
 
@@ -608,7 +644,7 @@ class Front:
         )
 
     async def act(self, echo_id: int, do: str, level: object = None) -> dict[str, Any]:
-        """The person's tap on an echo: Undo, Apply, Start as a task, or a level."""
+        """The person's tap on an echo: Undo, Apply, Start as a task, a level, or a chore's Save, Just once and Cancel."""
         async with self._acting:
             return await self._act(echo_id, do, level)
 
@@ -622,6 +658,8 @@ class Front:
         ):
             raise ApiError(409, "already_answered", "This was answered already.")
         kind = echo.get("echo")
+        if kind in ("chore", "chore_saved"):
+            return await self._act_chore(echo_id, echo, do)
         if do == "start" and kind == "ask":
             words = str(echo.get("words", ""))
             return await self.delegate(
@@ -647,6 +685,41 @@ class Front:
             return await self.control(_ref(record), echo["action"], of=echo_id)
         if do == "undo" and kind in ("control", "level"):
             return await self._undo(record, echo.get("undo") or {}, echo_id)
+        raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
+
+    async def _act_chore(
+        self, echo_id: int, echo: dict[str, Any], do: str
+    ) -> dict[str, Any]:
+        """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
+        title = str(echo.get("title", ""))
+        store = self.console.chore_runner.store
+        if do == "once" and echo.get("echo") == "chore":
+            return await self.delegate(
+                str(echo.get("text", "")), typed=str(echo.get("text", "")), of=echo_id
+            )
+        if do == "cancel" and echo.get("echo") == "chore":
+            line = f"Not saved: {title}"
+            return await self._echo("undone", "", title, line, of=echo_id)
+        try:
+            if do == "save" and echo.get("echo") == "chore":
+                chore = await store.create(
+                    title=title,
+                    request=str(echo.get("text", "")),
+                    schedule=Schedule.from_json(echo.get("schedule")),
+                    level=int(echo.get("level", 2)),
+                    front_id=self.console.main_id,
+                )
+                line = f"Saved: {title} · {chore.schedule.describe()}"
+                return await self.echo(
+                    {"echo": "chore_saved", "chore_id": chore.chore_id, "title": title,
+                     "line": line, "of": echo_id}
+                )  # fmt: skip
+            if do == "undo" and echo.get("echo") == "chore_saved":
+                await store.delete(str(echo.get("chore_id", "")))
+                line = f"Undone: {title} is not saved"
+                return await self._echo("undone", "", title, line, of=echo_id)
+        except ChoreError as exc:
+            raise ApiError(409, "invalid_transition", str(exc)) from exc
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
 
     async def _undo(
@@ -692,7 +765,7 @@ def _plain(exc: Exception) -> str:
 
 
 class EchoAction(Body):
-    do: Literal["undo", "apply", "start", "level"]
+    do: Literal["undo", "apply", "start", "level", "save", "once", "cancel"]
     level: str | int | None = None
 
 

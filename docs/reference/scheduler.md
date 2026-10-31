@@ -105,14 +105,16 @@ the lane by code.
 ## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` has a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 4 with `tasks`,
+tables. `support/gateway/task_store.py` creates version 6 with `tasks`,
 `task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
-`idle_windows`, `park_priority` and recovery storage, with indexes on `tasks(state, level_eff)`,
+`idle_windows`, `park_priority`, recovery storage and `chores` and `chore_meta`, with indexes on `tasks(state, level_eff)`,
 `priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`
-transaction. `TaskStore.open()` also migrates versions 1, 2 and 3 atomically and
+transaction. `TaskStore.open()` also migrates versions 1 to 5 atomically and
 records the component version in `schema_components`. `PRAGMA user_version`
 stays the session schema's, and a terminal `melo` never creates the component
-or reads its tables; a component newer than 4 is refused. The console calls
+or reads its tables; a component newer than 6 is refused. Version 6 adds
+the two chore tables (`support/gateway/chore_store.py`) and changes no
+existing row. The console calls
 `TaskStore.open()` after opening the store. A
 gateway takes the session file's owner
 lock: a second gateway process is refused rather than concurrently migrating
