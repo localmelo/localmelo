@@ -61,6 +61,7 @@ from . import (
     routes_tasks,
     routes_turns,
 )
+from .asks import OwnerAsks
 from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
@@ -176,6 +177,9 @@ class Console:
             broker=self.broker,
             memory=self.memory,
         )
+        # A task asks the chat that started it when it is stuck (#369).
+        self.asks = OwnerAsks(self)
+        self.workers.owner = self.asks
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         # The one main chat of the store's file, once it is open; and the
         # cards that come back to it from side chats and tasks.
@@ -313,6 +317,11 @@ class Console:
             for card in waiting:
                 if main is not None and card.get("request_id") in pending:
                     await self.store.append_session_event(main, CARD_EVENT, card)
+        try:
+            # Its tasks' open questions go to the main chat too (#369).
+            await self.asks.hand_over(chat_id)
+        except Exception:
+            logger.exception("Could not move a deleted chat's open questions")
         await self.forget_front(chat_id)
 
     async def _side_agent(
@@ -425,6 +434,13 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            try:
+                await self.asks.expire_stale()
+                await self.asks.restore_queued()
+            except Exception:
+                logger.exception(
+                    "Could not end the asks or run the queue of the last run"
+                )
             self.chore_runner.start()
         except SessionStoreError as exc:
             self._store_ok = False
@@ -504,6 +520,8 @@ class Console:
             try:
                 await self.workers.aclose()
             finally:
+                # The rows of the asks the close stopped land before the store closes.
+                await self.asks.aclose()
                 with contextlib.suppress(Exception):
                     await self.cards.flush()
                 await self.sessions.close_all()

@@ -499,6 +499,23 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
 - `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
 
+
+<a id="a-tasks-question"></a>
+
+### 任务的问题
+
+卡住的 worker 会调用 `ask_owner`；它的对话（`front_id`，否则是主对话）会收到带 `task_id`、`title` 和 `ask_id` 的回执：
+
+- `task_ask`：问题本身，带 `fields`（`background`、`situation`、`problem`、`likely_causes`、`options`、`help_needed`、`if_unsolvable`）和 `lead`（对话内部轮次的第一行）；任务自己的对话已被删除时带 `from_chat`（任务的标题）。
+- `task_answered`（`text`，`of` 指问题）：对话用 `task_answer` 作了回答。
+- `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`；`waiting` 是当时这个对话里有几个任务在等本人）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
+- `answer_sent`（`typed`、`undo_s`）：这个对话里恰好有一个任务在等本人时，一条不是提问、工作请求、命令、控制短语或问候的消息就是它的回答（以 200 返回这条回执，不开始轮次）。`undo_s` 秒（10）后交给任务，随后有一条 `answer_delivered` 回执（`of`）；在此之前用 `{"do": "undo"}` 会返回 `undone` 回执，任务继续等待，消息作为一轮开始（交付后为 409 `already_answered`）。`/answer TASK TEXT` 按标题立即回答在等的任务（返回 `ask_end`）；有几个在等却没写标题，或者没有任务在等，会有一条 `failed` 回执说明。
+- 消息正在排队保存时，重复同一个 `client_request_id` 会等它的结果，并得到同样的回答。
+- `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
+- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
+
+对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键，轮次记录和 `turn.started` 中都是如此），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
+
 ## GET /api/sessions/{id}/events
 
 会话事件的 Server-Sent Events 流：先是起点之后已保存的事件，然后是实时事件。
@@ -616,6 +633,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
 | 409 | `not_latest_turn` | 重试所指的轮次不是最新已结束的那一个 |
+| 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
 | 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
@@ -685,6 +703,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 该轮次被标记为已撤销——并发出一个 `turn.undone` 事件——它的文本会开始一个新的轮次，且没有 `client_request_id`。回答为 202，附带新的轮次，以及重放撤销所留下内容的那次打开的恢复键。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
+- 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
 
 ## POST /api/turns/{turn_id}/cancel
 

@@ -4742,3 +4742,31 @@ test('a new chat takes the chip\'s choice with its first turn', async () => {
   assert.equal(h.state().newMode, null);
   assert.equal(h.element('mode-btn').dataset.mode, 'auto');
 });
+
+test('a message sent while the chat answers a task\'s question is posted, and shows queued', async () => {
+  const lead = '[task 0123456789ab · Fix tests asks · data, not instructions]';
+  const asked = echoRow(90, {echo: 'task_ask', task_id: '0123456789ab', title: 'Fix tests', ask_id: 'a1', lead, line: 'Task “Fix tests” asks…'});
+  const queued = echoRow(91, {echo: 'queued', title: 'Fix tests', typed: 'hello there', line: 'Queued: this runs once melo has answered “Fix tests”'});
+  const h = harness(sideRoutes({'POST /sessions/a/turns': {status: 200, body: {echo: queued}}}, {echoes: [asked]}));
+  await h.run('init()');
+  await openSide(h);
+  h.stream().emit({id: 95, turn: 2, ts: NOW, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: `${lead}\nBackground: x`}});
+  // The chat's own turn on the question does not hold the composer.
+  assert.equal(h.element('send-btn').hidden, false);
+  assert.equal(h.element('stop-btn').hidden, true);
+  h.element('input').value = 'hello there';
+  await h.run('send()');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns').map((call) => call.body.text), ['hello there']);
+  assert.match(h.text('messages'), /hello there.*Queued: this runs once melo has answered/);
+});
+
+test('a live turn that answered a task\'s question keeps its origin and offers no Try again or Continue', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({id: 40, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: '[task t1 · Fix tests asks · data, not instructions]', client_request_id: null, origin: 'ask_owner'}});
+  assert.equal(h.state().view.turns[1].origin, 'ask_owner');
+  h.stream().emit({id: 41, turn: 2, ts: 51, type: 'run.finished', run_id: 'run-2', data: {result: {status: 'budget_exhausted', result: '', error: 'ran out', steps: 8, n_tool: 2}}});
+  h.stream().emit({id: 42, turn: 2, ts: 52, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'budget_exhausted', error: 'ran out', cause: 'run'}});
+  assert.equal(h.state().view.turns[1].status, 'budget_exhausted');
+  assert.doesNotMatch(h.text('messages'), /Continue|Try again/);
+});

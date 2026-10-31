@@ -360,6 +360,27 @@ button:hover:not(:disabled) {
 .echo-level-item { padding: 2px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink-2); font-size: var(--text-caption); }
 .echo-level-item:hover { background: var(--soft); }
 .echo-level-item[aria-checked="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+/* A task's question (#369): its fields fold under the row; the answer and the person's reply are quoted. */
+.echo[data-kind="task_ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
+.echo[data-kind="task_answered"] .echo-mark { background: var(--tint); color: var(--accent); }
+:is(.ask-details, .ask-fields, .ask-quote, .ask-reply) { flex: 1 0 100%; min-width: 0; }
+.ask-details summary { width: fit-content; color: var(--accent); cursor: pointer; }
+.ask-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 6px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
+.ask-fields dt { color: var(--ink-3); }
+.ask-fields dd { margin: 0; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-quote { margin: 0; padding-left: 12px; border-left: 2px solid var(--accent); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* "Needs your answer" is the one row that asks the person: it stands out, the question most. */
+.echo[data-kind="task_escalate"] { color: var(--ink); }
+.echo[data-kind="task_escalate"] .echo-mark { background: var(--warn); color: var(--surface); }
+.echo[data-kind="task_escalate"] .echo-body { flex: 1; padding: 12px 14px; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--warn-tint); }
+.echo[data-kind="task_escalate"] .echo-text { font-weight: 600; }
+.echo[data-kind="task_escalate"] .ask-fields { border-left-color: var(--warn); }
+.ask-fields dd[data-part="question"] { color: var(--ink); font-size: var(--text-reading); font-weight: 600; }
+.ask-reply { display: flex; align-items: flex-end; gap: 8px; margin-top: 4px; }
+.ask-reply-text { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font: inherit; resize: vertical; }
+.ask-reply .outline-button { padding: 6px 12px; font-size: var(--text-small); white-space: nowrap; }
+/* A message kept for the chat's next turn: not sent yet. */
+.user-bubble.queued { background: transparent; border: 1px dashed var(--control); color: var(--ink-2); }
 .task-button { padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: none; color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
 .task-button:hover:not(:disabled) { background: var(--soft); color: var(--ink); }
 .task-button:disabled { opacity: 0.5; }
@@ -371,7 +392,9 @@ button:hover:not(:disabled) {
   .main-face { flex-basis: 40px; width: 40px; height: 40px; }
 }
 @media (max-width: 700px), (pointer: coarse) {
-  .header-parent, .main-card-foot .link-button, .main-card-foot .outline-button, .echo-actions button, .echo-level-item, .task-button { min-height: 44px; }
+  .header-parent, .main-card-foot .link-button, .main-card-foot .outline-button, .echo-actions button, .echo-level-item, .task-button, .ask-reply .outline-button { min-height: 44px; }
+  .ask-fields { grid-template-columns: minmax(0, 1fr); }
+  .ask-fields dd + dt { margin-top: 4px; }
   /* A tall target on a line as tall as its words. */
   .echo-actions .link-button { margin-block: -12px; }
   /* The target is tall; the line stays as tall as the title. */

@@ -410,13 +410,13 @@ export function statusLine(status, error) {
 
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */
 export function canContinue(turn, newest) {
-  return newest && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
+  return newest && !turn.origin && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
     ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
 }
 
-/** A retry undoes the newest finished turn, never an earlier or undone one. */
+/** A retry undoes the newest finished turn, never an earlier or undone one, nor a task's question. */
 export function canRetry(turn, newest) {
-  return newest && !turn.undone && !!turn.finishedAt && turn.status !== "completed";
+  return newest && !turn.origin && !turn.undone && !!turn.finishedAt && turn.status !== "completed";
 }
 
 /** `approval_tag`: the short and long text of how an approval ended, or null. */
@@ -506,6 +506,8 @@ export function newTurn(row) {
     turn: int(source.turn) ?? 0,
     runId: String(source.run_id ?? ""),
     userText: String(source.user_text ?? ""),
+    // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
+    origin: String(source.origin ?? ""),
     status: String(source.status ?? ""),
     cause: String(source.cause ?? ""),
     answer,
@@ -556,12 +558,14 @@ function ensureTurn(view, number, fields = {}) {
       turn: number,
       user_text: fields.userText ?? "",
       client_request_id: fields.clientRequestId ?? "",
+      origin: fields.origin ?? "",
       status: "running",
       running_here: true,
     });
     addTurn(view, turn);
   }
   if (fields.id && !turn.id) turn.id = fields.id;
+  if (fields.origin && !turn.origin) turn.origin = fields.origin;
   if (fields.userText && !turn.userText) turn.userText = fields.userText;
   if (fields.clientRequestId && !turn.clientRequestId) {
     turn.clientRequestId = fields.clientRequestId;
@@ -676,6 +680,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       id: data.turn_id,
       userText: data.user_text,
       clientRequestId: data.client_request_id,
+      origin: data.origin,
     }) : findTurn(view, number);
 
   if (type === "turn.started") {

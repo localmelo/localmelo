@@ -28,6 +28,7 @@ from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinkin
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     LEASE_S,
+    OPTIONAL_SESSION_EVENT_FIELDS,
     OUTCOME_CAUSES,
     RECENT_SESSIONS,
     RESERVED_EVENT_PREFIXES,
@@ -152,16 +153,79 @@ async def test_attachment_migration_and_atomic_validation(tmp_path: Path) -> Non
     assert turn.attachments == files and turn.typed_text == "typed"
     assert (await store.list_turns("old"))[-1].user_text == text
     await store.aclose()
-    assert rows(path, "PRAGMA user_version") == [(2,)]
+    assert rows(path, "PRAGMA user_version") == [(3,)]
 
 
-async def test_a_new_file_gets_schema_version_2(tmp_path: Path) -> None:
+async def test_a_version_2_file_gains_turn_origins(tmp_path: Path) -> None:
+    """#369: a v2 file gets ``turns.origin`` (``""`` on its turns) and version 3."""
+    path = tmp_path / "v2.db"
+    with sqlite3.connect(path) as conn:
+        for statement in store_mod._SCHEMA:
+            conn.execute(
+                statement.replace("    origin      TEXT NOT NULL DEFAULT '',\n", "")
+            )
+        conn.execute("INSERT INTO store_info VALUES ('writer', 'gateway')")
+        conn.execute("PRAGMA user_version = 2")
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('old', 1, 1)"
+        )
+        conn.execute(
+            "INSERT INTO turns (session_id, turn, id, user_text, holder, started_at, "
+            "status) VALUES ('old', 1, 'oldturn', 'legacy', 'h', 1, 'completed')"
+        )
+    assert "origin" not in {row[1] for row in rows(path, "PRAGMA table_info(turns)")}
+    store = gateway(path)
+    [old] = await store.list_turns("old")
+    assert old.origin == ""
+    asked = await store.begin_turn(
+        "old", "[task t1 · Fix asks · data]", holder=HOLDER, origin="ask_owner"
+    )
+    assert (asked.origin, asked.typed_text) == ("ask_owner", "")
+    with pytest.raises(ValueError, match="origin must be one of"):
+        await store.begin_turn("old", "x", holder=HOLDER, origin="someone")
+    await store.aclose()
+    assert rows(path, "PRAGMA user_version") == [(3,)]
+    columns = {row[1]: row for row in rows(path, "PRAGMA table_info(turns)")}
+    assert columns["origin"][4] == "''"
+
+
+async def test_an_internal_turn_gives_a_new_session_no_title(tmp_path: Path) -> None:
+    store = gateway(tmp_path / "sessions.db")
+    info = await store.create_session()
+    turn = await store.begin_turn(
+        info.id, "[task t1 · Fix asks · data]", holder=HOLDER, origin="ask_owner"
+    )
+    assert turn.origin == "ask_owner"
+    assert (await store.get_session(info.id)).title == ""  # type: ignore[union-attr]
+    await store.aclose()
+
+
+async def test_turn_started_names_a_turn_the_person_did_not_begin(
+    tmp_path: Path,
+) -> None:
+    store = gateway(tmp_path / "sessions.db")
+    started = {}
+    for origin in ("", "ask_owner"):
+        info = await store.create_session()
+        await store.begin_turn(info.id, "x", holder=HOLDER, origin=origin)
+        [event] = [
+            e.event["data"]
+            for e in await store.list_events(info.id)
+            if e.event["type"] == "turn.started"
+        ]
+        started[origin] = event
+    assert "origin" not in started[""]
+    assert started["ask_owner"]["origin"] == "ask_owner"
+    await store.aclose()
+
+
+async def test_a_new_file_gets_schema_version_3(tmp_path: Path) -> None:
     path = tmp_path / "s" / "sessions.db"
     store = gateway(path)
     await store.open()
     await store.aclose()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert rows(path, "PRAGMA user_version") == [(2,)]
+    assert rows(path, "PRAGMA user_version") == [(3,)]
     assert rows(path, "SELECT value FROM store_info WHERE key = 'writer'") == [
         ("gateway",)
     ]
@@ -218,7 +282,7 @@ def _sessions_file(path: Path, writer: str = "gateway", version: int = 2) -> Non
 @pytest.mark.parametrize(
     ("case", "message"),
     [
-        ("newer", "has schema version 3; this localmelo reads version 2"),
+        ("newer", "has schema version 4; this localmelo reads version 3"),
         ("no_marker", "has no valid writer marker"),
         ("other_marker", "has no valid writer marker"),
         ("history_db", "is not a localmelo sessions file"),
@@ -229,7 +293,7 @@ async def test_a_refused_file_stays_unchanged(
 ) -> None:
     path = tmp_path / "sessions.db"
     if case == "newer":
-        _sessions_file(path, version=3)
+        _sessions_file(path, version=4)
     elif case == "no_marker":
         _sessions_file(path, writer="")
     elif case == "other_marker":
@@ -713,7 +777,13 @@ async def test_an_unknown_schema_component_is_ignored(tmp_path: Path) -> None:
 
 def test_the_session_event_keys_are_pinned() -> None:
     assert dict(SESSION_EVENT_FIELDS) == {
-        "turn.started": {"turn", "turn_id", "user_text", "client_request_id"},
+        "turn.started": {
+            "turn",
+            "turn_id",
+            "user_text",
+            "client_request_id",
+            "origin",
+        },
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "turn.pictures": {"turn", "turn_id", "pictures"},
@@ -746,6 +816,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "remember",
         },
     }
+    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {"turn.started": {"origin"}}
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 
 

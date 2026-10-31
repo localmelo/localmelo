@@ -636,10 +636,13 @@ class TurnRenderer:
         # The raised band marks where a turn starts (with a fill).
         self.out.print(Band(_marked(self.symbols.prompt, "user", echo)))
 
-    def begin_turn(self, text: str, *, first_turn: bool = False) -> None:
-        """Echo *text* and start the live area."""
-        self.echo(text)
-        self.out.print(Text(""))
+    def begin_turn(
+        self, text: str, *, first_turn: bool = False, echo: bool = True
+    ) -> None:
+        """Echo *text* (unless not *echo*) and start the live area."""
+        if echo:
+            self.echo(text)
+            self.out.print(Text(""))
         self.live = LiveState(
             activity="Starting", started=self._clock(), first_turn=first_turn
         )

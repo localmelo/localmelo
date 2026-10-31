@@ -41,7 +41,9 @@ class TurnChange:
     (``""`` when the run never started); ``answer`` is the stored copy,
     redacted and, after retention, without its ``<think>`` block.
     ``events`` holds the turn's stored events, in id order, with
-    ``with_events``.
+    ``with_events``. ``origin`` names who began a turn the person did not
+    (``ask_owner``: a task's question, whose ``user_text`` is the task's
+    words); ``""`` for the person's own and in a file of schema 2.
     """
 
     event_id: int
@@ -66,6 +68,7 @@ class TurnChange:
     started_at: float
     finished_at: float
     events: tuple[dict[str, Any], ...] | None
+    origin: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -197,12 +200,18 @@ class SessionReader:
                 return []
             await conn.execute("BEGIN")
             try:
+                columns = {
+                    row[1]
+                    for row in await conn.execute_fetchall("PRAGMA table_info(turns)")
+                }
+                # Schema 2 has no origin: every turn there is the person's.
+                origin = "t.origin" if "origin" in columns else "''"
                 rows = list(
                     await conn.execute_fetchall(
                         "SELECT e.id, e.type, e.event, s.kind, s.title, s.workspace, "
                         "s.model, t.session_id, t.turn, t.id, t.run_id, t.user_text, "
                         "t.typed_text, t.status, t.cause, t.answer, t.result, t.note, "
-                        "t.undone, t.started_at, t.finished_at FROM events e "
+                        f"t.undone, t.started_at, t.finished_at, {origin} FROM events e "
                         "JOIN turns t ON t.id = json_extract(e.event, '$.data.turn_id') "
                         "JOIN sessions s ON s.id = t.session_id "
                         "WHERE e.id > ? AND e.type IN ('turn.finished', 'turn.undone') "
@@ -251,6 +260,7 @@ class SessionReader:
                             started_at=row[19],
                             finished_at=finished_at,
                             events=events,
+                            origin=row[21],
                         )
                     )
             finally:

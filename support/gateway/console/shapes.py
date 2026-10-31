@@ -103,6 +103,9 @@ def turn_json(
             turn.status == "running" if running_here is None else running_here
         ),
     }
+    if turn.origin:
+        # A turn the person did not type: the chat answers a task (#369).
+        data["origin"] = turn.origin
     if events is not None:
         data["events"] = [event_json(event) for event in events]
     return data
