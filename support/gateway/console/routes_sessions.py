@@ -26,6 +26,7 @@ from localmelo.support.sessions.submissions import check_client_request_id
 
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
+from .front import ECHO_EVENT
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
 from .worker_reader import WorkerRecord, _total_tokens, decode_cursor, encode_cursor
@@ -304,9 +305,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
             has_earlier = bool(older)
         cards: list[StoredEvent] = []
+        echoes: list[StoredEvent] = []
         if info.kind == "front":
             await console.cards.flush()
             cards = await _page_cards(console, session_id, turns, before)
+            echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
         body: dict[str, Any] = {
             "turns": [
                 turn_json(
@@ -324,11 +327,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         }
         if before is None:
             body["replay_from"] = await _replay_from(console, store, session_id, turns)
-            if cards and not turns:
-                # The stream replays from here: the cards already given.
-                body["replay_from"] = max((cards[0].id or 1) - 1, 0)
+            if (cards or echoes) and not turns:
+                # The stream replays from here: the cards and echoes already given.
+                first = min(event.id or 1 for event in cards + echoes)
+                body["replay_from"] = max(first - 1, 0)
         if info.kind == "front":
             body["cards"] = [card_json(event) for event in cards]
+            body["echoes"] = [card_json(event) for event in echoes]
         return JSONResponse(content=body)
 
     @app.get("/api/sessions/{session_id}/events")
@@ -481,9 +486,13 @@ async def _turn_start(console: Console, session_id: str, turn: int) -> int | Non
 
 
 async def _page_cards(
-    console: Console, session_id: str, turns: list[TurnInfo], before: int | None
+    console: Console,
+    session_id: str,
+    turns: list[TurnInfo],
+    before: int | None,
+    type_: str = CARD_EVENT,
 ) -> list[StoredEvent]:
-    """The main chat's cards beside a page of its turns, the newest :data:`CARD_PAGE`.
+    """The main chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
 
     From the page's oldest turn (or the start, when it is the oldest page)
     to the next page's first turn (or now).
@@ -502,7 +511,7 @@ async def _page_cards(
         await _store_call(
             console,
             console.store.events_of_type(
-                session_id, CARD_EVENT, after_id=low, before_id=high, limit=CARD_PAGE
+                session_id, type_, after_id=low, before_id=high, limit=CARD_PAGE
             ),
             session_id,
         )
