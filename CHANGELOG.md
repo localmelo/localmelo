@@ -215,8 +215,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   own answers, which the model had copied into replies instead of calling the
   tool. When a reply says it noted a fact and no note was kept, melo keeps what
   the reply named after the same checks (your words, no secret, the newer value
-  replaces the old one) and shows it with Undo; when it cannot, nothing is kept
-  and the turn's `turn.memory` event has `unsaved_claim: true`. A request to be
+  replaces the old one, written to you: "Your flight to Faro is at gate 9", not
+  "gate 9 for Faro") and shows it with Undo; when it cannot, nothing is kept
+  and the turn's `turn.memory` event has `unsaved_claim: true`. A bare "Noted,
+  thanks!" claims nothing. A request to be
   reminded at a time is scheduled, never kept as a note ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A

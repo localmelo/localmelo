@@ -4,9 +4,10 @@ After a completed chat run, when the answer claims a save (``Remembered: X``,
 ``Noted — X``, ``I've noted that X``, ``记下了：X``) and the turn kept no note,
 code keeps X through ``remember``'s own path: the user's words, no secret, the
 newer value supersedes the old one. When X is not the user's words, or the
-answer names nothing usable, nothing is kept and the turn's ``turn.memory``
-event has ``unsaved_claim`` true. A turn that kept a note, a plain answer,
-workers, task runners and memory off do nothing. The claims are the real ones
+answer names nothing written to the user (a fragment such as "gate 9 for
+Faro"), nothing is kept and the turn's ``turn.memory`` event has
+``unsaved_claim`` true; a bare "Noted, thanks!" claims nothing. A turn that
+kept a note, a plain answer, workers, task runners and memory off do nothing. The claims are the real ones
 a guard cell of the benchmark answered with no note kept. End to end on the
 stub model, with words only and with a fake embedding server.
 """
@@ -66,16 +67,10 @@ CLAIMS = [
     ),
     ("我住在乌得勒支。", "记下了：你住在乌得勒支。", "你住在乌得勒支。"),
     (PREFERENCE, f"Remembered: {PREFERENCE_CLAIM}", f"W{PREFERENCE_CLAIM[1:]}"),
-    # A fragment is kept as it is: its words and values are the user's.
-    (
-        "My flight to Faro is at gate 9.",
-        "Noted — gate 9 for Faro. I've also kept your earlier note about the "
-        "Porto flight (gate 22), so both are on record.",
-        "Gate 9 for Faro.",
-    ),
 ]
 # A claim whose X is not the user's words (a changed value, a new word that is a
-# value, a paraphrase that adds a content word, a secret, nothing at all).
+# value, a paraphrase that adds a content word, a secret) or is not written to
+# the user (a fragment, the real M2 reply).
 REFUSED = [
     ("My name is Juno.", "Remembered: Your name is Zed."),
     ("My parking spot is C14.", "Noted — your parking spot is C15."),
@@ -84,7 +79,11 @@ REFUSED = [
         "Noted — your flight to Porto departs from gate 22.",
     ),
     ("My password is hunter2.", "Noted — your password is hunter2."),
-    ("My name is Juno.", "Noted — ."),
+    (
+        "My flight to Faro is at gate 9.",
+        "Noted — gate 9 for Faro. I've also kept your earlier note about the "
+        "Porto flight (gate 22), so both are on record.",
+    ),
 ]
 
 
@@ -102,6 +101,7 @@ def stub() -> Iterator[StubServer]:
     scenarios: dict[str, dict[str, Any]] = {
         "plain": {"replies": [{"content": "Hello Juno, nice to meet you."}]},
         "noted": {"replies": [{"content": "Noted."}]},
+        "thanks": {"replies": [{"content": "Noted, thanks!"}]},
         # The model keeps the note with the tool, then claims one more fact.
         "kept": {
             "replies": [
@@ -240,7 +240,7 @@ async def test_a_turn_that_kept_a_note_is_left_alone(
     assert len(await memory.records()) == 2 and events[-1]["unsaved_claim"] is False
 
 
-@pytest.mark.parametrize("scenario", ["plain", "noted"])
+@pytest.mark.parametrize("scenario", ["plain", "noted", "thanks"])
 async def test_an_answer_that_claims_nothing_does_nothing(
     memory: ChatMemory,
     store: SessionStore,
@@ -314,7 +314,10 @@ async def test_only_the_turn_under_way_keeps_a_claim(
     [
         ("Remembered: Your name is Juno.", "Your name is Juno."),
         ("Remembered: your airport spot is L7 (not C14).", "Your airport spot is L7."),
-        ("Noted — gate 9 for Faro. Safe travels!", "Gate 9 for Faro."),
+        (
+            "Noted — you fly from gate 9 to Faro. Safe travels!",
+            "You fly from gate 9 to Faro.",
+        ),
         ("Noted: you like tea. Anything else?", "You like tea."),
         ("Noted, you like tea!", "You like tea."),
         ("noted - you like tea", "You like tea."),
@@ -328,8 +331,15 @@ async def test_only_the_turn_under_way_keeps_a_claim(
         ("记下了：你住在乌得勒支。以后会用。", "你住在乌得勒支。"),
         ("已记住：你的导师是周教授！", "你的导师是周教授。"),
         ("记住了，你的导师是周教授。", "你的导师是周教授。"),
-        ("Noted — it costs 3.5 euros. Ok.", "It costs 3.5 euros."),
-        ("Noted — .", ""),
+        ("记住了：您住在乌得勒支。", "您住在乌得勒支。"),
+        ("Noted — you pay 3.5 euros. Ok.", "You pay 3.5 euros."),
+        ("Noted — it is YOURS.", "It is YOURS."),
+        # Not written to the user, with 3 content words or more: nothing usable.
+        ("Noted — gate 9 for Faro. I've also kept the Porto note.", ""),
+        ("Noted — it costs 3.5 euros. Ok.", ""),
+        ("Noted — the group meeting is on Thursdays.", ""),
+        ("记下了：导师是周教授。", ""),
+        ("Noted — I'll use plain words.", ""),
         # The first claim counts.
         ("Noted — you like tea. Remembered: you like jam.", "You like tea."),
     ],
@@ -343,6 +353,12 @@ def test_claimed_reads_the_fact_a_reply_says_it_noted(answer: str, fact: str) ->
     [
         "Noted.",
         "Noted",
+        "Noted — .",
+        "Noted, thanks!",
+        "Noted — thanks a lot.",
+        "Got it — noted.",
+        "已记住：好的。",
+        "Noted — yourself is fine.",
         "Hello there.",
         "As noted, tea is fine.",
         "Got it — you live in Utrecht.",

@@ -951,10 +951,11 @@ class ChatMemory:
         fact with :meth:`remember`, which checks it as it checks the model's own
         notes (the user's words, no secret, supersedes the old value).
 
-        When nothing usable is named, or ``remember`` refuses, nothing is kept
-        and the turn's ``turn.memory`` event, queued again, has ``unsaved_claim``
-        true. Nothing outside the turn, with memory off, with a note kept, or
-        when the reply claims nothing.
+        When nothing written to the user is named (a fragment such as "gate 9
+        for Faro"), or ``remember`` refuses, nothing is kept and the turn's
+        ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
+        outside the turn, with memory off, with a note kept, or when the reply
+        claims nothing.
         """
         turn = CHAT_TURN.get()
         if (

@@ -376,16 +376,21 @@ _CLAIMS: Final = tuple(
 )
 _CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
 _NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
+_TO_USER = re.compile(r"\b(?:you|your|yours)\b|[你您]", re.IGNORECASE)
+CLAIM_TERMS: Final = 3
 
 
 def claimed(answer: str) -> str | None:
     """The fact *answer* says it noted, as a note sentence: ``None`` when it does
-    not claim a save, ``""`` when it does and names nothing usable.
+    not claim a save, ``""`` when it does and names nothing written to the user.
 
     The first claim counts: ``Remembered: X``, ``Noted — X`` (or ``:``/``,``),
     ``I've noted (that) X``, ``I'll remember (that) X``, ``Got it — X`` with a
     ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``. X ends where its
-    sentence does, or at a ``(``.
+    sentence does, or at a ``(``. A note is written to the user, so X must say
+    ``you``, ``your``, ``yours``, ``你`` or ``您``: without, X of at least
+    :data:`CLAIM_TERMS` content words is a claim of nothing usable (``""``), and a
+    shorter one ("Noted, thanks!") is no claim.
     """
     text = answer.replace("**", "").replace("__", "")
     found = [m for pattern in _CLAIMS if (m := pattern.search(text))]
@@ -393,7 +398,10 @@ def claimed(answer: str) -> str | None:
         return None
     rest = text[min(found, key=lambda m: m.start()).start("x") :]
     fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
-    return finished(_NOTED_TAIL.sub("", fact))
+    note = finished(_NOTED_TAIL.sub("", fact))
+    if _TO_USER.search(note):
+        return note
+    return "" if len(note_terms(note)) >= CLAIM_TERMS else None
 
 
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
