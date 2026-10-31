@@ -122,17 +122,20 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 ### No model server is running at the first run
 
 ```text
-No model server is running yet. To start one with oMLX:
+No model server is running yet.
 ```
 
 - **Cause:** none of the four usual ports (8000, 8400, 11434, 30000, or the URLs
   in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`.
-- **Fix:** run the commands melo prints (oMLX on a Mac, Ollama elsewhere; they
-  are the ones in the [model servers guide](../guides/model-servers.md)), then
-  choose `Check again` in the list under them. A server on another port:
-  choose `Enter an address` and type it. `Quit` (or Esc) quits without
-  saving. The web console's setup card shows the same commands and looks
-  again by itself.
+- **Fix:** on a supported Apple-silicon Mac, choose `Review setup plan`, then
+  `Show manual steps`. Automatic setup is not available yet. Other systems keep
+  manual-server guidance; pipes and `TERM=dumb` print a guide link rather than
+  advertising a picker choice. Start the server yourself, then `Check again`
+  or `Enter an address` for a nondefault port. `Quit` (or Esc) saves nothing.
+  If setup checks fail or take too long, manual guidance remains available.
+  Already saved a backend? With none found, `melo setup` opens the full backend
+  menu instead. The web/app setup card keeps its manual commands and checks
+  again automatically.
 
 ### A model server cannot be used at the first run
 

@@ -8,8 +8,12 @@ import json
 import shlex
 import socket
 import subprocess
+import sys
+import urllib.request
 from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
+from threading import Event, Thread
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -25,7 +29,7 @@ _REAL_RAM = setup.ram_bytes
 @pytest.fixture(autouse=True)
 def machine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    for name in ("HF_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME"):
+    for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(setup.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(setup.platform, "machine", lambda: "arm64")
@@ -76,7 +80,11 @@ def test_recipe_and_plan_are_pinned_frozen_and_digest_is_canonical() -> None:
         ({}, "home/.cache/huggingface/hub"),
         ({"XDG_CACHE_HOME": "xdg"}, "xdg/huggingface/hub"),
         ({"HF_HOME": "hf", "XDG_CACHE_HOME": "xdg"}, "hf/hub"),
-        ({"HF_HUB_CACHE": "hub", "HF_HOME": "hf"}, "hub"),
+        ({"HUGGINGFACE_HUB_CACHE": "legacy", "HF_HOME": "hf"}, "legacy"),
+        (
+            {"HF_HUB_CACHE": "hub", "HUGGINGFACE_HUB_CACHE": "legacy", "HF_HOME": "hf"},
+            "hub",
+        ),
     ],
 )
 def test_hf_cache_precedence(tmp_path: Path, env: dict[str, str], suffix: str) -> None:
@@ -148,11 +156,92 @@ def test_platform_probe_errors_produce_manual_only_plan(
 
 
 @pytest.mark.parametrize("memory", [None, 8 * 1024**3])
-def test_unknown_or_insufficient_ram_is_not_claimed_supported(
+def test_unknown_or_insufficient_ram_warns_without_claiming_manual_only(
     monkeypatch: pytest.MonkeyPatch, memory: int | None
 ) -> None:
     monkeypatch.setattr(setup, "ram_bytes", lambda: memory)
-    assert "Manual only" in setup.detect().support
+    detected = setup.detect()
+    assert detected.asset is not None
+    assert (
+        "Manual only" not in detected.support
+        and "Hardware matches" not in detected.support
+    )
+    assert ("unknown" if memory is None else "may be slow") in detected.support
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin physical RAM probe")
+def test_real_darwin_ram_is_positive_and_a_multiple_of_one_mib() -> None:
+    memory = _REAL_RAM()
+    assert memory is not None and memory > 0 and memory % 2**20 == 0
+
+
+def test_ram_details_use_gib_labeled_gb_and_retain_exact_bytes() -> None:
+    text = "\n".join(setup.details(setup.plan(setup.detect())))
+    assert "RAM: 16 GB (17,179,869,184 bytes)" in text
+    assert "RAM: 17.18 GB" not in text
+
+
+def test_state_path_uses_melos_existing_cache_root() -> None:
+    detected = setup.detect()
+    expected = Path.home() / ".cache" / "localmelo" / "server-setup" / "omlx-0.7.3"
+    assert detected.state_path == str(expected)
+    assert not expected.exists()
+
+
+def test_bounded_detect_returns_completed_metadata_and_reraises_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = setup.detect()
+    monkeypatch.setattr(setup, "detect", lambda: expected)
+    assert setup.detect_bounded(timeout=0.5) == expected
+
+    def failed() -> Any:
+        raise RuntimeError("metadata failed")
+
+    monkeypatch.setattr(setup, "detect", failed)
+    with pytest.raises(RuntimeError, match="metadata failed"):
+        setup.detect_bounded(timeout=0.5)
+
+
+def test_bounded_detect_returns_unknown_without_waiting_for_stuck_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = setup.detect()
+    release = Event()
+    workers: list[Thread] = []
+
+    def tracked_thread(**kwargs: Any) -> Thread:
+        worker = Thread(**kwargs)
+        workers.append(worker)
+        return worker
+
+    def blocked() -> setup.Detection:
+        assert release.wait(1), "test fake was not released"
+        return expected
+
+    monkeypatch.setattr(setup, "Thread", tracked_thread, raising=False)
+    monkeypatch.setattr(setup, "detect", blocked)
+    try:
+        started = monotonic()
+        detected = setup.detect_bounded(timeout=0.02)
+        assert monotonic() - started < 0.75
+        assert workers and workers[0].daemon and workers[0].is_alive()
+        assert detected.system == detected.architecture == "unknown"
+        assert (
+            detected.ram_bytes is None
+            and detected.asset is None
+            and detected.disks == ()
+        )
+        assert (
+            detected.cache_root == detected.snapshot == detected.state_path == "unknown"
+        )
+        assert detected.completed_files == () and "timed out" in detected.support
+        assert detected != expected
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(timeout=1)
+            assert not worker.is_alive()
 
 
 def test_partial_snapshot_counts_only_complete_expected_size_files_and_shared_blobs(
@@ -193,7 +282,8 @@ def test_partial_snapshot_counts_only_complete_expected_size_files_and_shared_bl
     assert sorted(str(path) for path in cache.rglob("*")) == before
     assert "not integrity-verified" in "\n".join(setup.details(setup.plan(detected)))
     assert (
-        "Download: 3.2 GB · Cached: <0.1 GB" in setup.preview(setup.plan(detected))[2]
+        "Download: up to 3.2 GB · Cached: <0.1 GB"
+        in setup.preview(setup.plan(detected))[2]
     )
 
 
@@ -346,7 +436,7 @@ def test_default_preview_is_short_human_readable_and_counts_runtime_download() -
     lines = setup.preview(planned)
     assert len(lines) == 5 and all(len(line) < 80 for line in lines)
     assert lines[0] == "No model server is running yet."
-    assert lines[2] == "Download: 3.2 GB · Cached: 0 GB · Free: 10.0 GB"
+    assert lines[2] == "Download: up to 3.2 GB · Cached: 0 GB · Free: 10.0 GB"
     assert lines[3] == "Planned lifetime: stop when melo closes."
     assert "Ctrl+C" in "\n".join(setup.manual_steps(planned))
     assert lines[4] == "Automatic setup is coming soon: Show manual steps to do it now."
@@ -379,24 +469,24 @@ def test_concise_download_includes_runtime_even_when_model_is_cached(
 ) -> None:
     detection = replace(setup.detect(), missing_model_bytes=missing)
     line = setup.preview(setup.plan(detection))[2]
-    assert f"Download: {download}" in line and f"Cached: {cached}" in line
+    assert f"Download: up to {download}" in line and f"Cached: {cached}" in line
 
 
 @pytest.mark.parametrize(
     ("problem", "expected"),
     [
-        ("platform", "no supported installer"),
         ("ram-low", "may be slow"),
         ("ram-unknown", "RAM unknown"),
         ("disk-low", "not enough disk space"),
         ("disk-unknown", "free space unknown"),
     ],
 )
-def test_preview_adds_only_one_warning_line(problem: str, expected: str) -> None:
+@pytest.mark.parametrize("interactive", [False, True])
+def test_preview_adds_only_one_warning_line(
+    problem: str, expected: str, interactive: bool
+) -> None:
     detected = setup.detect()
-    if problem == "platform":
-        detected = replace(detected, asset=None)
-    elif problem.startswith("ram"):
+    if problem.startswith("ram"):
         detected = replace(
             detected, ram_bytes=8 * 1024**3 if problem == "ram-low" else None
         )
@@ -409,30 +499,57 @@ def test_preview_adds_only_one_warning_line(problem: str, expected: str) -> None
                 ),
             ),
         )
-    lines = setup.preview(setup.plan(detected))
+    lines = setup.preview(setup.plan(detected), interactive=interactive)
     assert len(lines) == 6 and expected.lower() in lines[-1].lower()
+    assert ("Details" if interactive else "the manual guide") in lines[-1]
     assert all(len(line) < 80 for line in lines)
-    if problem == "platform":
-        assert "Manual only" in lines[1] and "Download: unknown" in lines[2]
 
 
-def test_preview_combines_warnings_and_shows_multiple_volume_free_space() -> None:
+@pytest.mark.parametrize("interactive", [False, True])
+def test_preview_combines_warnings_and_shows_multiple_volume_free_space(
+    interactive: bool,
+) -> None:
     detected = setup.detect()
     detected = replace(
         detected,
-        asset=None,
         ram_bytes=None,
         disks=(
             replace(detected.disks[0], free_bytes=1),
             setup.DiskSpace("/other", ("/other/cache",), 10, None),
         ),
     )
-    lines = setup.preview(setup.plan(detected, keep_running=True))
+    lines = setup.preview(
+        setup.plan(detected, keep_running=True), interactive=interactive
+    )
     assert len(lines) == 6
     assert "Free/volume: <0.1 GB / unknown" in lines[2]
     assert "keep running after melo closes" in lines[3]
     assert "Several setup checks need attention" in lines[-1]
+    assert ("Details" if interactive else "the manual guide") in lines[-1]
     assert all(len(line) < 80 for line in lines)
+
+
+def test_manual_only_summary_hides_cache_lifetime_and_irrelevant_disk_warning() -> None:
+    detected = setup.detect()
+    detected = replace(
+        detected,
+        asset=None,
+        ram_bytes=None,
+        disks=(replace(detected.disks[0], free_bytes=1),),
+    )
+    lines = setup.preview(setup.plan(detected, keep_running=True))
+    text = "\n".join(lines)
+    assert len(lines) <= 6 and all(len(line) < 80 for line in lines)
+    assert "Manual only" in text and discovery.GUIDE_URL in text
+    for irrelevant in (
+        "Cached",
+        "lifetime",
+        "Free",
+        "disk",
+        "Several setup",
+        "Show manual steps",
+    ):
+        assert irrelevant not in text
 
 
 def test_manual_commands_are_pinned_shell_quoted_and_do_not_copy_models(
@@ -475,8 +592,10 @@ def test_manual_commands_are_pinned_shell_quoted_and_do_not_copy_models(
     )
 
 
+@pytest.mark.parametrize("bounded", [False, True])
 def test_detect_plan_preview_and_manual_have_no_network_writes_processes_or_binds(
     monkeypatch: pytest.MonkeyPatch,
+    bounded: bool,
 ) -> None:
     def forbidden(*args: object, **kwargs: object) -> Any:
         raise AssertionError("preview attempted a side effect")
@@ -490,12 +609,37 @@ def test_detect_plan_preview_and_manual_have_no_network_writes_processes_or_bind
     monkeypatch.setattr(builtins, "open", read_only)
     for name in ("mkdir", "unlink", "rename", "replace", "write_bytes", "write_text"):
         monkeypatch.setattr(Path, name, forbidden)
+    for name in (
+        "mkdir",
+        "makedirs",
+        "rename",
+        "replace",
+        "unlink",
+        "remove",
+        "rmdir",
+        "system",
+    ):
+        monkeypatch.setattr(setup.os, name, forbidden)
+    for name in (
+        "copy",
+        "copy2",
+        "copyfile",
+        "copytree",
+        "move",
+        "rmtree",
+        "unpack_archive",
+    ):
+        monkeypatch.setattr(setup.shutil, name, forbidden)
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    monkeypatch.setattr(urllib.request, "urlretrieve", forbidden)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", forbidden)
     monkeypatch.setattr(socket.socket, "bind", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(httpx.Client, "request", forbidden)
     monkeypatch.setattr(httpx.AsyncClient, "request", forbidden)
-    planned = setup.plan(setup.detect())
+    planned = setup.plan(setup.detect_bounded() if bounded else setup.detect())
     assert (
         setup.preview(planned)
         and setup.details(planned)

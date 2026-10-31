@@ -276,8 +276,9 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     """Run the split backend setup flow.
 
     With *guided* (default mode's ``--reconfigure``), a model server found on
-    this machine is offered first, as the first run does; no server shows the
-    read-only setup preview. The full menu follows a declined/unusable server.
+    this machine is offered first, as the first run does. With no server, only
+    a fresh setup shows the read-only preview; a saved backend uses the full menu.
+    The full menu also follows a declined/unusable server.
 
     1. Choose and configure the chat backend.
     2. Choose and configure the embedding backend.
@@ -594,18 +595,18 @@ def _review_setup(setup: server_setup.SetupPlan, *, developer: bool = False) -> 
     while True:
         for line in render(setup):
             _say(line)
-        choice = _choose_from(
-            "Review setup (nothing will run)",
-            [
-                "Set up and start",
-                f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
-                "Show manual steps",
-                "Details",
-                "Back",
-            ],
-            0,
-            4,
-        )
+        rows = [
+            "Set up and start",
+            f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
+            "Show manual steps",
+            "Details",
+            "Back",
+        ]
+        if setup.detection.asset is None:
+            rows = rows[2:]
+        choice = _choose_from("Review setup (nothing will run)", rows, 0, len(rows) - 1)
+        if setup.detection.asset is None:
+            choice += 2
         if choice == 4:
             return
         if choice == 3:
@@ -620,42 +621,52 @@ def _review_setup(setup: server_setup.SetupPlan, *, developer: bool = False) -> 
 
 
 def _wait_for_a_server(
-    urls: Sequence[str], *, developer: bool = False, saved_connection: bool = False
+    urls: Sequence[str], *, developer: bool = False
 ) -> discovery.FoundServer | str | None:
     """Preview setup, then reuse discovery on Enter; return a server/address or quit.
 
     EOFError and KeyboardInterrupt reach the caller. Piped input never enters
     the setup picker or approves anything; Enter/address/q keep their meanings.
     """
-    setup = server_setup.plan(
-        server_setup.detect()
-    )  # Reuse the caller's no-server result.
-    render = server_setup.details if developer else server_setup.preview
-    lines = render(setup)
-    if saved_connection:
+    setup = None
+    try:
+        setup = server_setup.plan(server_setup.detect_bounded())
+    except Exception:
+        how = discovery.how_to_start()
+        _say(f"Setup checks unavailable. Start {how.name} manually:")
+        for command in how.commands:
+            print(command)
+        _say(how.note)
+        print(discovery.GUIDE_URL)
+    if setup is not None:
         lines = (
-            "No model server found; your saved connection is unchanged.",
-            *lines[1:],
+            server_setup.details(setup)
+            if developer
+            else server_setup.preview(setup, interactive=_arrow_keys())
         )
-    for line in lines:
-        _say(line)
-    if developer and not _arrow_keys():
-        for line in server_setup.manual_steps(setup):
-            print(line)
+        for line in lines:
+            _say(line)
+        if developer and not _arrow_keys():
+            for line in server_setup.manual_steps(setup):
+                print(line)
+    rows = ["Check again", "Review setup plan", "Enter an address", "Quit"]
+    if setup is None:
+        rows.remove("Review setup plan")
     while True:
         if _arrow_keys():
             choice = _choose_from(
-                "No model server found. What now?",
-                ["Check again", "Review setup plan", "Enter an address", "Quit"],
-                0,
-                3,
+                "No model server found. What now?", rows, 0, len(rows) - 1
             )
-            if choice == 3:
+            if choice == len(rows) - 1:
                 return None
-            if choice == 1:
+            if setup is not None and choice == 1:
                 _review_setup(setup, developer=developer)
                 continue
-            answer = _question("Server URL", _FIRST_RUN_URL) if choice == 2 else ""
+            answer = (
+                _question("Server URL", _FIRST_RUN_URL)
+                if choice == len(rows) - 2
+                else ""
+            )
         else:
             answer = input(
                 "Press Enter to check again, type an address, or q to quit: "
@@ -930,18 +941,16 @@ def run_first_setup(
     without models raises :class:`_FullMenuError` before anything is saved.
     A no-server preview never changes the saved connection.
     """
-    urls = discovery.detect_urls()
     # A reconfigure knows what melo needs; a first run says it, also when it
     # reaches this question through `melo serve`.
     first = not ask_keep or not config.load().is_configured
-    found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
-    if first and (found is not None or not urls):
+    if first:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
+    urls = discovery.detect_urls()
+    found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     typed = ""
-    if found is None and urls:
-        waited = _wait_for_a_server(
-            urls, developer=developer, saved_connection=not first
-        )
+    if found is None and urls and first:
+        waited = _wait_for_a_server(urls, developer=developer)
         if waited is None:
             return None
         if isinstance(waited, str):

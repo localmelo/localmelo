@@ -8,14 +8,19 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 
 ## Setup preview
 
-- With no server found, terminal first run and `melo setup` show a short,
-  read-only preview: the recommendation, remaining download, cached amount,
-  free space and planned lifetime. It adds one warning when needed. Supported
-  Apple-silicon Macs get oMLX with Qwen3 4B Instruct (4-bit).
+- With no backend saved and no server found, terminal first run and `melo setup`
+  show a short, read-only preview. Supported Apple-silicon Macs get oMLX with
+  Qwen3 4B Instruct (4-bit): the download upper bound, cached amount, free space
+  and planned lifetime, with one warning when needed. Other systems show manual
+  guidance without cache or lifetime estimates for an unsupported installer.
+  With a backend already saved and no server found, `melo setup` opens the full
+  backend menu instead.
 - `Review setup plan` offers lifetime choices, manual steps and `Details`.
   Exact versions, checksums, cache paths, per-volume disk readings, plan digest
   and the proposed port are in `Details` or developer mode, not the default
-  summary. The pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB
+  summary. RAM uses GiB (shown as GB), with the exact byte count in `Details`;
+  less than 16 GB is a speed warning, not a manual-only restriction.
+  The pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB
   on macOS 15 or 0.88 GB on macOS 26/27. The remaining download includes both.
   Expansion/staging overhead is unmeasured; disk payload is only a lower bound.
   `Set up and start` explains automatic setup is unavailable and shows manual
@@ -27,7 +32,11 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
   when ready. The suggested high port is an example, not a reserved port;
   select a free one before starting and enter its address in melo. These commands
   run independently; stop the manual server yourself with Ctrl+C. The planned
-  lifetime does not manage it.
+  lifetime does not manage it. Cache precedence is `HF_HUB_CACHE`, then legacy
+  `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then the XDG/standard default.
+  The proposed server state is under `~/.cache/localmelo/server-setup/`.
+  Pipes and `TERM=dumb` show a manual-guide link instead of picker choices;
+  slow or unavailable setup checks do not block the manual path.
 - A direct snapshot's served model ID can be its revision hash, not the
   repository name. Use the ID the server lists. Rechecking an address only
   lists models; it does not load one. The web/app setup card and already

@@ -12,8 +12,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A short, read-only setup preview when terminal first run finds no model
   server: the recommendation, download/cache amounts, free space and planned
   lifetime. `Details` keeps versions, paths and checksums out of the default
-  view. Automatic setup is not available yet; **Set up and start** only shows
-  manual steps. Nothing installs, downloads, starts or saves, and direct runs
+  view. Setup checks have a time limit and manual fallback; pipes include a
+  usable manual guide. Already saved a backend? With no server found, setup
+  keeps the full backend menu. Automatic setup is not available yet;
+  **Set up and start** only shows manual steps. Nothing installs, downloads, starts or saves, and direct runs
   and existing connections are unchanged. [#NN]
 
 - Bring in what other coding assistants on this computer remember. A scan

@@ -204,10 +204,11 @@ Try: What is this project? · / commands · ctrl+d quit
 
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
-With no model server running, first-run `melo` and `melo setup` show a short,
-read-only preview: the recommendation, remaining download, cached amount,
-free disk space and planned lifetime. On supported Apple-silicon Macs the
-recommendation is oMLX with Qwen3 4B Instruct. Choose `Review setup plan` for
+With no backend saved and no model server running, first-run `melo` and
+`melo setup` show a short, read-only preview: the recommendation, download upper
+bound, cached amount, free disk space and planned lifetime. On supported
+Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. Choose
+`Review setup plan` for
 lifetime choices and manual steps, or `Details` inside that review for exact
 versions, paths and checksums; developer mode keeps the detailed view.
 Automatic setup is not available yet: `Set up and start` only explains this
@@ -280,8 +281,9 @@ Ctrl+D. Then `melo serve` starts the gateway on `http://127.0.0.1:8401`, and
 it keeps running in this terminal. In default mode `melo setup` starts with the
 first run's question: it prints `Found a model server at …` and asks
 `Use this model server?`. The full menu above follows only after
-`Use another server` or in developer mode. With none found, it shows the read-only
-setup preview instead; an already saved connection is left unchanged.
+`Use another server` or in developer mode. With none found and a backend already
+saved, it shows the full backend menu; with nothing saved, it shows the read-only
+setup preview.
 
 ## Start the gateway
 

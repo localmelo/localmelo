@@ -13,6 +13,8 @@ import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
 
 from localmelo.support.backends.discovery import GUIDE_URL, how_to_start
 
@@ -122,8 +124,11 @@ class SetupPlan:
 
 def cache_root(env: Mapping[str, str], home: Path) -> Path:
     """Use the Hub's cache precedence without importing or contacting the Hub."""
-    if env.get("HF_HUB_CACHE"):
-        return Path(env["HF_HUB_CACHE"]).expanduser().absolute()
+    # Replacements take precedence over still-functional deprecated variables:
+    # https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables#deprecated-environment-variables
+    for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        if env.get(name):
+            return Path(env[name]).expanduser().absolute()
     hf_home = env.get("HF_HOME")
     if hf_home:
         return (Path(hf_home).expanduser() / "hub").absolute()
@@ -210,8 +215,7 @@ def detect(
     snapshot = store / "snapshots" / recipe.model_revision
     state = (
         home
-        / ".local"
-        / "share"
+        / ".cache"
         / "localmelo"
         / "server-setup"
         / f"omlx-{recipe.runtime_version}"
@@ -224,8 +228,10 @@ def detect(
     )
     if asset is None:
         support = "Manual only: no validated oMLX installer for this platform/architecture/version."
-    elif memory is None or memory < 16 * 1024**3:
-        support = "Manual only: at least 16 GB RAM recommended; available RAM is insufficient or unknown."
+    elif memory is None:
+        support = "RAM unknown; at least 16 GB RAM recommended."
+    elif memory < 16 * 1024**3:
+        support = "Under 16 GB RAM: this model may be slow."
     else:
         support = "Hardware matches recommendation (16 GB RAM recommended); memory/quality not measured."
     completed = tuple(
@@ -263,6 +269,40 @@ def detect(
         support,
         tuple(volumes.values()),
     )
+
+
+def detect_bounded(*, timeout: float = 2.0) -> Detection:
+    """Bound slow metadata I/O; daemon threads never delay interpreter shutdown."""
+    results: Queue[Detection | Exception] = Queue(maxsize=1)
+
+    def probe() -> None:
+        try:
+            results.put(detect())
+        except Exception as exc:
+            results.put(exc)
+
+    Thread(target=probe, name="melo-setup-detect", daemon=True).start()
+    try:
+        result = results.get(timeout=timeout)
+    except Empty:
+        return Detection(
+            "unknown",
+            "unknown",
+            "",
+            None,
+            (),
+            "unknown",
+            "unknown",
+            "unknown",
+            (),
+            sum(size for _, size in PINNED_RECIPE.files),
+            None,
+            "Setup checks timed out; use the manual guide.",
+            (),
+        )
+    if isinstance(result, Exception):
+        raise result
+    return result
 
 
 def port_allowed(port: int) -> bool:
@@ -304,47 +344,66 @@ def _size(value: int | None) -> str:
     return f"{value / 1_000_000_000:.1f} GB" if value else "0 GB"
 
 
-def preview(setup: SetupPlan) -> tuple[str, ...]:
+def _ram(value: int | None) -> str:
+    return "unknown" if value is None else f"{value / 1024**3:g} GB ({value:,} bytes)"
+
+
+def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
     """A human summary; technical metadata requires Details or developer mode."""
     d = setup.detection
+    if d.asset is None:
+        return (
+            "No model server is running yet.",
+            "Manual only: use a compatible model server.",
+            (
+                "Setup checks are unavailable; use the manual guide."
+                if d.system == "unknown"
+                else "No supported oMLX installer for this computer."
+            ),
+            "Manual guide:",
+            GUIDE_URL,
+        )
     total = sum(size for _, size in setup.recipe.files)
-    download = d.missing_model_bytes + d.asset.bytes if d.asset else None
+    download = d.missing_model_bytes + d.asset.bytes
     free = " / ".join(_size(disk.free_bytes) for disk in d.disks) or "unknown"
     space = "Free/volume" if len(d.disks) > 1 else "Free"
     lines = [
         "No model server is running yet.",
-        (
-            "Recommended: oMLX with Qwen3 4B Instruct."
-            if d.asset
-            else "Manual only: use a compatible model server."
-        ),
-        f"Download: {_size(download)} · Cached: {_size(total - d.missing_model_bytes)} · {space}: {free}",
+        "Recommended: oMLX with Qwen3 4B Instruct.",
+        f"Download: up to {_size(download)} · Cached: {_size(total - d.missing_model_bytes)} · {space}: {free}",
         (
             "Planned lifetime: keep running after melo closes."
             if setup.keep_running
             else "Planned lifetime: stop when melo closes."
         ),
-        "Automatic setup is coming soon: Show manual steps to do it now.",
+        (
+            "Automatic setup is coming soon: Show manual steps to do it now."
+            if interactive
+            else GUIDE_URL
+        ),
     ]
     warnings = []
-    if d.asset is None:
-        warnings.append("Manual only: no supported installer for this computer.")
+    help_target = "Details" if interactive else "the manual guide"
     if d.ram_bytes is None:
-        warnings.append("RAM unknown; check the 16 GB recommendation in Details.")
+        warnings.append(
+            f"RAM unknown; check the 16 GB recommendation in {help_target}."
+        )
     elif d.ram_bytes < 16 * 1024**3:
-        warnings.append("Under 16 GB RAM: this model may be slow; check Details.")
+        warnings.append(
+            f"Under 16 GB RAM: this model may be slow; check {help_target}."
+        )
     if any(disk.free_bytes is None for disk in d.disks):
-        warnings.append("Free space unknown; check Details before manual setup.")
+        warnings.append(f"Free space unknown; check {help_target} before manual setup.")
     if any(
         disk.free_bytes is not None and disk.free_bytes < disk.payload_bytes
         for disk in d.disks
     ):
-        warnings.append("Not enough disk space for the download; check Details.")
+        warnings.append(f"Not enough disk space for the download; check {help_target}.")
     if warnings:
         lines.append(
             warnings[0]
             if len(warnings) == 1
-            else "Several setup checks need attention; see Details before manual setup."
+            else f"Several setup checks need attention; see {help_target} before manual setup."
         )
     return tuple(lines)
 
@@ -355,11 +414,11 @@ def details(setup: SetupPlan) -> tuple[str, ...]:
     lines = [
         "No model server is running yet. Setup preview only; nothing installed or started.",
         "Recommended: oMLX + Qwen3 4B Instruct.",
-        f"Platform: {d.system} {d.os_version} / {d.architecture}; RAM: {_bytes(d.ram_bytes)}.",
+        f"Platform: {d.system} {d.os_version} / {d.architecture}; RAM: {_ram(d.ram_bytes)}.",
         d.support,
         f"SetupPlan v{setup.version} SHA256: {setup.digest}",
         f"Pinned: oMLX {r.runtime_version} ({r.runtime_commit}); {r.model_repo} @ {r.model_revision}.",
-        f"Model download: {_bytes(d.missing_model_bytes)} missing of {_bytes(sum(n for _, n in r.files))}; {len(d.completed_files)}/{len(r.files)} exact-size cached files (not integrity-verified).",
+        f"Model download: up to {_bytes(d.missing_model_bytes)} missing of {_bytes(sum(n for _, n in r.files))}; {len(d.completed_files)}/{len(r.files)} exact-size cached files (not integrity-verified).",
         f"HF cache: {d.cache_root}",
         f"Snapshot (read-only): {d.snapshot}",
         f"New melo-owned state: {d.state_path}",

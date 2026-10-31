@@ -72,7 +72,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 
 When no server is ready:
 
-- With none running, supported Apple-silicon Macs show the terminal's [read-only setup preview](model-servers.md#setup-preview): the recommendation, remaining download/cached amount, free space and planned lifetime. `Review setup plan` offers `Details` for versions, paths and checksums. `Set up and start` currently shows an unavailable notice and manual steps, never an install. The list also lets you check again, enter an address or quit; pipes retain their existing typed answers. Other platforms and the web/app setup card keep manual-server guidance.
+- With none running, supported Apple-silicon Macs show the terminal's [read-only setup preview](model-servers.md#setup-preview): the recommendation, download upper bound, cached amount, free space and planned lifetime. `Review setup plan` offers `Details` for versions, paths and checksums. `Set up and start` currently shows an unavailable notice and manual steps, never an install. The list also lets you check again, enter an address or quit; pipes retain their existing typed answers. Other platforms and the web/app setup card keep manual-server guidance.
 - A server that does not answer, needs an API key or lists no models is named with the reason, and you can try again, start without saving or quit.
 - localmelo never asks for an API key for a local server.
 - [The terminal guide](terminal.md#first-run) lists every prompt and reason.
@@ -88,7 +88,7 @@ melo --serve --reconfigure  # the wizard, then the gateway
 
 - The wizard asks for a chat backend, its URL and model, and an embedding backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lists the prompts.
 - It sends a short test request to each server, saves the config file, then opens the chat or, with `--serve --reconfigure`, starts the gateway (Ctrl+C stops it).
-- In default mode `melo setup` starts as the first run does (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server` or developer mode. With none found, the read-only setup preview leaves any saved connection unchanged.
+- In default mode `melo setup` first offers a server it finds (`Found a model server at …`, `Use this model server?`). The full backend menu follows `Use another server`, developer mode, or no server found when a backend is already saved. Only an unconfigured first run shows the read-only setup preview when no server is found.
 - In developer mode (`[ui] mode = "developer"`; `melo config set ui.mode developer` saves it) the full menu comes first.
 - Each question offers the file's current value in brackets: press Enter to keep it.
 
