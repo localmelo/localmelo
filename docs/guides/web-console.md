@@ -392,6 +392,9 @@ run). Like Workers, the view replaces the chat while it is open. The header says
 
 - A task that ended opens with its answer, set as in a chat, above its facts. A task that
   did not complete says why in the same place. Its steps are folded under **Steps**.
+- **What melo told the task** is folded on the page when the task began with notes from its
+  chat (see [Tasks start with them](memory.md#notes-melo-keeps-about-you)): the lines it was given,
+  as information, not instructions. A task with no notes shows no fold.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A

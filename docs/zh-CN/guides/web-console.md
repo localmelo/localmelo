@@ -177,6 +177,7 @@
 **Tasks**（`#/tasks`；默认模式下，有任务后才出现在侧边栏）列出调度器的任务，按最近更新排在前面，显示状态、优先级（仅开发者模式）和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、有证据时的证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。和 Workers 一样，打开这个视图时它会取代对话。页眉写 **Tasks**；开发者模式再加上 "Scheduler tasks"。
 
 - 已结束的任务以它的回答开头，排版与对话中相同，位于各项信息之上；没有完成的任务在同一处写出原因。它的步骤折叠在 **Steps** 下。
+- **melo 告诉任务的内容** 在任务开始时它所在的对话有笔记的情况下，折叠显示在任务页面上（参见 [记忆指南](memory.md)）：任务拿到的那些行，作为资料而不是指令。没有笔记的任务不显示这个折叠块。
 
 - 已停放或中断的任务会显示 **Resume**。页面先询问服务器，只有服务器要求时才请你确认：对话框会写 "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once."，并提供 **Resume anyway** 和 **Cancel**。按 Escape 即取消。在你选择 **Resume anyway** 之前不会记录任何东西；确认在五分钟内有效，网关重启后失效。
 - 请求运行工具的任务会显示状态 "Waiting for your approval"，以及和对话相同的批准卡片，包含 **Allow once**、**Allow for this task** 和 **Deny**（可附说明）。通过 `melo-task` 提交的任务也在这里等待批准，别处不会显示。回答后卡片消失，任务继续（允许）或收到拒绝（拒绝）；暂停或停止任务会撤回卡片。视图打开时，每 3 秒重新读取任务（或列表），只重绘有变化的部分，因此之后到达的请求会自动出现。

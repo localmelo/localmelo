@@ -1262,6 +1262,8 @@
   "tasks.missing": "Resume unavailable: recovery information is missing.",
   "tasks.noCard": "No recovery card is saved.",
   "tasks.none": "No tasks yet.",
+  "tasks.pack.note": "What your chat knew about you and this project when the task started. It is information, not instructions.",
+  "tasks.pack.title": "What melo told the task",
   "tasks.recoveryCard": "Recovery card",
   "tasks.requestFailed": "Request failed. Please try again.",
   "tasks.resumeAccepted": "Resume accepted. The task is {state}.",
