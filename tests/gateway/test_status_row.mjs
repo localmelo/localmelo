@@ -100,13 +100,18 @@ test('a failed fetch keeps the row, and clear cancels a waiting fetch', async ()
   assert.equal(t.timers[0].cancelled, true);
 });
 
-test('the plain row keeps the context, and leaves out the cache, the step and phase and the queue', () => {
+test('the plain row keeps the context and what waits for you, and leaves out the cache, the step and phase and the queue', () => {
   assert.deepEqual(
     plainSegments(['cache 67% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify (cycle 1)', 'tasks 1 running 2 queued']),
     ['ctx 1.0k/8.0k'],
   );
   assert.deepEqual(plainSegments(['cache --', 'step 1']), [], 'a bare step number tells a new user nothing');
-  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), ['tasks 0 running 0 queued 2 held'], 'A task held for the user stays');
+  // A task held for a free model slot is the scheduler's business: the server says nothing else about it.
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), [], 'a task held for a slot shows nothing');
+  assert.deepEqual(plainSegments(['tasks 3 running 2 queued']), [], 'the running and queued counts are the developer\'s');
+  // A task held on the person's approval comes with its own sentence, which stays.
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held', '1 task waits for you']), ['1 task waits for you']);
+  assert.deepEqual(plainSegments(['ctx 1.0k/8.0k', 'tasks 1 running 0 queued 2 held', '2 tasks wait for you']), ['ctx 1.0k/8.0k', '2 tasks wait for you']);
   assert.deepEqual(plainSegments([]), []);
 });
 

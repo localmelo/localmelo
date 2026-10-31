@@ -81,7 +81,7 @@ for you to send or change, and step aside once there is text.
 4. A status row sits above the composer: the same segments as the terminal's
    developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
-   segment only. The cache
+   segment, and a sentence such as `1 task waits for you` while a task waits for your approval. The cache
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow

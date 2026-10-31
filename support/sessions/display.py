@@ -577,6 +577,36 @@ def event_activity(
     return _STATE_WORDS["thinking"]
 
 
+# An answer that says it is done: "Done.", "All done!", "已完成。". A surface
+# that has room for one line shows what follows such a start instead.
+_ANSWER_ACK: Final = (
+    r"(?:done|completed?|finished|all done|ok(?:ay)?|已完成|完成了?|好了)"
+)
+# A row that is nothing but the ack, markup and spacing around it.
+_ACK_ONLY: Final = re.compile(
+    rf"^[\s#>*_`-]*(?:{_ANSWER_ACK})[\s.!。！]*$", re.IGNORECASE
+)
+# An ack sentence opening a longer row: "Done. The tests pass."
+_ACK_LEAD: Final = re.compile(
+    rf"^[\s#>*_`-]*(?:{_ANSWER_ACK})(?:[.!](?=\s)|[。！])\s*", re.IGNORECASE
+)
+
+
+def drop_leading_ack(rows: Iterable[str]) -> list[str] | None:
+    """*rows* without an opening ``Done.``; ``None`` when they say nothing else.
+
+    What the main chat's card and an activity row both show of a finished
+    run: a row that only says it is done goes when anything follows it, and an
+    ack sentence that opens the first kept row comes off it. ``None`` says
+    there was nothing but the ack, which is itself the whole answer.
+    """
+    kept = [row for row in rows if not _ACK_ONLY.match(row)]
+    if not kept:
+        return None
+    kept[0] = _ACK_LEAD.sub("", kept[0]) or kept[0]
+    return kept
+
+
 # A title is at most this wide: a wide (CJK) character counts 2.
 TITLE_WIDTH: Final = 48
 # A clause shorter than this is no title ("Fix this today" says nothing).
