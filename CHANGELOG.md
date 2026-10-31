@@ -23,7 +23,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   with its value and its `config.toml` key. `GET /api/settings` adds
   `memory_retriever`, `developer_settings` and `run_options`, `PUT
   /api/settings` takes `memory_retriever`, and a failed `POST
-  /api/settings/test` names the model that did not answer (`failed`) ([#NN]).
+  /api/settings/test` names the model that did not answer (`failed`) ([#345]).
 
 - The main chat always works in the default folder (`[gateway] workspace`,
   else `~/localmelo-workspace`): a changed default applies at its next turn,
@@ -2813,3 +2813,4 @@ earlier milestones.
 [#342]: https://github.com/localmelo/localmelo/pull/342
 [#343]: https://github.com/localmelo/localmelo/pull/343
 [#344]: https://github.com/localmelo/localmelo/pull/344
+[#345]: https://github.com/localmelo/localmelo/pull/345
