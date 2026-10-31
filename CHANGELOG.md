@@ -26,7 +26,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   say the console does not have files or MCP yet. New for clients:
   `GET /api/commands` (the terminal's table, so the two never drift),
   `POST /api/sessions/{id}/undo` and `browser` on `PUT /api/settings`.
-  [#NN]
+  [#381]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the
@@ -3184,3 +3184,4 @@ earlier milestones.
 [#374]: https://github.com/localmelo/localmelo/pull/374
 [#378]: https://github.com/localmelo/localmelo/pull/378
 [#379]: https://github.com/localmelo/localmelo/pull/379
+[#381]: https://github.com/localmelo/localmelo/pull/381
