@@ -23,16 +23,16 @@
 
 <p align="center">
   <img src="docs/assets/terminal.webp" alt="深色终端中的 melo：欢迎信息旁的 Melo 的头、一轮的工具调用行、等待审批的文件修改，以及分区的状态栏" width="430">
-  <img src="docs/assets/img/panel.webp" alt="网页控制台：对话旁边的面板显示今天的活动和一个等待审批的任务" width="430">
+  <img src="docs/assets/img/main-chat-tasks.webp" alt="网页控制台：主对话里有一个完成的任务、一个以“今天”级别开始的任务和一个可以撤销的暂停，旁边是 Melo 的面板" width="430">
 </p>
 
 ## 能做什么
 
-- 在终端里用 `melo` 对话，或者运行一个任务，得到一行 JSON 和固定的退出码。
-- 使用网页控制台（`melo serve`）或 Mac App，每个对话旁边都有一个面板。
-- 让 melo 跨对话记忆；在“记忆”标签页里查看、编辑或删除每一条笔记。
+- 在终端（`melo`）、网页控制台（`melo serve`）或 Mac App 里和同一个主对话交谈：它自己回答，或按优先级把更大的工作交给任务，并用卡片说明发生了什么。
+- 让 melo 跨对话记忆：新的事实取代旧的，在“记忆”标签页里可以查看、编辑或删除每一条笔记。
+- 定时事项说一次就行，比如 `every weekday at 8:30, brief me on my calendar`：它按时运行，check-in 告诉你什么做完了。
 - 重要操作由你批准：melo 运行命令和写文件之前会先问你，并展示改动。
-- 使用你电脑上的 oMLX、Ollama、vLLM、SGLang 或 MLC LLM，或者云端 API。
+- 使用你电脑上的 oMLX、Ollama、vLLM、SGLang 或 MLC LLM，或者云端 API；也可以在脚本里运行一个任务，得到一行 JSON。
 
 ## 安装
 
@@ -54,7 +54,7 @@ uv run python scripts/build_macos_app.py --install
 ```
 
 - 从 Spotlight 打开 localmelo：网页控制台外面的一个原生窗口。
-- 菜单栏显示有多少对话和任务在运行，以及何时有一个在等你。
+- 菜单栏显示有多少对话和任务在运行，以及何时有一个在等你；窗口收起时，一个小胶囊说明 Melo 正在做什么。
 - 这是开发版本，使用临时签名（ad hoc）；构建需要 Swift 编译器（[macOS 应用指南](docs/zh-CN/guides/macos-app.md)）。
 
 ## 快速开始
