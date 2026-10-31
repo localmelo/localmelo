@@ -105,6 +105,18 @@ an attempt that runs out of steps, or repeats itself ─► reflection ─► do
 - `shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。
 - 直接运行、worker 和网关不流式接收回复，所以直到完整回复生成后才发送数据的服务器必须在超时内完成；思考较慢的模型可能需要更多时间。
 
+<a id="the-main-chat-and-tasks"></a>
+
+## 主对话与任务
+
+![主对话开始任务并显示它们的级别](../../assets/img/main-chat-tasks.webp)
+
+- 主对话是一次简短的运行：最多 4 步，不做反思，关闭思考，带有开始、列出和改变任务、读取文件和搜索记忆的工具。
+- 代码先读你的消息。`/task` 和控制短语（"pause the slides"、"暂停 Fix CI"）不需要调用模型；问候或简短的问题会立刻得到回答，不会被作为任务开始。
+- 较大的工作成为任务：一个 worker 在对话旁边运行它，级别由你的话决定，结果以卡片回来。
+- 4 步内没有办完的运行会以 "This needs more than a quick answer, so I started it as a task" 结束；如果你提的是问题，会先问你。
+- 旁支对话、直接运行和 worker 照旧运行上面完整的循环。
+
 <a id="code-layout"></a>
 
 ## 代码布局

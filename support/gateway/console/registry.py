@@ -190,6 +190,7 @@ class ConsoleSessions:
         settings: SettingsSource,
         *,
         builder: AgentBuilder | None = None,
+        front_builder: AgentBuilder | None = None,
         gate: ChatGate | None = None,
         memory: ChatMemory | None = None,
         idle_close_s: float = IDLE_CLOSE_S,
@@ -204,6 +205,8 @@ class ConsoleSessions:
         self._gate = gate
         self._memory = memory
         self._builder: AgentBuilder = builder or self._default_builder
+        # The main chat's own Agent (the front); None builds it as any chat.
+        self._front_builder = front_builder
         self._idle_close_s = idle_close_s
         self._max_open = max_open
         self._clock = clock
@@ -346,7 +349,9 @@ class ConsoleSessions:
         is_new = entry is None
         settings = self._settings()
         mcp_config = getattr(settings, "mcp_config", "") or None
-        agent = await self._build_agent(settings, workspace, mcp_config, session_id)
+        agent = await self._build_agent(
+            settings, workspace, mcp_config, session_id, front=info.kind == "front"
+        )
 
         if self._closed:
             with contextlib.suppress(Exception):
@@ -549,11 +554,18 @@ class ConsoleSessions:
             await self._store.delete_session(session_id)
 
     async def _build_agent(
-        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+        self,
+        settings: Config,
+        workspace: str,
+        mcp_config: str | None,
+        session_id: str,
+        *,
+        front: bool = False,
     ) -> Agent:
-        """The builder's Agent, with a failed start mapped as 2.2 says."""
+        """The builder's Agent (the front's for the main chat), a failed start mapped as 2.2 says."""
+        builder = (self._front_builder if front else None) or self._builder
         try:
-            return await self._builder(settings, workspace, mcp_config, session_id)
+            return await builder(settings, workspace, mcp_config, session_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -914,7 +926,13 @@ class ConsoleSessions:
                 )
             settings = self._settings()
             old_root = entry.agent.workspace_root
-            agent = await self._build_agent(settings, path, None, session_id)
+            agent = await self._build_agent(
+                settings,
+                path,
+                None,
+                session_id,
+                front=current is not None and current.kind == "front",
+            )
             try:
                 agent.load_conversation(entry.agent.conversation())
                 # The row names the new folder before the swap, so a store

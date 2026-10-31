@@ -556,3 +556,49 @@ def test_stop_says_when_the_task_has_not_stopped_yet(
         assert lines[1].endswith("melo-task show abc")
     else:
         assert len(lines) == 1
+
+
+def test_default_mode_says_levels_in_words_and_takes_them() -> None:
+    finished = {"task_id": "abc", "state": "done", "title": "Write it", "level": 1}
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        body = (
+            {"tasks": [finished]}
+            if request.method == "GET" and request.url.path == "/api/tasks"
+            else {"task": finished}
+        )
+        return httpx.Response(200, json=body)
+
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901", transport=httpx.MockTransport(answer)
+    ) as client:
+        out = io.StringIO()
+        for argv in (
+            ["show", "abc"],
+            ["list"],
+            ["level", "abc", "If idle"],
+            ["new", "x", "--level", "today"],
+        ):
+            execute(
+                parser().parse_args(argv),
+                client,
+                out=out,
+                stdin=io.StringIO(),
+                words=True,
+            )
+    text = out.getvalue()
+    assert "  Level: Today\n" in text
+    assert "abc  Today  done   Write it" in text
+    assert json.loads(seen[2].content) == {"level": "P4"}
+    assert json.loads(seen[3].content)["level"] == "P1"
+    with pytest.raises(SystemExit):
+        parser().parse_args(["level", "abc", "soon"])
+
+
+def test_main_reads_the_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from localmelo.support import task_cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert task_cli._developer() is False

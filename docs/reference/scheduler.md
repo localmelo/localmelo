@@ -25,7 +25,9 @@ An explicit `--gateway` bypasses gateway configuration loading. Loopback names
 and numeric spellings accepted by the gateway are supported without DNS lookup.
 
 - `new TEXT`, `new --brief FILE` or `new --stdin` submits one objective;
-  optional `--title`, `--workspace`, `--level P0` through `P5` and
+  optional `--title`, `--workspace`, `--level P0` through `P5` (or a word: `now`,
+  `today`, `normal`, `whenever`, `idle`, `later`, any case; also in `list`,
+  `resume` and `level`) and
   `--request-key` set fields explicitly. A file or stdin is task content,
   not a trusted urgency signal. Input is nonempty UTF-8, at most 1 MiB and
   100,000 characters. A generated request key allows safe retry; on an
@@ -37,7 +39,8 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   `Waiting for your approval: <tool> <target> (answer it in the web console,
   Tasks)` (under its row in `list`, in place of the `Waiting:` line in `show`) and
   `Reason: approval`; there is no `melo-task` verb to answer it. `pause ID`, `resume ID [--level Pn]`,
-  `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
+  `stop ID` and `level ID Pn|auto` control tasks. `list` and `show` print
+  levels as words (`Normal`) unless `[ui] mode = "developer"`, which prints `P2`. `first` and deadlines are
   not supported. Pause does not interrupt a running tool. `stop ID` prints
   the task's state; when the task is not yet `cancelled` it adds `stop
   requested; the task stops when its worker ends`, because the gateway

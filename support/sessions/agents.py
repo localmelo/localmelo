@@ -16,7 +16,7 @@ import copy
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
@@ -220,6 +220,8 @@ async def build_session_agent(
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
     memory: ChatMemory | None = None,
+    tools: Sequence[BaseToolProvider] = (),
+    agent_class: type[Agent] | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -254,6 +256,11 @@ async def build_session_agent(
     *memory*, when it is on, gives a chat memory across chats: its identity
     says so and pins the user's About-you and Preferences notes, and the
     Agent gets ``search_memory`` and ``remember``. The runner does the rest per turn.
+
+    *tools* are more tool providers for this Agent (the main chat's task
+    tools), and *agent_class* the class it is made of (the main chat's
+    :class:`~localmelo.support.gateway.console.front.FrontAgent`); every other
+    caller passes neither.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace
@@ -266,6 +273,7 @@ async def build_session_agent(
             "retrieval_extra_body needs an llm/auto retriever outside legacy"
         )
     providers = load_mcp_providers(mcp_config) if mcp_config else []
+    providers.extend(tools)
     notes: str | None = None
     if memory is not None and memory.enabled:
         try:
@@ -366,7 +374,7 @@ async def build_session_agent(
                 llm = wrap_llm(llm)
             if wrap_embedding is not None and embedding is not None:
                 embedding = wrap_embedding(embedding)
-            agent = Agent(
+            agent = (agent_class or Agent)(
                 llm=llm,
                 embedding=embedding,
                 options=agent_options,
@@ -374,7 +382,9 @@ async def build_session_agent(
             )
         else:
             assert cfg is not None
-            agent = Agent(config=cfg, options=agent_options, tool_providers=providers)
+            agent = (agent_class or Agent)(
+                config=cfg, options=agent_options, tool_providers=providers
+            )
     except BaseException:
         # No Agent exists to own these if a wrapper or constructor refused.
         for provider in (llm, embedding, *providers):

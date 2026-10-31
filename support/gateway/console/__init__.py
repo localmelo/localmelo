@@ -46,6 +46,7 @@ from localmelo.support.sessions.store import (
 from . import (
     activity,
     errors,
+    front,
     routes_details,
     routes_memory,
     routes_page,
@@ -58,6 +59,7 @@ from . import (
 )
 from .cards import MainChatCards
 from .errors import ApiError
+from .front import Front, FrontAgent, build_front_agent
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
 from .shapes import session_json
@@ -66,6 +68,7 @@ from .worker_reader import WorkerReader
 if TYPE_CHECKING:
     import httpx
 
+    from localmelo.melo.agent import Agent
     from localmelo.support.config import Config
 
 logger = logging.getLogger(__name__)
@@ -112,6 +115,9 @@ class ConsoleOptions:
     dev_reload: bool = False
     detect_transport: httpx.AsyncBaseTransport | None = None
     memory_dir: str | None = None
+    # The main chat's Agent; None builds the front (FrontAgent), or, when a
+    # test passes its own *builder*, the main chat runs on that one.
+    front_builder: AgentBuilder | None = None
 
 
 class Console:
@@ -137,11 +143,14 @@ class Console:
         self._owns_gate = self.options.gate is None
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
+        self.front = Front(self)
+        own_front = self.options.front_builder or not self.options.builder
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
             builder=self.options.builder,
+            front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
         )
@@ -191,6 +200,27 @@ class Console:
             return None
         return {**self.session_body(info), "last_card": self.cards.last}
 
+    async def _front_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        """The main chat's Agent, whose turns that run out of steps become tasks."""
+        if self.options.front_builder is not None:
+            agent = await self.options.front_builder(
+                settings, workspace, mcp_config, session_id
+            )
+        else:
+            agent = await build_front_agent(
+                settings,
+                workspace,
+                session_id,
+                tools=self.front.tools,
+                gate=self.gate,
+                memory=self.memory,
+            )
+        if isinstance(agent, FrontAgent):
+            agent.front = self.front
+        return agent
+
     # ── The gate ──
 
     def _build_gate(self) -> ChatGate:
@@ -237,6 +267,7 @@ class Console:
         routes_pictures.add_routes(app, self)
         routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
+        front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
 

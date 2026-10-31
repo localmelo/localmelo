@@ -61,6 +61,8 @@ class TurnRequest(Body):
     text: str
     attachments: list[_Attachment] = []
     client_request_id: str | None = None
+    # The composer's Run as a task: the main chat starts it as a task.
+    as_task: bool = False
 
 
 class CreateRequest(Body):
@@ -248,10 +250,23 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         # The session is judged first: a malformed id is 404, as it is on
         # every read of the same path, not the checker's 400.
-        await _require_session(console, session_id)
+        info = await _require_session(console, session_id)
         composed = _turn_text(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
+        if info.kind == "front":
+            # Code's rules first: a task to start or to change takes no model call.
+            echo = await _store_call(
+                console,
+                console.front.route(body.text, composed, as_task=body.as_task, key=key),
+                session_id,
+            )
+            if echo is not None:
+                return JSONResponse(status_code=200, content={"echo": echo})
+        elif body.as_task:
+            raise ApiError(
+                400, "invalid_request", "as_task: tasks start from the main chat"
+            )
         try:
             turn, resumed = await _sessions_call(
                 console,
