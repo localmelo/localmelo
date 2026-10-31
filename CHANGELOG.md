@@ -200,6 +200,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   candidates only and makes no extra embedding request. The `recall` object of a
   turn reports `context` (`off`, `used` or `none`) ([#NN]).
 
+- Notes the model keeps get kept, and it never claims a save it did not make.
+  A note passes when its values match what you typed and most of its other
+  words do: every number or word with a digit, weekday, capitalised name and
+  quoted phrase must be in your words, and so must 4 in 5 of the other content
+  words. "Your replies" now matches your "reply" (`-ies` ends in `y`), and
+  `said`, `told`, `then`, `each`, `use`, `also`, `always` and `every` are
+  never looked for, so a preference worded a little differently is kept, while
+  `C15` for `C14` or Thursday for Wednesday is still refused, and so is a note
+  in another language than your message (the refusal says to write it in the
+  language you used). The chat is told to say a fact is noted only after the
+  note was kept, and after a refusal to try once more with your own sentence or
+  say plainly that it was not kept ([#NN]).
+
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
   file…") no longer ends the turn: the work starts as a task, or a question asks

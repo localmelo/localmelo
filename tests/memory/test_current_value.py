@@ -155,6 +155,22 @@ def test_every_text_that_shows_notes_names_the_same_form() -> None:
     assert records.second_person("我的导师是周教授。") == "你的导师是周教授。"
 
 
+def test_the_tool_text_and_the_notes_text_agree_on_language_and_on_claiming_a_save() -> (
+    None
+):
+    """A note is in the language of this turn's message; a save is claimed only
+    after ``remember`` answered ``Remembered``, and a refusal is retried once."""
+    for text in (NOTES_TEXT, REMEMBER.description):
+        assert "in the language of the user's message in this turn" in text
+        assert "noted or remembered only after" in text
+        assert "answered “Remembered”" in text
+        assert (
+            "“Not remembered”, call it once more with the user's own sentence" in text
+        )
+        assert "or say plainly that it was not kept" in text
+    assert "in the user's language" not in REMEMBER.description
+
+
 def test_the_memory_rule_asks_for_the_current_value_and_for_what_was_asked() -> None:
     for rule in (
         "Answer with the newest value only, and mention an older value only when "

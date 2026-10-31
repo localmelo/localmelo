@@ -57,6 +57,7 @@ In the web console and the app, melo remembers across chats.
 What code checks before a note is kept:
 
 - Its words must come from what you typed in this chat (in any turn, not one you undid) or from a finished task's result the chat showed you (a task result recalled under one of your messages).
+- The wording may differ, the values may not. Every number or word with a digit, weekday, name or other capitalised word inside a sentence, and quoted phrase must be in your words, and so must at least 4 of every 5 of the other content words, so "your replies" matches your "reply" and "then" for "followed by" costs nothing, while `C15` for `C14` or Thursday for Wednesday is refused. A note in Chinese for a message in English is refused, and the model is told to write it in the language you used.
 - A fact only a web page, a file, a tool's output or melo's own answer states is refused, and the model is told it was not something you said.
 - Text that looks like a password, key, one-time code, card number or ID number is never kept; the line says `Not remembered: it looked like a password or key`.
 - The model is told never to save notes, or what you say about yourself, in a file or with code.
@@ -150,6 +151,7 @@ What a chat is told about memory:
 
 - That it keeps a note with `remember` when you share something lasting about yourself or your work, or a finished task's result is worth keeping, without asking you first.
 - That a fact you asked it to remember is saved already; that it never saves notes in a file or with code; and that it acknowledges a note in one short sentence.
+- That it says a fact is noted only after `remember` answered `Remembered`; after `Not remembered` it tries once more with your own sentence written to you, or says plainly that the note was not kept. A note is written in the language of your message.
 - That it sees only the recent messages of the conversation: older parts of it, earlier chats and notes come back with your message when they match, and `search_memory` looks up more.
 - That when notes or earlier chats disagree, the newest one is true.
 - Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).

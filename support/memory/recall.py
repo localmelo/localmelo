@@ -226,8 +226,13 @@ def stem(word: str) -> str:
     """A lowercase ASCII word without a plural, ``-ing`` or ``-ed`` ending.
 
     So "meets" and "meeting" find "meet" and "Tuesdays" finds "tuesday"; both
-    sides of a match are stemmed, so a stem need not be a word.
+    sides of a match are stemmed, so a stem need not be a word. ``-ies`` and a
+    long ``-ie`` end in ``y`` ("replies" and "reply", "movies" and "movie").
     """
+    if len(word) >= 5 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) >= 5 and word.endswith("ie"):
+        return word[:-2] + "y"
     if len(word) >= 6 and word.endswith("ing"):
         return word[:-3]
     if len(word) >= 5 and word.endswith("ed"):

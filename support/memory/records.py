@@ -149,7 +149,8 @@ _ALSO_ASKS = re.compile(
     re.IGNORECASE,
 )
 # Words a note adds when it restates what was said ("The user prefers…",
-# "You go by…"); they are never what has to be found in the user's words.
+# "You said: …", "You go by…") and function words a paraphrase swaps ("then",
+# "each", "use"); they are never what has to be found in the user's words.
 _FRAMING: Final = frozenset(
     [
         "user",
@@ -170,12 +171,36 @@ _FRAMING: Final = frozenset(
         "named",
         "remember",
         "note",
+        "said",
+        "say",
+        "says",
+        "told",
+        "tell",
+        "tells",
+        "then",
+        "each",
+        "every",
+        "use",
+        "also",
+        "always",
     ]
 )
+# Terms that are values: a change in one is a different fact. A word is a value
+# when it has a digit, is a number word or a weekday, is capitalised inside a
+# sentence or sits in a quoted span; every CJK character or pair is one too.
+_VALUE_WORD = re.compile(
+    r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty"
+    r"|forty|fifty|hundred|thousand|(?:mon|tues|wednes|thurs|fri|satur|sun)day"
+)
+_QUOTED = re.compile(r"\"([^\"]+)\"|“([^”]+)”|「([^」]+)」")
+_SENTENCE = re.compile(r"(?<=[.!?。！？])\s+|\n")
+# What share of a note's other content words the evidence must hold.
+WORDS_FOUND: Final = 0.8
 _CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么")
 _CJK_FRAMING = re.compile("希望被叫作|希望被称为|用户")
 _POSSESSIVE = re.compile(r"(?<=\w)['’]s\b")
 _WORD = re.compile(r"[a-z0-9_]+")
+_CASED = re.compile(r"[A-Za-z0-9_]+")
 _CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
 # The never-kept classes: passwords and codes, card and ID numbers.
 _SECRET_WORDS = re.compile(
@@ -525,13 +550,12 @@ def _evidence(texts: Sequence[str]) -> set[str]:
     return found
 
 
-def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
+def _missing(note: str, evidence: Sequence[str]) -> list[str]:
     """The content words of *note* that none of the *evidence* texts holds.
 
     A word counts when the evidence has it after stemming, or a word at most
     two letters longer that starts with it ("named" finds "name"); the words a
     note adds to restate a fact ("The user prefers…") need not be found.
-    ``[]`` means grounded.
     """
     words = _evidence(evidence)
     ascii_words = [w for w in words if w.isascii()]
@@ -547,13 +571,71 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     ]
 
 
+def _flagged(note: str) -> set[str]:
+    """The stemmed words of *note* that are values by their form: every word of
+    a quoted span, and a capitalised word that does not start its sentence."""
+    words = [
+        word
+        for group in _QUOTED.findall(note)
+        for span in group
+        for word in tokenize(normalise(span))
+    ]
+    for sentence in _SENTENCE.split(note):
+        words += [w.lower() for w in _CASED.findall(sentence)[1:] if w[0].isupper()]
+    return {_stem(word) for word in words if word.isascii()}
+
+
+def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
+    """The content words of *note* that the *evidence* texts lack, when that is
+    too much: ``[]`` means grounded.
+
+    The wording may vary, the values may not. Every value (a number or a word
+    with a digit, a weekday, a capitalised word inside a sentence, a quoted
+    span, a Chinese or Japanese character or pair) must be found, and so must
+    at least :data:`WORDS_FOUND` of the other content words (:func:`_missing`
+    says when one is found). The words listed are all the missing ones, values
+    first.
+    """
+    gone = _missing(note, evidence)
+    if not gone:
+        return []
+    flagged = _flagged(note)
+
+    def is_value(term: str) -> bool:
+        return (
+            not term.isascii()
+            or term in flagged
+            or _VALUE_WORD.fullmatch(term) is not None
+            or any(char.isdigit() for char in term)
+        )
+
+    values = [term for term in gone if is_value(term)]
+    others = [term for term in note_terms(note) if not is_value(term)]
+    lost = [term for term in gone if term not in values]
+    if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
+        return []
+    return values + lost
+
+
+def other_script(words: Sequence[str], evidence: Sequence[str]) -> bool:
+    """Whether one of *words* is in a script none of the *evidence* texts uses
+    (Chinese words in a note about an English message, or the other way round)."""
+    cjk = any(_CJK_RUN.search(text) for text in evidence)
+    latin = any(re.search("[A-Za-z]", text) for text in evidence)
+    return any(
+        (word.isascii() and word.isalpha() and not latin)
+        or (not word.isascii() and not cjk)
+        for word in words
+    )
+
+
 def quote_for(note: str, said: Sequence[str]) -> str:
     """The sentence of *said* that holds most of *note*'s words: the user's quote."""
     terms = set(note_terms(note))
     best, score = "", 0
     for text in said:
         for _, sentence in split_sentences(re.sub(r"\s*[;；]\s*", "\n", text)):
-            hits = len(terms - set(unsupported(note, [sentence])))
+            hits = len(terms - set(_missing(note, [sentence])))
             if hits > score:
                 best, score = sentence, hits
     return best[:MAX_RECORD_CHARS]
