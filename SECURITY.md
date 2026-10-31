@@ -92,7 +92,11 @@ those tools can do.
   rules read for it unchanged) and melo's rules read the step themselves
   and found it routine, both times. That covers `python_exec`, `shell_exec`,
   `file_write` and `file_edit` only. A tool allowed for the chat covers its
-  tasks' routine calls of that tool, as in the chat. Each such step leaves a
+  tasks' routine calls of that tool, as in the chat. Such a task's steps
+  are reviewed with every file changed since that chat began, not only
+  since the task began, so code an earlier task of the chat wrote is read
+  before an approval or grant covers a step; when that start cannot be
+  read, neither applies and the step asks. Each such step leaves a
   row with Revoke, and the approval card says when an Allow will be kept.
   Recorded approvals live in memory only: a restart, Revoke or deleting the
   chat drops them.

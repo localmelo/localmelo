@@ -475,10 +475,18 @@ class OwnedTaskPolicy:
     person and they allow, the approval is recorded in the chat that owns
     the task when they answer (nothing, when that chat went meanwhile). In
     Auto, *inner* decides first (it asks nobody); only a step it blocked
-    could run on a recorded approval, and it blocks none that is reusable. Auto's Allow once is never recorded: it
-    stays one exact step, once. *owner* gives the chat that owns the task
-    now. A task the person did not start is never wrapped (its approvals
-    are never remembered).
+    could run on a recorded approval, and it blocks none that is reusable.
+    Auto's Allow once is never recorded: it stays one exact step, once.
+    *owner* gives the chat that owns the task now, and *started* when a
+    chat began. A task the person did not start is never wrapped (its
+    approvals are never remembered).
+
+    Grants and recorded approvals are used only after :meth:`review_window`
+    read the owner chat's start, and only while that chat still owns the
+    task: the task's steps are then reviewed with every file changed since
+    that chat began, so code an earlier task of the chat planted is read
+    before the chat's approval covers a step. Without that start, the
+    person is asked.
     """
 
     def __init__(
@@ -488,22 +496,55 @@ class OwnedTaskPolicy:
         task_id: str,
         owner: Callable[[], Awaitable[str | None]],
         on_use: Callable[[ApprovalUse], Awaitable[None]] | None = None,
+        *,
+        started: Callable[[str], Awaitable[float | None]] | None = None,
     ) -> None:
         self.inner = inner
         self._ledger = ledger
         self._task_id = task_id
         self._owner = owner
         self._on_use = on_use
+        self._started = started
         # The owner chat as last read, for review_mode (which cannot await).
         self._chat: str | None = None
+        # The chat whose start the review window begins at, and that start.
+        self._window_chat: str | None = None
+        self._window: float | None = None
 
     def _auto(self) -> bool:
         return find_auto(self.inner) is not None
 
+    async def review_window(self) -> float | None:
+        """When the task's review window starts: its owner chat's start.
+
+        ``None`` (Auto, which uses neither, or a start that cannot be read):
+        the task's steps are reviewed from the task's own start, and its
+        chat's grants and approvals are not used.
+        """
+        self._window_chat = self._window = None
+        if self._auto() or self._started is None:
+            return None
+        chat = await self._owner()
+        if not chat:
+            return None
+        try:
+            started = await self._started(chat)
+        except Exception:
+            logger.warning("Could not read when chat %s began", chat, exc_info=True)
+            return None
+        if started is None or not math.isfinite(started):
+            return None
+        self._window_chat, self._window = chat, started
+        return started
+
+    def _reviewed_since(self, chat: str | None) -> bool:
+        """Whether the steps were reviewed from *chat*'s start."""
+        return bool(chat) and self._window is not None and chat == self._window_chat
+
     def _granted(self, tool_name: str) -> bool:
         chat = self._chat
         return (
-            bool(chat)
+            self._reviewed_since(chat)
             and not self._auto()
             and tool_name in self._ledger.grants_of(chat or "")
         )
@@ -539,8 +580,10 @@ class OwnedTaskPolicy:
             decision = await self.inner.decide(request)
             if not chat or decision.allow or decision.origin != "auto":
                 return decision
+            if not self._reviewed_since(chat):
+                return decision
             return await self._earlier(chat, request) or decision
-        if chat:
+        if chat and self._reviewed_since(chat):
             if self._granted(request.tool_name) and covered_by_grant(request.review):
                 return ApprovalDecision(True, origin="session")
             earlier = await self._earlier(chat, request)

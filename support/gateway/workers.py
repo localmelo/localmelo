@@ -2107,6 +2107,12 @@ class TaskWorkers:
                 self._homes.discard(home)
                 shutil.rmtree(home, ignore_errors=True)
                 raise
+            # Set below when the task uses its chat's approvals and grants.
+            owned: list[OwnedTaskPolicy] = []
+
+            async def review_since() -> float | None:
+                return await owned[0].review_window() if owned else None
+
             runner = SessionRunner(
                 agent,
                 self.store,
@@ -2118,6 +2124,7 @@ class TaskWorkers:
                 context=_pack_block(record.spec),
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
                 observe=lambda event: self._observe(task_id, event),
+                review_since=review_since,
             )
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -2153,7 +2160,9 @@ class TaskWorkers:
                     task_id,
                     lambda: self._owner_chat(task_id),
                     self._earlier,
+                    started=self._chat_started,
                 )
+                owned.append(policy)
             async with self._lock:
                 self._runners[task_id] = runner
                 if (
@@ -2413,6 +2422,11 @@ class TaskWorkers:
         """The chat that owns *task_id* now: the one that started it, else the main chat."""
         front = (await self.tasks.get_task(task_id)).front_id or self.front_id
         return await self.chat_of(front) if self.chat_of is not None else front
+
+    async def _chat_started(self, chat_id: str) -> float | None:
+        """When chat *chat_id* began; ``None`` when it is gone."""
+        session = await self.store.get_session(chat_id)
+        return session.created_at if session is not None else None
 
     async def _earlier(self, use: ApprovalUse) -> None:
         if self.on_earlier is not None:

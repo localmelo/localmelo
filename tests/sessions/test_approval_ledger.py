@@ -78,13 +78,23 @@ def folder(tmp_path: Path) -> str:
     return str(path)
 
 
-def owned(
+# When each chat began: its review window starts there.
+STARTED = {"chat-1": 1000.0, "chat-2": 1000.0, "main": 500.0}
+
+
+async def started(chat: str) -> float | None:
+    return STARTED.get(chat)
+
+
+async def owned(
     ledger: ApprovalLedger,
     inner: Any,
     task: str = "task-1",
     chat: str | None = "chat-1",
     uses: list[ApprovalUse] | None = None,
 ) -> OwnedTaskPolicy:
+    """A task's policy whose turn read its owner chat's start, as the runner does."""
+
     async def owner() -> str | None:
         return chat
 
@@ -92,7 +102,9 @@ def owned(
         if uses is not None:
             uses.append(use)
 
-    return OwnedTaskPolicy(inner, ledger, task, owner, on_use)
+    policy = OwnedTaskPolicy(inner, ledger, task, owner, on_use, started=started)
+    await policy.review_window()
+    return policy
 
 
 def test_reusable_only_for_a_routine_call_the_rules_read() -> None:
@@ -150,7 +162,7 @@ async def test_an_undecided_step_asks_every_time(folder: str) -> None:
     ledger = ApprovalLedger()
     person = Asker(ApprovalDecision(True))
     for task in ("task-1", "task-2"):
-        policy = owned(ledger, RememberingPolicy(person), task=task)
+        policy = await owned(ledger, RememberingPolicy(person), task=task)
         assert (await policy.decide(request(folder, review=UNDECIDED))).origin == "user"
     assert len(person.asked) == 2 and ledger.entries("chat-1") == []
 
@@ -160,7 +172,7 @@ async def test_a_tool_the_rules_do_not_read_asks_every_time(folder: str) -> None
     person = Asker(ApprovalDecision(True))
     pay = {"to": "ACME Ltd", "amount": 100}
     for task in ("task-1", "task-2"):
-        policy = owned(ledger, RememberingPolicy(person), task=task)
+        policy = await owned(ledger, RememberingPolicy(person), task=task)
         asked = request(folder, tool="pay_invoice", arguments=pay)
         assert (await policy.decide(asked)).origin == "user"
     assert len(person.asked) == 2 and ledger.entries("chat-1") == []
@@ -170,14 +182,20 @@ async def test_an_allow_answered_after_its_chat_went_records_nothing(
     folder: str,
 ) -> None:
     ledger = ApprovalLedger()
-    owners = iter(["chat-1", "main"])  # the chat is deleted while the person decides
+    # The turn and the step read chat-1; it is deleted while the person decides.
+    owners = iter(["chat-1", "chat-1", "main"])
 
     async def owner() -> str | None:
         return next(owners, "main")
 
     policy = OwnedTaskPolicy(
-        RememberingPolicy(Asker(ApprovalDecision(True))), ledger, "t", owner
+        RememberingPolicy(Asker(ApprovalDecision(True))),
+        ledger,
+        "t",
+        owner,
+        started=started,
     )
+    await policy.review_window()
     assert (await policy.decide(request(folder))).origin == "user"
     assert ledger.entries("chat-1") == [] and ledger.entries("main") == []
 
@@ -217,10 +235,10 @@ async def test_an_identical_step_runs_on_the_earlier_approval(folder: str) -> No
     ledger = ApprovalLedger()
     person = Asker(ApprovalDecision(True))
     uses: list[ApprovalUse] = []
-    first = owned(ledger, RememberingPolicy(person), uses=uses)
+    first = await owned(ledger, RememberingPolicy(person), uses=uses)
     assert (await first.decide(request(folder))).origin == "user"
     assert len(person.asked) == 1 and len(ledger.entries("chat-1")) == 1
-    second = owned(ledger, RememberingPolicy(person), task="task-2", uses=uses)
+    second = await owned(ledger, RememberingPolicy(person), task="task-2", uses=uses)
     again = request(folder)
     decision = await second.decide(again)
     assert decision.allow and decision.origin == "earlier"
@@ -238,7 +256,7 @@ async def test_an_identical_step_runs_on_the_earlier_approval(folder: str) -> No
 async def test_a_step_that_differs_asks(folder: str, tmp_path: Path) -> None:
     ledger = ApprovalLedger()
     person = Asker(ApprovalDecision(True))
-    policy = owned(ledger, RememberingPolicy(person))
+    policy = await owned(ledger, RememberingPolicy(person))
     await policy.decide(request(folder))
     await policy.decide(request(folder, code="print(1, 2)"))
     other = tmp_path / "other"
@@ -250,7 +268,7 @@ async def test_a_step_that_differs_asks(folder: str, tmp_path: Path) -> None:
 async def test_a_high_impact_identical_step_asks_every_time(folder: str) -> None:
     ledger = ApprovalLedger()
     person = Asker(ApprovalDecision(True))
-    policy = owned(ledger, RememberingPolicy(person))
+    policy = await owned(ledger, RememberingPolicy(person))
     for _ in range(3):
         decision = await policy.decide(request(folder, review=HIGH))
         assert decision.origin == "user"
@@ -264,7 +282,7 @@ async def test_a_step_nothing_reviewed_asks_every_time_and_is_never_recorded(
     ledger = ApprovalLedger()
     entry = ledger.record("chat-1", request(folder))
     person = Asker(ApprovalDecision(True))
-    policy = owned(ledger, RememberingPolicy(person))
+    policy = await owned(ledger, RememberingPolicy(person))
     for _ in range(2):
         decision = await policy.decide(request(folder, review=None))
         assert (decision.allow, decision.origin) == (True, "user")
@@ -274,10 +292,12 @@ async def test_a_step_nothing_reviewed_asks_every_time_and_is_never_recorded(
 
 async def test_a_denial_or_a_task_without_a_chat_records_nothing(folder: str) -> None:
     ledger = ApprovalLedger()
-    no = owned(ledger, RememberingPolicy(Asker(ApprovalDecision(False, "no"))))
+    no = await owned(ledger, RememberingPolicy(Asker(ApprovalDecision(False, "no"))))
     assert (await no.decide(request(folder))).allow is False
     assert ledger.entries("chat-1") == []
-    alone = owned(ledger, RememberingPolicy(Asker(ApprovalDecision(True))), chat=None)
+    alone = await owned(
+        ledger, RememberingPolicy(Asker(ApprovalDecision(True))), chat=None
+    )
     assert (await alone.decide(request(folder))).origin == "user"
     assert ledger.entries("chat-1") == []
 
@@ -285,7 +305,7 @@ async def test_a_denial_or_a_task_without_a_chat_records_nothing(folder: str) ->
 async def test_auto_allow_once_stays_one_step_once(folder: str) -> None:
     ledger = ApprovalLedger()
     auto = AutoPolicy(task=True)
-    policy = owned(ledger, auto)
+    policy = await owned(ledger, auto)
     blocked = request(folder, review=UNDECIDED)
     assert (await policy.decide(blocked)).origin == "auto"
     auto.allow_once(request_step(blocked), [], "python_exec")
@@ -303,7 +323,7 @@ async def test_an_auto_block_stays_a_block_whatever_was_allowed(folder: str) -> 
     ledger = ApprovalLedger()
     assert ledger.record("chat-1", request(folder, review=UNDECIDED)) is None
     ledger.record("chat-1", request(folder))
-    policy = owned(ledger, AutoPolicy(task=True))
+    policy = await owned(ledger, AutoPolicy(task=True))
     decision = await policy.decide(request(folder, review=UNDECIDED))
     assert (decision.allow, decision.origin) == (False, "auto")
 
@@ -314,7 +334,7 @@ async def test_in_auto_what_auto_runs_runs_as_it_would(folder: str) -> None:
     blocked = request(folder, code="print(2)", review=UNDECIDED)
     auto = AutoPolicy(task=True)
     uses: list[ApprovalUse] = []
-    policy = owned(ledger, auto, uses=uses)
+    policy = await owned(ledger, auto, uses=uses)
     # A routine step Auto runs anyway uses no approval and shows no row.
     assert (await policy.decide(request(folder))).origin == "auto"
     # A step allowed once on the task's page runs on that allowance, once.
@@ -335,7 +355,7 @@ async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(
     granted: dict[str, frozenset[str]] = {"chat-1": frozenset({"python_exec"})}
     ledger.grants_of = lambda chat: granted.get(chat, frozenset())
     person = Asker(ApprovalDecision(True))
-    policy = owned(ledger, RememberingPolicy(person))
+    policy = await owned(ledger, RememberingPolicy(person))
     routine = await policy.decide(request(folder, code="print(3)"))
     assert routine.origin == "session" and person.asked == []
     # The gate lets the user's model review an undecided call first, as under a grant.
@@ -361,9 +381,75 @@ async def test_a_failing_row_does_not_stop_the_step(folder: str) -> None:
         raise RuntimeError("store closed")
 
     policy = OwnedTaskPolicy(
-        RememberingPolicy(Asker(ApprovalDecision(False))), ledger, "t", owner, broken
+        RememberingPolicy(Asker(ApprovalDecision(False))),
+        ledger,
+        "t",
+        owner,
+        broken,
+        started=started,
     )
+    await policy.review_window()
     assert (await policy.decide(request(folder))).origin == "earlier"
+
+
+async def test_the_review_window_starts_at_the_owner_chats_start(folder: str) -> None:
+    ledger = ApprovalLedger()
+    policy = await owned(ledger, RememberingPolicy(Asker(ApprovalDecision(True))))
+    assert await policy.review_window() == 1000.0
+    other = await owned(
+        ledger, RememberingPolicy(Asker(ApprovalDecision(True))), chat="main"
+    )
+    assert await other.review_window() == 500.0
+    # Auto uses neither grants nor approvals: its steps keep the task's own window.
+    auto = await owned(ledger, AutoPolicy(task=True), chat="main")
+    assert await auto.review_window() is None
+
+
+@pytest.mark.parametrize("how", ["never read", "unreadable", "raises"])
+async def test_without_the_owner_chats_start_nothing_is_reused(
+    folder: str, how: str
+) -> None:
+    ledger = ApprovalLedger()
+    ledger.record("chat-1", request(folder))
+    ledger.grants_of = lambda chat: frozenset({"python_exec"})
+
+    async def owner() -> str | None:
+        return "chat-1"
+
+    async def unknown(chat: str) -> float | None:
+        if how == "raises":
+            raise RuntimeError("store closed")
+        return None
+
+    person = Asker(ApprovalDecision(True))
+    policy = OwnedTaskPolicy(
+        RememberingPolicy(person), ledger, "t", owner, started=unknown
+    )
+    if how != "never read":
+        assert await policy.review_window() is None
+    # Fail closed: no recorded approval and no grant of the chat; the person is asked.
+    assert review_mode(policy, request(folder)) == "ask"
+    assert (await policy.decide(request(folder))).origin == "user"
+    assert (await policy.decide(request(folder, code="print(9)"))).origin == "user"
+    assert len(person.asked) == 2
+
+
+async def test_a_window_read_for_another_chat_reuses_nothing(folder: str) -> None:
+    ledger = ApprovalLedger()
+    ledger.record("main", request(folder))
+    # The turn began in chat-1; the chat went, and the step's owner is the main chat.
+    owners = iter(["chat-1", "main"])
+
+    async def owner() -> str | None:
+        return next(owners, "main")
+
+    person = Asker(ApprovalDecision(True))
+    policy = OwnedTaskPolicy(
+        RememberingPolicy(person), ledger, "t", owner, started=started
+    )
+    assert await policy.review_window() == 1000.0
+    assert (await policy.decide(request(folder))).origin == "user"
+    assert len(person.asked) == 1
 
 
 def test_the_ledger_compares_resolved_folders(folder: str, tmp_path: Path) -> None:

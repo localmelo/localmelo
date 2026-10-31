@@ -1545,7 +1545,10 @@ chat's recorded approvals; a model never decides a match.
   same folder, and the step is reusable too. The chat gets an `earlier` echo
   and the task's `earlier` lists the step (`live` until the record is
   revoked). A session grant of the chat covers its tasks' routine calls of
-  that tool.
+  that tool. A task that uses its chat's records or grants is reviewed with
+  every file changed since that chat began, so a file an earlier task wrote
+  is read before a record or grant covers a step; when the chat's start
+  cannot be read, neither applies and the person is asked.
 - **Never.** A high-impact, `undecided`, model-settled or unreviewed step,
   and every call of a tool the rules do not read (network, MCP and other
   tools), asks every time; a task with an `origin` other than `user` (a
