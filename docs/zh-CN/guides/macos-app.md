@@ -47,7 +47,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 - 启动视图显示 Melo、`Starting localmelo…` 和当前步骤：`Starting the local server`、`Signing in`、`Opening your workspace`。
 - 网关在 20 秒内无法启动，或之后停止，视图会说明原因，并提供 **Try Again**、**Open Log** 和 **Quit**。
 - 日志是 `~/Library/Logs/LocalMelo/gateway.log`；问题不会弹出对话框，也不会关闭应用。
-- 首次设置在控制台的设置对话框中完成；应用使用 `~/.cache/localmelo` 里常规的配置和对话。
+- 首次设置在控制台的 **Settings**（它的 **Model server** 分区）中完成；应用使用 `~/.cache/localmelo` 里常规的配置和对话。
 
 <a id="language"></a>
 
@@ -106,6 +106,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 - 它显示“Done: …” 6 秒、“Stopped: …” 10 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会摇尾巴。
 - 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
 - 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。
+- 窗口里的 **Settings → Appearance → Melo on the desktop** 是同一个选择：它显示菜单当前的选择，在这里改就是在菜单里改。
 - 它只在工作时呼吸；在“减弱动态效果”下、低电量模式下、Mac 发热时或被盖住时保持不动。VoiceOver 读出一个按钮：“Melo is reading example.com. Opens the chat.”
 
 <a id="quit-and-the-gateway"></a>

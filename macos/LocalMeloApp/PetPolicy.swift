@@ -291,6 +291,26 @@ enum DesktopMode: String, CaseIterable {
 /// The menu that offers the choices above.
 var desktopMenuTitle: String { L10n.t("app.desktop.menu", "On the desktop") }
 
+/// What the console's Settings may ask of the app about the desktop: the choice now, or a new one.
+enum DesktopRequest: Equatable {
+    case get
+    case set(DesktopMode)
+}
+
+/// The request a page message holds, or nil: an unknown action, or a mode the menu does not offer.
+func desktopRequest(_ body: Any) -> DesktopRequest? {
+    guard let message = body as? [String: Any], let action = message["action"] as? String else { return nil }
+    switch action {
+    case "get":
+        return .get
+    case "set":
+        guard let raw = message["mode"] as? String, let mode = DesktopMode(rawValue: raw) else { return nil }
+        return .set(mode)
+    default:
+        return nil
+    }
+}
+
 /// What the app remembers about the pet between launches: whether the person hid it, whether the activity pill may
 /// take its place while work runs, the screen it was last on, and its spot on each screen. A missing, damaged or
 /// partly damaged file gives what is left of it.

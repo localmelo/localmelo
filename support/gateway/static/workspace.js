@@ -416,7 +416,6 @@ function applyChrome() {
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
   $("local-badge").hidden = !developerMode;
-  setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
 }
 
 /** Under a chat's title: its folder in default mode, its model and its folder in developer mode. */
@@ -2678,6 +2677,17 @@ const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-
 const showSettings = setupSettings({
   api,
   developer: () => developerMode,
+  health: () => S.health,
+  sessions: () => S.sessions,
+  // Memory and Scheduled have their own tabs in the panel: Settings closes and the tab opens.
+  openTab: (id) => {
+    $("settings-dialog").close?.();
+    panel.select(id, { focus: true });
+    if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+  },
+  // Only the macOS app registers these handlers; a browser has none.
+  desktop: () => globalThis.webkit?.messageHandlers?.localmeloDesktop,
+  folders: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
   onSaved: async (saved) => {
     await refreshMode(saved);
     drawer.modeChanged();
@@ -2885,7 +2895,7 @@ for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn"]) {
   if (id === "new-btn") node.addEventListener("click", () => newChat());
   else node.addEventListener("click", openSettings);
 }
-for (const id of ["close-settings", "cancel-settings"]) $(id).addEventListener("click", () => {
+$("close-settings").addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
 });

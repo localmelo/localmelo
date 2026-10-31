@@ -3824,11 +3824,9 @@ test('default mode leaves out the level, Details, the GPU line and the idle sect
   assert.deepEqual(hiddenOf(plain, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => true));
   assert.match(plain.text('machine-state'), /GPU lock: bench/, 'The element and its text stay in the page');
   assert.equal(plain.element('connection-btn').hidden, false);
-  assert.equal(plain.text('settings-label'), 'Settings');
   const developer = harness(baseRoutes(listed));
   await developer.run('init()');
   assert.deepEqual(hiddenOf(developer, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => false), 'Developer mode shows all of it');
-  assert.equal(developer.text('settings-label'), 'Connection settings');
   assert.equal(developer.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'A developer never asks whether Workers has anything');
 });
 

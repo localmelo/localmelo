@@ -48,7 +48,7 @@
         <nav class="session-list" id="session-list" aria-label="Chats"></nav>
         <div class="sidebar-bottom">
           <button class="nav-button" id="settings-btn">
-            <span aria-hidden="true">⚙</span> <span id="settings-label">Connection settings</span>
+            <span aria-hidden="true">⚙</span> <span id="settings-label">Settings</span>
           </button>
           <div class="local-caption">
             <span class="status-dot"></span> Your models. Your workspace.
@@ -239,110 +239,196 @@
       <button type="button" class="panel-backdrop" id="panel-backdrop" tabindex="-1" aria-label="Close activity" hidden></button>
     </div>
     <dialog id="picture-box" class="picture-box" aria-label="Picture"></dialog>
-    <dialog id="settings-dialog" aria-labelledby="settings-title">
-      <div class="settings-head">
-        <div>
-          <p class="eyebrow">WORKSPACE SETTINGS</p>
-          <h2 id="settings-title">Connection settings</h2>
-        </div>
-        <button type="button" class="icon-button" id="close-settings" aria-label="Close settings">×</button>
-      </div>
-      <p class="settings-description" id="settings-description">Changes apply to your next message.</p>
-      <p id="settings-status" class="field-hint" role="status" aria-live="polite"></p>
-      <nav class="settings-tabs" id="settings-tabs" aria-label="Settings sections">
-        <button type="button" id="settings-tab-model" aria-pressed="true">Model</button>
-        <button type="button" id="settings-tab-test" aria-pressed="false">Test</button>
-        <button type="button" id="settings-tab-theme" aria-pressed="false">Theme</button>
-        <button type="button" id="settings-tab-developer" aria-pressed="false">Developer</button>
-      </nav>
-      <h3 class="settings-section" id="settings-head-model" hidden>Model</h3>
-      <section id="settings-panel-model" aria-label="Model settings">
-      <div class="field">
-        <label for="s-adapter" id="s-adapter-label">Model server</label>
-        <select id="s-adapter" disabled></select>
-      </div>
-      <div class="field" id="s-chat-url-field">
-        <label for="s-chat-url" id="s-chat-url-label">Server address</label>
-        <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" aria-describedby="s-chat-url-hint" />
-        <p class="field-hint" id="s-chat-url-hint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
-      </div>
-      <div id="s-cloud-fields" hidden>
-        <div class="field">
-          <label for="s-key-env">API key environment variable</label>
-          <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-status" />
-          <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
-        </div>
-        <div class="field">
-          <label for="s-base-url">Base URL (optional)</label>
-          <input id="s-base-url" spellcheck="false" autocomplete="url" />
-        </div>
-      </div>
-      <button type="button" class="secondary-button" id="discover-btn">Discover models</button>
-      <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
-      <datalist id="s-model-options"></datalist>
-      <div class="field model-field">
-        <label for="s-chat-model">Chat model</label>
-        <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" />
-        <p class="field-hint">Type a model name or choose a discovered model.</p>
-      </div>
-      <div class="field" id="s-memory-field">
-        <label><input type="checkbox" id="s-across-chats" /> Remember across chats</label>
-        <div id="s-embed-offer" hidden>
-          <label><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label">Remember across chats with an embedding model?</span></label>
-        </div>
-        <p class="field-hint" id="s-memory-hint">Notes you tell melo to keep, and earlier chats, come back when they matter. Manage them in the Memory tab.</p>
-      </div>
-      <details class="advanced">
-        <summary>Embedding & advanced settings <span>Optional</span></summary>
-        <div class="advanced-body">
-          <div class="field">
-            <label for="s-embed-backend">Embedding backend</label>
-            <select id="s-embed-backend" disabled></select>
+    <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
+      <div class="st" id="settings-frame" data-view="section">
+        <nav class="st-nav" aria-labelledby="settings-title">
+          <h2 id="settings-title">Settings</h2>
+          <div class="st-tabs" id="settings-tabs" role="tablist" aria-orientation="vertical" aria-labelledby="settings-title">
+            <button type="button" class="st-tab" role="tab" id="settings-tab-model" aria-controls="settings-panel-model" aria-selected="true"><span class="st-glyph" aria-hidden="true">◉</span><span class="st-tab-text">Model server<span class="st-tab-note" id="settings-note-model"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-memory" aria-controls="settings-panel-memory" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◎</span><span class="st-tab-text">Memory<span class="st-tab-note" id="settings-note-memory"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-chats" aria-controls="settings-panel-chats" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">▤</span><span class="st-tab-text">Chats and folders<span class="st-tab-note" id="settings-note-chats"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-scheduled" aria-controls="settings-panel-scheduled" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◷</span><span class="st-tab-text">Scheduled<span class="st-tab-note" id="settings-note-scheduled"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-appearance" aria-controls="settings-panel-appearance" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◐</span><span class="st-tab-text">Appearance<span class="st-tab-note" id="settings-note-appearance"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-developer" aria-controls="settings-panel-developer" aria-selected="false" tabindex="-1" hidden><span class="st-glyph" aria-hidden="true">⌘</span><span class="st-tab-text">Developer<span class="st-tab-note" id="settings-note-developer"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
           </div>
-          <div id="s-embed-fields">
-            <div class="field">
-              <label for="s-embed-url">Embedding API URL</label>
-              <input id="s-embed-url" spellcheck="false" autocomplete="url" />
-            </div>
-            <div class="field">
-              <label for="s-embed-model">Embedding model</label>
-              <input id="s-embed-model" spellcheck="false" autocomplete="off" />
-            </div>
+        </nav>
+        <button type="button" class="icon-button st-close" id="close-settings" aria-label="Close settings">×</button>
+        <div class="st-main">
+          <button type="button" class="st-back" id="settings-back">‹ Settings</button>
+          <div class="st-body" id="settings-body">
+            <p id="settings-status" class="field-hint st-status" role="status" aria-live="polite"></p>
+            <section class="st-section" id="settings-panel-model" role="tabpanel" aria-labelledby="settings-head-model">
+              <h3 id="settings-head-model">Model server</h3>
+              <p class="st-help" id="settings-description">The models Melo runs on, and the server that serves them. Changes apply to your next message.</p>
+              <ul class="st-group">
+                <li class="st-row"><div class="st-text"><span class="st-label">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
+                <li class="st-row"><div class="st-text"><span class="st-label">Embedding model</span><p class="st-state" id="s-embed-state"></p></div></li>
+                <li class="st-row">
+                  <div class="st-text"><span class="st-label" id="s-server-label">Server</span><span class="st-mono" id="s-server-address"></span><p class="st-hint" id="s-server-kind"></p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-change" aria-expanded="false" aria-controls="s-editor">Change…</button></div>
+                </li>
+              </ul>
+              <div class="st-test">
+                <button type="button" class="outline-button" id="settings-test" disabled>Test connection</button>
+                <p id="settings-test-status" role="status" aria-live="polite"></p>
+              </div>
+              <div class="st-editor" id="s-editor" role="group" aria-labelledby="s-editor-title" hidden>
+                <h4 class="st-group-title" id="s-editor-title">Change the connection</h4>
+                <div class="field">
+                  <label for="s-adapter" id="s-adapter-label">Model server</label>
+                  <select id="s-adapter" disabled></select>
+                </div>
+                <div class="field" id="s-chat-url-field">
+                  <label for="s-chat-url" id="s-chat-url-label">Server address</label>
+                  <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" aria-describedby="s-chat-url-hint" />
+                  <p class="field-hint" id="s-chat-url-hint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
+                </div>
+                <div id="s-cloud-fields" hidden>
+                  <div class="field">
+                    <label for="s-key-env">API key environment variable</label>
+                    <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-status" />
+                    <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
+                  </div>
+                  <div class="field">
+                    <label for="s-base-url">Base URL (optional)</label>
+                    <input id="s-base-url" spellcheck="false" autocomplete="url" />
+                  </div>
+                </div>
+                <datalist id="s-model-options"></datalist>
+                <div class="field">
+                  <label for="s-chat-model">Chat model</label>
+                  <div class="st-inline">
+                    <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" aria-describedby="discover-status" />
+                    <button type="button" class="outline-button" id="discover-btn">Discover models</button>
+                  </div>
+                  <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
+                </div>
+                <div class="field" id="s-embed-offer" hidden>
+                  <label class="st-check"><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label">Remember across chats with an embedding model?</span></label>
+                </div>
+                <p class="field-hint" id="s-memory-hint"></p>
+                <details class="advanced">
+                  <summary>Embedding model on another server <span>Optional</span></summary>
+                  <div class="advanced-body">
+                    <div class="field">
+                      <label for="s-embed-backend">Embedding server</label>
+                      <select id="s-embed-backend" disabled></select>
+                    </div>
+                    <div id="s-embed-fields">
+                      <div class="field">
+                        <label for="s-embed-url">Embedding server address</label>
+                        <input id="s-embed-url" spellcheck="false" autocomplete="url" />
+                      </div>
+                      <div class="field">
+                        <label for="s-embed-model">Embedding model</label>
+                        <input id="s-embed-model" spellcheck="false" autocomplete="off" />
+                      </div>
+                    </div>
+                  </div>
+                </details>
+                <div class="st-editor-actions">
+                  <button type="button" class="quiet-button" id="s-editor-cancel">Cancel</button>
+                  <button type="button" class="primary-button" id="create-btn" disabled>Save connection</button>
+                </div>
+              </div>
+            </section>
+            <section class="st-section" id="settings-panel-memory" role="tabpanel" aria-labelledby="settings-head-memory" hidden>
+              <h3 id="settings-head-memory">Memory</h3>
+              <p class="st-help">What Melo keeps about you and your earlier chats, and how it finds it again.</p>
+              <ul class="st-group">
+                <li class="st-row">
+                  <div class="st-text"><label class="st-label" for="s-across-chats">Remember across chats</label><p class="st-hint">Notes you ask Melo to keep, and earlier chats, come back when they matter.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-across-chats" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
+                <li class="st-row" data-stack>
+                  <div class="st-text"><span class="st-label" id="s-recall-legend">How Melo finds notes</span><span class="st-key" id="s-recall-key" hidden>memory.retriever</span></div>
+                  <div class="st-choices" role="radiogroup" aria-labelledby="s-recall-legend">
+                    <label class="st-choice" id="s-recall-row-auto"><input type="radio" name="s-recall" id="s-recall-auto" value="auto" disabled /><span class="st-label">By words and meaning <span class="st-key" data-developer hidden>auto</span></span><span class="st-hint">Uses the embedding model when one is set up; words alone until then.</span></label>
+                    <label class="st-choice" id="s-recall-row-bm25"><input type="radio" name="s-recall" id="s-recall-bm25" value="bm25" disabled /><span class="st-label">By words only <span class="st-key" data-developer hidden>bm25</span></span><span class="st-hint">Never calls an embedding model.</span></label>
+                    <label class="st-choice" id="s-recall-row-embedding" hidden><input type="radio" name="s-recall" id="s-recall-embedding" value="embedding" disabled /><span class="st-label">By meaning and words, always <span class="st-key" data-developer hidden>embedding</span></span><span class="st-hint">Needs an embedding model: saving it without one is refused.</span></label>
+                    <label class="st-choice" id="s-recall-row-llm" hidden><input type="radio" name="s-recall" id="s-recall-llm" value="llm" disabled /><span class="st-label">Words, then the chat model chooses <span class="st-key" data-developer hidden>llm</span></span><span class="st-hint">No embedding calls; the chat model picks among the notes words found.</span></label>
+                  </div>
+                </li>
+                <li class="st-row">
+                  <div class="st-text"><span class="st-label">Notes</span><p class="st-hint">See, change or forget what Melo keeps.</p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-memory">Open Memory</button></div>
+                </li>
+              </ul>
+            </section>
+            <section class="st-section" id="settings-panel-chats" role="tabpanel" aria-labelledby="settings-head-chats" hidden>
+              <h3 id="settings-head-chats">Chats and folders</h3>
+              <p class="st-help">Where a new chat works. Each chat can pick another folder from the folder chip under the message box.</p>
+              <ul class="st-group">
+                <li class="st-row">
+                  <div class="st-text"><span class="st-label">Default folder</span><span class="st-mono" id="s-folder"></span></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-folder-change" aria-expanded="false" aria-controls="s-folder-edit">Change…</button></div>
+                </li>
+                <li class="st-row" id="s-folder-edit" data-stack hidden>
+                  <label class="st-label" for="s-workspace">Folder path</label>
+                  <div class="st-inline">
+                    <input class="st-input" id="s-workspace" spellcheck="false" autocomplete="off" aria-describedby="s-folder-hint" />
+                    <button type="button" class="outline-button" id="s-folder-use">Use</button>
+                    <button type="button" class="quiet-button" id="s-folder-cancel">Cancel</button>
+                  </div>
+                  <p class="st-hint" id="s-folder-hint">Use an absolute path or a path beginning with ~/.</p>
+                </li>
+              </ul>
+              <h4 class="st-group-title" id="s-recent-title">Recent folders</h4>
+              <ul class="st-group" id="s-recent" aria-labelledby="s-recent-title"></ul>
+            </section>
+            <section class="st-section" id="settings-panel-scheduled" role="tabpanel" aria-labelledby="settings-head-scheduled" hidden>
+              <h3 id="settings-head-scheduled">Scheduled</h3>
+              <p class="st-help">Melo can look in on its own while localmelo runs, and do chores you asked for at set times.</p>
+              <ul class="st-group">
+                <li class="st-row">
+                  <div class="st-text"><label class="st-label" for="s-checkin">Check-in</label><p class="st-hint" id="s-checkin-hint"></p><p class="st-state" id="s-checkin-state"></p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-checkin" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
+                <li class="st-row">
+                  <div class="st-text"><span class="st-label">Chores</span><p class="st-hint">Ask in the main chat, such as "every weekday at 8:30, brief me on my calendar".</p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-scheduled">Open Scheduled</button></div>
+                </li>
+              </ul>
+            </section>
+            <section class="st-section" id="settings-panel-appearance" role="tabpanel" aria-labelledby="settings-head-appearance" hidden>
+              <h3 id="settings-head-appearance">Appearance</h3>
+              <p class="st-help">How this window looks, and what Melo shows on your desktop.</p>
+              <ul class="st-group">
+                <li class="st-row">
+                  <div class="st-text"><span class="st-label" id="settings-theme-legend">Theme</span><p class="st-hint">Remembered in this browser.</p></div>
+                  <div class="st-segments" role="radiogroup" aria-labelledby="settings-theme-legend">
+                    <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" />System</label>
+                    <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" />Light</label>
+                    <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" />Dark</label>
+                  </div>
+                </li>
+                <li class="st-row" id="s-desktop-row" data-stack hidden>
+                  <div class="st-text"><span class="st-label" id="s-desktop-legend">Melo on the desktop</span><p class="st-hint">While the window is put away. The same choice as the app's menu.</p></div>
+                  <div class="st-choices" role="radiogroup" aria-labelledby="s-desktop-legend">
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pill" value="pill" /><span class="st-label">Melo and the activity pill</span><span class="st-hint">The pill takes Melo's place while work runs.</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pet" value="pet" /><span class="st-label">Melo only</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-nothing" value="nothing" /><span class="st-label">Nothing</span></label>
+                  </div>
+                </li>
+                <li class="st-row">
+                  <div class="st-text"><label class="st-label" for="s-developer">Developer mode</label><p class="st-hint">Adds the Developer section, technical names and debug views. It changes what is shown, never what runs.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-developer" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
+              </ul>
+            </section>
+            <section class="st-section" id="settings-panel-developer" role="tabpanel" aria-labelledby="settings-head-developer" hidden>
+              <h3 id="settings-head-developer">Developer</h3>
+              <p class="st-help">Every setting melo reads, grouped as <code>melo -h all</code> lists them, with the value in use. Change one with <code>melo config set KEY VALUE</code>, or for one run with <code>-X KEY=VALUE</code>.</p>
+              <p class="st-meta" id="settings-meta"><span id="settings-file"></span> · <span id="settings-revision"></span></p>
+              <div id="s-developer-options"></div>
+            </section>
           </div>
-          <div class="field">
-            <label for="s-workspace">Workspace path</label>
-            <input id="s-workspace" spellcheck="false" autocomplete="off" />
-            <p class="field-hint">Use an absolute path or a path beginning with ~/.</p>
+          <div class="st-foot" id="settings-foot">
+            <p id="settings-saved" role="status" aria-live="polite"><span class="st-saved-mark" id="settings-saved-mark" aria-hidden="true" hidden>✓</span> <span id="settings-saved-text"></span> <button type="button" class="link-button" id="settings-undo" hidden>Undo</button></p>
+            <p id="create-error" class="error st-error" role="alert" hidden></p>
+            <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
           </div>
         </div>
-      </details>
-      </section>
-      <section id="settings-panel-test" aria-label="Connection test" hidden>
-      <button type="button" class="secondary-button" id="settings-test" disabled>Test connection</button>
-      <p id="settings-test-status" class="field-hint" role="status" aria-live="polite"></p>
-      </section>
-      <section id="settings-panel-theme" aria-label="Theme settings" hidden>
-      <fieldset class="theme-options">
-        <legend id="settings-theme-legend">Theme</legend>
-        <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" /> System</label>
-        <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /> Light</label>
-        <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" /> Dark</label>
-      </fieldset>
-      </section>
-      <section id="settings-panel-developer" aria-label="Developer settings" hidden>
-      <label><input type="checkbox" id="s-developer" disabled /> Developer mode: show advanced settings and debug views</label>
-      <p class="field-hint">Saved as <code>[ui] mode</code>, the setting <code>melo --help</code> reads. It changes what is shown, never what runs.</p>
-      <div id="s-developer-options" hidden>
-        <p class="field-hint">Advanced and experimental options of <code>melo</code>, read-only: set them with the flag or in config.toml.</p>
-        <ul id="s-developer-list" class="dev-options"></ul>
-      </div>
-      </section>
-      <p id="create-error" class="error" role="alert" hidden></p>
-      <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
-      <div class="settings-footer">
-        <span id="settings-meta"><span id="settings-file"></span><br /><span id="settings-revision"></span></span>
-        <button type="button" class="secondary-button" id="cancel-settings">Cancel</button>
-        <button type="button" class="primary-button" id="create-btn" disabled>Save</button>
       </div>
     </dialog>
   </body>

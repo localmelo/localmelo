@@ -1,3 +1,6 @@
+import { folderChoices, folderName } from "./folder.mjs";
+import { CHECKIN, whenWords } from "./scheduled-tab.mjs";
+
 // A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
 // terminal. This dialog is where the user fixes it, so the advice is left out.
 const terminalAdvice = (message) => /\brun 'melo /i.test(message);
@@ -6,7 +9,7 @@ const terminalAdvice = (message) => /\brun 'melo /i.test(message);
 // today (backend, API URL, adapter). `layout()` writes the set of the mode.
 const WORDS = {
   plain: {
-    description: "Changes apply to your next message.",
+    description: "The models Melo runs on, and the server that serves them. Changes apply to your next message.",
     adapter: "Model server",
     url: "Server address",
     urlHint: "The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.",
@@ -23,12 +26,52 @@ const WORDS = {
   },
 };
 
+/** The sections, in the order of the list: id, then name. Developer is listed in developer mode only. */
+export const SECTIONS = [["model", "Model server"], ["memory", "Memory"], ["chats", "Chats and folders"],
+  ["scheduled", "Scheduled"], ["appearance", "Appearance"], ["developer", "Developer"]];
+const THEMES = ["system", "light", "dark"];
+const RECALL = ["auto", "bm25", "embedding", "llm"];
+// How memory finds notes, in the words of the Memory section and the phone's list.
+const RECALL_WORDS = {auto: "words and meaning", bm25: "words only", embedding: "meaning and words", llm: "words, then the chat model"};
+const DESKTOP = {pill: "Melo and the activity pill", pet: "Melo only", nothing: "Nothing"};
+// `melo -h all` lists the settings by section; these are the section names people read.
+const GROUPS = {"": "General", agent: "Agent", retrieval: "Recall in runs", memory: "Memory", endpoint: "Model endpoint",
+  sessions: "Chats", cli: "Terminal", ui: "Display", scheduler: "Scheduler", browser: "Browser", gateway: "Gateway"};
+const LOCAL_FIELDS = ["chat_url", "chat_model"];
+const CLOUD_FIELDS = ["api_key_env", "base_url", "chat_model"];
+
+/** "checked just now", "checked 12 s ago", "checked 3 min ago" or "checked at 9:05 AM". */
+export function checkedWords(secondsAgo, now = Date.now()) {
+  const ago = Math.max(0, Math.round(Number(secondsAgo) || 0));
+  if (ago < 5) return "checked just now";
+  if (ago < 60) return `checked ${ago} s ago`;
+  if (ago < 3600) return `checked ${Math.floor(ago / 60)} min ago`;
+  return `checked at ${new Date(now - ago * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}`;
+}
+
+/** A key's last part in words: `agent.window_messages` reads "Window messages". */
+export function keyWords(key) {
+  const last = String(key).slice(String(key).lastIndexOf(".") + 1).replace(/_s$/, " (s)").replace(/_/g, " ")
+    .replace(/\b(mcp|url|llm|gpu)\b/g, (word) => word.toUpperCase());
+  return last.charAt(0).toUpperCase() + last.slice(1);
+}
+
 /**
- * Wire the connection dialog. The caller owns entry buttons and health refresh. `developer()` says whether
- * developer mode is on: default mode stacks Model (with its test), Appearance and one Developer toggle;
- * developer mode keeps the tabs, the file and its revision.
+ * Wire the Settings dialog: a list of sections, the chosen one beside it (a sheet on a phone). Each change saves
+ * at once with the revision it read (a 409 asks for a reload) and offers Undo; the connection is the one change
+ * made in a form, saved with "Save connection".
+ *
+ * The caller owns the entry buttons and what a save refreshes (`onSaved`). `developer()` is the page's mode until
+ * the settings load; `health()` the last `GET /api/health`; `sessions()` the listed chats, for the recent folders;
+ * `openTab(id)` closes the dialog and opens the panel's Memory or Scheduled tab; `desktop()` and `folders()` are the
+ * macOS app's message handlers (none in a browser); `narrow()` says whether the dialog is the phone's sheet.
+ * Returns `open(section)`.
  */
-export function setupSettings({ api, onSaved, developer = () => false }) {
+export function setupSettings({
+  api, onSaved, developer = () => false, health = () => null, sessions = () => [], openTab = () => {},
+  desktop = () => null, folders = () => null, narrow = () => globalThis.matchMedia?.("(max-width: 700px)")?.matches === true,
+  clock = Date.now,
+}) {
   const $ = (id) => document.getElementById(id);
   const dialog = $("settings-dialog");
   const chat = $("s-adapter");
@@ -42,51 +85,28 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   const keyStatus = $("s-key-status");
   const testButton = $("settings-test");
   const testStatus = $("settings-test-status");
-  const themeIds = ["system", "light", "dark"];
+
   let theme = "system";
   try {
     const stored = localStorage.getItem("localmelo-console.theme");
-    if (themeIds.includes(stored)) theme = stored;
+    if (THEMES.includes(stored)) theme = stored;
   } catch { /* Storage may be unavailable. */ }
   function applyTheme(value) {
     theme = value;
     document.documentElement.dataset.theme = value;
-    for (const name of themeIds) $(`settings-theme-${name}`).checked = name === value;
+    for (const name of THEMES) $(`settings-theme-${name}`).checked = name === value;
+  }
+  function storeTheme(value) {
+    applyTheme(value);
+    try { localStorage.setItem("localmelo-console.theme", value); } catch { /* Keep the current theme. */ }
+    notes();
   }
   applyTheme(theme);
-  for (const name of themeIds) {
-    $(`settings-theme-${name}`).addEventListener("change", (event) => {
-      if (!event.target.checked) return;
-      applyTheme(name);
-      try { localStorage.setItem("localmelo-console.theme", name); } catch { /* Keep the current theme. */ }
-    });
-  }
-  const tabNames = ["model", "test", "theme", "developer"];
-  // `name` shows one panel; null shows them all, one under the other.
-  function select(name) {
-    for (const item of tabNames) {
-      $(`settings-panel-${item}`).hidden = name !== null && item !== name;
-      $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
-    }
-  }
-  let words = WORDS.plain;
-  function layout(isDeveloper) {
-    words = isDeveloper ? WORDS.developer : WORDS.plain;
-    $("settings-description").textContent = words.description;
-    $("s-adapter-label").textContent = words.adapter;
-    $("s-chat-url-label").textContent = words.url;
-    $("s-chat-url-hint").textContent = words.urlHint;
-    dialog.dataset.layout = isDeveloper ? "tabs" : "plain";
-    $("settings-tabs").hidden = !isDeveloper;
-    $("settings-head-model").hidden = isDeveloper;
-    $("settings-meta").hidden = !isDeveloper;
-    $("settings-title").textContent = isDeveloper ? "Connection settings" : "Settings";
-    $("settings-theme-legend").textContent = isDeveloper ? "Theme" : "Appearance";
-    select(isDeveloper ? "model" : null);
-  }
-  for (const name of tabNames) $(`settings-tab-${name}`).addEventListener("click", () => select(name));
-  const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model",
-    "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace", "s-developer", "s-across-chats", "s-embed-use"];
+
+  const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model", "s-embed-backend", "s-embed-url",
+    "s-embed-model", "s-embed-use"];
+  // Each saves on its own; they wait while a change is being saved.
+  const switchIds = ["s-across-chats", "s-developer", ...RECALL.map((name) => `s-recall-${name}`)];
   let settings = null;
   let sections = {};
   let generation = 0;
@@ -94,41 +114,108 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   let keyVersion = 0;
   let testVersion = 0;
   let busy = false;
+  let saving = false;
+  let words = WORDS.plain;
+  let isDeveloper = false;
+  let current = "model";
   // The embedding model the last "Discover models" listed on the chat server; "" before one did.
   let offered = "";
+  // The last test of this dialog: {at, ok, failed} (`failed` is "chat" or "embedding"), or null.
+  let tested = null;
+  let checkin = null;
+  let place = null; // what is on the desktop, as the app says; null without the app
+  let undo = null;
+
+  // --- sections ---------------------------------------------------------------------------------------------
+
+  const listed = () => SECTIONS.map(([id]) => id).filter((id) => id !== "developer" || isDeveloper);
+  function view(name) {
+    $("settings-frame").dataset.view = name;
+  }
+  function select(name, {focus = false, show = true} = {}) {
+    if (!listed().includes(name)) name = "model";
+    current = name;
+    for (const [id] of SECTIONS) {
+      const tab = $(`settings-tab-${id}`);
+      tab.setAttribute("aria-selected", String(id === name));
+      tab.tabIndex = id === name ? 0 : -1;
+      $(`settings-panel-${id}`).hidden = id !== name;
+    }
+    if (show) view("section");
+    if (focus) $(`settings-tab-${name}`).focus?.();
+    if (name === "scheduled") loadCheckin();
+  }
+  for (const [id] of SECTIONS) {
+    const tab = $(`settings-tab-${id}`);
+    tab.addEventListener("click", () => select(id));
+    tab.addEventListener("keydown", (event) => {
+      const order = listed();
+      const at = order.indexOf(id);
+      const next = {ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: order.length - 1}[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      // Arrows move along the list; on a phone they move the focus without opening the section.
+      select(order[(next + order.length) % order.length], {focus: true, show: !narrow()});
+    });
+  }
+  $("settings-back").addEventListener("click", () => {
+    view("list");
+    $(`settings-tab-${current}`).focus?.();
+  });
+
+  function layout(developerMode) {
+    isDeveloper = developerMode;
+    words = developerMode ? WORDS.developer : WORDS.plain;
+    $("settings-description").textContent = words.description;
+    $("s-adapter-label").textContent = words.adapter;
+    $("s-chat-url-label").textContent = words.url;
+    $("s-chat-url-hint").textContent = words.urlHint;
+    dialog.dataset.layout = developerMode ? "developer" : "default";
+    $("settings-tab-developer").hidden = !developerMode;
+    $("s-recall-key").hidden = !developerMode;
+    if (!listed().includes(current)) select("model", {show: false});
+    recall();
+  }
+
+  // --- the connection form (as before: a draft per server, saved together) -----------------------------------
 
   function invalidateTest() {
     testVersion += 1;
+    tested = null;
     testStatus.textContent = "";
     testStatus.dataset.state = "";
     testButton.disabled = busy || !settings || !chat.value;
+    model();
   }
 
   function showError(message, conflict = false) {
     error.textContent = message;
     error.hidden = !message;
     reload.hidden = !conflict;
+    foot();
+  }
+  // The foot under the section shows only while it has something to say.
+  function foot() {
+    $("settings-foot").hidden = !$("settings-saved-text").textContent && error.hidden && reload.hidden;
   }
 
   function enable(ready) {
     const chosen = !!chat.value; // Nothing is saved until the user chooses a server.
     for (const id of inputIds) $(id).disabled = !ready;
     for (const id of ["s-chat-url", "s-chat-model"]) $(id).disabled = !ready || !chosen;
+    for (const id of switchIds) $(id).disabled = !ready || saving;
+    $("s-checkin").disabled = !ready || saving || !checkin;
     save.disabled = !ready || !chosen;
     discover.disabled = !ready || !chosen || isCloud();
     testButton.disabled = !ready || !chosen;
   }
 
-  function isCloud() {
-    return settings?.choices.chat_backends.find((choice) => choice.key === chat.value)?.kind === "cloud";
-  }
-
-  function renderDeveloper() {
-    $("s-developer-options").hidden = !$("s-developer").checked;
+  function isCloud(key = chat.value) {
+    return settings?.choices.chat_backends.find((choice) => choice.key === key)?.kind === "cloud";
   }
 
   function options(node, choices, selected, blank = "") {
-    const all = blank ? [{ key: "", label: blank }, ...choices] : choices;
+    const all = blank ? [{key: "", label: blank}, ...choices] : choices;
     node.replaceChildren();
     for (const choice of all) {
       const option = document.createElement("option");
@@ -141,6 +228,21 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
 
   function section(key) {
     return sections[key] || (sections[key] = {});
+  }
+
+  function drafts(loaded) {
+    sections = {};
+    // Only writable fields go back to the server; never copy api_key_set.
+    for (const choice of loaded.choices.chat_backends) {
+      const fields = choice.kind === "cloud" ? ["api_key_env", "chat_model", "base_url"]
+        : ["chat_url", "chat_model", "embedding_url", "embedding_model"];
+      const saved = loaded.sections[choice.key] || {};
+      const defaults = loaded.defaults[choice.key] || {};
+      sections[choice.key] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
+    }
+    options(chat, loaded.choices.chat_backends, loaded.chat_backend, loaded.chat_backend ? "" : "Choose a server…");
+    options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
+    offered = "";
   }
 
   function renderChat() {
@@ -169,16 +271,22 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
   }
 
   // "Remember across chats with <model>?": offered when the server lists an embedding model (or one is in use already).
-  function renderMemory() {
+  function renderOffer() {
     const inUse = embedding.value !== "none" && !!embedding.value && !!$("s-embed-model").value;
     if (inUse) offered = $("s-embed-model").value; // unchecking keeps the offer, so it can be checked again
-    const model = offered;
-    $("s-embed-offer").hidden = !model;
+    const name = offered;
+    $("s-embed-offer").hidden = !name;
     $("s-embed-use").checked = inUse;
-    $("s-embed-offer-label").textContent = `Remember across chats with ${model}?`;
+    $("s-embed-offer-label").textContent = `Remember across chats with ${name}?`;
     $("s-memory-hint").textContent = inUse
       ? "Melo finds notes and earlier chats by meaning as well as by words."
       : "Melo finds notes and earlier chats by words only." + (offered ? "" : " A server that lists an embedding model adds search by meaning.");
+  }
+
+  function editor(open) {
+    $("s-editor").hidden = !open;
+    $("s-change").setAttribute("aria-expanded", String(open));
+    $("s-change").textContent = open ? "Close" : "Change…";
   }
 
   async function checkKey() {
@@ -191,7 +299,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     }
     keyStatus.textContent = "Checking key status…";
     try {
-      const result = await api(`/settings/key-status?${new URLSearchParams({ name })}`);
+      const result = await api(`/settings/key-status?${new URLSearchParams({name})}`);
       if (version === keyVersion && currentGeneration === generation && dialog.open) {
         keyStatus.textContent = result.set ? "Key is set." : "Key is not set in the gateway environment.";
       }
@@ -202,60 +310,497 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     }
   }
 
-  async function open() {
+  function candidate() {
+    const chatData = section(chat.value);
+    const selectedSections = {[chat.value]: isCloud()
+      ? {api_key_env: chatData.api_key_env, base_url: chatData.base_url, chat_model: chatData.chat_model}
+      : {chat_url: chatData.chat_url, chat_model: chatData.chat_model}};
+    if (embedding.value !== "none") {
+      const data = section(embedding.value);
+      selectedSections[embedding.value] = {
+        ...selectedSections[embedding.value],
+        embedding_url: data.embedding_url,
+        embedding_model: data.embedding_model,
+      };
+    }
+    return {chat_backend: chat.value, embedding_backend: embedding.value, workspace: settings.workspace, sections: selectedSections};
+  }
+
+  // The connection as `loaded` saved it, for Undo: its writable fields only.
+  function savedConnection(loaded) {
+    const backend = loaded.chat_backend;
+    const embed = loaded.embedding_backend || "none";
+    const fields = isCloud(backend) ? CLOUD_FIELDS : LOCAL_FIELDS;
+    const pick = (data, names) => Object.fromEntries(names.map((name) => [name, String(data?.[name] ?? "")]));
+    const out = {[backend]: pick(loaded.sections[backend], fields)};
+    if (embed !== "none") out[embed] = {...out[embed], ...pick(loaded.sections[embed], ["embedding_url", "embedding_model"])};
+    return {chat_backend: backend, embedding_backend: embed, sections: out};
+  }
+
+  // --- what each section shows ------------------------------------------------------------------------------
+
+  function state(id, kind, word, ...rest) {
+    const node = $(id);
+    node.dataset.state = kind;
+    const parts = [Object.assign(document.createElement("span"), {className: "st-dot"}),
+      Object.assign(document.createElement("span"), {className: "st-word", textContent: word})];
+    for (const item of rest.filter(Boolean)) {
+      const dot = Object.assign(document.createElement("span"), {textContent: "·"});
+      dot.setAttribute("aria-hidden", "true");
+      parts.push(dot, Object.assign(document.createElement("span"), {className: item.mono ? "st-mono" : "", textContent: item.text ?? item}));
+    }
+    node.replaceChildren(...parts);
+    node.dataset.text = [word, ...rest.filter(Boolean).map((item) => item.text ?? item)].join(" · ");
+  }
+
+  const ago = (at) => checkedWords((clock() - at) / 1000, clock());
+
+  function model() {
+    if (!settings) return;
+    const backend = settings.chat_backend;
+    const saved = settings.sections[backend] || {};
+    const name = saved.chat_model || "";
+    const probe = health()?.model_server;
+    if (!backend) state("s-chat-state", "off", "Not set up", "choose a server below");
+    else if (tested?.ok || (tested && tested.failed === "embedding")) state("s-chat-state", "ok", "Connected", {text: name, mono: true}, ago(tested.at));
+    else if (tested) state("s-chat-state", "error", "Not reachable", {text: name, mono: true}, ago(tested.at));
+    else if (isCloud(backend)) {
+      const set = saved.api_key_set === true;
+      state("s-chat-state", set ? "ok" : "error", set ? "Key is set" : "Key is not set", {text: name, mono: true});
+    } else if (probe?.reachable === true) state("s-chat-state", "ok", "Connected", {text: name, mono: true}, checkedWords(probe.checked_s_ago));
+    else if (probe?.reachable === false) state("s-chat-state", "error", "Not reachable", {text: name, mono: true}, checkedWords(probe.checked_s_ago));
+    else state("s-chat-state", "busy", "Checking", {text: name, mono: true});
+
+    const embed = settings.embedding_backend;
+    const embedName = embed && embed !== "none" ? settings.sections[embed]?.embedding_model || "" : "";
+    if (!embedName) state("s-embed-state", "off", "Off", "notes are found by words only");
+    else if (tested?.ok) state("s-embed-state", "ok", "Connected", {text: embedName, mono: true}, ago(tested.at));
+    else if (tested?.failed === "embedding") state("s-embed-state", "error", "Not answering", {text: embedName, mono: true}, ago(tested.at));
+    else state("s-embed-state", "busy", "Not checked yet", {text: embedName, mono: true});
+
+    const choice = settings.choices.chat_backends.find((item) => item.key === backend);
+    $("s-server-address").textContent = !backend ? "None yet" : isCloud(backend) ? saved.base_url || "The service's own address" : saved.chat_url || "";
+    $("s-server-kind").textContent = !choice ? "Choose one below."
+      : isCloud(backend) ? `${choice.label} · key in ${saved.api_key_env || "an environment variable"}` : choice.label;
+    notes();
+  }
+
+  function recall() {
+    if (!settings) return;
+    const value = RECALL.includes(settings.memory_retriever) ? settings.memory_retriever : "auto";
+    for (const name of RECALL) {
+      // Default mode offers the plain two; a value set in developer mode shows, so a choice is always marked.
+      $(`s-recall-row-${name}`).hidden = !isDeveloper && !["auto", "bm25"].includes(name) && name !== value;
+      $(`s-recall-${name}`).checked = name === value;
+    }
+    for (const node of dialog.querySelectorAll?.("[data-developer]") ?? []) node.hidden = !isDeveloper;
+  }
+
+  function folder() {
+    if (!settings) return;
+    $("s-folder").textContent = settings.workspace;
+    const recent = folderChoices({sessions: sessions() || [], fallback: settings.workspace, current: null, limit: 5})
+      .filter((choice) => choice.kind === "recent");
+    const rows = recent.map((choice) => {
+      const row = Object.assign(document.createElement("li"), {className: "st-row"});
+      const text = Object.assign(document.createElement("div"), {className: "st-text"});
+      text.append(Object.assign(document.createElement("span"), {className: "st-label", textContent: folderName(choice.label)}),
+        Object.assign(document.createElement("span"), {className: "st-mono", textContent: choice.label}));
+      const make = Object.assign(document.createElement("button"), {type: "button", className: "quiet-button", textContent: "Make default"});
+      make.setAttribute("aria-label", `Make ${choice.label} the default folder`);
+      make.addEventListener("click", () => setFolder(choice.label.startsWith("~/") || choice.label.startsWith("/") ? choice.label : choice.path));
+      const actions = Object.assign(document.createElement("div"), {className: "st-actions"});
+      actions.append(make);
+      row.append(text, actions);
+      return row;
+    });
+    if (!rows.length) rows.push(Object.assign(document.createElement("li"), {className: "st-empty", textContent: "Chats in other folders show here."}));
+    $("s-recent").replaceChildren(...rows);
+    notes();
+  }
+
+  function scheduled() {
+    $("s-checkin-hint").textContent = checkin ? CHECKIN.replace("30", String(checkin.every_min || 30)) : CHECKIN;
+    $("s-checkin").checked = checkin?.on === true;
+    if (!checkin) state("s-checkin-state", "off", checkin === null ? "Reading the schedule…" : "Could not read the schedule");
+    else if (checkin.on && checkin.next_at) state("s-checkin-state", "ok", "On", `next check-in ${whenWords(checkin.next_at, clock() / 1000)}`);
+    else state("s-checkin-state", "off", checkin.on ? "On" : "Off");
+    $("s-checkin").disabled = !checkin || saving;
+    notes();
+  }
+
+  function appearance() {
+    $("s-desktop-row").hidden = place === null;
+    for (const name of Object.keys(DESKTOP)) $(`s-desktop-${name}`).checked = name === place;
+    $("s-developer").checked = settings?.mode === "developer";
+    notes();
+  }
+
+  function developerList() {
+    if (!settings) return;
+    $("settings-file").textContent = `File ${settings.file_label || "~/.cache/localmelo/config.toml"}`;
+    $("settings-revision").textContent = `revision ${settings.revision || "not saved"}`;
+    const make = (tag, className, text) => Object.assign(document.createElement(tag), {className, textContent: text});
+    const blocks = [];
+    for (const group of settings.developer_settings || []) {
+      const list = make("ul", "st-group st-dense", "");
+      for (const item of group.keys) {
+        const row = make("li", "st-row", "");
+        const text = make("div", "st-text", "");
+        const about = [item.key, item.flag, item.issue ? `comparison, ${item.issue}` : "", item.file ? "" : "one run only"];
+        text.append(make("span", "st-label", keyWords(item.key)), make("span", "st-key", about.filter(Boolean).join(" · ")));
+        const value = make("span", "st-value st-mono", item.value);
+        value.dataset.default = String(item.value === item.default);
+        row.append(text, value);
+        list.append(row);
+      }
+      blocks.push(make("h4", "st-group-title", GROUPS[group.section] ?? group.section), list);
+    }
+    if (settings.run_options?.length) {
+      const list = make("ul", "st-group st-dense", "");
+      for (const item of settings.run_options) {
+        const row = make("li", "st-row", "");
+        const text = make("div", "st-text", "");
+        text.append(make("span", "st-label", item.text.charAt(0).toUpperCase() + item.text.slice(1)), make("span", "st-key", item.option));
+        row.append(text);
+        list.append(row);
+      }
+      blocks.push(make("h4", "st-group-title", "Options for one run"), list);
+    }
+    $("s-developer-options").replaceChildren(...blocks);
+    notes();
+  }
+
+  // The second line of each entry in the phone's list.
+  function notes() {
+    if (!settings) return;
+    const put = (id, text) => { $(`settings-note-${id}`).textContent = text; };
+    const chatState = $("s-chat-state").dataset?.text || "";
+    put("model", chatState.split(" · ").slice(0, 2).join(" · "));
+    const on = $("s-across-chats").checked;
+    put("memory", on ? `On · ${RECALL_WORDS[settings.memory_retriever] ?? RECALL_WORDS.auto}` : "Off");
+    put("chats", folderName(settings.workspace));
+    put("scheduled", checkin ? `Check-in ${checkin.on ? "on" : "off"}` : "");
+    put("appearance", `${theme.charAt(0).toUpperCase()}${theme.slice(1)} theme`);
+    put("developer", `${(settings.developer_settings || []).reduce((sum, group) => sum + group.keys.length, 0)} settings`);
+  }
+
+  function renderAll() {
+    $("s-across-chats").checked = settings.across_chats !== false;
+    model();
+    recall();
+    folder();
+    scheduled();
+    appearance();
+    developerList();
+  }
+
+  // --- saving one change ------------------------------------------------------------------------------------
+
+  function saved(text, back) {
+    undo = back;
+    $("settings-saved-mark").hidden = !text;
+    $("settings-saved-text").textContent = text;
+    $("settings-undo").hidden = !back;
+    foot();
+  }
+
+  function conflictOf(err) {
+    return err?.status === 409 && err?.code === "settings_changed";
+  }
+
+  function failure(err, fallback) {
+    const conflict = conflictOf(err);
+    const errors = err?.code === "invalid_settings" && Array.isArray(err.details?.errors)
+      ? err.details.errors.filter((item) => typeof item === "string" && item).join("\n") : "";
+    showError(conflict ? "The settings file changed since it was loaded. Reload and retry." : (errors || err?.message || fallback), conflict);
+  }
+
+  async function adopt(answer) {
+    settings = answer;
+    // Saving succeeded even if the dialog was closed while the request ran.
+    try { await onSaved?.(answer); } catch { /* The caller owns refresh failures. */ }
+    layout(answer.mode === "developer");
+    renderAll();
+  }
+
+  /** Save `change` over the settings as loaded; `text` says what changed, `back` is the change that undoes it. */
+  async function commit(change, text, back = null) {
+    if (saving || busy || !settings) return false;
+    if (!settings.chat_backend) {
+      showError("Choose a model server in Model server first.");
+      renderAll();
+      return false;
+    }
+    const currentGeneration = generation;
+    saving = true;
+    enable(true);
+    showError("");
+    saved("", null);
+    try {
+      const body = {chat_backend: settings.chat_backend, embedding_backend: settings.embedding_backend || "none",
+        workspace: settings.workspace, sections: {}, revision: settings.revision, ...change};
+      const answer = await api("/settings", {method: "PUT", body});
+      if (currentGeneration !== generation) {
+        // Saving succeeded even if the dialog was closed while the request ran.
+        try { await onSaved?.(answer); } catch { /* The caller owns refresh failures. */ }
+        return true;
+      }
+      await adopt(answer);
+      saved(back ? `Saved: ${text}` : text, back);
+      return true;
+    } catch (err) {
+      if (currentGeneration !== generation) return false;
+      failure(err, "Could not save the change.");
+      renderAll();
+      return false;
+    } finally {
+      if (currentGeneration === generation) {
+        saving = false;
+        enable(!busy);
+      }
+    }
+  }
+
+  async function undoLast() {
+    const back = undo;
+    if (!back || saving || busy) return;
+    saved("", null);
+    await back();
+  }
+  $("settings-undo").addEventListener("click", undoLast);
+
+  function settingCommit(field, value, text, previous, previousText) {
+    return commit({[field]: value}, text, () => commit({[field]: previous}, `Undone: ${previousText}`));
+  }
+
+  // --- what each control does -------------------------------------------------------------------------------
+
+  $("s-across-chats").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings) { event.target.checked = !on; return; }
+    if (settings.across_chats === undefined) return; // an older gateway saves it with the connection
+    settingCommit("across_chats", on, `Remember across chats is ${on ? "on" : "off"}.`, !on, `Remember across chats is ${on ? "off" : "on"}.`);
+  });
+  for (const name of RECALL) {
+    $(`s-recall-${name}`).addEventListener("change", (event) => {
+      if (!event.target.checked || !settings) return;
+      const before = settings.memory_retriever || "auto";
+      if (saving) { recall(); return; }
+      settingCommit("memory_retriever", name, `Melo finds notes by ${RECALL_WORDS[name]}.`, before, `Melo finds notes by ${RECALL_WORDS[before]}.`);
+    });
+  }
+  $("s-developer").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings) { event.target.checked = !on; return; }
+    const mode = on ? "developer" : "default";
+    const other = on ? "default" : "developer";
+    commit({mode}, `Developer mode is ${on ? "on" : "off"}.`, () => commit({mode: other}, `Undone: developer mode is ${on ? "off" : "on"}.`));
+  });
+
+  async function setFolder(path) {
+    const before = settings?.workspace;
+    if (!before) return;
+    if (path === before) { folderEdit(false); return; }
+    const done = await commit({workspace: path}, `New chats start in ${path}.`,
+      () => commit({workspace: before}, `Undone: new chats start in ${before}.`));
+    if (done) folderEdit(false);
+  }
+  function folderEdit(open) {
+    $("s-folder-edit").hidden = !open;
+    $("s-folder-change").setAttribute("aria-expanded", String(open));
+    if (open) {
+      $("s-workspace").value = settings?.workspace || "";
+      $("s-workspace").removeAttribute?.("aria-invalid");
+      $("s-workspace").focus?.();
+    }
+  }
+  $("s-folder-change").addEventListener("click", async () => {
+    const handler = folders();
+    if (!handler) return folderEdit($("s-folder-change").getAttribute("aria-expanded") !== "true");
+    const picked = await handler.postMessage({action: "choose"}).catch(() => null);
+    if (typeof picked === "string" && picked.startsWith("/")) await setFolder(picked);
+    return undefined;
+  });
+  $("s-folder-cancel").addEventListener("click", () => folderEdit(false));
+  async function usePath() {
+    const text = $("s-workspace").value.trim();
+    if (!/^(\/|~\/)\S/.test(text)) {
+      $("s-workspace").setAttribute("aria-invalid", "true");
+      $("s-folder-hint").textContent = "That is not a full path. Use an absolute path or a path beginning with ~/.";
+      return;
+    }
+    $("s-folder-hint").textContent = "Use an absolute path or a path beginning with ~/.";
+    await setFolder(text);
+  }
+  $("s-folder-use").addEventListener("click", usePath);
+  $("s-workspace").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    usePath();
+  });
+
+  async function loadCheckin() {
+    const currentGeneration = generation;
+    try {
+      const page = await api("/chores");
+      if (currentGeneration !== generation) return;
+      checkin = page.checkin ?? false;
+    } catch {
+      if (currentGeneration !== generation) return;
+      checkin = checkin || false;
+    }
+    scheduled();
+  }
+  async function setCheckin(on) {
+    const currentGeneration = generation;
+    saving = true;
+    showError("");
+    saved("", null);
+    enable(true);
+    try {
+      const done = await api("/checkin", {method: "PUT", body: {on}});
+      if (currentGeneration !== generation) return false;
+      checkin = done.checkin ?? {...checkin, on};
+      return true;
+    } catch (err) {
+      if (currentGeneration !== generation) return false;
+      failure(err, "Could not change the check-in.");
+      return false;
+    } finally {
+      if (currentGeneration === generation) {
+        saving = false;
+        enable(!busy);
+        scheduled();
+      }
+    }
+  }
+  $("s-checkin").addEventListener("change", async (event) => {
+    const on = event.target.checked;
+    if (saving || !checkin) { event.target.checked = !on; return; }
+    if (await setCheckin(on)) {
+      saved(`Saved: the check-in is ${on ? "on" : "off"}.`, async () => {
+        if (await setCheckin(!on)) saved(`Undone: the check-in is ${on ? "off" : "on"}.`, null);
+      });
+    }
+  });
+
+  for (const name of THEMES) {
+    $(`settings-theme-${name}`).addEventListener("change", (event) => {
+      if (!event.target.checked) return;
+      const before = theme;
+      storeTheme(name);
+      if (dialog.open && before !== name) {
+        saved(`Saved: the ${name} theme.`, () => { storeTheme(before); saved(`Undone: the ${before} theme.`, null); });
+      }
+    });
+  }
+
+  async function setPlace(mode) {
+    const handler = desktop();
+    if (!handler) return false;
+    const answer = await handler.postMessage({action: "set", mode}).catch(() => null);
+    if (!(answer in DESKTOP)) {
+      showError("The app did not take the change. Use its menu: On the desktop.");
+      appearance();
+      return false;
+    }
+    place = answer;
+    appearance();
+    return true;
+  }
+  for (const name of Object.keys(DESKTOP)) {
+    $(`s-desktop-${name}`).addEventListener("change", async (event) => {
+      if (!event.target.checked || place === null) return;
+      const before = place;
+      showError("");
+      if (await setPlace(name)) {
+        saved(`Saved: ${DESKTOP[name]} on the desktop.`, async () => {
+          if (await setPlace(before)) saved(`Undone: ${DESKTOP[before]} on the desktop.`, null);
+        });
+      }
+    });
+  }
+  async function readPlace() {
+    const handler = desktop();
+    const answer = handler ? await handler.postMessage({action: "get"}).catch(() => null) : null;
+    place = answer in DESKTOP ? answer : null;
+    appearance();
+  }
+
+  $("s-open-memory").addEventListener("click", () => openTab("memory"));
+  $("s-open-scheduled").addEventListener("click", () => openTab("scheduled"));
+  $("s-change").addEventListener("click", () => {
+    const open = $("s-change").getAttribute("aria-expanded") !== "true";
+    // The form starts from the saved connection, and closing it drops what was typed.
+    restoreDrafts();
+    editor(open);
+    if (open) {
+      $("s-editor").scrollIntoView?.({block: "nearest"});
+      $("s-adapter").focus?.({preventScroll: true});
+    }
+  });
+  $("s-editor-cancel").addEventListener("click", () => {
+    restoreDrafts();
+    editor(false);
+    $("s-change").focus?.();
+  });
+  // Cancel puts the saved connection back in the form.
+  function restoreDrafts() {
+    if (!settings) return;
+    drafts(settings);
+    invalidateTest();
+    renderChat();
+    renderEmbedding();
+    renderOffer();
+    enable(!busy);
+  }
+
+  // --- open, load, test, save the connection ----------------------------------------------------------------
+
+  async function open(name) {
     const currentGeneration = ++generation;
     discoveryVersion += 1;
     keyVersion += 1;
     settings = null;
     busy = true;
+    saving = false;
+    tested = null;
+    checkin = null;
     invalidateTest();
     enable(false);
     showError("");
+    saved("", null);
     status.textContent = "Loading settings…";
     modelStatus.textContent = "";
     keyStatus.textContent = "";
+    dialog.dataset.ready = "false";
     layout(developer());
+    // A named section opens as itself; otherwise a phone starts on the list.
+    select(typeof name === "string" ? name : current, {show: true});
+    if (narrow() && typeof name !== "string") view("list");
     if (!dialog.open) dialog.showModal();
+    $(`settings-tab-${current}`).focus?.();
+    readPlace();
     try {
       const loaded = await api("/settings");
       if (currentGeneration !== generation || !dialog.open) return;
       settings = loaded;
-      $("settings-file").textContent = `File: ${loaded.file_label || "~/.cache/localmelo/config.toml"}`;
-      $("settings-revision").textContent = `Revision: ${loaded.revision || "not saved"}`;
-      sections = {};
-      // Only writable fields go back to the server; never copy api_key_set.
-      for (const choice of loaded.choices.chat_backends) {
-        const fields = choice.kind === "cloud"
-          ? ["api_key_env", "chat_model", "base_url"]
-          : ["chat_url", "chat_model", "embedding_url", "embedding_model"];
-        const saved = loaded.sections[choice.key] || {};
-        const defaults = loaded.defaults[choice.key] || {};
-        sections[choice.key] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
-      }
-      options(chat, loaded.choices.chat_backends, loaded.chat_backend, loaded.chat_backend ? "" : "Choose a server…");
-      options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
-      $("s-workspace").value = loaded.workspace;
-      $("s-across-chats").checked = loaded.across_chats !== false;
-      offered = "";
-      $("s-developer").checked = loaded.mode === "developer";
+      drafts(loaded);
       layout(loaded.mode === "developer");
-      const list = $("s-developer-list");
-      list.replaceChildren();
-      for (const item of loaded.advanced_options || []) {
-        const row = document.createElement("li");
-        row.textContent = `${item.option}: ${item.tier}${item.issue ? `, decided in ${item.issue}` : ""}`;
-        list.append(row);
-      }
-      renderDeveloper();
       busy = false;
       renderChat();
       renderEmbedding();
-      renderMemory();
+      renderOffer();
+      renderAll();
+      editor(!loaded.chat_backend);
       enable(true);
       // "not set (run 'melo setup')" is advice for the terminal: here the empty select says it.
       const errors = (loaded.errors || []).filter((item) => typeof item === "string" && item && !terminalAdvice(item));
       status.textContent = !loaded.chat_backend ? "Choose a server to continue." : errors.length ? "Review your settings before saving." : "";
       showError(errors.join("\n"));
+      dialog.dataset.ready = "true";
+      loadCheckin();
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       busy = false;
@@ -268,26 +813,25 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     generation += 1;
     discoveryVersion += 1;
     keyVersion += 1;
+    saving = false;
     invalidateTest();
   });
-  reload.addEventListener("click", open);
+  reload.addEventListener("click", () => open(current));
   chat.addEventListener("change", () => { invalidateTest(); renderChat(); enable(!busy); });
-  embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); renderMemory(); });
+  embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); renderOffer(); });
   $("s-embed-use").addEventListener("change", () => {
     invalidateTest();
     if ($("s-embed-use").checked) {
       // The embedding model is served beside the chat model: same backend, same address.
-      if (!offered || !settings.choices.embedding_backends.some((choice) => choice.key === chat.value)) return renderMemory();
+      if (!offered || !settings.choices.embedding_backends.some((choice) => choice.key === chat.value)) return renderOffer();
       embedding.value = chat.value;
-      Object.assign(section(chat.value), { embedding_url: $("s-chat-url").value, embedding_model: offered });
+      Object.assign(section(chat.value), {embedding_url: $("s-chat-url").value, embedding_model: offered});
     } else {
       embedding.value = "none";
     }
     renderEmbedding();
-    return renderMemory();
+    return renderOffer();
   });
-  $("s-workspace").addEventListener("input", invalidateTest);
-  $("s-developer").addEventListener("change", renderDeveloper);
   for (const [id, field] of [["s-chat-url", "chat_url"], ["s-chat-model", "chat_model"],
     ["s-key-env", "api_key_env"], ["s-base-url", "base_url"]]) {
     $(id).addEventListener("input", () => {
@@ -310,7 +854,7 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     if (busy || !settings || isCloud()) return;
     const version = ++discoveryVersion;
     const currentGeneration = generation;
-    const params = new URLSearchParams({ backend: chat.value, url: $("s-chat-url").value });
+    const params = new URLSearchParams({backend: chat.value, url: $("s-chat-url").value});
     if (!$("s-chat-url").value) {
       modelStatus.textContent = words.needUrl;
       return;
@@ -321,14 +865,14 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
       const result = await api(`/models?${params}`);
       if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
       $("s-model-options").replaceChildren();
-      for (const model of result.models) {
+      for (const name of result.models) {
         const option = document.createElement("option");
-        option.value = model;
+        option.value = name;
         $("s-model-options").append(option);
       }
       modelStatus.textContent = result.models.length ? "Choose a discovered model or type a name." : "No models found. Type a model name.";
       offered = result.suggested_embedding || "";
-      renderMemory();
+      renderOffer();
     } catch (err) {
       if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
       modelStatus.textContent = err.message || "Could not discover models. Type a model name.";
@@ -337,28 +881,6 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     }
   });
 
-  function candidate() {
-    const chatData = section(chat.value);
-    const selectedSections = { [chat.value]: isCloud()
-      ? { api_key_env: chatData.api_key_env, base_url: chatData.base_url, chat_model: chatData.chat_model }
-      : { chat_url: chatData.chat_url, chat_model: chatData.chat_model } };
-    if (embedding.value !== "none") {
-      const data = section(embedding.value);
-      selectedSections[embedding.value] = {
-        ...selectedSections[embedding.value],
-        embedding_url: data.embedding_url,
-        embedding_model: data.embedding_model,
-      };
-    }
-    return { chat_backend: chat.value, embedding_backend: embedding.value,
-      workspace: $("s-workspace").value, sections: selectedSections };
-  }
-
-  function saveBody() {
-    const across = settings.across_chats === undefined ? {} : { across_chats: $("s-across-chats").checked };
-    return { ...candidate(), revision: settings.revision, mode: $("s-developer").checked ? "developer" : "default", ...across };
-  }
-
   testButton.addEventListener("click", async () => {
     if (busy || !settings || testButton.disabled) return;
     const version = ++testVersion;
@@ -366,51 +888,65 @@ export function setupSettings({ api, onSaved, developer = () => false }) {
     testButton.disabled = true;
     testStatus.textContent = "Testing…";
     testStatus.dataset.state = "testing";
+    const both = embedding.value !== "none" && !!embedding.value;
+    const firstLine = (text) => (typeof text === "string" ? text.split(/\r?\n/)[0] : "") || "Unknown error";
     try {
-      const result = await api("/settings/test", { method: "POST", body: candidate() });
+      const result = await api("/settings/test", {method: "POST", body: candidate()});
       if (version !== testVersion || currentGeneration !== generation || !dialog.open) return;
       if (result.ok === true) {
-        testStatus.textContent = "Backend reachable";
+        tested = {at: clock(), ok: true};
+        testStatus.textContent = both ? "Connected. Both models answered just now." : "Connected. The chat model answered just now.";
         testStatus.dataset.state = "success";
       } else {
-        const message = typeof result.error === "string" ? result.error.split(/\r?\n/)[0] : "Unknown error";
-        testStatus.textContent = `Could not connect: ${message || "Unknown error"}`;
+        tested = {at: clock(), ok: false, failed: result.failed === "embedding" ? "embedding" : "chat"};
+        testStatus.textContent = `Could not connect: ${firstLine(result.error)}`;
         testStatus.dataset.state = "error";
       }
     } catch (err) {
       if (version !== testVersion || currentGeneration !== generation || !dialog.open) return;
-      const message = typeof err.message === "string" ? err.message.split(/\r?\n/)[0] : "Unknown error";
-      testStatus.textContent = `Could not connect: ${message || "Unknown error"}`;
+      testStatus.textContent = `Could not connect: ${firstLine(err.message)}`;
       testStatus.dataset.state = "error";
     } finally {
-      if (version === testVersion && currentGeneration === generation && dialog.open) testButton.disabled = busy || !settings;
+      if (version === testVersion && currentGeneration === generation && dialog.open) {
+        testButton.disabled = busy || !settings;
+        model();
+      }
     }
   });
 
   save.addEventListener("click", async () => {
-    if (busy || !settings || !chat.value) return;
+    if (busy || saving || !settings || !chat.value) return;
     const currentGeneration = generation;
-    const body = saveBody();
+    const before = settings;
+    const across = settings.across_chats === undefined ? {} : {across_chats: $("s-across-chats").checked};
+    const body = {...candidate(), revision: settings.revision, mode: $("s-developer").checked ? "developer" : "default", ...across};
     busy = true;
     invalidateTest();
     enable(false);
     showError("");
-    status.textContent = "Saving settings…";
+    saved("", null);
+    status.textContent = "Saving the connection…";
     try {
-      const saved = await api("/settings", { method: "PUT", body });
-      // Saving succeeded even if the dialog was closed while the request ran.
-      try { await onSaved?.(saved); } catch { /* The caller owns refresh failures. */ }
-      if (currentGeneration !== generation || !dialog.open) return;
-      settings = saved;
-      status.textContent = "Settings saved.";
-      dialog.close();
+      const answer = await api("/settings", {method: "PUT", body});
+      if (currentGeneration !== generation || !dialog.open) {
+        try { await onSaved?.(answer); } catch { /* The caller owns refresh failures. */ }
+        return;
+      }
+      busy = false;
+      await adopt(answer);
+      drafts(answer);
+      renderChat();
+      renderEmbedding();
+      renderOffer();
+      editor(false);
+      status.textContent = "";
+      const back = before.chat_backend
+        ? () => commit(savedConnection(before), "Undone: the connection is as it was.") : null;
+      saved(back ? "Saved: the connection." : "Saved: the connection. Test it to be sure the server answers.", back);
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       status.textContent = "";
-      const conflict = err.status === 409 && err.code === "settings_changed";
-      const errors = err.code === "invalid_settings" && Array.isArray(err.details?.errors)
-        ? err.details.errors.filter((item) => typeof item === "string" && item).join("\n") : "";
-      showError(conflict ? "The settings file changed since it was loaded. Reload and retry." : (errors || err.message || "Could not save settings."), conflict);
+      failure(err, "Could not save settings.");
     } finally {
       if (currentGeneration === generation && dialog.open) {
         busy = false;

@@ -658,6 +658,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                          choose: { [weak self] reply in self?.chooseFolder(reply) ?? reply(nil) },
                          reveal: { [weak self] path, reply in self?.revealFolder(path, reply) ?? reply(false) }),
             contentWorld: .page, name: FolderBridge.name)
+        configuration.userContentController.addScriptMessageHandler(
+            DesktopBridge(gatewayPort: { [weak self] in self?.port ?? 0 },
+                          current: { [weak self] in self?.pet?.settings.mode ?? .pill },
+                          choose: { [weak self] mode in self?.pet?.setDesktop(mode) }),
+            contentWorld: .page, name: DesktopBridge.name)
         let view = ConsoleWebView(frame: content.bounds, configuration: configuration)
         view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
@@ -695,6 +700,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: FolderBridge.name, contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: DesktopBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
         page = PageState()
