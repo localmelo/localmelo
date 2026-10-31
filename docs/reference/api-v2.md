@@ -266,7 +266,8 @@ Without `session_id` (or with the main chat's) the same call lists the whole day
   priority (0 to 5). A result is always plain words: a run's own marker reads
   `Stopped before answering` or `Ended without an answer`, a path reads `Made a
   picture` or the file's name, and code gives way to the first sentence around
-  it (`Wrote some code` when there is none).
+  it (`Wrote some code` when there is none). In the whole day's list, a task a
+  side chat started also has `from`, that chat's title.
 - `approvals` lists what the row's session asked to do today, oldest first, at
   most 20: `{id, what, answer, at}`. `what` is the call in plain words (`Write
   slides.md`, `Run the tests`, `Run a command`; never a command line, code or
@@ -912,14 +913,17 @@ The session's turns, oldest first within the page.
   first: from the page's oldest turn (from the start, on the oldest page) up to
   the next page's first turn (up to now, on the newest page), at most the newest
   50. A main chat without turns gives its newest 50 cards and a `replay_from`
-  just before the oldest of them, so the stream replays nothing older.
+  just before the oldest of them, so the stream replays nothing older. A side
+  chat's pages carry `cards` and `echoes` the same way once it has any (a task
+  it started); a side chat without them has neither key.
 
 ### Cards in the main chat
 
-When a side chat's run ends, or a task finishes, fails or waits for an
-approval, the main chat gets a card: an `attention.card` session event that
-belongs to no turn. A card is never a turn: no model reads it, and the main
-chat's conversation never holds it.
+When a side chat's run ends, the main chat gets a card: an `attention.card`
+session event that belongs to no turn. When a task finishes, fails or waits for
+an approval, the chat that started it gets the card (its `front_id`: the main
+chat or a side chat; the main chat when that side chat is gone). A card is never
+a turn: no model reads it, and a chat's conversation never holds it.
 
 Its `data`:
 
@@ -954,8 +958,10 @@ Its `data`:
   once a minute; a waiting card whose approval was answered first is never
   written, and an approval answered later is followed by its `answered` card. The main chat's stream carries new cards as `attention.card` frames.
 - A task created through `POST /api/tasks` belongs to the chat its
-  `front_id` names, else to the main chat; its cards still come to the main
-  chat.
+  `front_id` names, else to the main chat; its cards, and the echoes of the
+  chat's task tools, come to that chat. A side chat's `done` card, and a `done`
+  card of one of its tasks, is also read by the main chat's next turn as one
+  line of news naming the side chat.
 
 ### Echoes in the main chat
 
@@ -991,8 +997,14 @@ with the echo.
   the plain words, and names a priority by its code (`Started: <title> · P2`,
   `<title> → P3`, `Undone: <title> is back to P2`); `typed` is the message it
   answers; `of` is the echo it answers.
-- `as_task` on any session but the main chat is 400 `invalid_request`. A
-  repeated `client_request_id` of a delegation answers the same echo.
+- `as_task` on a task session is 400 `invalid_request`; the main chat and a
+  side chat take it, and a side chat's code rules (`/task`, control phrases,
+  follow-ups, chores and reminders) apply from its second message, the task
+  belonging to that side chat. A repeated `client_request_id` of a delegation
+  answers the same echo.
+- A turn's echoes are stored in the chat that was spoken to. An echo about a
+  task of another chat carries `from_main: true` or `from_chat`, that chat's
+  title.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
 - `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
   "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}` answers
@@ -1005,7 +1017,9 @@ with the echo.
   nothing (an `undone` echo answers). Each answers once (409
   `already_answered`); an unknown echo or task is 404, `save` with 50 chores
   already kept is 409 `invalid_transition`, and a `do` that does not fit the
-  echo is 400 `invalid_request`.
+  echo is 400 `invalid_request`. The body takes `session_id` for an echo in a
+  side chat (404 for an unknown chat or one that is not a side chat); absent,
+  it is the main chat's.
 
 ## GET /api/sessions/{id}/events
 

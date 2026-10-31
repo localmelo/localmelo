@@ -6,7 +6,8 @@ This guide explains how the scheduler decides when chat requests may reach a sha
 
 ![The main chat starts tasks at a level from your words](../assets/img/main-chat-tasks.webp)
 
-- **Who starts a task.** The main chat, when you ask it for work, owns the task (`front_id`); `/task …` or **Run as a task** starts one without a model call. The [web console guide](web-console.md#hand-work-to-the-main-chat) shows how it looks.
+- **Who starts a task.** The chat you ask for work, the main chat or a side chat, owns the task (`front_id`); `/task …` or **Run as a task** starts one without a model call. The [web console guide](web-console.md#hand-work-to-the-main-chat) shows how it looks.
+- **A side chat owns its tasks.** A side chat has the same task tools and code words and the same scheduler. Its tasks' card, approvals and result go back to it, and it reads the ones that ended before its next answer; the main chat's Activity lists every task and names the side chat on those it did not start. When a side chat finishes work, the main chat reads one line about it with its next message ([side chats start tasks too](web-console.md#side-chats-start-tasks-too)).
 - **Its level.** Code reads only your own message: urgency words, a deadline today or the word "today" itself (not "not today") give P1, "no rush" gives P3, anything else P2. The reason is kept with the task (`you said "urgent"`). A page, a file or a task's report never sets a level.
 - **Your level stays.** A level you set (the line's **Change**, the panel, `melo task level`) is yours: the scheduler leaves it alone.
 - **Changes need your words.** The main chat changes a task (stop, pause, resume, a level) only when your latest message asks for it and names the task; otherwise it shows a suggestion you apply with one tap.

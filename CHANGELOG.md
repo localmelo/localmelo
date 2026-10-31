@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Side chats start tasks too. A side chat has the main chat's task tools and
+  code words (`/task …`, **Run as a task**, `pause the slides`, chores and
+  reminders), the same priorities and the same scheduler. A task belongs to the
+  chat that started it: its line, card, approvals, result and news come back to
+  that chat, and a chat acts on its own tasks first, then on the other chats'
+  (the line says whose). The main chat's Activity still lists every task and
+  names the side chat on the ones it did not start (`From Trip plan`), and its
+  next message reads one line when a side chat finished work. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

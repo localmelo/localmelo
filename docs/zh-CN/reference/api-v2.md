@@ -138,7 +138,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `since`（自纪元起的秒数）是这一天的开始；默认是网关所在电脑的本地午夜，不能是将来的时间（`400 invalid_request`），最多往回一周。
 - `session_id`（最多 128 个字符）是面板当前打开的对话。对于侧边对话，`scope` 为 `chat`，行是该对话自己的一行和它启动的任务（任务的 `front_id`）；未知的 id 视为没有任何内容的侧边对话。对于主对话（类型为 `front` 的会话，或 `meta` 里有 `main: true` 的会话），以及不带 `session_id` 时，`scope` 为 `all`，行是一整天的内容，包括 worker 运行和终端对话。
-- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。
+- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。在一整天的列表里，旁支对话开始的任务还带 `from`，即那个对话的标题。
 - `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令行、代码或文本），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
 - 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`、`approvals`）。
 
@@ -461,13 +461,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 对于被 `Try again` 撤销的轮次，`undone` 为 `true`；此类轮次仍会被列出。
 - `answer` 和 `result.result` 是保存的副本：密钥已脱敏，并且在保留期之后，内联的 `<think>` 块已被删除。
 - 轮次运行期间，`cause` 为 `""`。
-- 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。
+- 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。旁支对话一旦有卡片或回执（它开始过任务），它的每一页也同样带 `cards` 和 `echoes`；没有的旁支对话两个键都没有。
 
 <a id="cards-in-the-main-chat"></a>
 
 ### 主对话中的卡片
 
-旁支对话的一次运行结束，或任务完成、失败或等待审批时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。卡片从来不是轮次：没有模型会读取它，主对话的对话内容也从不包含它。
+旁支对话的一次运行结束时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。任务完成、失败或等待审批时，开始它的对话得到卡片（看它的 `front_id`：主对话或某个旁支对话；那个旁支对话已不存在时则是主对话）。卡片从来不是轮次：没有模型会读取它，任何对话的对话内容也从不包含它。
 
 它的 `data`：
 
@@ -480,7 +480,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `waiting` 卡片有 `request_id`。该审批得到答复后，会有一张状态为 `answered`、`request_id` 相同、`line` 为答复的卡片跟在它后面，客户端把这一张卡片显示为带着答复、不再有 Review 的样子。答复不是新消息：它永远不是列表的 `last_card`，等待卡片从未写入时也不会写入答复。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入；之后才答复的审批会跟上它的 `answered` 卡片。主对话的事件流以 `attention.card` 帧送来新卡片。
-- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
+- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片，以及该对话任务工具产生的回执，都来到那个对话。旁支对话的 `done` 卡片，以及它的某个任务的 `done` 卡片，也会在主对话的下一轮里读成一行点名那个旁支对话的消息。
 
 <a id="echoes-in-the-main-chat"></a>
 
@@ -493,9 +493,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
-- 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
+- 在任务会话上使用 `as_task` 返回 400 `invalid_request`；主对话和旁支对话都接受它，旁支对话从第二条消息起适用代码规则（`/task`、控制短语、跟进、定时事项和提醒），任务属于那个旁支对话。委派时重复的 `client_request_id` 返回同一条回执。
+- 一轮的回执存在被说话的那个对话里。关于别的对话的任务的回执带 `from_main: true` 或 `from_chat`（那个对话的标题）。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
-- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
 
 ## GET /api/sessions/{id}/events
 

@@ -137,8 +137,9 @@ under the main chat. A side chat's header begins with **Main chat ›**, which g
 and closing the open side chat goes back to the main chat too. Chats made before the main
 chat existed are its side chats, as they were.
 
-When a side chat's run ends, or a task finishes, fails or waits for your approval, the
-main chat shows a card under the day it happened:
+When a side chat's run ends, the main chat shows a card under the day it happened. So does a
+task of the main chat that finishes, fails or waits for your approval; a side chat's own tasks
+come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads:
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.
@@ -165,6 +166,16 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
 - **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question (a `?` anywhere, or "quick question") asks **Start this as a task?** first. It answers in the language of your message. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
+
+## Side chats start tasks too
+
+- **Same words, same priorities.** In a side chat, `/task …`, **Run as a task**, `pause the slides` and the model's own judgment work as in the main chat, at the same P0 to P5 levels and under the same scheduler. The first message of a new side chat goes to the model, which can start a task itself; the code words work from the second message on.
+- **A task comes back to the chat that started it.** Its line (`Started: Find hotels · P2`, with **Change** and **Undo**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
+- **The main chat still sees everything.** Activity and Workers list every task; one a side chat started reads `From Trip plan`.
+- **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. A task of another chat can still be named: its line reads `From Main chat` or `From Trip plan`.
+- **The main chat hears when a side chat finishes work.** With your next message it reads one line, the side chat's name and a short summary, when that chat answered or one of its tasks finished. It is information, not a message.
+- **Chores and reminders belong to the chat that made them.** One saved in a side chat runs as that chat's task and reports there, not in the main chat's check-in.
+- The terminal starts tasks from the main chat only (`/main`, then `/task …`).
 
 ## Chores that repeat
 
