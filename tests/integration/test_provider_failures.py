@@ -64,7 +64,11 @@ async def _run(server: FakeServer, memory_dir: Path) -> tuple[RunResult, Sleeps]
         model="m",
         transport=httpx.MockTransport(server.handler),
     )
-    options = AgentOptions(builtins=frozenset(), memory_dir=str(memory_dir))
+    # answer_on_stop (on by default) would send one more request after a refusal
+    # that says a budget is used; these tests count the requests of the failure.
+    options = AgentOptions(
+        builtins=frozenset(), memory_dir=str(memory_dir), answer_on_stop=False
+    )
     agent = Agent(llm=llm, options=options)
     sleeps = Sleeps()
     agent.chat.sleep = sleeps

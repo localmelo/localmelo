@@ -200,7 +200,15 @@ async def test_a_failed_switch_leaves_browsing_as_it_was(chat: Any) -> None:
     assert factory.browser_driver == "off"
 
 
-async def test_auto_mode_allows_everything_but_still_asks_about_a_website() -> None:
+async def test_auto_mode_asks_nobody_and_reviews_an_unnamed_site() -> None:
+    # Auto mode (#339): nobody is asked. A site the person named opens; one
+    # they did not name opens only when their model finds it serves the
+    # request (the agent reviews it, once per site per chat), else it is
+    # blocked. Here the policy reads the review the agent attached.
+    import dataclasses
+
+    from localmelo.melo.contracts.approvals import find_auto, review_mode
+    from localmelo.melo.contracts.review import ActionReview
     from localmelo.support.cli.approvals import Approvals
 
     asked: list[str] = []
@@ -214,15 +222,30 @@ async def test_auto_mode_allows_everything_but_still_asks_about_a_website() -> N
     approvals = Approvals(ask, "auto")
     policy = approvals.policy()
     assert policy is not None
-    shell = ApprovalRequest("r", "run", "c", "shell_exec", {"command": "ls"}, "", None)
-    assert (await policy.decide(shell)).origin == "policy" and asked == []
-    site = _ask()
-    assert (await policy.decide(site)).allow and asked == [
-        "browser:https://example.com"
-    ]
-    assert (
-        await policy.decide(site)
-    ).origin == "session"  # the chat's grant holds in auto mode
+    assert find_auto(policy) is not None and review_mode(policy, _ask()) == "auto"
+    shell = dataclasses.replace(
+        _ask(), tool_name="shell_exec", arguments={"command": "ls"}, tier="exec"
+    )
+    shell = dataclasses.replace(shell, review=ActionReview("routine"))
+    assert (await policy.decide(shell)).origin == "auto"
+    named = dataclasses.replace(
+        _ask(),
+        review=ActionReview("routine", (), ("Opens example.com, which you named.",)),
+    )
+    assert (await policy.decide(named)).allow
+    unnamed = dataclasses.replace(
+        _ask("tracker.example"),
+        review=ActionReview(
+            "high",
+            ("beyond_request",),
+            ("Does something the request did not ask for.",),
+        ),
+    )
+    blocked = await policy.decide(unnamed)
+    assert (blocked.allow, blocked.origin) == (False, "auto")
+    # A site nothing reviewed does not open either.
+    assert not (await policy.decide(_ask("other.example"))).allow
+    assert asked == []  # nobody is asked in auto mode
     approvals = Approvals(ask, "yolo")
     assert approvals.policy() is None  # --yolo asks about nothing
 

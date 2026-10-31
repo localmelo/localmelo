@@ -173,7 +173,7 @@ asyncio.run(main())
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
-| `run.finished` | Last. | `result` |
+| `run.finished` | Last. | `result`, `reviews` |
 
 ### run.started
 
@@ -335,8 +335,16 @@ The number of `tool.started` events is `RunResult.n_tool`.
   before the policy would have been asked. Otherwise it is
   `{request_id, allowed, reason, remember, origin}`, where `origin` is the
   decision's
-  (`user`, `session`, `policy` or `timeout`), `error` when the policy failed,
-  or `withdrawn` when the run was cancelled while the policy decided. See
+  (`user`, `session`, `policy`, `timeout` or `auto`), `error` when the policy
+  failed, or `withdrawn` when the run was cancelled while the policy decided.
+  In auto mode, and for a call whose review is not plainly routine, it also has
+  `mode` (`"auto"`), `review` (the review: `verdict`, `categories`, `reasons`,
+  `paths`, `by` (`rules` or `model`), `rules_version` and, when the model was
+  asked, `model`: `{verdict, category, fits_request, user_asked, reason, ms}` or
+  `{error, ms}`) and `step_key` (32 hex characters: the same step in the same
+  folder); a step allowed once has `allowance: "once"`. Origin `auto` with
+  `allowed: false` is a step auto mode blocked; `reason` then names it in a few
+  words (`installs software`). See
   [Approve tool calls](../guides/python.md#approve-tool-calls).
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
@@ -427,13 +435,13 @@ is in `memory_stats.recall_log` and, with its item text, in
 - `action`: the reflection's choice: `continue`, `stop`, `decompose` or
   `done`. With `reflection_gate="utility"` it is `decompose` for a
   reflection over the size limit that did not choose `done`; with the
-  default `"flags"`, such a reflection is trimmed and keeps its choice.
+  default `"patient"` or `"flags"`, such a reflection is trimmed and keeps its choice.
 - `continue_run`: `true` only when another attempt starts. It is `false`
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
 - `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
   `next_step_is_novel`, as booleans; `null` when the reply was not readable.
-- `gate`: the `reflection_gate` in force, `flags`, `utility` or `patient`.
+- `gate`: the `reflection_gate` in force, `patient` (the default), `flags` or `utility`.
 - `utility`: with `"utility"`, the decision's utility (see the option); else
   `null`.
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
@@ -458,7 +466,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
-  gets no event of its own. With the default `reflection_gate="flags"`, a
+  gets no event of its own. With the default `reflection_gate="patient"` or `"flags"`, a
   first reply that has JSON the decoder rejected, and is not a tool call, puts
   one more line after the retry note: the decoder's error and up to 60
   characters around it, for example `Your reply was not valid JSON (Expecting
@@ -466,7 +474,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   again with one JSON object.` In the compress modes the prompt fit can
   refuse a request before it is sent, which reads as an unreadable reply:
   `requests` is then 0, or 1 when only the retry was refused.
-- `readable`: `false` when, with the default `reflection_gate="flags"`, the
+- `readable`: `false` when, with the default `reflection_gate="patient"` or `"flags"`, the
   second reply still held no reflection. `requests` is then 2; `action`,
   `rationale`, `summary` and `best_effort_result` are `null`; and
   `continue_run` is `true`, unless no attempt could start, in which case the
@@ -588,6 +596,10 @@ ends the run's `run.progress` events, never the run.
 
 - `result`: the run's `RunResult`, as `RunResult.to_dict()`. Nothing in it
   is clipped, so `RunResult(**event.data["result"])` rebuilds it.
+- `reviews`: only for a run with an approval policy: the calls the rules found
+  `routine`, `high` and `undecided`, the `model` reviews the run sent, and
+  `blocked`: the steps auto mode blocked, each `{call_id, title, step_key}`. A
+  run without a policy, and an event stored before this key, has no `reviews`.
 
 `run.finished` comes also when `run_task` raises because the run was
 cancelled; it then holds the `RunResult` that `run_task` would have

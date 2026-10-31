@@ -347,7 +347,7 @@ async def test_embedding_requests_send_no_call_kind() -> None:
 
 
 def test_the_call_kinds() -> None:
-    assert LLM_REQUEST_KINDS == ("plan", "reflect", "retrieve", "estimate")
+    assert LLM_REQUEST_KINDS == ("plan", "reflect", "retrieve", "estimate", "review")
     assert LLM_REQUEST_KIND.get() == ""
 
 

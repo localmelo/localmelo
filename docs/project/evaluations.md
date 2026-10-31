@@ -8,13 +8,13 @@ comparisons are added when they settle a default.
 ## Reflection gate
 
 On 2026-10-23, on 12 coding exercises run 5 times in each setting, the
-default `flags` gate passed **59/60 runs, against 50/60 for the earlier
+`flags` gate (the default until the patient gate below) passed **59/60 runs, against 50/60 for the earlier
 `utility` gate: 15 percentage points more**. Runs without reflection passed
 59/60 as well.
 
 | Setting | Option | Passed |
 |---|---|---:|
-| `flags`, the default since [#34](https://github.com/localmelo/localmelo/pull/34) | `--reflection-gate flags` | 59/60 |
+| `flags`, the default from [#34](https://github.com/localmelo/localmelo/pull/34) until the patient gate | `--reflection-gate flags` | 59/60 |
 | `utility`, the earlier gate | `--reflection-gate utility` | 50/60 |
 | No reflection | `--attempt-policy none` | 59/60 |
 
@@ -91,3 +91,29 @@ each one contributes.
 - This comparison makes no claim about speed.
 - The raw records (run logs, requests and replies) are not published. They
   stay with the maintainer's benchmark, which is not public.
+
+## Patient gate and answer on stop
+
+On two sets of 24 web-search questions, each question run once in each
+setting, the patient gate with `answer_on_stop` gave an answer to more of them
+than the earlier defaults (`--reflection-gate flags -X agent.answer_on_stop=off`).
+They are the defaults now.
+
+| Set | Earlier defaults | Patient gate and `answer_on_stop` |
+|---|---:|---:|
+| First set | 7/24 | 17/24 |
+| Second set | 19/24 | 20/24 |
+
+- Paired by question, the new setting alone answered 11 questions of the first
+  set and the earlier defaults alone answered 1 (exact sign test, p = 0.006). The
+  second set differs by one question (p = 1.0).
+- Runs with no answer on the first set: 17 under the earlier defaults (11
+  stopped by the gate, 5 finished without the closing line the question asked
+  for, 1 server error) and 3 under the new setting (1 gate stop, 2 without
+  the line). On the second set, the only runs with no answer lacked the closing
+  line (5, then 3).
+- The runs of the new setting were also limited to 29 model requests, which a
+  default run does not have (`-X agent.max_calls`), so this comparison does not
+  measure the cost of the new defaults on its own.
+- The closing-line request ([Run results](../reference/run-results.md#statuses))
+  was added after this comparison, for the runs that finished without the line.

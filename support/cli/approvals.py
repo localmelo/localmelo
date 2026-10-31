@@ -6,9 +6,10 @@ it from the panel's keys: allow once (1), allow the tool for the session
 choice: its options are allow once (1) and deny (2), and the panel starts
 on deny. :class:`Approvals` is the session's policy:
 in ``ask`` mode a :class:`RememberingPolicy` that asks through the panel
-and keeps session grants, in ``auto`` mode the same behind a
-:class:`RoutineOnlyPolicy`, so that only high-impact and undecided calls
-ask; with ``--yolo`` no policy at all.
+and keeps session grants, in ``auto`` mode an
+:class:`~localmelo.melo.contracts.approvals.AutoPolicy`: nothing asks, a
+routine call runs and any other is blocked and explained (#339); with
+``--yolo`` no policy at all.
 
 The panel shows what will run escaped, never cleaned: approval is the only
 control before a shell command or Python code runs, so every byte shows.
@@ -29,16 +30,13 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    AutoPolicy,
     DenyAllPolicy,
 )
 from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
-from localmelo.support.sessions.approvals import (
-    AskFunction,
-    RememberingPolicy,
-    RoutineOnlyPolicy,
-)
+from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, folder_name, home_label
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
@@ -58,8 +56,8 @@ Mode = Literal["ask", "auto", "deny", "yolo"]
 DENY_REASON: Final = "approvals are set to deny"
 _MODE_WORDS: Final = {
     "ask": "asks before running commands or changing files",
-    "auto": "runs routine commands without asking; asks before installs, downloads "
-    "and changes outside the folder",
+    "auto": "works without asking; blocks risky steps and steps you did not ask "
+    "for, and explains them",
     "deny": "never runs commands or changes files",
     "yolo": "runs everything without asking (--yolo)",
 }
@@ -447,15 +445,6 @@ def approval_words(mode: Mode, grants: Iterable[str]) -> str:
     return _MODE_WORDS[mode]
 
 
-class _AutoPolicy(RoutineOnlyPolicy):
-    """Auto mode: routine calls run unasked, but a website still asks (once per site per chat)."""
-
-    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        if request.tool_name.startswith("browser:"):
-            return await self.inner.decide(request)
-        return await super().decide(request)
-
-
 class Approvals:
     """The session's approval mode and policy, which keeps the grants."""
 
@@ -470,6 +459,8 @@ class Approvals:
         self._ask = ask
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = RememberingPolicy(ask)
+        # Auto mode's policy, kept across turns for its allowances.
+        self._auto = AutoPolicy()
 
     def policy(self) -> ApprovalPolicy | None:
         """The policy for a turn: None with ``--yolo``, so nothing asks."""
@@ -478,7 +469,7 @@ class Approvals:
         if self.mode == "deny":
             return DenyAllPolicy(DENY_REASON)
         auto = self.mode == "auto"
-        self.snapshots.inner = _AutoPolicy(self._policy) if auto else self._policy
+        self.snapshots.inner = self._auto if auto else self._policy
         return self.snapshots
 
     def set_mode(self, mode: Literal["ask", "auto", "deny"]) -> None:
@@ -496,4 +487,5 @@ class Approvals:
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
         self._policy = RememberingPolicy(self._ask)
+        self._auto = AutoPolicy()
         self.snapshots.clear()

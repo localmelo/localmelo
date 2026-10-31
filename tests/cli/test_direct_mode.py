@@ -216,13 +216,13 @@ class TestFlags:
         ]
         assert action.option_strings == ["--reflection-gate"]
         assert action.choices == ["flags", "utility", "patient"]
-        assert action.default is None  # AgentOptions decides: "flags"
+        assert action.default is None  # AgentOptions decides: "patient"
         assert action.help == (
             "After a reflection, start the next attempt when it chooses continue "
-            "and its three checks hold (flags, default), or also require its "
+            "and its three checks hold (flags), or also require its "
             "utility score to reach 0.1 (utility, the behavior before this option), "
             "or as flags, but once per run also when the next step is not novel "
-            "(patient)"
+            "(patient, default)"
         )
 
     @pytest.mark.parametrize(("value", "seconds"), [("600", 600.0), ("0.5", 0.5)])
@@ -720,6 +720,7 @@ class TestJsonOutput:
                 "prefix_cache",
                 "confinement",
                 "answered_on_stop",
+                "format_fixed",
             )
         ] + ["localmelo_version"]
         assert record.pop("localmelo_version") == "v-test"
@@ -735,7 +736,12 @@ class TestJsonOutput:
         assert self._record(capsys.readouterr().out)["status"] == status
 
     @pytest.mark.parametrize(
-        ("argv", "gate"), [([], "flags"), (["--reflection-gate", "utility"], "utility")]
+        ("argv", "gate"),
+        [
+            ([], "patient"),
+            (["--reflection-gate", "flags"], "flags"),
+            (["--reflection-gate", "utility"], "utility"),
+        ],
     )
     def test_the_config_names_the_reflection_gate(
         self, argv: list[str], gate: str, capsys: pytest.CaptureFixture[str]

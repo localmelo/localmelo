@@ -8,6 +8,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalOrigin,
     ApprovalPolicy,
     ApprovalRequest,
+    AutoPolicy,
     DenyAllPolicy,
     denial_text,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "ApprovalOrigin",
     "ApprovalPolicy",
     "ApprovalRequest",
+    "AutoPolicy",
     "BaseEmbeddingProvider",
     "BaseLLMProvider",
     "BaseToolProvider",

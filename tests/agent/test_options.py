@@ -30,7 +30,8 @@ def test_defaults_equal_the_schema_constants() -> None:
     assert opts.steps_per_attempt == STEPS_PER_ATTEMPT
     assert opts.max_attempts == MAX_ATTEMPTS
     assert opts.attempt_policy == "reflect"
-    assert opts.reflection_gate == "flags"
+    assert opts.reflection_gate == "patient"
+    assert opts.answer_on_stop is True
     assert opts.tool_exposure == "retrieve"
     assert opts.builtins is None
     assert opts.mode == "python"

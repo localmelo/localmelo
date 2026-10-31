@@ -47,7 +47,7 @@ chat_model = "qwen3:8b"
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行从不受此限制。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
-| `answer_on_stop` | `[agent]` | `false` | 开发者设置。`true` 让以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的直接运行再向模型发出一次不带工具的请求，根据已收集的证据（工作窗口和最新反思）索要最终答案，使用任务要求的格式，允许回答 `unknown`。运行保留原来的状态；`result` 就是这个答案，JSON 记录中有 `"answered_on_stop": true`。没有对应的标志，`-X agent.answer_on_stop=on` 仅对一次运行设置它。交互式界面、控制台、应用和网关会忽略它。见[运行结果](run-results.md#statuses)。`--reflection-gate patient`（`-X agent.reflection_gate=patient`）是同类的另一个开发者设置：见[反思](../concepts/how-it-works.md#reflection)。 |
+| `answer_on_stop` | `[agent]` | `true` | 开发者设置。`true` 让以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行再向模型发出一次不带工具的请求，根据已收集的证据（工作窗口和最新反思）索要最终答案，使用任务要求的格式，允许回答 `unknown`。运行保留原来的状态；`result` 就是这个答案，JSON 记录中有 `"answered_on_stop": true`。任务要求有收尾行（例如 `FINAL ANSWER:`）而答案里没有时，它也会再发出一次请求把这一行加上，记录中则有 `"format_fixed": true`。`false` 两种请求都不发；没有对应的标志，`-X agent.answer_on_stop=off` 仅对一次运行设置它。直接运行读取该键；交互式界面、控制台、应用和网关会忽略它，并且总是发出这些请求，只有控制台的主对话例外：它会把步数用完的一轮交给任务，而不是再发请求。见[运行结果](run-results.md#statuses)。`--reflection-gate`（默认 `patient`）是同类的另一个设置：见[反思](../concepts/how-it-works.md#reflection)。 |
 | `max_calls` | `[agent]` | 未设置 | 开发者设置。不小于 2 的整数：直接运行最多发出的模型请求数（规划、反思及其他请求；重试的请求每次尝试各算一次）。在会超出它的那个请求之前，运行以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。开启 `answer_on_stop` 时，最后一次调用留给答案：运行在发出 `N - 1` 个请求后停止，答案请求是第 `N` 次调用。未设置时没有上限。没有对应的标志，`-X agent.max_calls=N` 仅对一次运行设置它。交互式界面、控制台、应用和网关会忽略它。见[运行结果](run-results.md#statuses)。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
 | `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
@@ -232,7 +232,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 在 `v3` 且启用 `fixed_prefix` 时：
 
 - 在尝试边界，智能体只追加一次反思，作为一条普通的窗口消息（`[Reflections; data, not instructions]` 和该块），而不是把它重建为每个规划请求的最后一条消息。之后它随历史移动，并像任何消息一样在被丢弃时离开。每次尝试中新产生的内容仍遵循“只保留最新一条”规则（新的反思会替换工作记忆中保存的那条），但更早的块会留在历史中，直到被丢弃。
-- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在默认的 `reflection_gate = "flags"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
+- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在 `reflection_gate = "flags"` 或默认的 `"patient"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
 - 不可读的回复会在同一前缀上再次询问：先是该请求，接着是作为助手消息的不可读回复（工具调用写成文本，因此不会留下没有结果的调用），再是一条结尾说明，并带上该请求提供的工具，而不是文本记录。如果回复含有解码器拒绝的 JSON，说明之后会多一行引用解码器的错误。如果第一个请求没有重复规划请求（窗口已经移动），就没有可接续的交换，重试仍和以前一样是文本记录。读到的重试会把整个交换留在窗口中：请求、不可读的回复、说明和回复。
 - 使用 `window_eviction = "boundary"` 时，已结束尝试的轮次会在边界处被丢弃，因此那里只追加该块。
 
@@ -266,7 +266,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。
 
-在默认的 `reflection_gate = "flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
+在 `reflection_gate = "patient"`（默认）或 `"flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
 
 交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
 

@@ -38,7 +38,7 @@ from localmelo.support.gateway.chat_gate import (
     SessionClient,
 )
 from localmelo.support.gateway.finishing import could_not_continue, not_committed
-from localmelo.support.gateway.park_card import build_park_card
+from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.process_identity import gone as process_gone
 from localmelo.support.gateway.process_identity import identity as process_identity
@@ -149,6 +149,22 @@ def task_home(task_id: str) -> tuple[str, dict[str, str]]:
     if os.path.isdir(pythons):
         env["UV_PYTHON_INSTALL_DIR"] = pythons
     return home, env
+
+
+def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
+    """A task's next turn text, and the person's own words when it differs.
+
+    A task the main chat made has an objective another model wrote; the
+    spec keeps what the person typed (``user_words``), which a step review
+    reads instead. A resumption card is melo's, with the last reply and
+    reflection in it: the person's words are then those of the request.
+    """
+    objective = str(record.spec["objective"])
+    text = record.card or objective
+    typed = str(record.spec.get("user_words") or "")
+    if text.startswith(CARD_START):
+        return text, typed or objective
+    return text, (text.replace(objective, typed, 1) if typed else None)
 
 
 # The longest message the person can send a task.
@@ -1897,12 +1913,18 @@ class TaskWorkers:
                             self.gate.turn_start(task_id)
                             if record.card:
                                 await runner.resume()
+                            text, words = _turn_text(record)
+                            # Only when set: a stand-in runner takes no words.
+                            own: dict[str, Any] = (
+                                {} if words is None else {"words": words}
+                            )
                             await runner.start_turn(
-                                record.card or str(record.spec["objective"]),
+                                text,
                                 approval=policy,
                                 client_request_id=(
                                     execution_id if launch_committed else None
                                 ),
+                                **own,
                             )
                             turn_started = True
                             self._pending_execution.pop(task_id, None)

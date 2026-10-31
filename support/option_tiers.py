@@ -150,7 +150,7 @@ class Setting(NamedTuple):
 
 SETTINGS = (
     Setting("agent.attempt_policy", "--attempt-policy", False, "reflect"),
-    Setting("agent.reflection_gate", "--reflection-gate", False, "flags"),
+    Setting("agent.reflection_gate", "--reflection-gate", False, "patient"),
     Setting("agent.fixed_prefix", "--fixed-prefix"),
     Setting("agent.window_eviction", "--window-eviction"),
     Setting("agent.reflect_tool_guard", "--reflect-tool-guard"),

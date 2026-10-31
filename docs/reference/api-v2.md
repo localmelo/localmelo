@@ -648,16 +648,20 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
 - `GET /api/chores` answers `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`, oldest first. `?session_id=ID` of a side chat keeps that chat's own and gives `"scope": "chat"`; the main chat's id, an empty or no `session_id` lists all. An unknown or non-chat id is 404 `not_found`.
-- `POST /api/chores` takes `request` (required, at most 100,000 characters), `schedule`, and optional `title` (at most 200; default derived from the request), `level` (`P1` to `P4`, 1 to 4, or the older words `Today`, `Normal`, `Whenever`, `If idle`; default from the request's words, as for a task) and `front_id` (a chat; default the main chat). `schedule` is `{"kind": "daily" | "weekdays", "at": "HH:MM"}` (local time) or `{"kind": "hours", "every": 1..24}`; other keys are refused. A bad body is 400 `invalid_request`; 50 chores are the most (409 `chore_limit`). Answers 201 `{"chore"}`; the first `next_run` is the schedule's next time plus a jitter of up to 120 s.
-- `PATCH /api/chores/{id}` takes the `revision` read plus `title`, `request`, `schedule`, `level` and `enabled` (at least one). A stale revision is 409 `stale_revision`, an unknown chore 404 `not_found`. A new `schedule` or `enabled: true` plans `next_run` from now (a missed day is not run); `enabled: false` sets it to null.
+- `POST /api/chores` takes `request` (required, at most 100,000 characters), `schedule`, and optional `title` (at most 200; default derived from the request), `level` (`P1` to `P4`, 1 to 4, or the older words `Today`, `Normal`, `Whenever`, `If idle`; default from the request's words, as for a task) and `front_id` (a chat; default the main chat). `schedule` is `{"kind": "daily" | "weekdays", "at": "HH:MM"}` (local time), `{"kind": "hours", "every": 1..24}` or, for a reminder, `{"kind": "once", "at": "YYYY-MM-DDTHH:MM"}` (a local date and time to the minute; it must be ahead and at most 366 days away, else 400 `invalid_request`); other keys are refused. A bad body is 400 `invalid_request`; 50 chores are the most (409 `chore_limit`). Answers 201 `{"chore"}`; the first `next_run` is the schedule's next time plus a jitter of up to 120 s.
+- `PATCH /api/chores/{id}` takes the `revision` read plus `title`, `request`, `schedule`, `level` and `enabled` (at least one). A stale revision is 409 `stale_revision`, an unknown chore 404 `not_found`. A new `schedule` or `enabled: true` plans `next_run` from now (a missed day is not run); `enabled: false` sets it to null. A new `once` schedule also switches a done reminder back on; `enabled: true` on one whose time has passed is 400 `invalid_request`.
 - `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+
+A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 30 at 9:00` (in the page's language for the console), its first `next_run` is its time plus the jitter, and after its run the gateway switches it off: `enabled` false, `next_run` null, `last_run` and `last` kept. One due while the computer slept or the gateway was down runs at the next tick, and `late_min` then says how many minutes after its time it started (null when it started less than five minutes after it). It never waits for an earlier run to end.
+
+A one-time chore whose `request` starts with `Reminder: ` is a reminder. Its run's objective is that request plus a note that tells the model to say the reminder in one short sentence and not to do the task; the task's `reason` is `Reminder`, and its card in the main chat has `reminder: true` (the console words it `Reminder: <title>`, and for a failed run the card's line is the full words).
 
 `last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
 
@@ -931,8 +935,16 @@ with the echo.
   `queued` for its next step or `continued` as a new turn of a finished task;
   `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a repeating
   phrase code read: `Run this every weekday at 8:30?`, with `title`, `text`
-  (the work), `schedule`, `when` and `level`), `chore_saved` (with `chore_id`),
-  `checkin` (the check-in's note, with `items`), `undone` or `failed`. `line` is
+  (the work), `schedule`, `when` and `level`; a reminder cue with a time gives
+  `Remind you on Fri Oct 30 at 9:00?` with `reminder: true`, `text`
+  `Reminder: <words>`, `work` (the words), a `once` `schedule` and no
+  `level`), `chore_saved` (with `chore_id`),
+  `checkin` (the check-in's note, with `items`), `undone` or `failed`. A reminder
+  cue with no usable time (none, one that has passed, one more than a year
+  ahead) gives an `ask` echo with `ask: "when"` and `work` instead (`When should
+  I remind you?`); it has no buttons, and the next message, if it is only a
+  time (`Friday at 9`), within an hour, answers it with the `chore` echo
+  (`of` is the ask). `line` is
   the plain words, and names a priority by its code (`Started: <title> · P2`,
   `<title> → P3`, `Undone: <title> is back to P2`); `typed` is the message it
   answers; `of` is the echo it answers.
@@ -945,7 +957,8 @@ with the echo.
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
   `suggest`, start an `ask`, or set a `started` or `level` echo's task to the
   person's level. On a `chore` echo, `save` keeps the chore (a `chore_saved`
-  echo answers), `once` starts its work as one task and `cancel` keeps
+  echo answers; a reminder is kept at P1, and one whose time passed meanwhile is 400),
+  `once` starts its work as one task (not for a reminder: 400) and `cancel` keeps
   nothing (an `undone` echo answers). Each answers once (409
   `already_answered`); an unknown echo or task is 404, `save` with 50 chores
   already kept is 409 `invalid_transition`, and a `do` that does not fit the

@@ -100,6 +100,7 @@ async def workers(
             session_options(kwargs["options"], kwargs["workspace"]),
             max_steps=2,
             attempt_policy="none",
+            answer_on_stop=False,  # these runs end out of steps; no extra request
         )
         agent = Agent(
             llm=kwargs["wrap_llm"](llm),

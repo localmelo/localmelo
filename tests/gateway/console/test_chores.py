@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
+from localmelo.support.gateway.chore_schedule import Schedule
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
 from localmelo.support.gateway.console.front import ECHO_EVENT
@@ -847,3 +848,313 @@ async def test_a_polite_request_with_a_schedule_is_a_proposal_but_an_attachment_
             is None
         )
         assert llm.requests == []
+
+
+# ── Reminders: a one-time chore ──
+
+# The test clock is Wednesday 2026-10-28 07:00 in UTC (the chore options' zone).
+REMIND = "remind me to send the report on Friday at 9"
+FRIDAY = {"kind": "once", "at": "2026-10-30T09:00"}
+
+
+async def remind(client: httpx.AsyncClient, console: Console, text: str) -> Any:
+    response = await _say(client, console, text)
+    assert response.status_code == 200, response.text
+    return response.json()["echo"]
+
+
+async def test_a_reminder_phrase_proposes_a_one_time_chore_with_the_absolute_time(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, _, _, llm):
+        echo = await remind(client, console, REMIND)
+        assert (echo["echo"], echo["reminder"], echo["typed"]) == (
+            "chore",
+            True,
+            REMIND,
+        )
+        assert echo["line"] == "Remind you on Fri Oct 30 at 9:00?"
+        assert echo["said"] == {
+            "key": "front.echo.remind",
+            "params": {"at": Schedule.from_json(FRIDAY).said_at()},
+        }
+        assert (echo["title"], echo["work"], echo["text"]) == (
+            "send the report", "send the report", "Reminder: send the report"
+        )  # fmt: skip
+        assert echo["schedule"] == FRIDAY and echo["when"] == "once, Fri Oct 30 at 9:00"
+        assert "level" not in echo  # a reminder shows no level chip
+        # No model call, and nothing is saved or started before the tap.
+        assert llm.requests == []
+        assert (await client.get("/api/chores")).json()["chores"] == []
+        assert await tasks_of(console) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "at"),
+    [
+        ("Remind me tomorrow at 9am to call mom", "2026-10-29T09:00"),
+        ("remind me in 2 hours to drink water", "2026-10-28T09:00"),
+        ("remind me at 6:30 to stretch", "2026-10-28T18:30"),
+        ("提醒我明天九点给导师发邮件", "2026-10-29T09:00"),
+        ("记得明天九点给导师发邮件", "2026-10-29T09:00"),
+        ("两小时后提醒我喝水", "2026-10-28T09:00"),
+        ("提醒我下周一交作业", "2026-11-02T09:00"),
+    ],
+)
+async def test_relative_times_become_absolute_in_the_persons_time_zone(
+    tmp_path: Path, text: str, at: str
+) -> None:
+    async with chore_console(tmp_path) as (console, client, _, _, llm):
+        echo = await remind(client, console, text)
+        assert (echo["echo"], echo["schedule"]) == ("chore", {"kind": "once", "at": at})
+        assert llm.requests == []
+
+
+async def test_a_reminder_without_a_time_asks_when_and_the_next_message_answers(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, answer("ok")) as (console, client, _, _, llm):
+        ask = await remind(client, console, "remind me to send the report")
+        assert (ask["echo"], ask["ask"], ask["work"]) == (
+            "ask",
+            "when",
+            "send the report",
+        )
+        assert ask["said"]["key"] == "front.echo.askWhen" and ask["line"].startswith(
+            "When should I remind you?"
+        )
+        assert (await client.get("/api/chores")).json()["chores"] == []
+        # The answer is only a time: the reminder is proposed, tied to the question.
+        echo = await remind(client, console, "Friday at 9")
+        assert (echo["echo"], echo["of"], echo["work"]) == (
+            "chore",
+            ask["id"],
+            "send the report",
+        )
+        assert echo["schedule"] == FRIDAY and echo["typed"] == "Friday at 9"
+        assert llm.requests == []
+        # The question is answered once: a time sent later is not tied to it.
+        later = await _say(client, console, "Friday at 9")
+        assert later.status_code == 202
+        await _wait_turn(client, str(console.main_id))
+        assert len(llm.requests) == 1
+
+
+async def test_a_time_that_has_passed_asks_again_and_a_reply_that_is_not_a_time_goes_on(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, answer("ok")) as (console, client, _, _, llm):
+        ask = await remind(client, console, "remind me today at 6am to call mom")
+        assert ask["ask"] == "when" and ask["said"]["key"] == "front.echo.askWhenPast"
+        again = await remind(client, console, "remind me on 2028-01-05 to renew it")
+        assert again["said"]["key"] == "front.echo.askWhenFar"
+        # Not a time: the message is an ordinary one for the model.
+        reply = await _say(client, console, "never mind, what is a reminder?")
+        assert reply.status_code == 202
+        await _wait_turn(client, str(console.main_id))
+        assert len(llm.requests) == 1
+
+
+async def test_saving_a_reminder_keeps_a_one_time_chore_and_undo_removes_it(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        proposal = await remind(client, console, REMIND)
+        saved = await tap(client, proposal["id"], "save")
+        assert saved.status_code == 200, saved.text
+        card = saved.json()["echo"]
+        assert card["echo"] == "chore_saved" and card["of"] == proposal["id"]
+        assert card["line"] == "Saved: send the report · once, Fri Oct 30 at 9:00"
+        [chore] = (await client.get("/api/chores")).json()["chores"]
+        assert (chore["schedule"], chore["when"], chore["level"], chore["enabled"]) == (
+            FRIDAY, "once, Fri Oct 30 at 9:00", 1, True
+        )  # fmt: skip
+        assert (chore["request"], chore["title"]) == (
+            "Reminder: send the report",
+            "send the report",
+        )
+        assert chore["next_run"] == at("2026-10-30 09:00") and chore["late_min"] is None
+        assert (await tap(client, card["id"], "undo")).json()["echo"][
+            "echo"
+        ] == "undone"
+        assert (await client.get("/api/chores")).json()["chores"] == []
+        # "Just once" does not fit a reminder, and a tap after its time is refused in words.
+        other = await remind(client, console, REMIND)
+        assert (await tap(client, other["id"], "once")).status_code == 400
+        clock.to("2026-10-30 09:30")
+        late = await tap(client, other["id"], "save")
+        assert late.status_code == 400 and "passed" in late.json()["error"]["message"]
+        assert (await client.get("/api/chores")).json()[
+            "chores"
+        ] == [] and await tasks_of(console) == []
+
+
+async def test_cancel_saves_no_reminder(tmp_path: Path) -> None:
+    async with chore_console(tmp_path) as (console, client, _, _, _):
+        proposal = await remind(client, console, REMIND)
+        done = await tap(client, proposal["id"], "cancel")
+        assert done.json()["echo"]["line"] == "Not saved: send the report"
+        assert (await client.get("/api/chores")).json()["chores"] == []
+
+
+async def test_a_reminder_runs_once_at_its_time_as_a_task_then_is_done(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, llm):
+        proposal = await remind(client, console, REMIND)
+        await tap(client, proposal["id"], "save")
+        runner = console.chore_runner
+        clock.to("2026-10-30 08:59")
+        assert await runner.tick() == []
+        clock.to("2026-10-30 09:00")
+        [task_id] = await runner.tick()
+        [record] = await tasks_of(console)
+        assert record.task_id == task_id
+        assert (record.origin, record.title, record.level, record.reason) == (
+            "user_rule", "send the report", 1, "Reminder"
+        )  # fmt: skip
+        assert record.spec["objective"].startswith("Reminder: send the report\n\n")
+        assert "Do not do the task yourself" in record.spec["objective"]
+        [done] = (await client.get("/api/chores")).json()["chores"]
+        # Done: switched off, no next time, kept in the list with its last run.
+        assert (done["enabled"], done["next_run"], done["last_run"]) == (
+            False,
+            None,
+            clock.now,
+        )
+        assert done["last"]["task_id"] == task_id and done["late_min"] is None
+        # It never runs again, whatever the days after.
+        for stamp in ("2026-10-30 09:30", "2026-11-06 09:00", "2027-01-01 09:00"):
+            clock.to(stamp)
+            assert await runner.tick() == []
+        assert len(await tasks_of(console)) == 1 and llm.requests == []
+
+
+async def test_a_reminder_missed_while_the_computer_slept_runs_at_wake_and_says_it_ran_late(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        proposal = await remind(client, console, REMIND)
+        await tap(client, proposal["id"], "save")
+        clock.to("2026-10-30 11:00")  # two hours after its time
+        assert len(await console.chore_runner.tick()) == 1
+        [done] = (await client.get("/api/chores")).json()["chores"]
+        assert (done["enabled"], done["late_min"]) == (False, 120)
+        # A reminder that waits for its jitter is not late.
+        clock.to("2026-10-30 11:00")
+        await add(
+            client, "Reminder: stand up", {"kind": "once", "at": "2026-10-30T11:30"}
+        )
+        clock.to("2026-10-30 11:31")
+        assert len(await console.chore_runner.tick()) == 1
+        bodies = {
+            c["request"]: c for c in (await client.get("/api/chores")).json()["chores"]
+        }
+        assert bodies["Reminder: stand up"]["late_min"] is None
+
+
+async def test_a_reminder_runs_even_when_an_earlier_run_is_still_open(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Reminder: send the report", FRIDAY)
+        runner = console.chore_runner
+        clock.to("2026-10-29 12:00")
+        await client.post(
+            f"/api/chores/{chore['id']}/run"
+        )  # Run now: a queued task stays open
+        clock.to("2026-10-30 09:01")
+        assert len(await runner.tick()) == 1
+        assert len(await tasks_of(console)) == 2
+
+
+async def test_the_api_checks_a_one_time_chore_and_a_done_one_wakes_with_a_new_time(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        for at_text in (
+            "2026-10-28T06:59",
+            "2028-01-05T09:00",
+            "2026-13-01T09:00",
+            "09:00",
+        ):
+            response = await client.post(
+                "/api/chores",
+                json={
+                    "request": "Reminder: call mom",
+                    "schedule": {"kind": "once", "at": at_text},
+                },
+            )
+            assert response.status_code == 400, at_text
+            assert response.json()["error"]["code"] == "invalid_request"
+        chore = await add(client, "Reminder: call mom", FRIDAY)
+        assert chore["when"] == "once, Fri Oct 30 at 9:00" and chore["next_run"] == at(
+            "2026-10-30 09:00"
+        )
+        clock.to("2026-10-30 09:05")
+        await console.chore_runner.tick()
+        [done] = (await client.get("/api/chores")).json()["chores"]
+        assert done["enabled"] is False
+        # Switching a done reminder on would run a time that has passed.
+        on = await client.patch(
+            f"/api/chores/{chore['id']}",
+            json={"revision": done["revision"], "enabled": True},
+        )
+        assert on.status_code == 400 and "passed" in on.json()["error"]["message"]
+        # A new time arms it again.
+        again = await client.patch(
+            f"/api/chores/{chore['id']}",
+            json={
+                "revision": done["revision"],
+                "schedule": {"kind": "once", "at": "2026-11-02T08:00"},
+            },
+        )
+        body = again.json()["chore"]
+        assert (body["enabled"], body["next_run"]) == (True, at("2026-11-02 08:00"))
+
+
+async def test_a_reminders_card_shows_the_persons_words_even_when_its_run_failed(
+    tmp_path: Path,
+) -> None:
+    long = "send the report to the whole committee before noon"
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(client, "Reminder: stretch", FRIDAY)
+        await add(client, f"Reminder: {long}", FRIDAY, title="send the report")
+        await add(client, "Brief me on my calendar", FRIDAY)
+        clock.to("2026-10-30 09:01")
+        done, failed, plain = await console.chore_runner.tick()
+
+        async def last_card() -> Any:
+            return (await client.get("/api/sessions")).json()["main"]["last_card"]
+
+        # Done: the card is flagged and keeps the answer.
+        await finish(console, done, clock.now, "Time to stretch.")
+        await console.store.append_session_event(
+            done, "sched.finished", {"state": "done"}
+        )
+        card = await last_card()
+        assert (card["state"], card["reminder"], card["line"]) == (
+            "done",
+            True,
+            "Time to stretch.",
+        )
+        # Failed: the line is the person's full words, not a reason.
+        await console.workers.tasks.change(
+            failed, state="failed", actor="scheduler", failure_reason="No model"
+        )
+        await console.store.append_session_event(
+            failed, "sched.finished", {"state": "failed"}
+        )
+        card = await last_card()
+        assert (card["state"], card["reminder"], card["title"]) == (
+            "failed",
+            True,
+            "send the report",
+        )
+        assert card["line"] == f"The reminder did not run. It was: {long}"
+        # A once chore that is not a reminder (no prefix) is a task like any other.
+        await finish(console, plain, clock.now)
+        await console.store.append_session_event(
+            plain, "sched.finished", {"state": "done"}
+        )
+        assert "reminder" not in await last_card()

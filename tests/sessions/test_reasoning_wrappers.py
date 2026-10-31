@@ -164,7 +164,9 @@ async def test_gated_retrieval_body_is_sent_only_on_retrieve_requests(
                 provider, gate.client("retrieve-session")
             ),
         )
-        assert agent._llm.extra_body_by_kind == {"retrieve": extra}
+        assert agent._llm.extra_body_by_kind["retrieve"] == extra
+        # A step review gets its own short, unthinking body (#339).
+        assert set(agent._llm.extra_body_by_kind) == {"retrieve", "review"}
         extra["temperature"] = 0.9
         for kind in ("retrieve", "plan", "reflect"):
             token = LLM_REQUEST_KIND.set(kind)

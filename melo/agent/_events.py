@@ -667,15 +667,28 @@ class _Emitter:
             return
         self._emit("run.progress", lambda: json_safe_payload(state.as_dict()))
 
-    def run_finished(self, result: RunResult) -> None:
+    def run_finished(
+        self, result: RunResult, reviews: dict[str, Any] | None = None
+    ) -> None:
         """The run's last event, with ``result.to_dict()`` whole.
 
         A RunResult holds only JSON values, and nothing in it is clipped, so
-        ``RunResult(**event.data["result"])`` rebuilds *result*.
+        ``RunResult(**event.data["result"])`` rebuilds *result*. A run with
+        an approval policy adds ``reviews``: the calls the rules found
+        routine, high and undecided, the model reviews sent, and the steps
+        auto mode blocked (``blocked``: call id, title and step key each,
+        #339). A run without one has no ``reviews`` key, as before.
         """
         if self._sink is None:
             return
-        self._emit("run.finished", lambda: {"result": result.to_dict()})
+
+        def data() -> dict[str, Any]:
+            out: dict[str, Any] = {"result": result.to_dict()}
+            if reviews is not None:
+                out["reviews"] = json_safe_payload(reviews)
+            return out
+
+        self._emit("run.finished", data)
 
     # ── Delivery ──
 

@@ -31,7 +31,11 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS, legacy_options
+from localmelo.tests.legacy_options import (
+    LEGACY_ANSWER_OPTIONS,
+    LEGACY_CACHE_OPTIONS,
+    legacy_options,
+)
 
 # The fields in the order of the Phase 1a spec (B4). The CLI's JSON output
 # prints RunResult.to_dict() and relies on this order.
@@ -53,8 +57,8 @@ SPEC_FIELDS = [
 ]
 
 # Optional memory, context accounting, prefix telemetry and write confinement are
-# omitted while None, and answered_on_stop while false, so SPEC_FIELDS stays the
-# legacy JSON line's shape.
+# omitted while None, and answered_on_stop and format_fixed while false, so
+# SPEC_FIELDS stays the legacy JSON line's shape.
 DATACLASS_FIELDS = [
     *SPEC_FIELDS,
     "memory_stats",
@@ -62,6 +66,7 @@ DATACLASS_FIELDS = [
     "prefix_cache",
     "confinement",
     "answered_on_stop",
+    "format_fixed",
 ]
 
 
@@ -242,7 +247,10 @@ async def _echo(text: str) -> str:
 
 def _options(**kwargs: Any) -> AgentOptions:
     """Options without built-ins, so the test's echo tool is the only tool."""
-    return AgentOptions(builtins=frozenset(), **{**LEGACY_CACHE_OPTIONS, **kwargs})
+    return AgentOptions(
+        builtins=frozenset(),
+        **{**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS, **kwargs},
+    )
 
 
 def _agent(

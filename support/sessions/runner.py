@@ -145,6 +145,8 @@ class _Turn:
     approval: ApprovalPolicy | None
     # What the person typed, without attachments: memory reads only this.
     typed: str = ""
+    # The person's words for a step review when not *typed* (a task's).
+    words: str | None = None
     # The run's routine name, run_task's ``routine=`` (UR-N).
     routine: str | None = None
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
@@ -411,12 +413,15 @@ class SessionRunner:
         client_request_id: str | None = None,
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
+        words: str | None = None,
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
         The turn runs on in a task the runner owns; :meth:`wait` returns its
         RunResult. *routine* names the run's routine (``Agent.run_task``'s
-        ``routine=``), passed only when given. With *client_request_id*, a
+        ``routine=``), passed only when given. *words* are the person's own
+        words when *text* is not (``Agent.run_task``'s ``user_words=``; the
+        typed text otherwise). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
@@ -429,6 +434,7 @@ class SessionRunner:
             routine,
             tuple(attachments),
             own_task=True,
+            words=words,
         )
         return turn.turn
 
@@ -455,6 +461,7 @@ class SessionRunner:
         attachments: tuple[TextAttachment, ...],
         *,
         own_task: bool,
+        words: str | None = None,
     ) -> _Turn:
         self._check_open()
         typed_text = text
@@ -507,6 +514,7 @@ class SessionRunner:
                 caller,
                 attachments,
                 typed_text,
+                words,
             )
         )
         self._begin = begin
@@ -548,6 +556,7 @@ class SessionRunner:
         caller: asyncio.Task[Any] | None,
         attachments: tuple[TextAttachment, ...],
         typed_text: str,
+        words: str | None = None,
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -578,6 +587,7 @@ class SessionRunner:
             approval=approval,
             routine=routine,
             typed=typed_text,
+            words=words,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -688,6 +698,12 @@ class SessionRunner:
                 kwargs["routine"] = turn.routine
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
+            kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            # The chat began when its session did, across reloads and restarts.
+            with contextlib.suppress(Exception):
+                session = await self._store.get_session(turn.turn.session_id)
+                if session is not None:
+                    kwargs["chat_started"] = session.created_at
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)

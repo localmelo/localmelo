@@ -5,7 +5,10 @@ asks the store which chores are due and starts each as a task (origin
 ``user_rule``, owned by the chat the chore belongs to). The tick is code only:
 it never calls a model. A chore that came due while the computer slept runs
 once when the tick next runs, and its next time is planned from then, never
-once per missed slot. A chore whose last run has not ended is skipped.
+once per missed slot. A chore whose last run has not ended is skipped. A
+one-time chore (a reminder) runs once, late if the computer slept through its
+time, and is then switched off with no next time; it never waits for an earlier
+run to end.
 
 The check-in comes every :data:`CHECKIN_S` seconds while the gateway runs and
 the switch is on. It looks for something to say in code: a chore's finished
@@ -30,7 +33,12 @@ from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import GatedLLM
-from localmelo.support.gateway.chore_store import Chore, ChoreStore
+from localmelo.support.gateway.chore_store import (
+    REMINDER_NOTE,
+    REMINDER_REASON,
+    Chore,
+    ChoreStore,
+)
 from localmelo.support.gateway.front_rules import FINISHED, level_word
 from localmelo.support.gateway.i18n import said_text, t
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
@@ -49,6 +57,8 @@ TICK_S: Final = 30.0
 CHECKIN_S: Final = 1800.0
 SUMMARY_TIMEOUT_S: Final = 60.0
 SUMMARY_CHARS: Final = 400
+# A one-time chore that starts this long after its time ran late (the jitter and a beat are not late).
+LATE_S: Final = 300.0
 # A chore whose last task is in one of these states has not finished: its next slot is skipped.
 _ACTIVE: Final = frozenset({"queued", "running", "held", "waiting"})
 _SUMMARY_PROMPT: Final = (
@@ -134,25 +144,30 @@ class ChoreRunner:
         return started
 
     async def _run_due(self, chore: Chore, now: float) -> str | None:
-        # Planned from now: a slot missed while asleep is not run again.
-        next_run = self.store.plan(chore.schedule, now)
-        if await self._busy(chore):
+        # Planned from now: a slot missed while asleep is not run again. A one-time
+        # chore has no next slot: it is switched off whatever its run does.
+        once = chore.schedule.kind == "once"
+        next_run = None if once else self.store.plan(chore.schedule, now)
+        over = False if once else None
+        if not once and await self._busy(chore):
             await self.store.advance(chore, next_run=next_run)
             return None
         slot = int(chore.next_run or now)
         try:
             task = await self._start(chore, f"chore:{chore.chore_id}:{slot}")
         except TaskConflictError:
-            await self.store.advance(chore, next_run=next_run)
+            await self.store.advance(chore, next_run=next_run, enabled=over)
             return None
         except (TaskPolicyError, ValueError) as exc:
             logger.warning("Chore %s could not start: %s", chore.title, exc)
-            await self.store.advance(chore, next_run=next_run)
+            await self.store.advance(chore, next_run=next_run, enabled=over)
             return None
         except SessionStoreError as exc:
             logger.warning("Chore %s could not start now: %s", chore.title, exc)
             return None  # tried again at the next tick
-        await self.store.advance(chore, next_run=next_run, task_id=task, ran_at=now)
+        await self.store.advance(
+            chore, next_run=next_run, task_id=task, ran_at=now, enabled=over
+        )
         return task
 
     async def _busy(self, chore: Chore) -> bool:
@@ -165,10 +180,11 @@ class ChoreRunner:
         return record.state in _ACTIVE
 
     async def _start(self, chore: Chore, key: str) -> str:
-        spec = TaskSpec.from_payload({"objective": chore.request, "title": chore.title})
-        spec = dataclasses.replace(
-            spec, level=chore.level, reason=f"Chore, {chore.schedule.describe()}"
-        )
+        reminder = chore.is_reminder
+        objective = f"{chore.request}\n\n{REMINDER_NOTE}" if reminder else chore.request
+        spec = TaskSpec.from_payload({"objective": objective, "title": chore.title})
+        reason = REMINDER_REASON if reminder else f"Chore, {chore.schedule.describe()}"
+        spec = dataclasses.replace(spec, level=chore.level, reason=reason)
         task, _ = await self.console.workers.create_spec(
             spec, front_id=chore.front_id, request_key=key, origin="user_rule"
         )
@@ -300,6 +316,13 @@ class ChoreRunner:
             "at": at,
         }
 
+    def late_min(self, chore: Chore) -> int | None:
+        """How many minutes after its time a one-time chore ran, when that was not on time."""
+        if chore.schedule.kind != "once" or chore.last_run is None:
+            return None
+        late = chore.last_run - chore.schedule.when(self.options.tz)
+        return round(late / 60) if late >= LATE_S else None
+
     async def chore_body(self, chore: Chore) -> dict[str, Any]:
         return {
             "id": chore.chore_id,
@@ -317,6 +340,8 @@ class ChoreRunner:
             "last_run": chore.last_run,
             "last": await self.last(chore),
             "created_at": chore.created_at,
+            # A one-time chore that ran late (the computer slept or the gateway was down).
+            "late_min": self.late_min(chore),
         }
 
     async def checkin_body(self) -> dict[str, Any]:

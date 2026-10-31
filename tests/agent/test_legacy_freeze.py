@@ -31,7 +31,7 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import Message, RunResult, StepRecord, TaskRecord
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, LEGACY_CACHE_OPTIONS
 
 # The headers of a chat request at R1's base (ade1513), by name.
 BASE_HEADERS = {
@@ -197,6 +197,7 @@ async def _wire_run(
     options = AgentOptions(
         memory_dir=None if memory_dir is None else str(memory_dir),
         **LEGACY_CACHE_OPTIONS,
+        **LEGACY_ANSWER_OPTIONS,
     )
     agent = Agent(llm=llm, options=options)
     try:
@@ -241,6 +242,7 @@ def test_run_result_and_message_keep_their_fields() -> None:
             "prefix_cache",
             "confinement",
             "answered_on_stop",
+            "format_fixed",
         )
     ] == [
         "task_id",

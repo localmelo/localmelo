@@ -32,9 +32,18 @@ export function whenWords(at, now) {
   return t('sched.when.day', {day: label, clock});
 }
 
-/** The lines under a row's title: when it runs next, then how the last run went. */
+/** ``ran 35 min late``, ``ran 2 h late``, ``ran 3 days late`` for a reminder that ran after its time. */
+export function lateWords(minutes) {
+  if (minutes < 60) return t('sched.late.min', {n: minutes});
+  return minutes < 2880 ? t('sched.late.hours', {n: Math.round(minutes / 60)}) : t('sched.late.days', {n: Math.round(minutes / 1440)});
+}
+
+/** The lines under a row's title: when it runs next (a one-time chore that ran: when), how late, then how the last run went. */
 export function rowLines(chore, now) {
-  const lines = [chore.enabled ? t('sched.next', {when: whenWords(chore.next_run, now)}) : t('common.off')];
+  const done = chore.schedule?.kind === 'once' && !chore.enabled && chore.last_run;
+  const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_run, now)}) : t('common.off');
+  const lines = [first];
+  if (chore.late_min) lines.push(lateWords(chore.late_min));
   const ran = RAN.has(chore.last?.state) ? t(`sched.ran.${chore.last.state}`) : chore.last?.state;
   if (chore.last) lines.push(t('sched.last', {what: [ran, chore.last.line].filter(Boolean).join(' · ')}));
   return lines;
@@ -118,6 +127,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
 
   function timeForm(chore) {
     const form = node('div', 'sched-form');
+    const once = state.edit.kind === 'once';
     const kind = node('select', 'sched-input');
     kind.setAttribute('aria-label', t('sched.howOften'));
     for (const value of KINDS) {
@@ -128,7 +138,11 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     }
     kind.addEventListener('change', () => { state.edit.kind = kind.value; draw(); });
     const field = node('input', 'sched-input');
-    if (state.edit.kind === 'hours') {
+    if (once) {
+      Object.assign(field, {type: 'datetime-local', value: state.edit.at});
+      field.setAttribute('aria-label', t('sched.dateTime'));
+      field.addEventListener('input', () => { state.edit.at = field.value; });
+    } else if (state.edit.kind === 'hours') {
       Object.assign(field, {type: 'number', min: '1', max: '24', value: String(state.edit.every)});
       field.setAttribute('aria-label', t('sched.hoursBetween'));
       field.addEventListener('input', () => { state.edit.every = field.value; });
@@ -139,14 +153,14 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     }
     const save = async () => {
       const {kind: how, at, every} = state.edit;
-      const schedule = how === 'hours' ? {kind: how, every: Number(every)} : {kind: how, at};
+      const schedule = how === 'hours' ? {kind: how, every: Number(every)} : {kind: how, at};  // `once` and the daily kinds both send `at`
       const done = await put(chore, {schedule});
       if (done) { replace(done.chore); state.edit = null; }
       draw();
     };
     const actions = node('div', 'sched-actions');
     actions.append(button('outline-button', t('common.save'), save), button('quiet-button', t('common.cancel'), () => { state.edit = null; draw(); }));
-    form.append(kind, field, actions);
+    form.append(...(once ? [] : [kind]), field, actions);
     return form;
   }
 
