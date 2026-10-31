@@ -21,7 +21,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   answer never approves a step. A task's words are never taken as yours: they
   allow no blocked step, are never remembered as something you said, and the
   turn that answers them cannot be retried. Deleting a chat moves its open
-  questions to the main chat. The chat's `task_get` now reads a running task
+  questions to the main chat. The terminal shows the same rows: `Task “Fix tests”
+  asks: …`, melo's answer, then `melo answered` or `needs your answer`. The chat's `task_get` now reads a running task
   live. [#NN]
 - Side chats start tasks too. A side chat has the main chat's task tools and
   code words (`/task …`, **Run as a task**, `pause the slides`, chores and

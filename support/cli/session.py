@@ -732,13 +732,16 @@ class CliSession:
             failed=error is not None,
         )
 
-    def follow_turn(self, text: str) -> bool:
-        """Draw a turn of the open chat that another window sent; False when busy."""
+    def follow_turn(self, text: str, *, echo: bool = True) -> bool:
+        """Draw a turn of the open chat that another window sent; False when busy.
+
+        Without *echo*, its text is not shown (a task's question, #369).
+        """
         if self._state != "idle" or self._closed or self.remote is None:
             return False
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
-        self.renderer.begin_turn(text)
+        self.renderer.begin_turn(text, echo=echo)
         self._work = self.spawn(self._remote_turn(text, typed=False))
         if self.app is not None:
             self.app.invalidate()

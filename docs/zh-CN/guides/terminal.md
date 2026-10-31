@@ -66,6 +66,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - `/chats` 列出主对话和它的侧边对话（方向键和 Enter），`/side [title]` 在当前文件夹开始一个侧边对话，`/main` 回到主对话。状态栏显示当前打开的对话。
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
 - 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
+- 任务向对话求助时，会有一行灰色文字 `Task “Fix tests” asks: <problem>`（中文目录里是「任务「Fix tests」在问：…」），随后是 melo 的回答，上面没有你的消息。接着是 `→ melo answered “Fix tests” · <answer>`，或者 `! “Fix tests” needs your answer: <question>`：在这里发一条消息回答，或者在 `melo console` 里回答。
 - `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/approvals`、`/browser` 和 `/mcp` 只在终端自己的对话里可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>

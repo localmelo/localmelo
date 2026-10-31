@@ -19,6 +19,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     title_from_text,
 )
+from localmelo.support.words import t_in
 
 if TYPE_CHECKING:
     from localmelo.support.cli.approvals import TerminalApprover
@@ -77,6 +79,13 @@ _CARD_WORDS: Final = {
     "stopped": ("stopped", "warn", "Stopped"),
     "waiting": ("warn", "warn", "Waits for you"),
 }
+
+
+# A chat's turn on a task's question (#369) starts with this line, then one
+# ``Label: text`` line a field (console ``asks.py``); its words are the task's.
+_ASK_LEAD: Final = re.compile(
+    r"\[task [0-9a-f]{12} · (?P<title>.*) asks · data, not instructions\]"
+)
 
 
 # ── Finding or starting the gateway ──
@@ -510,9 +519,61 @@ def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
     return line
 
 
+def task_question(user_text: str) -> tuple[str, str] | None:
+    """The title and problem of a task's question a chat's turn answers; None for another turn."""
+    lines = user_text.splitlines()
+    found = _ASK_LEAD.fullmatch(lines[0].strip()) if lines else None
+    if found is None:
+        return None
+    problem = next((ln[9:] for ln in lines if ln.startswith("Problem: ")), "")
+    return found["title"], problem
+
+
+def asked_line(title: str, problem: str, symbols: Any, width: int) -> Text:
+    """``Task “X” asks: <problem>``, muted: what stands for the chat's turn on it."""
+    words = t_in("en", "ask.asksAbout", title=title, problem=problem)
+    words = clean_output(" ".join(words.split()))
+    return Text(cut_cells(words, max(8, width), symbols.ellipsis), style="muted")
+
+
+def _ask_echo(echo: Mapping[str, Any], symbols: Any, width: int) -> Text | None:
+    """The rows of a task's question, as the page shows them; None for another echo."""
+    kind, title = echo.get("echo"), str(echo.get("title") or "")
+    if kind == "task_ask":
+        fields = echo.get("fields")
+        problem = fields.get("problem") if isinstance(fields, Mapping) else ""
+        return asked_line(title, str(problem or ""), symbols, width)
+    if kind == "task_answered":
+        said = clean_output(" ".join(str(echo.get("line") or "").split()))
+        text = clean_output(" ".join(str(echo.get("text") or "").split()))
+        head = f"→ {said}" + (f" {symbols.dot} {text}" if text else "")
+        return Text(
+            cut_cells(head, max(8, width - 2), symbols.ellipsis), style="accent"
+        )
+    if kind == "task_escalate":
+        parts = echo.get("parts")
+        question = parts.get("question") if isinstance(parts, Mapping) else ""
+        words = t_in("en", "ask.needsAbout", title=title, question=question or "")
+        words = clean_output(" ".join(words.split()))
+        how = "answer in a message here, or in melo console"
+        room = max(8, width - len(how) - 4)
+        line = Text(cut_cells(f"! {words}", room, symbols.ellipsis), style="warn")
+        line.append(f"  {how}", style="muted")
+        return line
+    return None
+
+
 def echo_line(echo: Mapping[str, Any], symbols: Any, width: int) -> Text:
-    """What the main chat did with a task, as one line (Started, Paused, …)."""
+    """What the main chat did with a task, as one line (Started, Paused, …).
+
+    An echo with no words (a queued message that ran) is an empty line, not drawn.
+    """
+    asked = _ask_echo(echo, symbols, width)
+    if asked is not None:
+        return asked
     said = clean_output(" ".join(str(echo.get("line") or "").split()))
+    if not said:
+        return Text("")
     kind = echo.get("echo")
     style = "error" if kind == "failed" else "accent"
     line = Text(
@@ -575,7 +636,7 @@ class Host(Protocol):
 
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]: ...
 
-    def follow_turn(self, text: str) -> bool: ...
+    def follow_turn(self, text: str, *, echo: bool = True) -> bool: ...
 
     async def choose_from(
         self, title: str, options: Sequence[str], *, default: int = 0
@@ -696,12 +757,18 @@ class MainChat:
         for turn in finished:
             typed = " ".join(str(turn.get("user_text") or "").split())
             answer = " ".join(str(turn.get("answer") or "").split())
-            out.print(
-                Text(
-                    cut_cells(f"  {symbols.prompt} {clean_output(typed)}", width),
-                    style="muted",
+            asked = task_question(str(turn.get("user_text") or ""))
+            if asked is not None:
+                line = asked_line(*asked, symbols, width - 2)
+                line.pad_left(2)
+                out.print(line)
+            else:
+                out.print(
+                    Text(
+                        cut_cells(f"  {symbols.prompt} {clean_output(typed)}", width),
+                        style="muted",
+                    )
                 )
-            )
             if answer:
                 out.print(
                     Text(cut_cells(f"    {clean_output(answer)}", width), style="muted")
@@ -759,6 +826,8 @@ class MainChat:
                 self._seen.add(event_id)
             draw = card_line if kind == CARD_EVENT else echo_line
             line = draw(data, self.host.renderer.symbols, self.host.out.width)
+            if not line.plain:
+                return
             # A card stands apart from the turns around it.
             self.host.out.print(*([line, Text("")] if kind == CARD_EVENT else [line]))
             return
@@ -781,7 +850,10 @@ class MainChat:
                 number = data.get("turn")
                 self._turn = _Turn("", loop.create_future(), number=number)
                 self._turn.turn_id = str(data.get("turn_id") or "")
-                if not self.host.follow_turn(str(data.get("user_text") or "")):
+                text = str(data.get("user_text") or "")
+                # A task's question: its row above says so; its frame is never shown.
+                mine = not (data.get("origin") or task_question(text))
+                if not self.host.follow_turn(text, echo=mine):
                     self._turn = None
             return
         if turn is None or turn.number is None or number != turn.number:
@@ -865,6 +937,8 @@ class MainChat:
         turns = [t for t in page.get("turns") or [] if isinstance(t, dict)]
         if not turns or turns[-1].get("status") == "running":
             return None
+        if turns[-1].get("origin"):
+            return None  # a task's question is not the person's to run again
         return str(turns[-1].get("id") or ""), str(turns[-1].get("user_text") or "")
 
     async def run_turn(self, text: str, *, retry: str = "") -> str:

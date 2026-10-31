@@ -60,6 +60,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - `/chats` lists the main chat and its side chats (arrow keys and Enter), `/side [title]` starts a side chat in this folder, and `/main` goes back. The status bar names the open chat.
 - An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
 - A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task in the open chat, as in the console; an echo about another chat's task ends with `from` and that chat's name.
+- When a task asks the chat for help, a muted line reads `Task “Fix tests” asks: <problem>` and melo's answer follows, with no message of yours above it. Then `→ melo answered “Fix tests” · <answer>`, or `! “Fix tests” needs your answer: <question>`: answer it in a message here, or in `melo console`.
 - `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/approvals`, `/browser` and `/mcp` work in the terminal's own chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
 
 ### Which model server
