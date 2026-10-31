@@ -510,7 +510,7 @@ class CliSession:
         keeps the draft.
         """
         assert self.remote is not None
-        if command is not None and command.name == "task":
+        if command is not None and command.name in ("task", "answer"):
             chat = self.remote.chat
             if not chat.main and chat.id is None:
                 # A side chat its first message has not made yet has no tasks to own.
@@ -522,7 +522,7 @@ class CliSession:
                 )
                 return None
             if self._state != "idle":
-                return "/task is not available while a turn runs (esc stops it)."
+                return f"/{name} is not available while a turn runs (esc stops it)."
             self.submit(text)
             return None
         if command is not None and command.name in ("new", "clear"):
@@ -938,7 +938,7 @@ class CliSession:
                     main_chat=self.remote is not None,
                 )
             )
-        elif name in ("chats", "side", "main", "task"):
+        elif name in ("chats", "side", "main", "task", "answer"):
             await self._chats_command(name, arguments)
         elif name == "attach":
             await self._attach_file(arguments)
@@ -1020,7 +1020,7 @@ class CliSession:
                     style="muted",
                 )
             )
-        elif name == "task":
+        elif name in ("task", "answer"):
             pass  # sent as a message (see _main_chat_command)
         elif name == "chats":
             await remote.pick()

@@ -24,7 +24,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Deleting a chat moves its open questions to the main chat. The terminal
   shows the same rows: `Task “Fix tests” asks: …`, melo's answer, then `melo
   answered` or `needs your answer`. melo's answer is kept as the task's
-  exchange, which later chats can recall, never as a note. The chat's
+  exchange, which later chats can recall, never as a note. When only one task waits for
+  you in a chat, you can just send your answer as a message (`Sent to “Fix
+  tests” as your answer`, with Undo for 10 seconds); with several,
+  `/answer Fix tests: B`, in the console and the terminal. The chat's
   `task_get` now reads a running task live. [#NN]
 - Side chats start tasks too. A side chat has the main chat's task tools and
   code words (`/task …`, **Run as a task**, `pause the slides`, chores and

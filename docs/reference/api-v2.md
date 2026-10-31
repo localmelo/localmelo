@@ -1050,9 +1050,21 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 - `task_answered` (`text`, `of` the question): the chat answered with
   `task_answer`.
 - `task_escalate` (`parts`: `background`, `what_happened`, `tried`,
-  `choices`, `question`): the chat asked the person with `ask_person`.
+  `choices`, `question`; `waiting`, how many of the chat's tasks waited for
+  the person then): the chat asked the person with `ask_person`.
   `POST /api/front/echoes/{id}` with `{"do": "reply", "text": "…"}` answers it
   (200 `{"echo"}`, the `ask_end`; 409 `already_answered` once it is closed).
+- `answer_sent` (`typed`, `undo_s`): with exactly one of the chat's tasks
+  waiting for the person, a message that is not a question, a work request, a
+  command, a control phrase or a greeting is its answer (200 with this echo
+  instead of a turn). It reaches the task after `undo_s` seconds (10), and an
+  `answer_delivered` echo (`of`) follows; `{"do": "undo"}` before then answers
+  an `undone` echo, the task keeps waiting and the message starts as a turn
+  (409 `already_answered` after delivery). `/answer TASK TEXT` answers a
+  waiting task by its title at once (the `ask_end`); with several waiting and
+  no title, or none waiting, a `failed` echo says so.
+- A repeated `client_request_id` while its message is being queued waits for
+  it and gets the same answer.
 - `ask_end` (`how`: `person` with `text`, `timeout`, `stopped` or `expired`;
   `of` the question or the escalation).
 - `queued` (`typed`) and `dequeued` (`of`): a message sent while the chat

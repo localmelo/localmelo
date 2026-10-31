@@ -528,6 +528,15 @@ def test_a_tasks_question_reads_as_the_pages_rows() -> None:
         "  answer in a message here, or in melo console"
     )
     assert line(echo="dequeued", of=7).plain == ""
+    several = line(echo="task_escalate", line="“Fix tests” needs your answer",
+                   parts=PARTS, waiting=2)  # fmt: skip
+    assert several.plain == (
+        "! “Fix tests” needs your answer: A or B?"
+        "  several wait: /answer Fix tests …, or melo console"
+    )
+    sent = line(echo="answer_sent", line="Sent to “Fix tests” as your answer")
+    assert sent.plain == "→ Sent to “Fix tests” as your answer"
+    assert line(echo="answer_delivered", of=8).plain == ""
     assert main_chat.task_question(ASKED) == ("Fix tests", "The cache is stale.")
     assert main_chat.task_question("hello") is None
 
@@ -884,3 +893,14 @@ def test_the_chat_setting_and_its_override(monkeypatch: pytest.MonkeyPatch) -> N
     bad = config.Config()
     bad.cli.chat = "both"
     assert any("[cli] chat" in error for error in bad.cli_errors())
+
+
+async def test_answer_goes_to_the_open_chat_as_a_message(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("/answer Fix tests: B") is None
+    await setup.idle()
+    sent = [r[2]["text"] for r in gateway.requests if r[0] == "POST"]
+    assert sent == ["/answer Fix tests: B"]

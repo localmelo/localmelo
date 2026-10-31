@@ -173,3 +173,30 @@ test('a turn that answered a task\'s question offers no Retry or Continue', () =
   assert.equal(canRetry({...turn, origin: ''}, true), true);
   assert.equal(canContinue({...turn, origin: ''}, true), true);
 });
+
+test('a message sent as a task\'s answer shows with Undo until it is delivered', () => {
+  const sent = row(40, {echo: 'answer_sent', line: 'Sent to “Fix tests” as your answer', typed: 'B',
+    said: {key: 'ask.sentAnswer', params: {title: 'Fix tests'}}});
+  const acted = [];
+  const doc = fakeDoc();
+  const [bubble, line] = echoNodes({doc, echo: sent, act: (...args) => acted.push(args)});
+  assert.equal(bubble.children[0].textContent, 'B');
+  assert.ok(text(line).startsWith('↩ | Sent to “Fix tests” as your answer'));
+  const undo = doc.made.find((node) => node.tag === 'button' && node.textContent === 'Undo');
+  undo.listeners.click();
+  assert.deepEqual(acted, [[sent, 'undo']]);
+  const after = fakeDoc();
+  echoNodes({doc: after, echo: sent, done: true, act: () => {}});
+  assert.equal(after.made.some((node) => node.tag === 'button'), false, 'delivered: no Undo');
+  assert.deepEqual(echoNodes({doc: fakeDoc(), echo: row(41, {echo: 'answer_delivered', of: 40}), act: () => {}}), []);
+});
+
+test('a question to you says how to answer it: a message when only it waits, /answer when several do', () => {
+  const hint = (waiting) => {
+    const doc = fakeDoc();
+    echoNodes({doc, echo: row(42, {echo: 'task_escalate', line: '“Fix tests” needs your answer', parts: PARTS, waiting}), act: () => {}});
+    return doc.made.find((node) => node.tag === 'p' && node.className === 'echo-sub')?.textContent;
+  };
+  assert.equal(hint(1), 'Answer in the box, or send your answer as a message.');
+  assert.equal(hint(2), 'Several tasks wait for you: answer in each box, or with /answer Fix tests …');
+});

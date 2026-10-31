@@ -84,6 +84,7 @@ from localmelo.support.gateway.front_rules import (
     allows_level,
     allows_message,
     brief_question,
+    control_action,
     intention_only,
     is_chinese,
     is_question,
@@ -96,6 +97,7 @@ from localmelo.support.gateway.front_rules import (
     route,
     short_title,
     triage,
+    work_request,
 )
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
@@ -109,7 +111,12 @@ from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_session_options,
 )
-from localmelo.support.sessions.store import SessionStoreError, StoredEvent, TurnInfo
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStoreError,
+    StoredEvent,
+    TurnInfo,
+)
 
 from .asks import ASK_ORIGIN, ASK_STEPS, PERSON_PARTS
 from .bodies import Body
@@ -312,6 +319,23 @@ def thinking_off(settings: Config) -> Config:
     kwargs["enable_thinking"] = False
     section.extra_body = {**section.extra_body, "chat_template_kwargs": kwargs}
     return settings
+
+
+def _plain_answer(routed: Routed, typed: str, composed: str) -> bool:
+    """Whether a message code left to the model can be a waiting task's answer.
+
+    Not a question, a work request, a command, a control phrase, a greeting,
+    or a message with attachments.
+    """
+    text = typed.strip()
+    return (
+        routed.route == "plan"
+        and text == composed.strip()
+        and not text.startswith("/")
+        and not is_question(text)
+        and not work_request(text)
+        and control_action(text) is None
+    )
 
 
 class FrontAgent(Agent):
@@ -1175,6 +1199,11 @@ class Front:
         self, typed: str, composed: str, *, as_task: bool, key: str | None
     ) -> dict[str, Any] | None:
         """The echo of a message that code handled, or ``None`` for the model."""
+        asks, chat = self.console.asks, self.chat_id
+        command = re.match(r"^/answer(?:\s+|$)", typed.strip())
+        if command is not None and chat is not None:
+            # The person's answer to a task's question, named (#369).
+            return await asks.answer_named(chat, typed.strip()[command.end() :])
         waiting = (
             await self._waiting_when() if typed.strip() == composed.strip() else None
         )
@@ -1215,7 +1244,28 @@ class Front:
         if routed.route == "reminder" and typed.strip() == composed.strip():
             found = parse_reminder(typed, self._now())
             return None if found is None else await self._remind(found, typed)
+        if chat is not None and _plain_answer(routed, typed, composed):
+            # One task waits for the person here: a plain message answers it.
+            return await asks.answer_from_chat(chat, typed)
         return None
+
+    async def _take_back(self, echo_id: int, echo: dict[str, Any]) -> dict[str, Any]:
+        """Undo of a message sent as a task's answer: the task still waits, the message is the chat's."""
+        found = self.console.asks.take_back(echo_id)
+        chat = self.chat_id
+        if found is None or chat is None:
+            raise ApiError(409, "already_answered", t("errors.echoAnswered"))
+        ask, typed = found
+        undone = await self.echo(
+            {"echo": "undone", "of": echo_id, "task_id": ask.task_id,
+             "title": ask.title, "line": t_in("en", "ask.takenBack", title=ask.title),
+             "said": said("ask.takenBack", title=ask.title)}
+        )  # fmt: skip
+        try:
+            await self.console.sessions.start_turn(chat, typed, typed)
+        except SessionBusyError:
+            await self.console.asks.queue(chat, typed, typed, None)
+        return undone
 
     async def _ask_which(
         self, routed: Routed, composed: str, typed: str
@@ -1720,6 +1770,8 @@ class Front:
             if replied is None:
                 raise ApiError(409, "already_answered", t("errors.echoAnswered"))
             return replied
+        if do == "undo" and kind == "answer_sent":
+            return await self._take_back(echo_id, echo)
         if do == "start" and kind == "ask":
             words = str(echo.get("words", ""))
             return await self.delegate(

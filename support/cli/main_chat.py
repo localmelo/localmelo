@@ -555,7 +555,10 @@ def _ask_echo(echo: Mapping[str, Any], symbols: Any, width: int) -> Text | None:
         question = parts.get("question") if isinstance(parts, Mapping) else ""
         words = t_in("en", "ask.needsAbout", title=title, question=question or "")
         words = clean_output(" ".join(words.split()))
-        how = "answer in a message here, or in melo console"
+        if int(echo.get("waiting") or 1) > 1:
+            how = f"several wait: /answer {clean_output(title)} …, or melo console"
+        else:
+            how = "answer in a message here, or in melo console"
         room = max(8, width - len(how) - 4)
         line = Text(cut_cells(f"! {words}", room, symbols.ellipsis), style="warn")
         line.append(f"  {how}", style="muted")

@@ -34,7 +34,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.support.gateway.i18n import said, t_in
+from localmelo.support.gateway.i18n import said, t, t_in
 from localmelo.support.sessions.display import ActivityText
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -43,6 +43,8 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import SubmissionRepeated
 from localmelo.support.words import said_in
+
+from .errors import ApiError
 
 if TYPE_CHECKING:
     from . import Console
@@ -58,6 +60,8 @@ OWNER_TIMEOUT_S: Final = 600.0
 # How often a chat with a turn running is looked at again.
 IDLE_POLL_S: Final = 0.2
 MAX_ANSWER_CHARS: Final = 2000
+# How long the person can take back a message sent as a task's answer.
+ANSWER_UNDO_S: Final = 10.0
 MAX_PART_CHARS: Final = 800
 ASK_EVENT: Final = "task.ask"
 ANSWER_EVENT: Final = "task.answer"
@@ -90,6 +94,9 @@ class Ask:
     # What ask_person showed, and the internal turn that handles the ask.
     parts: dict[str, str] = field(default_factory=dict)
     turn_id: str = ""
+    # A message sent as its answer, delivered when its Undo window ends:
+    # (the echo, the words, the delivery).
+    held: tuple[int, str, asyncio.Task[None]] | None = None
 
 
 @dataclass
@@ -120,6 +127,9 @@ class OwnerAsks:
         self._jobs: set[asyncio.Task[Any]] = set()
         self._listeners: list[Callable[[StoredEvent], None]] = []
         self._closed = False
+        self.undo_s = ANSWER_UNDO_S
+        # Per chat and key: the outcome of a queued message being kept.
+        self._admitting: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
 
     # ── What the rest reads ──
 
@@ -207,7 +217,9 @@ class OwnerAsks:
         ask.row = row["id"]
         if ask.on == "person":
             # Its chat was deleted: the question to the person moves, reply box and all.
-            row = await self._echo(ask, "task_escalate", "ask.needs", parts=ask.parts)
+            many = len(self.waiting_on_person(ask.chat_id))
+            row = await self._echo(ask, "task_escalate", "ask.needs", parts=ask.parts,
+                                   waiting=many)  # fmt: skip
             ask.person_row = row["id"]
         await self._mirror(ask)
 
@@ -244,6 +256,86 @@ class OwnerAsks:
         self._emit(ANSWER_EVENT, ask, by="person")
         self._index(ask, text)
         return echo
+
+    # ── The person's words in the chat ──
+
+    def waiting_on_person(self, chat_id: str) -> list[Ask]:
+        """The open asks of *chat_id* that wait for the person, oldest first."""
+        return [a for a in self._asks.values()
+                if a.chat_id == chat_id and a.on == "person" and not a.closed]  # fmt: skip
+
+    async def answer_from_chat(self, chat_id: str, typed: str) -> dict[str, Any] | None:
+        """A plain message while one ask of the chat waits for the person: its answer.
+
+        It is delivered when :attr:`undo_s` ends, unless taken back
+        (:meth:`take_back`); None when not exactly one ask waits.
+        """
+        waiting = [a for a in self.waiting_on_person(chat_id) if a.held is None]
+        if len(waiting) != 1 or not typed.strip():
+            return None
+        ask = waiting[0]
+        echo = await self._echo(ask, "answer_sent", "ask.sentAnswer", typed=typed,
+                                undo_s=self.undo_s)  # fmt: skip
+        delivery = asyncio.create_task(
+            self._deliver(ask, typed.strip(), echo["id"]), context=contextvars.Context()
+        )
+        ask.held = (echo["id"], typed, delivery)
+        return echo
+
+    async def _deliver(self, ask: Ask, text: str, echo_id: int) -> None:
+        await asyncio.sleep(self.undo_s)
+        ask.held = None
+        await self.reply(ask.task_id, text, ask.ask_id)
+        # The Undo goes: the answer is the task's now.
+        with contextlib.suppress(Exception):
+            await self.console.front_for(ask.chat_id).echo(
+                {"echo": "answer_delivered", "of": echo_id}
+            )
+
+    def take_back(self, echo_id: int) -> tuple[Ask, str] | None:
+        """Undo a message sent as an answer, before it is delivered: its ask and words."""
+        for ask in self._asks.values():
+            if ask.held is not None and ask.held[0] == echo_id:
+                _, typed, delivery = ask.held
+                delivery.cancel()
+                ask.held = None
+                return ask, typed
+        return None
+
+    async def answer_named(self, chat_id: str, words: str) -> dict[str, Any]:
+        """``/answer TASK TEXT``: the person's answer to that task's question, at once."""
+        waiting = self.waiting_on_person(chat_id)
+        if not waiting:
+            return await self._said_here(chat_id, "ask.noneWaiting")
+        chosen, text = None, words.strip()
+        for ask in waiting:
+            head = text[: len(ask.title)]
+            if ask.title and head.casefold() == ask.title.casefold():
+                chosen, text = ask, text[len(ask.title) :].lstrip(" :,，：")
+                break
+            if text.startswith(ask.task_id):
+                chosen, text = ask, text[len(ask.task_id) :].lstrip(" :,，：")
+                break
+        if chosen is None and len(waiting) == 1:
+            chosen = waiting[0]
+        if chosen is None:
+            return await self._said_here(
+                chat_id, "ask.whichTask", title=waiting[0].title
+            )
+        if not text:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        if chosen.held is not None:
+            self.take_back(chosen.held[0])
+        replied = await self.reply(chosen.task_id, text, chosen.ask_id)
+        if replied is None:
+            return await self._said_here(chat_id, "ask.noneWaiting")
+        return replied
+
+    async def _said_here(self, chat_id: str, key: str, **params: Any) -> dict[str, Any]:
+        return await self.console.front_for(chat_id).echo(
+            {"echo": "failed", "line": t_in("en", key, **params),
+             "said": said(key, **params)}
+        )  # fmt: skip
 
     # ── The chat's tools ──
 
@@ -293,7 +385,9 @@ class OwnerAsks:
             if not 1 <= len(text) <= MAX_PART_CHARS:
                 return f"Not done: fill {name} (1 to {MAX_PART_CHARS} characters)."
         ask.on, ask.parts = "person", clean
-        row = await self._echo(ask, "task_escalate", "ask.needs", parts=clean)
+        many = len(self.waiting_on_person(ask.chat_id))
+        row = await self._echo(ask, "task_escalate", "ask.needs", parts=clean,
+                               waiting=many)  # fmt: skip
         ask.person_row = row["id"]
         await self._mirror(ask)
         return (
@@ -306,11 +400,43 @@ class OwnerAsks:
     async def queue(
         self, chat_id: str, typed: str, composed: str, key: str | None
     ) -> dict[str, Any]:
-        """Keep the person's message for the chat's next turn; its echo shows it queued."""
+        """Keep the person's message for the chat's next turn; its echo shows it queued.
+
+        A repeat of a key still being kept waits for it and gets its outcome.
+        """
+        first = self._admitting.get((chat_id, key)) if key is not None else None
+        if first is not None:
+            return await asyncio.shield(first)
         people = self._people.setdefault(chat_id, [])
         for item in people:
             if key is not None and item.key == key:
                 return item.echo
+        if key is None:
+            return await self._admit(chat_id, typed, composed, key, people)
+        outcome: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        outcome.add_done_callback(lambda f: f.cancelled() or f.exception())
+        self._admitting[(chat_id, key)] = outcome
+        try:
+            echo = await self._admit(chat_id, typed, composed, key, people)
+        except BaseException as exc:
+            failed = exc if isinstance(exc, Exception) else SessionStoreError(str(exc))
+            outcome.set_exception(failed)
+            raise
+        finally:
+            self._admitting.pop((chat_id, key), None)
+        outcome.set_result(echo)
+        return echo
+
+    async def _admit(
+        self,
+        chat_id: str,
+        typed: str,
+        composed: str,
+        key: str | None,
+        people: list[_Queued],
+    ) -> dict[str, Any]:
         busy = self._busy.get(chat_id)
         title = (
             busy.title if busy else (people[-1].echo.get("title", "") if people else "")
@@ -597,6 +723,9 @@ class OwnerAsks:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(self.settle(), 5.0)
         self._closed = True
+        for ask in self._asks.values():
+            if ask.held is not None:
+                ask.held[2].cancel()
         drains = [drain for drain in self._drains.values() if not drain.done()]
         for drain in drains:
             drain.cancel()

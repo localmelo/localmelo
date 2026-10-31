@@ -210,9 +210,9 @@ export function cardNode({doc, card, open, resume = null}) {
 // ── Echoes: what the main chat did with a task ──
 
 const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin",
-  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued"]);
+  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷",
-  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…"};
+  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
 const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
 const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];
@@ -262,6 +262,8 @@ export function echoActions(echo, done) {
     return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"]] : [undo];
   }
   if (echo.kind === "control") return [undo];
+  // A message sent as a task's answer can be taken back until it is delivered.
+  if (echo.kind === "answer_sent") return [undo];
   if (echo.kind === "suggest") {
     if (echo.action === "level") return [[t("mainChat.echo.setTo", {level: levelCode(echo.level)}), "apply"]];
     const word = ["stop", "pause", "resume", "first"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
@@ -285,7 +287,7 @@ export function echoNodes({doc, echo, done = false, act}) {
   };
   const nodes = [];
   // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing.
-  if (echo.kind === "dequeued" || (echo.kind === "queued" && done)) return nodes;
+  if (echo.kind === "dequeued" || echo.kind === "answer_delivered" || (echo.kind === "queued" && done)) return nodes;
   if (echo.typed) {
     const article = el("article", "msg user");
     article.append(el("div", echo.kind === "queued" ? "user-bubble queued" : "user-bubble", echo.typed));
@@ -358,6 +360,8 @@ function askNodes({el, echo, done, act}) {
   if (echo.kind !== "task_escalate") return [];
   const nodes = [fields(echo.parts, PERSON_PARTS, (name) => t(`ask.part.${name}`))];
   const key = `${echo.ask_id ?? ""}:${echo.id}`;
+  // How to answer: the box, a plain message when only this task waits, or /answer TASK when several do.
+  if (!done) nodes.push(el("p", "echo-sub", Number(echo.waiting) > 1 ? t("ask.answerHintMany", {title: echo.title ?? ""}) : t("ask.answerHint")));
   if (done) {
     replyDrafts.delete(key);
     return nodes;

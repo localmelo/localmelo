@@ -1104,3 +1104,161 @@ async def test_each_answered_question_is_kept_once_as_the_tasks_exchange(
         (first, "the problem the help needed", "Use option B."),
         (second, "the problem the help needed A or B?", "B, please"),
     ]
+
+
+# ── After a third review (#369) ──
+
+
+async def test_a_repeat_of_a_message_being_kept_waits_for_it_and_gets_its_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answers("B")), answer("Answered.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        task_id = await start(console, "a job")
+        await until(lambda: len(models["main"].requests) == 1)
+        entered, fail = asyncio.Event(), asyncio.Event()
+        update = console.store.update_session
+
+        async def slow(session_id: str, **kwargs: Any) -> Any:
+            if "queued" in (kwargs.get("meta_update") or {}):
+                entered.set()
+                await fail.wait()
+                raise SessionStoreError("disk full")
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", slow)
+        key = {"client_request_id": "msg-1"}
+        first = asyncio.create_task(_post_turn(client, main_id, "hello there", **key))
+        await asyncio.wait_for(entered.wait(), 5)
+        again = asyncio.create_task(_post_turn(client, main_id, "hello there", **key))
+        await asyncio.sleep(0.1)
+        assert not again.done(), "the repeat waits for the first to be kept"
+        fail.set()
+        answers_ = [await first, await again]
+        assert [r.status_code for r in answers_] == [503, 503]
+        release.set()
+        await ended(console, task_id)
+        await _wait_turn(client, main_id)
+        assert [t.origin for t in await console.store.list_turns(main_id)] == [
+            "ask_owner"
+        ]
+
+
+async def test_a_plain_message_answers_the_one_task_that_waits_for_you(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        asks_person,
+        answer("The task needs your answer."),
+        answer("B is faster."),
+    ]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        console.asks.undo_s = 0.2
+        main_id = str(console.main_id)
+        task_id = await start(console, "a job", title="A job")
+        await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
+        await _wait_turn(client, main_id)
+        # A question is the chat's, not the task's answer.
+        asked = await _post_turn(client, main_id, "Which one is faster?")
+        assert asked.status_code == 202, asked.text
+        await _wait_turn(client, main_id)
+        response = await _post_turn(client, main_id, "B, the faster one")
+        assert response.status_code == 200, response.text
+        sent = response.json()["echo"]
+        assert (sent["echo"], sent["typed"], sent["said"]["key"]) == (
+            "answer_sent",
+            "B, the faster one",
+            "ask.sentAnswer",
+        )
+        await ended(console, task_id)
+        [result] = tool_results(models["workers"][0])
+        assert result == "[answer from the user, in their own words]\nB, the faster one"
+        found = await rows(console, main_id)
+        assert [r["of"] for r in found if r["echo"] == "answer_delivered"] == [
+            sent["id"]
+        ]
+        late = await client.post(f"/api/front/echoes/{sent['id']}", json={"do": "undo"})
+        assert late.status_code == 409
+        assert [t.origin for t in await console.store.list_turns(main_id)] == [
+            "ask_owner",
+            "",
+        ]
+
+
+async def test_undo_keeps_the_task_waiting_and_sends_the_message_to_the_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        asks_person,
+        answer("The task needs your answer."),
+        answer("Noted."),
+    ]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        console.asks.undo_s = 60.0
+        main_id = str(console.main_id)
+        task_id = await start(console, "a job", title="A job")
+        await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
+        await _wait_turn(client, main_id)
+        sent = (await _post_turn(client, main_id, "B")).json()["echo"]
+        assert sent["echo"] == "answer_sent"
+        undone = await client.post(
+            f"/api/front/echoes/{sent['id']}", json={"do": "undo"}
+        )
+        assert undone.status_code == 200, undone.text
+        assert undone.json()["echo"]["said"]["key"] == "ask.takenBack"
+        turn = await _wait_turn(client, main_id)
+        assert (turn["user_text"], turn.get("origin", "")) == ("B", "")
+        assert (console.asks.waiting(task_id) or {}).get("on") == "person"
+        assert tool_results(models["workers"][0]) == []
+
+
+async def test_with_two_tasks_waiting_answer_names_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        asks_person,
+        answer("The first task needs you."),
+        asks_person,
+        answer("The second task needs you."),
+        answer("Which task is that for?"),
+    ]
+    workers: list[list[Reply]] = [[ASKS, answer("done")], [ASKS, answer("done")]]
+    async with ask_console(tmp_path, monkeypatch, main=main, workers=workers) as (
+        console,
+        client,
+        models,
+    ):
+        main_id = str(console.main_id)
+        first = await start(console, "the first job", title="First job")
+        second = await start(console, "the second job", title="Second job")
+
+        def on_person() -> bool:
+            asked = [console.asks.waiting(t) or {} for t in (first, second)]
+            return all(a.get("on") == "person" for a in asked)
+
+        await until(on_person)
+        await _wait_turn(client, main_id)
+        escalations = [
+            r for r in await rows(console, main_id) if r["echo"] == "task_escalate"
+        ]
+        assert escalations[-1]["waiting"] == 2
+        # Two wait: a plain message is the chat's.
+        plain = await _post_turn(client, main_id, "B")
+        assert plain.status_code == 202, plain.text
+        await _wait_turn(client, main_id)
+        unnamed = await _post_turn(client, main_id, "/answer B")
+        assert unnamed.json()["echo"]["said"]["key"] == "ask.whichTask"
+        named = await _post_turn(client, main_id, "/answer Second job: B")
+        assert named.json()["echo"]["how"] == "person"
+        await ended(console, second)
+        assert (console.asks.waiting(first) or {}).get("on") == "person"
+        results = [text for llm in models["workers"] for text in tool_results(llm)]
+        assert results == ["[answer from the user, in their own words]\nB"]

@@ -508,7 +508,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `task_ask`：问题本身，带 `fields`（`background`、`situation`、`problem`、`likely_causes`、`options`、`help_needed`、`if_unsolvable`）和 `lead`（对话内部轮次的第一行）；任务自己的对话已被删除时带 `from_chat`（任务的标题）。
 - `task_answered`（`text`，`of` 指问题）：对话用 `task_answer` 作了回答。
-- `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
+- `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`；`waiting` 是当时这个对话里有几个任务在等本人）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
+- `answer_sent`（`typed`、`undo_s`）：这个对话里恰好有一个任务在等本人时，一条不是提问、工作请求、命令、控制短语或问候的消息就是它的回答（以 200 返回这条回执，不开始轮次）。`undo_s` 秒（10）后交给任务，随后有一条 `answer_delivered` 回执（`of`）；在此之前用 `{"do": "undo"}` 会返回 `undone` 回执，任务继续等待，消息作为一轮开始（交付后为 409 `already_answered`）。`/answer TASK TEXT` 按标题立即回答在等的任务（返回 `ask_end`）；有几个在等却没写标题，或者没有任务在等，会有一条 `failed` 回执说明。
+- 消息正在排队保存时，重复同一个 `client_request_id` 会等它的结果，并得到同样的回答。
 - `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
 - `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
 
