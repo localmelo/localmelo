@@ -37,7 +37,7 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     SessionClient,
 )
-from localmelo.support.gateway.finishing import not_committed
+from localmelo.support.gateway.finishing import could_not_continue, not_committed
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.process_identity import gone as process_gone
@@ -1747,7 +1747,30 @@ class TaskWorkers:
                         deferred = True
                         return
             if execution_id is None:
+                # An ordinary start (a continued task, one queued again after a
+                # park) has no launch fence, but the tool-capture hook below
+                # needs this execution's capture row and a running task: it
+                # goes to running now, with a capture that starts incomplete,
+                # as an ordinary start's always did.
                 execution_id = uuid.uuid4().hex
+                async with self._lock:
+                    # A Stop, a close or a bad folder is settled where the agent
+                    # is built, below, which cancels the run before its turn.
+                    if not (
+                        self._closed
+                        or task_id in self._stopping
+                        or task_id in self._invalid_workspace
+                    ):
+                        current = await self.tasks.get_task(task_id)
+                        if current.state != "queued" or current.level >= 5:
+                            deferred = True
+                            return
+                        await self.tasks.change(
+                            task_id,
+                            state="running",
+                            actor="scheduler",
+                            _capture_execution=execution_id,
+                        )
             capture_execution = execution_id
 
             async def incomplete() -> None:
@@ -1844,13 +1867,15 @@ class TaskWorkers:
                     if current.state == "parked":
                         deferred = True
                     else:
-                        if not launch_committed or current.state != "running":
+                        if current.state != "running":
+                            # The capture row exists since the launch (a first
+                            # start) or the start above (every other).
                             await self.tasks.change(
                                 task_id,
                                 state="running",
                                 actor="scheduler",
                                 _capture_execution=execution_id,
-                                _capture_existing=launch_committed,
+                                _capture_existing=True,
                             )
                         if (
                             task_id in self._stopping
@@ -1902,9 +1927,13 @@ class TaskWorkers:
         except asyncio.CancelledError:
             post_fence_failure = launch_committed and not turn_started
             raise
-        except Exception:
+        except Exception as exc:
             post_fence_failure = launch_committed and not turn_started
             log.exception("Worker %s failed", task_id)
+            if not (post_fence_failure or turn_started):
+                # No turn began and no launch fence holds it: the task was
+                # continued (or queued again) and could not start.
+                failure_reason = could_not_continue(exc)
         finally:
             if process_token is not None:
                 PROCESS_RECORD.reset(process_token)

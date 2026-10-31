@@ -111,6 +111,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task you continue with a message starts its next run. A done, stopped or
+  failed task (a run that used up its steps, say) that a message or a "Send"
+  card continued ended again within a moment with no turn, because its
+  worker looked for tool-capture evidence before the new run was recorded as
+  running. The run now starts as running first, then sets up its tools. A
+  run that still cannot start says why on its card in the main chat and in the
+  panel's activity list ("Could not continue: …") instead of repeating the
+  earlier run's reason ([#NN]).
+
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
   file…") no longer ends the turn: the work starts as a task, or a question asks
