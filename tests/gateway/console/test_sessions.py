@@ -154,8 +154,12 @@ async def test_a_session_with_its_tokens_and_agent_state(
         "mcp_error",
         "agent",
         "tokens",
+        "last_event_id",
     }
     assert body["agent"] == "not_loaded"
+    # The newest stored event's id: a stream after it hears only what comes next.
+    events = await console.store.list_events(turn.session_id)
+    assert body["last_event_id"] == events[-1].id
     assert body["grants"] == []
     assert body["granted_at"] == {}
     assert body["mcp_error"] == ""
@@ -251,6 +255,7 @@ async def test_a_pending_high_impact_call_carries_its_review_and_is_never_grante
             "Installs playwright with pip.",
             "Creates a Python environment in .venv.",
         ],
+        "categories": ["install", "env"],
     }
 
     # An answer that asks to remember allows this call and restarts no clock.
@@ -285,7 +290,7 @@ async def test_a_pending_routine_call_has_a_review_without_a_title(
 
     pending = client.get(f"/api/sessions/{turn.session_id}").json()["pending_approvals"]
     assert {item["request_id"]: item["review"] for item in pending} == {
-        "a": {"verdict": "routine", "title": "", "reasons": []},
+        "a": {"verdict": "routine", "title": "", "reasons": [], "categories": []},
         "b": None,
     }
     console.broker.withdraw_all(reason="test over")

@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
@@ -171,6 +172,8 @@ class Console:
         # cards that come back to it from side chats and tasks.
         self.main_id: str | None = None
         self.cards = MainChatCards(self)
+        # Called each time the store opens (the gateway's endpoint file).
+        self.on_store_open: Callable[[], None] | None = None
         self.chore_runner = ChoreRunner(self, self.options.chores)
         self._started_at = time.time()
         self._store_ok = False
@@ -314,6 +317,8 @@ class Console:
             return False
         self._store_ok = True
         self._store_error = ""
+        if self.on_store_open is not None:
+            self.on_store_open()
         return True
 
     def _start_retention(self) -> None:

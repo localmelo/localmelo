@@ -127,7 +127,7 @@ def _arguments_complete(original: dict[str, Any], safe: dict[str, Any]) -> bool:
 def _review_json(
     review: ActionReview | None, root: str | None
 ) -> dict[str, Any] | None:
-    """The review as the card reads it: the verdict, the reasons and the title.
+    """The review as the card reads it: the verdict, the reasons, the title and the categories.
 
     ``title`` is the card's question for a high-impact call and ``""`` for
     any other. A reason goes through the secret redaction.
@@ -138,6 +138,7 @@ def _review_json(
         "verdict": review.verdict,
         "title": review_title(review, display.folder_name(root)),
         "reasons": [redact_secrets(reason)[0] for reason in review.reasons],
+        "categories": list(review.categories),
     }
 
 

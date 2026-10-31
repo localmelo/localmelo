@@ -278,6 +278,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "mcp_error": "" if entry is None else entry.mcp_error,
                 "agent": "not_loaded" if worker else agent_state(console, session_id),
                 "tokens": tokens,
+                # Where a client's stream starts to hear only what comes next.
+                "last_event_id": await _store_call(
+                    console,
+                    store.latest_event_id(session_id),
+                    None if worker else session_id,
+                ),
             }
         )
 

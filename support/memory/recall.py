@@ -9,8 +9,8 @@ above that list's bar: most of the question's content words for BM25,
 :data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
-A turn whose fact a newer note replaced comes after the rest, below that note,
-and reads as older (:func:`newer_first`).
+A turn whose fact a newer note or a newer turn replaced comes after the rest,
+below the newer one, and reads as older (:func:`newer_first`).
 """
 
 from __future__ import annotations
@@ -49,8 +49,10 @@ NOT_KEPT_LINE: Final = (
     "and it must not be written anywhere (no file, no code)"
 )
 KEPT_NOTES: Final = 3
-# How a turn whose fact a newer note replaced reads, to the model and the page.
+# How a turn whose fact a newer note, or a newer turn's words, replaced reads,
+# to the model and the page.
 OLDER: Final = "older; replaced by a newer note"
+OLDER_TURN: Final = "older; replaced by a newer message"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
 _TITLE_CHARS: Final = 40
@@ -71,8 +73,10 @@ class Item:
     turn. ``quote`` is a record's words as the user typed them, which the
     model reads, so that "you" never stands for the user in its prompt.
     ``where`` names the chat and the day. A record's ``replaces`` are the
-    turns (session id, turn) whose facts it replaced; ``older`` marks such a
-    turn when it is recalled.
+    turns (session id, turn) whose facts it replaced; a turn's ``said`` is
+    what its typed words state about the user, each folded statement with
+    its subject key (``""`` for none). ``older`` is how such a turn reads
+    when a newer one replaced it: :data:`OLDER` or :data:`OLDER_TURN`.
     """
 
     key: str
@@ -85,7 +89,8 @@ class Item:
     vector: np.ndarray | None = None  # unit length
     embed_model: str = ""
     replaces: tuple[tuple[str, int], ...] = ()
-    older: bool = False
+    said: tuple[tuple[str, str], ...] = ()
+    older: str = ""
 
     @property
     def is_record(self) -> bool:
@@ -94,13 +99,13 @@ class Item:
     @property
     def source(self) -> str:
         said = ("you said it · " if self.is_record else "") + self.where
-        return f"{said} · {OLDER}" if self.older else said
+        return f"{said} · {self.older}" if self.older else said
 
     @property
     def prompt(self) -> str:
         """The item as the model reads it, with where it came from."""
         if not self.is_record:
-            older = f" ({OLDER})" if self.older else ""
+            older = f" ({self.older})" if self.older else ""
             return f"{snippet(self.text)} ({self.where}){older}"
         said = f"the user said “{self.quote}”" if self.quote else self.text
         return f"{said} ({self.where})"
@@ -193,14 +198,19 @@ class Corpus:
         self.items: dict[str, Item] = {}
         self.terms: dict[str, frozenset[str]] = {}
         self.index = BM25Index()
+        # Changes with every add and remove, so what is derived from all the
+        # items can be kept until they change.
+        self.version = 0
 
     def add(self, item: Item) -> None:
+        self.version += 1
         self.items[item.key] = item
         words = stemmed(normalise(item.text))
         self.terms[item.key] = frozenset(tokenize(words))
         self.index.add(item.key, words)
 
     def remove(self, key: str) -> None:
+        self.version += 1
         self.items.pop(key, None)
         self.terms.pop(key, None)
         self.index.remove(key)
@@ -267,10 +277,15 @@ def replaced_turns(corpus: Corpus) -> dict[tuple[str, int], Item]:
 
 
 def newer_first(
-    items: Sequence[Item], replaced: Mapping[tuple[str, int], Item]
+    items: Sequence[Item],
+    replaced: Mapping[tuple[str, int], Item],
+    *,
+    exclude_session: str = "",
 ) -> list[Item]:
-    """*items* with each turn whose fact a newer note *replaced* moved after the
-    rest and marked older; that note comes in ahead of it if it was not found.
+    """*items* with each turn whose fact a newer note or turn *replaced* moved
+    after the rest and marked older; the newer one comes in ahead of it if it
+    was not found (a turn of *exclude_session*, the chat under way, never: the
+    chat has it already).
 
     The old fact stays as history, as people keep it, but the newer one wins.
     """
@@ -282,10 +297,17 @@ def newer_first(
         if newer is None:
             fresh.append(item)
             continue
-        if newer.key not in keys:
+        # A newer turn a still newer note or turn replaced: that one wins.
+        for _ in range(len(replaced)):
+            if newer.is_record or (newer.session_id, newer.turn) not in replaced:
+                break
+            newer = replaced[(newer.session_id, newer.turn)]
+        here = not newer.is_record and newer.session_id == exclude_session
+        if newer.key not in keys and not here:
             keys.add(newer.key)
             fresh.append(newer)
-        stale.append(dataclasses.replace(item, older=True))
+        older = OLDER if newer.is_record else OLDER_TURN
+        stale.append(dataclasses.replace(item, older=older))
     return fresh + stale
 
 

@@ -90,7 +90,9 @@ While the window is put away and something runs or waits, a small pill takes Mel
 
 ## Quit and the gateway
 
-- Opening the app starts its own gateway with `melo --serve --port 0`: a free port, never one that other work reserves, and an existing listener is not adopted.
+- Opening the app starts its own gateway with `melo --serve --port 0`: a free port, never one that other work reserves, and an unknown listener is not adopted.
+- When a gateway already runs (one `melo` started in a terminal, say), the app uses it instead, signed in the same way; it finds it through `~/.cache/localmelo/gateway/endpoint.json`.
+- Quitting leaves a gateway the app did not start running, and the menu says so: **Quit localmelo (the gateway keeps running)**. `melo serve stop` stops it.
 - Closing the window leaves the gateway running; quitting asks only when something would stop, for example `Quitting stops what is running: 2 tasks and 1 chat.`
 - Direct runs and terminal chats belong to other processes and go on: `Not affected: 1 run and 1 terminal chat.`
 - If another gateway holds the console's store, stop it first; a background service is checked with `melo serve status` and removed with `melo serve uninstall`.

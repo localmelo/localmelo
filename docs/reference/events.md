@@ -295,7 +295,7 @@ too (see [Model calls](memory.md#model-calls)).
 | Tool | Preview |
 |---|---|
 | `shell_exec` | The command, with runs of whitespace collapsed. |
-| `python_exec` | The first non-blank line of the code, followed by ` (+<n> more lines)` when more lines follow. |
+| `python_exec` | The command the code runs, when it calls `subprocess.run`, `check_output`, `check_call`, `call` or `Popen` with a literal command (`grep -rn DEFAULT_WORKSPACE .`), or calls a function it defines that does, with literal arguments (`run("git", "status")` reads `git status`); else the first line that is not blank, a comment or an import (the first line when there is none). Followed by ` (+<n> more lines)` when more lines follow. |
 | `file_read` | The path. |
 | `list_files` | The path (`.` without one), followed by ` (<n> levels)` for a depth above 1. |
 | `file_write` | `<path> (<n> chars)`. |
@@ -718,7 +718,7 @@ and `"run_id": ""`.
   follows the [payload rules](#payload-rules). The store refuses every other
   type.
 - **`attention.card`** is the one such type with set keys: the main chat's
-  card (`source_id`, `source_kind`, `title`, `state`, `line`, `at`), stored in
+  card (`source_id`, `source_kind`, `title`, `state`, `line`, `at`, and `request_id` on a waiting or answered one), stored in
   the main chat with no turn when a side chat's run or a task comes back; see
   [Cards in the main chat](api-v2.md#cards-in-the-main-chat).
 - **`attention.echo`** is the main chat's line about a task it started,

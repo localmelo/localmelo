@@ -481,6 +481,40 @@ async def test_each_action_goes_to_the_gateway_once_chosen() -> None:
     assert app.hints[-1] == "Bench the cache is now P3"
 
 
+def test_default_mode_says_levels_in_words() -> None:
+    parts = work_parts(WorkSummary(running=2, queued=1, top=1), words=True)
+    assert [part.text for part in parts] == [
+        "2 running",
+        "1 queued",
+        "Today",
+        "ctrl+t tasks",
+    ]
+    labels = [action.label for action in actions(TASKS[0], words=True)]
+    assert labels == ["Pause", "Raise to Today", "Lower to Whenever", "Stop"]
+    # The command the gateway gets keeps its code.
+    assert actions(TASKS[0], words=True)[1].level == "P1"
+    assert task_rows(TASKS, words=True) == [
+        "Normal  running  Bench the cache",
+        "Today   queued   Write the changelog",
+        "Later   paused   Old idea",
+        "Now     held     Waits for an answer",
+    ]
+    assert not any(
+        "P" + str(n) in " ".join(task_rows(TASKS, words=True)) for n in range(6)
+    )
+
+
+async def test_ctrl_t_says_levels_in_words_outside_developer_mode() -> None:
+    tasks = FakeTasks(TASKS)
+    app = ScriptedApp([0, 1])
+    await WorkBeside(tasks, words=True).open(app)  # type: ignore[arg-type]
+    assert app.asked[0][1][0] == "Normal  running  Bench the cache"
+    assert app.asked[1][0] == "Bench the cache · Normal · running"
+    assert app.asked[1][1] == ["Pause", "Raise to Today", "Lower to Whenever", "Stop"]
+    assert tasks.acted == [("t1", Action("Raise to Today", "level", "P1"))]
+    assert app.hints == ["Bench the cache is now Today"]
+
+
 async def test_resume_goes_to_the_gateway_for_a_paused_task() -> None:
     tasks = FakeTasks(TASKS)
     app = ScriptedApp([2, 0])

@@ -14,6 +14,15 @@ REAL_LIST_MODELS = discovery.list_models
 
 
 @pytest.fixture(autouse=True)
+def _terminal_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare melo in a test keeps the terminal's own chat: no gateway is reached.
+
+    The main chat's own tests set ``LOCALMELO_CHAT=main`` and a free port.
+    """
+    monkeypatch.setenv("LOCALMELO_CHAT", "local")
+
+
+@pytest.fixture(autouse=True)
 def _no_status_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never ask a real server which models are loaded.
 

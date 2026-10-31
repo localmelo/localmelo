@@ -194,6 +194,7 @@ def welcome(
     width: int,
     symbols: Symbols,
     palette: Palette | None = None,
+    chat: str | None = None,
 ) -> RenderableType:
     """Three rows that start the conversation: the model, the folder, what to try.
 
@@ -209,11 +210,15 @@ def welcome(
     dot, ellipsis = symbols.dot, symbols.ellipsis
     model = clean_output(backend.model)
     change: Parts = [(" (", "muted"), ("/model", "accent"), (" to change)", "muted")]
+    if chat is not None:
+        # The main chat's model is the gateway's: the row names the chat instead.
+        change = [(f" {dot} ", "muted"), (chat, "accent")]
     named: list[Parts] = [
         [("melo", "brand"), (f" {v} {dot} ", "muted"), (model, ""), *change]
         for v in (version, version.split(" (")[0])  # then without the commit
     ]
-    cut = cut_cells(model, max(1, width - cells(" (/model to change)")), ellipsis)
+    tail = "".join(text for text, _ in change)
+    cut = cut_cells(model, max(1, width - cells(tail)), ellipsis)
     lines = [
         _fitting([*named, [(model, ""), *change], [(cut, ""), *change]], width),
         Text(
@@ -276,8 +281,12 @@ def banner(
     session_title: str | None = None,
     developer: bool = False,
     palette: Palette | None = None,
+    chat: str | None = None,
 ) -> RenderableType:
-    """The startup banner: the welcome, or in developer mode a box of every row."""
+    """The startup banner: the welcome, or in developer mode a box of every row.
+
+    *chat* names the main chat when the terminal opens it through the gateway.
+    """
     if not developer:
         return welcome(
             version=version,
@@ -287,6 +296,7 @@ def banner(
             width=width,
             symbols=symbols,
             palette=palette,
+            chat=chat,
         )
     rows: list[tuple[str, str, str]] = []
     for number, text in enumerate(model_rows(backend)):
@@ -302,7 +312,7 @@ def banner(
             (
                 f'"{clean_output(session_title)}" (resumed)'
                 if session_title is not None
-                else "new"
+                else f"{chat} (the gateway's)" if chat is not None else "new"
             ),
             "",
         ),

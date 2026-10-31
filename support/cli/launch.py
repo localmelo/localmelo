@@ -45,6 +45,10 @@ SCREEN_ERRORS_S: Final = 5.0
 # After a signal or a hangup, how long the app gets to end on its own.
 APP_END_S: Final = 1.0
 
+# Overrides [cli] chat for one process: "local" keeps the terminal's own chat
+# (a script or a test harness that must never reach a gateway).
+CHAT_ENV: Final = "LOCALMELO_CHAT"
+
 NO_TERMINAL: Final = (
     "melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).\n"
     '  Run one task:      melo "your task"\n'
@@ -76,6 +80,23 @@ def ui_terminal() -> bool:
     except (AttributeError, ValueError):
         return False
     return ttys and os.environ.get("TERM") != "dumb"
+
+
+def wants_main_chat(args: argparse.Namespace, choice: Choice, chat: str) -> bool:
+    """Whether bare melo opens the main chat, as ``[cli] chat`` (*chat*) says.
+
+    ``--url``, ``-c``, ``-r`` and ``--yolo`` choose what only the terminal's
+    own chat does, so they keep it; so does ``LOCALMELO_CHAT=local``.
+    """
+    override = os.environ.get(CHAT_ENV, "")
+    chosen = override if override in config.CLI_CHATS else chat
+    return (
+        chosen == "main"
+        and choice.cfg is not None
+        and not getattr(args, "yolo", False)
+        and not getattr(args, "continue_session", False)
+        and getattr(args, "resume", None) is None
+    )
 
 
 def _configured(
@@ -432,6 +453,8 @@ async def main_async(
     from prompt_toolkit.patch_stdout import patch_stdout
     from rich.text import Text
 
+    from localmelo.support import task_cli
+    from localmelo.support.cli import main_chat
     from localmelo.support.cli.agents import AgentFactory
     from localmelo.support.cli.app import InteractiveApp, open_history, terminal_input
     from localmelo.support.cli.approvals import TerminalApprover
@@ -569,6 +592,14 @@ async def main_async(
             )
             pricing = {}
 
+        starting = (
+            getattr(args, "continue_session", False)
+            or getattr(args, "resume", None) is not None
+        )
+        main_wanted = not starting and wants_main_chat(
+            args, choice, session_config.cli.chat
+        )
+
         def draw_banner(selected: SessionInfo | None = None) -> None:
             out.print(
                 banner(
@@ -583,6 +614,7 @@ async def main_async(
                     session_title=selected.title if selected is not None else None,
                     developer=developer,
                     palette=active(),
+                    chat=main_chat.MAIN_TITLE if main_wanted else None,
                 )
             )
 
@@ -600,7 +632,7 @@ async def main_async(
             out=out,
             developer=developer,
             pricing=pricing,
-            work=WorkBeside(GatewayTasks()),
+            work=WorkBeside(GatewayTasks(), words=not developer),
             welcome=draw_banner,
         )
 
@@ -629,12 +661,39 @@ async def main_async(
             if not choice.checked and factory.listable():
                 session.spawn(session.check_server())
 
-        starting = (
-            getattr(args, "continue_session", False)
-            or getattr(args, "resume", None) is not None
-        )
+        connected: main_chat.Link | main_chat.Offline | None = None
+        if main_wanted:
+            # The main chat lives in the gateway: find it, or start it here.
+            def starting_gateway() -> None:
+                line = Text(
+                    in_symbols("Starting the gateway in the background…", symbols),
+                    style="muted",
+                )
+                loop.call_soon_threadsafe(out.print, line)
+
+            found = connected = await asyncio.to_thread(
+                main_chat.connect, session_config, on_start=starting_gateway
+            )
+            if isinstance(found, main_chat.Link):
+                session.remote = main_chat.MainChat(
+                    session, main_chat.GatewayClient(found.url), found
+                )
+                session.title = main_chat.MAIN_TITLE
+                url = found.url
+                session.work = WorkBeside(
+                    GatewayTasks(
+                        connect=lambda timeout: task_cli.connect(url, timeout=timeout)
+                    ),
+                    words=not developer,
+                )
+            else:
+                main_wanted = False  # the welcome does not name the main chat
         if not starting:
             show_banner()
+        if isinstance(connected, main_chat.Link):
+            out.print(Text(connected.line(), style="muted"))
+        elif isinstance(connected, main_chat.Offline):
+            out.print(Text(f"{symbols.warn} {connected.line()}", style="warn"))
         history: History
         try:
             history = open_history(os.path.expanduser(HISTORY_FILE))
@@ -680,6 +739,8 @@ async def main_async(
         signals.install()
         app = asyncio.ensure_future(ui.run())
         session.spawn(session.navigation.refresh_refs())
+        if session.remote is not None:
+            session.spawn(session.open_main_chat())
         if starting:
             session._state = "switching"
             session._work = session.spawn(
