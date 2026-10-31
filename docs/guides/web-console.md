@@ -220,7 +220,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/undo`, `/retry` | Forget the newest finished turn (its file changes stay), or run it again. |
 | `/copy [turn]` | Copy an answer to the clipboard; without a number, the latest. |
 | `/title [text]` | Show or set the chat's title. |
-| `/memory [window]` | Open the Memory tab; `window` shows the model's window. `/memory import` is kept for the import screen. |
+| `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
 | `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
 | `/attach`, `/attachments`, `/detach` | The console takes no files yet, and says so. |

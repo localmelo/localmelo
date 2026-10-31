@@ -117,7 +117,7 @@
 | `/undo`、`/retry` | 忘掉最近一轮已结束的轮次（文件改动保留），或把它再跑一次。 |
 | `/copy [turn]` | 把一个回答拷贝到剪贴板；不带数字时是最新的。 |
 | `/title [text]` | 查看或设置对话标题。 |
-| `/memory [window]` | 打开“记忆”标签页；`window` 显示模型的窗口。`/memory import` 留给导入界面。 |
+| `/memory [window\|import]` | 打开“记忆”标签页；`window` 显示模型的窗口；`import` 还会按下 **Look for notes**，列出其他助手保存的文件（记忆关闭时会有一行说明）。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
 | `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
 | `/attach`、`/attachments`、`/detach` | 控制台暂时不能附加文件，并会这样说明。 |

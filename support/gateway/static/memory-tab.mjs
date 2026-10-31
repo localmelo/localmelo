@@ -228,7 +228,15 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   }
 
   draw();
-  return {root, state, show: () => load(), reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
+  /** `/memory import`: the notes are read, then "Look for notes" is pressed; false when memory is off (no section). */
+  async function lookForNotes() {
+    if (!state.loaded) await load();
+    if (!state.on) return false;
+    await importing.look();
+    return true;
+  }
+
+  return {root, state, show: () => load(), lookForNotes, reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
 }
 
 /**

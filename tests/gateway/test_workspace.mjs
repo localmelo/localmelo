@@ -748,7 +748,9 @@ function harness(routes, {mobile = false} = {}) {
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
-    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false}),
+    // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
+    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false, select() {}, openSheet() {},
+      lookForNotes: async () => { context.notesLooked = (context.notesLooked ?? 0) + 1; return context.notesOn !== false; }}),
     document,
     location: {hash: '', pathname: '/', search: ''},
     history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
@@ -4846,6 +4848,21 @@ test('a slash command typed in the composer runs on the page, answers in a local
   assert.match(h.text('local-rows'), /Unknown command \/nonsense — \/help lists them/);
   assert.equal(turnPosts(h).length, 0);
   assert.equal(h.state().outbox.a, undefined, 'No pending message either');
+});
+
+test('/memory import opens the Memory tab and looks for notes; with memory off a row says so', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.element('input').value = '/memory import';
+  await h.run('send()');
+  assert.equal(h.context.notesLooked, 1, 'the tab looked for notes as its button does');
+  assert.equal(turnPosts(h).length, 0);
+  assert.doesNotMatch(h.text('local-rows'), /not on this page yet/, 'the import screen is on this page now');
+  h.context.notesOn = false;
+  h.element('input').value = '/memory import';
+  await h.run('send()');
+  assert.equal(h.context.notesLooked, 2);
+  assert.match(h.text('local-rows'), /Memory across chats is off\. Turn on Remember across chats in the Memory tab first\./);
 });
 
 test('a message that only looks like a command is sent as the person wrote it, and a sent message clears the rows', async () => {

@@ -1210,6 +1210,7 @@
   "slash.manyChats": "有 {n} 个对话与“{query}”匹配。请在列表里选一个。",
   "slash.mcp": "控制台暂时不支持 MCP 服务器。终端对话可以用 /mcp 列出它们。",
   "slash.memoryImport": "这个页面暂时不能导入笔记。请在终端里用 melo memory import。",
+  "slash.memoryImportOff": "跨对话记忆已关闭。请先在 Memory 标签页打开“跨对话记忆”。",
   "slash.menuLabel": "命令",
   "slash.modelSet": "模型已设为 {model}（已保存）。",
   "slash.new": "新的",

@@ -3004,6 +3004,8 @@ const slash = setupSlash({
     panel.select("memory", { focus: true });
     if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
   },
+  // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
+  memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
   openDrawer: (tab) => drawer.open(tab),
   settingsSaved,
   setMode: setChatMode,

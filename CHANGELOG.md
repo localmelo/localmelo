@@ -93,7 +93,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `Show what they say`, `Not now`; the list starts on `Show what they say`) on
   the first interactive run, and later with `/memory import` or
   `melo memory import` (`--undo BATCH` takes a batch back). Esc, ctrl+c and end
-  of input leave without recording an answer, so the offer comes again.
+  of input leave without recording an answer, so the offer comes again. In the
+  console and the app, `/memory import` opens the Memory tab and looks for notes.
   The Memory tab gets **From other assistants** (**Look for notes**, and each
   batch with its own **Undo**), and an imported note says which file it came
   from. Nothing is brought in until you choose; a task run never asks. New:

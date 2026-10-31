@@ -249,7 +249,7 @@ export function batches(rows) {
 /**
  * The Memory tab's "From other assistants": "Look for notes" scans and shows the card's list, "Bring them in"
  * writes the checked files; the batches already brought in (from the tab's notes) each have Undo. `rows()` is
- * the tab's loaded notes and `reload()` reads them again.
+ * the tab's loaded notes and `reload()` reads them again. `look()` presses "Look for notes" (`/memory import`).
  */
 export function importSection({doc, api, rows, reload, redraw}) {
   const root = el(doc, "section", "memory-import");
@@ -343,5 +343,5 @@ export function importSection({doc, api, rows, reload, redraw}) {
     }
     root.replaceChildren(...parts);
   }
-  return {root, draw};
+  return {root, draw, look: lookFor};
 }
