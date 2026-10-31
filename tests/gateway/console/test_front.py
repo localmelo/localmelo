@@ -497,7 +497,7 @@ async def test_a_delegated_task_comes_back_as_a_card(tmp_path: Path) -> None:
         assert (card["source_id"], card["state"], card["line"]) == (
             task_id,
             "done",
-            "Two new roles.",
+            "Two new roles.\nSaved jobs.md.",
         )
         assert len(await store.events_of_type(str(console.main_id), CARD_EVENT)) == 1
 
