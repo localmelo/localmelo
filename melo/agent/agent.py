@@ -263,6 +263,7 @@ from localmelo.melo.schema import (
     answer_text,
     clip_session_text,
     describe_images,
+    has_content,
     new_record_id,
     new_tool_call_id,
     split_thinking,
@@ -5169,17 +5170,17 @@ class Agent:
         ``completed`` with a direct answer as the result, or as
         ``failed`` with a checker's refusal as the error.
 
-        A reply with neither a tool call nor text is no answer: its step
-        counts, working memory records it as :data:`EMPTY_REPLY_LABEL`,
-        an assistant message, followed by :data:`EMPTY_REPLY_NUDGE` as a
-        user message, and the model plans again. The label keeps the
-        roles alternating, since some chat templates (Mistral, Gemma)
-        reject two user messages in a row, such as the query and the
-        nudge. Neither message goes to history, and neither counts as a
-        reply of the model: the latest text, the empty-reply count and
-        stuck detection only see what the model returned. The
-        :data:`MAX_EMPTY_REPLIES`-th empty reply in a row in this run
-        (reflections in between do not break the row) ends it as
+        A reply with neither a tool call nor text is no answer (text with no
+        letter or digit, such as ``...``, is none): its step counts, working
+        memory records it as :data:`EMPTY_REPLY_LABEL`, an assistant message,
+        followed by :data:`EMPTY_REPLY_NUDGE` as a user message, and the
+        model plans again. The label keeps the roles alternating, since some
+        chat templates (Mistral, Gemma) reject two user messages in a row,
+        such as the query and the nudge. Neither message goes to history,
+        and neither counts as a reply of the model: the latest text, the
+        empty-reply count and stuck detection only see what the model
+        returned. The :data:`MAX_EMPTY_REPLIES`-th empty reply in a row in
+        this run (reflections in between do not break the row) ends it as
         ``failed`` with the error ``empty replies``.
 
         A reply that is only unfinished thinking (``Chat.unfinished``, #278)
@@ -5299,12 +5300,13 @@ class Agent:
             thought_aliases: list[str] = []
             if self._notes_mode and "thought" in self._effective_kinds:
                 thought_aliases = await self._store_thought_chunks(response, run)
-            if rest.strip():
+            # Dots, dashes or emoji alone say nothing: the text is blank.
+            if has_content(rest):
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
-                if rest.strip():
+                if has_content(rest):
                     # No tool call → direct answer. In the compress modes
                     # the note is stored first and the answer is the text
                     # without its <note> block.

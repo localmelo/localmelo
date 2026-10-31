@@ -205,6 +205,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A broken model reply is no longer shown as the answer. A reply that starts
+  with a spelled-out `<thinking>...</thinking>` block now has that block as its
+  thinking, as a `<think>` block does, and the person no longer sees it while the
+  reply streams or in the answer. An answer of dots, dashes or emoji only (no
+  letter or digit in any script) counts as an empty reply, so the model is asked
+  once more. Short real answers such as `OK`, `好` or `1` are kept. [#NN]
 - Memory answers give the current value, and notes say who they are about. After
   you update a fact, asking about it recalled the older chat as well, marked
   `(older; replaced by a newer note)`, and the answer named both ("Utrecht, the
