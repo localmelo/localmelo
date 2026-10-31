@@ -128,6 +128,12 @@ def test_other_code_is_still_reviewed(tmp_path: Path) -> None:
         (("git", "remote", "-v"), True),
         (("git", "remote", "add", "o", "u"), False),
         (("git", "push"), False),
+        (("git", "diff", "--ext-diff"), False),
+        (("git", "log", "-p", "--textconv"), False),
+        (("git", "-c", "core.pager=less", "log"), False),
+        (("git", "--exec-path=/tmp", "status"), False),
+        (("git", "--git-dir=/tmp/x", "status"), False),
+        (("git", "--no-pager", "-C", "src", "log"), True),
         (("ls",), True),
         (("sort", "-o", "x"), False),
         ((), False),
@@ -135,3 +141,69 @@ def test_other_code_is_still_reviewed(tmp_path: Path) -> None:
 )
 def test_read_only_argv(argv: tuple[str, ...], reads: bool) -> None:
     assert read_only_argv(argv) is reads
+
+
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        # Reads outside the workspace ask, as before helpers were followed.
+        ('run("cat", "/etc/passwd")', "undecided"),
+        ('run("grep", "-r", "token", "/Users")', "undecided"),
+        ('run("cat", "../../outside.txt")', "undecided"),
+        ('run("git", "-C", "..", "status")', "undecided"),
+        ('run("grep", "--file=/etc/hosts", "src")', "undecided"),
+        # Files that hold passwords or keys, inside the workspace too.
+        ('run("cat", ".env")', "high"),
+        ('run("cat", "config/.env.local")', "high"),
+        ('run("git", "show", "HEAD:.env")', "high"),
+        ('run("cat", "certs/server.pem")', "high"),
+        ('run("head", "deploy/id_ed25519")', "high"),
+        ('run("cat", "credentials.json")', "high"),
+        # git options that run a program the repository or the command names.
+        ('run("git", "diff", "--ext-diff")', "undecided"),
+        ('run("git", "log", "-p", "--textconv")', "undecided"),
+        ('run("git", "-c", "core.pager=less", "log")', "undecided"),
+        ('run("git", "--exec-path=/tmp/x", "status")', "undecided"),
+        ('run("git", "--git-dir=/tmp/x", "status")', "undecided"),
+        # The same reads, inside the workspace and of plain files: routine.
+        ('run("cat", "README.md")', "routine"),
+        ('run("grep", "-rn", "x", "src")', "routine"),
+        ('run("grep", "-rn", "token", "src")', "routine"),
+        ('run("git", "show", "HEAD:docs/a.md")', "routine"),
+        ('run("git", "-C", "src", "log", "-n", "3")', "routine"),
+    ],
+)
+def test_a_helper_read_is_routine_only_inside_the_workspace_and_of_no_secret(
+    tmp_path: Path, call: str, expected: str
+) -> None:
+    assert verdict(tmp_path, VARARGS + call) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        # The helper's folder is its default: a literal inside the workspace.
+        (ONE_LIST + 'sh(["cat", "a.md"])', "routine"),
+        (
+            'import subprocess\ndef sh(cmd, cwd="src"):\n    subprocess.run(cmd, cwd=cwd)\n'
+            'sh(["cat", "../README.md"])',
+            "routine",
+        ),
+        (
+            'import subprocess\ndef sh(cmd, cwd="/etc"):\n    subprocess.run(cmd, cwd=cwd)\n'
+            'sh(["ls"])',
+            "undecided",
+        ),
+        # A call that passes the folder, or a helper whose first parameter takes it.
+        (ONE_LIST + 'sh(["ls"], "/etc")', "undecided"),
+        (
+            "import subprocess\ndef run(cwd, *a):\n    subprocess.run(list(a), cwd=cwd)\n"
+            'run("/etc", "ls")',
+            "undecided",
+        ),
+    ],
+)
+def test_a_helper_runs_in_its_folder_only_when_melo_can_place_it(
+    tmp_path: Path, code: str, expected: str
+) -> None:
+    assert verdict(tmp_path, code) == expected

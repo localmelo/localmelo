@@ -108,6 +108,7 @@ async def test_each_read_shows_the_repository(repo: Path) -> None:
     diff = await run_git_status(str(repo), "diff", paths=["a.py"])
     assert "-two" in diff and "+TWO" in diff
     assert "a.py" in await run_git_status(str(repo), "show", rev="HEAD")
+    assert await run_git_status(str(repo), "show", rev="HEAD:a.py") == "one\ntwo\nthree"
 
 
 async def test_reads_leave_the_repository_as_it_was(repo: Path) -> None:
@@ -132,6 +133,10 @@ async def test_reads_leave_the_repository_as_it_was(repo: Path) -> None:
         ("log", {"stat": True}, "stat and staged apply to diff only"),
         ("branch", {"rev": "main"}, "rev applies to log, diff and show"),
         ("log", {"count": 0}, "count must be a positive integer"),
+        ("show", {"rev": "HEAD:../outside"}, "outside allowed workspace root"),
+        ("show", {"rev": "HEAD:.env"}, "may hold passwords or keys"),
+        ("diff", {"paths": ["config/.env.local"]}, "may hold passwords or keys"),
+        ("log", {"paths": ["keys/id_ed25519"]}, "may hold passwords or keys"),
     ],
 )
 def test_a_read_outside_its_bounds_is_refused(

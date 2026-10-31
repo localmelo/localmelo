@@ -13,8 +13,10 @@ git's argv itself, so a call cannot run anything but these reads:
 No shell runs, and git runs without hooks, external diff or text conversion
 programs, a pager, an fsmonitor, a terminal prompt or the optional index
 refresh (``GIT_OPTIONAL_LOCKS=0``), so nothing it runs can write. A path
-must resolve inside the root and a revision must look like one (no leading
-``-``, no spaces): anything else is refused before git starts. The output
+must resolve inside the root, a revision must look like one (no leading
+``-``, no spaces), and neither may name a file that holds passwords or keys
+(``.env``, ``*.pem``, ``id_rsa``…, a ``REV:path``'s path included): anything
+else is refused before git starts. The output
 keeps its first :data:`MAX_OUTPUT_CHARS` characters.
 """
 
@@ -30,6 +32,7 @@ import subprocess
 from collections.abc import Sequence
 from typing import Any, Final
 
+from localmelo.melo.checker.review.paths import secret_name
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.schema import ToolDef
 
@@ -116,6 +119,9 @@ def git_argv(
     ):
         raise ValueError("paths must be a list of strings")
     fenced = _fenced(root, list(paths or []))
+    if ":" in rev:
+        # REV:path names a file as git keeps it: the same rules as a path.
+        _fenced(root, [rev.split(":", 1)[1] or "."])
     if fenced and command not in ("log", "diff"):
         raise ValueError(f"paths apply to log and diff, not {command}")
     if (stat or staged) and command != "diff":
@@ -163,6 +169,10 @@ def _fenced(root: str, paths: list[str]) -> list[str]:
         real = os.path.realpath(os.path.join(real_root, path))
         if os.path.commonpath([real_root, real]) != real_root:
             raise ValueError(f"Path '{path}' is outside allowed workspace root")
+        if secret_name(path):
+            raise ValueError(
+                f"Path '{path}' may hold passwords or keys; git_status does not read it"
+            )
         out.append(os.path.relpath(real, real_root))
     return out
 
