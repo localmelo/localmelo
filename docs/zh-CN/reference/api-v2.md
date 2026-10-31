@@ -810,7 +810,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/Users/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "session_id": "b79a99d86b50"}}
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "session_id": "b79a99d86b50"}}
 ```
 
 - 任务的审批带 `explanation`；对话的没有。
@@ -917,7 +917,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "approvals": [{"id": "763fa9e3c647", "tool": "python_exec", "folder": "/Users/me/notes", "verdict": "routine", "categories": [], "preview": "print(1)", "at": 1793482098.376}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
+{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "approvals": [{"id": "763fa9e3c647", "tool": "python_exec", "folder": "/home/me/notes", "verdict": "routine", "categories": [], "preview": "print(1)", "at": 1793482098.376}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
 ```
 
 - `approvals` 是本人在这个对话里允许过的步骤，从新到旧，它的任务会不再询问就再次运行它们（[任务的批准](#a-tasks-approvals-go-through-its-chat)）。
