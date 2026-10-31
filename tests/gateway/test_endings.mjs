@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from '../../support/gateway/static/endings.mjs';
+import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, reportText, testWords} from '../../support/gateway/static/endings.mjs';
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'commit_missing'], question: '',
@@ -37,6 +37,13 @@ test('needs you says its question; failed and stopped need no reasons', () => {
   assert.equal(endingWhy(readEnding({state: 'failed', reasons: ['run_failed']})), '');
   assert.equal(endingLabel(readEnding({state: 'dropped', reasons: ['stopped']})), 'Stopped');
   assert.deepEqual(testWords(DRAFT.tests[0]), {mark: '?', command: DRAFT.tests[0].command, outcome: 'result not checked'});
+});
+
+test('the person reads a report without its Ending line', () => {
+  assert.equal(reportText('Fixed the parser.\n\nEnding: ready\n'), 'Fixed the parser.');
+  assert.equal(reportText('Asked.\n**Ending:** `blocked` — which port?'), 'Asked.');
+  assert.equal(reportText('The ending: a twist.'), 'The ending: a twist.', 'only a proposal line goes');
+  assert.equal(reportText(null), '');
 });
 
 test('in Chinese, the state, the reasons and Finish it read in Chinese', async () => {

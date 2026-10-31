@@ -32,6 +32,7 @@ import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
 import { answered, askTurn, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
+import { reportText } from "./endings.mjs";
 import {
   activity,
   applyEvent,
@@ -2643,7 +2644,8 @@ function taskResultNodes(view, render) {
   const turns = view.turns.filter((turn) => turn.items.length || turn.answer);
   const last = turns.findLast((turn) => turn.answer) ?? turns.at(-1);
   const newest = view.turns.at(-1);
-  const answer = [...(last?.answer ? [answerNode(last.answer)] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
+  // The report without its Ending line: how the task ended is the page's State, as code decided it.
+  const answer = [...(last?.answer ? [answerNode(reportText(last.answer))] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
   const steps = turns.flatMap((turn) => {
     if (turn !== last) return turnWork(turn, view.id, render, "");
     return turn.items.length ? turnSteps(turn, view.id, render, "") : [];

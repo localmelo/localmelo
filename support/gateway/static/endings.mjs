@@ -12,6 +12,11 @@ const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 const WHY = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
 const OUTCOMES = new Set(['passed', 'failed', 'unknown']);
 export const ENDING_MARKS = {ready: '✓', draft: '◐', blocked: '?', failed: '✕', dropped: '■'};
+// The report's proposal line (`Ending: ready`), as the server's task_endings reads it.
+const PROPOSAL = /^[\s>*_`-]*ending[*_`\s]*[:：][*_`\s]*(?:ready|blocked|failed|dropped)\b[*_`]*[ \t]*(?:[:：—–-].*)?$/gim;
+
+/** A task's report without its `Ending:` line: the proposal is for code, the person reads the rest. */
+export const reportText = (answer) => String(answer ?? '').replace(PROPOSAL, '').trimEnd();
 
 /** An ending as the page keeps it, `{state, reasons, question, tests}`, or null when there is none. */
 export function readEnding(raw) {

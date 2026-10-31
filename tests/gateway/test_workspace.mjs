@@ -23,6 +23,7 @@ import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
+import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
 
 const {
@@ -531,6 +532,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/endings\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
@@ -741,6 +743,7 @@ function harness(routes, {mobile = false} = {}) {
     ...levels,
     ...modeChip,
     ...blocked,
+    reportText,
     parseCommand,
     setupSlash,
     // The question a deleted chat with notes asks; a test sets `answer`.
@@ -3492,12 +3495,15 @@ test('a task code found not finished says why, lists its own tests, and Finish i
     tests: [{command: "subprocess.run(['pytest', '-q'])", exit_code: 0, outcome: 'unknown'}]};
   const h = await openTask({
     'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending})},
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', answer: 'Rounded the mean.\nEnding: ready'})], has_earlier: false},
     'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', ending: null}), message: 'continued'}}; },
   });
   const text = flatten(h.element('task-panel'));
   assert.match(text, /State\s*Done, not finished/);
   assert.match(text, /How it ended\s*A test ran, but its result was not checked · The changes are not committed/);
   assert.match(text, /Tests it ran\s*\?\s*subprocess\.run\(\['pytest', '-q'\]\)\s*result not checked/);
+  assert.match(flatten(answerBox(h)), /Rounded the mean\./);
+  assert.doesNotMatch(flatten(answerBox(h)), /Ending: ready/, 'the proposal line is for code, not the person');
   labelled(h, 'Finish it: run the tests and commit').click(); await settle();
   assert.deepEqual(calls, ['continue']);
   assert.match(flatten(h.element('task-panel')), /State\s*queued/);
