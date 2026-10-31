@@ -761,6 +761,7 @@
   "importCard.nothingNew": "Nothing new: melo already knows these.",
   "importCard.nothingToBring": "Nothing to bring in: the lines were left out ({reasons}).",
   "importCard.partial": "The search stopped early, so a few files may be missing.",
+  "importCard.reason.capped": "over the limit",
   "importCard.reason.duplicate": "repeats",
   "importCard.reason.mechanics": "how the other tool works",
   "importCard.reason.secret": "secrets",

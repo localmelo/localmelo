@@ -15,6 +15,7 @@ import re
 import sqlite3
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
+from itertools import chain
 from pathlib import Path
 
 from localmelo.melo.memory.notes import split_sentences
@@ -35,6 +36,7 @@ _NEVER = re.compile(
 _IMPORT = re.compile(r"(?<!\S)@((?:~|\.{1,2}|[\w.-]+)?/\S*|[\w.-]+\.\w+)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _BULLET = re.compile(r"^(?:[-*+•]|\d+[.)])\s+")
+_BLOCK = re.compile(r"[>|][+-]?")  # a YAML block scalar's marker, not a value
 _NOISE = re.compile(
     r"^(?:\[[^\]]*\]\([^)]*\)|https?://\S+|(?:why|how to apply)\s*[:：])",
     re.IGNORECASE,
@@ -188,6 +190,12 @@ def markdown(
                 yield Statement(sentence, path, number, heading, kind)
 
 
+def _unquote(value: str) -> str:
+    """*value* without the quotes around it."""
+    quoted = len(value) > 1 and value[0] == value[-1] and value[0] in "\"'"
+    return value[1:-1].strip() if quoted else value
+
+
 def _file(
     path: Path, src: Source, home: Path, seen: set[str], depth: int
 ) -> Iterator[Statement]:
@@ -215,11 +223,22 @@ def _file(
                 )
         return
     fields: dict[str, str] = {}
+    rows: dict[str, int] = {}
     if front := re.match(r"---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", text, re.DOTALL):
-        parts = (line.partition(":") for line in front[1].splitlines())
-        fields = {k.strip(): v.strip() for k, _, v in parts if v.strip()}
+        for number, row in enumerate(front[1].splitlines(), 2):
+            key, _, value = row.partition(":")
+            if value := _unquote(value.strip()):
+                fields[key.strip()], rows[key.strip()] = value, number
         text = "\n" * front[0].count("\n") + text[front.end() :]
-    for st in markdown(text, str(real), fields.get("type", ""), fields.get("name", "")):
+    name, kind = fields.get("name", ""), fields.get("type", "")
+    gist = fields.get("description", "")
+    # The one-line summary a note file was written around comes first.
+    summary = (
+        markdown("\n" * (rows["description"] - 1) + gist, str(real), kind, name)
+        if src.kind == "memory" and gist and not _BLOCK.fullmatch(gist)
+        else iter(())
+    )
+    for st in chain(summary, markdown(text, str(real), kind, name)):
         rest = st.text
         for token in (t.rstrip(".,;:)。") for t in _IMPORT.findall(st.text)):
             target = Path(
@@ -258,7 +277,10 @@ def _sqlite(path: Path, home: Path) -> Iterator[Statement]:
 
 
 def read_source(src: Source, home: Path, seen: set[str]) -> Iterator[Statement]:
-    """The statements of *src*, skipping files *seen* already (real path or content)."""
+    """The statements of *src*, skipping files *seen* already (real path or content).
+
+    A note file of a memory folder starts with its front matter ``description``.
+    """
     path = Path(src.path)
     if src.kind == "sqlite":
         yield from _sqlite(path, home)

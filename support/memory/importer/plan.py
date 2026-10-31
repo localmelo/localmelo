@@ -6,6 +6,11 @@ the file, line and heading it came from. A rescan skips lines it knows
 (``line_sha``); a line whose wording changed in the same place supersedes the
 note of its old wording. Notes of the user's own, and notes of another source,
 are never superseded: a line that says what one says is a duplicate.
+
+A source holds at most :data:`PER_SOURCE` notes. A folder of note files fills it
+round by round (:func:`_by_rounds`): the first note of every file (its summary),
+then the second of every file, so a long file cannot crowd the others out. What
+passed every check but did not fit is counted as ``capped``.
 """
 
 from __future__ import annotations
@@ -13,7 +18,8 @@ from __future__ import annotations
 import hashlib
 import time
 import uuid
-from collections.abc import Sequence
+from collections import deque
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,11 +30,15 @@ from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import new_record_id
 from localmelo.support.memory import records
 from localmelo.support.memory.importer.rules import own_email, reject, topic_for
-from localmelo.support.memory.importer.sources import discover, read_source
+from localmelo.support.memory.importer.sources import (
+    Statement,
+    discover,
+    read_source,
+)
 
 PER_SOURCE = 60
 PER_BATCH = 300
-FILTERS = ("secret", "third_party", "wrong_owner", "duplicate", "mechanics")
+FILTERS = ("secret", "third_party", "wrong_owner", "duplicate", "mechanics", "capped")
 
 
 @dataclass
@@ -85,6 +95,28 @@ def _changed(
     return None
 
 
+def _by_rounds(
+    statements: Sequence[Statement], by_file: bool, notes: Sequence[Note]
+) -> Iterator[Statement]:
+    """*statements* in rounds: each file (in the order read) hands over statements
+    until one becomes a note in *notes*, then the next file has its turn.
+
+    Without *by_file* the source is one file, read in order.
+    """
+    files: dict[str, deque[Statement]] = {}
+    for st in statements:
+        files.setdefault(st.path if by_file else "", deque()).append(st)
+    queues = list(files.values())
+    while queues:
+        for queue in queues:
+            before = len(notes)
+            while queue:
+                yield queue.popleft()
+                if len(notes) > before:
+                    break
+        queues = [queue for queue in queues if queue]
+
+
 def build_plan(
     home: Path, active: Sequence[StoredEntry], *, timeout_s: float
 ) -> ImportPlan:
@@ -106,8 +138,9 @@ def build_plan(
         present = {(st.path, line_sha(st.text)) for st in statements}
         counts = dict.fromkeys(FILTERS, 0)
         notes: list[Note] = []
+        over: list[tuple[str, set[str]]] = []  # passed every check, no room left
         found = 0
-        for st in statements:
+        for st in _by_rounds(statements, src.kind == "memory", notes):
             if st.kind in ("project", "reference") and not src.workspace:
                 continue  # its folder is gone
             if time.monotonic() > deadline:
@@ -134,12 +167,14 @@ def build_plan(
                 or records.decide(text, active, kind=kind)[0] != "NEW"
                 or any(
                     k == kind and overlap(tokens, t) >= records.SUPERSEDE_OVERLAP
-                    for k, t in kept
+                    for k, t in (*kept, *over)
                 )
             ):
                 counts["duplicate"] += 1
                 continue
             if len(notes) >= PER_SOURCE:
+                counts["capped"] += 1
+                over.append((kind, tokens))
                 continue
             prov: dict[str, Any] = {
                 "source": "import",

@@ -73,6 +73,7 @@ test('a path shows the home folder as ~, and what a file left out is said by rea
   assert.equal(leftOut({secret: 1, third_party: 1}), '2 left out: secrets, other people’s details');
   assert.equal(leftOut({mechanics: 3, secret: 0}), '3 left out: how the other tool works');
   assert.equal(leftOut({secret: 0}), '');
+  assert.equal(leftOut({secret: 1, capped: 12}), '13 left out: secrets, over the limit');
   const read = readScan(scan());
   assert.deepEqual(read.sources.map((source) => [source.path, source.kept]), [['~/.claude/CLAUDE.md', 2], ['~/.hermes/memories/USER.md', 2]]);
   assert.equal(read.batchId, 'b1');

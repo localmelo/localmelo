@@ -88,6 +88,9 @@ def test_the_rows_name_the_notes_and_files_and_the_files_show_paths_with_samples
         "left out: secrets, other people's details, how the other tool works" in shown
     )
     assert str(Path.home()) not in shown
+    assert (
+        memory_import._reasons({"secret": 1, "capped": 4}) == "secrets, over the limit"
+    )
     assert SECRET not in shown and "hunter2" not in shown and "LEAK" not in shown
     assert "claude" not in memory_import.TITLE.lower()
 
