@@ -26,7 +26,7 @@ lists, with no PR or issue numbers in their prose.
 - A section is a heading and at most five short points, one line each; a guide keeps the exact detail in a table or a code block, not in a paragraph.
 - No paragraph is longer than two sentences.
 - Plain words from the reader's side ("You can …"); internals only on a page about internals.
-- The roadmap is a board in three columns, Now, Next and Later: cards with a title, one line and a status chip (building, testing or done).
+- The roadmap is a board of open work in three columns, Now, Next and Later, with a Done strip of finished work under it: cards with a title, one line and a status chip (building, testing or done); a card whose work has not started carries no chip.
 - Updates are newest first: per day a heading and three to six points of what a person sees.
 
 ### Pictures and numbers

@@ -123,47 +123,55 @@
         </div>
 
         <h3 id="around">智能体周围</h3>
-        <p>消息从某个入口进来，在对话或 worker 中运行；每一个都运行同一个智能体，旁边是记忆。点击图中的方框，可以跳到它的卡片。</p>
+        <p>消息从某个入口经网关进来，在对话或 worker 中运行；每一个都运行同一个智能体，旁边是记忆。点击图中的方框，可以跳到它的卡片。</p>
 
         <div class="diagram-scroll">
-          <div class="diagram" id="dia-around" style="width:930px;height:460px">
-            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
+          <div class="diagram" id="dia-around" style="width:930px;height:510px">
+            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:160px">
               <span class="node-title">终端</span>
-              <span class="node-sub">melo · 自己运行对话</span>
+              <span class="node-sub">同一个主对话</span>
             </a>
-            <a class="node" id="a-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
+            <a class="node" id="a-file" href="#c-endpoint" style="left:230px;top:12px;width:200px">
+              <span class="node-title">端点文件</span>
+              <span class="node-sub">网关写入；终端和 App 读取</span>
+            </a>
+            <a class="node" id="a-console" href="#c-gateway" style="left:490px;top:12px;width:200px">
               <span class="node-title">控制台和 App</span>
               <span class="node-sub">浏览器页面 · macOS 窗口</span>
             </a>
-            <a class="node" id="a-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
+            <a class="node" id="a-api" href="#c-gateway" style="left:740px;top:12px;width:170px">
               <span class="node-title">HTTP API</span>
               <span class="node-sub">/v1 供脚本使用 · /api</span>
             </a>
-            <a class="node" id="a-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+            <a class="node" id="a-gateway" href="#c-gateway" style="left:110px;top:152px;width:540px">
               <span class="node-title">网关</span>
               <span class="node-sub">melo serve · 令牌登录 · 只监听回环地址</span>
             </a>
-            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
-              <span class="node-title">对话</span>
-              <span class="node-sub">主对话 · 旁支对话</span>
+            <a class="node" id="a-chores" href="#c-chores" style="left:700px;top:152px;width:210px">
+              <span class="node-title">定时事项</span>
+              <span class="node-sub">每 30 秒检查 · 每 30 分钟 check-in</span>
             </a>
-            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
+            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:282px;width:230px">
+              <span class="node-title">对话</span>
+              <span class="node-sub">主对话 · 旁支对话 · 卡片</span>
+            </a>
+            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:320px;top:282px;width:210px">
               <span class="node-title">调度器</span>
               <span class="node-sub">任务队列 · P0–P5 · GPU 锁闸门</span>
             </a>
-            <a class="node" id="a-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
+            <a class="node" id="a-workers" href="#c-workers" style="left:580px;top:282px;width:135px">
               <span class="node-title">Worker</span>
               <span class="node-sub">无界面的任务会话</span>
             </a>
-            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:372px;width:220px">
+            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:412px;width:220px">
               <span class="node-title">记忆</span>
               <span class="node-sub">笔记和所有对话的索引</span>
             </a>
-            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:372px;width:280px">
+            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:412px;width:280px">
               <span class="node-title">智能体</span>
               <span class="node-sub">即上面的核心 · 每个对话或任务一个</span>
             </a>
-            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:372px;width:270px">
+            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:412px;width:270px">
               <span class="node-title">模型服务器</span>
               <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · 云端 API</span>
             </a>
@@ -174,8 +182,13 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
           <div class="legend-item"><div class="legend-line dashed"></div>发往模型服务器的请求</div>
-          <div class="legend-item"><div class="legend-line dotted"></div>计划中</div>
         </div>
+        <ul>
+          <li>终端和 App 通过同一个端点文件找到正在运行的网关，所以后启动的那个会用已在运行的网关。</li>
+          <li>主对话自己回答，或按优先级把更大的工作交给调度器；结果以卡片的形式回到它那里。</li>
+          <li>定时事项按时启动任务；每 30 分钟，check-in 告诉主对话什么做完了或在等你。</li>
+          <li>Worker 和对话运行同一个智能体，记忆会召回到每一轮里。</li>
+        </ul>
       </section>
 
       <section class="section" id="components">
@@ -184,11 +197,11 @@
         <div class="comp-grid">
           <div class="comp-card" id="c-cli">
             <h3>终端</h3>
-            <p><code>melo</code> 打开对话；<code>melo "task"</code> 运行一个任务。</p>
+            <p><code>melo</code> 打开主对话；<code>melo "task"</code> 运行一个任务。</p>
             <ul>
               <li>打印答案或一行 JSON，并用退出码说明运行如何结束。</li>
               <li>运行命令和写文件之前先询问；文件工具只在当前文件夹内工作。</li>
-              <li>自己运行对话，不经过网关。</li>
+              <li>通过 App 使用的同一个网关打开主对话；<code>-u</code>、<code>-c</code>、<code>-r</code> 和 <code>--yolo</code> 会保留终端自己的对话。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a>
           </div>
@@ -202,13 +215,23 @@
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/api-v2.md">API v2 参考</a>
           </div>
+          <div class="comp-card" id="c-endpoint">
+            <h3>端点文件</h3>
+            <p><code class="wrap">~/.cache/localmelo/gateway/endpoint.json</code> 指明正在运行的网关。</p>
+            <ul>
+              <li>网关启动时写入它，停止时删除它。</li>
+              <li>终端和 App 都先读它，所以后启动的那个会用已在运行的网关。</li>
+              <li>里面只有端口，没有凭据。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">终端的主对话</a>
+          </div>
           <div class="comp-card" id="c-chats">
             <h3>对话</h3>
             <p>每个对话是一个会话，它的轮次在重启后仍然保留。</p>
             <ul>
               <li>每一轮在该对话自己的智能体上运行，一次一轮，并附上记忆为它召回的内容。</li>
-              <li>控制台和 App 打开在主对话上；旁支对话列在它下面，旁支对话结束或任务需要你时，它会显示一张卡片。</li>
-              <li>主对话把工作交给任务，在计划中。</li>
+              <li>控制台、App 和终端打开的是同一个主对话；旁支对话列在它下面，旁支对话结束或任务需要你时，它会显示一张卡片。</li>
+              <li>主对话自己回答简短的问题，或按优先级把更大的工作作为任务开始。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
           </div>
@@ -216,17 +239,27 @@
             <h3>调度器</h3>
             <p>为任务排序；打开闸门后，也为模型调用排序。</p>
             <ul>
-              <li>带 P0 到 P5 优先级的任务队列，保存在网关的会话文件中。</li>
-              <li>模型调用的闸门：默认关闭，可选先到先得或按类别。</li>
-              <li>读取共享的 GPU 锁和电池状态；可以在锁被占用时等待。</li>
+              <li>带六个级别（从“现在”到“以后”，即 P0 到 P5）的任务队列，保存在网关的会话文件中。</li>
+              <li>经批准后回来的任务按级别排队等待；没有轮次在运行的对话会把它的名额让给任务。</li>
+              <li>可选的模型调用闸门（先到先得或按类别）会读取共享的 GPU 锁和电池状态。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/scheduler.md">调度器指南</a>
+          </div>
+          <div class="comp-card" id="c-chores">
+            <h3>定时事项</h3>
+            <p>按时运行的任务，以及告诉你发生了什么的 check-in。</p>
+            <ul>
+              <li>在主对话里说 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>；你点按 Save chore 之前不会保存任何东西。</li>
+              <li>每 30 秒检查一次，把到期的事项作为任务开始，绝不提前；电脑睡眠时错过的一次，醒来后只运行一次。</li>
+              <li>每 30 分钟，check-in 告诉主对话什么做完了或在等你；没有可说的就不调用模型。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">会重复的事项</a>
           </div>
           <div class="comp-card" id="c-workers">
             <h3>Worker</h3>
             <p>没有对话窗口、在后台运行任务的会话。</p>
             <ul>
-              <li>网关按优先级启动排队的任务，每次几个。</li>
+              <li>网关按优先级启动排队的任务，每次几个，各在所属对话的文件夹里。</li>
               <li><code>melo worker</code> 根据任务说明文件运行一个任务，返回 JSON 结果。</li>
               <li>控制台的 Workers 视图列出每一次运行。</li>
             </ul>
@@ -339,14 +372,16 @@
               <tr><th scope="col">部分</th><th scope="col">你能得到什么</th><th scope="col">状态</th></tr>
             </thead>
             <tbody>
-              <tr><td>终端</td><td>对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>终端</td><td>App 里同一个主对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker、活动胶囊</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>主对话和旁支对话</td><td>一个主对话：自己回答，或按优先级把更大的工作交给任务</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、新的值取代旧的、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>定时事项</td><td>按时运行的事项，以及每 30 分钟的 check-in</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>浏览</td><td>在 Safari 里读网页、跟随链接；接下来是在网页上操作</td><td><span class="chip building">开发中</span></td></tr>
-              <tr><td>调度器和 worker</td><td>任务队列、优先级、worker、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
+              <tr><td>浏览</td><td>在你能看到的 Safari 窗口里读网页、跟随链接</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>调度器和 worker</td><td>任务队列、级别、worker、公平的排队、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>
-              <tr><td>主对话和旁支对话</td><td>控制台和 App 打开在一个主对话上；把工作交给任务在下一步</td><td><span class="chip building">开发中</span></td></tr>
+              <tr><td>计算机操作</td><td>在浏览器里操作网页，重要的操作先问你</td><td>计划中</td></tr>
               <tr><td>空闲时学习</td><td>离线回顾过去的工作</td><td>计划中</td></tr>
             </tbody>
           </table>
@@ -391,13 +426,17 @@
           { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "创建" }
         ],
         "svg-around": [
-          { from: "a-cli", fs: "bottom", to: "a-chats", ts: "top", tf: 0.2, label: "终端对话" },
-          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.2, label: "API v2" },
-          { from: "a-api", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.8, label: "HTTP" },
-          { from: "a-gateway", fs: "bottom", ff: 0.15, to: "a-chats", ts: "top", tf: 0.75, label: "控制台对话" },
-          { from: "a-gateway", fs: "bottom", ff: 0.7, to: "a-scheduler", ts: "top", label: "任务" },
+          { from: "a-cli", fs: "bottom", ff: 0.8, to: "a-gateway", ts: "top", tf: 0.1, label: "主对话" },
+          { from: "a-file", fs: "left", to: "a-cli", ts: "right", label: "读取" },
+          { from: "a-file", fs: "right", to: "a-console", ts: "left", label: "读取" },
+          { from: "a-gateway", fs: "top", ff: 0.45, to: "a-file", ts: "bottom", label: "写入" },
+          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.78, label: "API v2" },
+          { from: "a-api", fs: "bottom", ff: 0.2, to: "a-gateway", ts: "top", tf: 0.96, label: "HTTP" },
+          { from: "a-gateway", fs: "bottom", ff: 0.12, to: "a-chats", ts: "top", tf: 0.75, label: "对话" },
+          { from: "a-gateway", fs: "bottom", ff: 0.68, to: "a-scheduler", ts: "top", tf: 0.45, label: "任务" },
+          { from: "a-chores", fs: "bottom", to: "a-scheduler", ts: "top", tf: 0.9, label: "到期的事项" },
           { from: "a-scheduler", fs: "right", to: "a-workers", ts: "left" },
-          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", type: "planned" },
+          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", bidi: true, label: "按级别" },
           { from: "a-chats", fs: "bottom", ff: 0.75, to: "a-agent", ts: "top", tf: 0.2, label: "每一轮" },
           { from: "a-workers", fs: "bottom", to: "a-agent", ts: "top", tf: 0.85, label: "同一个智能体" },
           { from: "a-memory", fs: "right", to: "a-agent", ts: "left", bidi: true, label: "召回", dy: -16 },

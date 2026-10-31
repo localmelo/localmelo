@@ -123,47 +123,55 @@
         </div>
 
         <h3 id="around">Around the agent</h3>
-        <p>Messages come in from a surface, run in a chat or a worker, and each one runs the same agent with memory beside it. Select a box to jump to its card.</p>
+        <p>Messages come in from a surface through the gateway, run in a chat or a worker, and each runs the same agent with memory beside it. Select a box to jump to its card.</p>
 
         <div class="diagram-scroll">
-          <div class="diagram" id="dia-around" style="width:930px;height:460px">
-            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:190px">
+          <div class="diagram" id="dia-around" style="width:930px;height:510px">
+            <a class="node" id="a-cli" href="#c-cli" style="left:10px;top:12px;width:160px">
               <span class="node-title">Terminal</span>
-              <span class="node-sub">melo · runs its own chats</span>
+              <span class="node-sub">the same main chat</span>
             </a>
-            <a class="node" id="a-console" href="#c-gateway" style="left:240px;top:12px;width:190px">
+            <a class="node" id="a-file" href="#c-endpoint" style="left:230px;top:12px;width:200px">
+              <span class="node-title">Endpoint file</span>
+              <span class="node-sub">the gateway writes it; terminal and app read it</span>
+            </a>
+            <a class="node" id="a-console" href="#c-gateway" style="left:490px;top:12px;width:200px">
               <span class="node-title">Console and app</span>
               <span class="node-sub">browser page · macOS window</span>
             </a>
-            <a class="node" id="a-api" href="#c-gateway" style="left:470px;top:12px;width:190px">
+            <a class="node" id="a-api" href="#c-gateway" style="left:740px;top:12px;width:170px">
               <span class="node-title">HTTP API</span>
               <span class="node-sub">/v1 for scripts · /api</span>
             </a>
-            <a class="node" id="a-gateway" href="#c-gateway" style="left:240px;top:122px;width:420px">
+            <a class="node" id="a-gateway" href="#c-gateway" style="left:110px;top:152px;width:540px">
               <span class="node-title">Gateway</span>
               <span class="node-sub">melo serve · token sign-in · loopback only</span>
             </a>
-            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
-              <span class="node-title">Chats</span>
-              <span class="node-sub">a main chat · side chats</span>
+            <a class="node" id="a-chores" href="#c-chores" style="left:700px;top:152px;width:210px">
+              <span class="node-title">Scheduled chores</span>
+              <span class="node-sub">tick 30 s · check-in 30 min</span>
             </a>
-            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
+            <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:282px;width:230px">
+              <span class="node-title">Chats</span>
+              <span class="node-sub">a main chat · side chats · cards</span>
+            </a>
+            <a class="node" id="a-scheduler" href="#c-scheduler" style="left:320px;top:282px;width:210px">
               <span class="node-title">Scheduler</span>
               <span class="node-sub">task queue · P0–P5 · GPU lock gate</span>
             </a>
-            <a class="node" id="a-workers" href="#c-workers" style="left:575px;top:232px;width:135px">
+            <a class="node" id="a-workers" href="#c-workers" style="left:580px;top:282px;width:135px">
               <span class="node-title">Workers</span>
               <span class="node-sub">headless task sessions</span>
             </a>
-            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:372px;width:220px">
+            <a class="node" id="a-memory" href="#c-memory" style="left:10px;top:412px;width:220px">
               <span class="node-title">Memory</span>
               <span class="node-sub">notes and the index of every chat</span>
             </a>
-            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:372px;width:280px">
+            <a class="node" id="a-agent" href="#c-agent" style="left:300px;top:412px;width:280px">
               <span class="node-title">Agent</span>
               <span class="node-sub">the core above · one per chat or task</span>
             </a>
-            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:372px;width:270px">
+            <a class="node" id="a-models" href="#c-backends" style="left:650px;top:412px;width:270px">
               <span class="node-title">Model servers</span>
               <span class="node-sub">oMLX · Ollama · vLLM · SGLang · MLC · cloud APIs</span>
             </a>
@@ -174,8 +182,13 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
           <div class="legend-item"><div class="legend-line dashed"></div>requests to model servers</div>
-          <div class="legend-item"><div class="legend-line dotted"></div>planned</div>
         </div>
+        <ul>
+          <li>The terminal and the app find the running gateway through one endpoint file, so whichever starts second uses it.</li>
+          <li>The main chat answers, or hands bigger work to the scheduler by priority; results come back to it as cards.</li>
+          <li>Scheduled chores start tasks on time, and a check-in every 30 minutes tells the main chat what finished or waits.</li>
+          <li>Workers and chats run the same agent, with memory recalled into each turn.</li>
+        </ul>
       </section>
 
       <section class="section" id="components">
@@ -184,11 +197,11 @@
         <div class="comp-grid">
           <div class="comp-card" id="c-cli">
             <h3>Terminal</h3>
-            <p><code>melo</code> opens a chat; <code>melo "task"</code> runs one task.</p>
+            <p><code>melo</code> opens the main chat; <code>melo "task"</code> runs one task.</p>
             <ul>
               <li>Prints the answer, or one JSON line, and exits with a code that says how the run ended.</li>
               <li>Asks before commands and file writes; file tools stay in the folder.</li>
-              <li>Runs its chats itself, without the gateway.</li>
+              <li>Opens the main chat through the gateway the app uses; <code>-u</code>, <code>-c</code>, <code>-r</code> and <code>--yolo</code> keep a chat of its own.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">Command-line reference</a>
           </div>
@@ -202,13 +215,23 @@
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2 reference</a>
           </div>
+          <div class="comp-card" id="c-endpoint">
+            <h3>Endpoint file</h3>
+            <p><code class="wrap">~/.cache/localmelo/gateway/endpoint.json</code> names the running gateway.</p>
+            <ul>
+              <li>The gateway writes it as it starts and removes it as it stops.</li>
+              <li>The terminal and the app read it first, so whichever starts second uses the running gateway.</li>
+              <li>It holds a port, never a credential.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-main-chat">The terminal's main chat</a>
+          </div>
           <div class="comp-card" id="c-chats">
             <h3>Chats</h3>
             <p>Each chat is a session whose turns survive a restart.</p>
             <ul>
               <li>A turn runs on the chat's own agent, one turn at a time, with what memory recalls for it.</li>
-              <li>The console and the app open on a main chat; side chats sit under it, and it shows a card when one finishes or a task needs you.</li>
-              <li>The main chat handing work to tasks is planned.</li>
+              <li>The console, the app and the terminal open the same main chat; side chats sit under it, and it shows a card when one finishes or a task needs you.</li>
+              <li>The main chat answers a quick question itself, or starts bigger work as a task by priority.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions reference</a>
           </div>
@@ -216,17 +239,27 @@
             <h3>Scheduler</h3>
             <p>Orders tasks, and model calls when you turn its gate on.</p>
             <ul>
-              <li>A task queue with priorities P0 to P5, kept in the gateway's session file.</li>
-              <li>A gate on model calls: off by default, or first come first served, or by class.</li>
-              <li>Reads the shared GPU lock and the battery; can wait while the lock is held.</li>
+              <li>A task queue with six levels, Now to Later (P0 to P5), kept in the gateway's session file.</li>
+              <li>A task that comes back after an approval waits its turn by level; a chat with no turn running leaves its slots to tasks.</li>
+              <li>An opt-in gate on model calls (first come first served, or by class) reads the shared GPU lock and the battery.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md">Scheduler guide</a>
+          </div>
+          <div class="comp-card" id="c-chores">
+            <h3>Scheduled chores</h3>
+            <p>Tasks that run on time, and a check-in that tells you what happened.</p>
+            <ul>
+              <li>Say <code class="wrap">every weekday at 8:30, brief me on my calendar</code> in the main chat; nothing is saved until you tap Save chore.</li>
+              <li>A tick every 30 seconds starts due chores as tasks, never early; a run missed while the computer slept happens once at wake.</li>
+              <li>Every 30 minutes the check-in tells the main chat what finished or waits, and makes no model call when there is nothing to say.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">Chores that repeat</a>
           </div>
           <div class="comp-card" id="c-workers">
             <h3>Workers</h3>
             <p>Headless sessions that run tasks without a chat window.</p>
             <ul>
-              <li>The gateway starts queued tasks by priority, a few at a time.</li>
+              <li>The gateway starts queued tasks by priority, a few at a time, each in its chat's folder.</li>
               <li><code>melo worker</code> runs one from a brief file and returns a JSON result.</li>
               <li>The console's Workers view lists every run.</li>
             </ul>
@@ -339,14 +372,16 @@
               <tr><th scope="col">Part</th><th scope="col">What you get</th><th scope="col">Status</th></tr>
             </thead>
             <tbody>
-              <tr><td>Terminal</td><td>Chats, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Terminal</td><td>The main chat the app shows, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers, the activity pill</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Main chat and side chats</td><td>One main chat that answers, or hands bigger work to tasks by priority</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, the newer value wins, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Scheduled chores</td><td>Chores that run on time, and a check-in every 30 minutes</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Browsing</td><td>Read and follow pages in Safari; acting on pages next</td><td><span class="chip building">building</span></td></tr>
-              <tr><td>Scheduler and workers</td><td>Task queue, priorities, workers, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
+              <tr><td>Browsing</td><td>Read and follow pages in Safari windows you can watch</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Scheduler and workers</td><td>Task queue, levels, workers, fair turns, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
               <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>
-              <tr><td>Main chat and side chats</td><td>The console and the app open on one main chat; handing work to tasks next</td><td><span class="chip building">building</span></td></tr>
+              <tr><td>Computer use</td><td>Acting on pages in the browser, asking before anything that matters</td><td>planned</td></tr>
               <tr><td>Learning while idle</td><td>Offline review of past work</td><td>planned</td></tr>
             </tbody>
           </table>
@@ -391,13 +426,17 @@
           { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "builds" }
         ],
         "svg-around": [
-          { from: "a-cli", fs: "bottom", to: "a-chats", ts: "top", tf: 0.2, label: "terminal chats" },
-          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.2, label: "API v2" },
-          { from: "a-api", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.8, label: "HTTP" },
-          { from: "a-gateway", fs: "bottom", ff: 0.15, to: "a-chats", ts: "top", tf: 0.75, label: "console chats" },
-          { from: "a-gateway", fs: "bottom", ff: 0.7, to: "a-scheduler", ts: "top", label: "tasks" },
+          { from: "a-cli", fs: "bottom", ff: 0.8, to: "a-gateway", ts: "top", tf: 0.1, label: "main chat" },
+          { from: "a-file", fs: "left", to: "a-cli", ts: "right", label: "reads" },
+          { from: "a-file", fs: "right", to: "a-console", ts: "left", label: "reads" },
+          { from: "a-gateway", fs: "top", ff: 0.45, to: "a-file", ts: "bottom", label: "writes" },
+          { from: "a-console", fs: "bottom", to: "a-gateway", ts: "top", tf: 0.78, label: "API v2" },
+          { from: "a-api", fs: "bottom", ff: 0.2, to: "a-gateway", ts: "top", tf: 0.96, label: "HTTP" },
+          { from: "a-gateway", fs: "bottom", ff: 0.12, to: "a-chats", ts: "top", tf: 0.75, label: "chats" },
+          { from: "a-gateway", fs: "bottom", ff: 0.68, to: "a-scheduler", ts: "top", tf: 0.45, label: "tasks" },
+          { from: "a-chores", fs: "bottom", to: "a-scheduler", ts: "top", tf: 0.9, label: "due chores" },
           { from: "a-scheduler", fs: "right", to: "a-workers", ts: "left" },
-          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", type: "planned" },
+          { from: "a-chats", fs: "right", to: "a-scheduler", ts: "left", bidi: true, label: "by level" },
           { from: "a-chats", fs: "bottom", ff: 0.75, to: "a-agent", ts: "top", tf: 0.2, label: "each turn" },
           { from: "a-workers", fs: "bottom", to: "a-agent", ts: "top", tf: 0.85, label: "same agent" },
           { from: "a-memory", fs: "right", to: "a-agent", ts: "left", bidi: true, label: "recall", dy: -16 },

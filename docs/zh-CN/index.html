@@ -58,8 +58,8 @@
       </header>
 
       <figure class="home-shot">
-        <img src="../assets/web-workspace.webp" alt="localmelo 的网页工作区：左侧是对话列表，右侧的对话中，智能体用带格式的列表和代码块回答了一个问题。" width="1920" height="1200">
-        <figcaption><code>melo serve</code> 在浏览器中打开的网页控制台。</figcaption>
+        <img src="../assets/img/main-chat-tasks.webp" alt="网页控制台：主对话里有一个完成的任务、一个以“今天”级别开始且展开了级别选项的任务和一个可以撤销的暂停，旁边是 Melo 的面板。" width="1280" height="800">
+        <figcaption><code>melo serve</code> 在浏览器中打开的网页控制台：主对话，以及旁边 Melo 的面板。</figcaption>
       </figure>
 
       <section class="section" id="quickstart">
@@ -94,17 +94,29 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="features">
         <h2>能做什么</h2>
         <div class="show-grid">
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-interactive-ui">
-            <img src="../assets/img/terminal-chat.webp" alt="终端里的对话：每个工具调用安静地占一行，最后是彩色的答案。" width="1280" height="979" loading="lazy">
-            <span class="show-text"><strong>在终端里对话</strong><span>输入 <code>melo</code>。每个工具调用只占安静的一行，答案一眼就能看到。</span></span>
-          </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md">
-            <img src="../assets/img/panel.webp" alt="网页控制台：对话旁边的面板列出今天的活动和一个等待审批的任务。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>在对话旁边看到工作</strong><span>控制台显示今天的活动，并能实时查看每个任务。</span></span>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#hand-work-to-the-main-chat">
+            <img src="../assets/img/main-chat-search.webp" alt="主对话通过搜索文件夹回答了一个问题，然后开始一个任务，接着一句话要求提交它。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>一个主对话，旁边是旁支对话</strong><span>提问，或者交代工作：更大的工作按优先级成为任务，完成后以卡片回来。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md#memory-across-chats">
             <img src="../assets/img/memory-tab.webp" alt="“记忆”标签页：melo 记下的关于你的笔记，每条都有来源对话以及编辑和删除按钮。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>看得见的记忆</strong><span>melo 跨对话记忆。你可以查看、编辑或删除每一条笔记。</span></span>
+            <span class="show-text"><strong>看得见的记忆</strong><span>melo 跨对话记忆，新的事实取代旧的。你可以查看、编辑或删除每一条笔记。</span></span>
+          </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">
+            <img src="../assets/img/scheduled-tab.webp" alt="Scheduled 标签页：带开关的 check-in，以及两个定时事项，各自显示下次运行和上次运行的结果。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>按时运行的定时事项</strong><span>说一次就行，比如 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>。check-in 会告诉你什么做完了。</span></span>
+          </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#the-main-chat-and-side-chats">
+            <img src="../assets/img/cards.webp" alt="主对话里的三张卡片：一个完成的任务（改了什么和测试结果）、一个已回答的审批、一个在等你的审批。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>说清发生了什么的任务</strong><span>完成的任务的卡片说明改了什么和提交；任务只在它所属对话的文件夹里工作。</span></span>
+          </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">
+            <img src="../assets/img/terminal-main-chat.webp" alt="主对话里的终端：用 /side 开始旁支对话、得到回复、用 /main 回去，以及一张说明任务完成的卡片。" width="1280" height="813" loading="lazy">
+            <span class="show-text"><strong>终端进入同一个对话</strong><span>输入 <code>melo</code> 就进入 App 里同一个主对话，<code>/side</code> 开始旁支对话。</span></span>
+          </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md#the-activity-pill">
+            <img src="../assets/img/pill.webp" alt="Melo 的活动胶囊的六种状态：工作中、有多个在运行、在等你批准、完成、已停止、模型服务器连不上。" width="1080" height="630" loading="lazy">
+            <span class="show-text"><strong>显示正在运行什么的胶囊</strong><span>窗口收起时，Mac 上的一个小胶囊说明 melo 正在做什么。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">
             <img src="../assets/img/terminal-approval.webp" alt="终端里的审批面板：写文件将做出的改动，以及一组可选的回答。" width="1280" height="946" loading="lazy">
@@ -113,10 +125,6 @@ source .venv/bin/activate</code></pre>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md">
             <img src="../assets/img/browser.webp" alt="终端里的对话：melo 打开一个网页并说出它的内容。" width="1280" height="552" loading="lazy">
             <span class="show-text"><strong>读网页</strong><span>打开浏览功能后，melo 在你能看到的 Safari 窗口里读网页。</span></span>
-          </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">
-            <img src="../assets/img/pet-smooth.webp" alt="秋田犬 Melo 从休息中起身，开始工作。" width="528" height="194" loading="lazy">
-            <span class="show-text"><strong>桌面上的 Melo</strong><span>在 Mac 上，Melo 躺在你的桌面上，工作运行或等待时会表现出来。</span></span>
           </a>
         </div>
         <p class="more-link">另外：<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">模型服务器</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/gateway.md">HTTP API</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">worker 运行</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a> 和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#use-melo-in-scripts">脚本</a>。</p>
@@ -127,21 +135,21 @@ source .venv/bin/activate</code></pre>
         <p>第一个版本 v0.1.0 计划于 2026-12-20 发布。</p>
         <div class="board">
           <div class="board-col now">
-            <h3>现在 <small>6</small></h3>
+            <h3>现在 <small>4</small></h3>
             <ul>
-              <li class="board-card"><strong>主对话和旁支对话</strong><span>控制台和 App 打开在一个主对话上；把更大的工作交给任务在下一步。</span><span class="chip building">开发中</span></li>
-              <li class="board-card"><strong>看得见的记忆</strong><span>你要求或 melo 判断值得时记下笔记；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
-              <li class="board-card"><strong>浏览网页</strong><span>melo 在你能看到的窗口里读网页；接下来是在网页上操作。</span><span class="chip building">开发中</span></li>
-              <li class="board-card"><strong>秋田犬 Melo</strong><span>App、控制台和桌面上的宠物；接下来是更生动的时刻。</span><span class="chip building">开发中</span></li>
+              <li class="board-card"><strong>任务页面用平实的话</strong><span>任务页面用平实的话说明发生了什么，不带 melo 内部的标签。</span><span class="chip building">开发中</span></li>
+              <li class="board-card"><strong>把活干完的 worker 运行</strong><span>运行尽早动手，检查自己的结果，并说明为什么停下。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>不看文档也能完成首次运行</strong><span>连接模型、回答 melo 的问题，无需阅读任何说明。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>本地服务器上更省 token</strong><span>在你自己的模型服务器上，提示缓存命中更多，回复更短。</span><span class="chip testing">测试中</span></li>
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>5</small></h3>
+            <h3>接下来 <small>7</small></h3>
             <ul>
+              <li class="board-card"><strong>在新版本上第二轮自用</strong><span>通过主对话做这个仓库的真实工作，找出并修好仍然绊住人的地方。</span></li>
+              <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
+              <li class="board-card"><strong>Melo 工作时的更多姿势</strong><span>胶囊和桌面宠物为 melo 工作的时刻画出更多姿势。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
-              <li class="board-card"><strong>把活干完的 worker 运行</strong><span>运行尽早动手，检查自己的结果，并说明为什么停下。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
               <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
@@ -157,6 +165,19 @@ source .venv/bin/activate</code></pre>
               <li class="board-card"><strong>发布 v0.1.0</strong><span>每次改动都跑测试，写好更新日志，在 2026-12-20 前打标签发布。</span></li>
             </ul>
           </div>
+        </div>
+        <div class="board-done">
+          <h3>已完成 <small>8</small></h3>
+          <ul>
+            <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>按时运行的定时事项</strong><span>说一次就行；check-in 告诉你什么做完了或在等你。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>说清发生了什么的卡片</strong><span>完成的任务的卡片说明改了什么、跑了哪些测试和提交。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>跟着对话走的文件夹</strong><span>任务在所属对话的文件夹里工作，绝不悄悄换到别处，worker 也少问了。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>浏览网页</strong><span>melo 在你能看到的窗口里读网页并跟随链接。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>秋田犬 Melo 和胶囊</strong><span>App、控制台和桌面上的宠物，以及说明正在运行什么的胶囊。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>重要的调用先问你</strong><span>安装、下载和文件夹之外的改动总会先问你，并说明原因。</span><span class="chip done">已完成</span></li>
+          </ul>
         </div>
         <p class="more-link"><a href="./updates.html#updates">最新变化</a>和<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">变更详情（英文）</a>。</p>
       </section>

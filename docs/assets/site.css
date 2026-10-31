@@ -1178,24 +1178,40 @@ a.show-card:hover,
   border-top-style: dashed;
 }
 
-.content .board-col h3 {
+.content .board-col h3,
+.content .board-done h3 {
   display: flex;
   justify-content: space-between;
   margin: 2px 2px 10px;
   font-size: 1rem;
 }
 
-.board-col h3 small {
+.board-col h3 small,
+.board-done h3 small {
   color: var(--muted-2);
   font-weight: 500;
 }
 
-.content .board-col ul {
+.content .board-col ul,
+.content .board-done ul {
   display: grid;
   gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Finished work: a strip under the three columns of open work. */
+.board-done {
+  margin-top: 14px;
+  padding: 12px;
+  border-top: 3px solid var(--teal);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.content .board-done ul {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .board-card {
@@ -1328,7 +1344,8 @@ a.show-card:hover,
 }
 
 @media (max-width: 920px) {
-  .comp-grid {
+  .comp-grid,
+  .content .board-done ul {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1336,7 +1353,8 @@ a.show-card:hover,
 @media (max-width: 700px) {
   .show-grid,
   .comp-grid,
-  .board {
+  .board,
+  .content .board-done ul {
     grid-template-columns: 1fr;
   }
 

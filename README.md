@@ -24,16 +24,16 @@ remembers across chats and talks to your own model server or a cloud API.
 
 <p align="center">
   <img src="docs/assets/terminal.webp" alt="melo in a dark terminal: Melo's head beside the welcome, a turn's tool rows, a file change waiting for approval, and the status bar in zones" width="430">
-  <img src="docs/assets/img/panel.webp" alt="The web console with a panel beside the chat: today's activity and a task waiting for approval" width="430">
+  <img src="docs/assets/img/main-chat-tasks.webp" alt="The web console: the main chat with a finished task, a task started at Today and a pause that can be undone, with Melo's panel beside it" width="430">
 </p>
 
 ## What you can do
 
-- Chat in the terminal with `melo`, or run one task and get one JSON line and a fixed exit code.
-- Use the web console (`melo serve`) or the Mac app, with a panel beside each chat.
-- Let melo remember across chats; read, edit or forget each note in the Memory tab.
+- Talk to one main chat in the terminal (`melo`), the web console (`melo serve`) or the Mac app: it answers, or hands bigger work to a task by priority, and a card says what happened.
+- Let melo remember across chats: the newer fact wins, and the Memory tab lets you read, edit or forget each note.
+- Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished.
 - Approve what matters: melo asks before commands and file writes, and shows the change.
-- Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API.
+- Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
 
 ## Install
 
@@ -57,7 +57,7 @@ uv run python scripts/build_macos_app.py --install
 ```
 
 - Open localmelo from Spotlight: a native window around the web console.
-- The menu bar shows how many chats and tasks run, and when one waits for you.
+- The menu bar shows how many chats and tasks run, and when one waits for you; with the window put away, a small pill says what Melo is doing.
 - It is a development build, signed ad hoc; it needs a Swift compiler ([macOS app guide](docs/guides/macos-app.md)).
 
 ## Quick start
