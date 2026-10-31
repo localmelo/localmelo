@@ -368,6 +368,16 @@ async def test_only_the_turn_under_way_keeps_a_claim(
         ("Remembered: Gate 9 for Faro.", ""),
         ("Noted — it costs 3.5 euros. Ok.", ""),
         ("Noted — I'll use plain words.", ""),
+        # A claim after a short interjection in the same sentence counts.
+        (
+            "Got it — I've noted that Dr. Kowalski's office is on Pine Street.",
+            "Dr. Kowalski's office is on Pine Street.",
+        ),
+        (
+            "OK, I'll remember that you prefer short answers.",
+            "You prefer short answers.",
+        ),
+        ("好的，我已记住：你的导师是周教授。", "你的导师是周教授。"),
         # The first claim counts.
         ("Noted — you like tea. Remembered: you like jam.", "You like tea."),
     ],
@@ -385,6 +395,8 @@ def test_claimed_reads_the_fact_a_reply_says_it_noted(answer: str, fact: str) ->
         "Noted, thanks!",
         "Noted — thanks a lot.",
         "Got it — noted.",
+        "Got it — thanks!",
+        "As noted before, Prof. Duarte's office is in the Atrium Wing.",
         "已记住：好的。",
         "Noted — yourself is fine.",
         "Hello there.",

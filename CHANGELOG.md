@@ -388,7 +388,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   later question got a mixed answer. When the chat kept no note that turn, melo
   now keeps each plain statement you typed that gives a new value to a subject
   an active note holds, with Undo, whatever `keep_statements` says; a statement
-  of a new subject or a question is still left to the chat ([#NN]).
+  of a new subject or a question is still left to the chat. "You have a weekly
+  sync on Wednesdays." and "Your weekly sync is on Friday." are one subject
+  (the same for "have/has/had a X on/at/in/every Y"), so the second replaces the
+  first. A reply that opens with a short interjection, "Got it — I've noted that
+  Dr. Kowalski's office is on Pine Street.", keeps the fact named after "I've
+  noted", not the words before it ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

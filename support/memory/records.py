@@ -136,6 +136,13 @@ _OWNED = re.compile(rf"^(?:my|your|our|(?:the )?user['’]s) {_ATTRIBUTE}")
 _OWNED_ZH = re.compile(
     r"^(?:我|你|用户)的?([^\s，,。是叫姓]{1,12}?)(?:现在|也)?([是叫姓].*)$"
 )
+# "You have a weekly sync on Wednesdays" says what "Your weekly sync is on
+# Wednesday" says: X is the subject and the value relates to it as "on".
+_HAVE = re.compile(
+    r"^(?:i|you|we|(?:the )?user)(?: now| currently)? (?:have|has|had) "
+    r"(?:(?:a|an|my|your|our) )?((?:[\w'’-]+ ){0,4}?[\w'’-]+) "
+    r"(?:on|at|in|every)\b"
+)
 # What follows a third party's "Name's" / "NAME的": "office is in room 9C",
 # "工作室在中山路88号" (a place is "在", which the user's own form leaves alone).
 _THIRD = re.compile(rf"^{_ATTRIBUTE}")
@@ -378,7 +385,11 @@ _CLAIMS: Final = tuple(
     for pattern in (
         _AT + r"Remembered[:：]\s*(?P<x>.+)",
         _AT + r"Noted" + _LEAD + r"(?P<x>.+)",
-        _AT + r"Got it" + _LEAD + r"(?P<x>(?=[\s\S]*\bnoted\b).+)",
+        _AT
+        + r"Got it"
+        + _LEAD
+        + r"(?P<x>(?=\S)(?!I(?:'ve| have|'ll| will) (?:noted|remember)\b)"
+        + r"(?=[\s\S]*\bnoted\b).+)",
         r"\bI(?:'ve| have) noted(?: that)?\s+(?P<x>.+)",
         r"\bI(?:'ll| will) remember(?: that)?\s+(?!to\b)(?P<x>.+)",
         r"(?:记下了|记住了)[：:，,]\s*(?P<x>.+)",
@@ -862,6 +873,9 @@ def _subject(text: str) -> tuple[str, str]:
         return stems, _relation(found.group(2))
     if found := _OWNED_ZH.match(folded):
         return found.group(1), _relation(found.group(2))
+    if found := _HAVE.match(folded):
+        words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
+        return " ".join(stem(w) for w in words if w not in _ARTICLES), "on"
     return "", ""
 
 

@@ -263,3 +263,39 @@ def test_changes_reads_the_statement_against_the_active_notes() -> None:
     assert records.changes("My weekly sync is on Wednesday.", notes) == []
     assert records.changes("My manager is Ana Li.", notes) == []
     assert records.changes("My weekly sync is on Friday.", []) == []
+
+
+HAVE = "You have a weekly sync on Wednesdays."
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (HAVE, FRIDAY),
+        (FRIDAY, HAVE),
+        (HAVE, "I have a weekly sync on Fridays."),
+        ("Your weekly sync is on Friday.", "You have a weekly sync every Monday."),
+    ],
+)
+def test_have_and_is_on_state_one_subject(old: str, new: str) -> None:
+    from localmelo.tests.memory.test_third_party_subjects import entry
+
+    assert records.subject(old) == records.subject(new) == "weekly sync"
+    assert records.decide(new, [entry(9, old)], kind="semantic") == ("UPDATE", 9)
+
+
+def test_changes_finds_the_typed_value_against_a_have_note() -> None:
+    from localmelo.tests.memory.test_third_party_subjects import entry
+
+    (cand,) = records.changes("My weekly sync is on Friday.", [entry(1, HAVE)])
+    assert cand.text == FRIDAY
+
+
+def test_have_without_a_place_or_time_keeps_no_subject_and_look_alikes_apart() -> None:
+    from localmelo.tests.memory.test_third_party_subjects import entry
+
+    assert records.subject_key("You have a cat.") == ""
+    swim = "You have a swim class on Saturdays."
+    piano = "Your piano class is on Saturday."
+    assert records.decide(piano, [entry(9, swim)], kind="semantic")[0] == "NEW"
+    assert records.decide(swim, [entry(9, piano)], kind="semantic")[0] == "NEW"
