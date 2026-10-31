@@ -3,7 +3,7 @@
 Workers wrap their commands in a helper (``def run(*a):
 subprocess.run(list(a))``) and call it with literal commands. The review
 follows the helper to each call site: when every one is a literal read
-(git status/log/diff, ls, grep, cat…), the call is routine, so a session's
+(git status/log/diff, ls, grep of a file, cat…), the call is routine, so a session's
 grant covers it; a write, a commit, a checkout, a command it cannot read or a
 helper it cannot follow keeps the call undecided (or high impact).
 """
@@ -34,7 +34,9 @@ ONE_LIST = (
 def verdict(tmp_path: Path, code: str) -> str:
     home = tmp_path / "home"
     root = home / "project"
-    root.mkdir(parents=True, exist_ok=True)
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "a.py").write_text("x = 1\n")
+    (root / ".env").write_text("API_KEY=secret\n")
     payload = ActionReviewPayload(
         "python_exec", {"code": code}, str(root), home=str(home)
     )
@@ -44,7 +46,7 @@ def verdict(tmp_path: Path, code: str) -> str:
 @pytest.mark.parametrize(
     "calls",
     [
-        'run("git", "status")\nrun("ls", "-la")\nrun("grep", "-rn", "TODO", ".")\n'
+        'run("git", "status")\nrun("ls", "-la")\nrun("grep", "-n", "TODO", "a.py")\n'
         'run("cat", "README.md")',
         'run("git", "log", "-n", "5")\nrun("git", "diff", "--stat")',
         'run("git", "-C", "sub", "show", "--stat", "HEAD")\nrun("git", "branch")',
@@ -135,6 +137,22 @@ def test_other_code_is_still_reviewed(tmp_path: Path) -> None:
         (("git", "--git-dir=/tmp/x", "status"), False),
         (("git", "--no-pager", "-C", "src", "log"), True),
         (("ls",), True),
+        (("grep", "-n", "x", "a.py"), True),
+        (("grep", "-rn", "x", "."), False),
+        (("grep", "-Rl", "x"), False),
+        (("egrep", "--recursive", "x"), False),
+        (("grep", "--directories=recurse", "x"), False),
+        (("git", "grep", "x"), False),
+        (("grep", "--rec", "x"), False),
+        (("grep", "-nd", "recurse", "x"), False),
+        (("grep", "-d", "skip", "x", "a.py"), True),
+        (("tree", "-a"), True),
+        (("tree", "-ao", "out.txt"), False),
+        (("file", "-C"), False),
+        (("rg", "--pre", "sh", "x", "a.py"), False),
+        (("git", "branch", "-a"), True),
+        (("git", "branch", "--unset-upstream"), False),
+        (("git", "branch", "-D", "x"), False),
         (("sort", "-o", "x"), False),
         ((), False),
     ],
@@ -167,8 +185,20 @@ def test_read_only_argv(argv: tuple[str, ...], reads: bool) -> None:
         ('run("git", "--git-dir=/tmp/x", "status")', "undecided"),
         # The same reads, inside the workspace and of plain files: routine.
         ('run("cat", "README.md")', "routine"),
-        ('run("grep", "-rn", "x", "src")', "routine"),
-        ('run("grep", "-rn", "token", "src")', "routine"),
+        ('run("grep", "-n", "x", "src/a.py")', "routine"),
+        ('run("grep", "-n", "token", "src/a.py")', "routine"),
+        ('run("rg", "-n", "x", "src/a.py")', "routine"),
+        # A search through every file below, hidden ones (.env) too, asks:
+        # search_files is the worker's way, and never reads them.
+        ('run("grep", "-rn", "token", ".")', "undecided"),
+        ('run("grep", "-r", "API_KEY")', "undecided"),
+        ('run("grep", "-R", "x", "src")', "undecided"),
+        ('run("grep", "-nri", "x", ".")', "undecided"),
+        ('run("grep", "--recursive", "x", ".")', "undecided"),
+        ('run("grep", "-d", "recurse", "x", ".")', "undecided"),
+        ('run("git", "grep", "API_KEY")', "undecided"),
+        ('run("rg", "API_KEY")', "undecided"),
+        ('run("rg", "x", "src")', "undecided"),
         ('run("git", "show", "HEAD:docs/a.md")', "routine"),
         ('run("git", "-C", "src", "log", "-n", "3")', "routine"),
     ],

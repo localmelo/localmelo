@@ -85,7 +85,7 @@ _READ_ONLY = set(
 )
 _GIT_READS = set(
     ["status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame"]
-    + ["describe", "shortlog", "grep", "ls-tree", "remote"]
+    + ["describe", "shortlog", "ls-tree", "remote"]
 )
 _WRITE_FLAGS = ("--output", "-delete", "-exec", "-execdir", "-ok", "-fprint", "-fls")
 # git options that run a program the repository or the command names.
@@ -96,6 +96,13 @@ _GIT_RUNS = (
     "--upload-pack",
     "--receive-pack",
 )
+# Short flags that make a read-only command write a file or run a program:
+# tree -o FILE, file -C (writes a compiled magic file), rg --pre COMMAND.
+_PROG_WRITES = {"tree": "o", "file": "C"}
+# The only flags a listing `git branch` or `git remote` takes here; others
+# (--unset-upstream, --edit-description, -m) change the repository.
+_GIT_LISTS = set(["-a", "-r", "-v", "-vv", "-l", "--list", "--all", "--remotes"])
+_GIT_LISTS |= set(["--verbose", "--show-current", "--no-color"])
 _HELPER_KEYWORDS = set(
     ["capture_output", "text", "check", "cwd", "timeout", "stdout", "stderr"]
     + ["encoding", "errors", "universal_newlines"]
@@ -113,6 +120,13 @@ def read_only_argv(argv: tuple[str, ...]) -> bool:
     if not argv or any(a.startswith(_WRITE_FLAGS) for a in argv):
         return False
     prog, args = os.path.basename(argv[0]), list(argv[1:])
+    if prog in ("grep", "egrep", "fgrep") and _recursive(args):
+        return False  # it reads every file below, hidden ones (.env) too
+    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-")
+    if prog in _PROG_WRITES and _PROG_WRITES[prog] in short:
+        return False
+    if prog == "rg" and any(a.startswith("--pre") for a in args):
+        return False
     if prog != "git":
         return prog in _READ_ONLY
     if any(a == "-c" or a.startswith(_GIT_RUNS) for a in args):
@@ -121,9 +135,30 @@ def read_only_argv(argv: tuple[str, ...]) -> bool:
         args = args[2:] if args[0] == "-C" else args[1:]
     if not args or args[0] not in _GIT_READS:
         return False
-    words = [a for a in args[1:] if not a.startswith("-")]
     # `git branch NAME` makes a branch and `git remote add` adds one.
-    return not (args[0] in ("branch", "remote") and words)
+    return args[0] not in ("branch", "remote") or set(args[1:]) <= _GIT_LISTS
+
+
+def _recursive(args: list[str]) -> bool:
+    """Whether grep's *args* ask it to read the folders it names, recursively.
+
+    Long options count by any prefix grep accepts (``--rec``), and ``-d`` or
+    ``--directories`` by a ``recurse`` value, inline or in the next word.
+    """
+    for i, arg in enumerate(args):
+        name, _, value = arg.partition("=")
+        value = value or "".join(args[i + 1 : i + 2])
+        if arg.startswith("--") and len(name) > 3:
+            if "--recursive".startswith(name):
+                return True
+            if "--dereference-recursive".startswith(name):
+                return True
+            if "--directories".startswith(name) and value == "recurse":
+                return True
+        elif arg[:1] == "-" and arg[1:2] != "-":
+            if set("rR") & set(arg) or "d" in arg and "recurse" in (arg, value):
+                return True
+    return False
 
 
 # The nodes the first pass looks at; the rest are skipped fast.
@@ -506,9 +541,21 @@ class _Review:
                     f"Runs {os.path.basename(argv[0]) if argv else 'a command'} "
                     "through a helper, which melo allows unasked only for reads."
                 )
+            if os.path.basename(argv[0]) == "rg" and not self.files_only(argv, base):
+                self.f.doubt(
+                    "Searches folders with rg, which melo allows unasked only for files."
+                )
             if argv:
                 self.helper_paths(argv, base)
                 shell.run_argv(self.ctx.deeper(), self.f, list(argv), base)
+
+    def files_only(self, argv: tuple[str, ...], base: str) -> bool:
+        """Whether rg's *argv* names only regular files to search (no folder)."""
+        words = [a for a in argv[1:] if not a.startswith("-")]
+        given = {"-e", "-f", "--regexp", "--file"} & set(argv)
+        paths = words if given else words[1:]
+        found = [resolve(self.ctx, p, base) for p in paths]
+        return bool(found) and all(p is not None and os.path.isfile(p) for p in found)
 
     def helper_base(self, inner: ast.Call, fn: _Def) -> str | None:
         """The folder a helper's command runs in: the workspace, a literal

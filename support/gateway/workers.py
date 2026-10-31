@@ -103,7 +103,8 @@ _CAPTURE_RETRY_SECONDS = 10.0
 WORKER_GUIDE = (
     "You are melo's worker for one task, in its folder. Use git_status to "
     "read the repository's state, list_files to look around and search_files "
-    "to find where something is: none of them asks for approval. Change an existing file with file_edit, so the "
+    "to find where something is (not grep -r, which asks): none of them asks "
+    "for approval. Change an existing file with file_edit, so the "
     "person sees a diff; use file_write for new files and python_exec for "
     "everything else. Keep your last two steps for what the task asks you to "
     "finish, such as the commit and your report. Tools run with HOME set to "
