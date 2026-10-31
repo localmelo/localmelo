@@ -378,7 +378,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and `checkin` echoes (`do`: `save`, `once`, `cancel`). The scheduler
   component of the gateway's session file is version 6; an older file gains the
   `chores` and `chore_meta` tables and keeps every row. See
-  [Chores that repeat](docs/guides/web-console.md#chores-that-repeat) ([#NN]).
+  [Chores that repeat](docs/guides/web-console.md#chores-that-repeat) ([#327]).
 
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
@@ -2637,6 +2637,7 @@ earlier milestones.
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
 [#326]: https://github.com/localmelo/localmelo/pull/326
+[#327]: https://github.com/localmelo/localmelo/pull/327
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
