@@ -3020,7 +3020,7 @@ const slash = setupSlash({
   // Only the macOS app registers these handlers; a browser tab has neither.
   isApp: () => !!globalThis.webkit?.messageHandlers?.localmeloFolder,
   canQuit: () => !!globalThis.webkit?.messageHandlers?.localmeloQuit,
-  quit: () => globalThis.webkit.messageHandlers.localmeloQuit.postMessage({}),
+  quit: () => globalThis.webkit.messageHandlers.localmeloQuit.postMessage({ action: "quit" }),
 });
 
 // ── The clock ──

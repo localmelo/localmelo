@@ -674,6 +674,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                           choose: { [weak self] mode in self?.pet?.setDesktop(mode) }),
             contentWorld: .page, name: DesktopBridge.name)
         configuration.userContentController.add(
+            QuitBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, quit: { NSApp.terminate(nil) }),
+            contentWorld: .page, name: QuitBridge.name)
+        configuration.userContentController.add(
             LanguageBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, changed: { [weak self] in self?.languageChosen($0) }),
             contentWorld: .page, name: LanguageBridge.name)
         let view = ConsoleWebView(frame: content.bounds, configuration: configuration)

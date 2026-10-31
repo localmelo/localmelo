@@ -340,6 +340,21 @@ def test_the_menu_bar_dot_has_three_to_one_against_its_ring_and_either_bar() -> 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_quit_bridge_takes_one_message_from_the_gateway_page(tmp_path: Path) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+// The console's /exit asks the app to quit with exactly this message.
+precondition(quitRequest(["action": "quit"]))
+let refused: [Any] = [["action": "quit", "force": true], ["action": "exit"], ["action": 1], [String: Any](), "quit", ["quit"], 7]
+precondition(refused.allSatisfy { !quitRequest($0) })
+precondition(acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: true, gatewayPort: 9))
+precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, isMainFrame: true, gatewayPort: 9))
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_the_folder_bridge_takes_known_requests_from_the_gateway_page_and_shows_only_chat_folders(
     tmp_path: Path,
 ) -> None:
