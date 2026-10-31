@@ -81,7 +81,11 @@ The developer setting ``[agent] answer_on_stop`` (no flag; ``-X agent.answer_on_
 adds a check of its config value and its application to the options in
 ``_build_direct_mode_agent``, which has a new hash; off, the default, leaves the options
 and so the requests, stdout and exit codes as they were, as
-``tests/agent/test_gate_patient.py`` checks. ``_check_args`` is not pinned.
+``tests/agent/test_gate_patient.py`` checks. The developer setting ``[agent] max_calls``
+(no flag; ``-X agent.max_calls=30``) adds a check of its config value and its application
+to the options in ``_build_direct_mode_agent``, which has a new hash again; unset, the
+default, leaves the options and so the requests, stdout and exit codes as they were, as
+``tests/agent/test_call_budget.py`` checks. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -103,7 +107,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "30721c63a04b07e709b5951d1b820c7437d499489cf7dc84a4480761a21e22c8",
+    "_build_direct_mode_agent": "6b195926ace8e0cb774ea7b54a1daa23bfe98dacb9c43f8cc8cf0c783fb217ac",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
