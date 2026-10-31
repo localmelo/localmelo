@@ -369,9 +369,12 @@ def test_short_titles_cut_at_a_word() -> None:
     ("typed", "title"),
     [
         ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
-        ("今天修一下：路由规则改掉", "修一下：路由规则改掉"),
+        ("今天：修小药丸", "修小药丸"),
+        ("今天修一下：路由规则改掉", "今天修一下：路由规则改掉"),
         ("no rush: tidy the photos", "tidy the photos"),
         ("Please, no rush: tidy the photos", "tidy the photos"),
+        ("today, fix the pill", "fix the pill"),
+        ("Whenever possible, update the docs", "Whenever possible, update the docs"),
         ("today", "today"),
         ("today:", "today"),
         ("Today's news summary", "Today's news summary"),
