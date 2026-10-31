@@ -222,9 +222,11 @@ _POSSESSIVE = re.compile(r"(?<=\w)['’]s\b")
 _WORD = re.compile(r"[a-z0-9_]+")
 _CASED = re.compile(r"[A-Za-z0-9_]+")
 _CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
-# The never-kept classes: passwords and codes, card and ID numbers.
+# The never-kept classes: passwords and codes, card and ID numbers. A lower-case
+# "pin" is the verb ("Pin the versions") unless a code or digits follow it.
 _SECRET_WORDS = re.compile(
-    r"\b(passwords?|passcodes?|passwd|pin|cvv|security code|one-time code|otp)\b"
+    r"\b(passwords?|passcodes?|passwd|cvv|security code|one-time code|otp"
+    r"|(?-i:PINs?)|pin\s?(?:codes?|numbers?)|pin(?=\s*(?:is\s*|[:=]\s*)?\d))\b"
     r"|密码|口令|验证码",
     re.IGNORECASE,
 )

@@ -22,6 +22,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   changed in the same place replaces its old note. Imported notes are recalled
   but never pinned to every chat. Nothing runs unless asked. Part of #364.
   [#NN]
+- A lower-case "pin" without a code or digits after it is the verb, not a
+  PIN: "Pin dependency versions in uv.lock." is kept as a note; "my pin 4821"
+  is still refused. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

@@ -435,6 +435,7 @@ def test_private_data_of_someone_else_is_dropped(line: str) -> None:
         "Git hooks run ruff before a commit.",
         "Run the tests with uv run pytest.",
         "A permission denied error means the file is read-only.",
+        "Pin dependency versions in uv.lock.",
     ],
 )
 def test_ordinary_lines_pass_the_filters(line: str) -> None:
