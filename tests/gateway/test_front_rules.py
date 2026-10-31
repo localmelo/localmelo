@@ -26,6 +26,7 @@ from localmelo.support.gateway.front_rules import (
     short_title,
     title_matches,
     triage,
+    work_request,
 )
 
 SLIDES = TaskRef("a1b2c3d4e5f6", "Slides for the 15:00 meeting", "running")
@@ -525,3 +526,49 @@ def test_a_question_that_asks_for_a_brief_answer_is_answered_here(typed: str) ->
 )
 def test_other_messages_are_not_brief_questions(typed: str) -> None:
     assert not brief_question(typed)
+
+
+@pytest.mark.parametrize(
+    ("text", "work"),
+    [
+        # A prohibition before the verb, in Chinese and in English, is no request.
+        ("不要删除 report.md，只解释它的内容。", False),
+        ("别删除 report.md，解释一下", False),
+        ("请勿删除 report.md", False),
+        ("禁止修改 docs/a.md", False),
+        ("不用改 report.md，解释它", False),
+        ("Please do not delete report.md; just explain what it contains.", False),
+        ("Never delete report.md", False),
+        ("Don't edit docs/a.md, explain it", False),
+        ("No need to fix docs/a.md", False),
+        # Said in quotation marks, a verb is mentioned, not asked.
+        ("日志里写着“删除 report.md”，帮我解释一下", False),
+        ("日志里写着「删除 report.md」", False),
+        ('Say "delete report.md" to me', False),
+        ("日志里写着 '删除 report.md'，只解释这行日志。", False),
+        ("Fix 'a.py' and commit", True),
+        ("Fix tests/a.py, it's broken", True),
+        ("Please don't delete a.md; it's working, just explain it", False),
+        # One prohibition over a list of verbs, after 、 or a comma.
+        ("不要删除 a.md、修改 b.md，只解释这两个文件的用途。", False),
+        ("不要删除 a.md，修改 b.md，只解释这两个文件的用途。", False),
+        ("请勿删除 a.md、b.md、修改 c.md", False),
+        # A request with a prohibition elsewhere, or a quote around the file, still is one.
+        ("修复 a.md、更新 b.md", True),
+        ("不要删除 a.md，请修复 b.md", True),
+        ("别担心，修复 a.py", True),
+        ("请修复 tests/a.py，不要删除 b.py", True),
+        ("修改 docs/a.md，别动其他文件", True),
+        ("分别修复 a.py 和 b.py", True),
+        ("把 docs/a.md 里的图换掉", True),
+        ("Fix a.py, never delete b.py", True),
+        ("Fix `a.py` and commit", True),
+        ('Rename "old" to "new" in docs/a.md', True),
+        ("Fix tests/cli/test_e2e_pty.py and commit", True),
+    ],
+)
+def test_work_is_asked_for_only_when_no_prohibition_or_quote_holds_the_verb(
+    text: str, work: bool
+) -> None:
+    assert work_request(text) is work
+    assert (route(text).route == "work") is work
