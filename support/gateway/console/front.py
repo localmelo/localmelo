@@ -34,6 +34,7 @@ import dataclasses
 import logging
 import re
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from fastapi import FastAPI
@@ -50,8 +51,12 @@ from localmelo.melo.executor.search_files import (
 from localmelo.melo.schema import NO_ANSWER_LABEL, RunResult, ToolDef, split_thinking
 from localmelo.support.config import LocalBackendConfig
 from localmelo.support.gateway.chat_gate import GatedEmbedding, GatedLLM
-from localmelo.support.gateway.chore_schedule import Schedule, parse_phrase
-from localmelo.support.gateway.chore_store import ChoreError
+from localmelo.support.gateway.chore_schedule import (
+    Schedule,
+    ScheduleError,
+    parse_phrase,
+)
+from localmelo.support.gateway.chore_store import REMINDER_PREFIX, ChoreError
 from localmelo.support.gateway.front_rules import (
     FINISHED,
     Action,
@@ -71,7 +76,8 @@ from localmelo.support.gateway.front_rules import (
     short_title,
     triage,
 )
-from localmelo.support.gateway.i18n import said, t, t_in
+from localmelo.support.gateway.i18n import said, said_text, t, t_in
+from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
 from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
@@ -114,6 +120,8 @@ FRONT_TEXT: Final = (
     "task_message. Never reply with only what you are about to do: do it, or "
     "hand it to a task. Answer in the language of the user's latest message."
 )
+# How long "When should I remind you?" waits for its answer.
+ASK_WHEN_S: Final = 3600.0
 # The first characters of a task's answer the main chat reads, in a list and alone.
 ANSWER_CHARS: Final = 240
 ANSWER_CHARS_ONE: Final = 800
@@ -635,6 +643,14 @@ class Front:
         self, typed: str, composed: str, *, as_task: bool, key: str | None
     ) -> dict[str, Any] | None:
         """The echo of a message that code handled, or ``None`` for the model."""
+        waiting = (
+            await self._waiting_when() if typed.strip() == composed.strip() else None
+        )
+        if waiting is not None and (when := parse_when(typed, self._now())) is not None:
+            # The answer to "When should I remind you?"
+            return await self._remind(
+                dataclasses.replace(when, work=waiting[1]), typed, of=waiting[0]
+            )
         routed = route(typed, [_ref(r) for r in await self.records()], as_task=as_task)
         if routed.route == "delegate":
             work = route(composed, as_task=as_task).text
@@ -655,7 +671,57 @@ class Front:
             return await self.follow(record, composed, typed=typed, show=typed)
         if routed.route == "chore" and typed.strip() == composed.strip():
             return await self.propose_chore(typed)
+        if routed.route == "reminder" and typed.strip() == composed.strip():
+            found = parse_reminder(typed, self._now())
+            return None if found is None else await self._remind(found, typed)
         return None
+
+    def _now(self) -> datetime:
+        """The person's wall clock: the computer's own time zone unless the chores were given one."""
+        runner = self.console.chore_runner
+        return datetime.fromtimestamp(runner.clock(), runner.options.tz)
+
+    async def _waiting_when(self) -> tuple[int, str] | None:
+        """The newest echo when it asks "When should I remind you?" and is under an hour old: its id and the work."""
+        main = self.console.main_id
+        if main is None:
+            return None
+        for event in await self.console.store.events_of_type(main, ECHO_EVENT, limit=1):
+            data = event.event.get("data") or {}
+            fresh = time.time() - float(event.event.get("ts") or 0) < ASK_WHEN_S
+            if data.get("ask") == "when" and fresh and event.id is not None:
+                return event.id, str(data.get("work", ""))
+        return None
+
+    async def _remind(
+        self, found: Reminder, typed: str, of: int | None = None
+    ) -> dict[str, Any] | None:
+        """ "Remind you on Fri Oct 30 at 9:00?" for a time code read, else one line that asks when."""
+        schedule = found.schedule
+        extra = {} if of is None else {"of": of}
+        if schedule is None:
+            key = {
+                "past": "front.echo.askWhenPast",
+                "far": "front.echo.askWhenFar",
+            }.get(found.problem, "front.echo.askWhen")
+            return await self.echo(
+                {"echo": "ask", "ask": "when", "work": found.work, "line": t_in("en", key),
+                 "said": said(key), **extra},
+                show=typed,
+            )  # fmt: skip
+        request, title = REMINDER_PREFIX + found.work, short_title(found.work)
+        try:
+            TaskSpec.from_payload({"objective": request, "title": title})
+        except TaskPolicyError:
+            return None
+        at = schedule.said_at()
+        return await self.echo(
+            {"echo": "chore", "reminder": True, "title": title, "text": request,
+             "work": found.work, "schedule": schedule.to_json(), "when": schedule.describe(),
+             "line": t_in("en", "front.echo.remind", at=said_text(at, "en")),
+             "said": said("front.echo.remind", at=at), **extra},
+            show=typed,
+        )  # fmt: skip
 
     async def propose_chore(self, typed: str) -> dict[str, Any] | None:
         """ "Run this every weekday at 8:30?" for a repeating phrase code can read, else ``None``.
@@ -993,7 +1059,7 @@ class Front:
         """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
         title = str(echo.get("title", ""))
         store = self.console.chore_runner.store
-        if do == "once" and echo.get("echo") == "chore":
+        if do == "once" and echo.get("echo") == "chore" and not echo.get("reminder"):
             return await self.delegate(
                 str(echo.get("text", "")), typed=str(echo.get("text", "")), of=echo_id
             )
@@ -1005,11 +1071,13 @@ class Front:
             )  # fmt: skip
         try:
             if do == "save" and echo.get("echo") == "chore":
+                schedule = Schedule.from_json(echo.get("schedule"))
                 chore = await store.create(
                     title=title,
                     request=str(echo.get("text", "")),
-                    schedule=Schedule.from_json(echo.get("schedule")),
-                    level=int(echo.get("level", 2)),
+                    schedule=schedule,
+                    # A reminder runs at P1, so a busy queue does not hold it back.
+                    level=int(echo.get("level", 1 if schedule.kind == "once" else 2)),
                     front_id=self.console.main_id,
                 )
                 line = f"Saved: {title} · {chore.schedule.describe()}"
@@ -1027,6 +1095,8 @@ class Front:
                 )  # fmt: skip
         except ChoreError as exc:
             raise ApiError(409, "invalid_transition", str(exc)) from exc
+        except ScheduleError as exc:  # a reminder's time passed before the tap
+            raise ApiError(400, "invalid_request", t("front.echo.timePassed")) from exc
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
 
     async def _undo(

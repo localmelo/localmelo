@@ -51,6 +51,25 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
         # Repeating phrases are chores, left for the scheduled tab.
         ("every weekday at 8:30 remind me to stretch", "chore"),
         ("每天早上提醒我喝水", "chore"),
+        # A reminder cue with work and a time is a one-time chore; a cue without a time
+        # is a question about when. A request that also repeats stays a chore.
+        ("remind me to send the report on Friday at 9", "reminder"),
+        ("Remind me tomorrow at 9am to call mom", "reminder"),
+        ("remind me to call mom", "reminder"),
+        ("can you remind me in 2 hours to drink water?", "reminder"),
+        ("set a reminder for Monday to renew the card", "reminder"),
+        ("提醒我明天九点给导师发邮件", "reminder"),
+        ("记得明天九点给导师发邮件", "reminder"),
+        ("两小时后提醒我喝水", "reminder"),
+        ("提醒我吃药", "reminder"),
+        ("remind me every day at 9 to take pills", "chore"),
+        ("每周一提醒我交周报", "chore"),
+        # Not reminders: questions, a cue with no work, a weak cue with no time.
+        ("remind me what the report said", "plan"),
+        ("what reminders do I have?", "answer"),
+        ("我记得明天有会", "plan"),
+        ("记得保存文件", "plan"),
+        ("remind me tomorrow at 9", "plan"),
         ("pause the report", "plan"),  # no open task is named so
         ("stop the old report", "plan"),  # a finished task is not changed
         ("stop worrying about the slides font and make it bigger please", "plan"),

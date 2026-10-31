@@ -6,7 +6,8 @@ Pure functions over the text the person typed and the open tasks:
   (``/task …`` or the composer's Run as a task), ``control`` (a control word
   and a task the person named), ``follow`` (a follow-up word and a task the
   person named, finished ones too), ``chore`` (a repeating phrase, left to the
-  scheduled chores), ``work`` (an imperative change to named files: a task at
+  scheduled chores), ``reminder`` (a reminder cue: "remind me to … on Friday at
+  9", "提醒我 …"; a one-time chore, or a question about when), ``work`` (an imperative change to named files: a task at
   once, with a short title), ``answer`` (a greeting or a short question) or
   ``plan`` (the main chat's own planning step decides).
 - :func:`triage` gives a new task its level from the person's own words:
@@ -24,7 +25,10 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final, Literal
+
+from localmelo.support.gateway.reminder_time import parse_reminder
 
 # Levels P0 to P5. People read the P-code, with its meaning where there is room
 # (``P1 · today``). The words stay what people may type and what the API's
@@ -40,7 +44,9 @@ LEVEL_MEANINGS: Final = (
 )
 FINISHED: Final = frozenset({"done", "failed", "cancelled", "expired"})
 
-Route = Literal["delegate", "control", "follow", "chore", "work", "answer", "plan"]
+Route = Literal[
+    "delegate", "control", "follow", "chore", "reminder", "work", "answer", "plan"
+]
 Action = Literal["stop", "pause", "resume", "first"]
 
 
@@ -551,6 +557,8 @@ _REPEATS: Final = re.compile(
     r"wednesday|thursday|friday|saturday|sunday|\d+\s+(?:minutes?|hours?|days?))\b"
     r"|\b(?:daily|weekly|monthly|hourly)\b|每天|每周|每晚|每早|每个工作日|每小时|每月|每隔"
 )
+# Any fixed moment: whether a message is a reminder does not depend on the time.
+_ANY_TIME: Final = datetime(2026, 1, 5, 12, 0)
 # A message longer than this is not a quick question, and code never reads it as a control.
 SHORT_CHARS: Final = 120
 CONTROL_CHARS: Final = 80
@@ -574,6 +582,8 @@ def route(
                 return Routed("control", action=found[0], task=task)
     if _REPEATS.search(text):
         return Routed("chore")
+    if parse_reminder(stripped, _ANY_TIME) is not None:
+        return Routed("reminder")
     cue = follow_cue(stripped)
     if len(text) <= CONTROL_CHARS and cue is not None and not is_question(stripped):
         task = named_task(stripped, cue, tasks, finished=True)

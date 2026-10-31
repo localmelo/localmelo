@@ -30,7 +30,7 @@
 
 - 在终端（`melo`）、网页控制台（`melo serve`）或 Mac App 里和同一个主对话交谈：它自己回答，或按优先级把更大的工作交给任务，并用卡片说明发生了什么。
 - 让 melo 跨对话记忆：新的事实取代旧的，在“记忆”标签页里可以查看、编辑或删除每一条笔记。
-- 定时事项说一次就行，比如 `every weekday at 8:30, brief me on my calendar`：它按时运行，check-in 告诉你什么做完了。
+- 定时事项说一次就行，比如 `every weekday at 8:30, brief me on my calendar`：它按时运行，check-in 告诉你什么做完了。也可以要一个提醒，比如 `remind me to send the report on Friday at 9`：它会先显示理解的日期，到时间再通知你。
 - 重要操作由你批准：melo 运行命令和写文件之前会先问你，并展示改动。
 - 使用你电脑上的 oMLX、Ollama、vLLM、SGLang 或 MLC LLM，或者云端 API；也可以在脚本里运行一个任务，得到一行 JSON。
 

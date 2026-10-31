@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC
+from datetime import UTC, date
 from pathlib import Path
 
 import pytest
 
-from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
+from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule, ScheduleError
 from localmelo.support.gateway.chore_store import (
     MAX_CHORES,
     ChoreLimitError,
@@ -230,3 +230,81 @@ async def test_an_older_file_gets_the_chore_tables_and_keeps_its_rows(
         assert len(await chores.list_chores()) == 1
     finally:
         await second.aclose()
+
+
+# ── One-time chores (reminders) ──
+
+
+def once(day: int, hour: int = 9, month: int = 7) -> Schedule:
+    return Schedule("once", minute=hour * 60, on=date(2026, month, day))
+
+
+async def test_a_one_time_chore_is_planned_at_its_own_time_plus_jitter(
+    store: SessionStore, clock: Clock
+) -> None:
+    chores = make(store, clock, jitter=42.0)
+    schedule = once(27)  # NOW is Saturday 2026-07-25 17:20 UTC
+    chore = await chores.create(
+        title="Report", request="Reminder: send it", schedule=schedule
+    )
+    assert chore.next_run == schedule.when(UTC) + 42.0
+    assert chore.schedule == schedule and chore.is_reminder
+    # Its time has not come: it is not due; at its time plus the jitter it is.
+    assert await chores.due(schedule.when(UTC)) == []
+    assert [c.chore_id for c in await chores.due(schedule.when(UTC) + 42.0)] == [
+        chore.chore_id
+    ]
+
+
+async def test_a_one_time_chore_in_the_past_or_over_a_year_ahead_is_refused(
+    store: SessionStore, clock: Clock
+) -> None:
+    chores = make(store, clock)
+    far = Schedule("once", minute=0, on=date(2027, 8, 1))
+    for bad in (once(25, hour=17), once(1), once(24), far):
+        with pytest.raises(ScheduleError):
+            await chores.create(title="A", request="Reminder: a", schedule=bad)
+    assert await chores.list_chores() == []
+
+
+async def test_a_one_time_chore_that_ran_stays_in_the_list_switched_off(
+    store: SessionStore, clock: Clock
+) -> None:
+    chores = make(store, clock)
+    chore = await chores.create(title="A", request="Reminder: a", schedule=once(27))
+    clock.now = once(27).when(UTC) + 60
+    assert await chores.advance(
+        chore, next_run=None, task_id="t1", ran_at=clock.now, enabled=False
+    )
+    done = await chores.get(chore.chore_id)
+    assert (done.enabled, done.next_run, done.last_run, done.last_task_id) == (
+        False, None, clock.now, "t1"
+    )  # fmt: skip
+    assert [c.chore_id for c in await chores.list_chores()] == [chore.chore_id]
+    assert await chores.due(clock.now + 86400) == []
+    # A stale view does not move it.
+    assert not await chores.advance(chore, next_run=None, enabled=False)
+
+
+async def test_a_done_reminder_is_armed_again_by_a_new_time_but_not_by_a_switch(
+    store: SessionStore, clock: Clock
+) -> None:
+    chores = make(store, clock)
+    chore = await chores.create(title="A", request="Reminder: a", schedule=once(27))
+    clock.now = once(27).when(UTC) + 60
+    await chores.advance(
+        chore, next_run=None, task_id="t1", ran_at=clock.now, enabled=False
+    )
+    done = await chores.get(chore.chore_id)
+    # Switching it on would run a time that has passed: refused, nothing changes.
+    with pytest.raises(ScheduleError, match="passed"):
+        await chores.update(chore.chore_id, revision=done.revision, enabled=True)
+    assert (await chores.get(chore.chore_id)).enabled is False
+    # A new time arms it again.
+    new = once(28, hour=8)
+    again = await chores.update(chore.chore_id, revision=done.revision, schedule=new)
+    assert (again.enabled, again.next_run, again.schedule) == (True, new.when(UTC), new)
+    # A title change keeps a pending reminder's planned time, even one that is late.
+    clock.now = new.when(UTC) + 3 * 3600
+    kept = await chores.update(chore.chore_id, revision=again.revision, title="Renamed")
+    assert kept.next_run == again.next_run

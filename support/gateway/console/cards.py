@@ -36,7 +36,9 @@ from localmelo.support.sessions.display import (
 )
 from localmelo.support.sessions.store import StoredEvent
 
+from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, not_committed
+from ..task_store import TaskStoreError
 from .activity import answer_lines, answer_word
 
 if TYPE_CHECKING:
@@ -190,7 +192,7 @@ class MainChatCards:
             return None
         kind = stored.event.get("type")
         data = stored.event.get("data") or {}
-        card = {
+        card: dict[str, Any] = {
             "source_id": info.id,
             "source_kind": info.kind,
             "title": card_title(info.title),
@@ -248,7 +250,24 @@ class MainChatCards:
             # A task whose commit is all that is left says so, with the command.
             left = await not_committed(last.answer, info.workspace)
             ended = {"line": left} if left else ended
+        words = await self._reminder_words(info.id) if info.kind == "task" else None
+        if words is not None:
+            # A reminder's card shows the person's words even when its run failed.
+            card["reminder"] = True
+            if state == "failed":
+                ended = _words("cards.reminderFailed", words=words)
         return {**card, "state": state, **ended}
+
+    async def _reminder_words(self, task_id: str) -> str | None:
+        """The person's words of a reminder's task, or ``None`` for any other task."""
+        try:
+            record = await self._console.workers.tasks.get_task(task_id)
+        except TaskStoreError:
+            return None
+        if record.reason != REMINDER_REASON:
+            return None
+        first = str(record.spec.get("objective", "")).split("\n\n")[0]
+        return first.removeprefix(REMINDER_PREFIX)
 
     async def _answer_card(
         self, card: dict[str, Any], data: dict[str, Any]

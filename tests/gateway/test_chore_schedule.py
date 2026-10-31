@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, date, datetime, tzinfo
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from localmelo.support.gateway.chore_schedule import (
+    MAX_AHEAD,
     MAX_HOURS,
     Schedule,
     ScheduleError,
     clock_text,
     parse_phrase,
 )
+from localmelo.support.gateway.i18n import said_text
 
 
 def at(text: str, tz: tzinfo = UTC) -> float:
@@ -175,3 +177,80 @@ def test_a_repeating_phrase_gives_the_schedule_and_the_work_that_is_left(
 )
 def test_a_message_that_names_no_supported_schedule_is_not_read(text: str) -> None:
     assert parse_phrase(text) is None
+
+
+# ── One-time schedules (reminders) ──
+
+FRIDAY_NINE = {"kind": "once", "at": "2026-10-30T09:00"}
+
+
+def test_a_one_time_schedule_round_trips_and_says_its_date_in_both_languages() -> None:
+    schedule = Schedule.from_json(FRIDAY_NINE)
+    assert schedule == Schedule("once", minute=9 * 60, on=date(2026, 10, 30))
+    assert schedule.to_json() == FRIDAY_NINE
+    assert schedule.describe() == "once, Fri Oct 30 at 9:00"
+    assert said_text(schedule.said_at(), "en") == "Fri Oct 30 at 9:00"
+    assert said_text(schedule.said(), "zh-Hans") == "仅一次，10月30日 周五 9:00"
+    late = Schedule("once", minute=21 * 60 + 5, on=date(2027, 1, 3))
+    assert late.describe() == "once, Sun Jan 3 at 21:05"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"kind": "once"},
+        {"kind": "once", "at": "09:00"},
+        {"kind": "once", "at": "2026-10-30"},
+        {"kind": "once", "at": "2026-10-30 09:00"},
+        {"kind": "once", "at": "2026-10-30T09:00:00"},
+        {"kind": "once", "at": "2026-02-30T09:00"},
+        {"kind": "once", "at": "2026-10-30T24:00"},
+        {"kind": "once", "at": "2026-10-30T09:60"},
+        {"kind": "once", "at": 5},
+        {"kind": "once", "at": "2026-10-30T09:00", "every": 2},
+        {"kind": "daily", "at": "2026-10-30T09:00"},
+    ],
+)
+def test_a_one_time_schedule_that_is_not_a_date_and_a_time_is_refused(
+    data: object,
+) -> None:
+    with pytest.raises(ScheduleError):
+        Schedule.from_json(data)
+
+
+def test_a_one_time_schedule_is_due_at_its_own_time_only_if_ahead_and_within_a_year() -> (
+    None
+):
+    schedule = Schedule.from_json(FRIDAY_NINE)
+    due = at("2026-10-30 09:00")
+    assert schedule.when(UTC) == due
+    # The next time is its own time, whatever day it is asked on.
+    assert schedule.next_after(at("2026-10-28 10:00"), UTC) == due
+    assert schedule.next_after(due - 60, UTC) == due
+    # Past, or the very minute: no next time.
+    for now in (due, due + 1, at("2026-11-02 09:00")):
+        with pytest.raises(ScheduleError, match="passed"):
+            schedule.next_after(now, UTC)
+    # At most a year ahead.
+    far = Schedule("once", minute=0, on=date(2027, 11, 5))
+    with pytest.raises(ScheduleError, match="year"):
+        far.next_after(at("2026-10-28 10:00"), UTC)
+    edge = datetime(2026, 10, 28, 10, 0, tzinfo=UTC) + MAX_AHEAD
+    inside = Schedule("once", minute=10 * 60, on=edge.date())
+    assert inside.next_after(at("2026-10-28 10:00"), UTC) == inside.when(UTC)
+
+
+def test_a_one_time_time_is_on_the_wall_clock_of_the_given_zone() -> None:
+    new_york = ZoneInfo("America/New_York")
+    schedule = Schedule.from_json({"kind": "once", "at": "2026-11-01T08:30"})
+    assert schedule.when(new_york) == at("2026-11-01 08:30", new_york)
+    assert schedule.when(new_york) != schedule.when(UTC)
+
+
+def test_only_a_one_time_schedule_has_a_date() -> None:
+    with pytest.raises(ScheduleError):
+        Schedule("once", minute=60)
+    with pytest.raises(ScheduleError):
+        Schedule("daily", minute=60, on=date(2026, 10, 30))
+    with pytest.raises(ScheduleError):
+        Schedule("daily", minute=60).when()

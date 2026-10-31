@@ -31,7 +31,7 @@ remembers across chats and talks to your own model server or a cloud API.
 
 - Talk to one main chat in the terminal (`melo`), the web console (`melo serve`) or the Mac app: it answers, or hands bigger work to a task by priority, and a card says what happened.
 - Let melo remember across chats: the newer fact wins, and the Memory tab lets you read, edit or forget each note.
-- Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished.
+- Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished. Ask for a reminder, like `remind me to send the report on Friday at 9`, and it shows the date it understood, then tells you at that time.
 - Approve what matters: melo asks before commands and file writes, and shows the change.
 - Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
 
