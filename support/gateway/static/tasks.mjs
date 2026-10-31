@@ -2,6 +2,7 @@ import {taskLive} from './task-live.mjs';
 import {levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts} from './blocked.mjs';
+import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -89,7 +90,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
   // A task waiting on its question's answer says whose (#369).
   const askText = (ask) => (ask.on === 'person' ? t('ask.waitingOnYou') : t('ask.waitingOn', {chat: ask.chat_title ?? ''}));
-  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : task.ask ? askText(task.ask) : isStopped(task) ? t('tasks.state.stopped') : stateWord(task.state));
+  // A finished task's state is how code decided it ended: Ready, Done, not finished, Needs you…
+  const endingOf = (task) => (isStopped(task) ? null : readEnding(task.ending));
+  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : task.ask ? askText(task.ask) : isStopped(task) ? t('tasks.state.stopped')
+    : endingOf(task) ? endingLabel(endingOf(task)) : stateWord(task.state));
 
   function evidenceText(task) {
     if (state.evidence === 'unverified_processes') return t('tasks.evidence.unverified');
@@ -122,8 +126,27 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const back = node('a', t('tasks.back'));
     back.href = '#/tasks';
     const meta = node('dl', undefined, 'worker-meta');
-    const row = (label, value) => meta.append(node('dt', label), node('dd', value));
-    row(t('tasks.row.state'), stateText(task));
+    const row = (label, value) => {
+      const cell = node('dd', value);
+      meta.append(node('dt', label), cell);
+      return cell;
+    };
+    const stateCell = row(t('tasks.row.state'), stateText(task));
+    const ending = readEnding(task.ending);
+    if (endingOf(task)) stateCell.dataset.ending = ending.state;
+    // Why it is not ready, and the tests its run ran (from its own calls, never from its report).
+    if (ending && endingWhy(ending)) row(t('ending.row'), endingWhy(ending));
+    if (ending?.tests.length) {
+      const tests = node('ul', undefined, 'ending-tests');
+      for (const test of ending.tests) {
+        const words = testWords(test);
+        const item = node('li');
+        item.dataset.outcome = test.outcome;
+        item.append(node('span', words.mark, 'ending-test-mark'), node('code', words.command), node('span', words.outcome, 'ending-test-outcome'));
+        tests.append(item);
+      }
+      row(t('ending.tests')).append(tests);
+    }
     // Fixed when the task was made: the mode of its chat then.
     row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
     if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
@@ -157,6 +180,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     }
     if (isStopped(task)) {
       actions.append(button(t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), Boolean(state.busy)));
+    } else if (canFinish(ending)) {
+      // A draft finishes with one tap: the tests (and the commit), through the same continue.
+      actions.append(button(state.busy === 'continue' ? t('common.starting') : finishLabel(ending), () => keepGoing(), Boolean(state.busy)));
     }
     if (!FINISHED.has(task.state)) {
       actions.append(button(t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), state.busy === 'stop'));

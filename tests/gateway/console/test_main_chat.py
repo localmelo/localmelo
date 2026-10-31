@@ -491,6 +491,36 @@ async def test_a_task_that_ran_out_of_steps_comes_back_as_a_stopped_card(
         assert recent["outcome"] == "stopped"
 
 
+async def test_a_task_card_keeps_how_code_found_it_ended(tmp_path: Path) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        store = console.store
+        record, _ = await console.workers.create(
+            {"objective": "Fix the report", "request_key": "k"}
+        )
+        task_id = record["task_id"]
+        started = await store.begin_turn(task_id, "Fix the report", holder=HOLDER)
+        await store.finish_turn(
+            task_id,
+            started.turn,
+            holder=HOLDER,
+            status="completed",
+            cause="run",
+            result=run_result(),
+            answer="Fixed the report.\nEnding: ready",
+        )
+        draft = {"state": "draft", "reasons": ["tests_missing"], "question": ""}
+        await console.workers.tasks.change(
+            task_id, state="done", actor="scheduler", ending={**draft, "tests": []}
+        )
+        await store.append_session_event(task_id, "sched.finished", {"state": "done"})
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        # The card stays done; its ending says what code found, its line drops the claim.
+        assert (card["state"], card["ending"]) == ("done", draft)
+        assert card["line"] == "Fixed the report."
+        task = (await client.get(f"/api/tasks/{task_id}")).json()["task"]
+        assert task["ending"]["state"] == "draft"
+
+
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(
     tmp_path: Path,
 ) -> None:

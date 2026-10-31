@@ -101,6 +101,7 @@ from localmelo.support.gateway.front_rules import (
 )
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
+from localmelo.support.gateway.task_endings import report_text, shown
 from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
@@ -269,7 +270,7 @@ def _tell(typed: str) -> str:
 
 def answer_head(answer: str, chars: int = ANSWER_CHARS) -> str:
     """The first lines of a task's answer, on one line: what changed, tests, commit."""
-    text = split_thinking(answer or "")[1]
+    text = split_thinking(report_text(answer))[1]
     lines = (
         " ".join(line.split()).lstrip("#>*- ").strip() for line in text.splitlines()
     )
@@ -818,8 +819,19 @@ def _summary(line: str) -> str:
 
 def _row(record: TaskRecord) -> str:
     state = _STATE_WORDS.get(record.state, record.state)
+    ending = shown(record)
     if is_out_of_steps(record.state, record.wait_reason):
         state = "stopped (ran out of steps; it can continue)"
+    elif ending is not None:
+        # How it ended as code decided it, never as its report says.
+        name = ending["state"]
+        state = t_in("en", f"ending.state.{name}").lower()
+        why = [ending.get("question") or ""] + [
+            t_in("en", f"ending.reason.{code}")
+            for code in ending.get("reasons", ())
+            if code not in ("question", "run_failed", "stopped")
+        ]
+        state += f" ({'; '.join(w for w in why if w)})" if any(why) else ""
     return f"{record.task_id} · {record.title} · {state} · {level_code(record.level)}"
 
 

@@ -487,6 +487,27 @@ test('a task that ran out of steps reads Stopped with what is left, and its row 
   assert.deepEqual(h.root.find((node) => node.className === 'activity-actions').children.map((node) => node.textContent), ['Open task']);
 });
 
+test('a task code found not finished reads so in amber, and its row offers Finish it', async () => {
+  const draft = row({state: 'done', icon: 'write', result: 'Fixed it.', can_continue: true,
+    ending: {state: 'draft', reasons: ['tests_failed'], question: '', tests: []}});
+  const ready = row({id: 't2', title: 'Notes', state: 'done', result: 'Wrote notes.', ending: {state: 'ready', reasons: [], tests: []}});
+  const h = harness({rows: [draft, ready]});
+  await h.panel.update(health());
+  const lines = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
+  assert.deepEqual(lines, ['Done, not finished · The last test run failed', 'Wrote notes.'], 'a ready task keeps its result');
+  assert.equal(h.root.find((node) => node.className === 'activity-row').dataset.ending, 'draft');
+  h.tabs()[1].click();
+  const workers = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
+  assert.deepEqual(workers, ['Done, not finished · The last test run failed', 'Ready']);
+  h.heads()[0].click();
+  await settle();
+  const actions = h.root.find((node) => node.className === 'activity-actions');
+  assert.deepEqual(actions.children.map((node) => node.textContent), ['Finish it: run the tests', 'Open task']);
+  actions.children[0].click();
+  await settle();
+  assert.deepEqual(h.calls.find(([, path]) => path.endsWith('/continue')), ['POST', '/tasks/t1/continue', undefined]);
+});
+
 test('a task held on an approval says so in the row, a slot wait keeps its words', async () => {
   const asks = row({state: 'held', icon: 'wait', activity: 'Needs your approval'});
   const slot = row({id: 't2', title: 'Slides', state: 'held', icon: 'held', activity: 'Waiting for a free model slot'});

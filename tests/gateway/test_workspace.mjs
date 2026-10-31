@@ -3477,6 +3477,35 @@ test('a task that ran out of steps says so once in default mode, and a developer
   assert.match(flatten(answerBox(developer)), /Max steps reached/);
 });
 
+test('a task code found not finished says why, lists its own tests, and Finish it continues it', async () => {
+  const calls = [];
+  const ending = {state: 'draft', proposed: 'ready', reasons: ['tests_unverified', 'commit_missing'], question: '',
+    tests: [{command: "subprocess.run(['pytest', '-q'])", exit_code: 0, outcome: 'unknown'}]};
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending})},
+    'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', ending: null}), message: 'continued'}}; },
+  });
+  const text = flatten(h.element('task-panel'));
+  assert.match(text, /State\s*Done, not finished/);
+  assert.match(text, /How it ended\s*A test ran, but its result was not checked · The changes are not committed/);
+  assert.match(text, /Tests it ran\s*\?\s*subprocess\.run\(\['pytest', '-q'\]\)\s*result not checked/);
+  labelled(h, 'Finish it: run the tests and commit').click(); await settle();
+  assert.deepEqual(calls, ['continue']);
+  assert.match(flatten(h.element('task-panel')), /State\s*queued/);
+  assert.equal(labelled(h, 'Finish it: run the tests and commit'), null, 'it has gone on');
+});
+
+test('a ready task and one that needs you read as such, with no Finish it', async () => {
+  const ready = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: {state: 'ready', reasons: [], tests: []}})}});
+  assert.match(flatten(ready.element('task-panel')), /State\s*Ready/);
+  assert.doesNotMatch(flatten(ready.element('task-panel')), /How it ended/);
+  const asks = {state: 'blocked', reasons: ['question'], question: 'Which port should it use?', tests: []};
+  const blocked = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: asks})}});
+  assert.match(flatten(blocked.element('task-panel')), /State\s*Needs you/);
+  assert.match(flatten(blocked.element('task-panel')), /How it ended\s*Which port should it use\?/);
+  assert.equal(labelled(blocked, 'Finish it: run the tests'), null);
+});
+
 test('a task that failed for another reason stays failed and offers no Continue', async () => {
   const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: false, wait_reason: 'no disk'})}});
   assert.match(flatten(h.element('task-panel')), /State\s*failed/);

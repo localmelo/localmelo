@@ -4,6 +4,7 @@ import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {LEVELS, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
+import {canFinish, endingLabel, endingWhy, finishLabel, readEnding} from './endings.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -23,8 +24,12 @@ import {formatTime, t} from './i18n.mjs';
  */
 export const GLYPHS = {
   wait: '!', held: '◷', queued: '◷', paused: '‖', read: '▤', write: '✎', run: '>_', web: '⊕',
-  memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●',
+  memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●', draft: '◐', blocked: '?',
 };
+// The icon of a task that did not end ready, by how code decided it ended.
+const ENDING_ICONS = {draft: 'draft', blocked: 'blocked', failed: 'failed', dropped: 'stopped'};
+// A finished task's state and reasons in words, as code decided them: "Done, not finished · No test ran …".
+const endingLine = (ending) => [endingLabel(ending), endingWhy(ending)].filter(Boolean).join(' · ');
 // A tab's words are `panel.tab.<id>`; the workers' empty note `panel.emptyWorkers.<scope>`.
 const TABS = [['activity', '≡'], ['workers', '⚙'], ['scheduled', '◷'], ['memory', '◎']];
 // A row's state in words (`panel.state.<state>`), and how an approval was answered (`panel.answer.<key>`).
@@ -215,21 +220,25 @@ export function setupPanel({
   // A worker's second line says its state in words, then what it does or how it ended.
   // A held or waiting worker says why in the server's words (`Waiting for a free model slot`, `Waiting on you`).
   const workerLine = (row) => (['held', 'waiting'].includes(row.state) && row.activity ? row.activity
+    : readEnding(row.ending) && row.state !== 'stopped' ? endingLine(readEnding(row.ending))
     : [stateWords(row.state), row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · '));
   function rowNode(row, worker = false) {
     const item = node('li', 'activity-row');
     item.dataset.state = row.state;
+    const ending = row.state === 'stopped' ? null : readEnding(row.ending);
+    if (ending) item.dataset.ending = ending.state;
     const open = state.open === key(row);
     const headButton = button('activity-head', '', () => toggle(row));
     headButton.dataset.focusKey = key(row);
     headButton.setAttribute('aria-expanded', String(open));
     const text = node('span', 'activity-text');
-    text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
+    const said = ending && ending.state !== 'ready' ? endingLine(ending) : row.activity || row.result || '';
+    text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : said));
     // A task names the folder it works in (its chat's, unless it was given one).
     if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
     // A task a side chat started says so in the whole day's list.
     if (row.from) text.append(node('span', 'activity-folder activity-from', t('chat.fromChat', {title: row.from})));
-    headButton.append(icon(row.icon), text);
+    headButton.append(icon(ENDING_ICONS[ending?.state] ?? row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);
     if (row.approvals?.length) item.append(approvalFold(row));
@@ -325,9 +334,10 @@ export function setupPanel({
     if (live.state.error) box.append(node('p', 'panel-note', live.state.error));
     const actions = node('div', 'activity-actions');
     if (row.kind === 'task' && LIVE.has(row.state)) actions.append(...taskActions(row));
-    // A task that ran out of steps goes on from where it stopped.
+    // A task that ran out of steps goes on from where it stopped; one not finished finishes.
     else if (row.kind === 'task' && row.can_continue) {
-      const go = button('outline-button', t('failure.continue'), () => act(row, null, '/continue'));
+      const ending = readEnding(row.ending);
+      const go = button('outline-button', canFinish(ending) && row.state !== 'stopped' ? finishLabel(ending) : t('failure.continue'), () => act(row, null, '/continue'));
       go.disabled = state.busy === key(row);
       actions.append(go);
     }

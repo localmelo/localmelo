@@ -639,6 +639,19 @@ def test_a_task_that_ran_out_of_steps_is_a_stopped_card_not_a_failed_one() -> No
     assert "Not finished" not in line.plain
 
 
+def test_a_done_task_card_says_how_code_found_it_ended() -> None:
+    card = {"state": "done", "source_id": "t1", "source_kind": "task", "title": "Fix it",
+            "line": "Fixed it.", "ending": {"state": "draft", "reasons": ["tests_failed", "commit_missing"]}}  # fmt: skip
+    line = card_line(card, UNICODE, 120)
+    assert line.plain.startswith(
+        "⚠ Done, not finished: Fix it · The last test run failed; The changes are not committed"
+    )
+    ready = card_line(
+        {**card, "ending": {"state": "ready", "reasons": []}}, UNICODE, 120
+    )
+    assert ready.plain.startswith("✓ Ready: Fix it · Fixed it.")
+
+
 def test_an_approval_request_from_the_gateways_list() -> None:
     request = approval_request(
         {"request_id": "r", "call_id": "c", "tool_name": "file_write",

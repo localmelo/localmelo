@@ -332,7 +332,8 @@ def finish_message(ending: Mapping[str, Any]) -> str:
 
 def shown(record: TaskRecord) -> dict[str, Any] | None:
     """A finished task's ending: decided at its last transition, else its state's."""
-    ending, ended = record.ending, record.state == "done" or record.state in _DEFAULTS
+    ending = getattr(record, "ending", None)  # a stand-in record may have none
+    ended = record.state == "done" or record.state in _DEFAULTS
     if ended and isinstance(ending, Mapping) and ending.get("at") == record.finished_at:
         return dict(ending)
     if record.state == "failed" and record.wait_reason == OUT_OF_STEPS:

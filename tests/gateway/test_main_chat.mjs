@@ -112,6 +112,34 @@ test('a task that ran out of steps is a stopped card that offers Continue before
   assert.deepEqual(made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
 });
 
+test('a done task card says how code found it ended: ready, not finished with Finish it, or needs you', () => {
+  const base = {id: 5, at: NOON, state: 'done', sourceId: 't5', sourceKind: 'task', title: 'Fix CI', line: 'Fixed the check.'};
+  const draft = {state: 'draft', reasons: ['tests_missing', 'commit_missing'], question: ''};
+  const card = readCard({id: 5, source_id: 't5', source_kind: 'task', state: 'done', title: 'Fix CI', ending: draft});
+  assert.deepEqual(card.ending, {...draft, tests: []});
+  assert.deepEqual(cardWords({...base, ending: {state: 'ready', reasons: [], question: '', tests: []}}),
+    {mark: '✓', heading: 'Ready: Fix CI', action: 'Open task'});
+  assert.deepEqual(cardWords(card), {mark: '◐', heading: 'Done, not finished: Fix CI', action: 'Open task', more: 'Finish it: run the tests and commit'});
+  const blocked = cardWords({...base, ending: {state: 'blocked', reasons: ['question'], question: 'Which port?', tests: []}});
+  assert.equal(blocked.heading, 'Needs you: Fix CI');
+  assert.equal(readCard({id: 6, source_id: 't', state: 'done', ending: {state: 'finished'}}).ending, undefined, 'an unknown ending is no ending');
+  const made = [];
+  const doc = {createElement(tag) {
+    const node = {tag, className: '', textContent: '', type: '', dataset: {}, attributes: {}, children: [], listeners: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+      append(...items) { this.children.push(...items); },
+      addEventListener(type, fn) { this.listeners[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  const finished = [];
+  const node = cardNode({doc, card: {...card, at: NOON}, open: () => {}, resume: (value, button) => finished.push(button.textContent)});
+  assert.equal(node.dataset.ending, 'draft');
+  assert.equal(made.find((item) => item.className === 'main-card-why').textContent, 'No test ran after the last change · The changes are not committed');
+  made.find((item) => item.textContent === 'Finish it: run the tests and commit').listeners.click();
+  assert.deepEqual(finished, ['Finish it: run the tests and commit'], 'Finish it is the continue the stopped card uses');
+});
+
 test('a card node opens its source', () => {
   const made = [];
   const doc = {createElement(tag) {

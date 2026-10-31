@@ -555,3 +555,31 @@ async def test_an_older_store_gains_the_ending_column(tmp_path: Path) -> None:
 )
 def test_a_commit_is_asked_only_in_plain_words(text: str, asks: bool) -> None:
     assert asks_commit(text) is asks
+
+
+def test_the_main_chat_reads_how_a_task_ended_in_plain_words() -> None:
+    from localmelo.support.gateway.console.front import _row, answer_head
+
+    ending = {"state": "draft", "reasons": ["tests_missing"], "at": 5.0}
+    record = SimpleNamespace(
+        task_id="t1",
+        title="Fix",
+        state="done",
+        wait_reason="",
+        level=2,
+        finished_at=5.0,
+    )
+    record.ending = ending
+    assert _row(record) == (  # type: ignore[arg-type]
+        "t1 · Fix · done, not finished (No test ran after the last change) · P2"
+    )
+    record.ending = {
+        "state": "blocked",
+        "reasons": ["question"],
+        "question": "Which port?",
+        "at": 5.0,
+    }
+    assert _row(record) == "t1 · Fix · needs you (Which port?) · P2"  # type: ignore[arg-type]
+    record.ending = {"state": "ready", "reasons": [], "at": 5.0}
+    assert _row(record) == "t1 · Fix · ready · P2"  # type: ignore[arg-type]
+    assert answer_head("Fixed the report.\nEnding: ready") == "Fixed the report."

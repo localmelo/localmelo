@@ -48,6 +48,7 @@ _PARAM = re.compile(r"\{(\w+)\}")
 CONVERTED_JS = (
     "blocked.mjs",
     "drawer.mjs",
+    "endings.mjs",
     "folder.mjs",
     "levels.mjs",
     "main-chat.mjs",

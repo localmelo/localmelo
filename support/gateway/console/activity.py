@@ -43,6 +43,7 @@ from localmelo.support.sessions.store import (
 )
 
 from ..finishing import NOT_CONTINUED, is_out_of_steps
+from ..task_endings import report_text, shown
 from .errors import ApiError
 from .running import (
     TASK_OUTCOMES,
@@ -151,7 +152,7 @@ def result_line(note: str, answer: str) -> str:
     there is none). A ``Done.`` that opens the answer gives way to what the
     run says after it, as it does on the chat's card.
     """
-    raw = note or split_thinking(answer or "")[1]
+    raw = note or split_thinking(report_text(answer))[1]
     marker = _MARKER.match(raw)
     if marker:
         return _marker_words(marker.group(1))
@@ -188,7 +189,7 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
     answering``), an answer that is only code ``Wrote some code``, and an
     answer that only says it is done, ``Done.`` itself.
     """
-    raw = split_thinking(answer or "")[1]
+    raw = split_thinking(report_text(answer))[1]
     marker = _MARKER.match(raw)
     if marker:
         return _marker_words(marker.group(1))
@@ -237,7 +238,7 @@ def left_line(answer: str, *, bare: bool = False) -> str:
     opens it (``Remaining: run the tests``, ``还剩下：运行测试``) is dropped,
     for the task page, whose row is called "What is left" already.
     """
-    raw = _FENCE.sub("\n", split_thinking(answer or "")[1])
+    raw = _FENCE.sub("\n", split_thinking(report_text(answer))[1])
     for line in raw.splitlines():
         row = " ".join(_MARKUP.sub("", line).replace("`", "").replace("**", "").split())
         for part in _SENTENCE.split(row):
@@ -355,6 +356,10 @@ async def _task_rows(
             elif state == "failed" and record.wait_reason.startswith(NOT_CONTINUED):
                 result = record.wait_reason
             row.update(icon=ended[1] if state == "done" else state, result=result)
+            # How it ended, decided by code; a draft finishes with one tap.
+            row["ending"] = shown(record)
+            if (row["ending"] or {}).get("state") == "draft":
+                row["can_continue"] = True
         rows.append(row)
     return rows
 
