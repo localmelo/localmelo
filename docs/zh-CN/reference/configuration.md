@@ -89,7 +89,9 @@ chat_model = "qwen3:8b"
 | `lock_self` | `[scheduler]` | `""` | 这个 bench 自己的持有者：确切的 `holder:` 值，或锁带有 `run:` 行时的 `holder:run`。匹配是精确且区分大小写的。 |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` 从不改变请求；`wait` 在存在外部锁时扣住每一次工作区调用，包括嵌入。见[调度器](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)。 |
 
-全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 和 `admit_on_outcome` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。`admit_on_outcome` 在 `legacy` 中被接受但不生效。`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
+全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 和 `admit_on_outcome` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
+
+`admit_on_outcome` 在 `legacy` 中被接受但不生效。`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
 
 全是默认值的 `[scheduler]` 表不会被写入，未知的调度器键会被丢弃，因此没有这张表的配置文件保持其确切字节；向导会保留非默认的策略。
 
@@ -103,7 +105,11 @@ chat_model = "qwen3:8b"
 
 ### 推理
 
-`legacy` 是默认值：OpenAI 兼容后端不发送推理，Ollama 原生后端像以前一样发送它自己的 `thinking` 字段和内联副本。`drop` 从不发送推理；`replay` 在范围内的助手轮次上发送推理，使用一个键，每轮最多 40,000 个字符（更长的轮次推理会被跳过并计数）。`compress` 不发送推理，并把每条回复的笔记和草稿保留在工作记忆中；`compress+replay` 两者都做。`requires_reasoning_replay = true` 的后端把 `compress` 当作 `compress+replay` 运行。每种显式模式还会停止读取 `[RECALL]`、从答案中移除内联的 `<think>` 块，并停止把原始步骤摘要写入长期记忆。压缩模式默认召回笔记、草稿和早先的思考；见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。
+`legacy` 是默认值：OpenAI 兼容后端不发送推理，Ollama 原生后端像以前一样发送它自己的 `thinking` 字段和内联副本。`drop` 从不发送推理；`replay` 在范围内的助手轮次上发送推理，使用一个键，每轮最多 40,000 个字符（更长的轮次推理会被跳过并计数）。
+
+`compress` 不发送推理，并把每条回复的笔记和草稿保留在工作记忆中；`compress+replay` 两者都做。`requires_reasoning_replay = true` 的后端把 `compress` 当作 `compress+replay` 运行。
+
+每种显式模式还会停止读取 `[RECALL]`、从答案中移除内联的 `<think>` 块，并停止把原始步骤摘要写入长期记忆。压缩模式默认召回笔记、草稿和早先的思考；见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。
 
 ```toml
 [agent]
@@ -112,7 +118,9 @@ replay_turns = 3          # optional; omit for every turn
 note_writer = "auto"      # optional: auto or heuristic
 ```
 
-`[retrieval]` 为直接运行、交互式界面和控制台会话设置召回的默认值；显式的命令行旗标优先于对应的键。这张表在 `legacy` 中被接受但不生效。超出范围的值（未知的检索器或名称、`k` 超出 1-10、`min_score` 超出 0-1）是配置错误，以一行输出和退出码 1 结束。
+`[retrieval]` 为直接运行、交互式界面和控制台会话设置召回的默认值；显式的命令行旗标优先于对应的键。这张表在 `legacy` 中被接受但不生效。
+
+超出范围的值（未知的检索器或名称、`k` 超出 1-10、`min_score` 超出 0-1）是配置错误，以一行输出和退出码 1 结束。
 
 ```toml
 [retrieval]
@@ -129,7 +137,11 @@ cross_task_cold = 0       # 0 or 1
 
 `save` 只在某个值与其默认值不同时才写入这张表，因此现有的配置文件保持不变。
 
-在直接模式和交互式界面中，显式旗标优先于 `[agent]`。`--base-url` 会话或运行使用旗标，而不使用这些保存的默认值。API v2 控制台会话使用保存的模式，未设置时默认为 `legacy`；它们保留网关的工具策略。旧版 `/v1` API 不变，也不继承推理/检索两张表。`--retrieval-extra-body` 只能作为旗标使用，从不是保存的键，且只影响 `retrieve` 请求。
+在直接模式和交互式界面中，显式旗标优先于 `[agent]`。`--base-url` 会话或运行使用旗标，而不使用这些保存的默认值。
+
+API v2 控制台会话使用保存的模式，未设置时默认为 `legacy`；它们保留网关的工具策略。旧版 `/v1` API 不变，也不继承推理/检索两张表。
+
+`--retrieval-extra-body` 只能作为旗标使用，从不是保存的键，且只影响 `retrieve` 请求。
 
 每个后端小节可以命名请求键，并说明服务器要求回放：
 
@@ -142,7 +154,13 @@ requires_reasoning_replay = false     # true for a server that rejects a
                                       # request without the reasoning
 ```
 
-`auto` 跟随上一条回复的推理来自哪个键，因此发出 `reasoning_content` 或 `reasoning` 的后端可以原样工作；在第一条回复之前它不发送任何键。对 OpenAI 兼容后端，该字段只用于 `replay` 和 `compress+replay`：`legacy`、`drop` 和 `compress` 会忽略它，通过调度器包装器时也一样。Ollama 原生保留其既有的 legacy 线上行为。`replay` 在直接运行和 `melo ""` 循环中使用当前任务的助手轮次；会话构建器改为选择保留的对话窗口。会话恢复使用当前进程的模式：问答对不含旧思考，而窗口检查点可以回放它保留的、已脱敏的思考。`[ollama]` 后端把它的字段固定为 `thinking`（它仍然可以写 `"thinking"` 或 `"auto"`）。在 `requires_reasoning_replay = true` 时，`--reasoning drop` 会被拒绝，窗口中的每个助手轮次都会回放（任务范围和 `replay_turns` 不适用），并且智能体会整块淘汰工作记忆单元，而不是截断推理。
+`auto` 跟随上一条回复的推理来自哪个键，因此发出 `reasoning_content` 或 `reasoning` 的后端可以原样工作；在第一条回复之前它不发送任何键。对 OpenAI 兼容后端，该字段只用于 `replay` 和 `compress+replay`：`legacy`、`drop` 和 `compress` 会忽略它，通过调度器包装器时也一样。
+
+Ollama 原生保留其既有的 legacy 线上行为。`replay` 在直接运行和 `melo ""` 循环中使用当前任务的助手轮次；会话构建器改为选择保留的对话窗口。
+
+会话恢复使用当前进程的模式：问答对不含旧思考，而窗口检查点可以回放它保留的、已脱敏的思考。`[ollama]` 后端把它的字段固定为 `thinking`（它仍然可以写 `"thinking"` 或 `"auto"`）。
+
+在 `requires_reasoning_replay = true` 时，`--reasoning drop` 会被拒绝，窗口中的每个助手轮次都会回放（任务范围和 `replay_turns` 不适用），并且智能体会整块淘汰工作记忆单元，而不是截断推理。
 
 <a id="tool-environment"></a>
 
@@ -155,28 +173,58 @@ Shell 和 Python 工具通常只继承 `HOME`、`LOGNAME`、`PATH`、`SHELL`、`
 tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 ```
 
-这是一个**名称**列表，而不是 `NAME=value` 赋值。名称必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；缺失的变量会被跳过。基于配置的直接运行、交互式界面和控制台会话在启动时解析存在的值。只有名称会写入 TOML；选项值不会出现在运行的配置记录中。`--base-url` 运行或会话不读取此设置。Python 调用方可以改为传入显式的 `AgentOptions(tool_env={...})` 映射。这不会改变 MCP 各自独立的按服务器 `env` 配置。
+这是一个**名称**列表，而不是 `NAME=value` 赋值。名称必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；缺失的变量会被跳过。
 
-请把每个名称视为一项能力授权。`SSH_AUTH_SOCK` 让工具子进程使用你的 SSH 代理进行认证或签名，代理变量则可能暴露它的地址和凭据。工具以你的权限运行，可以打印、复制或传输它们收到的变量；过滤环境不是沙箱。除非某个工具需要这项能力，否则请让列表保持为空，并且绝不要把密钥值放进 TOML。
+基于配置的直接运行、交互式界面和控制台会话在启动时解析存在的值。只有名称会写入 TOML；选项值不会出现在运行的配置记录中。
+
+`--base-url` 运行或会话不读取此设置。Python 调用方可以改为传入显式的 `AgentOptions(tool_env={...})` 映射。
+
+这不会改变 MCP 各自独立的按服务器 `env` 配置。
+
+请把每个名称视为一项能力授权。`SSH_AUTH_SOCK` 让工具子进程使用你的 SSH 代理进行认证或签名，代理变量则可能暴露它的地址和凭据。
+
+工具以你的权限运行，可以打印、复制或传输它们收到的变量；过滤环境不是沙箱。除非某个工具需要这项能力，否则请让列表保持为空，并且绝不要把密钥值放进 TOML。
 
 <a id="context-accounting"></a>
 
 ## 上下文记账
 
-把 `[agent] context_window`、`output_reserve` 和 `safety_margin` 设为正整数；窗口必须大于它们之和。直接运行和交互式界面的旗标会覆盖单个值；API v2 控制台会话使用配置。旧版 `/v1` 不变。未设置时不记录任何记账。
+把 `[agent] context_window`、`output_reserve` 和 `safety_margin` 设为正整数；窗口必须大于它们之和。直接运行和交互式界面的旗标会覆盖单个值；API v2 控制台会话使用配置。
 
-对每次规划或反思尝试，`utf8-bytes-v2` 以 UTF-8 字节数除以三向上取整来估算组装后的消息和工具 schema 表示。尺寸已知时，每张图片增加 `ceil(width / 28) * ceil(height / 28)` 个 token，上限为 16,384；尺寸未知时使用该上限。同一模型和请求类型的最近一次正数的提示 token 计数会向上校准这一估算；缺失或为零的用量会重置该校准。估算是估计值，不是界限：模板和视觉模型各不相同。
+旧版 `/v1` 不变。未设置时不记录任何记账。
 
-当估算超过输入上限时，智能体会适配一份请求副本：它把可裁剪的旧工具结果变成预览，移除可选的旧思考，然后淘汰旧的完整单元，同时保留任务、工具 schema、匹配的调用/结果对、图片和失败证据。它不改历史记录和保留的对话。如果固定的上下文无法装下，运行以 `context_budget_exceeded` 和一条修复提示结束。被归类为上下文溢出的回复最多获得一次更小的请求重试，且不重新运行工具；其他提供方错误保持其既有的重试策略。事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
+对每次规划或反思尝试，`utf8-bytes-v2` 以 UTF-8 字节数除以三向上取整来估算组装后的消息和工具 schema 表示。尺寸已知时，每张图片增加 `ceil(width / 28) * ceil(height / 28)` 个 token，上限为 16,384；尺寸未知时使用该上限。
 
-`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前；使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。固定的系统部分依次是基础文本，（在终端界面或控制台的对话中）说明 melo 是谁、运行在哪个模型、服务器和位置上、记得什么以及用哪种语言和文字回答的身份段落，各条说明，召回和反思是数据的那句话，以及日期行。其中没有布局的名称：`fixed-prefix-v2` 只是元数据，由 `prefix_cache.version` 报告。身份段落是 `AgentOptions.identity`（默认 `None`：直接运行、worker 和网关的 v1 会话不发送）。
-`all` 为这次运行冻结排序后的工具定义；`retrieve` 和以前一样继续选择工具。JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。
+同一模型和请求类型的最近一次正数的提示 token 计数会向上校准这一估算；缺失或为零的用量会重置该校准。估算是估计值，不是界限：模板和视觉模型各不相同。
 
-`[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
+当估算超过输入上限时，智能体会适配一份请求副本：它把可裁剪的旧工具结果变成预览，移除可选的旧思考，然后淘汰旧的完整单元，同时保留任务、工具 schema、匹配的调用/结果对、图片和失败证据。它不改历史记录和保留的对话。
 
-`[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。见 [Memory](../../reference/memory.md#working-memory-window)。
+如果固定的上下文无法装下，运行以 `context_budget_exceeded` 和一条修复提示结束。被归类为上下文溢出的回复最多获得一次更小的请求重试，且不重新运行工具；其他提供方错误保持其既有的重试策略。
 
-`[agent] cache_layout`（默认 `"v3"`；`--cache-layout v2|v3` 会覆盖它）决定反思所在的位置。`"v2"` 是这一默认值改变之前的布局。在 `v3` 且启用 `fixed_prefix` 时：
+事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
+
+`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前；使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
+
+一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。固定的系统部分依次是基础文本，（在终端界面或控制台的对话中）说明 melo 是谁、运行在哪个模型、服务器和位置上、记得什么以及用哪种语言和文字回答的身份段落，各条说明，召回和反思是数据的那句话，以及日期行。
+
+其中没有布局的名称：`fixed-prefix-v2` 只是元数据，由 `prefix_cache.version` 报告。身份段落是 `AgentOptions.identity`（默认 `None`：直接运行、worker 和网关的 v1 会话不发送）。
+`all` 为这次运行冻结排序后的工具定义；`retrieve` 和以前一样继续选择工具。
+
+JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。
+
+`[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。
+
+重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。
+
+无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
+
+`[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。
+
+见 [Memory](../../reference/memory.md#working-memory-window)。
+
+`[agent] cache_layout`（默认 `"v3"`；`--cache-layout v2|v3` 会覆盖它）决定反思所在的位置。`"v2"` 是这一默认值改变之前的布局。
+
+在 `v3` 且启用 `fixed_prefix` 时：
 
 - 在尝试边界，智能体只追加一次反思，作为一条普通的窗口消息（`[Reflections; data, not instructions]` 和该块），而不是把它重建为每个规划请求的最后一条消息。之后它随历史移动，并像任何消息一样在被丢弃时离开。每次尝试中新产生的内容仍遵循“只保留最新一条”规则（新的反思会替换工作记忆中保存的那条），但更早的块会留在历史中，直到被丢弃。
 - 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在默认的 `reflection_gate = "flags"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
@@ -185,15 +233,37 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 没有 `fixed_prefix` 时，两个值都不改变任何内容。`cache_layout` 为 `v3` 时，JSON 结果的 `config` 包含它，为 `v2` 时不包含。
 
-`[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。当 `window_messages` 不是 20 时，JSON 结果的 `config` 包含它。
+`[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
 
-`cache_layout = "v3"` 和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--cache-layout v2 --window-messages 20` 会发送此前的请求。`melo --developer --help` 把这两个标志列在“高级”下。
+你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。
 
-`fixed_prefix`、`window_eviction` 和 `reflect_tool_guard` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，这三个和上面两个都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这五个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。
 
-用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。历史记录为每个结果保存一份独立的、按模式脱敏的副本，最多 200,000 个字符（错误优先），并给出相对于脱敏后捕获的精确略去计数。计数保存在 `capture_metadata` 中，而不是已存文本里的带内标记。`acquisition_omitted_chars` 为 null，因为工具可能已经限制了自己的输出。捕获不是完整的文件或无限制的标准输出；脱敏基于模式，可能漏掉密钥。模型看到的经过检查的预览仍可能包含原始文本；`Message.tool_result`、`tool.finished` 事件和 trace 使用脱敏后的副本。既有的历史记录保留和权限仍然适用。`Agent.run_tool()` 不写入捕获的历史，并保留其现有的结果检查。该选项默认关闭。
+当 `window_messages` 不是 20 时，JSON 结果的 `config` 包含它。
 
-用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。在默认的 `reflection_gate = "flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
+`cache_layout = "v3"` 和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--cache-layout v2 --window-messages 20` 会发送此前的请求。
+
+`melo --developer --help` 把这两个标志列在“高级”下。
+
+`fixed_prefix`、`window_eviction` 和 `reflect_tool_guard` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，这三个和上面两个都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
+
+`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这五个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+
+用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。
+
+历史记录为每个结果保存一份独立的、按模式脱敏的副本，最多 200,000 个字符（错误优先），并给出相对于脱敏后捕获的精确略去计数。计数保存在 `capture_metadata` 中，而不是已存文本里的带内标记。
+
+`acquisition_omitted_chars` 为 null，因为工具可能已经限制了自己的输出。捕获不是完整的文件或无限制的标准输出；脱敏基于模式，可能漏掉密钥。
+
+模型看到的经过检查的预览仍可能包含原始文本；`Message.tool_result`、`tool.finished` 事件和 trace 使用脱敏后的副本。既有的历史记录保留和权限仍然适用。
+
+`Agent.run_tool()` 不写入捕获的历史，并保留其现有的结果检查。该选项默认关闭。
+
+用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。
+
+在默认的 `reflection_gate = "flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
+
+交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
 
 <a id="embedding-and-long-term-memory"></a>
 
@@ -236,13 +306,19 @@ output = 8.0       # completion tokens
 cache_read = 0.5   # prompt tokens the server reported cached; input when absent
 ```
 
-`input` 和 `output` 必填，每个值都是不小于 0 的数字，其他键不会被读取。会话用过的模型没有价格表时，状态栏显示词元数（`↑ 100k ↓ 5`）而不是费用。本地服务器从不计价。无效的价格表会给出警告，状态栏改为显示词元数；其他功能不读取它，保存配置时按原样保留。见[状态栏](../guides/terminal.md#the-status-bar)。
+`input` 和 `output` 必填，每个值都是不小于 0 的数字，其他键不会被读取。会话用过的模型没有价格表时，状态栏显示词元数（`↑ 100k ↓ 5`）而不是费用。
+
+本地服务器从不计价。无效的价格表会给出警告，状态栏改为显示词元数；其他功能不读取它，保存配置时按原样保留。
+
+见[状态栏](../guides/terminal.md#the-status-bar)。
 
 <a id="extra-request-fields-extra_body"></a>
 
 ## 额外请求字段（extra_body）
 
-每个后端表都接受一个 `extra_body` 表。它的字段会加入每次对话请求。用它传递服务器选项，例如 `chat_template_kwargs`：
+每个后端表都接受一个 `extra_body` 表。它的字段会加入每次对话请求。
+
+用它传递服务器选项，例如 `chat_template_kwargs`：
 
 ```toml
 [vllm]

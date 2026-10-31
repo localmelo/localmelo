@@ -4,15 +4,18 @@ This guide shows how a script drives localmelo through its HTTP API: it creates 
 
 ## A script: create, run, approve, read
 
-One Python file, standard library only. It creates a session with a first
-turn, follows the event stream to the end, answers the approval the turn
-asks for, and reads the answer back. Point it at a gateway whose model is
-a scripted or local model that wants a `python_exec` approval for a plain
-sentence; the workspace must exist and hold a few files. The script reads the
-gateway token from its private file; it accepts only HTTP loopback URLs,
-disables proxies and refuses redirects so it does not forward the token to
-another host. Make sure the port belongs to your gateway: another local process
-can impersonate it.
+One Python file, standard library only. It:
+
+- creates a session with a first turn;
+- follows the event stream to the end;
+- answers the approval the turn asks for;
+- reads the answer back.
+
+Before you run it:
+
+- Point it at a gateway whose model is a scripted or local model that wants a `python_exec` approval for a plain sentence; the workspace must exist and hold a few files.
+- The script reads the gateway token from its private file. It accepts only HTTP loopback URLs, disables proxies and refuses redirects, so it does not forward the token to another host.
+- Make sure the port belongs to your gateway: another local process can impersonate it.
 
 ```python
 """Create a session, run a turn, answer its approval, read the result."""
@@ -100,10 +103,7 @@ print(f"answer: {turn['answer']}")
 print(f"tokens: {turn['result']['usage'].get('completion_tokens', 0)}")
 ```
 
-Run as `python demo.py http://127.0.0.1:8401 ~/demo-project`, against a
-gateway whose model answered the message with a `python_exec` call. This is
-illustrative output: additional events such as `run.progress` may appear, and
-token counts depend on the model and provider:
+Run as `python demo.py http://127.0.0.1:8401 ~/demo-project`, against a gateway whose model answered the message with a `python_exec` call. This is illustrative output: additional events such as `turn.memory` and `run.progress` may appear, and token counts depend on the model and provider:
 
 ```text
 created 201 session edb425a382be turn 2e2b132e1dcc49e283c52782858ee051
@@ -127,8 +127,7 @@ answer: The program printed 42.
 tokens: 24
 ```
 
-Two details the script relies on. `urllib` reads an event stream line by
-line, so a frame is complete when its `data:` line arrives; a client that
-answers an approval mid-stream keeps reading the same response. And a
-turn's outcome and its `turn.finished` are written in one transaction, so
-the `turns` read after the stream ends sees the answer.
+Two details the script relies on:
+
+- `urllib` reads an event stream line by line, so a frame is complete when its `data:` line arrives; a client that answers an approval mid-stream keeps reading the same response.
+- A turn's outcome and its `turn.finished` are written in one transaction, so the `turns` read after the stream ends sees the answer.

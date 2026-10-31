@@ -3,7 +3,9 @@
 A session is a conversation that is kept in SQLite: each turn begins with a
 stored row, outlives the request that started it, and ends exactly once with
 a status and a cause, also when the process that ran it stops or dies. A
-fresh agent can then resume the conversation. `localmelo.support.sessions`
+fresh agent can then resume the conversation.
+
+`localmelo.support.sessions`
 provides the store, a runner for an agent's turns, approval policies for a
 person, an event stream and a read-only change feed.
 
@@ -20,7 +22,9 @@ person, an event stream and a read-only change feed.
 `build_session_agent(...)` makes and starts the Agent a surface runs its
 turns on, and closes it when the start fails. It sets the session's rules on
 the options: the workspace, `record_answers=True`, `tool_exposure="all"`,
-the 600 s tool limit and `replay_scope="window"`. The caller's tool `mode`
+the 600 s tool limit and `replay_scope="window"`.
+
+The caller's tool `mode`
 (`interactive` or `gateway`) survives. It takes a URL with `base_url` (and `model`, with
 `default` when None; an embedding only from `embedding_base_url` and
 `embedding_model`), or the backends of `cfg`, on a copy whose chat model is
@@ -31,7 +35,9 @@ With `options=None`, the builder resolves `[agent]` and `[retrieval]`
 defaults, including named `tool_env` variables; an explicit `AgentOptions`
 object takes precedence. The UI resolves explicit flags over these defaults,
 and the console uses them while keeping `mode="gateway"`; its reasoning
-mode defaults to `legacy`. `reasoning_field` overrides a configured replay
+mode defaults to `legacy`.
+
+`reasoning_field` overrides a configured replay
 key, but is refused for native Ollama's fixed `thinking` field.
 `retrieval_extra_body` applies only to `retrieve` requests with `llm`/`auto`
 outside `legacy`, and is not persisted.
@@ -41,9 +47,12 @@ made, before the Agent is built; the Agent is made with what they return, so
 the provider its `Chat` holds is the wrapped one, and every model call goes
 through the wrapper. Non-replay OpenAI-compatible providers have their
 reasoning key cleared before wrapping; Ollama keeps its native field.
+
 Legacy without hooks keeps the original `Agent(config=cfg)` path. Explicit
 modes own their providers before construction so a refused mode/provider
-pair closes them without disabling MCP. An embedding that was not built is
+pair closes them without disabling MCP.
+
+An embedding that was not built is
 not wrapped.
 
 ```python
@@ -100,10 +109,14 @@ One store implementation serves two files. Each surface opens only its own:
 Worker sessions also use the CLI file: every direct task saves one unless
 `--no-save-session` or `[sessions] record_direct = false` opts out, and dsh logs
 can be imported by content hash. They have one
-turn and are excluded from interactive chat selection. The gateway can read
+turn and are excluded from interactive chat selection.
+
+The gateway can read
 worker rows in this file through a read-only connection; it does not recover,
 modify, or follow them. SQLite may create `-wal` and `-shm` bookkeeping
-sidecars during a read. See [Worker histories](cli.md#worker-histories) for
+sidecars during a read.
+
+See [Worker histories](cli.md#worker-histories) for
 redaction limitations.
 
 - **A writer marker.** A new file records its writer. Opening the other
@@ -202,7 +215,9 @@ a turn started meanwhile waits for the resume.
 A client that sends a message over a network can name it with a
 `client_request_id` before it knows whether the message arrived. The id is
 1 to 128 characters of letters, digits and `. _ : -`, starting with a letter
-or digit, such as `crypto.randomUUID()` gives. With an id, the store records
+or digit, such as `crypto.randomUUID()` gives.
+
+With an id, the store records
 the message, its turn and `turn.started` in one transaction, so a client
 that lost the response can ask what became of the message:
 
@@ -312,8 +327,9 @@ async for event in hub.subscribe(session_id, after_id=last_event_id):
 It replays the stored events after `after_id`, then the new ones as they are
 committed, with no gap and no repeat, also for a slow client. Event ids only
 grow, also across restarts, so a client that reconnects with its last id
-gets the events it missed, those that recovery wrote included. The session
-events are listed in [Events](events.md#session-events).
+gets the events it missed, those that recovery wrote included.
+
+The session events are listed in [Events](events.md#session-events).
 
 ## Export finished turns
 

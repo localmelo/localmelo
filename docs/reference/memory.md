@@ -28,6 +28,7 @@ vendor's backend (`--window-messages N`, 8 to 256, changes the cap; see below): 
 reply's turn (a tool-call message with its results, never split). By default
 (`chunk`) the window drops whole units at once, so the history starts at the
 same unit for several steps and a server's prompt cache can reuse it.
+
 `--window-eviction slide` (or `[agent] window_eviction = "slide"`) is the
 earlier behavior: the oldest unit leaves at every step once the window is
 full, so from about the eleventh step each request starts its history one unit
@@ -44,10 +45,13 @@ cap (100,000 characters) and, with `--context-window`, by the request fit.
 With the default of 64 messages the count rarely drops anything: the prompt-size fit is the
 evictor. When the planning prompt would pass the 100,000-character cap,
 it drops whole units, a tool call with its results never split, down to 70% of the cap under `chunk`
-and `boundary` (just under it under `slide`, so every step drops one unit again). A window that
-reaches the message cap first still drops by count, as the mode says; a drop takes at most half the
+and `boundary` (just under it under `slide`, so every step drops one unit again).
+
+A window that reaches the message cap first still drops by count, as the mode says; a drop takes at most half the
 window, so below a cap of 16 a chunk is fewer than eight messages. The value appears as
-`window_messages` in the JSON result's `config` when it is not 20. `--window-messages 20` (or
+`window_messages` in the JSON result's `config` when it is not 20.
+
+`--window-messages 20` (or
 `[agent] window_messages = 20`) is the earlier cap, which a cloud vendor's backend keeps by
 default: without prompt caching, a longer window costs input tokens on every request.
 
@@ -56,7 +60,9 @@ A mode other than `slide` appears as `window_eviction` in the JSON result's
 holds its cut under `chunk` and `boundary`: when a request would pass the
 input limit it drops whole units down to 70% of the limit and remembers the
 oldest unit it kept, and the next requests start from that unit and drop again
-only when they would pass the limit. A window chunk drop or a boundary drop
+only when they would pass the limit.
+
+A window chunk drop or a boundary drop
 that removes the remembered unit resets the cut. Reasoning replay and the
 units the fit never drops (an unfinished tool call, the latest failing result,
 images) are unchanged.
@@ -68,25 +74,33 @@ nonempty `files:` or `verified:` line. An admitted digest stores a hash of its
 run's normalized, redacted task line and of its workspace's realpath in its
 provenance, so a sanitized or truncated rendered line cannot change the key and
 the same task text in another folder is a different task; a hash is not a
-privacy guarantee against guessing. Digests with no key, including old entries,
+privacy guarantee against guessing.
+
+Digests with no key, including old entries,
 are cross-task. The first meaningful sentence is bounded, so distinct tasks with
-the same task line in the same workspace can share a key. If the run's last
+the same task line in the same workspace can share a key.
+
+If the run's last
 attempt has no evidence but an earlier attempt does, the last evidence-bearing
 attempt digest is the one admitted, so checked work is not lost.
 
 Within the long-term candidate pool, same-task episodic digests rank first. The
 store also searches for the best matching same-task digests beyond that pool.
+
 A cross-task digest needs a score at least `cross_task_ratio` times the best
 same-task digest score from the same long-store backend; scores from BM25 and
 cosine are not compared. At most `cross_task_cap` cross-task digests are sent.
+
 If no same-task digest matches, `cross_task_cold` sets the cold allowance (0 by
 default, or 1 for an opt-in match above the existing backend floor). All remain
 subject to the existing two-long-hit limit, retriever selection and block budget.
+
 Non-digest memories, including user facts and notes, bypass this gate.
 
 The config keys are under `[retrieval]`: ratio 1–10 (default 1.1), cap 0–2
-(default 1), and cold 0–1 (default 0). They are inert in `legacy`. A delivered
-recall record includes `same_task` and `cross_task` counts for long-store
+(default 1), and cold 0–1 (default 0). They are inert in `legacy`.
+
+A delivered recall record includes `same_task` and `cross_task` counts for long-store
 digests only, plus `task_notes` for delivered task-local note-store hits
 (notes, drafts, thoughts and in-task digests); unscoped long hits count in none
 of the three. `memory_stats.recall_same_task`, `recall_cross_task` and
@@ -100,8 +114,9 @@ With `--reasoning compress` (or `compress+replay`) and memory on,
 status, the signal that admitted it and its provenance, beside the text and
 the vector the earlier store already had. With persistence on, the file
 exists in those modes even without an embedding provider; a text-only entry
-stores an empty vector and is found by the in-process BM25 index. In
-`legacy` the file still exists only with an embedding provider.
+stores an empty vector and is found by the in-process BM25 index.
+
+In `legacy` the file still exists only with an embedding provider.
 
 | Kind | What it holds | Source |
 |---|---|---|
@@ -114,50 +129,71 @@ stores an empty vector and is found by the in-process BM25 index. In
 or `step_summary` (a legacy row). `status` is `active`, `superseded` or
 `conflicted`; v1 writes `active` for every new entry and marks the replaced
 entry `superseded`; `conflicted` is reserved for the sleep pipeline.
+
 `admitted_by` is the signal that wrote the entry, or empty for a legacy row.
 `provenance` carries the task and session, the step and attempt, the run's
 text, the paths and commands the turn touched, the record ids the item came
-from (`source_ids`), and the candidate id and item index. Every one of those
+from (`source_ids`), and the candidate id and item index.
+
+Every one of those
 texts is redacted and bounded before the write. The session id is `""` in direct mode, which does
-not thread one; the gateway does not thread its own id into the run yet. A
-search returns the legacy metadata merged with these columns, so an older
+not thread one; the gateway does not thread its own id into the run yet.
+
+A search returns the legacy metadata merged with these columns, so an older
 reader still sees the same text and metadata.
 
 The source of a fact is the observation that established it, which may be
 earlier in the task than the note that states it. The candidate records are
 this reply's tool results, the results still in the working-memory window,
-and the rest of the same task's results. Only the task's last 200 records are
+and the rest of the same task's results.
+
+Only the task's last 200 records are
 kept, and another task's records are never used. A record matches when it
 shares a strong key or at least two distinctive non-stopwords of four or more
-characters. The uniquely best score wins; equal top scores cite nothing.
+characters.
+
+The uniquely best score wins; equal top scores cite nothing.
 Each matching typed key adds to the score; conflicting dates, years when
 both are present, currencies, phone numbers or event times reject a record.
+
 For JSON records, time comparison uses body, text, notes, start and end, not
 message timestamps. A polarity mismatch rejects a record in either direction;
 the detector is heuristic and may also reject records with unrelated negative
-clauses. A negative item must appear in full in the record (apart
+clauses.
+
+A negative item must appear in full in the record (apart
 from final punctuation), or it is left unsourced; paraphrases can be missed.
-Other matching remains heuristic and is not verified evidence. Amounts retain
-their unit or currency. A strong key is a date, a time with a colon or am/pm,
+Other matching remains heuristic and is not verified evidence.
+
+Amounts retain their unit or currency. A strong key is a date, a time with a colon or am/pm,
 an amount with a currency or unit (or an amount field), a phone number, an
 identifier of three or more characters containing a digit, a number of three
 or more digits, or a capitalised name that does not start its sentence.
+
 Dates include ISO, `April 9`, `9 April` and bare slash dates such as `4/9`.
 Ambiguous slash dates use US month-first order; unambiguous `13/4` is
-day-first. Thus `offsite 4/9` matches `2026-04-09`. A slash pair is not a
+day-first.
+
+Thus `offsite 4/9` matches `2026-04-09`. A slash pair is not a
 date when followed by a quantity or count word, or preceded by a number and
 space (a mixed number such as `2 1/2`); `24/7`, invalid dates and lowercase
-`may`/`march` are not dates either. These are heuristic rules, so other
+`may`/`march` are not dates either.
+
+These are heuristic rules, so other
 fraction formats can still be ambiguous. Bare one- or two-digit numbers and
-ordinals are not keys. Fillers such
-as `done`, `ok`, `good`, `thanks`, `好的`, `完成` and `可以` are stopwords,
+ordinals are not keys.
+
+Fillers such as `done`, `ok`, `good`, `thanks`, `好的`, `完成` and `可以` are stopwords,
 so an item that says only "Done." takes no source. When the note has no record
 text at all, the item keeps the note's own `source_ids`; when it has records
 and none matches, the item gets none, including after admission.
+
 A digest's ids are the union of its notes' ids and the records behind their
 items. A completion or self-work claim with no fact beyond its frame is
 `IGNORE`d with the reason `meta claim about the agent's own work`, whether it
-comes from a note or from a digest. A `task:` line, a file, path or function
+comes from a note or from a digest.
+
+A `task:` line, a file, path or function
 name makes the text content instead. A final digest admitted by `outcome`
 for a completed run is exempt from this filter entirely, but still needs a
 nonempty file or verification line for admission.
@@ -165,11 +201,14 @@ nonempty file or verification line for admission.
 ## Experimental typed assertions
 
 Python callers can opt in with `AgentOptions(typed_assertions=True)`; there is
-no CLI or config switch. The default remains off. In explicit reasoning modes,
+no CLI or config switch. The default remains off.
+
+In explicit reasoning modes,
 recognized short user assertions and supported sourced notes can carry versioned
 assertion metadata in `provenance`, alongside their original checked text.
-Recognition is deliberately narrow, not a general fact extractor. A sourced note
-needs an exact matching text field and record ID; an unsupported or unverified
+Recognition is deliberately narrow, not a general fact extractor.
+
+A sourced note needs an exact matching text field and record ID; an unsupported or unverified
 assertion is not automatically superseded. Source records and assertions still
 pass pattern-based redaction, which can miss secrets.
 
@@ -178,13 +217,17 @@ supersede one older active assertion when its verified source time (`timestamp`
 or `date`) is later; a user statement is ordered by message and sentence
 position within its task. A user counter and a source timestamp are different
 clocks, and a restarted task does not link to earlier user statements (they stay
-conflicts). Missing or naive source times do not order; markers include Chinese
+conflicts).
+
+Missing or naive source times do not order; markers include Chinese
 `取消` and trailing `now`/`instead`. Multiple active candidates, missing ordering
-or a different value without a change marker retain conflicts. This does not
-link entities across tasks or sessions. An unlinked assertion is kept
+or a different value without a change marker retain conflicts.
+
+This does not link entities across tasks or sessions. An unlinked assertion is kept
 without claiming it names the same entity; a relative `tonight` gets an
-effective date only from a matching record's timezone-aware timestamp. Old rows
-have no inferred polarity.
+effective date only from a matching record's timezone-aware timestamp.
+
+Old rows have no inferred polarity.
 
 With the option on, BM25 long-term search can include superseded entries; recall
 labels those entries and unlinked assertions, dates their titles from a record's
@@ -193,7 +236,9 @@ newest first by source observation or the user entry's wall-clock time, and
 ignores only an exact normalized duplicate; a near-duplicate with different
 content is kept (`NEW`, unlinked). Search still has
 relevance and item limits and does not guarantee
-that every related fact will appear. `history_entries(task_id)` on the long-term
+that every related fact will appear.
+
+`history_entries(task_id)` on the long-term
 store returns that task's active and superseded entries newest first; forget
 removes both. In a nonpersistent explicit-mode agent the option enables a RAM
 store; persistence requires `memory_dir` or the persistence environment.
@@ -211,8 +256,9 @@ Nothing is written without a signal:
 Only the user's own text gives a user signal: a tool result, a note, a recall
 block or an assistant message never does, and a note's first-person item is
 never a profile entry. The candidate boundary runs again with target `long`
-before the write: a refused item writes no entry and no decision. Every text
-written, including the provenance's task text, paths and commands, is redacted
+before the write: a refused item writes no entry and no decision.
+
+Every text written, including the provenance's task text, paths and commands, is redacted
 by `redact_secrets` and bounded first.
 
 The policy compares the item with the active entries of its kind and picks
@@ -235,24 +281,29 @@ action, with the candidate id, the action, the kind, the signal, the entry and
 target ids, a one-line reason, the item's `source_ids`, the SHA-256 of the
 checked text and the task id. The text itself is stored only with
 `--keep-decision-text` (an evaluation switch, refused in the interactive UI);
-the hash lets a later join without keeping the text. `forget(task_id)` removes
+the hash lets a later join without keeping the text.
+
+`forget(task_id)` removes
 a task's entries and decisions; `forget_all()` clears both tables. Reset the
-file by deleting `long_term.db` with localmelo stopped. There is no
-age-based retention in this version; the sleep pipeline's policy comes later.
+file by deleting `long_term.db` with localmelo stopped.
+
+There is no age-based retention in this version; the sleep pipeline's policy comes later.
 
 **The migration.** A `long_term.db` from the earlier store is migrated in place
 when it is opened: `user_version` becomes 1, the typed columns and the
 `decisions` table are added with `ALTER TABLE` (no table rebuild), a legacy
 reflection becomes `kind='reflection'`/`source='reflection'`, every other row
 `episodic`/`step_summary`, and its text, vector and metadata bytes stay as they
-were. An older localmelo can still open and search the file. A file from a
-newer localmelo raises one WARNING and the run continues without long-term
+were. An older localmelo can still open and search the file.
+
+A file from a newer localmelo raises one WARNING and the run continues without long-term
 memory. The read-only exports never migrate a file; see
 [Offline retrieval](retrieval.md#the-typed-long-term-store).
 
 At `start`, the long leg reads the active entries of other tasks of every kind:
 `--recall-min-score` applies to a cosine score, while the BM25 first-stage
 pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
+
 `memory=False` removes the store, the writes and the leg.
 
 ## Files on disk

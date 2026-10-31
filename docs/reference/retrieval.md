@@ -83,7 +83,9 @@ melo-retrieve: error: --retriever llm needs --base-url
 
 The corpus, the labelled queries and the raw calls are JSON Lines files: one
 JSON object per line, in UTF-8. Blank lines are skipped and unknown keys are
-ignored. Any other problem stops the run with exit code 2 and one line that
+ignored.
+
+Any other problem stops the run with exit code 2 and one line that
 names the file and the line:
 
 ```text
@@ -283,7 +285,9 @@ the model did not answer with a list of ids.
 | 130 | Ctrl+C stopped the run. |
 
 A usage error prints the usage summary and one error line; any other error
-prints one line. There is no traceback. Lines already printed on stdout stay
+prints one line. There is no traceback.
+
+Lines already printed on stdout stay
 whole, so a stopped run leaves complete query lines.
 
 ## The typed long-term store
@@ -293,7 +297,9 @@ mutually exclusive with the evaluation flags other than the model ones and
 with `--export-run`, and none contacts a model: `--base-url`, `--chat-model`,
 `--embedding-base-url`, `--embedding-model`, `--retrieval-timeout` and
 `--retrieval-extra-body` are accepted and ignored, so a bench script can pass
-the same flags everywhere. The same store is what [recall in the loop](../concepts/memory.md#recall-in-the-loop)
+the same flags everywhere.
+
+The same store is what [recall in the loop](../concepts/memory.md#recall-in-the-loop)
 reads at `start`, and what `--export-store` shows the bench. `DIR` may be a memory directory (the file is
 `long_term.db`) or the file itself.
 
@@ -316,14 +322,17 @@ One JSON line per **active** entry, in `(created_at, id)` order:
 ```
 
 The bench's T4 reader reads `text` and `provenance.source_ids`. A count goes
-to stderr. The file is opened read-only: a v0 file is read with its legacy
+to stderr.
+
+The file is opened read-only: a v0 file is read with its legacy
 columns and the legacy derivation (a reflection by `metadata.type`, otherwise
 episodic/step_summary) and is **not** migrated; a file from a newer version is
 one line on stderr and exit 2. A directory with no `long_term.db` yet — a
 bench directory whose run wrote nothing — is an empty store: no line on
 stdout, `exported 0 active entries from DIR/long_term.db` on stderr, and
-exit 0, so a bench script need not test for the file first. A path that is
-not a directory keeps the missing-file error: one line and exit 2.
+exit 0, so a bench script need not test for the file first.
+
+A path that is not a directory keeps the missing-file error: one line and exit 2.
 
 ### `--export-decisions`
 
@@ -356,7 +365,9 @@ Each input line is one candidate:
 `outcome` or `sleep`; an unknown value is exit 2. The optional `task_key`
 string is stored in the candidate's provenance, so a routed digest can carry
 the same key a run's recall looks for; a routed digest without one is
-cross-task. The candidate goes through the same boundary and policy as a run,
+cross-task.
+
+The candidate goes through the same boundary and policy as a run,
 into a text-only store under `--memory-dir`, and one line comes out per input
 line, in input order:
 
@@ -371,7 +382,9 @@ a digest without a nonempty `files:` or `verified:` line is refused at
 admission. `--memory-dir`
 is required and the command refuses the default `~/.cache/localmelo/memory`
 and the `LOCALMELO_MEMORY_DIR` value (resolved paths); the directory is
-created `0700`. `--route` appends to an existing scratch store rather than
+created `0700`.
+
+`--route` appends to an existing scratch store rather than
 clearing it, so the bench uses a fresh directory per run. `--export-store` on
 that directory shows what the route wrote.
 

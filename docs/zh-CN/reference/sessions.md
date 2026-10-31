@@ -2,7 +2,9 @@
 
 # 会话
 
-会话是保存在 SQLite 中的一段对话：每一轮都从一条已存储的记录开始，比启动它的请求活得更久，并且恰好以一种状态和一个原因结束一次——运行它的进程停止或死掉时也是如此。之后一个新的智能体可以恢复这段对话。`localmelo.support.sessions` 提供存储器、智能体轮次的运行器、供人使用的审批策略、事件流和只读的变更订阅。
+会话是保存在 SQLite 中的一段对话：每一轮都从一条已存储的记录开始，比启动它的请求活得更久，并且恰好以一种状态和一个原因结束一次——运行它的进程停止或死掉时也是如此。之后一个新的智能体可以恢复这段对话。
+
+`localmelo.support.sessions` 提供存储器、智能体轮次的运行器、供人使用的审批策略、事件流和只读的变更订阅。
 
 > [!NOTE]
 > 会话属于实验性的 Python API，在 v0.1.0 之前可能变化。交互式界面（单独的
@@ -14,11 +16,19 @@
 
 ## 会话运行的智能体
 
-`build_session_agent(...)` 创建并启动某个界面运行其轮次所用的智能体，并在启动失败时关闭它。它把会话的规则设在选项上：工作区、`record_answers=True`、`tool_exposure="all"`、600 秒的工具时限和 `replay_scope="window"`。调用方的工具 `mode`（`interactive` 或 `gateway`）保持不变。它接受带 `base_url` 的 URL（以及 `model`，为 None 时用 `default`；嵌入只来自 `embedding_base_url` 和 `embedding_model`），或使用 `cfg` 的后端——在一份副本上，其对话模型为 `model`、`request_timeout_s` 为给定的值；`cfg` 本身不变。
+`build_session_agent(...)` 创建并启动某个界面运行其轮次所用的智能体，并在启动失败时关闭它。它把会话的规则设在选项上：工作区、`record_answers=True`、`tool_exposure="all"`、600 秒的工具时限和 `replay_scope="window"`。
 
-当 `options=None` 时，构建器解析 `[agent]` 和 `[retrieval]` 的默认值，包括点名的 `tool_env` 变量；显式的 `AgentOptions` 对象优先。界面让显式旗标优先于这些默认值，控制台使用这些默认值，同时保持 `mode="gateway"`；它的推理模式默认为 `legacy`。`reasoning_field` 覆盖配置的回放键，但对 Ollama 原生固定的 `thinking` 字段会被拒绝。`retrieval_extra_body` 只适用于 `legacy` 之外使用 `llm`/`auto` 的 `retrieve` 请求，且不会被保存。
+调用方的工具 `mode`（`interactive` 或 `gateway`）保持不变。它接受带 `base_url` 的 URL（以及 `model`，为 None 时用 `default`；嵌入只来自 `embedding_base_url` 和 `embedding_model`），或使用 `cfg` 的后端——在一份副本上，其对话模型为 `model`、`request_timeout_s` 为给定的值；`cfg` 本身不变。
 
-`wrap_llm` 和 `wrap_embedding` 在智能体构建之前，以构建器创建的提供方调用；智能体用它们的返回值创建，因此它的 `Chat` 持有的提供方就是被包装的那个，每次模型调用都会经过包装器。非回放的 OpenAI 兼容提供方在包装之前会清空它的推理键；Ollama 保留其原生字段。不带钩子的 legacy 保持原有的 `Agent(config=cfg)` 路径。显式模式在构建之前就拥有自己的提供方，因此被拒绝的模式/提供方组合会关闭它们，而不禁用 MCP。没有创建的嵌入不会被包装。
+当 `options=None` 时，构建器解析 `[agent]` 和 `[retrieval]` 的默认值，包括点名的 `tool_env` 变量；显式的 `AgentOptions` 对象优先。界面让显式旗标优先于这些默认值，控制台使用这些默认值，同时保持 `mode="gateway"`；它的推理模式默认为 `legacy`。
+
+`reasoning_field` 覆盖配置的回放键，但对 Ollama 原生固定的 `thinking` 字段会被拒绝。`retrieval_extra_body` 只适用于 `legacy` 之外使用 `llm`/`auto` 的 `retrieve` 请求，且不会被保存。
+
+`wrap_llm` 和 `wrap_embedding` 在智能体构建之前，以构建器创建的提供方调用；智能体用它们的返回值创建，因此它的 `Chat` 持有的提供方就是被包装的那个，每次模型调用都会经过包装器。非回放的 OpenAI 兼容提供方在包装之前会清空它的推理键；Ollama 保留其原生字段。
+
+不带钩子的 legacy 保持原有的 `Agent(config=cfg)` 路径。显式模式在构建之前就拥有自己的提供方，因此被拒绝的模式/提供方组合会关闭它们，而不禁用 MCP。
+
+没有创建的嵌入不会被包装。
 
 ```python
 import asyncio
@@ -73,7 +83,11 @@ wrapped OpenAICompatLLM
 | `PRAGMA synchronous` | `FULL`：操作系统崩溃不会丢失任何已提交的内容 | `NORMAL` |
 | 事件流（`SessionHub`） | 有 | 无 |
 
-worker 会话也使用命令行界面的文件：每个直接任务默认都会保存一个（`--no-save-session` 或 `[sessions] record_direct = false` 可退出），dsh 日志可以按内容哈希导入。它们只有一轮，并被排除在交互式聊天选择之外。网关可以通过只读连接读取这个文件中的 worker 记录；它不会恢复、修改或跟随它们。读取期间 SQLite 可能创建 `-wal` 和 `-shm` 记账附属文件。脱敏限制见 [worker 历史记录](../../reference/cli.md#worker-histories)（英文）。
+worker 会话也使用命令行界面的文件：每个直接任务默认都会保存一个（`--no-save-session` 或 `[sessions] record_direct = false` 可退出），dsh 日志可以按内容哈希导入。它们只有一轮，并被排除在交互式聊天选择之外。
+
+网关可以通过只读连接读取这个文件中的 worker 记录；它不会恢复、修改或跟随它们。读取期间 SQLite 可能创建 `-wal` 和 `-shm` 记账附属文件。
+
+脱敏限制见 [worker 历史记录](../../reference/cli.md#worker-histories)（英文）。
 
 - **写入者标记。** 新文件会记录它的写入者。打开另一个写入者的文件会抛出 `SessionStoreError`，例如 `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`；标记缺失或未知的文件抛出 `<path> has no valid writer marker`；不是会话文件的文件（例如 `history.db`）抛出 `<path> is not a localmelo sessions file`。存储器在写入任何内容之前先在只读连接上读取这些信息，因此被拒绝的文件保持原样、逐字节不变；在 WAL 模式下，SQLite 仍可能在文件旁创建它的 `-wal` 和 `-shm` 文件。schema 更新的文件抛出 `<path> has schema version <n>; this localmelo reads version 2`。版本 1 的存储器通过添加可为空的 `turns.attachments` 元数据原地迁移。
 - **所有者锁。** 网关的存储器在其整个生命周期内持有 `<path>.owner` 上的锁。同一文件上的第二个网关会得到 `StoreOwnedError`：`Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.` 进程以任何方式结束时系统都会释放该锁，因此崩溃后下一个网关可以立即启动。文件必须位于本地磁盘上。
@@ -108,7 +122,9 @@ worker 会话也使用命令行界面的文件：每个直接任务默认都会�
 
 ## 消息 id 与提交
 
-通过网络发送消息的客户端，可以在知道消息是否到达之前用一个 `client_request_id` 命名它。id 由 1 到 128 个字母、数字和 `. _ : -` 组成，以字母或数字开头，例如 `crypto.randomUUID()` 给出的那种。带 id 时，存储器在一个事务中记录消息、它的轮次和 `turn.started`，因此丢失了响应的客户端可以询问这条消息后来怎样了：
+通过网络发送消息的客户端，可以在知道消息是否到达之前用一个 `client_request_id` 命名它。id 由 1 到 128 个字母、数字和 `. _ : -` 组成，以字母或数字开头，例如 `crypto.randomUUID()` 给出的那种。
+
+带 id 时，存储器在一个事务中记录消息、它的轮次和 `turn.started`，因此丢失了响应的客户端可以询问这条消息后来怎样了：
 
 ```python
 import asyncio
@@ -191,7 +207,9 @@ async for event in hub.subscribe(session_id, after_id=last_event_id):
     print(event.id, event.event["type"])
 ```
 
-它回放 `after_id` 之后已存储的事件，然后随着提交发送新事件，不遗漏也不重复，对慢速客户端也是如此。事件 id 只增不减，跨重启也是如此，因此用最后一个 id 重连的客户端会得到它错过的事件，包括恢复过程写入的那些。会话事件列在[事件](../../reference/events.md#session-events)（英文）中。
+它回放 `after_id` 之后已存储的事件，然后随着提交发送新事件，不遗漏也不重复，对慢速客户端也是如此。事件 id 只增不减，跨重启也是如此，因此用最后一个 id 重连的客户端会得到它错过的事件，包括恢复过程写入的那些。
+
+会话事件列在[事件](../../reference/events.md#session-events)（英文）中。
 
 <a id="export-finished-turns"></a>
 
