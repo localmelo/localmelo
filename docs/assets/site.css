@@ -1406,6 +1406,22 @@ a.show-card:hover,
   background: var(--teal-soft);
 }
 
+.group.chats {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  background: var(--accent-soft);
+}
+
+.node.small {
+  padding: 8px 10px;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.node.small .node-title {
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .group-label.right {
   right: 16px;
   left: auto;

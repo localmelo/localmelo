@@ -54,24 +54,32 @@
         <h3 id="flow">工作如何流转</h3>
 
         <div class="diagram-scroll">
-          <div class="diagram" id="dia-flow" style="width:800px;height:520px">
-            <div class="group workers" id="f-workers" style="left:20px;top:384px;width:540px;height:120px">
+          <div class="diagram" id="dia-flow" style="width:800px;height:636px">
+            <div class="group chats" id="f-side" style="left:420px;top:20px;width:360px;height:72px">
+              <span class="group-label">旁支对话 · 能力相同，共享记忆</span>
+            </div>
+            <div class="group workers" id="f-workers" style="left:20px;top:384px;width:760px;height:120px">
               <span class="group-label">后台</span>
             </div>
 
-            <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:250px;min-height:72px">
+            <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:220px;min-height:72px">
               <span class="node-title">主对话</span>
               <span class="node-sub">每人一个</span>
             </a>
-            <a class="node chat" id="f-side" href="#c-chats" style="left:530px;top:20px;width:250px;min-height:72px">
-              <span class="node-title">旁支对话</span>
-              <span class="node-sub">能力相同 · 共享记忆</span>
+            <a class="node small" id="f-s1" href="#c-chats" style="left:432px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">旁支对话 1</span>
+            </a>
+            <a class="node small" id="f-s2" href="#c-chats" style="left:546px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">旁支对话 2</span>
+            </a>
+            <a class="node small" id="f-s3" href="#c-chats" style="left:660px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">旁支对话 3</span>
             </a>
             <a class="node" id="f-chores" href="#c-chores" style="left:315px;top:128px;width:170px;min-height:72px">
               <span class="node-title">定时事项</span>
               <span class="node-sub">按时启动任务</span>
             </a>
-            <div class="node static channel" id="f-chan" style="left:20px;top:150px;width:205px;min-height:125px">
+            <div class="node static channel" id="f-chan" style="left:20px;top:150px;width:195px;min-height:125px">
               <span class="node-title">对话与后台的通道</span>
               <span class="node-sub"><span aria-hidden="true">↓</span> 状态和消息</span>
               <span class="node-sub"><span aria-hidden="true">↑</span> 结果和进展</span>
@@ -82,24 +90,20 @@
               <span class="node-title">调度器</span>
               <span class="node-sub">级别 P0–P5 · 模型槽位</span>
             </a>
-            <div class="node static worker planned" id="f-sw" style="left:590px;top:262px;width:190px;min-height:72px">
+            <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:416px;width:220px;min-height:72px">
+              <span class="node-title">后台任务 1 · 主对话</span>
+              <span class="node-sub">完成一项工作</span>
+            </a>
+            <a class="node worker" id="f-w2" href="#c-workers" style="left:290px;top:416px;width:220px;min-height:72px">
+              <span class="node-title">后台任务 2 · 主对话</span>
+              <span class="node-sub">完成一项工作</span>
+            </a>
+            <div class="node static worker planned" id="f-w3" style="left:540px;top:416px;width:220px;min-height:72px">
               <span class="tag-planned badge">计划中</span>
-              <span class="node-title">旁支对话的后台任务</span>
-              <span class="node-sub">由旁支对话启动</span>
+              <span class="node-title">后台任务 3 · 旁支对话 1</span>
+              <span class="node-sub">完成一项工作</span>
             </div>
-            <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">后台任务 1</span>
-              <span class="node-sub">完成一项工作</span>
-            </a>
-            <a class="node worker" id="f-w2" href="#c-workers" style="left:210px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">后台任务 2</span>
-              <span class="node-sub">完成一项工作</span>
-            </a>
-            <a class="node worker" id="f-w3" href="#c-workers" style="left:380px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">后台任务 3</span>
-              <span class="node-sub">完成一项工作</span>
-            </a>
-            <a class="node approval" id="f-appr" href="#c-checker" style="left:610px;top:416px;width:170px;min-height:72px">
+            <a class="node approval" id="f-appr" href="#c-checker" style="left:280px;top:540px;width:240px;min-height:72px">
               <span class="node-title">审批</span>
               <span class="node-sub">你，或自动模式的复核</span>
             </a>
@@ -114,7 +118,7 @@
         </div>
         <ul>
           <li>你和主对话交流。旁支对话能力相同，共享记忆。</li>
-          <li>较大的工作交给调度器，来自主对话或定时事项，也来自旁支对话 <span class="tag-planned">计划中</span>。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务。</li>
+          <li>较大的工作交给调度器，来自主对话或定时事项，也来自旁支对话 <span class="tag-planned">计划中</span>。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
           <li>任务属于启动它的对话：进展和结果回到那里；旁支对话结束时会给主对话留一份总结 <span class="tag-planned">计划中</span>。</li>
           <li>对话可以查看后台任务的状态，也可以给它发消息。后台任务向所属对话求助 <span class="tag-planned">计划中</span>；只有对话会来问你，批准每一步的只有你，或自动模式的复核。</li>
         </ul>
@@ -559,18 +563,17 @@
       const DIAGRAMS = {
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "共享记忆" },
-          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, type: "planned", label: "结束时的总结", tag: true },
+          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, type: "planned", label: "结束时的总结\n", tag: true },
           { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "任务", lt: 0.28 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "到期的事项" },
-          { from: "f-side", fs: "bottom", ff: 0.1, to: "f-sched", ts: "top", tf: 0.88, type: "planned", label: "任务", tag: true, lt: 0.28, dx: 12 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, type: "planned", label: "任务", tag: true, lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },
-          { from: "f-sched", fs: "right", to: "f-sw", ts: "left", type: "planned" },
-          { from: "f-main", fs: "bottom", ff: 0.408, to: "f-chan", ts: "top", tf: 0.4976, bidi: true },
-          { from: "f-chan", fs: "bottom", ff: 0.4976, to: "f-workers", ts: "top", tf: 0.182, bidi: true },
-          { from: "f-side", fs: "bottom", ff: 0.468, to: "f-sw", ts: "top", tf: 0.3, bidi: true, type: "planned", label: "同一条通道", tag: true },
-          { from: "f-workers", fs: "right", to: "f-appr", ts: "left", bidi: true }
+          { from: "f-main", fs: "bottom", ff: 0.4636, to: "f-chan", ts: "top", tf: 0.523, bidi: true },
+          { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
+          { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, type: "planned", label: "同一条通道", tag: true },
+          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true }
         ],
         "svg-worker": [
           { from: "w-sched", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.133 },

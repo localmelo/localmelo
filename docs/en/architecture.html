@@ -54,24 +54,32 @@
         <h3 id="flow">How work flows</h3>
 
         <div class="diagram-scroll">
-          <div class="diagram" id="dia-flow" style="width:800px;height:520px">
-            <div class="group workers" id="f-workers" style="left:20px;top:384px;width:540px;height:120px">
+          <div class="diagram" id="dia-flow" style="width:800px;height:636px">
+            <div class="group chats" id="f-side" style="left:420px;top:20px;width:360px;height:72px">
+              <span class="group-label">Side chats · same abilities, shared memory</span>
+            </div>
+            <div class="group workers" id="f-workers" style="left:20px;top:384px;width:760px;height:120px">
               <span class="group-label">Workers</span>
             </div>
 
-            <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:250px;min-height:72px">
+            <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:220px;min-height:72px">
               <span class="node-title">Main chat</span>
               <span class="node-sub">One per person</span>
             </a>
-            <a class="node chat" id="f-side" href="#c-chats" style="left:530px;top:20px;width:250px;min-height:72px">
-              <span class="node-title">Side chat</span>
-              <span class="node-sub">Same abilities · shared memory</span>
+            <a class="node small" id="f-s1" href="#c-chats" style="left:432px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">Side chat 1</span>
+            </a>
+            <a class="node small" id="f-s2" href="#c-chats" style="left:546px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">Side chat 2</span>
+            </a>
+            <a class="node small" id="f-s3" href="#c-chats" style="left:660px;top:46px;width:108px;min-height:39px">
+              <span class="node-title">Side chat 3</span>
             </a>
             <a class="node" id="f-chores" href="#c-chores" style="left:315px;top:128px;width:170px;min-height:72px">
               <span class="node-title">Scheduled chores</span>
               <span class="node-sub">Start tasks on time</span>
             </a>
-            <div class="node static channel" id="f-chan" style="left:20px;top:150px;width:205px;min-height:125px">
+            <div class="node static channel" id="f-chan" style="left:20px;top:150px;width:195px;min-height:125px">
               <span class="node-title">Chat–worker channel</span>
               <span class="node-sub"><span aria-hidden="true">↓</span> status and messages</span>
               <span class="node-sub"><span aria-hidden="true">↑</span> results and news</span>
@@ -82,24 +90,20 @@
               <span class="node-title">Task scheduler</span>
               <span class="node-sub">Levels P0–P5 · model slots</span>
             </a>
-            <div class="node static worker planned" id="f-sw" style="left:590px;top:262px;width:190px;min-height:72px">
+            <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:416px;width:220px;min-height:72px">
+              <span class="node-title">Worker 1 · main chat</span>
+              <span class="node-sub">Runs one job</span>
+            </a>
+            <a class="node worker" id="f-w2" href="#c-workers" style="left:290px;top:416px;width:220px;min-height:72px">
+              <span class="node-title">Worker 2 · main chat</span>
+              <span class="node-sub">Runs one job</span>
+            </a>
+            <div class="node static worker planned" id="f-w3" style="left:540px;top:416px;width:220px;min-height:72px">
               <span class="tag-planned badge">planned</span>
-              <span class="node-title">Side chat's worker</span>
-              <span class="node-sub">Started by a side chat</span>
+              <span class="node-title">Worker 3 · side chat 1</span>
+              <span class="node-sub">Runs one job</span>
             </div>
-            <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">Worker 1</span>
-              <span class="node-sub">Runs one job</span>
-            </a>
-            <a class="node worker" id="f-w2" href="#c-workers" style="left:210px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">Worker 2</span>
-              <span class="node-sub">Runs one job</span>
-            </a>
-            <a class="node worker" id="f-w3" href="#c-workers" style="left:380px;top:416px;width:150px;min-height:72px">
-              <span class="node-title">Worker 3</span>
-              <span class="node-sub">Runs one job</span>
-            </a>
-            <a class="node approval" id="f-appr" href="#c-checker" style="left:610px;top:416px;width:170px;min-height:72px">
+            <a class="node approval" id="f-appr" href="#c-checker" style="left:280px;top:540px;width:240px;min-height:72px">
               <span class="node-title">Approvals</span>
               <span class="node-sub">You, or Auto's review</span>
             </a>
@@ -113,8 +117,8 @@
           <div class="legend-item"><div class="legend-line dotted"></div><span class="tag-planned">planned</span> not built yet</div>
         </div>
         <ul>
-          <li>You talk to the main chat. A side chat has the same abilities and shares its memory.</li>
-          <li>Bigger work goes to the task scheduler, from the main chat or a scheduled chore, and from a side chat <span class="tag-planned">planned</span>. It orders tasks by level, P0 to P5, and by model slot, then starts workers.</li>
+          <li>You talk to the main chat. Side chats have the same abilities and share its memory.</li>
+          <li>Bigger work goes to the task scheduler, from the main chat or a scheduled chore, and from a side chat <span class="tag-planned">planned</span>. It orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
           <li>A task belongs to the chat that started it: its news and result come back there, and a finished side chat leaves a summary for the main chat <span class="tag-planned">planned</span>.</li>
           <li>A chat can check on a worker and message it. A worker asks its chat for help <span class="tag-planned">planned</span>; only the chat asks you, and only you, or Auto's review, approve a step.</li>
         </ul>
@@ -559,18 +563,17 @@
       const DIAGRAMS = {
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "shared memory" },
-          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, type: "planned", label: "summary at the end", tag: true },
+          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, type: "planned", label: "summary at the end\n", tag: true },
           { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "tasks", lt: 0.28 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "due chores" },
-          { from: "f-side", fs: "bottom", ff: 0.1, to: "f-sched", ts: "top", tf: 0.88, type: "planned", label: "tasks", tag: true, lt: 0.28, dx: 12 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, type: "planned", label: "tasks", tag: true, lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },
-          { from: "f-sched", fs: "right", to: "f-sw", ts: "left", type: "planned" },
-          { from: "f-main", fs: "bottom", ff: 0.408, to: "f-chan", ts: "top", tf: 0.4976, bidi: true },
-          { from: "f-chan", fs: "bottom", ff: 0.4976, to: "f-workers", ts: "top", tf: 0.182, bidi: true },
-          { from: "f-side", fs: "bottom", ff: 0.468, to: "f-sw", ts: "top", tf: 0.3, bidi: true, type: "planned", label: "same channel", tag: true },
-          { from: "f-workers", fs: "right", to: "f-appr", ts: "left", bidi: true }
+          { from: "f-main", fs: "bottom", ff: 0.4636, to: "f-chan", ts: "top", tf: 0.523, bidi: true },
+          { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
+          { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, type: "planned", label: "same channel", tag: true },
+          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true }
         ],
         "svg-worker": [
           { from: "w-sched", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.133 },
