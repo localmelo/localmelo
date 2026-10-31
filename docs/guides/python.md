@@ -306,5 +306,6 @@ assistant Paris is the capital of France.
 - That last case is for templates that open the block in the prompt, such as Qwen3's thinking models, which leave only the closing tag. Ollama, and OpenAI-compatible servers without a reasoning parser, put the reasoning there.
 - An answer longer than 8,000 characters is cut and ends with `... [<n> more characters not shown]`.
 - A run without an answer leaves a label instead: `[interrupt: no assistant output for this turn]` for a `cancelled` run, and `[no answer: the run ended with status <status>]` for any other.
+- The label stays in `agent.conversation()` and in a saved turn. The model is shown a user message, `[The previous request ended without an answer.]`, in its place, joined to the user messages beside it, because a model copies an assistant message that says it gave no answer.
 
 To keep a conversation in a file, across processes and restarts, see [Sessions](../reference/sessions.md).

@@ -40,8 +40,11 @@ from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
+    UNANSWERED_NOTE,
     Message,
     ToolDef,
+    answer_from_thinking,
+    is_no_answer_label,
     unfinished_thinking,
 )
 
@@ -567,6 +570,31 @@ def _merge_user_turns(messages: list[Message]) -> list[Message]:
     return merged
 
 
+def _unanswered_as_notes(messages: list[Message]) -> list[Message]:
+    """*messages* with each no-answer label replaced by a user-side note (#357).
+
+    The label (see :func:`~localmelo.melo.schema.is_no_answer_label`) stays in
+    working memory and in the saved turn, which people read. A model that
+    reads it as its own earlier reply copies it, and every turn after fails.
+    The request carries :data:`UNANSWERED_NOTE` as a user message instead,
+    joined to the user messages beside it so the roles still alternate.
+    """
+    if not any(
+        m.role == "assistant" and is_no_answer_label(m.content) for m in messages
+    ):
+        return messages
+    return _merge_user_turns(
+        [
+            (
+                Message(role="user", content=UNANSWERED_NOTE, timestamp=m.timestamp)
+                if m.role == "assistant" and is_no_answer_label(m.content)
+                else m
+            )
+            for m in messages
+        ]
+    )
+
+
 def _quote_data_delimiter(text: str, delimiter: str) -> str:
     """Quote data lines that could impersonate the enclosing block's end."""
     return "".join(
@@ -1014,14 +1042,39 @@ class Chat:
             return False
         display = STREAM_DISPLAY.get()
         declared = display.reasoning_tags if display is not None else None
-        usage = getattr(self.llm, "last_usage", None)
-        tokens = usage.get("reasoning_tokens") if isinstance(usage, dict) else None
         return unfinished_thinking(
             reply.content,
             reply.thinking,
             framing=declared or self.framing_seen,
-            reasoning_tokens=tokens if isinstance(tokens, int) else None,
+            reasoning_tokens=self._reasoning_tokens(),
             streamed=display is not None,
+            thinking_off=self._thinking_off(),
+        )
+
+    def _thinking_off(self) -> bool:
+        """Whether the provider's requests tell the model not to think (#357)."""
+        return getattr(self.llm, "thinking_off", False) is True
+
+    def _reasoning_tokens(self) -> int | None:
+        """The reasoning tokens the provider counted for its last reply, if any."""
+        usage = getattr(self.llm, "last_usage", None)
+        tokens = usage.get("reasoning_tokens") if isinstance(usage, dict) else None
+        return tokens if isinstance(tokens, int) else None
+
+    def _answered(self, reply: Message) -> Message:
+        """*reply*, with the words it sent as thinking made its answer (#357).
+
+        Only when the provider's requests tell the model not to think and the
+        reply has no tool call: see
+        :func:`~localmelo.melo.schema.answer_from_thinking`.
+        """
+        if reply.tool_calls or not self._thinking_off():
+            return reply
+        words = answer_from_thinking(
+            reply.content, reply.thinking, reasoning_tokens=self._reasoning_tokens()
+        )
+        return (
+            dataclasses.replace(reply, content=words, thinking="") if words else reply
         )
 
     async def _send(
@@ -1038,14 +1091,17 @@ class Chat:
         token = LLM_REQUEST_ATTEMPT.set(attempt)
         kind_token = LLM_REQUEST_KIND.set(kind)
         try:
+            messages = _unanswered_as_notes(messages)
             if self.fixed_prefix and kind in ("plan", "reflect"):
                 # Fit individual recall units first; merge adjacent user turns only
                 # on the outgoing copy for templates that require alternating roles.
                 messages = _merge_user_turns(messages)
             display = STREAM_DISPLAY.get() if kind == "plan" else None
             if display is not None:
-                return await self._send_streaming(messages, tools, display)
-            return await self.llm.chat(messages, tools=tools or None)
+                reply = await self._send_streaming(messages, tools, display)
+            else:
+                reply = await self.llm.chat(messages, tools=tools or None)
+            return self._answered(reply) if kind == "plan" else reply
         finally:
             LLM_REQUEST_KIND.reset(kind_token)
             LLM_REQUEST_ATTEMPT.reset(token)

@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import NO_ANSWER_LABEL
+from localmelo.melo.schema import NO_ANSWER_LABEL, UNANSWERED_NOTE, is_no_answer_label
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     CLOSED_ERROR,
@@ -250,13 +250,14 @@ async def test_both_resume_arms_after_a_crash(tmp_path: Path) -> None:
         request = llm.requests[0]
         roles = [m.role for m in request if m.role != "system"]
         assert all(a != b for a, b in zip(roles, roles[1:], strict=False)), roles
-        # Turn 2 as its pair, right before turn 3.
+        # Turn 2 as its user words and a note, joined to turn 3: the model is
+        # not shown the label, which it would copy (#357).
         talk = [(m.role, m.content) for m in request if m.role in ("user", "assistant")]
-        assert talk[-3:] == [
-            ("user", "Now wait for ever"),
-            ("assistant", NO_ANSWER_LABEL.format(status="crashed")),
-            ("user", "Turn three"),
-        ]
+        assert talk[-1] == (
+            "user",
+            f"Now wait for ever\n\n{UNANSWERED_NOTE}\n\nTurn three",
+        )
+        assert not any(is_no_answer_label(content) for _, content in talk)
         # Each tool message answers the call before it.
         for before, message in zip(request, request[1:], strict=False):
             if message.role == "tool":
