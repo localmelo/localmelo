@@ -47,6 +47,7 @@ In the web console and the app, melo keeps short notes about you across chats (s
 - **Change it.** Say the new value in any chat ("I live in Utrecht now", "我的健身教练是小宇"): it replaces the old note about the same thing and comes first in recall, and answers give the new value only: the chat where you said the old value comes back, marked older, only when you ask about the past ("before", "used to", "以前").
 - **Long chats.** The chat keeps its newest messages in view. What you said earlier in the same chat comes back when it matches your message, marked `this chat`.
 - Each note shows under your message as `Remembered: … · Undo`; Undo on a new value brings the old one back.
+- **Other assistants.** The first time the main chat opens, or `melo` opens in a terminal, melo offers to bring in the notes other assistants on this Mac keep about you, as a list of files (see [Bring in memory from other assistants](../concepts/memory.md#bring-in-memory-from-other-assistants)). Nothing is brought in until you choose, and **Not now** ends the offer. Later: the Memory tab's **From other assistants**, `/memory import`, or `melo memory import`.
 - To see, reword or forget notes later, use the console's **Memory** tab, `/memory` in the terminal, or `melo memory list` and `melo memory forget`; to stop keeping notes, run `melo config set memory.across_chats false` and restart `melo serve` or the app.
 
 ## Turn long-term memory off

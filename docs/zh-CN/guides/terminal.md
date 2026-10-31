@@ -151,7 +151,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/copy [turn]` | 复制已保存回答的 Markdown；不带编号时复制最近一个已完成、未被撤销的轮次。 |
 | `/usage` | 每个轮次记录的步骤、工具调用、词元和时间（包括被撤销的工作），并给出合计；`?` 表示未记录。 |
 | `/status [all]` | 五行说明 melo 是否就绪：模型及其服务器（`✓ answers`，或原因）、文件夹、会话、审批的作用，以及上下文有多满。`/status all`（开发者模式下直接 `/status`）输出所有行。 |
-| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory window` 不调用模型，检查模型的工作窗口。 |
+| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory import` 提议导入其他助手保存的笔记（见[首次运行](#first-run)）。`/memory window` 不调用模型，检查模型的工作窗口。 |
 | `/attach PATH` | 暂存一个工作区文本文件；`/attachments` 列出它们，`/detach N\|all` 移除它们。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用的参数、20 行输出、反思的完整理由。 |
 | `/thinking [on\|off]` | 打开思考摘录，或关闭（默认，开发者模式除外）。 |
@@ -459,6 +459,18 @@ No model server is running yet. To start one with oMLX:
 Put a model in its own folder of ~/models first. The guide shows how:
 https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
 ```
+
+问题之后，并且只在终端里，首次运行还会提议一次：导入这台电脑上其他助手保存的关于你的笔记：
+
+```text
+ melo found notes on this Mac from other assistants
+ ❯ 1. Bring in 21 notes from 8 files
+   2. Show what they say
+   3. Not now
+ ↑↓ select · enter confirm · esc cancel
+```
+
+`Show what they say` 把每个文件打印成路径（`~/.claude/CLAUDE.md · 9 notes`），带几行示例和舍弃了什么（`9 left out: secrets, other people's details`），然后再问一次。在你选第一行之前不会导入任何内容；`Not now`、Esc 和输入结束都会让这个提议永久结束。之后可以在对话里用 `/memory import`，或用 `melo memory import` 再问同样的列表；任务运行（`melo "task"`）从不询问。管道输入时，列表是从 stdin 读取的编号问题。这些笔记就是控制台 Memory 标签页列出的那些，每次导入都有一个批次，可以用 `melo memory import --undo BATCH` 收回。
 
 <a id="questions-are-lists"></a>
 
