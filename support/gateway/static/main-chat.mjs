@@ -3,9 +3,13 @@
  *
  * The gateway keeps one main chat (`kind: "front"`, `main: true`). Every other console chat is one of
  * its side chats. When a side chat's run ends, or a task finishes, fails or waits for an approval, the
- * main chat gets a card (an `attention.card` event, never a turn). Nothing here fetches; the page
- * passes what a card's Open does.
+ * main chat gets a card (an `attention.card` event, never a turn). What the main chat did with a task
+ * (started, paused, a suggestion, "Start this as a task?") is an echo line (an `attention.echo` event).
+ * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
+
+/** Levels in words, P0 to P5; P-codes are for developer mode. */
+export const LEVELS = ["Now", "Today", "Normal", "Whenever", "If idle", "Later"];
 
 const DAY_S = 86400;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -69,21 +73,23 @@ export function mergeCards(cards, more) {
 }
 
 /**
- * The main chat's conversation: its turns and cards by time, with a divider at each new day.
- * Between two turns, a source shows only its newest card, so a busy side chat is one card.
- * Items: `{kind: "day", label}`, `{kind: "turn", turn}`, `{kind: "card", card}`.
+ * The main chat's conversation: its turns, cards and echoes by time, with a divider at each new day.
+ * Between two turns, a source shows only its newest card, so a busy side chat is one card; every
+ * echo stays. Items: `{kind: "day", label}`, `{kind: "turn", turn}`, `{kind: "card", card}`,
+ * `{kind: "echo", echo}`.
  */
-export function timeline(turns, cards, now) {
-  const at = (item) => (item.kind === "turn" ? Number(item.turn.startedAt) || 0 : item.card.at);
+export function timeline(turns, cards, now, echoes = []) {
+  const at = (item) => (item.kind === "turn" ? Number(item.turn.startedAt) || 0 : item[item.kind].at);
   const items = [
     ...turns.map((turn) => ({kind: "turn", turn})),
     ...cards.map((card) => ({kind: "card", card})),
+    ...echoes.map((echo) => ({kind: "echo", echo})),
   ].sort((left, right) => at(left) - at(right));
   const kept = [];
   let since = new Map();
   for (const item of items) {
-    if (item.kind === "turn") {
-      since = new Map();
+    if (item.kind !== "card") {
+      if (item.kind === "turn") since = new Map();
       kept.push(item);
       continue;
     }
@@ -148,4 +154,121 @@ export function cardNode({doc, card, open}) {
   foot.append(action, el("span", "main-card-time", card.at ? clock(card.at) : ""));
   node.append(mark, text, foot);
   return node;
+}
+
+// ── Echoes: what the main chat did with a task ──
+
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed"]);
+const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!",
+  stop: "■", pause: "‖", resume: "▶", first: "↑"};
+
+/** An echo as the page keeps it, from an `echoes` row or an `attention.echo` frame; null if unusable. */
+export function readEcho(row) {
+  const data = row?.data && typeof row.data === "object" ? {...row.data, id: row.id, ts: row.ts} : row;
+  const id = Number(data?.id);
+  if (!Number.isFinite(id) || !ECHO_KINDS.has(data?.echo)) return null;
+  return {...data, id, at: Number(data.ts) || 0, kind: data.echo, line: String(data.line ?? "")};
+}
+
+/** *echoes* with *more* added once each, oldest first. */
+export function mergeEchoes(echoes, more) {
+  const byId = new Map(echoes.map((echo) => [echo.id, echo]));
+  for (const row of more) {
+    const echo = readEcho(row);
+    if (echo) byId.set(echo.id, echo);
+  }
+  return [...byId.values()].sort((left, right) => left.id - right.id);
+}
+
+/** The ids of echoes a later one answered (an Undo, an Apply, a Start): their buttons go. */
+export function answered(echoes) {
+  return new Set(echoes.map((echo) => Number(echo.of)).filter(Number.isFinite));
+}
+
+/** An echo's buttons: `[label, do]`; a level change opens the level list. */
+export function echoActions(echo, done) {
+  if (done || !echo.task_id && echo.kind !== "ask") return [];
+  if (echo.kind === "started" || echo.kind === "level") {
+    return echo.kind === "started" ? [["Change", "level"]] : [["Undo", "undo"]];
+  }
+  if (echo.kind === "control") return [["Undo", "undo"]];
+  if (echo.kind === "suggest") {
+    const word = echo.action === "level" ? `Set to ${LEVELS[echo.level] ?? "Normal"}` : echo.action;
+    return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
+  }
+  if (echo.kind === "ask") return [["Start as a task", "start"], ["Not now", "dismiss"]];
+  return [];
+}
+
+/**
+ * One echo's nodes: the person's own message when it answers one, then the line with its buttons.
+ * `{doc, echo, done, act, developer}`: `act(echo, do, level)` runs a button; `done` hides them.
+ */
+export function echoNodes({doc, echo, done = false, act, developer = false}) {
+  const el = (tag, className, text) => {
+    const node = doc.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const nodes = [];
+  if (echo.typed) {
+    const article = el("article", "msg user");
+    article.append(el("div", "user-bubble", echo.typed));
+    nodes.push(article);
+  }
+  const line = el("div", "echo");
+  line.dataset.kind = echo.kind;
+  line.dataset.echoId = String(echo.id);
+  const mark = el("span", "echo-mark", MARKS[echo.action] ?? MARKS[echo.kind] ?? "·");
+  mark.setAttribute("aria-hidden", "true");
+  const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
+  const words = level === null ? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
+  const text = el("p", "echo-text", words);
+  line.append(mark, text);
+  if (level !== null) {
+    const chip = el("span", "echo-level", developer ? `P${level} · ${LEVELS[level]}` : LEVELS[level]);
+    chip.dataset.level = String(level);
+    line.append(chip);
+  }
+  const buttons = el("span", "echo-actions");
+  for (const [label, does] of echoActions(echo, done)) {
+    const button = el("button", does === "start" ? "outline-button" : "link-button", label);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      if (does !== "level") return act(echo, does);
+      const list = levelList({el, echo, act, developer});
+      buttons.replaceChildren(list);
+      list.children[echo.level ?? 2]?.focus();
+    });
+    buttons.append(button);
+  }
+  if (buttons.children.length) line.append(buttons);
+  nodes.push(line);
+  return nodes;
+}
+
+/** The six levels as an option list; arrows move, Enter or a click chooses. */
+function levelList({el, echo, act, developer}) {
+  const list = el("span", "echo-levels");
+  list.setAttribute("role", "radiogroup");
+  list.setAttribute("aria-label", "Level");
+  LEVELS.forEach((word, level) => {
+    const item = el("button", "echo-level-item", developer ? `P${level} · ${word}` : word);
+    item.type = "button";
+    item.dataset.level = String(level);
+    item.setAttribute("role", "radio");
+    item.setAttribute("aria-checked", String(level === echo.level));
+    item.tabIndex = level === echo.level ? 0 : -1;
+    item.addEventListener("click", () => act(echo, "level", word));
+    item.addEventListener("keydown", (event) => {
+      const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const items = [...list.children];
+      items[(items.indexOf(item) + step + items.length) % items.length].focus();
+    });
+    list.append(item);
+  });
+  return list;
 }

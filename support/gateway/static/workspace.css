@@ -320,6 +320,27 @@ button:hover:not(:disabled) {
 .main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
+/* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
+   amber when it jumps the queue (Now, Today), green for Normal, grey below. */
+.echo { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
+.echo-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-size: var(--text-caption); font-weight: 700; }
+.echo[data-kind="started"] .echo-mark { background: var(--tint); color: var(--ok); }
+.echo[data-kind="failed"] { color: var(--error); }
+.echo[data-kind="suggest"] .echo-mark, .echo[data-kind="ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
+.echo-text { flex: 0 1 auto; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.echo-level { display: inline-block; padding: 0 8px; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-size: var(--text-caption); font-weight: 600; line-height: 20px; white-space: nowrap; }
+.echo-level[data-level="0"], .echo-level[data-level="1"] { background: var(--warn-tint); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.echo-level[data-level="2"] { background: var(--tint); color: var(--accent); }
+.echo-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.echo-actions .link-button { padding: 0; font-size: var(--text-small); }
+.echo-actions .outline-button { padding: 3px 10px; font-size: var(--text-small); }
+.echo-levels { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.echo-level-item { padding: 2px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink-2); font-size: var(--text-caption); }
+.echo-level-item:hover { background: var(--soft); }
+.echo-level-item[aria-checked="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.task-button { padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: none; color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
+.task-button:hover:not(:disabled) { background: var(--soft); color: var(--ink); }
+.task-button:disabled { opacity: 0.5; }
 @media (min-width: 701px) and (max-width: 1179px) {
   .session-list.nested { margin-left: 0; padding-left: 0; border-left: 0; }
   :is(.list-day, .main-text, .main-when) { display: none; }
@@ -328,7 +349,7 @@ button:hover:not(:disabled) {
   .main-face { flex-basis: 40px; width: 40px; height: 40px; }
 }
 @media (max-width: 700px), (pointer: coarse) {
-  .header-parent, .main-card-foot .link-button { min-height: 44px; }
+  .header-parent, .main-card-foot .link-button, .echo-actions button, .echo-level-item, .task-button { min-height: 44px; }
   /* The target is tall; the line stays as tall as the title. */
   .header-trail { align-items: center; }
   .header-parent { margin-block: -12px; }

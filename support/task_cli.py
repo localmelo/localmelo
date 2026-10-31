@@ -16,12 +16,25 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from localmelo.support.gateway.front_rules import LEVEL_WORDS
 from localmelo.support.loopback import is_loopback
 from localmelo.support.task_follow import FollowError, follow
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_OBJECTIVE_CHARS = 100_000
 LEVELS = tuple(f"P{n}" for n in range(6))
+# Levels in words, P0 to P5: a word is accepted wherever a P-code is.
+WORDS = ("now", "today", "normal", "whenever", "idle", "later")
+
+
+def _level_arg(value: str) -> str:
+    """``P1`` for ``today``, ``Today`` or ``p1``; ``auto`` as it is."""
+    text = value.strip().lower().removeprefix("if ")
+    return (
+        f"P{WORDS.index(text)}"
+        if text in WORDS
+        else text.upper().replace("AUTO", "auto")
+    )
 
 
 class ClientError(Exception):
@@ -119,18 +132,18 @@ def parser(prog: str = "melo-task") -> argparse.ArgumentParser:
     source.add_argument("--stdin", action="store_true")
     new.add_argument("--title")
     new.add_argument("--workspace")
-    new.add_argument("--level", choices=LEVELS)
+    new.add_argument("--level", choices=LEVELS, type=_level_arg)
     new.add_argument("--request-key")
     listing = subs.add_parser("list", parents=[common], allow_abbrev=False)
     listing.add_argument("--state")
-    listing.add_argument("--level", choices=LEVELS)
+    listing.add_argument("--level", choices=LEVELS, type=_level_arg)
     for name in ("show", "pause", "resume", "stop", "follow", "level"):
         sub = subs.add_parser(name, parents=[common], allow_abbrev=False)
         sub.add_argument("id")
         if name == "resume":
-            sub.add_argument("--level", choices=LEVELS[:-1])
+            sub.add_argument("--level", choices=LEVELS[:-1], type=_level_arg)
         if name == "level":
-            sub.add_argument("level", choices=(*LEVELS, "auto"))
+            sub.add_argument("level", choices=(*LEVELS, "auto"), type=_level_arg)
         if name == "follow":
             sub.add_argument("--wait", action="store_true")
             sub.add_argument("--after", type=int, default=0)
@@ -170,15 +183,26 @@ def _safe(value: object) -> str:
     return "".join(c if c.isprintable() else "?" for c in str(value))
 
 
-def _level_label(task: dict[str, Any]) -> str:
+def _level_label(task: dict[str, Any], words: bool = False) -> str:
     level = task.get("level")
-    return f"P{level}" if type(level) is int and 0 <= level <= 5 else "not recorded"
+    if type(level) is not int or not 0 <= level <= 5:
+        return "not recorded"
+    return LEVEL_WORDS[level] if words else f"P{level}"
 
 
 def execute(
-    args: argparse.Namespace, client: httpx.Client, *, out: TextIO, stdin: TextIO
+    args: argparse.Namespace,
+    client: httpx.Client,
+    *,
+    out: TextIO,
+    stdin: TextIO,
+    words: bool = False,
 ) -> int:
-    """Run a parsed operation using an already authenticated client."""
+    """Run a parsed operation using an already authenticated client.
+
+    *words* prints levels as words (``Normal``), as default mode does; the
+    P-codes are developer mode's.
+    """
     cmd = args.command
     if cmd == "follow":
         if not 0 <= args.after <= 2**63 - 1:
@@ -285,7 +309,7 @@ def execute(
             rows.append(
                 (
                     _safe(task.get("task_id", "")),
-                    _level_label(task),
+                    _level_label(task, words),
                     _safe(task.get("state", "")),
                     _safe(title),
                     _safe(_waiting_approval(task) or ""),
@@ -317,7 +341,7 @@ def execute(
             )
         if cmd == "show":
             print(f"  Title: {_safe(task.get('title') or 'not recorded')}", file=out)
-            print(f"  Level: {_level_label(task)}", file=out)
+            print(f"  Level: {_level_label(task, words)}", file=out)
             approval = _waiting_approval(task)
             wait = task.get("wait_reason")
             reason = task.get("reason") or ("approval" if approval else None)
@@ -394,13 +418,25 @@ def connect(gateway: str | None = None, *, timeout: float = 10) -> httpx.Client:
     )
 
 
+def _developer() -> bool:
+    """Whether ``[ui] mode`` is developer; an unreadable config is default mode."""
+    try:
+        from localmelo.support.config import load
+
+        return load().ui.mode == "developer"
+    except Exception:
+        return False
+
+
 def main(argv: list[str] | None = None, prog: str = "melo-task") -> int:
     args = parser(prog).parse_args(argv)
     try:
         if args.command == "follow" and not 0 <= args.after <= 2**63 - 1:
             raise ValueError("invalid event cursor")
         with connect(getattr(args, "gateway", None)) as client:
-            return execute(args, client, out=sys.stdout, stdin=sys.stdin)
+            return execute(
+                args, client, out=sys.stdout, stdin=sys.stdin, words=not _developer()
+            )
     except KeyboardInterrupt:
         return 130
     except (ValueError, ClientError, FollowError, OSError, httpx.HTTPError) as exc:
