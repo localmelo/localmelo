@@ -116,6 +116,8 @@ logger = logging.getLogger(__name__)
 ECHO_EVENT: Final = "attention.echo"
 # The front's step cap (design 2.4); a turn not settled in it is handed off.
 FRONT_STEPS: Final = 4
+# A brief question's step cap: BRIEF_NOTE asks for one or two steps.
+BRIEF_STEPS: Final = 2
 HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
 STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
 ASK_TEXT: Final = "This needs more than a quick answer. Start this as a task?"
@@ -359,8 +361,11 @@ class FrontAgent(Agent):
 
         saved = self.options
         if quick:
-            # The stop answer is asked for once, so a brief question still gets one.
-            self.options = dataclasses.replace(saved, answer_on_stop=True)
+            # The stop answer is asked for once, so a brief question still gets one,
+            # and it has BRIEF_STEPS steps.
+            self.options = dataclasses.replace(
+                saved, answer_on_stop=True, max_steps=BRIEF_STEPS
+            )
         try:
             outcome = await super().run_task(query, on_event=sink, **kwargs)
         finally:
@@ -1373,6 +1378,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
 __all__ = [
     "ASK_TEXT",
     "ASK_TEXT_ZH",
+    "BRIEF_STEPS",
     "ECHO_EVENT",
     "FRONT_STEPS",
     "FRONT_TEXT",

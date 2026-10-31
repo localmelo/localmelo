@@ -47,13 +47,15 @@ async def front_console(
     *replies: Message,
     chores: ChoreOptions | None = None,
     titler: Callable[[str], Awaitable[str]] | None = None,
+    model: ScriptedLLM | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, ScriptedLLM]]:
     """A console whose main chat runs a FrontAgent on *replies*; workers never start.
 
     *chores* replaces the chore clock, beats and summary of the console, and
-    *titler* the model's reply that names a task code starts.
+    *titler* the model's reply that names a task code starts. *model*, when
+    given, answers the main chat in place of *replies*.
     """
-    llm = ScriptedLLM(replies)
+    llm = model if model is not None else ScriptedLLM(replies)
     holder: list[Console] = []
 
     async def front(settings: Any, workspace: str, mcp: Any, session_id: str) -> Any:
