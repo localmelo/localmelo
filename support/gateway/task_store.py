@@ -1042,6 +1042,24 @@ class TaskStore:
             )
             return bool(cursor.rowcount)
 
+    async def rehome(self, front_id: str, to: str | None) -> list[str]:
+        """Hand the unfinished tasks of chat *front_id* to chat *to*; their ids.
+
+        A finished task keeps its record, its owner included.
+        """
+        ended = ", ".join("?" * len(_TERMINAL_STATES))
+        async with self._store.component_transaction("task_rehome") as conn:
+            rows = await _rows(
+                conn,
+                f"SELECT task_id FROM tasks WHERE front_id = ? AND state NOT IN ({ended})",
+                (front_id, *_TERMINAL_STATES),
+            )
+            await conn.execute(
+                f"UPDATE tasks SET front_id = ? WHERE front_id = ? AND state NOT IN ({ended})",
+                (to, front_id, *_TERMINAL_STATES),
+            )
+        return [row[0] for row in rows]
+
     async def priority_events(self, task_id: str) -> list[dict[str, Any]]:
         async with self._store.component_transaction("task_events") as conn:
             rows = await _rows(

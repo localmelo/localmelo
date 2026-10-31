@@ -28,7 +28,7 @@ from localmelo.support.sessions.submissions import check_client_request_id
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
 from .front import ECHO_EVENT
-from .running import waiting_by_chat
+from .running import live_tasks, waiting_by_chat
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
 from .worker_reader import WorkerRecord, _total_tokens, decode_cursor, encode_cursor
@@ -216,6 +216,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 query=query,
                 kinds=(kind,),
                 min_turns=0 if kind == "front" else 1,
+                # A chat that took a task by code has an echo and no turn.
+                or_events=(ECHO_EVENT, CARD_EVENT),
             ),
         )
         has_more = len(sessions) > limit
@@ -325,10 +327,21 @@ def add_routes(app: FastAPI, console: Console) -> None:
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
         if info.kind in ("front", "chat"):
-            if info.kind == "front":
-                await console.cards.flush()
-            cards = await _page_cards(console, session_id, turns, before)
             echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
+            cards = await _page_cards(console, session_id, turns, before)
+            if (
+                info.kind == "front"
+                or echoes
+                or cards
+                or any(
+                    record.front_id == session_id
+                    for record in await live_tasks(console) or []
+                )
+            ):
+                # A side chat that started a task has cards to write: what its
+                # page shows is as new as the main chat's.
+                await console.cards.flush()
+                cards = await _page_cards(console, session_id, turns, before)
         body: dict[str, Any] = {
             "turns": [
                 turn_json(

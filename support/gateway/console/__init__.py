@@ -60,7 +60,7 @@ from . import (
     routes_tasks,
     routes_turns,
 )
-from .cards import MainChatCards
+from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
 from .front import Front, FrontAgent, SideAgent, build_front_agent
@@ -254,6 +254,25 @@ class Console:
         front = self._side_fronts.pop(chat_id, None)
         if front is not None:
             await front.aclose()
+
+    async def waiting_cards(self, chat_id: str) -> list[dict[str, Any]]:
+        """The cards of side chat *chat_id* that still ask the person for an answer, read before it is deleted."""
+        with contextlib.suppress(Exception):
+            await self.cards.flush()  # one written for a task that waits now is not lost
+        return await self.cards.waiting_in(chat_id)
+
+    async def hand_over(self, chat_id: str, waiting: list[dict[str, Any]]) -> None:
+        """A side chat was deleted: its unfinished tasks and chores, and the cards that wait for the person, are the main chat's now.
+
+        A finished task keeps its record. The tasks' news and cards go to the
+        main chat from here on.
+        """
+        main = self.main_id
+        moved = set(await self.workers.tasks.rehome(chat_id, main))
+        await self.chore_runner.store.rehome(chat_id, main)
+        for card in waiting:
+            if main is not None and card.get("source_id") in moved:
+                await self.store.append_session_event(main, CARD_EVENT, card)
 
     async def _side_agent(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str

@@ -25,6 +25,7 @@ from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     go_ahead_text,
 )
+from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -215,6 +216,41 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
+async def _create_for_task(
+    console: Console, body: CreateRequest, composed: str, key: str | None
+) -> JSONResponse:
+    """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
+
+    The answer is 201 with the chat and the task's ``echo``, and no turn. A
+    task that cannot start leaves no chat behind.
+    """
+    assert body.turn is not None
+    entry, _ = await _sessions_call(
+        console,
+        console.sessions.create(body.workspace, None, mode=body.approvals),
+    )
+    chat = entry.session_id
+    try:
+        echo = await _store_call(
+            console,
+            console.front_for(chat).route(
+                body.turn.text, composed, as_task=True, key=key
+            ),
+            chat,
+        )
+        await _store_call(
+            console, console.store.rename_session(chat, short_title(composed)), chat
+        )
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await console.sessions.delete(chat)
+        raise
+    info = await _require_session(console, chat)
+    return JSONResponse(
+        status_code=201, content={"session": console.session_body(info), "echo": echo}
+    )
+
+
 # ── Routes ──
 
 
@@ -230,6 +266,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
             first = (body.turn.text, composed)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
+        if body.turn is not None and body.turn.as_task:
+            return await _create_for_task(console, body, composed, key)
         try:
             entry, turn = await _sessions_call(
                 console,
@@ -504,11 +542,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
     ) -> Response:
         """Delete a chat; its notes stay unless ``?notes=forget``."""
         console.require_store()
+        waiting = await console.waiting_cards(session_id)
         await _sessions_call(
             console,
             console.sessions.delete(session_id, forget_notes=notes == "forget"),
             session_id,
         )
+        # Its unfinished tasks, chores and waiting cards are the main chat's now.
+        await console.hand_over(session_id, waiting)
         await console.forget_front(session_id)
         return Response(status_code=204)
 

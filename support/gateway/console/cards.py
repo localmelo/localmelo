@@ -364,22 +364,26 @@ class MainChatCards:
             **_words(f"cards.answer.{name}"),
         }
 
-    async def _read_unanswered(self, owner: str) -> set[str]:
-        """The request ids of the newest waiting cards of *owner* that no answer follows."""
+    async def waiting_in(self, owner: str) -> list[dict[str, Any]]:
+        """The newest waiting cards of chat *owner* that no answer follows, as stored."""
         found = await self._console.store.events_of_type(
             owner, CARD_EVENT, limit=_LOOK_BACK
         )
-        waiting: set[str] = set()
+        waiting: dict[str, dict[str, Any]] = {}
         for event in found:
             item = event.event.get("data") or {}
             asked = item.get("request_id")
             if not asked:
                 continue
             if item.get("state") == "waiting":
-                waiting.add(asked)
+                waiting[asked] = item
             elif item.get("state") == "answered":
-                waiting.discard(asked)
-        return waiting
+                waiting.pop(asked, None)
+        return list(waiting.values())
+
+    async def _read_unanswered(self, owner: str) -> set[str]:
+        """The request ids of the newest waiting cards of *owner* that no answer follows."""
+        return {str(card["request_id"]) for card in await self.waiting_in(owner)}
 
 
 def _is_news(data: object) -> bool:

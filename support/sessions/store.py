@@ -1611,13 +1611,16 @@ class SessionStore:
         workspace: str | None = None,
         min_turns: int = 0,
         kinds: Collection[str] | None = ("chat",),
+        or_events: Collection[str] = (),
     ) -> list[SessionInfo]:
         """Sessions, the most recently updated first.
 
         *query* matches the title or any turn's user text (``LIKE``, with
         ``%`` and ``_`` taken literally); *workspace* the stored workspace
         exactly; *min_turns* keeps the sessions with at least that many
-        turns, running ones included. *kinds* ``None`` means every kind.
+        turns, running ones included, and also those with an event of one of
+        the types in *or_events* (a chat that took a task by code, with no
+        turn yet). *kinds* ``None`` means every kind.
         """
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError(f"limit must be an int >= 1, got {limit!r}")
@@ -1639,10 +1642,16 @@ class SessionStore:
             # Any turn counts, a running or an undone one too: a session
             # with a turn is a session the list shows, from the moment its
             # first turn's row exists.
-            clauses.append(
-                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
-            )
+            kept = "(SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
             args.append(min_turns)
+            if or_events:
+                marks = ", ".join("?" * len(or_events))
+                kept += (
+                    " OR EXISTS (SELECT 1 FROM events e WHERE e.session_id = s.id "
+                    f"AND e.type IN ({marks}))"
+                )
+                args += list(or_events)
+            clauses.append(f"AND ({kept})")
         async with self._lock:
             conn = await self._ready()
             rows = await _rows(
@@ -1999,6 +2008,22 @@ class SessionStore:
             rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
         return [
             StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
+            for row in reversed(rows)
+        ]
+
+    async def events_of_type_anywhere(
+        self, type_: str, *, after_id: int = 0, limit: int = 200
+    ) -> list[StoredEvent]:
+        """The newest *limit* events of one type in any session with ids above *after_id*, in id order."""
+        sql = (
+            "SELECT id, session_id, turn, event FROM events "
+            "WHERE type = ? AND id > ? ORDER BY id DESC LIMIT ?"
+        )
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql, (type_, after_id, limit))
+        return [
+            StoredEvent(row[0], row[1], row[2], json.loads(row[3]))
             for row in reversed(rows)
         ]
 
