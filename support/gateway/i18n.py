@@ -12,6 +12,10 @@ language`` setting when it names a language, else the first of the reader's
 preferred languages that the console has (``zh``, ``zh-CN`` or ``zh-Hans`` is
 Simplified Chinese; Traditional Chinese tags are skipped), else English.
 
+The catalogs, :func:`catalog` and :func:`t_in` live in
+:mod:`localmelo.support.words`, which needs no gateway extra; this module adds
+the request's language (and, with it, :func:`t`).
+
 The server answers a request in the language the console page asks for, with
 the ``X-LocalMelo-Language`` header or its ``localmelo_language`` cookie;
 every other client (the terminal, scripts) gets English. While a request is
@@ -20,38 +24,30 @@ handled, :func:`t` uses its language.
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from functools import cache
 from http.cookies import CookieError, SimpleCookie
-from pathlib import Path
 from typing import Any, Final
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-LANGUAGES: Final = ("en", "zh-Hans")
+from localmelo.support.words import (
+    CATALOGS,
+    LANGUAGES,
+    Entry,
+    catalog,
+    format_entry,
+    plural_form,
+    t_in,
+)
+
 SETTINGS: Final = ("auto", *LANGUAGES)
 COOKIE: Final = "localmelo_language"
 HEADER: Final = b"x-localmelo-language"
-CATALOGS: Final = Path(__file__).with_name("static") / "i18n"
 
-_PARAM: Final = re.compile(r"\{(\w+)\}")
 _TRADITIONAL: Final = frozenset({"hant", "tw", "hk", "mo"})
 _current: ContextVar[str] = ContextVar("localmelo_language", default="en")
-
-Entry = str | Mapping[str, str]
-
-
-@cache
-def catalog(language: str) -> dict[str, Entry]:
-    """The catalog of *language*, read once."""
-    data: dict[str, Entry] = json.loads(
-        (CATALOGS / f"{language}.json").read_text(encoding="utf-8")
-    )
-    return data
 
 
 def _language_of(tag: str) -> str | None:
@@ -91,32 +87,6 @@ def accept_languages(header: str) -> list[str]:
         if tag and tag != "*" and quality > 0:
             ranked.append((-quality, index, tag))
     return [tag for _, _, tag in sorted(ranked)]
-
-
-def plural_form(language: str, n: object) -> str:
-    """``one`` or ``other``: English has both, Chinese only ``other``."""
-    return "one" if language == "en" and n == 1 else "other"
-
-
-def format_entry(entry: Entry, params: Mapping[str, Any], language: str) -> str:
-    """*entry* with its parameters filled in; a count picks its plural form first."""
-    if not isinstance(entry, str):
-        entry = entry.get(plural_form(language, params.get("n")), entry["other"])
-    return _PARAM.sub(
-        lambda found: (
-            str(params[found.group(1)]) if found.group(1) in params else found.group()
-        ),
-        entry,
-    )
-
-
-def t_in(language: str, key: str, /, **params: Any) -> str:
-    """The words of *key* in *language*, falling back to English, then to the key."""
-    own = catalog(language) if language in LANGUAGES else {}
-    entry = own.get(key)
-    if entry is None:
-        language, entry = "en", catalog("en").get(key)
-    return key if entry is None else format_entry(entry, params, language)
 
 
 def t(key: str, /, **params: Any) -> str:
@@ -225,16 +195,19 @@ class LanguageMiddleware:
 
 
 __all__ = [
+    "CATALOGS",
     "COOKIE",
     "LANGUAGES",
     "SETTINGS",
     "LanguageMiddleware",
+    "Entry",
     "accept_languages",
     "catalog",
     "current",
     "format_entry",
     "page_language",
     "pick_language",
+    "plural_form",
     "request_language",
     "said",
     "said_text",

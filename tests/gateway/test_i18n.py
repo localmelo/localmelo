@@ -35,6 +35,8 @@ from localmelo.support.gateway.i18n import (  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "support/gateway/static"
 CONSOLE = ROOT / "support/gateway/console"
+# The status row's words are written in the terminal's module, which runs without the gateway.
+USAGE = ROOT / "support/usage_snapshot.py"
 APP = ROOT / "macos/LocalMeloApp"
 CASES = json.loads((ROOT / "tests/fixtures/i18n_cases.json").read_text("utf-8"))
 _PARAM = re.compile(r"\{(\w+)\}")
@@ -77,8 +79,7 @@ CONVERTED_PY = (
     "routes_turns.py",
 )
 
-# What stays English on purpose. JavaScript: key names, a code the scheduler sends, the
-# terminal's own status line (copied into reports as the terminal prints it), and the
+# What stays English on purpose. JavaScript: key names, a code the scheduler sends, and the
 # message of an internal error that is never shown.
 JS_ENGLISH = {
     "Escape",
@@ -87,11 +88,7 @@ JS_ENGLISH = {
     "Reservation",
     "melo did not finish an answer",
     "cannot reach the model server at",
-    "melo: run ended with status X: X",
     "noopener noreferrer",
-    # A failed turn's details, copied into a bug report as the terminal prints them.
-    "Xrun X",
-    "Tool calls: X",
     # Class lists of one word each.
     "msg user",
     "msg assistant",
@@ -247,7 +244,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         found |= {key for _, key in _JS_KEY.findall(path.read_text("utf-8"))}
         templates |= set(_JS_STEM.findall(path.read_text("utf-8")))
     found |= set(_HTML_KEY.findall((STATIC / "index.html").read_text("utf-8")))
-    for path in [*CONSOLE.glob("*.py"), *ROOT.glob("support/gateway/*.py")]:
+    for path in [*CONSOLE.glob("*.py"), *ROOT.glob("support/gateway/*.py"), USAGE]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))
         templates |= set(_PY_STEM.findall(text))
@@ -256,7 +253,12 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         found |= {key for key, _ in _SWIFT_T.findall(text)}
         found |= {key for key, _, _ in _SWIFT_PLURAL.findall(text)}
     quoted: set[str] = set()
-    for path in [*STATIC.glob("*.mjs"), STATIC / "workspace.js", *CONSOLE.glob("*.py")]:
+    for path in [
+        *STATIC.glob("*.mjs"),
+        STATIC / "workspace.js",
+        *CONSOLE.glob("*.py"),
+        USAGE,
+    ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
     stems = {re.split(r"\$\{|\{", key)[0] for key in built} | templates

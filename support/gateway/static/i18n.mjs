@@ -15,12 +15,15 @@
  * `data-i18n="key"` get their text, and `data-i18n-placeholder`,
  * `data-i18n-title`, `data-i18n-aria-label` or `data-i18n-data-prompt` that
  * attribute, from the catalog; each `{code}` in the words stands for the
- * element's next own `<code>`, which stays.
+ * element's next own `<code>`, which stays. The macOS app is told the
+ * language each time the page starts (`localmeloLanguage`), so its menus
+ * follow without a restart.
  *
  * For another screen's code, the whole API is `t(key, params)` for words,
- * `saidText(said)` for words the gateway stored with a record, and
- * `language()`; a new key goes into both catalogs (see the Chinese style
- * guide's interface terms for the words to use).
+ * `saidText(said)` for words the gateway stored with a record,
+ * `formatTime(date, kind)` for a time or a date, and `language()`; a new key
+ * goes into both catalogs (see the Chinese style guide's interface terms for
+ * the words to use).
  */
 
 export const LANGUAGES = ["en", "zh-Hans"];
@@ -86,6 +89,50 @@ export function language() {
   return current;
 }
 
+// What each kind of time shows. Chinese writes the hour on 12 hours with its day part ("上午 2:06"), as the
+// page's English does; the English hour follows the computer (see `timeLocale`).
+const TIME_KINDS = {
+  clock: {hour: "numeric", minute: "2-digit"},
+  weekday: {weekday: "long"},
+  day: {month: "short", day: "numeric"},
+  dayYear: {year: "numeric", month: "short", day: "numeric"},
+  full: {year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit"},
+};
+const formats = new Map();
+
+/**
+ * The locale a time is written in: Simplified Chinese for the Chinese page; for the English page the
+ * first English language the computer prefers (so a 24-hour computer keeps its clock), else plain `en`.
+ */
+export function timeLocale(lang, preferred = globalThis.localmeloLanguages ?? globalThis.navigator?.languages ?? []) {
+  if (lang === "zh-Hans") return "zh-Hans";
+  const own = [...preferred ?? []].find((tag) => /^en(-|_|$)/i.test(String(tag)));
+  try {
+    return own ? Intl.DateTimeFormat.supportedLocalesOf([String(own).replace(/_/g, "-")])[0] ?? "en" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+/**
+ * A time or a date as the page's language writes it: `clock` ("2:06 AM", "上午 2:06"), `weekday`
+ * ("Friday", "星期五"), `day` ("Oct 31", "10月31日"), `dayYear` ("Oct 31, 2026", "2026年10月31日") or `full`
+ * (the day and the clock, with seconds). `date` is a Date; an invalid one reads as an empty string.
+ */
+export function formatTime(date, kind = "clock", {language: lang = current, preferred} = {}) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const locale = timeLocale(lang, preferred);
+  const id = `${locale}|${kind}`;
+  if (!formats.has(id)) {
+    const options = TIME_KINDS[kind] ?? TIME_KINDS.clock;
+    formats.set(id, new Intl.DateTimeFormat(locale, locale.startsWith("zh") && options.hour ? {...options, hour12: true} : options));
+  }
+  const parts = formats.get(id).formatToParts(date);
+  // Chinese puts a space between the day part and the figures that follow, as the style guide does for digits.
+  // Newer ICU writes a narrow no-break space before "AM"; a plain space is what people copy and search.
+  return parts.map((part, index) => (part.type === "dayPeriod" && parts[index + 1]?.type === "hour" ? `${part.value} ` : part.value)).join("").replace(/\u202f/g, " ");
+}
+
 async function readCatalog(name) {
   const url = new URL(`./i18n/${name}.json`, import.meta.url);
   if (url.protocol === "file:") {
@@ -146,6 +193,12 @@ async function start(doc) {
   }
   translate(doc);
   delete html.dataset.i18nPending;
+  // The macOS app writes its menus, pill and pet in the page's language too; elsewhere nobody listens.
+  try {
+    globalThis.webkit?.messageHandlers?.localmeloLanguage?.postMessage({language: chosen});
+  } catch {
+    // Without the app the page needs no one to follow it.
+  }
 }
 
 // Without its English catalog the page still runs, showing keys: a failed read must not stop every module.

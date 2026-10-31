@@ -3,7 +3,7 @@ import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {LEVELS, levelLabel} from './levels.mjs';
-import {t} from './i18n.mjs';
+import {formatTime, t} from './i18n.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -201,7 +201,7 @@ export function setupPanel({
   // ── Activity ──
 
   const key = (row) => `${row.kind}:${row.id}`;
-  const timeOf = (at) => new Date(at * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  const timeOf = (at) => formatTime(new Date(at * 1000), 'clock');
   // What the live view follows for a row: a running, waiting or held session streams; a queued one never started.
   const liveState = (row) => ({task_id: row.id, state: ['running', 'waiting', 'held'].includes(row.state) ? 'running' : 'done',
     started_at: row.state === 'queued' ? null : row.at});

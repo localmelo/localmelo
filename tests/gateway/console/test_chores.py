@@ -1158,3 +1158,51 @@ async def test_a_reminders_card_shows_the_persons_words_even_when_its_run_failed
             plain, "sched.finished", {"state": "done"}
         )
         assert "reminder" not in await last_card()
+
+
+async def test_a_refused_chore_change_says_why_in_the_page_s_language(
+    tmp_path: Path,
+) -> None:
+    zh = {"X-LocalMelo-Language": "zh-Hans"}
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        # A time in the past, a time too far ahead, and a chore that is gone.
+        for at_text, english, chinese in (
+            (
+                "2026-10-28T06:59",
+                "That time has passed. Choose a new time.",
+                "这个时间已经过了。请选一个新的时间。",
+            ),
+            (
+                "2028-01-05T09:00",
+                "Reminders can be at most a year ahead.",
+                "提醒最多只能设在一年以内。",
+            ),
+        ):
+            body = {
+                "request": "Reminder: call mom",
+                "schedule": {"kind": "once", "at": at_text},
+            }
+            asked = await client.post("/api/chores", json=body)
+            assert asked.json()["error"]["message"] == english
+            told = await client.post("/api/chores", json=body, headers=zh)
+            assert told.json()["error"]["message"] == chinese
+            assert told.json()["error"]["code"] == "invalid_request"
+        chore = await add(client, "Brief me", BRIEF)
+        stale = await client.patch(
+            f"/api/chores/{chore['id']}",
+            json={"revision": 99, "title": "Other"},
+            headers=zh,
+        )
+        assert (
+            stale.json()["error"]["message"]
+            == "这个定时事项已经变了。请重新载入后再试。"
+        )
+        assert stale.json()["error"]["code"] == "stale_revision"
+        await client.delete(f"/api/chores/{chore['id']}")
+        gone = await client.delete(f"/api/chores/{chore['id']}", headers=zh)
+        assert (
+            gone.json()["error"]["message"]
+            == f"找不到 id 为 {chore['id']} 的定时事项。"
+        )
+        plain = await client.delete(f"/api/chores/{chore['id']}")
+        assert plain.json()["error"]["message"] == f"No chore has id {chore['id']}"

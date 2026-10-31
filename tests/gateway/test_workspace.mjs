@@ -10,7 +10,7 @@ import vm from 'node:vm';
 
 import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
-import {t} from '../../support/gateway/static/i18n.mjs';
+import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
@@ -512,7 +512,7 @@ test('tool marks are the terminal glyphs, and a running call is a live dot', () 
 // ── The page in a DOM double ──
 
 const source = readFileSync(new URL('../../support/gateway/static/workspace.js', import.meta.url), 'utf8')
-  .replace(/^import \{ t \} from "\.\/i18n\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/i18n\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/turns\.mjs";\n/m, '')
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
@@ -719,6 +719,7 @@ function harness(routes, {mobile = false} = {}) {
   const context = vm.createContext({
     ...turns,
     t,
+    formatTime,
     renderMarkdown,
     workerHistory,
     setupTasks,

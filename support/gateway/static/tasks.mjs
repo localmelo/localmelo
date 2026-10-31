@@ -1,6 +1,6 @@
 import {taskLive} from './task-live.mjs';
 import {levelCode, levelLabel} from './levels.mjs';
-import {t} from './i18n.mjs';
+import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts} from './blocked.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
@@ -74,7 +74,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const path = (id) => `/tasks/${encodeURIComponent(id)}`;
   const when = (value) => {
     const date = value == null ? null : new Date(value * 1000);
-    return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '—';
+    return date && !Number.isNaN(date.getTime()) ? formatTime(date, 'full') : '—';
   };
   const errorText = (error) => error?.message || t('tasks.requestFailed');
   const hasCard = (task) => typeof task.card === 'string' && task.card.trim() !== '';

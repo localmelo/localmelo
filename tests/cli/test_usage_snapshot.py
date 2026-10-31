@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -9,9 +11,11 @@ from localmelo.support.usage_snapshot import (
     TaskCounts,
     UsageSnapshot,
     context_summary,
+    status_parts,
     status_segments,
     usage_lines,
 )
+from localmelo.support.words import t_in
 
 T0 = 1_000.0
 
@@ -308,3 +312,67 @@ def test_the_context_summary_says_how_full_the_context_is_in_words() -> None:
     assert summary([budget(2600, None)]) == "2.6k tokens used"
     assert summary([], 1800) == "1.8k tokens used"  # the status bar's last request
     assert summary([budget(2600, 32000)], 1800) == "8% used (2.6k of 32k tokens)"
+
+
+# ── The row as words: English for the terminal, any language for the console ──
+
+
+def test_the_row_is_words_and_the_terminal_text_is_those_words_in_english() -> None:
+    started = {"type": "run.started", "ts": T0, "data": {}}
+    events = [
+        message(1000, 400),
+        message(1500, 1000, T0),
+        budget(1000, 8000),
+        started,
+        progress(step=3, attempt=2, phase="fix"),
+    ]
+    snap = UsageSnapshot()
+    for event in events:
+        snap.observe(event)
+    counts = TaskCounts(running=1, queued=2, held=1, waiting=1)
+    for words_ in (False, True):
+        parts = status_parts(snap, local=True, now=T0 + 200, tasks=counts, words=words_)
+        english = status_segments(
+            snap, local=True, now=T0 + 200, tasks=counts, words=words_
+        )
+        assert [t_in("en", p["key"], **p["params"]) for p in parts] == english
+    parts = status_parts(snap, local=True, now=T0 + 200, tasks=counts)
+    assert [part["key"] for part in parts] == [
+        "status.cacheIdle",
+        "status.ctx",
+        "status.stepAttemptPhase",
+        "status.tasksHeld",
+        "status.waits",
+    ]
+    assert parts[0]["params"] == {"share": "67%", "idle": "3m"}
+    chinese = [t_in("zh-Hans", p["key"], **p["params"]) for p in parts]
+    assert chinese == [
+        "缓存 67%，空闲 3m",
+        "上下文 1.0k/8.0k",
+        "第 3 步 · 第 2 次尝试 · 阶段 fix",
+        "任务 1 个运行、2 个排队、1 个在等模型",
+        "1 个任务在等你",
+    ]
+
+
+def test_the_route_sends_the_words_beside_the_text() -> None:
+    snap = UsageSnapshot()
+    for event in (message(1000, None), budget(2600, 32000)):
+        snap.observe(event)
+    body = snap.to_dict(local=True, now=T0 + 30)
+    assert [part["key"] for part in body["parts"]] == ["status.cacheNone", "status.ctx"]
+    assert len(body["parts"]) == len(body["segments"])
+
+
+def test_the_terminal_writes_its_row_without_the_gateway() -> None:
+    """The words come from `support/words.py`, which needs neither FastAPI nor the gateway package."""
+    code = (
+        "import sys; import localmelo.support.usage_snapshot as u; "
+        "print(u.waits_for_you(2)); "
+        "assert 'fastapi' not in sys.modules and 'localmelo.support.gateway' not in sys.modules"
+    )
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "2 tasks wait for you"

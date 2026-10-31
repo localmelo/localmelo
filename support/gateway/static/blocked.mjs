@@ -1,4 +1,4 @@
-import {t} from './i18n.mjs';
+import {formatTime, language, t} from './i18n.mjs';
 
 // The kinds of step auto mode blocks (#339), as the review names them.
 export const CATEGORIES = new Set([
@@ -29,6 +29,20 @@ export function blockWords(approval) {
 }
 
 /**
+ * The sentences under a blocked step's title, in the page's language. English keeps the rules' own
+ * sentences, which name the package, the file or the host; another language names the kind of step
+ * in its own words (the step itself is on the card, as written). A review the model settled says what
+ * it found by its category. A review with no sentences of its own reads by category in any language.
+ */
+export function reasonLines(review, categories) {
+  const written = (Array.isArray(review.reasons) ? review.reasons : []).map(String).filter(Boolean);
+  if (written.length && language() === 'en') return written;
+  const modelFound = review.by === 'model' && !['beyond_request', 'opaque', 'unreviewed'].includes(categories[0]);
+  if (modelFound) return [t('auto.reason.model', {what: t(`auto.words.${categories[0]}`)})];
+  return categories.slice(0, 3).map((category) => t(`auto.reason.${category}`));
+}
+
+/**
  * What a blocked call's card says, or null for a call auto mode did not block. `step` is the call's
  * code or command on one line; `allow` whether Allow once may run it (never for `self`, never for a
  * call a stopped turn left unreviewed); `words` whether "go ahead" can allow it too.
@@ -45,7 +59,7 @@ export function blockFacts({approval, name = '', arguments: args = {}, preview =
     stepKey: String(approval.step_key ?? ''),
     category: first,
     title: first ? t('auto.blocked.title', {title: t(`auto.title.${first}`)}) : t('auto.blocked.stopped'),
-    reasons: (Array.isArray(review.reasons) ? review.reasons : []).map(String).filter(Boolean),
+    reasons: reasonLines(review, categories),
     name: String(name),
     step: stepText(name, args, preview),
     self,
@@ -76,7 +90,7 @@ export function allowState({until = null, used = null, now = 0} = {}) {
   return now < until ? {state: 'pending', at: until} : {state: 'expired'};
 }
 
-const clock = (seconds) => new Date(seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+const clock = (seconds) => formatTime(new Date(seconds * 1000), 'clock');
 
 /**
  * The card under a blocked call: what was blocked and why, the step, and Allow once. `allowing` is
@@ -102,7 +116,7 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   card.append(head);
   const why = [...facts.reasons];
   why.push(t(facts.self ? 'auto.blocked.self' : facts.words ? 'auto.blocked.why' : 'auto.blocked.clickOnly'));
-  card.append(node('p', 'block-why', why.join(' ')));
+  card.append(node('p', 'block-why', why.join(t('common.sentenceGap'))));
   if (facts.step) {
     const step = node('code', 'block-step', facts.step);
     step.title = facts.step;

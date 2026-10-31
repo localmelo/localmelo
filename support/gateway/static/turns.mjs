@@ -397,12 +397,15 @@ export function shownItems(turn) {
   return turn.items.filter((item) => !(item.kind === "notice" && item.noticeKind === "retry"));
 }
 
-/** `status_line`: one bounded line, without the user's task text. */
+/**
+ * `status_line`: one bounded line, without the user's task text. The frame reads in the page's language;
+ * the status code and the error's own words stay as they are.
+ */
 export function statusLine(status, error) {
   let reason = String(error ?? "").split(/\s+/).filter(Boolean).join(" ");
   const characters = Array.from(reason);
   if (characters.length > 500) reason = characters.slice(0, 497).join("") + "...";
-  return `melo: run ended with status ${status}: ${reason || "no error message"}`;
+  return t("failure.copyLine", {status, reason: reason || t("failure.noMessage")});
 }
 
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */

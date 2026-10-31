@@ -7,7 +7,7 @@
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
-import {language, t} from './i18n.mjs';
+import {formatTime, t} from './i18n.mjs';
 import {levelLabel} from './levels.mjs';
 
 // Read once, in the page's language (a new language reloads the page).
@@ -23,12 +23,10 @@ export function whenWords(at, now) {
   const time = new Date(at * 1000);
   const day = (stamp) => { const d = new Date(stamp * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
   const ahead = Math.round((day(at) - day(now)) / 86400);
-  // The day and the time as the page's language writes them (in English, as this computer does).
-  const names = language() === 'en' ? [] : 'zh-CN';
-  const clock = time.toLocaleTimeString(names, {hour: 'numeric', minute: '2-digit'});
+  const clock = formatTime(time, 'clock');
   if (ahead <= 0) return t('sched.when.today', {clock});
   if (ahead === 1) return t('sched.when.tomorrow', {clock});
-  const label = ahead < 7 ? time.toLocaleDateString(names, {weekday: 'long'}) : time.toLocaleDateString(names, {month: 'short', day: 'numeric'});
+  const label = formatTime(time, ahead < 7 ? 'weekday' : 'day');
   return t('sched.when.day', {day: label, clock});
 }
 

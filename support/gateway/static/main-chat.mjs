@@ -8,7 +8,7 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
-import {language, saidText, t} from "./i18n.mjs";
+import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
 const DAY_S = 86400;
@@ -21,21 +21,18 @@ function startOfDay(ts) {
 
 const daysAgo = (ts, now) => Math.round((startOfDay(now) - startOfDay(ts)) / DAY_S);
 
-/** "Today", "Yesterday", "Oct 28", or "Oct 28, 2025" for another year (in Chinese, 10月28日). */
+/** "Today", "Yesterday", "Oct 28", or "Oct 28, 2025" for another year (in Chinese, 10月28日 and 2025年10月28日). */
 export function dayLabel(ts, now) {
   const days = daysAgo(ts, now);
   if (days <= 0) return t("time.today");
   if (days === 1) return t("time.yesterday");
   const day = new Date(ts * 1000);
-  // English names the month (`Oct`); Chinese numbers it (`10月`).
-  const month = language() === "en" ? day.toLocaleString("en-US", {month: "short"}) : day.getMonth() + 1;
-  const params = {month, day: day.getDate(), year: day.getFullYear()};
-  return day.getFullYear() === new Date(now * 1000).getFullYear() ? t("time.monthDay", params) : t("time.monthDayYear", params);
+  return formatTime(day, day.getFullYear() === new Date(now * 1000).getFullYear() ? "day" : "dayYear");
 }
 
-/** "7:35 PM", as this computer writes a time (the panel's rows write it the same way). */
+/** "7:35 PM" ("下午 7:35"), as the page's language writes a time (the panel's rows write it the same way). */
 export function clock(ts) {
-  return new Date(ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+  return formatTime(new Date(ts * 1000), "clock");
 }
 
 /** A time beside a row: the clock today, else the day. */

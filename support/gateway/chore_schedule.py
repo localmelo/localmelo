@@ -32,7 +32,15 @@ DEFAULT_MINUTE: Final = 9 * 60
 
 
 class ScheduleError(ValueError):
-    """A schedule that is not one of the kinds, or out of range."""
+    """A schedule that is not one of the kinds, or out of range.
+
+    *words* is the message as a :func:`said`, for an error a person can cause
+    from the page; the console says it in the reader's language.
+    """
+
+    def __init__(self, message: str, words: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.words = words
 
 
 def clock_text(minute: int) -> str:
@@ -158,9 +166,14 @@ class Schedule:
         if self.on is not None:
             when = self.when(tz)
             if when <= after:
-                raise ScheduleError("That time has passed. Choose a new time.")
+                raise ScheduleError(
+                    "That time has passed. Choose a new time.",
+                    said("errors.timePassed"),
+                )
             if when > after + MAX_AHEAD.total_seconds():
-                raise ScheduleError("Reminders can be at most a year ahead.")
+                raise ScheduleError(
+                    "Reminders can be at most a year ahead.", said("errors.timeTooFar")
+                )
             return when
         if self.kind == "hours":
             return after + self.hours * 3600.0

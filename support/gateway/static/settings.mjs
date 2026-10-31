@@ -1,5 +1,5 @@
 import { folderChoices, folderName } from "./folder.mjs";
-import { t } from "./i18n.mjs";
+import { formatTime, t } from "./i18n.mjs";
 import { whenWords } from "./scheduled-tab.mjs";
 
 // A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
@@ -35,7 +35,7 @@ export function checkedWords(secondsAgo, now = Date.now()) {
   if (ago < 5) return t("settings.checked.justNow");
   if (ago < 60) return t("settings.checked.seconds", {n: ago});
   if (ago < 3600) return t("settings.checked.minutes", {n: Math.floor(ago / 60)});
-  return t("settings.checked.at", {time: new Date(now - ago * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})});
+  return t("settings.checked.at", {time: formatTime(new Date(now - ago * 1000), "clock")});
 }
 
 /** A key's last part in words: `agent.window_messages` reads "Window messages". */

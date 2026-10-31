@@ -1094,7 +1094,10 @@ class Front:
                     said=said("front.echo.unsaved", title=title),
                 )  # fmt: skip
         except ChoreError as exc:
-            raise ApiError(409, "invalid_transition", str(exc)) from exc
+            words = exc.words
+            raise ApiError(
+                409, "invalid_transition", said_text(words) if words else str(exc)
+            ) from exc
         except ScheduleError as exc:  # a reminder's time passed before the tap
             raise ApiError(400, "invalid_request", t("front.echo.timePassed")) from exc
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")

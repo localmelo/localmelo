@@ -150,11 +150,33 @@ def _redact(text: str) -> str:
     return redact_secrets(text)[0]
 
 
+def _kind_words(label: str) -> str:
+    """*label* in the request's language when the page asks for one.
+
+    Only the generic ``OpenAI-compatible server`` is a phrase; every other
+    label is a name (``oMLX``, ``Ollama``) and reads the same everywhere.
+    """
+    if label == discovery.OPENAI_COMPATIBLE_NAME:
+        return t("model.server.openaiCompatible")
+    return label
+
+
+def _choice_label(key: str, label: str) -> str:
+    """The settings' name of a backend choice in the request's language.
+
+    The terminal's onboarding keeps *label*; a choice with no words in the
+    catalog (a cloud provider is a name) reads as it is.
+    """
+    words = t(f"settings.backend.{key}")
+    return label if words == f"settings.backend.{key}" else words
+
+
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend.
 
     A ``vllm`` backend is labelled ``oMLX`` when the config says so or the
-    health probe's last model listing did.
+    health probe's last model listing did. The generic label reads in the
+    language the request asks for (English for a client that asks for none).
     """
     backend = cfg.chat_backend
     section = getattr(cfg, backend, None) if backend else None
@@ -165,7 +187,7 @@ def model_json(cfg: Any) -> dict[str, Any]:
         label = backend
     return {
         "backend": backend,
-        "backend_label": label,
+        "backend_label": _kind_words(label),
         "name": name,
         "embedding": cfg.embedding_backend or "none",
     }
@@ -351,13 +373,13 @@ def settings_json() -> dict[str, Any]:
             "chat_backends": [
                 {
                     "key": key,
-                    "label": label,
+                    "label": _choice_label(key, label),
                     "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
                 }
                 for key, label in onboard.CHAT_BACKENDS
             ],
             "embedding_backends": [
-                {"key": key, "label": label}
+                {"key": key, "label": _choice_label(key, label)}
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
         },
