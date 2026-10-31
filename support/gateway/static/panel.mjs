@@ -483,6 +483,7 @@ export function setupPanel({
     Object.assign(state, {chat: now, rows: [], more: false, unavailable: [], loaded: false, error: '', scope: 'all', notice: '', all: false});
     state.folds.clear();
     closeRow();
+    scheduled.rescope(); // its list is read again by the refresh below, when the tab is open
     drawHeader();
     drawBody();
     return refresh();

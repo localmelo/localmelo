@@ -230,6 +230,31 @@ test("a side chat lists its own chores and says so; the main chat's list is unsc
   assert.ok(side.text().includes('This chat’s own chores. The main chat lists all of them.'));
 });
 
+test("a new chat takes the tab: the old chat's list, open row and edit go, and a read still out is dropped", async () => {
+  const h = harness({chores: [chore('a')], chat: 'chat-a'});
+  await h.tab.show();
+  await h.open();
+  h.button('Edit time: Chore a').click();
+  assert.notEqual(h.tab.state.edit, null);
+  h.chat = 'chat-b';
+  h.chores = [chore('b', {front_id: 'chat-b'})];
+  h.tab.rescope();
+  assert.deepEqual([h.tab.state.edit, h.tab.state.open, h.tab.state.chores.length, h.tab.state.loaded], [null, null, 0, false]);
+  assert.equal(h.button('Save'), null, "the old chat's editor is gone");
+  // Edits were open when the chat changed: the quiet reload (which refuses to interrupt one) now loads the new chat.
+  await h.tab.reload();
+  assert.deepEqual(h.calls.at(-1), ['GET', '/chores?session_id=chat-b', undefined]);
+  assert.ok(h.text().includes('Chore b') && !h.text().includes('Chore a'));
+  // A read the old chat started and that comes back late is not the new chat's list.
+  h.chat = 'chat-c';
+  h.chores = [chore('c', {front_id: 'chat-c'})];
+  const late = h.tab.show();
+  h.tab.rescope();
+  await late;
+  assert.equal(h.tab.state.loaded, false);
+  assert.ok(!h.text().includes('Chore c'));
+});
+
 test('an unreadable schedule says so; a quiet reload keeps what is shown and never interrupts an edit', async () => {
   const down = harness({fail: {'GET /chores': 'The session store is not available.'}});
   await down.tab.show();

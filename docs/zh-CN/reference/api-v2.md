@@ -377,7 +377,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/sessions
 
-最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。
+最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。旁支对话有了轮次，或有了 `attention.echo` 或 `attention.card` 事件（它用代码接了一个任务，还没有轮次），才会列出。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
@@ -493,7 +493,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
-- 在任务会话上使用 `as_task` 返回 400 `invalid_request`；主对话和旁支对话都接受它，旁支对话从第二条消息起适用代码规则（`/task`、控制短语、跟进、定时事项和提醒），任务属于那个旁支对话。委派时重复的 `client_request_id` 返回同一条回执。
+- 在任务会话上使用 `as_task` 返回 400 `invalid_request`；主对话和旁支对话都接受它（`POST /api/sessions` 带 `turn.as_task` 也一样：先创建一个空对话，用这条消息命名，返回 201 以及 `session` 和任务的 `echo`，没有轮次；它不是幂等的，任务无法开始时不会留下对话），旁支对话从第二条消息起适用代码规则（`/task`、控制短语、跟进、定时事项和提醒），任务属于那个旁支对话。委派时重复的 `client_request_id` 返回同一条回执。
 - 一轮的回执存在被说话的那个对话里。关于别的对话的任务的回执带 `from_main: true` 或 `from_chat`（那个对话的标题）。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
 - `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
@@ -793,6 +793,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话被删除。
 - 主对话返回 409 `main_chat`（`The main chat is always there: it cannot be deleted.`），并保持原样。
 - 204 且无响应体：该会话的行、轮次、事件和 blob 都已删除，它在记忆对话索引中的条目也已删除。melo 在这个对话里产生的笔记会保留（笔记比对话活得久，之后显示为 `from a deleted chat`）；`?notes=forget` 会一并忘记。`notes` 的其他取值返回 400。
+- 旁支对话没做完的任务和定时事项从此归主对话（它们的 `front_id` 变成主对话的），仍在等人答复的卡片会在主对话里重新写一张；已完成的任务保留原来的记录。
 - 在仍在进行的 security-1b 改动中，轮次运行或启动排队期间，409 `session_busy` 会拒绝删除；它不会取消该轮次，也不会删除其行。请取消或等待它结束，然后重试。持有会话锁的维护操作也可能短暂地返回该错误，即使没有轮次在运行；请等待后重试。
 - 未知会话返回 404 `not_found`。
 

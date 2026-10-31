@@ -4607,6 +4607,42 @@ test('a side chat whose task waits for you gets the dot, and the main chat count
   assert.doesNotMatch(flatten(h.element('main-chat-row')), /waiting in/);
 });
 
+test('a result held while the person types shows in its own chat, never in the one opened meanwhile', async () => {
+  const h = harness(sideRoutes());
+  await h.run('init()');
+  const input = h.element('input');
+  input.focus();
+  input.value = 'half a thought';
+  input.listeners.input.forEach((fn) => fn({}));
+  h.stream().emit({id: 70, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'done', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: 'Fixed.', at: NOW}});
+  assert.doesNotMatch(h.text('messages'), /Done: Fix CI/, 'held while the person types');
+  await openSide(h);
+  assert.equal(h.state().activeId, 'a');
+  h.run('lastKey = 0');
+  h.timers.filter((timer) => !timer.cleared && timer.ms === 10_000).at(-1).handler();
+  assert.doesNotMatch(h.text('messages'), /Done: Fix CI/, 'the main chat\'s result is not this side chat\'s');
+  assert.deepEqual(h.state().view.cards ?? [], []);
+});
+
+test('the answer to a tap on an echo lands in the chat the tap was made in', async () => {
+  let release;
+  const slow = new Promise((resolve) => { release = resolve; });
+  const paused = echoRow(91, {echo: 'control', action: 'pause', task_id: 't1', title: 'Book a table', undo: {state: 'resume'}, line: 'Paused: Book a table'});
+  const h = harness(sideRoutes({'POST /front/echoes/91': () => slow}, {echoes: [paused]}));
+  await h.run('init()');
+  await openSide(h);
+  findNode(h.element('messages'), (node) => node.textContent === 'Undo').click();
+  await settle();
+  // The person goes back to the main chat before the gateway answers.
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(h.state().activeId, 'm');
+  release({status: 200, body: {echo: echoRow(93, {echo: 'undone', task_id: 't1', title: 'Book a table', of: 91, line: 'Undone: Book a table is going again'})}});
+  await settle();
+  assert.doesNotMatch(h.text('messages'), /Undone: Book a table/);
+  assert.deepEqual(h.state().view.echoes ?? [], []);
+});
+
 test('a side chat that started no task stays a plain list of turns', async () => {
   const h = harness(sideRoutes());
   await h.run('init()');

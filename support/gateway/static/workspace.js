@@ -1177,11 +1177,13 @@ async function actOnEcho(echo, does, level) {
     renderMessages(false);
     return;
   }
+  // The chat the tap is made in: the answer belongs to it, not to the chat open when it arrives.
+  const view = S.view;
   try {
     // A side chat's echo is found in that chat.
     const chat = mainActive() ? {} : { session_id: S.activeId };
     const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}), ...chat } });
-    if (S.view) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    if (view && S.view === view) view.echoes = mergeEchoes(view.echoes ?? [], [body.echo]);
     // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
     panel.refresh();
   } catch (error) {
@@ -1205,7 +1207,7 @@ function holdOrShow(view, frame) {
     view.cards = mergeCards(view.cards ?? [], [frame]);
     return;
   }
-  heldCards.push(frame);
+  heldCards.push({ view, frame });
   clearTimeout(heldTimer);
   heldTimer = setTimeout(showHeld, TYPING_HOLD_MS);
 }
@@ -1216,7 +1218,10 @@ function showHeld() {
     heldTimer = setTimeout(showHeld, TYPING_HOLD_MS - (Date.now() - lastKey));
     return;
   }
-  if (S.view && heldCards.length) S.view.cards = mergeCards(S.view.cards ?? [], heldCards);
+  // A result shows in the chat it came for. One held for a chat the person has left comes
+  // back with that chat's page.
+  const mine = heldCards.filter((item) => item.view === S.view).map((item) => item.frame);
+  if (S.view && mine.length) S.view.cards = mergeCards(S.view.cards ?? [], mine);
   heldCards = [];
   renderMessages(false);
 }

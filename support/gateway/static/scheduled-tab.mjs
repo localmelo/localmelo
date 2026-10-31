@@ -232,6 +232,13 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     root.replaceChildren(...nodes);
   }
 
+  // The panel follows another chat: what was listed, opened or being edited belongs to the old one.
+  function rescope() {
+    reads += 1; // a read the old chat started is not the new chat's list
+    Object.assign(state, {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false});
+    draw();
+  }
+
   draw();
-  return {root, state, show: () => load(), reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
+  return {root, state, show: () => load(), rescope, reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
 }
