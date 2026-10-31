@@ -5,6 +5,10 @@ above the running app (prompt_toolkit erases the live area, the input box
 and the status bar, prints, and draws them again). What is printed in one
 pass of the event loop is printed in one go, so a burst of events costs one
 redraw. :class:`RecordingOut` keeps plain text, for tests.
+
+While a slash command runs (:func:`~localmelo.support.cli.hanging.under_command`)
+both hang what is printed under the command's echo and report a width less
+the indent; ``width`` is what a body has, not the terminal's.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.output import Output
 from rich.console import Console, RenderableType
 
+from localmelo.support.cli import hanging
 from localmelo.support.cli.theme import active
 
 # Cursor home, erase the screen, erase the scrollback.
@@ -73,12 +78,16 @@ class TerminalOut:
 
     @property
     def width(self) -> int:
+        """The width a printed body has: the terminal's, less a command's hang indent."""
+        return hanging.narrowed(self._columns())
+
+    def _columns(self) -> int:
         return max(1, self._output.get_size().columns)
 
     def render(self, *renderables: RenderableType) -> str:
-        """*renderables* as ANSI text at the current width."""
+        """*renderables* as ANSI text at the terminal's width."""
         buffer = io.StringIO()
-        console = _console(buffer, self.width, no_color=self._no_color)
+        console = _console(buffer, self._columns(), no_color=self._no_color)
         for renderable in renderables:
             console.print(renderable)
         return buffer.getvalue()
@@ -86,7 +95,7 @@ class TerminalOut:
     def print(self, *renderables: RenderableType) -> None:
         if self._detached:
             return
-        self._enqueue(self.render(*renderables))
+        self._enqueue(self.render(*hanging.wrap(renderables)))
 
     def clear_screen(self) -> bool:
         """Wipe the screen and its scrollback before what is printed next.
@@ -194,10 +203,10 @@ class RecordingOut:
 
     @property
     def width(self) -> int:
-        return self._width
+        return hanging.narrowed(self._width)
 
     def print(self, *renderables: RenderableType) -> None:
-        for renderable in renderables:
+        for renderable in hanging.wrap(renderables):
             self.console.print(renderable)
 
     def write_control(self, sequence: str) -> bool:
