@@ -225,11 +225,11 @@ async def test_a_newer_schema_raises_and_an_empty_file_has_no_records(
     await store.create_session()
     await store.aclose()
     conn = sqlite3.connect(newer)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     conn.commit()
     conn.close()
     reader = SessionReader(newer)
-    with pytest.raises(SessionStoreError, match="has schema version 3"):
+    with pytest.raises(SessionStoreError, match="has schema version 4"):
         await reader.changes()
     await reader.aclose()
     junk = tmp_path / "junk.db"

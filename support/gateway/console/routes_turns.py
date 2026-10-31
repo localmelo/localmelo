@@ -277,6 +277,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
+            if console.asks.holds(session_id):
+                # The chat is answering a task's question: the message waits,
+                # shown as queued, and runs as the chat's next turn (#369).
+                echo = await _store_call(
+                    console,
+                    console.asks.queue(session_id, body.text, composed, key),
+                    session_id,
+                )
+                return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:

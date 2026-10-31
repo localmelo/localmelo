@@ -506,6 +506,8 @@ export function newTurn(row) {
     turn: int(source.turn) ?? 0,
     runId: String(source.run_id ?? ""),
     userText: String(source.user_text ?? ""),
+    // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
+    origin: String(source.origin ?? ""),
     status: String(source.status ?? ""),
     cause: String(source.cause ?? ""),
     answer,

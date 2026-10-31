@@ -60,6 +60,7 @@ from . import (
     routes_tasks,
     routes_turns,
 )
+from .asks import OwnerAsks
 from .cards import MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
@@ -174,6 +175,9 @@ class Console:
             broker=self.broker,
             memory=self.memory,
         )
+        # A task asks the chat that started it when it is stuck (#369).
+        self.asks = OwnerAsks(self)
+        self.workers.owner = self.asks
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         # The one main chat of the store's file, once it is open; and the
         # cards that come back to it from side chats and tasks.
@@ -365,6 +369,10 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            try:
+                await self.asks.expire_stale()
+            except Exception:
+                logger.exception("Could not mark the asks of the last run expired")
             self.chore_runner.start()
         except SessionStoreError as exc:
             self._store_ok = False
@@ -444,6 +452,8 @@ class Console:
             try:
                 await self.workers.aclose()
             finally:
+                # The rows of the asks the close stopped land before the store closes.
+                await self.asks.aclose()
                 with contextlib.suppress(Exception):
                     await self.cards.flush()
                 await self.sessions.close_all()

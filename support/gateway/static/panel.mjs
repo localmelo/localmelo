@@ -213,8 +213,8 @@ export function setupPanel({
     return mark;
   }
   // A worker's second line says its state in words, then what it does or how it ended.
-  // A held worker says why in the server's words (`Waiting for a free model slot`).
-  const workerLine = (row) => (row.state === 'held' && row.activity ? row.activity
+  // A held or waiting worker says why in the server's words (`Waiting for a free model slot`, `Waiting on you`).
+  const workerLine = (row) => (['held', 'waiting'].includes(row.state) && row.activity ? row.activity
     : [stateWords(row.state), row.state === 'running' ? row.activity : LIVE.has(row.state) ? '' : row.result].filter(Boolean).join(' · '));
   function rowNode(row, worker = false) {
     const item = node('li', 'activity-row');

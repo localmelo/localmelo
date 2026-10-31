@@ -209,9 +209,21 @@ export function cardNode({doc, card, open, resume = null}) {
 
 // ── Echoes: what the main chat did with a task ──
 
-const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin"]);
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin",
+  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷",
-  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→"};
+  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…"};
+// A task's question (#369): its seven fields, and the five parts of a question to the person.
+const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
+const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];
+const camel = (name) => name.replace(/_(\w)/g, (_, letter) => letter.toUpperCase());
+
+/** Whether *turn* is the chat's internal turn on a task's question: its row stands in for the person's bubble. */
+export function askTurn(turn, echoes = []) {
+  if (turn?.origin === "ask_owner") return true;
+  const text = String(turn?.userText ?? "");
+  return echoes.some((echo) => echo.kind === "task_ask" && echo.lead && text.startsWith(echo.lead));
+}
 
 /** An echo as the page keeps it, from an `echoes` row or an `attention.echo` frame; null if unusable. */
 export function readEcho(row) {
@@ -270,9 +282,11 @@ export function echoNodes({doc, echo, done = false, act}) {
     return node;
   };
   const nodes = [];
+  // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing.
+  if (echo.kind === "dequeued" || (echo.kind === "queued" && done)) return nodes;
   if (echo.typed) {
     const article = el("article", "msg user");
-    article.append(el("div", "user-bubble", echo.typed));
+    article.append(el("div", echo.kind === "queued" ? "user-bubble queued" : "user-bubble", echo.typed));
     nodes.push(article);
   }
   const line = el("div", "echo");
@@ -301,6 +315,7 @@ export function echoNodes({doc, echo, done = false, act}) {
   // A task of another chat says whose it is (a side chat's title, or the main chat).
   const owner = echo.from_main ? t("chat.main") : echo.from_chat;
   if (owner) body.append(el("p", "echo-sub", t("chat.fromChat", {title: owner})));
+  body.append(...askNodes({el, echo, done, act}));
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done)) {
     const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);
@@ -315,6 +330,48 @@ export function echoNodes({doc, echo, done = false, act}) {
   }
   if (buttons.children.length) body.append(buttons);
   nodes.push(line);
+  return nodes;
+}
+
+/** A task's question folded under its row, an answer quoted, or a question to the person with its reply box. */
+function askNodes({el, echo, done, act}) {
+  const fields = (values, names, label) => {
+    const list = el("dl", "ask-fields");
+    for (const name of names) {
+      const value = String(values?.[name] ?? "").trim();
+      if (!value) continue;
+      const term = el("dt", "", label(camel(name)));
+      const text = el("dd", "", value);
+      text.dataset.part = name;
+      list.append(term, text);
+    }
+    return list;
+  };
+  if (echo.kind === "task_ask") {
+    const details = el("details", "ask-details");
+    details.append(el("summary", "", t("ask.show")), fields(echo.fields, ASK_FIELDS, (name) => t(`ask.field.${name}`)));
+    return [details];
+  }
+  if (echo.kind === "task_answered" || (echo.kind === "ask_end" && echo.text)) return [el("blockquote", "ask-quote", echo.text)];
+  if (echo.kind !== "task_escalate") return [];
+  const nodes = [fields(echo.parts, PERSON_PARTS, (name) => t(`ask.part.${name}`))];
+  if (done) return nodes;
+  const form = el("form", "ask-reply");
+  const box = el("textarea", "ask-reply-text");
+  box.rows = 2;
+  box.placeholder = t("ask.replyHint");
+  box.setAttribute("aria-label", t("ask.replyLabel", {title: echo.title ?? ""}));
+  const send = el("button", "outline-button", t("ask.send"));
+  send.type = "submit";
+  form.append(box, send);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = box.value.trim();
+    if (!text) return box.focus();
+    send.disabled = true;
+    return act(echo, "reply", null, text);
+  });
+  nodes.push(form);
   return nodes;
 }
 

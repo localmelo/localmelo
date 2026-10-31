@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import Field
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
@@ -108,6 +109,7 @@ from localmelo.support.sessions.agents import (
 )
 from localmelo.support.sessions.store import SessionStoreError, StoredEvent, TurnInfo
 
+from .asks import ASK_ORIGIN, ASK_STEPS, PERSON_PARTS
 from .bodies import Body
 from .cards import CARD_EVENT, card_json
 from .errors import ApiError
@@ -323,6 +325,8 @@ class FrontAgent(Agent):
     ) -> RunResult:
         front = self.front
         turn = front.current_turn() if front is not None else None
+        if turn is not None and turn.origin == ASK_ORIGIN:
+            return await self.answer_ask(query, on_event=on_event, **kwargs)
         if front is None or turn is None or on_event is None:
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
@@ -406,6 +410,17 @@ class FrontAgent(Agent):
                 logger.exception("The main chat could not hand its turn off")
         return dataclasses.replace(outcome, status="completed", result=text, error="")
 
+    async def answer_ask(self, query: str, **kwargs: Any) -> RunResult:
+        """A task's question (#369): at most ASK_STEPS steps, never handed off, no news."""
+        saved = self.options
+        self.options = dataclasses.replace(
+            saved, max_steps=ASK_STEPS, answer_on_stop=True
+        )
+        try:
+            return await Agent.run_task(self, query, **kwargs)
+        finally:
+            self.options = saved
+
 
 class SideAgent(FrontAgent):
     """A side chat's Agent: the full agent loop with the task tools, and its tasks' news.
@@ -419,6 +434,9 @@ class SideAgent(FrontAgent):
     async def run_task(
         self, query: str, *, on_event: Any = None, **kwargs: Any
     ) -> RunResult:
+        turn = self.front.current_turn() if self.front is not None else None
+        if turn is not None and turn.origin == ASK_ORIGIN:
+            return await self.answer_ask(query, on_event=on_event, **kwargs)
         news = ""
         if self.front is not None:
             try:
@@ -526,6 +544,19 @@ TASK_TOOLS: Final = (
         'follow-up ("finish it", "commit it") instead of starting a new task.',
         {"task_id": _ID},
     ),
+    _tool(
+        "task_answer",
+        "Only while you handle a task's question: answer that task in your own "
+        "words. The task reads it as data and goes on.",
+        {"task_id": _ID, "answer": {"type": "string"}},
+    ),
+    _tool(
+        "ask_person",
+        "Only while you handle a task's question you cannot answer: ask the user. "
+        "Every part is required; choices are the options with their trade-offs, and "
+        "question is the exact question. The task waits for the user's reply.",
+        {"task_id": _ID, **{name: {"type": "string"} for name in PERSON_PARTS}},
+    ),
 )
 
 
@@ -547,6 +578,8 @@ class TaskTools(BaseToolProvider):
             "task_set_priority": self.set_priority,
             "task_control": self.control,
             "task_message": self.message,
+            "task_answer": self.answer_task,
+            "ask_person": self.ask_person,
         }
         return [
             ProvidedTool(definition=d, function=functions[d.name]) for d in TASK_TOOLS
@@ -560,6 +593,11 @@ class TaskTools(BaseToolProvider):
         turn = front.current_turn()
         if turn is None:
             return "Not done: no message of the user's is being answered."
+        if turn.origin == ASK_ORIGIN:
+            return (
+                "Not done: a task's question starts no task; answer it with "
+                "task_answer, or ask the user with ask_person."
+            )
         if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
             return (
                 "Not done: one task per message. Tell the user what else could start."
@@ -595,6 +633,8 @@ class TaskTools(BaseToolProvider):
         lines = [await front.row(record)]
         if record.reason:
             lines.append(f"why this priority: {record.reason}")
+        if record.state not in FINISHED:
+            lines += _live_lines(front, record.task_id)
         answer = await front.answer(record, ANSWER_CHARS_ONE)
         if answer:
             lines.append(f"answer: {answer}")
@@ -645,16 +685,43 @@ class TaskTools(BaseToolProvider):
         echo = await front.follow(record, turn.user_text, typed=typed, turn=turn)
         if echo.get("echo") != "sent":
             return f"Not done: {echo.get('line', '')}"
-        how = (
-            "it continues in its own session with the user's message as its next turn"
-            if echo.get("how") == "continued"
-            else "it reads the user's message at its next step"
-        )
+        how = {
+            "continued": "it continues in its own session with the user's message "
+            "as its next turn",
+            "answered": "the user's message answers the question it waited on",
+        }.get(str(echo.get("how")), "it reads the user's message at its next step")
         return (
             f"Sent to task {record.task_id}: {record.title}{_from(echo)}; {how}. Its "
             f"result comes back to {'the chat that started it' if _from(echo) else 'this chat'} "
             f"as a card. Name the task. {_tell(typed)}"
         )
+
+    async def answer_task(self, task_id: str = "", answer: str = "", **_: Any) -> str:
+        asks = self._front.console.asks
+        return await asks.answer(self._front, str(task_id), str(answer))
+
+    async def ask_person(self, task_id: str = "", **parts: Any) -> str:
+        asks = self._front.console.asks
+        return await asks.ask_person(self._front, str(task_id), parts)
+
+
+def _live_lines(front: Front, task_id: str) -> list[str]:
+    """What a running task does now, read live: its step, last action, question and plan note."""
+    workers, owner = front.console.workers, front.console.workers.owner
+    live = workers.live(task_id)
+    asked = owner.waiting(task_id) if owner is not None else None
+    lines = []
+    if live.get("step"):
+        lines.append(f"step {live['step']} of {live.get('budget') or '?'}")
+    if live.get("action"):
+        name, args = live["action"]
+        lines.append(f"last action: {name} {redact_secrets(str(args))[0][:160]}")
+    if asked:
+        who = "the user" if asked["on"] == "person" else asked["chat_title"]
+        lines.append(f"waiting on {who} for the answer to its question")
+    if live.get("left"):
+        lines.append(f"its last note: {answer_head(live['left'], ANSWER_CHARS)}")
+    return lines
 
 
 class FrontTools(TaskTools):
@@ -1358,12 +1425,16 @@ class Front:
             await store.events_of_type(chat, ECHO_EVENT, after_id=after_id, limit=200)
         )
 
-    async def act(self, echo_id: int, do: str, level: object = None) -> dict[str, Any]:
-        """The person's tap on an echo: Undo, Apply, Start as a task, a level, or a chore's Save, Just once and Cancel."""
+    async def act(
+        self, echo_id: int, do: str, level: object = None, text: str = ""
+    ) -> dict[str, Any]:
+        """The person's tap on an echo: Undo, Apply, Start as a task, a level, a chore's Save, Just once and Cancel, or a reply to a task."""
         async with self._acting:
-            return await self._act(echo_id, do, level)
+            return await self._act(echo_id, do, level, text)
 
-    async def _act(self, echo_id: int, do: str, level: object) -> dict[str, Any]:
+    async def _act(
+        self, echo_id: int, do: str, level: object, text: str = ""
+    ) -> dict[str, Any]:
         found = await self._echoes(after_id=echo_id - 1)
         echo = found[0].event.get("data") if found and found[0].id == echo_id else None
         if not isinstance(echo, dict):
@@ -1375,6 +1446,18 @@ class Front:
         kind = echo.get("echo")
         if kind in ("chore", "chore_saved"):
             return await self._act_chore(echo_id, echo, do)
+        if do == "reply" and kind == "task_escalate":
+            # The person's answer to a task's question (#369).
+            text = text.strip()
+            if not text:
+                raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+            asks = self.console.asks
+            replied = await asks.reply(
+                str(echo.get("task_id")), text, str(echo.get("ask_id"))
+            )
+            if replied is None:
+                raise ApiError(409, "already_answered", t("errors.echoAnswered"))
+            return replied
         if do == "start" and kind == "ask":
             words = str(echo.get("words", ""))
             return await self.delegate(
@@ -1516,8 +1599,10 @@ def _plain(exc: Exception) -> str:
 
 
 class EchoAction(Body):
-    do: Literal["undo", "apply", "start", "level", "save", "once", "cancel"]
+    do: Literal["undo", "apply", "start", "level", "save", "once", "cancel", "reply"]
     level: str | int | None = None
+    # A reply's words (``do: reply``, a task's question to the person).
+    text: str = Field(default="", max_length=8_000)
     # The side chat the echo is in; absent: the main chat.
     session_id: str | None = None
 
@@ -1533,7 +1618,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             if info is None or info.kind != "chat":
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         echo = await console.front_for(body.session_id).act(
-            echo_id, body.do, body.level
+            echo_id, body.do, body.level, body.text
         )
         return JSONResponse(content={"echo": echo})
 

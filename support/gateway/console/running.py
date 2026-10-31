@@ -220,6 +220,9 @@ async def item_activity(
     changed = float(events[0].event.get("ts") or 0) if events else 0.0
     if kind in ("chat", "task") and console.broker.pending(owner):
         return activity_text(state="waiting"), changed
+    if kind == "task" and (asked := console.asks.activity(owner)) is not None:
+        # Waiting on its chat's answer, or on the person's (#369).
+        return asked, changed
     if kind in ("chat", "task") and (reason := console.gate.held(owner)):
         return activity_text(state="held", reason=reason), changed
     found = event_activity(stored.event for stored in events)

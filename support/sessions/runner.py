@@ -415,6 +415,7 @@ class SessionRunner:
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
         words: str | None = None,
+        origin: str = "",
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -422,7 +423,8 @@ class SessionRunner:
         RunResult. *routine* names the run's routine (``Agent.run_task``'s
         ``routine=``), passed only when given. *words* are the person's own
         words when *text* is not (``Agent.run_task``'s ``user_words=``; the
-        typed text otherwise). With *client_request_id*, a
+        typed text otherwise). *origin* marks a turn the person did not
+        begin (``SessionStore.begin_turn``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
@@ -436,6 +438,7 @@ class SessionRunner:
             tuple(attachments),
             own_task=True,
             words=words,
+            origin=origin,
         )
         return turn.turn
 
@@ -463,6 +466,7 @@ class SessionRunner:
         *,
         own_task: bool,
         words: str | None = None,
+        origin: str = "",
     ) -> _Turn:
         self._check_open()
         typed_text = text
@@ -516,6 +520,7 @@ class SessionRunner:
                 attachments,
                 typed_text,
                 words,
+                origin,
             )
         )
         self._begin = begin
@@ -558,6 +563,7 @@ class SessionRunner:
         attachments: tuple[TextAttachment, ...],
         typed_text: str,
         words: str | None = None,
+        origin: str = "",
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -573,6 +579,7 @@ class SessionRunner:
                 create_scope=self._create_scope_key,
                 attachments=attachments,
                 typed_text=typed_text if attachments else None,
+                origin=origin,
             )
             self._create_scope_key = False
         finally:

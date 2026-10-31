@@ -29,7 +29,7 @@ import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
 import {
   activity,
   applyEvent,
@@ -1149,7 +1149,7 @@ function mainNodes(view, turns) {
   // A task that came back finished takes no more changes: its lines lose their buttons.
   const ended = new Set((view?.cards ?? []).filter((card) => ["done", "failed", "stopped"].includes(card.state)).map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
-    if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
+    if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
     if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard, resume: continueCard })];
     if (item.kind === "echo") {
       const echo = item.echo;
@@ -1163,8 +1163,8 @@ function mainNodes(view, turns) {
 // Echoes whose "Not now" was chosen on this page.
 const dismissed = new Set();
 
-/** A tap on an echo's button: Undo, Apply, Start as a task, or a level from Change. */
-async function actOnEcho(echo, does, level) {
+/** A tap on an echo's button: Undo, Apply, Start as a task, a level from Change, or a reply to a task's question. */
+async function actOnEcho(echo, does, level, text) {
   if (does === "dismiss") {
     dismissed.add(echo.id);
     renderMessages(false);
@@ -1173,7 +1173,7 @@ async function actOnEcho(echo, does, level) {
   try {
     // A side chat's echo is found in that chat.
     const chat = mainActive() ? {} : { session_id: S.activeId };
-    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}), ...chat } });
+    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}), ...(text ? { text } : {}), ...chat } });
     if (S.view) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
     // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
     panel.refresh();
@@ -1233,11 +1233,13 @@ function openCard(card) {
   else openSession(card.sourceId);
 }
 
-function turnNode(turn, newest = false) {
+function turnNode(turn, newest = false, asked = askTurn(turn)) {
   const section = el("section", "turn");
   if (turn.undone) section.classList.add("undone");
   section.dataset.turnId = turn.id || String(turn.turn);
-  section.append(userNode(turn), assistantNode(turn, newest));
+  // A task's question is the row above it, not a message the person typed (#369).
+  if (!asked) section.append(userNode(turn));
+  section.append(assistantNode(turn, newest));
   return section;
 }
 
