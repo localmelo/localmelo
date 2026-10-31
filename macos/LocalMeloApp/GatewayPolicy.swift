@@ -193,9 +193,72 @@ func ownsListener(_ pids: [Int32]?, child: Int32) -> Bool {
     return !pids.isEmpty && pids.allSatisfy { $0 == child }
 }
 
+// A gateway the app did not start has no app instance: its pages send no header.
 func acceptsInstance(_ header: String?, expected: String, childRunning: Bool) -> Bool {
-    childRunning && header == expected
+    childRunning && (header ?? "") == expected
 }
+
+/// The gateway the app talks to: its own child, or a running one it attached to.
+protocol GatewayChild: AnyObject {
+    var isRunning: Bool { get }
+    var processIdentifier: Int32 { get }
+    /// Started by this app: stopped on Quit and on a failure. An attached one never is.
+    var owned: Bool { get }
+}
+
+extension Process: GatewayChild {
+    var owned: Bool { true }
+}
+
+final class AttachedGateway: GatewayChild {
+    let processIdentifier: Int32
+    init(pid: Int32) { processIdentifier = pid }
+    var isRunning: Bool { kill(processIdentifier, 0) == 0 || errno == EPERM }
+    var owned: Bool { false }
+}
+
+/// What `~/.cache/localmelo/gateway/endpoint.json` says: the running gateway that holds
+/// the main chat. Only one on 127.0.0.1, which the app's pages can reach, is used.
+struct GatewayEndpoint: Equatable {
+    let pid: Int32
+    let port: Int
+    let instance: String
+    let id: String
+}
+
+func gatewayEndpoint(_ data: Data?) -> GatewayEndpoint? {
+    guard let data = data,
+          let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let pid = body["pid"] as? Int, pid > 0, pid <= Int(Int32.max),
+          let port = body["port"] as? Int, port > 0, port <= 65535,
+          body["host"] as? String == "127.0.0.1",
+          let id = body["id"] as? String, !id.isEmpty, id.count <= 64 else { return nil }
+    let instance = body["instance"] as? String ?? ""
+    return GatewayEndpoint(pid: Int32(pid), port: port, instance: instance, id: id)
+}
+
+enum GatewayStart: Equatable {
+    case attach(GatewayEndpoint)
+    case start
+}
+
+/// Attach to the gateway the file names when its process lives; else start one.
+func gatewayStart(_ endpoint: GatewayEndpoint?, alive: (Int32) -> Bool) -> GatewayStart {
+    guard let endpoint = endpoint, alive(endpoint.pid) else { return .start }
+    return .attach(endpoint)
+}
+
+/// `GET /` of that port must carry the file's id: else the file is stale.
+func attachConfirmed(status: Int?, gatewayHeader: String?, endpoint: GatewayEndpoint) -> Bool {
+    status == 200 && gatewayHeader == endpoint.id
+}
+
+func quitTitle(attached: Bool) -> String {
+    attached ? "Quit localmelo (the gateway keeps running)" : "Quit localmelo"
+}
+
+/// An attached gateway that ends was stopped elsewhere (`melo serve stop`, say).
+let attachedStoppedMessage = "The gateway it was using has stopped. Try Again starts a new one."
 
 /// The port in the gateway's startup line `Gateway: http://HOST:PORT`, where
 /// HOST may be an IPv6 address in brackets. Any other line gives nil.

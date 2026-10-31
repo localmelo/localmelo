@@ -17,6 +17,7 @@ from localmelo.support.gateway.chat_gate import call_log_dir
 from localmelo.support.gateway.guard import app_instance
 from localmelo.support.gateway.machine_monitor import read_pmset
 from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
+from localmelo.support.gateway_endpoint import GATEWAY_HEADER
 
 _STATIC = Path(__file__).with_name("static")
 
@@ -105,6 +106,10 @@ def mount(
             if instance
             else {}
         )
+        # The id in the gateway's endpoint file: a reader confirms the file is live.
+        gateway_id = getattr(app.state, "gateway_id", "")
+        if gateway_id:
+            headers = {**headers, GATEWAY_HEADER: gateway_id}
         return HTMLResponse(
             (_STATIC / "index.html").read_text(encoding="utf-8"), headers=headers
         )

@@ -114,6 +114,7 @@ def test_startup_banner_uses_the_resolved_title(
     assert first.quit() == 0
     resumed = melo("--developer", flag, *(["hello"] if flag == "-r" else []))
     resumed.see('Resumed "hello"')
+    resumed.see('session    "hello" (resumed)')
     assert 'session    "hello" (resumed)' in resumed.text()
     assert "session    new" not in resumed.text()
     assert resumed.quit() == 0
@@ -130,5 +131,7 @@ def test_startup_picker_precedes_the_banner(melo: Callable[..., Melo]) -> None:
     assert "╭─ melo" not in picker.text()
     picker.type("\r")
     picker.see('Resumed "hello"')
+    # The banner's session row can reach the terminal after the recap's first line.
+    picker.see('session    "hello" (resumed)')
     assert 'session    "hello" (resumed)' in picker.text()
     assert picker.quit() == 0

@@ -75,6 +75,8 @@ UI_MODES = ("default", "developer")
 STATUS_LINES = ("auto", "off")
 CLI_COLORS = ("auto", "16", "256", "truecolor")
 CLI_BACKGROUNDS = ("auto", "dark", "light")
+# What bare melo opens: the main chat through the gateway, or a chat of its own.
+CLI_CHATS = ("main", "local")
 
 
 @dataclass
@@ -148,6 +150,9 @@ class CliConfig:
     # The terminal's colour depth and background; "auto" detects them.
     colors: str = "auto"  # auto | 16 | 256 | truecolor
     background: str = "auto"  # auto | dark | light
+    # "main": bare melo opens the main chat through the gateway (started when
+    # none runs); "local": the terminal's own chat, without the gateway.
+    chat: str = "main"
 
 
 @dataclass
@@ -541,7 +546,11 @@ class Config:
             errors.append(
                 f"[cli] status_line {cli.status_line!r} is not one of {STATUS_LINES}"
             )
-        for key, allowed in (("colors", CLI_COLORS), ("background", CLI_BACKGROUNDS)):
+        for key, allowed in (
+            ("colors", CLI_COLORS),
+            ("background", CLI_BACKGROUNDS),
+            ("chat", CLI_CHATS),
+        ):
             if getattr(cli, key) not in allowed:
                 errors.append(
                     f"[cli] {key} {getattr(cli, key)!r} is not one of {allowed}"

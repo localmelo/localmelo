@@ -26,7 +26,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var pill: PillController!
     // Where "Waiting for your approval" goes: the console route of the first chat or task that waits.
     private var pendingRoute: String?
-    private var child: Process?
+    // The app's own gateway, or a running one it attached to (see `GatewayChild.owned`).
+    private var child: GatewayChild?
+    // Counts starts, so an endpoint probe from an earlier Try Again does nothing.
+    private var startAttempt = 0
+    private var quitItems: [NSMenuItem] = []
     private var timer: Timer?
     private var healthTimer: Timer?
     private var deadline = Date()
@@ -44,7 +48,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var page = PageState()
     private var signInItems: [NSMenuItem] = []
     // Instance collision check, not authentication against another local process.
-    private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    private let ownInstance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    // The instance of the gateway the app talks to: its own, or the attached one's (empty
+    // when the terminal started it).
+    private var instance = ""
     // The gateway picks its own port (`--port 0`) and prints it; 0 until then.
     private var port = 0
     private var logHandle: FileHandle?
@@ -112,6 +119,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting),
                           showPet: #selector(showPet))
         signInItems = [signIn] + (menuBar.statusItem.menu?.items.filter { $0.action == #selector(signInAgain) } ?? [])
+        let quit = #selector(NSApplication.terminate(_:))
+        quitItems = appMenu.items.filter { $0.action == quit }
+            + (menuBar.statusItem.menu?.items.filter { $0.action == quit } ?? [])
         updateSignInItems()
     }
 
@@ -269,7 +279,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // A probe response can arrive just before another process takes the port,
     // so check the kernel's listener again immediately before a code leaves
     // the app: a listener the app's child does not own must receive none.
-    private func sendWhenOwned(child: Process, _ send: @escaping () -> Void) {
+    private func sendWhenOwned(child: GatewayChild, _ send: @escaping () -> Void) {
         listenerPIDs { [weak self] pids in
             guard let self = self, !self.stopping else { return }
             guard child.isRunning else {
@@ -291,7 +301,56 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     // Also what Try Again runs: a new child, with nothing kept from an earlier one.
+    // A gateway already running (the terminal's, say) holds the main chat's store, so
+    // the app attaches to it when the endpoint file names a live one, and starts its
+    // own only when none runs.
     private func startGateway() {
+        startAttempt += 1
+        let attempt = startAttempt
+        resetForStart()
+        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
+        let file = home.appendingPathComponent(".cache/localmelo/gateway/endpoint.json")
+        let found = gatewayEndpoint(try? Data(contentsOf: file))
+        guard case .attach(let endpoint) = gatewayStart(found, alive: { kill($0, 0) == 0 || errno == EPERM }),
+              let url = URL(string: "http://127.0.0.1:\(endpoint.port)/") else {
+            spawnGateway()
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        healthSession.dataTask(with: request) { [weak self] _, response, _ in
+            let http = response as? HTTPURLResponse
+            let confirmed = attachConfirmed(status: http?.statusCode,
+                                            gatewayHeader: http?.value(forHTTPHeaderField: "X-LocalMelo-Gateway"),
+                                            endpoint: endpoint)
+            DispatchQueue.main.async {
+                guard let self = self, self.startAttempt == attempt, !self.quitPending else { return }
+                if confirmed {
+                    self.attach(endpoint)
+                } else {
+                    self.spawnGateway()
+                }
+            }
+        }.resume()
+    }
+
+    // Signs in to a running gateway the app did not start, the same way as to its own:
+    // the listener check, the instance check, and one-use codes from the shared auth folder.
+    private func attach(_ endpoint: GatewayEndpoint) {
+        instance = endpoint.instance
+        port = endpoint.port
+        child = AttachedGateway(pid: endpoint.pid)
+        setQuitTitles(attached: true)
+        showStep()
+        deadline = Date().addingTimeInterval(20)
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkReady() }
+    }
+
+    private func setQuitTitles(attached: Bool) {
+        for item in quitItems { item.title = quitTitle(attached: attached) }
+    }
+
+    private func resetForStart() {
         stopping = false
         ready = false
         checking = false
@@ -303,7 +362,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         pet?.update(health: nil, stopped: false)
         pill?.update(health: nil, stopped: false)
         port = 0
+        instance = ownInstance
+        setQuitTitles(attached: false)
         showStep()
+    }
+
+    private func spawnGateway() {
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
             fail("The bundled gateway is missing.")
             return
@@ -328,7 +392,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         process.executableURL = executable
         process.arguments = ["--serve", "--allow-unconfigured", "--host", "127.0.0.1", "--port", "0"]
         var environment = ProcessInfo.processInfo.environment
-        environment["LOCALMELO_APP_INSTANCE"] = instance
+        environment["LOCALMELO_APP_INSTANCE"] = ownInstance
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
         let output = Pipe()
@@ -383,11 +447,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func checkReady() {
-        guard let child = child, child.isRunning else { return }
+        guard let child = child else { return }
+        guard child.isRunning else {
+            if !child.owned { fail(attachedStoppedMessage) }
+            return
+        }
         if Date() >= deadline {
             timer?.invalidate()
             stopping = true
-            kill(child.processIdentifier, SIGTERM)
+            if child.owned { kill(child.processIdentifier, SIGTERM) }
             fail(port == 0 ? "The gateway did not report its port." : "Gateway did not become ready on port \(port).")
             return
         }
@@ -410,7 +478,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     // Prove that the listener is this child before issuing any login code.
     // The identifier catches an accidental collision; it is not authentication.
-    private func signIn(child: Process, reload: Bool) {
+    private func signIn(child: GatewayChild, reload: Bool) {
         let url = URL(string: "http://127.0.0.1:\(port)/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
@@ -437,7 +505,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }.resume()
     }
 
-    private func issueLoginCodes(child: Process, reload: Bool) {
+    private func issueLoginCodes(child: GatewayChild, reload: Bool) {
         guard let python = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/python/bin/python3") else {
             retryLogin()
             return
@@ -510,7 +578,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         updateSignInItems()
     }
 
-    private func fetchHealth(child: Process, reload: Bool) {
+    private func fetchHealth(child: GatewayChild, reload: Bool) {
         let url = URL(string: "http://127.0.0.1:\(port)/api/health")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
@@ -540,7 +608,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                         self.timer?.invalidate()
                         self.healthTimer?.invalidate()
                         self.stopping = true
-                        kill(child.processIdentifier, SIGTERM)
+                        if child.owned { kill(child.processIdentifier, SIGTERM) }
                         self.fail(storeFailureMessage(health))
                     }
                     return
@@ -594,6 +662,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func pollHealth() {
+        // An attached gateway has no termination handler: its end shows here.
+        if let child = child, !child.owned, !child.isRunning, !stopping {
+            fail(attachedStoppedMessage)
+            return
+        }
         guard ready, !stopping, !checking, Date() >= nextLoginAttempt,
               let child = child, child.isRunning else { return }
         checking = true
@@ -695,8 +768,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
     }
 
+    // Quit stops only a gateway the app started; an attached one keeps running.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let child = child, child.isRunning else { return .terminateNow }
+        guard let child = child as? Process, child.isRunning else { return .terminateNow }
         if stopping {
             kill(child.processIdentifier, SIGTERM)
             waitForChild(child, application: sender)
@@ -778,7 +852,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         timer?.invalidate()
         healthTimer?.invalidate()
         tearDownWebView()
-        if let failed = child, failed.isRunning {
+        if let failed = child as? Process, failed.isRunning {
             kill(failed.processIdentifier, SIGTERM)
             // A gateway that ignored SIGTERM would keep the session store from the next start.
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {

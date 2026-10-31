@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import socket
 import threading
 import time
@@ -19,7 +21,7 @@ except ImportError as e:
     ) from e
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
-from localmelo.support import config
+from localmelo.support import config, gateway_endpoint
 from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard, app_instance, is_loopback
@@ -56,6 +58,11 @@ class GatewayServer:
         # The per-launch identifier the macOS app passes to its child; empty
         # for a gateway the user started directly.
         self.instance = app_instance()
+        # This process's id in the endpoint file and in GET /'s header, so a
+        # reader can tell a live gateway from a stale file.
+        self.gateway_id = secrets.token_hex(16)
+        self._listening = False
+        self._published = False
 
         # SessionManager now builds providers from Config directly
         self.sessions = SessionManager(
@@ -74,6 +81,7 @@ class GatewayServer:
             redoc_url=None,
             openapi_url=None,
         )
+        self.app.state.gateway_id = self.gateway_id
         self._register_routes()
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
@@ -92,6 +100,7 @@ class GatewayServer:
             options=self._console_options(console_options),
         )
         self.console.mount(self.app)
+        self.console.on_store_open = self.publish
         self.app.add_middleware(
             LoopbackGuard,
             port=self.port,
@@ -113,6 +122,43 @@ class GatewayServer:
         if gate is None:
             return options or ConsoleOptions()
         return replace(options or ConsoleOptions(), gate=gate)
+
+    # ── The endpoint file ──
+
+    def publish(self) -> None:
+        """Write the endpoint file once this gateway listens and holds the main chat's file."""
+        console = self.console
+        if self._published or not self._listening or console is None:
+            return
+        if console.store_state() != "ok":
+            return  # another gateway holds it: its file stays
+        # A gateway on every address is reached on the loopback one.
+        host = self.host.strip("[]")
+        host = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+        try:
+            gateway_endpoint.write(
+                gateway_endpoint.Endpoint(
+                    pid=os.getpid(),
+                    host=host,
+                    port=self.cfg.gateway.port,
+                    instance=self.instance,
+                    id=self.gateway_id,
+                    started=time.time(),
+                )
+            )
+        except OSError as exc:
+            logger.warning("Could not write the gateway's endpoint file: %s", exc)
+            return
+        self._published = True
+
+    def listening(self) -> None:
+        self._listening = True
+        self.publish()
+
+    def unpublish(self) -> None:
+        """Remove the endpoint file as shutdown starts, so no one attaches now."""
+        self._listening = False
+        gateway_endpoint.remove(self.gateway_id)
 
     # ── Lifespan ──
 
@@ -363,7 +409,9 @@ class GatewayServer:
             log_level="info",
             timeout_graceful_shutdown=int(GRACEFUL_SHUTDOWN_S),
         )
-        return _ConsoleServer(config, console=self.console, on_ready=self.on_ready)
+        return _ConsoleServer(
+            config, console=self.console, on_ready=self.on_ready, gateway=self
+        )
 
     def run(self, sockets: list[socket.socket] | None = None) -> None:
         self.uvicorn_server().run(sockets=sockets)
@@ -428,10 +476,12 @@ class _ConsoleServer(uvicorn.Server):
         *,
         console: Console | None,
         on_ready: Callable[[], None] | None = None,
+        gateway: GatewayServer | None = None,
     ) -> None:
         super().__init__(config)
         self._console = console
         self._on_ready = on_ready
+        self._gateway = gateway
 
     async def startup(self, sockets: Any = None) -> None:
         """Start, then tell *on_ready*: a page opened now must find the server.
@@ -439,10 +489,14 @@ class _ConsoleServer(uvicorn.Server):
         A server that could not bind never gets here, so it never announces.
         """
         await super().startup(sockets=sockets)
+        if self.started and self._gateway is not None:
+            self._gateway.listening()
         if self.started and self._on_ready is not None:
             threading.Thread(target=self._on_ready, daemon=True).start()
 
     async def shutdown(self, sockets: Any = None) -> None:
+        if self._gateway is not None:
+            self._gateway.unpublish()
         if self._console is not None:
             self._console.begin_shutdown()
         await super().shutdown(sockets=sockets)

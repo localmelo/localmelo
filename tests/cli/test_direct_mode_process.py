@@ -159,6 +159,9 @@ def _env(home: Path) -> dict[str, str]:
     }
     env["HOME"] = str(home)
     env["NO_PROXY"] = "127.0.0.1,localhost"
+    # Bare melo keeps the terminal's own chat: no gateway is found or started
+    # on the default port. The main chat's tests set "main" themselves.
+    env["LOCALMELO_CHAT"] = "local"
     return env
 
 
