@@ -15,6 +15,7 @@ from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import (
+    _TASK_COLUMNS,
     COMPONENT,
     SCHEDULER_VERSION,
     TaskConflictError,
@@ -97,7 +98,9 @@ async def one(store: SessionStore, sql: str, params: Sequence[Any] = ()) -> Any:
 
 
 async def get_task(tasks: TaskStore, task_id: str) -> TaskRecord | None:
-    row = await one(tasks.store, "SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+    # The record's own columns: the kept baseline is read only when a run ends.
+    sql = f"SELECT {', '.join(_TASK_COLUMNS)} FROM tasks WHERE task_id = ?"
+    row = await one(tasks.store, sql, (task_id,))
     return TaskRecord.from_row(row) if row is not None else None
 
 

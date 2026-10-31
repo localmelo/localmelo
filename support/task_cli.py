@@ -24,6 +24,7 @@ from localmelo.support.words import t_in
 ENDINGS = ("ready", "draft", "blocked", "failed", "dropped")
 _WHY = (
     "tests_failed",
+    "tests_still_fail",
     "tests_missing",
     "tests_unverified",
     "commit_missing",

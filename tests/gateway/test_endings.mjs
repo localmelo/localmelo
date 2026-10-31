@@ -31,6 +31,12 @@ test('a draft says why and finishes with one tap; a run out of steps continues i
   assert.equal(canFinish(null), false);
 });
 
+test('tests that still fail with nothing changed say so, with nothing to finish', () => {
+  const still = readEnding({state: 'draft', reasons: ['tests_still_fail']});
+  assert.equal(endingWhy(still), 'The tests still fail; nothing was changed');
+  assert.equal(canFinish(still), false);
+});
+
 test('a task its worker gave up on reads apart from your Stop, and still finishes what it owes', () => {
   const moot = readEnding({state: 'dropped', proposed: 'dropped', reasons: ['tests_missing']});
   assert.equal(endingLabel(moot), 'Not needed');

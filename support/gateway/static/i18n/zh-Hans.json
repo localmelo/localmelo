@@ -450,6 +450,7 @@
   "ending.reason.stopped": "被停止了",
   "ending.reason.tests_failed": "最后一次测试没通过",
   "ending.reason.tests_missing": "最后一次改动之后没跑测试",
+  "ending.reason.tests_still_fail": "测试仍然没通过，什么也没改",
   "ending.reason.tests_unverified": "跑了测试，但没核对结果",
   "ending.reason.unchecked": "没能核对它的工作",
   "ending.row": "结果",

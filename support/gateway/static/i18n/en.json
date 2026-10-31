@@ -467,6 +467,7 @@
   "ending.reason.stopped": "It was stopped",
   "ending.reason.tests_failed": "The last test run failed",
   "ending.reason.tests_missing": "No test ran after the last change",
+  "ending.reason.tests_still_fail": "The tests still fail; nothing was changed",
   "ending.reason.tests_unverified": "A test ran, but its result was not checked",
   "ending.reason.unchecked": "Its work could not be checked",
   "ending.row": "How it ended",

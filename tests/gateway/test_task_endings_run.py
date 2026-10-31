@@ -313,3 +313,74 @@ async def test_a_message_the_run_read_counts_as_asked(
     base = Baseline(None)
     await workers._ending(record.task_id, "done", None, str(repo), base, record)
     assert seen == [True]
+
+
+async def test_work_a_stopped_run_left_is_owed_by_the_run_that_continues_it(
+    setup: Setup,
+) -> None:
+    workers, llm, repo = setup
+    held = asyncio.Event()
+    script = [EDIT]
+
+    async def edit_then_hang(
+        messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        if script:
+            return script.pop(0)()
+        held.set()
+        await asyncio.sleep(30)
+        return says("never")()
+
+    plain = llm.chat
+    llm.chat = edit_then_hang  # type: ignore[method-assign]
+    task_id = await start(workers, repo, "Fix add in calc.py")
+
+    async def editing() -> bool:
+        for request in workers.broker.pending(task_id):
+            workers.broker.answer(request.request_id, ApprovalDecision(True))
+        return held.is_set()
+
+    await until(editing)
+    assert "a + b" in (repo / "calc.py").read_text()
+    await workers.update(task_id, state="stop")
+
+    async def stopped() -> bool:
+        return (await workers.tasks.get_task(task_id)).state == "cancelled"
+
+    await until(stopped)
+    llm.chat = plain  # type: ignore[method-assign]
+    llm.replies = [says("Nothing left to do.\nEnding: ready")]
+    _, how = await workers.message(task_id, "Go on")
+    assert how == "continued"
+    ending = (await ended(workers, task_id, turns=2))["ending"]
+    assert (ending["state"], ending["reasons"]) == ("draft", ["tests_missing"])
+    assert ending["uncommitted"] == ["calc.py"]
+
+
+@pytest.mark.parametrize("how", ["unreadable", "raises"])
+async def test_a_folder_unreadable_at_the_start_is_not_kept(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    workers, llm, repo = setup
+    from localmelo.support.gateway import task_endings
+
+    calls: list[str | None] = []
+
+    async def flaky(folder: str | None) -> Baseline:
+        calls.append(folder)
+        if len(calls) == 1:  # the first run's start only
+            if how == "raises":
+                raise OSError("disk went away")
+            return Baseline(None, git=True, error=True)
+        return await task_endings.baseline(folder)
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.baseline", flaky)
+    llm.replies = [says("Looked.\nEnding: ready")]
+    task_id = await start(workers, repo, "Look at calc.py")
+    first = (await ended(workers, task_id))["ending"]
+    assert (first["state"], first["reasons"]) == ("draft", ["unchecked"])
+    # The next run reads the folder again: nothing changed, so it is ready.
+    llm.replies = [says("Looked again.\nEnding: ready")]
+    await workers.continue_stopped(task_id)
+    second = (await ended(workers, task_id, turns=2))["ending"]
+    assert (second["state"], second["reasons"]) == ("ready", [])

@@ -2434,11 +2434,17 @@ class TaskWorkers:
         return body
 
     async def _baseline(self, workspace: str | None, record: TaskRecord) -> Baseline:
-        """The folder before the first run since the task last ended ready (kept, so owed)."""
+        """The folder before the first run since the task last ended ready (kept, so owed).
+
+        A folder git could not read leaves this run unchecked and is never kept:
+        the next run reads it again.
+        """
         try:
             now = await baseline(workspace)
+            if now.error:
+                return now
             kept = await self.tasks.keep_work_base(record.task_id, now.to_json())
-            return Baseline.from_json(kept)
+            return now.since(kept)
         except Exception:
             log.exception("Could not read the folder of task %s", record.task_id)
             return Baseline(None, git=True, error=True)  # unchecked, never ready

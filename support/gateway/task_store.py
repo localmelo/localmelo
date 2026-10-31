@@ -172,7 +172,6 @@ _TASK_COLUMNS: Final = (
     "updated_at",
     "expires_at",
     "ending",
-    "work_base",
 )
 _SELECT_TASK: Final = "SELECT " + ", ".join(_TASK_COLUMNS) + " FROM tasks"
 
@@ -231,8 +230,6 @@ class TaskRecord:
     expires_at: float | None
     # How its last run ended, as code decided it (``task_endings``), or None.
     ending: Mapping[str, Any] | None = None
-    # The folder before the first run since it last ended ready: what is owed.
-    work_base: Mapping[str, Any] | None = None
 
     @classmethod
     def from_row(cls, row: Sequence[Any]) -> TaskRecord:
@@ -250,7 +247,6 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
         "pgids": tuple(json.loads(values["pgids"])),
         "level_pinned": bool(values["level_pinned"]),
         "ending": json.loads(values["ending"]) if values["ending"] else None,
-        "work_base": json.loads(values["work_base"]) if values["work_base"] else None,
     }
 
 

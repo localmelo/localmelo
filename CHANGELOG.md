@@ -19,7 +19,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Only tests the task's own run started count, and only a plain test command
   passes on its result; tests a report claims do not count, and work that was
   in the folder before the task is not blamed on it. Work owed stays owed until
-  the task ends ready. The card, the task page, Activity and the terminal say it
+  the task ends ready, outside git too. Tests that still fail when nothing was
+  changed say so, with nothing to finish. The card, the task page, Activity and the terminal say it
   in plain words and colour, the task page lists the tests the run ran, and
   **Finish it: run the tests and commit** continues a task that still owes them
   with one tap. Part of #377. [#NN]

@@ -20,6 +20,7 @@ import pytest
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import asks_commit
 from localmelo.support.gateway.task_endings import (
+    MAX_STAMPS,
     Baseline,
     baseline,
     can_finish,
@@ -90,6 +91,10 @@ SWALLOW = {
         "sys.exit(p.returncode)\n"
     ),
     "in_process": "import pytest, sys\nsys.exit(pytest.main(['-q']))\n",
+    "renamed_import": (
+        "import subprocess as sys, sys as subprocess\n"
+        "sys.exit(subprocess.run(['pytest', '-q']).returncode)\n"
+    ),
     "other_folder": (
         "import subprocess\nsubprocess.run(['pytest', '/somewhere/else/tests'], check=True)\n"
     ),
@@ -259,8 +264,10 @@ async def test_a_failing_last_test_is_never_ready_even_without_a_change(
     repo: Path, tmp_path: Path
 ) -> None:
     base = await baseline(str(repo))
-    run = Run("Tried; the tests still fail.").test(exit_code=1)
-    assert why(await end(run, repo, base)) == ("draft", ["tests_failed"])
+    run = Run("test_x fails: the fixture uses UTC.\nEnding: ready").test(exit_code=1)
+    still = await end(run, repo, base)
+    assert why(still) == ("draft", ["tests_still_fail"])
+    assert not can_finish(still), "nothing was changed: there is nothing to finish"
     # Outside git the rules of the test calls still apply.
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -418,7 +425,7 @@ async def test_a_folder_git_cannot_read_is_unchecked(
     (repo / ".git" / "HEAD").write_text("garbage\n")  # git refuses the repository now
     ending = await end(Run().edit().test(), repo, base)
     assert why(ending) == ("draft", ["unchecked"])
-    broken = Baseline.from_json({"git": True, "error": True})
+    broken = Baseline(None, git=True, error=True)
     assert why(await end(Run(), repo, broken)) == ("draft", ["unchecked"])
 
 
@@ -429,9 +436,25 @@ async def test_a_plain_ready_outside_git_and_without_a_proposal(tmp_path: Path) 
     folder = tmp_path / "notes"
     folder.mkdir()
     base = await baseline(str(folder))
-    (folder / "poem.py").write_text("print('hi')\n")
-    ending = await end(Run("Wrote it.").edit("poem.py"), folder, base)
+    (folder / "poem.md").write_text("# Hi\n")
+    ending = await end(Run("Wrote it.").edit("poem.md"), folder, base)
     assert (*why(ending), ending["proposed"]) == ("ready", [], None)
+    tested = await end(Run("Wrote it.").edit("poem.py").test(), folder, base)
+    assert why(tested) == ("ready", [])
+
+
+async def test_code_edited_outside_git_still_owes_a_test(tmp_path: Path) -> None:
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    base = await baseline(str(folder))
+    (folder / "x.py").write_text("print(1)\n")
+    for run in (
+        Run().edit("x.py"),
+        Run().py("open('x.py', 'w').write('print(1)')\n"),
+        Run().edit("x.py").test().edit("x.py"),
+    ):
+        assert why(await end(run, folder, base)) == ("draft", ["tests_missing"])
+    assert why(await end(Run().py("print(1)\n"), folder, base)) == ("ready", [])
 
 
 async def test_a_docs_only_change_needs_no_test_and_a_build_file_does(
@@ -587,8 +610,9 @@ async def test_a_change_then_committed_still_needs_its_test(repo: Path) -> None:
 async def test_work_left_by_an_earlier_run_is_still_owed(repo: Path) -> None:
     # The baseline is taken once, before the first run since the last ready ending;
     # every later run (after a stop, a failed claim, a crash) is judged against it.
-    base = Baseline.from_json((await baseline(str(repo))).to_json())
+    kept = (await baseline(str(repo))).to_json()
     (repo / "app.py").write_text("x = 2\n")  # the earlier run's change; it said failed
+    base = (await baseline(str(repo))).since(kept)
     only_commit = await end(Run(), repo, base, commit=True)
     assert why(only_commit) == ("draft", ["tests_missing", "commit_missing"])
     git(repo, "commit", "-qam", "Fix")
@@ -605,6 +629,301 @@ async def test_the_stored_test_command_has_no_secrets(repo: Path) -> None:
     )
     ending = await end(Run().test(code), repo, base)
     assert token not in ending["tests"][0]["command"]
+
+
+# ── Normal flows stay ready; anything that could write is a writer ──
+
+# Ways a worker commits or reads git after its test: none of them writes code.
+COMMITS = {
+    "add+commit": (
+        "import subprocess\nsubprocess.run(['git', 'add', '-A'], check=True)\n"
+        "subprocess.run(['git', 'commit', '-m', 'Fix add'], check=True)\n"
+    ),
+    "cwd": (
+        "import subprocess\n"
+        "subprocess.run(['git', 'commit', '-am', 'Fix add'], check=True, cwd='.')\n"
+    ),
+    "msg-var": (
+        "import subprocess\nmsg = 'Fix add'\n"
+        "subprocess.run(['git', 'commit', '-am', msg], check=True)\n"
+    ),
+    "if-check": (
+        "import subprocess\n"
+        "r = subprocess.run(['git', 'commit', '-am', 'Fix'], capture_output=True, "
+        "text=True)\nif r.returncode:\n    print(r.stderr)\n"
+    ),
+    "log-decode": (
+        "import subprocess\n"
+        "print(subprocess.check_output(['git', 'log', '--oneline', '-1']).decode())\n"
+    ),
+    "shell": (
+        "import subprocess\n"
+        "subprocess.run('git commit -am \"Fix add\"', shell=True, check=True)\n"
+    ),
+    "import-os": (
+        "import subprocess, os\n"
+        "subprocess.run(['git', 'commit', '-am', 'Fix add'], check=True)\n"
+    ),
+    "identity": (
+        "import subprocess\nWHO = ['-c', 'user.name=T', '-c', 'user.email=t@e.invalid']\n"
+        "subprocess.run(['git', *['-c', 'user.name=T'], 'commit', '-qam', 'x'])\n"
+        "print(open('app.py').read().strip(), __name__)\n"
+    ),
+}
+# Calls that could change a file: each makes the test before it stale.
+WRITES = {
+    "open-w": "open('app.py', 'w').write('x = 9')\n",
+    "path": "from pathlib import Path\nPath('app.py').write_text('x = 9')\n",
+    "os-remove": "import os\nos.remove('app.py')\n",
+    "module-alias": "import os\nx = os\nx.replace('a.py', 'app.py')\n",
+    "sys-modules": "import sys\nsys.modules['os'].replace('a.py', 'app.py')\n",
+    "rebound-reader": "import os\nprint = os.remove\nprint('app.py')\n",
+    "attribute-set": "import os, json\njson.loads = os.remove\njson.loads('app.py')\n",
+    "dunder": "print.__self__.open('app.py', 'w')\n",
+    "getattr": "import os\ngetattr(os, 'remove')('app.py')\n",
+    "other-module": "import shutil\nshutil.copy('a.py', 'app.py')\n",
+    "diff-output": (
+        "import subprocess\nsubprocess.run(['git', 'diff', '--output=app.py'])\n"
+    ),
+    "diff-o": "import subprocess\nsubprocess.run(['git', 'diff', '-o', 'app.py'])\n",
+    "diff-computed": (
+        "import subprocess\nopt = '--output=app.py'\n"
+        "subprocess.run(['git', 'diff', opt])\n"
+    ),
+    "checkout": "import subprocess\nsubprocess.run(['git', 'checkout', 'app.py'])\n",
+    "git-config-runs": (
+        "import subprocess\n"
+        "subprocess.run(['git', '-c', 'core.fsmonitor=touch app.py', 'status'])\n"
+    ),
+    "git-env": (
+        "import subprocess\nsubprocess.run(['git', 'diff'], env={'GIT_EXTERNAL_DIFF': 'x'})\n"
+    ),
+    "shell-redirect": (
+        "import subprocess\nsubprocess.run('git diff > app.py', shell=True)\n"
+    ),
+    "module-name-rebound": "import os\njson = os\njson.replace('a.py', 'app.py')\n",
+}
+SHELL_WRITES = ["sed -i s/1/9/ app.py", "git show HEAD:app.py > app.py", "make build"]
+
+
+@pytest.mark.parametrize("code", list(COMMITS.values()), ids=list(COMMITS))
+async def test_a_tested_change_then_committed_any_usual_way_is_ready(
+    repo: Path, code: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    git(repo, "commit", "-qam", "Fix")
+    ending = await end(Run().edit().test().py(code), repo, base, commit=True)
+    assert why(ending) == ("ready", [])
+
+
+@pytest.mark.parametrize("code", list(WRITES.values()), ids=list(WRITES))
+async def test_a_call_that_could_write_after_the_test_makes_it_stale(
+    repo: Path, code: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 9\n")
+    ending = await end(Run().edit().test().py(code), repo, base)
+    assert why(ending) == ("draft", ["tests_missing"])
+
+
+@pytest.mark.parametrize("command", SHELL_WRITES)
+async def test_a_shell_call_that_could_write_makes_the_test_stale(
+    repo: Path, command: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 9\n")
+    run = Run().edit().test().call("shell_exec", {"command": command}, exit_code=0)
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+    reads = Run().edit().test().call("shell_exec", {"command": "git status --short"})
+    assert why(await end(reads, repo, base)) == ("ready", [])
+
+
+async def test_an_unknown_tool_after_the_test_could_have_written(repo: Path) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 9\n")
+    unknown = Run().edit().test().call("project_writer", {"path": "app.py"})
+    assert why(await end(unknown, repo, base)) == ("draft", ["tests_missing"])
+    known = Run().edit().test().call("file_read", {"path": "app.py"})
+    assert why(await end(known, repo, base)) == ("ready", [])
+
+
+# ── Runners, and the flags that make them run nothing ──
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        "['uv', 'run', '--with', 'pytest-xdist', 'pytest', '-n', 'auto']",
+        "['uv', 'run', '--frozen', 'python', '-m', 'unittest']",
+        "['poetry', 'run', 'pytest']",
+        "['make', 'test']",
+        "['tox']",
+        "['tox', '-e', 'py312']",
+        "['nox', '-s', 'tests']",
+        "['npx', 'jest']",
+        "['npx', 'vitest', 'run']",
+        "['bun', 'test']",
+        "['xcodebuild', 'test', '-scheme', 'App']",
+        "['xcodebuild', '-scheme', 'App', 'test']",
+        "['swift', 'test']",
+        "['node', '--test']",
+    ],
+)
+def test_more_runners_pass_their_exit_code_on(argv: str) -> None:
+    command, passes = python_test(
+        f"import subprocess\nsubprocess.run({argv}, check=True)\n"
+    )
+    assert command and passes, argv
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        "['pytest', '-V']",
+        "['pytest', '--setup-plan']",
+        "['pytest', '--fixtures']",
+        "['pytest', '--pyargs', 'json']",
+        "['pytest', '--co']",
+        "['cargo', 'test', '--no-run']",
+        "['go', 'test', '-run', '^$', './...']",
+        "['go', 'test', '-run=^$', './...']",
+        "['go', 'test', '-list', '.']",
+        "['npx', 'vitest', 'list']",
+        "['tox', '-l']",
+        "['xcodebuild', 'test', '-list']",
+        "['uv', 'run', 'pytest', '--collect-only']",
+        "['uv', 'run', 'npm', 'test']",
+    ],
+)
+def test_a_runner_that_runs_no_test_is_not_a_test(argv: str) -> None:
+    code = f"import subprocess\nsubprocess.run({argv}, check=True)\n"
+    assert python_test(code) == ("", False), argv
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        "['cargo', 'test', '--manifest-path=/elsewhere/Cargo.toml']",
+        "['uv', 'run', '--project', '../other', 'pytest']",
+        "['pytest', '--rootdir=~/elsewhere']",
+    ],
+)
+def test_a_runner_pointed_elsewhere_has_an_unknown_result(argv: str) -> None:
+    code = f"import subprocess\nsubprocess.run({argv}, check=True)\n"
+    command, passes = python_test(code)
+    assert command and not passes, argv
+
+
+async def test_a_newline_in_a_shell_test_is_an_operator(repo: Path) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    for command in ("pytest -q\ntrue", "pytest -q\r\ntrue"):
+        run = Run().edit().call("shell_exec", {"command": command}, exit_code=0)
+        assert why(await end(run, repo, base)) == ("draft", ["tests_unverified"])
+
+
+# ── What a change is, and what is kept ──
+
+
+@pytest.mark.parametrize("path", ["pkg/docs/views.py", "docs/conf.py", "notes.txt"])
+async def test_only_doc_extensions_are_docs(repo: Path, path: str) -> None:
+    base = await baseline(str(repo))
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text("x = 1\n")
+    ending = await end(Run().edit(path), repo, base)
+    assert why(ending) == ("draft", ["tests_missing"]), path
+
+
+async def test_a_stash_the_person_made_between_runs_is_not_the_run(repo: Path) -> None:
+    (repo / "app.py").write_text("x = 7\n")  # the earlier run's change
+    kept = (await baseline(str(repo))).to_json()
+    git(repo, "stash", "-q")  # the person stashes it before the next run
+    base = (await baseline(str(repo))).since(kept)
+    ending = await end(Run().test(), repo, base)
+    assert "unchecked" not in ending["reasons"], ending
+
+
+async def test_the_kept_baseline_holds_code_paths_only(repo: Path) -> None:
+    (repo / "app.py").write_text("x = 2\n")
+    (repo / "README.md").write_text("# More\n")
+    git(repo, "stash", "-q")
+    (repo / "app.py").write_text("x = 3\n")
+    (repo / "README.md").write_text("# Other\n")
+    now = await baseline(str(repo))
+    assert (now.git, now.error, now.stash) == (True, False, 1)
+    kept = now.to_json()
+    assert set(kept) == {"git", "head", "stamps"}, "never the stash"
+    assert list(kept["stamps"]) == ["app.py"]
+
+
+async def test_a_folder_with_too_many_changes_is_unchecked(repo: Path) -> None:
+    for n in range(MAX_STAMPS + 1):
+        (repo / f"f{n}.py").write_text("")
+    assert (await baseline(str(repo))).error
+    assert why(await end(Run(), repo, await baseline(str(repo)))) == (
+        "draft",
+        ["unchecked"],
+    )
+
+
+async def test_a_task_folder_inside_a_repository_sees_only_itself(repo: Path) -> None:
+    folder = repo / "sub"
+    folder.mkdir()
+    (folder / "app.py").write_text("x = 1\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "Sub")
+    base = await baseline(str(folder))
+    (repo / "app.py").write_text("x = 2\n")  # outside the task's folder
+    (folder / "app.py").write_text("x = 2\n")
+    ending = await end(Run().edit(), folder, base, commit=True)
+    assert why(ending) == ("draft", ["tests_missing", "commit_missing"])
+    assert ending["uncommitted"] == ["app.py"]
+    git(repo, "commit", "-qm", "Fix", "sub/app.py")
+    committed = await end(Run().edit().test(), folder, base, commit=True)
+    assert why(committed) == ("ready", [])
+
+
+# ── git that cannot run ──
+
+
+def fake_git(tmp_path: Path, err: str, code: int) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "git"
+    script.write_text(f"#!/bin/sh\necho '{err}' >&2\nexit {code}\n")
+    script.chmod(0o755)
+    return bin_dir
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["none", "stand-in"],
+)
+async def test_git_that_cannot_run_is_not_a_git_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    if where == "none":
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    else:
+        shim = "xcrun: error: invalid active developer path (/Library/Developer)"
+        monkeypatch.setenv("PATH", str(fake_git(tmp_path, shim, 1)))
+    base = await baseline(str(folder))
+    assert (base.git, base.error) == (False, False)
+    ending = await end(Run().edit("x.py").test(), folder, base)
+    assert why(ending) == ("ready", [])
+
+
+async def test_git_that_runs_but_fails_is_unchecked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    monkeypatch.setenv("PATH", str(fake_git(tmp_path, "fatal: unsafe repository", 128)))
+    base = await baseline(str(folder))
+    assert (base.git, base.error) == (True, True)
 
 
 # ── The report ──
@@ -673,14 +992,19 @@ async def test_the_store_keeps_an_ending_with_its_transition(tmp_path: Path) -> 
         done = await tasks.change(record.task_id, state="done", ending=draft)
         assert done.ending == {**draft, "at": done.finished_at}
         assert shown(done) == done.ending
-        assert done.work_base == {"git": True, "head": "a"}, "owed until ready"
+        probe = {"git": True, "head": "c"}
+        owed = await tasks.keep_work_base(record.task_id, probe)
+        assert owed == {"git": True, "head": "a"}, "owed until ready"
+        assert not hasattr(done, "work_base"), "lists and reads never carry it"
         reopened = await tasks.reopen(record.task_id, "Finish it: run the tests")
         assert shown(reopened) is None
         await tasks.change(record.task_id, state="running", actor="scheduler")
         ready = await tasks.change(
             record.task_id, state="done", ending={"state": "ready"}
         )
-        assert ready.work_base is None, "a ready ending owes nothing"
+        assert ready.ending is not None
+        fresh = await tasks.keep_work_base(record.task_id, probe)
+        assert fresh == probe, "a ready ending owes nothing: the next run starts anew"
     finally:
         await store.aclose()
 
@@ -703,7 +1027,9 @@ async def test_an_older_store_gains_the_ending_columns(tmp_path: Path) -> None:
         tasks = TaskStore(store)
         await tasks.open()
         again = await tasks.get_task(record.task_id)
-        assert (again.ending, again.work_base) == (None, None)
+        assert again.ending is None
+        kept = await tasks.keep_work_base(record.task_id, {"git": False})
+        assert kept == {"git": False}
     finally:
         await store.aclose()
 

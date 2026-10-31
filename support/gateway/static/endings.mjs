@@ -9,7 +9,9 @@ import {t} from './i18n.mjs';
 
 const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 // The reasons worth words beside the state; the others restate it.
-const WHY = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
+const WHY = new Set(['tests_failed', 'tests_still_fail', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
+// The reasons a Finish it settles; tests that still fail with nothing changed have nothing to finish.
+const OWED = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
 const OUTCOMES = new Set(['passed', 'failed', 'unknown']);
 export const ENDING_MARKS = {ready: '✓', draft: '◐', blocked: '?', failed: '✕', dropped: '■'};
 // The report's proposal line (`Ending: ready`), as the server's task_endings reads it.
@@ -50,7 +52,7 @@ export function endingWhy(ending) {
  * tests, a commit or a check (one that ran out of steps continues instead), as the server decides.
  */
 export const canFinish = (ending) => ['draft', 'failed', 'dropped'].includes(ending?.state)
-  && ending.reasons.some((reason) => WHY.has(reason)) && !ending.reasons.includes('out_of_steps');
+  && ending.reasons.some((reason) => OWED.has(reason)) && !ending.reasons.includes('out_of_steps');
 
 /** "Finish it: run the tests", with "and commit" when the commit is missing too. */
 export const finishLabel = (ending) => t(ending.reasons.includes('commit_missing') ? 'ending.finishCommit' : 'ending.finish');
