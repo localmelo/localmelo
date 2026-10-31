@@ -80,6 +80,23 @@ def test_a_console_transcript_marks_prompts_output_and_check_marks() -> None:
     assert lines[2].tokens == (("o", "Found 你好 at ~/demo"),)
 
 
+def test_a_chat_block_marks_each_message_and_colours_slash_commands() -> None:
+    text = "/approvals auto\nremind me to send the report on Friday at 9\n提醒我明天九点喝水"
+    lines = ub.parse(text, "chat")
+    assert [(ln.kind, ln.prompt, ln.glyph) for ln in lines] == [("cmd", True, "›")] * 3
+    assert roles(text, "chat") == [("c", "/approvals"), ("a", "auto")]
+    assert lines[1].tokens == (("q", "remind me to send the report on Friday at 9"),)
+    assert ub.copy_text(lines) == text
+    block = ub.Block("x", text, mode="chat")
+    assert 'class="p">›</span>' in ub.render_html(block) and "$" not in ub.render_html(
+        block
+    )
+    assert "›" in ub.render_svg(block, "light")
+    assert 'class="p">$</span>' in ub.render_html(
+        ub.Block("y", "melo")
+    )  # a shell keeps `$`
+
+
 def test_copy_has_the_commands_only() -> None:
     text = "$ melo  # open the chat\nsome output\n$ curl -sS URL \\\n  -d '{}'\nmore"
     lines = ub.parse(text, "console")
