@@ -54,6 +54,7 @@ from localmelo.support.gateway.finishing import (
     is_out_of_steps,
     not_committed,
 )
+from localmelo.support.gateway.front_rules import asks_commit
 from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
@@ -70,6 +71,13 @@ from localmelo.support.gateway.resume_evidence import (
 )
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
+from localmelo.support.gateway.task_endings import (
+    Baseline,
+    baseline,
+    finish_message,
+    shown,
+)
+from localmelo.support.gateway.task_endings import decide as decide_ending
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
     WorkspaceError,
@@ -128,14 +136,19 @@ WORKER_GUIDE = (
     "to find where something is (not grep -r, which asks): none of them asks "
     "for approval. Change an existing file with file_edit, so the "
     "person sees a diff; use file_write for new files and python_exec for "
-    "everything else. Run the tests that cover the code you changed: search the "
-    "tests for the names you changed, not only the test files you edited. Keep "
+    "everything else. Run the tests that cover the code you changed, with their "
+    "exit code as python_exec's (sys.exit(subprocess.run([...]).returncode)): "
+    "search the tests for the names you changed, not only the test files you "
+    "edited. Keep "
     "your last two steps for what the task asks you to "
     "finish, such as the commit and your report. Tools run with HOME set to "
     "a fresh folder of this task, so a test suite that refuses the real home "
     "runs; your real home stays readable. When something blocks you that the "
     "task's chat may know or decide, call ask_owner with every field; never stop "
-    "just to ask the person in your report."
+    "just to ask the person in your report. End your report with one line, "
+    "Ending: ready (done as asked), Ending: blocked: <what only the person can "
+    "give> (say blocked only then), Ending: failed or Ending: dropped (made "
+    "moot); code checks it against your own test runs and commits."
 )
 # ask_owner's fields, in the order the chat reads them (#369).
 _ASK_HINTS: Final = {
@@ -757,16 +770,23 @@ class TaskWorkers:
             raise
 
     async def continue_stopped(self, task_id: str) -> tuple[dict, str]:
-        """Continue a task that ran out of steps from where it stopped (#341).
+        """Continue a task that ran out of steps (#341), or finish one not finished.
 
         The message is the console's own words, in the language of the
-        request; any other task refuses (a done task has nothing to continue,
-        a running one reads messages as they come).
+        request: go on from where it stopped, or run the tests (and commit,
+        when the commit is what is missing). Any other task refuses (a ready
+        task has nothing to continue, a running one reads messages as they
+        come).
         """
         record = await self.tasks.get_task(task_id)
-        if not is_out_of_steps(record.state, record.wait_reason):
-            raise TaskStoreError("only a task that ran out of steps continues here")
-        return await self.message(task_id, words("failure.continueMessage"))
+        if is_out_of_steps(record.state, record.wait_reason):
+            return await self.message(task_id, words("failure.continueMessage"))
+        ending = shown(record)
+        if ending is None or ending.get("state") != "draft":
+            raise TaskStoreError(
+                "only a task that ran out of steps or is not finished continues here"
+            )
+        return await self.message(task_id, finish_message(ending))
 
     async def _continue(
         self, current: TaskRecord, text: str, *, level: int | None, reason: str
@@ -1861,6 +1881,10 @@ class TaskWorkers:
         runner = None
         phase = "failed"
         failure_reason = None
+        # How the run ended, decided by code for the phase it was decided at.
+        ending: dict[str, Any] | None = None
+        ending_phase = ""
+        base = Baseline(None)
         deferred = False
         launch_uncertain = False
         execution_id: str | None = self._pending_execution.get(task_id)
@@ -2039,6 +2063,7 @@ class TaskWorkers:
                 self._homes.discard(home)
                 shutil.rmtree(home, ignore_errors=True)
                 raise
+            base = await self._baseline(workspace, record)
             runner = SessionRunner(
                 agent,
                 self.store,
@@ -2140,6 +2165,10 @@ class TaskWorkers:
                 if result and result.status == "budget_exhausted":
                     # Out of steps is a stop the person can continue, not a failure.
                     failure_reason = OUT_OF_STEPS
+                ending_phase = phase
+                ending = await self._ending(
+                    task_id, phase, failure_reason, workspace, base, record
+                )
         except WorkspaceError:
             if launch_committed and not turn_started:
                 post_fence_failure = True
@@ -2293,6 +2322,7 @@ class TaskWorkers:
                                 failure_reason=(
                                     failure_reason if phase == "failed" else None
                                 ),
+                                ending=ending if phase == ending_phase else None,
                             )
                     except TaskNotFoundError:
                         pass
@@ -2351,10 +2381,49 @@ class TaskWorkers:
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).
         body["out_of_steps"] = is_out_of_steps(record.state, record.wait_reason)
+        # How it ended, decided by code; a draft finishes with one tap.
+        body["ending"] = shown(record)
         # The question it waits on (#369): "Waiting on <chat>" or "Waiting on you".
         owner = self.owner
         body["ask"] = owner.waiting(record.task_id) if owner is not None else None
         return body
+
+    async def _baseline(self, workspace: str | None, record: TaskRecord) -> Baseline:
+        """The task folder's git state before a run, and what the last run left owed."""
+        try:
+            return await baseline(workspace, record.ending)
+        except Exception:
+            log.exception("Could not read the folder of task %s", record.task_id)
+            return Baseline(None)
+
+    async def _ending(
+        self,
+        task_id: str,
+        phase: str,
+        failure_reason: str | None,
+        workspace: str | None,
+        base: Baseline,
+        record: TaskRecord,
+    ) -> dict[str, Any] | None:
+        """How the run ended, from its own tool calls and the folder: never its claim."""
+        typed = str(record.spec.get("user_words") or "")
+        asked = [str(record.spec.get("objective") or ""), typed]
+        if record.card and not record.card.startswith(CARD_START):
+            asked.append(record.card)  # a continued task's message is asked too
+        try:
+            return await decide_ending(
+                self.store,
+                task_id,
+                phase=phase,
+                failure_reason=failure_reason or "",
+                folder=workspace,
+                base=base,
+                asks_commit=any(asks_commit(text) for text in asked),
+            )
+        except Exception:
+            log.exception("Could not check how task %s ended", task_id)
+            unchecked = {"state": "draft", "reasons": ["unchecked"]}
+            return unchecked if phase == "done" else None
 
     def _observe(self, task_id: str, event: AgentEvent) -> None:
         """Keep what a running task did last, as its events come (no store read)."""

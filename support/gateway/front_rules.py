@@ -654,6 +654,18 @@ def _pipeline(text: str) -> bool:
     )
 
 
+def asks_commit(text: str) -> bool:
+    """Whether *text* asks for a commit: a commit cue that is not quoted or forbidden.
+
+    "fix the router, run the tests and commit" and "改完提交" ask; "don't
+    commit yet", "先不要提交" and "the log says `git commit` failed" do not.
+    """
+    bare = _QUOTED.sub(" ", text or "")
+    return bool(_COMMIT_CUE.search(bare)) and not any(
+        _COMMIT_CUE.search(no.group(0)) for no in _PIPELINE_NO.finditer(bare)
+    )
+
+
 def work_request(typed: str) -> bool:
     """An imperative change to named files or paths: code starts it as a task at once.
 
@@ -867,6 +879,7 @@ __all__ = [
     "allows",
     "allows_level",
     "allows_message",
+    "asks_commit",
     "brief_question",
     "continue_name",
     "control_action",
