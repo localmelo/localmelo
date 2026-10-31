@@ -63,13 +63,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   language at once when Settings changes it, without a restart.
   `GET /api/sessions/{id}/status` also returns `parts` (the segments as
   catalog keys and parameters) and a chore `when_said`; `segments` and
-  `when` are unchanged ([#NN]).
+  `when` are unchanged ([#360]).
 
 - Scheduled shows the time a chore is set for (`8:30`), not the few seconds
   the start is spread by (`8:31`): a chore has `next_at` beside `next_run`,
   which is still when the run starts, up to 120 seconds later. The line
   "Wants to run a command" on the main chat's approval card reads in the
-  chosen language too ([#NN]).
+  chosen language too ([#360]).
 
 - A run ends with a usable answer more often. The patient reflection gate
   (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
@@ -2968,3 +2968,4 @@ earlier milestones.
 [#356]: https://github.com/localmelo/localmelo/pull/356
 [#358]: https://github.com/localmelo/localmelo/pull/358
 [#359]: https://github.com/localmelo/localmelo/pull/359
+[#360]: https://github.com/localmelo/localmelo/pull/360
