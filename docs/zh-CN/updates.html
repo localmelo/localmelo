@@ -61,15 +61,16 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>7</small></h3>
+            <h3>接下来 <small>8</small></h3>
             <ul>
-              <li class="board-card"><strong>在新版本上第二轮自用</strong><span>通过主对话做这个仓库的真实工作，找出并修好仍然绊住人的地方。</span></li>
               <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
               <li class="board-card"><strong>Melo 工作时的更多姿势</strong><span>胶囊和桌面宠物为 melo 工作的时刻画出更多姿势。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
               <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
+              <li class="board-card"><strong>带入其他助手的记忆</strong><span>计划中：首次设置时，melo 读取你电脑上其他编程助手保存的笔记并带入，可撤销。</span></li>
+              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>计划中：melo 离线回顾最近的对话，合并重复的笔记、保留较新的值，可撤销。</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -84,7 +85,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>8</small></h3>
+          <h3>已完成 <small>13</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -94,6 +95,11 @@
             <li class="board-card"><strong>浏览网页</strong><span>melo 在你能看到的窗口里读网页并跟随链接。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>秋田犬 Melo 和胶囊</strong><span>App、控制台和桌面上的宠物，以及说明正在运行什么的胶囊。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>重要的调用先问你</strong><span>安装、下载和文件夹之外的改动总会先问你，并说明原因。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>自动模式</strong><span>每个对话可选“询问”或“自动”：常规步骤直接运行，有风险的步骤被拦下并说明原因，“允许一次”放行一步。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>中文控制台和 App</strong><span>控制台和 App 支持简体中文，时间和日期按中文习惯书写。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>提醒</strong><span>说一次就行，比如“提醒我明天九点给导师发邮件”，到点 melo 会告诉你。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>停下后可继续</strong><span>步数用完的任务显示“已停止”，点“继续”就从停下的地方接着做。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>在这个仓库上自用</strong><span>已完成三轮；第三轮在“自动”下，melo 没有问过一次就修好了自己代码里的两件事。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">GitHub 上的完整计划</a>；尚未实现的记忆设计见<a href="./memory-design.html">记忆设计</a>。</p>
@@ -102,6 +108,18 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p class="more-link">每一项变化的细节见<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>。</p>
+        <section class="day" id="day-2026-10-31">
+          <h3><time datetime="2026-10-31">10 月 31 日</time></h3>
+          <figure class="shot"><a href="../assets/img/auto-menu-zh.webp"><img src="../assets/img/auto-menu-zh.webp" alt="输入框下模型旁边的“询问”和“自动”菜单，已选“自动”，上方是一个被拦下的安装步骤的卡片，带“允许一次”按钮。" width="1280" height="800" loading="lazy"></a></figure>
+          <ul class="day-points">
+            <li>自动模式：每个对话可以选“询问”或“自动”。在“自动”下，常规步骤直接运行，有风险的步骤被拦下并说明原因，“允许一次”可以放行一步。</li>
+            <li>说 <code class="wrap">提醒我明天九点给导师发邮件</code>：melo 会显示它理解的日期，到点告诉你。</li>
+            <li>控制台和 App 支持简体中文，优先级写作 P0 到 P5。</li>
+            <li>步数用完的任务显示“已停止”，点“继续”就从停下的地方接着做；在主对话里说 <code class="wrap">继续恢复卡片任务</code> 也可以。</li>
+            <li>设置按主题整理，本站的每条命令都是彩色的终端块。</li>
+            <li>另外：运行更常以可用的答案结束，损坏的回复不再显示，melo 在“自动”下没有问过一次就修好了自己代码里的两个小问题。</li>
+          </ul>
+        </section>
         <section class="day" id="day-2026-10-30">
           <h3><time datetime="2026-10-30">10 月 30 日</time></h3>
           <span class="anchors"><span id="u-pet-smooth"></span><span id="u-chats-remember"></span><span id="u-clear"></span><span id="u-browsing"></span><span id="u-melo-ear"></span><span id="u-tool-images"></span><span id="u-approval-why"></span><span id="u-status-bar-cost"></span><span id="u-melo-moves"></span><span id="u-turn-pictures"></span><span id="u-high-impact"></span><span id="u-one-thinking-row"></span><span id="u-unfinished-thinking"></span><span id="u-identity"></span><span id="u-completion-delete"></span><span id="u-confine-direct-runs"></span><span id="u-akita-portrait"></span><span id="u-worker-writes"></span><span id="u-look-2"></span><span id="u-akita-pet"></span><span id="u-akita-pictures"></span><span id="u-look-1"></span><span id="u-question-lists"></span><span id="u-write-diff"></span><span id="u-console-opens"></span><span id="u-app-logo"></span><span id="u-getting-started-2"></span><span id="u-list-files"></span><span id="u-coming-back"></span><span id="u-plain-words"></span><span id="u-lean-output"></span><span id="u-app-command-line-tools"></span><span id="u-smaller-app"></span><span id="u-status-help"></span><span id="u-reflection-repair-2"></span><span id="u-first-task-folder"></span><span id="u-model-picker"></span><span id="u-console-defaults"></span><span id="u-reading-a-turn"></span><span id="u-console-first-run"></span><span id="u-short-commands"></span><span id="u-menu-bar"></span><span id="u-getting-started"></span><span id="u-reflection-repair"></span><span id="u-app-first-minute"></span><span id="u-omlx-first-class"></span><span id="u-direct-model-choice"></span><span id="u-shell-tail-test"></span><span id="u-brief-items"></span><span id="u-model-choice"></span><span id="u-console-connect"></span></span>

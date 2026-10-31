@@ -321,6 +321,35 @@ def test_other_messages_are_not_work(typed: str) -> None:
     assert route(typed, TASKS).route != "work"
 
 
+@pytest.mark.parametrize(
+    "typed",
+    [
+        # No file is named, but the words ask for the whole pipeline: change
+        # it, test it, commit it. The front's step would only lose a search.
+        "今天修一下：路由规则改掉，跑测试，过了就提交",
+        "修一下这个，跑测试，过了就提交",
+        "麻烦把路由的中文判定改掉，跑测试，过了就提交",
+        "fix the router, run the tests and commit if they pass",
+    ],
+)
+def test_a_change_test_commit_pipeline_is_work_without_a_named_file(typed: str) -> None:
+    assert route(typed, ()).route == "work"
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "跑测试，过了就提交",  # nothing to change
+        "今天不用改，跑测试再提交",  # the ask is negated
+        "能不能修一下并跑测试再提交？",  # a question: the front's step
+        "把端到端测试改得更严格一些，然后提交",  # loose 改, no test run asked
+        "fix and/or improve the docs",  # no test cue, no commit cue
+    ],
+)
+def test_a_pipeline_ask_that_is_not_work(typed: str) -> None:
+    assert route(typed, ()).route != "work"
+
+
 def test_short_titles_cut_at_a_word() -> None:
     long = "summarize every chapter of the handbook and write the findings down"
     # At most 48 characters, at a word, without a trailing "and".
@@ -334,6 +363,25 @@ def test_short_titles_cut_at_a_word() -> None:
         "see https://example.com/a/b.html"
     )
     assert short_title("   ") == "Task"
+
+
+@pytest.mark.parametrize(
+    ("typed", "title"),
+    [
+        ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
+        ("今天：修小药丸", "修小药丸"),
+        ("今天修一下：路由规则改掉", "今天修一下：路由规则改掉"),
+        ("no rush: tidy the photos", "tidy the photos"),
+        ("Please, no rush: tidy the photos", "tidy the photos"),
+        ("today, fix the pill", "fix the pill"),
+        ("Whenever possible, update the docs", "Whenever possible, update the docs"),
+        ("today", "today"),
+        ("today:", "today"),
+        ("Today's news summary", "Today's news summary"),
+    ],
+)
+def test_a_level_word_that_opens_a_title_is_dropped(typed: str, title: str) -> None:
+    assert short_title(typed) == title
 
 
 @pytest.mark.parametrize(

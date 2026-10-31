@@ -52,6 +52,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A question that asks for a short answer ("briefly", "in one line", a Chinese
+  "简单说") gets at most two steps, not four, before its stop answer. A task's
+  title drops a level word that opens its request and is followed by a colon or
+  comma (`no rush:`, `today,`, `今天：`) when more text follows it. A task worker
+  is told to run the tests that cover the code it changed, found by searching
+  the tests for the names it changed, not only the test files it edited. [#367]
 - A `file_edit` that cannot apply fails at once and asks no one: the text to
   replace must occur exactly once, and a missing text, several matches, an
   empty text or a missing file return a plain error that says what to do
@@ -281,6 +287,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The app's pill says **stopped**, not failed, for a task that used all its
+  steps, as the console already does: `status.recent` reads the task's reason. [#365]
+- A Chinese ask that says to change code, run the tests and commit
+  (`今天修一下：……改掉，跑测试，过了就提交`) starts a task at once, as the English
+  one already did, instead of the main chat searching first. [#365]
 - A model that is told not to think (`enable_thinking = false`) is no longer
   failed for an answer it did give, and one failed turn no longer fails the
   rest of the chat. After a reply that carried reasoning, every later plain
@@ -682,6 +693,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- The website and both READMEs catch up with October 30 and 31: the home page has short sections for Auto mode, reminders and stopped tasks that continue, each with a picture and a terminal block, and a card for the Chinese console; priorities read P0 to P5; the Chinese pages show Chinese screenshots; the roadmap board moves Auto mode, Chinese, reminders, stop-and-continue and the self-runs to Done and plans bringing in what other assistants remember and tidying notes while the computer is idle; the Updates page has an October 31 entry; the Architecture page shows Auto's review and write sandbox in the checker; both READMEs list the new features. `scripts/usage_blocks.toml` blocks can have `mode = "chat"` for what you type into melo's own chat (messages marked `›`) ([#368]).
 - Commands on the website and in both READMEs are coloured terminal blocks: the command, its options, its values, quoted strings, comments and output each get their own colour, from the terminal's own palette in light and dark, with a Copy button that copies the commands only. The home page and the Quickstart open with five numbered steps (install, a first task, the main chat, a task, memory), each with a terminal block or a picture; the READMEs show the same blocks as light and dark pictures with the commands as text below. The blocks are generated from `scripts/usage_blocks.toml` by `scripts/usage_blocks.py` (`sync`, `contrast`), and the docs builder draws Markdown fences tagged `shell` or `console` the same way ([#342]).
 - The website and both READMEs catch up with the main chat, memory across chats, Scheduled chores, the activity pill and the terminal on the main chat. The home page shows eight feature cards, each with a picture (a main chat with side chats, memory you can see, chores that run on time, tasks that say what happened, the terminal in the same chat, the pill, approvals, browsing) and a console picture of the main chat at the top; three new WebP pictures live in `docs/assets/img/`. The roadmap board (home and updates, English and Chinese) moves finished work into a Done strip under the Now, Next and Later columns and adds the open work (plain words on the task page, dogfood round 2 on the new build, computer use in the browser, art for Melo's working poses). The architecture page's second diagram adds the Scheduled chores tick and check-in feeding the scheduler, the terminal as a client of the same gateway as the app, and the endpoint file they share (the first diagram is unchanged), and the Components section gains cards for the endpoint file and Scheduled chores; the status table follows. The README's "What you can do" points and second picture match the home page. `docs/STYLE.md` and its Chinese counterpart describe the Done strip ([#335]).
 - oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#237]).
@@ -3078,3 +3090,6 @@ earlier milestones.
 [#360]: https://github.com/localmelo/localmelo/pull/360
 [#361]: https://github.com/localmelo/localmelo/pull/361
 [#362]: https://github.com/localmelo/localmelo/pull/362
+[#365]: https://github.com/localmelo/localmelo/pull/365
+[#367]: https://github.com/localmelo/localmelo/pull/367
+[#368]: https://github.com/localmelo/localmelo/pull/368

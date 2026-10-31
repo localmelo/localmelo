@@ -82,7 +82,7 @@
             </a>
             <a class="checker-zone" id="n-checker" href="#c-checker" style="left:200px;top:170px;width:370px;height:230px">
               <span class="cz-label">检查器</span>
-              <span class="cz-sub">被拒绝的工具调用会作为错误返回给模型</span>
+              <span class="cz-sub">被拒绝的工具调用会作为错误返回给模型<br>自动：审查每一步，并在写入沙箱里运行</span>
             </a>
             <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">执行器</span>
@@ -252,6 +252,7 @@
               <li>在主对话里说 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>；你点按 Save chore 之前不会保存任何东西。</li>
               <li>每 30 秒检查一次，把到期的事项作为任务开始，绝不提前；电脑睡眠时错过的一次，醒来后只运行一次。</li>
               <li>每 30 分钟，check-in 告诉主对话什么做完了或在等你；没有可说的就不调用模型。</li>
+              <li>提醒是只运行一次的事项：<code class="wrap">提醒我明天九点给导师发邮件</code> 会显示它理解的日期，你点“提醒我”之前不会保存任何东西。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">会重复的事项</a>
           </div>
@@ -282,6 +283,7 @@
               <li>检查每个计划、每个工具调用和每个工具结果。</li>
               <li>被拒绝的调用不会运行；模型会看到原因。</li>
               <li>发送、删除或发布之类的调用总会询问，并说明原因。</li>
+              <li>在“自动”下，由审查而不是一次点击来决定每一步；被拦下的步骤会得到解释，“允许一次”只让那一步运行一次。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>
           </div>
@@ -291,7 +293,7 @@
             <ul>
               <li>内置工具：<code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code>、<code>file_write</code> 和 <code>list_files</code>。</li>
               <li>按权限级别请求审批。</li>
-              <li>在 macOS 上，worker 运行和保存的任务只能在自己的工作区内写文件。</li>
+              <li>在 macOS 上，worker 运行、保存的任务和“自动”下的步骤只能在自己的文件夹内写文件，“自动”下的步骤也碰不到 melo 自己的登录信息。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具参考</a>
           </div>
@@ -356,7 +358,7 @@
             </thead>
             <tbody>
               <tr><td><code>melo/</code> 和 <code>support/</code></td><td><code>melo/</code> 在模块级别从不导入 <code>support/</code>；<code>Agent(config=…)</code> 是唯一的桥。</td><td>智能体可以使用你自己构建的提供方运行，新增后端只改 <code>support/</code>。</td></tr>
-              <tr><td>智能体和执行器</td><td>一步只运行它提供的工具，每个调用都先通过检查。</td><td>被拒绝的调用从不运行。检查是护栏，不是沙箱。</td></tr>
+              <tr><td>智能体和执行器</td><td>一步只运行它提供的工具，每个调用都先通过检查。</td><td>被拒绝的调用从不运行。在“询问”下，检查是护栏，不是沙箱；在 macOS 的“自动”下，步骤还会在写入沙箱里运行。</td></tr>
               <tr><td>智能体和记忆</td><td>记忆写入要通过检查器的大小限制。</td><td>提示和存储都保持在限定范围内。</td></tr>
               <tr><td>后端和模型服务器</td><td>后端只连接一个 URL。</td><td>模型服务器始终由你掌控。</td></tr>
             </tbody>
@@ -373,11 +375,11 @@
             </thead>
             <tbody>
               <tr><td>终端</td><td>App 里同一个主对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker、活动胶囊</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker、活动胶囊，有中文和英文</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>主对话和旁支对话</td><td>一个主对话：自己回答，或按优先级把更大的工作交给任务</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、新的值取代旧的、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>定时事项</td><td>按时运行的事项，以及每 30 分钟的 check-in</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>定时事项</td><td>按时运行的事项和一次性提醒，以及每 30 分钟的 check-in</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核、每个对话可选“询问”或“自动”</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>浏览</td><td>在你能看到的 Safari 窗口里读网页、跟随链接</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>调度器和 worker</td><td>任务队列、级别、worker、公平的排队、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>

@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import (
@@ -1575,11 +1576,31 @@ async def test_latest_finished_is_the_task_that_ended_last(
     assert await tasks.latest_finished() is None  # nothing has ended
     clock.advance(10)
     await tasks.change(first.task_id, state="done")
-    assert await tasks.latest_finished() == (first.task_id, "done", clock.now)
+    assert await tasks.latest_finished() == (first.task_id, "done", clock.now, "")
     clock.advance(10)
     await tasks.change(second.task_id, state="failed", failure_reason="it broke")
-    assert await tasks.latest_finished() == (second.task_id, "failed", clock.now)
+    assert await tasks.latest_finished() == (
+        second.task_id,
+        "failed",
+        clock.now,
+        "it broke",
+    )
     assert queued.state == "queued"
     clock.advance(10)
     await tasks.change(queued.task_id, state="cancelled")
-    assert await tasks.latest_finished() == (queued.task_id, "cancelled", clock.now)
+    assert await tasks.latest_finished() == (queued.task_id, "cancelled", clock.now, "")
+
+
+async def test_latest_finished_carries_the_reason_of_a_run_out_of_steps(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    """The reason rides along, so a reader can call an out-of-steps task stopped."""
+    record, _ = await create_task(tasks, spec(), origin="user")
+    await tasks.change(record.task_id, state="running")
+    await tasks.change(record.task_id, state="failed", failure_reason=OUT_OF_STEPS)
+    assert await tasks.latest_finished() == (
+        record.task_id,
+        "failed",
+        clock.now,
+        OUT_OF_STEPS,
+    )

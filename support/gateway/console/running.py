@@ -22,6 +22,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.i18n import said_text
 from localmelo.support.sessions.display import (
     ActivityText,
@@ -44,9 +45,10 @@ MAX_ITEMS = 20
 TITLE_CHARS = 200
 # The kind a worker file's session has in `status.items` and `status.recent`.
 WORKER_KINDS = {"worker": "run", "chat": "terminal"}
-# How a task ended, as `status.recent` says it: the person's stop and an expiry are no failure.
 # The newest events read to say what an item is doing.
 EVENTS_READ = 40
+# How a task ended, as `status.recent` says it: the person's stop, an expiry and a
+# run that used all its steps (#341) are no failure.
 TASK_OUTCOMES = {
     "done": "done",
     "failed": "failed",
@@ -117,6 +119,13 @@ def _turn_outcome(status: str, cause: str) -> str:
     return {"ok": "done", "stopped": "stopped"}.get(severity, "failed")
 
 
+def _task_outcome(state: str, wait_reason: str) -> str:
+    """How a finished task reads in ``recent``: a run out of steps is stopped, not failed."""
+    if is_out_of_steps(state, wait_reason):
+        return "stopped"
+    return TASK_OUTCOMES[state]
+
+
 async def _title_of(console: Console, kind: str, owner: str) -> str:
     """The title of a finished chat, task, run or terminal chat; empty when it cannot be read."""
     try:
@@ -138,7 +147,8 @@ async def recent_outcome(console: Console) -> dict[str, Any] | None:
     ``items``, ``title`` what it was called (empty when unreadable),
     ``outcome`` ``done``, ``failed`` or ``stopped``, the age in seconds to
     a tenth. A turn that a shutdown, a crash, a takeover, a close or a park
-    ended is no outcome (the store's ``OUTCOME_CAUSES``).
+    ended is no outcome (the store's ``OUTCOME_CAUSES``). A task whose run used
+    all its steps is ``stopped``, as on the console's row (#341).
     """
     found: list[tuple[float, str, str, str]] = []  # (finished_at, kind, id, outcome)
     if console.store_state() == "ok":
@@ -158,7 +168,9 @@ async def recent_outcome(console: Console) -> dict[str, Any] | None:
         try:
             task = await console.workers.tasks.latest_finished()
             if task is not None and task[1] in TASK_OUTCOMES:
-                found.append((task[2], "task", task[0], TASK_OUTCOMES[task[1]]))
+                found.append(
+                    (task[2], "task", task[0], _task_outcome(task[1], task[3]))
+                )
         except (SessionStoreError, AttributeError):
             pass
     try:

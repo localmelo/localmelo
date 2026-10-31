@@ -1013,20 +1013,21 @@ class TaskStore:
             )
             return [TaskRecord.from_row(row) for row in rows]
 
-    async def latest_finished(self) -> tuple[str, str, float] | None:
-        """``(task_id, state, finished_at)`` of the task that ended last, or ``None``.
+    async def latest_finished(self) -> tuple[str, str, float, str] | None:
+        """``(task_id, state, finished_at, wait_reason)`` of the task that ended last, or ``None``.
 
         A task ends as ``done``, ``failed``, ``cancelled`` or ``expired``; the
-        rows it reads are those with a ``finished_at``.
+        rows it reads are those with a ``finished_at``. The reason comes along so
+        a reader can tell a run that used all its steps from one that broke.
         """
         async with self._store.component_transaction("task_list") as conn:
             rows = await _rows(
                 conn,
-                "SELECT task_id, state, finished_at FROM tasks "
+                "SELECT task_id, state, finished_at, wait_reason FROM tasks "
                 "WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
                 (),
             )
-        return (rows[0][0], rows[0][1], rows[0][2]) if rows else None
+        return (rows[0][0], rows[0][1], rows[0][2], rows[0][3]) if rows else None
 
     async def set_title(self, task_id: str, title: str, *, was: str) -> bool:
         """Name the task *title* while it is still called *was*; ``False`` if it is not.
