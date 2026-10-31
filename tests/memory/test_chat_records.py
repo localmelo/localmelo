@@ -251,6 +251,7 @@ async def test_a_question_or_a_lone_secret_carries_no_kept_line(
     sid = await _session(store)
     asked = await _say(memory, store, sid, "What is my name?")
     assert asked.block == "" and asked.remembered == () and not asked.refused
+    assert asked.recall is not None and asked.recall.block_chars == 0
     secret = await _say(memory, store, sid, "My wifi password is hunter2-lighthouse.")
     assert secret.refused and secret.remembered == ()
     assert secret.block == f"\n\n{BLOCK_HEADER}\n{NOT_KEPT_LINE}"
