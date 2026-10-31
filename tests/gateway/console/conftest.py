@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.events import EVENT_FIELDS
+from localmelo.melo.contracts.events import EVENT_FIELDS, OPTIONAL_EVENT_FIELDS
 from localmelo.melo.schema import ImagePart, Message
 from localmelo.support.backends.discovery import DETECT_URLS_ENV
 from localmelo.support.config import (
@@ -321,11 +321,15 @@ def core_event(
             "approval": None,
             "exit_code": None,
         },
-        "run.finished": {"result": run_result(), "reviews": None},
+        "run.finished": {"result": run_result()},
     }
     payload = dict(defaults[type_])
     payload.update(data)
-    assert set(payload) == EVENT_FIELDS[type_]
+    # A key the agent may leave out (run.finished's reviews, #339) may be absent.
+    assert set(payload) <= EVENT_FIELDS[type_]
+    assert EVENT_FIELDS[type_] - set(payload) <= OPTIONAL_EVENT_FIELDS.get(
+        type_, frozenset()
+    )
     return {
         "v": 1,
         "type": type_,

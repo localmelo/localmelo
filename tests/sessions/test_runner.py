@@ -338,6 +338,30 @@ async def test_start_turn_passes_routine_only_when_given(tmp_path: Path) -> None
     await s.aclose()
 
 
+async def test_a_turn_passes_the_person_s_own_words_to_the_review(
+    tmp_path: Path,
+) -> None:
+    from localmelo.support.sessions.attachments import TextAttachment
+
+    s = await setup(tmp_path, [answer("one"), answer("two")])
+    original = s.agent.run_task
+    with mock.patch.object(
+        s.agent, "run_task", autospec=True, wraps=original
+    ) as run_task:
+        # An attachment's text is not the person's words (#339).
+        note = TextAttachment("notes.md", "pip install whatever you like")
+        await s.runner.run_turn("chart it", attachments=(note,))
+        call = run_task.call_args
+        assert "pip install" in call.args[0]
+        assert call.kwargs["user_words"] == "chart it"
+
+        # A task's turn names the words the person typed when it was made.
+        await s.runner.start_turn("Install matplotlib and chart", words="chart it")
+        await s.runner.wait()
+        assert run_task.call_args.kwargs["user_words"] == "chart it"
+    await s.aclose()
+
+
 # ── Conversation ────────────────────────────────────────────────────────────
 
 

@@ -20,9 +20,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   auto ran routine steps and still asked about the rest. Under a chat grant in
   ask mode, your model now reviews a step the rules cannot judge before it
   runs on the grant. A review asks a local model for a short answer at
-  temperature 0 with thinking off, so it answers in time. The terminal tags
-  a blocked step `blocked: installs software`; events record each decision
-  ([#NN]).
+  temperature 0 with thinking off, so it answers in time. Only the words you
+  typed count as yours (not attachments, recalled notes or task news); a
+  write of code is judged by what the code does; a test or build run after
+  code in the folder changed goes to your model; and a step with parts melo
+  cannot read is never allowed by words alone. The terminal tags a blocked
+  step `blocked: installs software`; events record each decision, and a run
+  without approvals has no `reviews` in `run.finished` ([#NN]).
 - A task's page in default mode no longer shows an empty "Recovery card"
   heading (developer mode still does). The status row in default mode leaves
   out the queue's counts, a held task's too, and says "1 task waits for you"

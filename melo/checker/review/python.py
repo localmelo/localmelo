@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import os
 import shlex
+from collections import Counter
 from itertools import product
 from typing import Any
 
+from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import shell
 from localmelo.melo.checker.review.paths import (
     Context,
@@ -243,6 +246,21 @@ def _changes(node: ast.AST, name: str) -> bool:
 
 # Names that reach a function without calling it by its name.
 _INDIRECT = frozenset(["globals", "locals", "vars", "getattr", "__import__"])
+# Lookups that find a function by a name made at run time.
+_LOOKUPS = frozenset(["globals", "locals", "vars", "getattr", "eval", "__import__"])
+_LOOKUPS |= frozenset(["importlib.import_module", "operator.attrgetter"])
+_DUNDERS = frozenset(["__dict__", "__getattribute__", "__builtins__", "__globals__"])
+_DUNDERS |= frozenset(["__class__", "__subclasses__", "__mro__", "__code__"])
+# Methods that change a list, a dict or a set in place.
+_MUTATORS = frozenset(["append", "extend", "insert", "remove", "pop", "clear"])
+_MUTATORS |= frozenset(["sort", "reverse", "update", "setdefault", "add", "discard"])
+_MUTATORS |= frozenset(["__setitem__", "__delitem__", "__iadd__", "popitem"])
+# Calls that read a list without changing it; any other call it is passed to
+# may change it.
+_READS_LIST = frozenset(["print", "len", "str", "repr", "sorted", "list", "tuple"])
+_READS_LIST |= frozenset(["set", "any", "all", "sum", "min", "max", "enumerate"])
+_READS_LIST |= frozenset(["zip", "json.dumps", "shlex.join", "os.path.join"])
+_MUTABLE = (ast.List, ast.Set, ast.Dict, ast.ListComp, ast.SetComp, ast.DictComp)
 
 
 class _Review:
@@ -294,6 +312,34 @@ class _Review:
             ):
                 self.helpers.pop(name)
         self.forwarded = {id(inner) for inner, _ in self.helpers.values()}
+        assigned: Counter[str] = Counter()
+        self.unsure: set[str] = set()  # names whose value melo cannot follow
+        for node in nodes:
+            if isinstance(node, ast.AugAssign | ast.Delete):
+                for target in getattr(node, "targets", [getattr(node, "target", None)]):
+                    if isinstance(target, ast.Name):
+                        self.unsure.add(target.id)
+            elif isinstance(node, ast.Subscript) and isinstance(
+                node.ctx, ast.Store | ast.Del
+            ):
+                if isinstance(node.value, ast.Name):
+                    self.unsure.add(node.value.id)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.attr in _MUTATORS
+            ):
+                self.unsure.add(node.func.value.id)
+            if isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr):
+                targets = getattr(node, "targets", [getattr(node, "target", None)])
+                for target in targets:
+                    for each in ast.walk(target) if target is not None else []:
+                        if isinstance(each, ast.Name):
+                            assigned[each.id] += 1
+                if isinstance(node.value, ast.Name):
+                    self.unsure.add(node.value.id)  # an alias could change it
+        self.unsure |= {name for name, count in assigned.items() if count > 1}
         for node in ast.walk(tree):
             if type(node) not in _BINDS:
                 continue
@@ -312,9 +358,14 @@ class _Review:
                 for t in targets:
                     if isinstance(t, ast.Name) and node.value is not None:
                         self.bound.setdefault(t.id, []).append(node.value)
+                        module = self.imported_name(node.value)
+                        if module and t.id not in self.unsure:
+                            self.alias[t.id] = module
             elif isinstance(node, ast.For | ast.comprehension):
                 items = getattr(node.iter, "elts", [ast.Constant(None)])
                 if isinstance(node.target, ast.Name):
+                    if node.target.id in assigned:
+                        self.unsure.add(node.target.id)
                     self.bound.setdefault(node.target.id, []).extend(items)
             elif isinstance(node, ast.withitem) and isinstance(
                 node.optional_vars, ast.Name
@@ -323,13 +374,107 @@ class _Review:
                     node.context_expr
                 )
 
+        # A list passed to a call that may change it is not followed either.
+        mutable = {
+            name
+            for name, values in self.bound.items()
+            if any(
+                isinstance(v, _MUTABLE)
+                or isinstance(v, ast.Call)
+                and self.name(v.func) in ("list", "dict")
+                for v in values
+            )
+        }
+        for node in nodes:
+            if not isinstance(node, ast.Call) or self.reads_only(node):
+                continue
+            for arg in [*node.args, *(k.value for k in node.keywords)]:
+                value = arg.value if isinstance(arg, ast.Starred) else arg
+                if isinstance(value, ast.Name) and value.id in mutable:
+                    self.unsure.add(value.id)
+
+    def reads_only(self, node: ast.Call) -> bool:
+        """Whether *node* only reads the lists it is passed (or runs them)."""
+        name = self.name(node.func)
+        attr = name.rsplit(".", 1)[-1]
+        if name in _READS_LIST or attr in ("join", "format"):
+            return True
+        if isinstance(node.func, ast.Name) and node.func.id in self.helpers:
+            return True
+        return (
+            name.split(".")[0] == "subprocess"
+            and attr in _RUNS
+            or name.startswith(_SPAWNS)
+            or name in ("os.system", "os.popen", "pty.spawn")
+        )
+
+    def imported_name(self, node: ast.AST) -> str:
+        """The module ``__import__("m")`` or ``import_module("m")`` gives, or ``""``."""
+        if not isinstance(node, ast.Call) or not node.args:
+            return ""
+        first = node.args[0]
+        name = self.name(node.func)
+        if name in ("__import__", "importlib.import_module") and isinstance(
+            first, ast.Constant
+        ):
+            return str(first.value)
+        return ""
+
     def name(self, node: ast.AST) -> str:
-        """The dotted name of a function or attribute, imports resolved."""
+        """The dotted name of a function or attribute, imports resolved.
+
+        ``getattr(m, "f")`` and ``import_module("m")`` with literal names
+        resolve too, and so does a name assigned once to a function
+        (``f = os.system``). ``"?"`` when melo cannot tell.
+        """
         if isinstance(node, ast.Name):
+            values = self.bound.get(node.id, [])
+            if (
+                node.id not in self.alias
+                and node.id not in self.unsure
+                and len(values) == 1
+                and (
+                    isinstance(values[0], ast.Name | ast.Attribute)
+                    or isinstance(values[0], ast.Call)
+                    and self.name(values[0]) != "?"
+                )
+                and node.id not in self.busy
+            ):
+                self.busy.add(node.id)
+                try:
+                    return self.name(values[0])
+                finally:
+                    self.busy.discard(node.id)
             return self.alias.get(node.id, node.id)
         if isinstance(node, ast.Attribute):
             return f"{self.name(node.value)}.{node.attr}"
+        if isinstance(node, ast.Call):
+            module = self.imported_name(node)
+            if module:
+                return module
+            if (
+                self.name(node.func) == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                return f"{self.name(node.args[0])}.{node.args[1].value}"
         return "?"
+
+    def looked_up(self, func: ast.AST) -> bool:
+        """Whether the function *func* names is found by a run-time lookup."""
+        for node in ast.walk(func):
+            if isinstance(node, ast.Attribute) and node.attr in _DUNDERS:
+                return True
+            if isinstance(node, ast.Name) and node.id in ("__builtins__", "builtins"):
+                return True
+            if (
+                isinstance(node, ast.Call)
+                and self.name(node.func) in _LOOKUPS
+                and self.name(node) == "?"
+            ):
+                return True
+        return False
 
     def fold(self, node: ast.AST | None) -> list[Any]:
         """The values *node* may have (str, tuple or None), at most eight."""
@@ -346,6 +491,8 @@ class _Review:
         ctx, name = self.ctx, self.name(node)
         if isinstance(node, ast.Constant):
             return [None if node.value is None else str(node.value)]
+        if isinstance(node, ast.Name) and node.id in self.unsure:
+            return [None]
         if (
             isinstance(node, ast.Name)
             and node.id in self.bound
@@ -421,6 +568,22 @@ class _Review:
             self.f.add("credentials", "Reads your browser's cookies.")
         if any(n.startswith("pip._internal") for n in names):
             self.f.add("install", "Runs pip's installer from Python.")
+        # An import runs the workspace module it names (design rule 8).
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                file_rules.module(self.ctx, self.f, a.name)
+            return
+        ctx, module = self.ctx, node.module or ""
+        if node.level:
+            base = ctx.here or ctx.root
+            for _ in range(node.level - 1):
+                base = os.path.dirname(base)
+            ctx = dataclasses.replace(ctx, here=base)
+        for a in node.names:
+            target = (
+                module if a.name == "*" else ".".join(filter(None, [module, a.name]))
+            )
+            file_rules.module(ctx, self.f, target)
 
     def call(self, node: ast.Call) -> None:
         if id(node) in self.forwarded:
@@ -428,6 +591,12 @@ class _Review:
         if isinstance(node.func, ast.Name) and node.func.id in self.helpers:
             return self.helper_call(node, *self.helpers[node.func.id])
         ctx, f, name = self.ctx, self.f, self.name(node.func)
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in self.bound and name == func.id:
+            # A lambda, a partial or another value melo cannot follow.
+            return f.doubt(f"Calls {func.id}, a function melo could not follow.")
+        if self.looked_up(func):
+            return f.doubt("Calls a function looked up by name at run time.")
         attr, base = name.rsplit(".", 1)[-1], getattr(node.func, "value", None)
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         first = node.args[0] if node.args else None
@@ -696,6 +865,10 @@ class _Review:
                 shell.script(self.ctx, self.f, path, "python", self.ctx.root)
         elif any(v.split(".")[0] == "pip" for v in values):
             self.f.add("install", "Runs pip's installer from Python.")
+        else:  # import_module, __import__, runpy.run_module: a workspace module
+            for value in values:
+                main = name == "runpy.run_module"
+                file_rules.module(self.ctx, self.f, value, main=main)
 
 
 def _join(sep: str, parts: tuple[Any, ...]) -> Any:

@@ -16,8 +16,7 @@ import ast
 import hashlib
 import json
 import os
-import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -85,6 +84,12 @@ CLICK_ONLY: Final = frozenset(
 )
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
+# The tools whose arguments the rules read (melo.checker.review); another
+# tool is routine to them, and auto mode makes one that is not read-only
+# undecided.
+RULED_TOOLS: Final = frozenset(["shell_exec", "python_exec", "file_write", "file_edit"])
+# A model's category that can let a call run: none, or one words can allow.
+MODEL_CAN_ALLOW: Final = frozenset({"none", ""}) | WORDS_CAN_ALLOW
 
 
 @dataclass(frozen=True)
@@ -131,6 +136,11 @@ class ActionReview:
     the workspace that the call names. A review the model settled has
     ``by="model"`` and its :class:`ModelAnswer`; a high-impact call the
     user's words allowed keeps its categories with the verdict ``routine``.
+    ``doubts`` are what the rules could not tell about a high-impact call
+    (the reasons an undecided call has in ``reasons``): words never allow
+    such a call. ``inputs`` name the local files whose content the rules
+    read, each as ``path:digest``; :func:`step_key` includes them, so a
+    changed file makes another step.
     """
 
     verdict: Verdict
@@ -140,6 +150,8 @@ class ActionReview:
     by: Literal["rules", "model"] = "rules"
     rules_version: int = RULES_VERSION
     model: ModelAnswer | None = None
+    doubts: tuple[str, ...] = ()
+    inputs: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -150,6 +162,8 @@ class ActionReview:
             "by": self.by,
             "rules_version": self.rules_version,
         }
+        if self.doubts:
+            out["doubts"] = list(self.doubts)
         if self.model is not None:
             out["model"] = self.model.to_json()
         return out
@@ -185,7 +199,7 @@ def block_words(review: ActionReview | None) -> str:
 
 
 def _normalized(tool_name: str, arguments: Mapping[str, Any]) -> Any:
-    """What a call does, without what does not change it (layout, comments)."""
+    """What a call does: Python as its syntax tree, a command as its exact text."""
     if tool_name == "python_exec":
         code = str(arguments.get("code") or "")
         try:
@@ -194,15 +208,10 @@ def _normalized(tool_name: str, arguments: Mapping[str, Any]) -> Any:
             return ["python-text", " ".join(code.split())]
     if tool_name == "shell_exec":
         command = arguments.get("command")
-        text = (
-            " ".join(map(str, command))
-            if isinstance(command, list)
-            else str(command or "")
-        )
-        try:
-            return ["shell", shlex.split(text, comments=True)]
-        except ValueError:
-            return ["shell-text", " ".join(text.split())]
+        # The exact text: a "#" inside a word, or a quote, changes what runs.
+        if isinstance(command, list):
+            return ["shell-argv", [str(part) for part in command]]
+        return ["shell", str(command or "")]
     if tool_name in ("file_write", "file_edit"):
         rest = {k: v for k, v in arguments.items() if k != "path"}
         body = json.dumps(rest, sort_keys=True, ensure_ascii=False, default=str)
@@ -215,15 +224,20 @@ def _normalized(tool_name: str, arguments: Mapping[str, Any]) -> Any:
 
 
 def step_key(
-    tool_name: str, arguments: Mapping[str, Any], workspace_root: str | None
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    workspace_root: str | None,
+    inputs: Sequence[str] = (),
 ) -> str:
-    """The normalized hash of one step: the same call in the same folder.
+    """The hash of one step: the same call in the same folder, on the same files.
 
-    Python is compared as its syntax tree and a shell command as its
-    tokens, so a comment or a reflowed line is the same step; a file write
-    by its resolved path and a hash of what it writes. 32 hex characters.
+    Python is compared as its syntax tree, so a comment or a reflowed line
+    is the same step; a shell command by its exact text; a file write by
+    its resolved path and a hash of what it writes. *inputs* are the
+    review's (:attr:`ActionReview.inputs`): the local files it read, with
+    their digests. 32 hex characters.
     """
     root = os.path.realpath(workspace_root) if workspace_root else ""
-    shape = [tool_name, root, _normalized(tool_name, arguments)]
+    shape = [tool_name, root, _normalized(tool_name, arguments), sorted(inputs)]
     text = json.dumps(shape, ensure_ascii=False, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode()).hexdigest()[:32]

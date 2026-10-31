@@ -516,3 +516,24 @@ async def test_blocked_gate_cancel_real_runner(
         await hub.aclose()
         await gate.close()
         await store.aclose()
+
+
+def test_a_task_s_turn_reads_the_person_s_words_not_the_objective() -> None:
+    from types import SimpleNamespace
+
+    from localmelo.support.gateway.workers import _turn_text
+
+    def record(card: str, **spec: str) -> Any:
+        return SimpleNamespace(card=card, spec={"objective": "Install x", **spec})
+
+    assert _turn_text(record("")) == ("Install x", None)
+    assert _turn_text(record("", user_words="chart it")) == ("Install x", "chart it")
+    # A task stopped before it ran: its next turn carries the request first.
+    assert _turn_text(record("Install x\n\nnow", user_words="chart it")) == (
+        "Install x\n\nnow",
+        "chart it\n\nnow",
+    )
+    assert _turn_text(record("thanks, go on", user_words="chart it")) == (
+        "thanks, go on",
+        "thanks, go on",
+    )

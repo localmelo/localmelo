@@ -99,6 +99,9 @@ class TaskSpec:
 
     ``workspace`` is only checked for its shape here;
     :func:`validate_task_workspace` resolves it against the config and origin.
+    ``user_words`` is what the person typed when another model wrote the
+    objective (the main chat's ``task_create``); only trusted code sets it,
+    and a step review reads it as the person's words.
     """
 
     title: str
@@ -107,6 +110,7 @@ class TaskSpec:
     level: int = 2
     level_source: str = "computed"
     reason: str = ""
+    user_words: str = ""
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
@@ -165,8 +169,8 @@ class TaskSpec:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """The JSON object ``tasks.spec`` holds."""
-        return {
+        """The JSON object ``tasks.spec`` holds (``user_words`` only when set)."""
+        out: dict[str, Any] = {
             "title": self.title,
             "objective": self.objective,
             "workspace": self.workspace,
@@ -174,6 +178,9 @@ class TaskSpec:
             "level_source": self.level_source,
             "reason": self.reason,
         }
+        if self.user_words:
+            out["user_words"] = self.user_words
+        return out
 
 
 def _text(value: object, name: str, *, max_chars: int, required: bool) -> str:

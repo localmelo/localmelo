@@ -97,6 +97,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
+    STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
     ApprovalPolicy,
@@ -115,6 +116,8 @@ from localmelo.melo.contracts.providers import (
     ProviderError,
 )
 from localmelo.melo.contracts.review import (
+    CATEGORY_WORDS,
+    RULED_TOOLS,
     SELF_DENIAL,
     ActionReview,
     block_words,
@@ -1510,7 +1513,10 @@ class _ApprovalGate:
     auto mode; see :mod:`localmelo.melo.agent._step_review`). In auto mode
     (#339) a denial is a block: the model reads the note of
     :func:`~localmelo.melo.contracts.approvals.block_note`, and a second
-    block of the same kind sets ``run.reviews.stop``.
+    block of the same kind sets ``run.reviews.stop``; the step's later
+    calls are then blocked unreviewed. A tool the rules do not read
+    (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
+    read-only is undecided in auto mode, so the user's model reviews it.
 
     The run's cancellation propagates, and the prompt counts as withdrawn.
     The policy fails closed otherwise: an exception it raises, a
@@ -1528,6 +1534,7 @@ class _ApprovalGate:
         tier: ToolTier,
         checker: Checker | None = None,
         reviewer: StepReviewer | None = None,
+        destructive: bool = False,
     ) -> None:
         self._policy = policy
         self._run = run
@@ -1536,6 +1543,7 @@ class _ApprovalGate:
         self._tier = tier
         self._checker = checker
         self._reviewer = reviewer
+        self._destructive = destructive
         self.review: ActionReview | None = None
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
@@ -1550,10 +1558,13 @@ class _ApprovalGate:
         if self._checker is not None:
             self.review = self._checker.review_action(
                 ActionReviewPayload(
-                    request.tool_name, dict(request.arguments), self._workspace_root
+                    request.tool_name,
+                    dict(request.arguments),
+                    self._workspace_root,
+                    since=None if self._reviewer is None else self._reviewer.since,
+                    destructive=self._destructive,
                 )
             )
-            run.reviews.count(self.review)
         asking = ApprovalRequest(
             request_id=uuid.uuid4().hex,
             run_id=run.task_id,
@@ -1567,12 +1578,33 @@ class _ApprovalGate:
         )
         self._mode = review_mode(self._policy, asking)
         auto = find_auto(self._policy) if self._mode == "auto" else None
+        if (
+            self._mode == "auto"
+            and self.review is not None
+            and self.review.verdict == "routine"
+            and request.tool_name not in RULED_TOOLS
+            and self._tier != "read"
+        ):
+            self.review = ActionReview(
+                "undecided",
+                (),
+                (f"Runs {request.tool_name}, a tool melo's rules do not read.",),
+            )
+            asking = dataclasses.replace(asking, review=self.review)
+        run.reviews.count(self.review)
         if self.review is not None and (
             self._mode != "ask" or self.review.verdict != "routine"
         ):
             self._key = step_key(
-                request.tool_name, request.arguments, self._workspace_root
+                request.tool_name,
+                request.arguments,
+                self._workspace_root,
+                self.review.inputs,
             )
+        if self._mode == "auto" and run.reviews.stop:
+            # The turn already stopped: the step's later calls do not run.
+            self._record(asking, origin="auto", reason="the turn stopped")
+            return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
         run.waiting_call_id = call.id
         try:
             if (
@@ -1601,9 +1633,10 @@ class _ApprovalGate:
             if self.review is not None and "self" in self.review.categories:
                 run.waiting_call_id = ""
                 if self._mode == "auto":
-                    self._record(asking, origin="auto", reason=SELF_DENIAL)
+                    words = CATEGORY_WORDS["self"]
+                    self._record(asking, origin="auto", reason=words)
                     return ApprovalDecision(
-                        False, self._block(asking, auto), origin="auto"
+                        False, self._block(asking, auto, words), origin="auto"
                     )
                 self._record(asking, origin="policy", reason=SELF_DENIAL)
                 return ApprovalDecision(False, SELF_DENIAL, origin="policy")
@@ -2264,6 +2297,8 @@ class Agent:
         conversation. Explicit reasoning modes split a legacy inline
         thinking block in the loaded copies; the caller's messages are
         unchanged, and prompt-cap fitting can strip thinking before facts.
+        What the step review kept of the chat (the user's words, settled
+        reviews, blocks) starts over.
 
         Raises ``RuntimeError`` during a run, and ``TypeError``, before
         anything is cleared, for an item that is not a
@@ -2277,6 +2312,8 @@ class Agent:
                 raise TypeError(
                     f"load_conversation takes Message objects, got {type(msg).__name__}"
                 )
+        # Another chat, an undo or a reload: the step review starts over too.
+        self._reviewer.reset()
         loaded = copy.deepcopy(loaded)
         if self.options.reasoning != "legacy":
             # Normalize legacy checkpoints once, before prompt-cap fitting
@@ -4162,6 +4199,7 @@ class Agent:
             tier: ToolTier = (
                 "write" if called_tool is None else self.checker.tier(called_tool)
             )
+            hints = {} if called_tool is None else called_tool.annotations
             gate = _ApprovalGate(
                 run.approval,
                 run,
@@ -4170,6 +4208,7 @@ class Agent:
                 tier,
                 self.checker,
                 self._reviewer,
+                destructive=hints.get("destructiveHint") is True,
             )
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(
@@ -5409,6 +5448,7 @@ class Agent:
         progress: bool = False,
         routine: str | None = None,
         inbox: InboxSource | None = None,
+        user_words: str | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -5590,6 +5630,11 @@ class Agent:
         the routine is the query, with dates and times masked, in the
         folder the run's tools work in.
 
+        *user_words* are what the person typed for this run, when the query
+        carries more (attachments, task news, a task's objective another
+        model wrote): a step review reads only them as the user's words.
+        Without it, the query is, up to a recalled-memory block.
+
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, or when
@@ -5630,7 +5675,7 @@ class Agent:
             ),
         )
         # The user's own words, which a step review reads (never tool output).
-        self._reviewer.user_message(query)
+        self._reviewer.user_message(query if user_words is None else user_words)
         prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
         budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))

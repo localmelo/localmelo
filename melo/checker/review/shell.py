@@ -7,6 +7,7 @@ import re
 import shlex
 from urllib.parse import urlparse
 
+from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
     Context,
@@ -18,7 +19,6 @@ from localmelo.melo.checker.review.paths import (
 )
 
 MAX_DEPTH = 3
-SCRIPT_BYTES = 64 * 1024
 _OPS = re.compile(r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]")
 _SEPARATORS = set([";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;"]) | {
     "\n"
@@ -76,6 +76,18 @@ _WRITERS = {
     **dict.fromkeys(["touch", "mkdir", "tee", "truncate"], "all"),
     **dict.fromkeys(["chmod", "chown", "chgrp"], "rest"),
 }
+# Programs that run the project's own files: a test runner, a build tool, a
+# package script. With code changed in this chat they are undecided.
+_RUNNERS = set(["pytest", "py.test", "tox", "nox", "make", "gmake", "just"])
+_RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx"])
+_FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
+_PACKAGE_RUNS = set(["test", "t", "run", "run-script", "start", "exec", "x"])
+_BUILDS = {
+    "cargo": set(["run", "test", "build", "bench", "check"]),
+    "go": set(["run", "test", "generate"]),
+    "swift": set(["run", "test", "build"]),
+}
+_YARN_OWN = set(["add", "install", "remove", "init", "global", "config", "info"])
 # One rule a line: a pattern over "program args…", the category ("?" for
 # undecided) and the reason; {prog} is the program.
 _RULES = [
@@ -360,6 +372,21 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
         path = resolve(ctx, argv[0], cwd)
         if path and where(ctx, path, write=False) == "inside":
             script(ctx, f, argv[0], "", cwd)
+    if _runs_project(prog, words):
+        file_rules.runner(ctx, f, prog)
+
+
+def _runs_project(prog: str, words: list[str]) -> bool:
+    """Whether ``prog words…`` runs the project's files on its own."""
+    if prog in _RUNNERS or os.path.basename(prog) in _RUNNERS:
+        return True
+    if prog in _FILE_RUNNERS:
+        return bool(words)
+    if prog in ("npm", "pnpm", "bun"):
+        return bool(words) and words[0] in _PACKAGE_RUNS
+    if prog == "yarn":
+        return bool(words) and words[0] not in _YARN_OWN
+    return prog in _BUILDS and bool(words) and words[0] in _BUILDS[prog]
 
 
 def is_melo_python(ctx: Context, interp: str) -> bool:
@@ -449,6 +476,10 @@ def _module(ctx: Context, f: Findings, interp: str, name: str, args: list[str]) 
             f.add("service", "Opens a web server that other computers can reach.")
     elif name in ("playwright", "uv", "pipx", "huggingface_hub", "conda"):
         run_argv(ctx, f, [name.replace("huggingface_hub", "hf"), *args], ctx.root)
+    elif name in ("pytest", "unittest", "tox", "nox", "doctest"):
+        file_rules.runner(ctx, f, f"python -m {name}")
+    else:
+        file_rules.module(ctx, f, name, main=True)
 
 
 def download(ctx: Context, f: Findings, url: str, target: str, cwd: str) -> None:
@@ -471,22 +502,20 @@ def download(ctx: Context, f: Findings, url: str, target: str, cwd: str) -> None
 def script(ctx: Context, f: Findings, raw: str, kind: str, cwd: str) -> None:
     """Classify a local script the call runs, once (one level deep)."""
     path = resolve(ctx, raw, cwd)
-    try:
-        if not path or os.path.getsize(path) > SCRIPT_BYTES or ctx.depth > 1:
-            raise OSError
-        with open(path, encoding="utf-8") as file:
-            text = file.read()
-    except (OSError, UnicodeDecodeError):
+    if not path or ctx.depth > 1:
         return f.doubt(f"Runs {raw}, which melo could not read.")
+    text = f.take(path)
+    if not text:
+        return  # read before, or a doubt
     shebang = text.split("\n", 1)[0]
     python = (
         kind == "python" or not kind and (raw.endswith(".py") or "python" in shebang)
     )
-    _code(ctx, f, "python" if python else "sh", text)
+    _code(ctx, f, "python" if python else "sh", text, os.path.dirname(path))
 
 
-def _code(ctx: Context, f: Findings, prog: str, body: str) -> None:
+def _code(ctx: Context, f: Findings, prog: str, body: str, here: str = "") -> None:
     if _PY.match(prog):
-        py_rules.review_python(ctx.deeper(), f, body)
+        py_rules.review_python(ctx.deeper(here or None), f, body)
     elif prog in _SHELLS:
-        review_shell(ctx.deeper(), f, body)
+        review_shell(ctx.deeper(here or None), f, body)

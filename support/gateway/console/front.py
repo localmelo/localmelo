@@ -71,7 +71,11 @@ from localmelo.support.gateway.front_rules import (
     short_title,
     triage,
 )
-from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
+from localmelo.support.gateway.task_policy import (
+    MAX_OBJECTIVE_CHARS,
+    TaskPolicyError,
+    TaskSpec,
+)
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.sessions.agents import (
     build_session_agent,
@@ -692,7 +696,8 @@ class Front:
             spec = TaskSpec.from_payload({"objective": work, "title": title or None})
         except TaskPolicyError as exc:
             return await self._failed(f"Could not start a task: {exc}", show)
-        spec = dataclasses.replace(spec, level=level, reason=reason)
+        words = typed.strip()[:MAX_OBJECTIVE_CHARS]
+        spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         main = self.console.main_id
         return await self._start(spec, main, show=show, key=key, turn=turn, of=of)
 

@@ -25,12 +25,13 @@ module, so the executor can use it without an import cycle.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
 
 from localmelo.melo.contracts.review import (
+    CATEGORY_WORDS,
     ActionReview,
     because,
     block_words,
@@ -211,36 +212,43 @@ class AutoPolicy:
     model for an undecided call, or for a high-impact one the user's words
     may cover), so this policy reads only the verdict: ``routine`` runs
     (origin ``auto``), anything else is denied with origin ``auto`` and the
-    category in a few words as its reason. A call nothing reviewed runs.
+    category in a few words as its reason. A call nothing reviewed is
+    blocked too.
 
     :meth:`allow_once` keeps an allowance for one exact step
-    (:func:`~localmelo.melo.contracts.review.step_key`) for
-    :data:`ALLOW_ONCE_S`; the next call of that step runs once, with origin
-    ``user``. Allowances live in this object only.
+    (:func:`~localmelo.melo.contracts.review.step_key`, the files it read
+    included) for :data:`ALLOW_ONCE_S` of wall-clock time; the next call of
+    that step runs once, with origin ``user``, when its review finds no
+    category the allowance did not cover. Allowances live in this object
+    only.
     """
 
     def __init__(
-        self, *, task: bool = False, clock: Callable[[], float] = time.monotonic
+        self, *, task: bool = False, clock: Callable[[], float] = time.time
     ) -> None:
         # A saved task's policy: a blocked step is offered on the task's page.
         self.task = task
         self._clock = clock
-        self._allowed: dict[str, float] = {}
+        self._allowed: dict[str, tuple[float, frozenset[str]]] = {}
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         return "auto"
 
-    def allow_once(self, key: str) -> None:
-        """Allow the step *key* once, for the next :data:`ALLOW_ONCE_S` seconds."""
-        self._allowed[key] = self._clock() + ALLOW_ONCE_S
+    def allow_once(self, key: str, categories: Iterable[str]) -> None:
+        """Allow the step *key* once, for the next :data:`ALLOW_ONCE_S` seconds.
+
+        *categories* are those of the blocked step the user saw: a run of
+        it whose review finds any other is not allowed by this.
+        """
+        self._allowed[key] = (self._clock() + ALLOW_ONCE_S, frozenset(categories))
 
     def allowed_once(self, key: str) -> bool:
         """Whether *key* has an allowance that has not run out (it is not used)."""
-        expires = self._allowed.get(key)
-        if expires is not None and expires <= self._clock():
+        kept = self._allowed.get(key)
+        if kept is not None and kept[0] <= self._clock():
             del self._allowed[key]
             return False
-        return expires is not None
+        return kept is not None
 
     def has_allowances(self) -> bool:
         """Whether any step is allowed once and not used or run out yet."""
@@ -251,12 +259,24 @@ class AutoPolicy:
         self._allowed.clear()
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        key = step_key(request.tool_name, request.arguments, request.workspace_root)
-        if self.allowed_once(key):
+        review = request.review
+        key = step_key(
+            request.tool_name,
+            request.arguments,
+            request.workspace_root,
+            review.inputs if review is not None else (),
+        )
+        if (
+            review is not None
+            and self.allowed_once(key)
+            and "self" not in review.categories
+            and set(review.categories) <= self._allowed[key][1]
+        ):
             del self._allowed[key]
             return ApprovalDecision(True, "allowed once", origin="user")
-        review = request.review
-        if review is None or review.verdict == "routine":
+        if review is None:
+            return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
+        if review.verdict == "routine":
             return ApprovalDecision(True, origin="auto")
         return ApprovalDecision(
             False, block_words(review) or "needs your approval", origin="auto"
@@ -328,9 +348,9 @@ BLOCK_NOTE: Final = (
     "- other ways to reach the goal: without this step, or with something "
     "the user can do;\n"
     "- {allow}\n"
-    "Do not reach the same result another way (another command, a script, "
-    "another tool): every step gets the same review, and a step that does the "
-    "same thing is blocked too. Go on with any work that does not need it."
+    "Do not try to reach the same result another way (another command, a "
+    "script, another tool): the user chose auto mode so that such steps do "
+    "not run without them. Go on with any work that does not need it."
 )
 ALLOW_IN_CHAT: Final = (
     "that they can allow this step once from the chat, or say so in their "
@@ -348,6 +368,12 @@ BLOCK_STOP: Final = (
     "Auto mode blocked this step too: {it_lower}\nStop working on this. Your "
     "next reply is your answer to the user: explain what was blocked and why, "
     "why the task needed it, and the other ways, as above."
+)
+# A call of a turn auto mode already stopped: it does not run either.
+STOPPED_NOTE: Final = (
+    "Auto mode stopped this turn after blocking a step, so this step did not "
+    "run.\nYour next reply is your answer to the user: explain what was "
+    "blocked and why, why the task needed it, and the other ways."
 )
 # A retry of an allowed step that changed: the allowance named this one.
 ALLOWED_EXACTLY: Final = (

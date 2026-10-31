@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.events import EVENT_FIELDS
+from localmelo.melo.contracts.events import EVENT_FIELDS, OPTIONAL_EVENT_FIELDS
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.sessions.store import CAUSES, RUN_STATUSES
@@ -103,11 +103,15 @@ def core_event(
             "prefix": None,
             "duration_s": 0.1,
         },
-        "run.finished": {"result": run_result(), "reviews": None},
+        "run.finished": {"result": run_result()},
     }
     payload = dict(defaults[type_])
     payload.update(data)
-    assert set(payload) == EVENT_FIELDS[type_]
+    # A key the agent may leave out (run.finished's reviews, #339) may be absent.
+    assert set(payload) <= EVENT_FIELDS[type_]
+    assert EVENT_FIELDS[type_] - set(payload) <= OPTIONAL_EVENT_FIELDS.get(
+        type_, frozenset()
+    )
     return {
         "v": 1,
         "type": type_,

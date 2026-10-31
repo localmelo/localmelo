@@ -144,12 +144,13 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     }
 )
 # Keys that a stored event from an older release may lack. Events the agent
-# emits now always carry every key of EVENT_FIELDS; a session store accepts
-# the older shape too.
+# emits now carry every key of EVENT_FIELDS, but run.finished's reviews only
+# for a run with an approval policy; a session store accepts the older shape
+# too.
 OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "assistant.message": frozenset({"prefix"}),
-        # A run's reviews (#339): None without an approval policy.
+        # A run's reviews (#339): only a run with an approval policy has it.
         "run.finished": frozenset({"reviews"}),
         "reflection": frozenset(
             {

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import hashlib
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
@@ -81,6 +82,10 @@ _HARMLESS = [
 ]
 _CACHES = [".cache/uv", "Library/Caches/black", ".npm"]
 _APP = ("/Applications/LocalMelo.app",)
+# localmelo's own source: an editable install runs from here.
+_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), *[".."] * 3))
+# Local files the review reads for one call, at most.
+MAX_READS = 10
 _LAUNCHD = ("/Library/LaunchAgents", "/Library/LaunchDaemons")
 _SAY = {
     "self": "Changes {}, part of localmelo itself.",
@@ -91,21 +96,28 @@ _SAY = {
 
 @dataclass(frozen=True)
 class Context:
-    """The call's surroundings: the workspace, the home folder, melo's Python."""
+    """The call's surroundings: the workspace, the home folder, melo's Python.
+
+    ``here`` is the folder of the file under review (its imports start
+    there); ``since`` the wall-clock time the chat began, or ``None``: a
+    file changed after it counts as written in this chat.
+    """
 
     root: str
     home: str
     executable: str
     prefix: str
     depth: int = 0
+    here: str = ""
+    since: float | None = None
 
     @property
     def folder(self) -> str:
         return os.path.basename(self.root.rstrip("/")) or self.root
 
-    def deeper(self) -> Context:
-        return Context(
-            self.root, self.home, self.executable, self.prefix, self.depth + 1
+    def deeper(self, here: str | None = None) -> Context:
+        return replace(
+            self, depth=self.depth + 1, here=self.here if here is None else here
         )
 
 
@@ -117,6 +129,32 @@ class Findings:
     unsure: list[str] = field(default_factory=list)
     paths: list[str] = field(default_factory=list)
     seen: set[tuple[str, str, str | None]] = field(default_factory=set)
+    # The local files read for this call: path -> digest of what was read.
+    read: dict[str, str] = field(default_factory=dict)
+
+    def take(self, path: str) -> str | None:
+        """*path*'s text when the review may read it (once, at most
+        :data:`MAX_READS` files, 64 KB each), else ``None``.
+
+        A file read before gives ``""``: it was reviewed already. A file
+        that cannot be read is a doubt.
+        """
+        if path in self.read:
+            return ""
+        if len(self.read) >= MAX_READS:
+            self.doubt("Runs more local files than melo checks.")
+            return None
+        try:
+            if os.path.getsize(path) > 64 * 1024:
+                raise OSError
+            with open(path, "rb") as file:
+                data = file.read()
+            text = data.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            self.doubt(f"Runs {os.path.basename(path)}, which melo could not read.")
+            return None
+        self.read[path] = hashlib.sha256(data).hexdigest()[:16]
+        return text
 
     def add(self, category: str, reason: str) -> None:
         self.high.setdefault(category, [])
@@ -131,12 +169,18 @@ class Findings:
         def cut(text: str) -> str:
             return text if len(text) <= 120 else text[:119] + "…"
 
+        inputs = tuple(f"{path}:{digest}" for path, digest in sorted(self.read.items()))
+        unsure = tuple(map(cut, self.unsure[:3]))
         if not self.high:
-            unsure = tuple(map(cut, self.unsure[:3]))
-            return ActionReview("undecided" if unsure else "routine", (), unsure)
+            if unsure:
+                return ActionReview("undecided", (), unsure, inputs=inputs)
+            return ActionReview("routine", inputs=inputs)
         cats = tuple(sorted(self.high, key=list(TITLES).index))
         reasons = tuple(dict.fromkeys(cut(r) for c in cats for r in self.high[c]))
-        return ActionReview("high", cats, reasons[:3], tuple(dict.fromkeys(self.paths)))
+        paths = tuple(dict.fromkeys(self.paths))
+        return ActionReview(
+            "high", cats, reasons[:3], paths, doubts=unsure, inputs=inputs
+        )
 
 
 def under(path: str, folder: str) -> bool:
@@ -155,10 +199,15 @@ def resolve(ctx: Context, raw: str, cwd: str | None = None) -> str | None:
 
 @functools.lru_cache(maxsize=32)
 def _places(home: str, root: str) -> dict[str, tuple[str, ...]]:
-    """The folders of :func:`where` for one home and workspace."""
+    """The folders of :func:`where` for one home and workspace.
+
+    localmelo's source counts as itself, unless the workspace is that
+    source or inside it: then the person works on localmelo.
+    """
     later = [*(os.path.join(home, p) for p in _PERSISTENCE), f"{root}/.git/hooks"]
+    source = () if under(root, _SOURCE) else (_SOURCE,)
     return {
-        "self": (f"{home}/.cache/localmelo", *_APP, f"{home}{_APP[0]}"),
+        "self": (f"{home}/.cache/localmelo", *_APP, f"{home}{_APP[0]}", *source),
         "persistence": (*later, f"{root}/.envrc", *_LAUNCHD),
         "credentials": tuple(
             os.path.join(home, p) for p in _CREDENTIALS if not p.startswith(_ANYWHERE)

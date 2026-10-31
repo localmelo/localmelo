@@ -134,6 +134,8 @@ async def test_slash_task_delegates_at_normal_without_a_model_call(
         assert (record.level, record.level_source) == (2, "computed")
         assert record.reason == "you asked for it"
         assert record.spec["objective"] == "make slides from notes.md"
+        # What the person typed, for the task's step reviews (#339).
+        assert record.spec["user_words"] == "/task make slides from notes.md"
         assert llm.requests == []
         page = (await client.get(f"/api/sessions/{console.main_id}/turns")).json()
         assert page["turns"] == []

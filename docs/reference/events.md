@@ -596,11 +596,10 @@ ends the run's `run.progress` events, never the run.
 
 - `result`: the run's `RunResult`, as `RunResult.to_dict()`. Nothing in it
   is clipped, so `RunResult(**event.data["result"])` rebuilds it.
-- `reviews`: `null` for a run without an approval policy. Otherwise the calls
-  the rules found `routine`, `high` and `undecided`, the `model` reviews the run
-  sent, and `blocked`: the steps auto mode blocked, each
-  `{call_id, title, step_key}`. Events stored before this key have no
-  `reviews`.
+- `reviews`: only for a run with an approval policy: the calls the rules found
+  `routine`, `high` and `undecided`, the `model` reviews the run sent, and
+  `blocked`: the steps auto mode blocked, each `{call_id, title, step_key}`. A
+  run without a policy, and an event stored before this key, has no `reviews`.
 
 `run.finished` comes also when `run_task` raises because the run was
 cancelled; it then holds the `RunResult` that `run_task` would have

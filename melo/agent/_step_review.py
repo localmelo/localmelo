@@ -10,9 +10,9 @@ When the model is asked:
 - an undecided call that would run without a person (a session grant, or
   auto mode);
 - in auto mode, a high-impact call whose categories the user's words can
-  allow (:data:`~localmelo.melo.contracts.review.WORDS_CAN_ALLOW`), when a
-  user message came after a block of the same kind or names something the
-  call acts on.
+  allow (:data:`~localmelo.melo.contracts.review.WORDS_CAN_ALLOW`), with
+  nothing the rules could not tell, when a user message came after a block
+  of the same kind or names something the call acts on.
 
 It is never asked about a routine call or a ``self`` one, nor when a person
 will be asked anyway. A review that times out, fails or cannot be read, the
@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
+import re
 import time
 from collections import deque
 from collections.abc import Callable
@@ -43,10 +44,13 @@ from localmelo.melo.checker.review.model import (
     own_words,
     parse_reply,
     shares_a_name,
+    step_names,
     user_message,
 )
 from localmelo.melo.contracts.approvals import ReviewMode, block_note
 from localmelo.melo.contracts.review import (
+    CATEGORY_WORDS,
+    MODEL_CAN_ALLOW,
     TITLES,
     WORDS_CAN_ALLOW,
     ActionReview,
@@ -64,6 +68,18 @@ BLOCKS_PER_TURN: Final = 3
 BLOCKS_KEPT: Final = 20
 
 Purpose = Literal["undecided", "consent"]
+_HOST: Final = re.compile(
+    r"(?<![a-z0-9_.-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})"
+)
+
+
+def _bare_host(text: str) -> str:
+    """*text* (a host or a URL) as a lower-case host, without ``www.`` or a port."""
+    host = text.strip().lower()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0].split("@")[-1].split(":", 1)[0].rstrip(".")
+    return host.removeprefix("www.")
 
 
 @dataclass
@@ -106,15 +122,29 @@ class StepReviewer:
     """Asks the user's model about steps the rules left open; keeps the chat's blocks."""
 
     def __init__(
-        self, chat: Callable[[], Chat], *, clock: Callable[[], float] = time.monotonic
+        self,
+        chat: Callable[[], Chat],
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
     ) -> None:
         # The Agent's Chat, read at each review (a test may replace it).
         self._chat = chat
         self._clock = clock
+        self._wall = wall
+        self.reset()
+
+    def reset(self) -> None:
+        """Start a new chat: no messages, reviews or blocks kept.
+
+        ``since`` is now: the rules count a file changed after it as
+        written in this chat.
+        """
         self._requests: deque[str] = deque(maxlen=EARLIER_REQUESTS + 1)
         self._marker = 0
-        self._cache: dict[str, tuple[ActionReview, int]] = {}
+        self._cache: dict[str, tuple[ActionReview, int, Purpose]] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
+        self.since = self._wall()
 
     # ── The user's words ──
 
@@ -134,26 +164,41 @@ class StepReviewer:
         return tuple(self._requests)
 
     def names_host(self, host: str) -> bool:
-        """Whether a user message names *host* (``www.`` aside)."""
-        bare = host.lower().removeprefix("www.")
-        return bool(bare) and any(bare in text.lower() for text in self._requests)
+        """Whether a user message names *host*, or a site *host* belongs to.
+
+        Whole host names only (``www.`` aside): ``docs.example.com`` is
+        named by ``example.com``, but ``t.co`` is not by ``microsoft.com``.
+        """
+        bare = _bare_host(host)
+        if not bare:
+            return False
+        named = {
+            _bare_host(found)
+            for text in self._requests
+            for found in _HOST.findall(text.lower())
+        }
+        return any(bare == name or bare.endswith("." + name) for name in named)
 
     # ── Reviews ──
 
     def _purpose(
-        self, review: ActionReview, mode: ReviewMode, action: str
+        self, review: ActionReview, mode: ReviewMode, wanted: set[str]
     ) -> Purpose | None:
         if mode == "ask" or review.verdict == "routine" or "self" in review.categories:
             return None
         if review.verdict == "undecided":
             return "undecided"
-        if mode != "auto" or not set(review.categories) <= WORDS_CAN_ALLOW:
+        if (
+            mode != "auto"
+            or review.doubts  # words never allow what melo could not read
+            or not set(review.categories) <= WORDS_CAN_ALLOW
+        ):
             return None
         after_block = any(
             block.category in review.categories and block.marker < self._marker
             for block in self._blocks
         )
-        if after_block or shares_a_name(action, self._requests):
+        if after_block or shares_a_name(wanted, self._requests):
             return "consent"
         return None
 
@@ -169,14 +214,21 @@ class StepReviewer:
         key: str,
         workspace: str | None,
     ) -> ActionReview:
-        """*review* settled by the model when the rules leave it open, else as it is."""
+        """*review* settled by the model when the rules leave it open, else as it is.
+
+        A settled review is kept by step key: one that lets an undecided
+        call run is used again in this chat; any other only until the
+        user's next message, since new words can change the answer.
+        """
         action = action_text(tool_name, arguments)
-        purpose = self._purpose(review, mode, action)
+        purpose = self._purpose(review, mode, step_names(tool_name, arguments))
         if purpose is None:
             return review
         cached = self._cache.get(key)
         if cached is not None and (
-            cached[0].verdict == "routine" or cached[1] == self._marker
+            cached[1] == self._marker
+            or cached[2] == "undecided"
+            and cached[0].verdict == "routine"
         ):
             return cached[0]
         if len(action) > MAX_ACTION_CHARS:
@@ -198,7 +250,7 @@ class StepReviewer:
             answer = await self._ask(inputs)
         settled = _settle(review, answer, purpose)
         if not answer.error:
-            self._cache[key] = (settled, self._marker)
+            self._cache[key] = (settled, self._marker, purpose)
         return settled
 
     async def _ask(self, inputs: ReviewInputs) -> ModelAnswer:
@@ -271,38 +323,60 @@ class StepReviewer:
         )
 
 
+def _model_reason(category: str) -> str:
+    """melo's own sentence for what the model found: its free text is only kept."""
+    if category == "beyond_request":
+        return "Does something the request did not ask for."
+    if category == "opaque":
+        return "Does something melo could not check."
+    return f"Your model's review says it {CATEGORY_WORDS[category]}."
+
+
 def _settle(
     review: ActionReview, answer: ModelAnswer, purpose: Purpose
 ) -> ActionReview:
-    """The review once the model answered (or failed to)."""
+    """The review once the model answered (or failed to).
+
+    A call runs only on a category of :data:`MODEL_CAN_ALLOW`: an answer
+    that names a category only a click can allow keeps it blocked, and an
+    undecided call the model files under a category words can allow runs
+    only when the user's words ask for it.
+    """
+    allows = answer.category in MODEL_CAN_ALLOW
     if purpose == "consent":
-        if answer.user_asked == "yes" and answer.fits_request == "yes":
+        if answer.user_asked == "yes" and answer.fits_request == "yes" and allows:
             # The user's words allow it: it runs, its categories kept.
             return dataclasses.replace(
                 review, verdict="routine", by="model", model=answer
             )
         return dataclasses.replace(review, by="model", model=answer)
     if answer.error:
-        return ActionReview(
-            "high",
-            ("unreviewed",),
-            (f"melo could not review this call: {answer.error}.",),
-            review.paths,
+        return dataclasses.replace(
+            review,
+            verdict="high",
+            categories=("unreviewed",),
+            reasons=(f"melo could not review this call: {answer.error}.",),
             by="model",
             model=answer,
         )
-    if answer.verdict == "routine" and answer.fits_request == "yes":
+    plain = answer.category in ("none", "") or answer.user_asked == "yes"
+    if (
+        answer.verdict == "routine"
+        and answer.fits_request == "yes"
+        and allows
+        and plain
+    ):
         return dataclasses.replace(review, verdict="routine", by="model", model=answer)
     category = "opaque" if answer.category == "unclear" else answer.category
-    if category not in TITLES or category == "self":
+    if category not in TITLES or category in ("self", "none", "unreviewed"):
         category = "beyond_request" if answer.fits_request == "no" else "opaque"
-    reason = answer.reason or (
-        "Does something the request did not ask for."
-        if category == "beyond_request"
-        else "Does something melo could not check."
-    )
-    return ActionReview(
-        "high", (category,), (reason,), review.paths, by="model", model=answer
+    return dataclasses.replace(
+        review,
+        verdict="high",
+        categories=(category,),
+        reasons=(_model_reason(category),),
+        by="model",
+        model=answer,
     )
 
 
