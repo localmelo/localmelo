@@ -83,6 +83,7 @@ tables of the chosen backends.
 | `n_srv` | `[scheduler]` | `8` | The model server's slots. |
 | `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |
 | `n_fg` | `[scheduler]` | `1` | Background calls allowed in flight while a chat is focused. |
+| `focus_s` | `[scheduler]` | `10` | Seconds a chat stays focused after its last model call or keystroke (and while a call of its turn runs); an open chat with no turn running leaves free slots to tasks. A number above 0. |
 | `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |

@@ -194,9 +194,38 @@ current priority, and forgetting it alone preserves its identity;
 `held(task_id)` reports the gate's reason as it does for a chat. Task routes
 write priority changes through the store.
 
+`ChatGate(focus_s=...)` sets the focus window in seconds, the policy's
+`tau_focus_s`; `None` keeps the policy's own 30. The gateway passes
+`[scheduler] focus_s` (default 10). A chat is focused while one of its calls is
+in flight, and for that window after its last call ended or a keystroke
+arrived; the window is also the longest a held call waits before the policy
+runs again. The page's presence heartbeat (sent on typing, on a send and on
+opening a chat) counts for the window and no longer, so an open chat with no
+turn running leaves the free slots to tasks. While focused, the policy admits
+at most `n_fg` background P2-P4 calls in flight; the lane is never limited by
+that cap.
+
+A held call's activity words come from the gate's reason code
+(`activity_text(state="held", reason=...)` in `support/sessions/display.py`):
+`Priority` is `Waiting for a higher-priority task`, `Resources` `Waiting for a
+free model slot`, `Reservation` `Waiting while another job uses the model`,
+`Memory` `Waiting for free memory`, `Battery` `Waiting for the battery`,
+`Thermal` `Waiting for the Mac to cool down` and `IdleOnly` `Waiting until the
+Mac is idle`; any other code, or none, reads `Waiting for the model`.
+
 The gateway has [task routes](api-v2.md#scheduler-tasks-s3a2) and in-process workers.
 New user tasks are queued by effective priority, rank and creation time, with
 at most four resident workers; a successfully parked worker releases its slot.
+A queued task that outranks a resident one (a strictly lower effective level)
+when every slot is taken asks the lowest resident worker to make room, youngest
+first within a level: the worker is paused through the same safe-point park as
+a person's Pause, so it parks at its next held plan or reflection and never in
+the middle of a tool, and is then queued again at the level it had, to be
+admitted by level, rank and age like a new task. Tasks of one level never
+displace each other. A worker with an approval pending or being asked is left
+alone, and a Pause, Resume or Stop from a person on a worker that is making
+room cancels the automatic queueing again. One request is outstanding per
+waiting task. A model call already in flight is not cancelled.
 Each uses `mode="gateway"`, `memory=False` and the console's shared gate for
 LLM and embedding calls. Stop cancels the runner and finishes the gate task.
 A retention sweep discards terminal gate identities whose task rows have

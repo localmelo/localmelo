@@ -95,7 +95,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。
 - `sessions.resume_mode` 是当前使用的恢复方式；目前为 `pairs`。
 - `status.running` 按类别统计当前正在运行的内容：`chats`（控制台中有轮次在进行的对话，与 `sessions.running` 相同）、`tasks`（状态为 `running` 的调度任务）、`runs`（直接运行和 `--brief` worker）和 `terminal`（交互式 `melo` 对话）。后两项来自命令行文件，只在租约有效时才计入一个轮次，因此进程已终止的运行不会被计入。`status.tasks` 是状态行所显示的调度队列：`running`、`queued`、`held` 和 `top_level`（其中最高的级别，没有则为 `null`）。`status.items` 列出正在运行的内容，先是对话，然后是任务、运行和终端对话，最多 20 项，每项为 `{"kind", "id", "title", "activity", "icon"}`（`kind` 为 `chat`、`task`、`run` 或 `terminal`；终端对话的标题已脱敏）。计数没有上限。无法读取的存储按没有运行任何内容计；一次调用通过索引读取任务状态，并通过索引读取命令行文件中正在运行的轮次。
-- `activity` 用平实的话说明该项正在做什么，`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用）、`Reading notes.md` 和 `Looking through
+- `activity` 用平实的话说明该项正在做什么，`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
@@ -738,7 +738,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"ok": true}
 ```
 
-- 未知会话返回 404 `not_found`。该调用是针对被聚焦对话的一个调度器事件（通道会保留它的输入窗口）；它不会打开会话，也不改变其他任何东西。
+- 未知会话返回 404 `not_found`。该调用是针对被聚焦对话的一个调度器事件（通道会保留它的输入窗口，即 `[scheduler] focus_s`，默认 10 秒）；它不会打开会话，也不改变其他任何东西。只是被打开的聊天在窗口结束后，会重新把槽位让给任务。
 - 通过轮次路由开始的轮次，以及带第一个轮次的创建，同样会重置该对话的保持时钟并使其获得焦点，与对话自身的消息一样。
 
 ## GET /api/sessions/{id}/tools

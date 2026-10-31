@@ -83,6 +83,7 @@ chat_model = "qwen3:8b"
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
 | `n_fg` | `[scheduler]` | `1` | 有聊天处于焦点时允许在途的后台调用数。 |
+| `focus_s` | `[scheduler]` | `10` | 聊天在最后一次模型调用或按键之后保持焦点的秒数（其本轮的调用运行期间也算焦点）；已打开但没有轮次在运行的聊天会把空闲槽位留给任务。须为大于 0 的数。 |
 | `call_log` | `[scheduler]` | `true` | 每次网关运行写一份 JSONL 调用日志。 |
 | `call_log_dir` | `[scheduler]` | `""` | 日志的父目录；默认为 `~/.cache/localmelo/scheduler`。 |
 | `gpu_lock_file` | `[scheduler]` | `""` | 要读取的共享 GPU 锁；为空表示不读取锁。网关中的电池读取器始终开启。 |
