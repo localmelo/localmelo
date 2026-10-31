@@ -532,6 +532,28 @@ _CHANGE_ZH: Final = re.compile(
 )
 _LEAD_ZH: Final = re.compile(r"^(?:请|麻烦你?|帮我|帮忙|给我|你)?(?:把|将|在)?")
 _LOCATION: Final = re.compile(r"^(?:in|for|at|on)\s+\S+\s*[,:;]\s*")
+# A whole pipeline in one breath: change something, test it, commit it. The
+# commit verb is left out of the change list, so "跑测试，过了就提交" (nothing
+# to change) is not a request, and a bare 改 or 修 is not either ("改得更严格"
+# changes how something reads, not code).
+_EDIT_ZH: Final = re.compile(
+    r"修复|修改|修一下|修好|改成|改为|改掉|改一下|换成|换掉|换一下|删除|删掉|添加|加上|加到|"
+    r"放到|移到|移动|重命名|替换|实现|重构|更新"
+)
+_EDIT_EN: Final = re.compile(
+    r"\b(?:fix|change|edit|update|refactor|rename|replace|remove|delete|add|move|rewrite|"
+    r"implement|patch|correct|format|migrate|bump|revert)\w*\b",
+    re.IGNORECASE,
+)
+_TEST_CUE: Final = re.compile(r"测试|运行测试|tests?\b|pytest", re.IGNORECASE)
+_COMMIT_CUE: Final = re.compile(r"提交|push|commits?\b", re.IGNORECASE)
+# The ask negated is not an ask: "今天不用改，跑测试再提交".
+_PIPELINE_NO: Final = re.compile(
+    r"(?:不用|不需要|无需|不必|不要|先不|暂时不|别)\s*(?:再|去|用)?\s*(?:改|修|测|提交|动手)"
+    r"|\b(?:don['’]t|do\s+not|no\s+need\s+to|never|not\s+worth)\s+(?:even\s+)?(?:re-?)?"
+    r"(?:fix|change|edit|update|refactor|rename|replace|remove|delete|add|test|commit|push)\w*",
+    re.IGNORECASE,
+)
 
 
 def names_files(text: str) -> bool:
@@ -542,24 +564,41 @@ def names_files(text: str) -> bool:
     )
 
 
+def _pipeline(text: str) -> bool:
+    """Whether *text* spells out the whole ask: change the code, test it, commit.
+
+    "今天修一下：路由规则改掉，跑测试，过了就提交", "fix the router, run the
+    tests and commit if they pass": a verb that changes something, a test cue
+    and a commit cue, not said in a question and not under a negation. No file
+    is named here, so the wording itself has to carry the request.
+    """
+    if _PIPELINE_NO.search(text):
+        return False
+    edit = _EDIT_ZH if _has_cjk(text) else _EDIT_EN
+    return bool(edit.search(text) and _TEST_CUE.search(text) and _COMMIT_CUE.search(text))
+
+
 def work_request(typed: str) -> bool:
     """An imperative change to named files or paths: code starts it as a task at once.
 
     "Please fix this today: in tests/cli/test_e2e_pty.py …", "把 docs/a.md 里的图换掉":
     the message starts with a change verb (after "please" and the like, or
     after a leading "in <path>:"), names a file or a path, and is not a
-    question.
+    question. With no file named, the same happens when the message asks for
+    the whole pipeline at once (`_pipeline`: change it, run the tests, commit).
     """
     text = norm(typed)
-    if not text or is_question(typed) or not names_files(text):
+    if not text or is_question(typed):
         return False
-    if _has_cjk(text[:24]):
-        lead = text[_LEAD_ZH.match(text).end() :]  # type: ignore[union-attr]
-        first = re.split(r"[。！？；\n]", lead, maxsplit=1)[0]
-        return bool(_CHANGE_ZH.search(first))
-    return bool(
-        _LEAD_EN.match(text) or _LEAD_EN.match(_LOCATION.sub("", text, count=1))
-    )
+    if names_files(text):
+        if _has_cjk(text[:24]):
+            lead = text[_LEAD_ZH.match(text).end() :]  # type: ignore[union-attr]
+            first = re.split(r"[。！？；\n]", lead, maxsplit=1)[0]
+            return bool(_CHANGE_ZH.search(first))
+        return bool(
+            _LEAD_EN.match(text) or _LEAD_EN.match(_LOCATION.sub("", text, count=1))
+        )
+    return _pipeline(text)
 
 
 _TITLE_LEAD: Final = re.compile(
