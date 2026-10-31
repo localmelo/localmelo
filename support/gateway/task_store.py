@@ -988,6 +988,18 @@ class TaskStore:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             return record
 
+    async def by_request_key(
+        self, request_key: str, origin: str = "user"
+    ) -> TaskRecord | None:
+        """The task a request key made, or ``None``."""
+        async with self._store.component_transaction("task_by_key") as conn:
+            row = await _first(
+                conn,
+                f"{_SELECT_TASK} WHERE origin = ? AND request_key = ?",
+                (origin, request_key),
+            )
+        return None if row is None else TaskRecord.from_row(row)
+
     async def list_tasks(self, states: Sequence[str] | None = None) -> list[TaskRecord]:
         """Every task, newest first, or only those in *states* (by the state index)."""
         where = ""

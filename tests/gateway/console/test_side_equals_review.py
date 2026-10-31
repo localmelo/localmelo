@@ -9,11 +9,13 @@ with real Agents on scripted models; no worker starts.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS
 from localmelo.support.gateway.front_rules import (
     TaskRef,
@@ -513,6 +515,98 @@ async def test_as_task_on_a_new_chat_that_cannot_start_leaves_no_chat(
         assert made.status_code == 400
         listed = await console.store.list_sessions(kinds=("chat",))
         assert listed == []
+
+
+def _as_task_body(text: str, key: str | None = None) -> dict[str, Any]:
+    folder = Path.home() / "side-folder"
+    folder.mkdir(exist_ok=True)
+    turn: dict[str, Any] = {"text": text, "as_task": True}
+    if key is not None:
+        turn["client_request_id"] = key
+    return {"workspace": str(folder), "turn": turn}
+
+
+async def _chats(console: Console) -> list[str]:
+    return [s.id for s in await console.store.list_sessions(kinds=("chat",))]
+
+
+async def test_a_repeated_as_task_create_answers_the_same_chat_and_echo(
+    tmp_path: Path,
+) -> None:
+    async with chats_console(tmp_path) as (console, client, _):
+        body = _as_task_body("Find hotels", "create-1")
+        first = await client.post("/api/sessions", json=body)
+        again = await client.post("/api/sessions", json=body)
+        assert (first.status_code, again.status_code) == (201, 200), again.text
+        one, two = first.json(), again.json()
+        assert two["repeated"] is True and "repeated" not in one
+        assert two["session"]["id"] == one["session"]["id"]
+        assert two["echo"]["id"] == one["echo"]["id"]
+        assert two["echo"]["task_id"] == one["echo"]["task_id"]
+        assert await _chats(console) == [one["session"]["id"]], "no second chat"
+        assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+async def test_two_as_task_creates_at_once_make_one_chat(tmp_path: Path) -> None:
+    async with chats_console(tmp_path) as (console, client, _):
+        body = _as_task_body("Find hotels", "create-2")
+        answers = await asyncio.gather(
+            client.post("/api/sessions", json=body),
+            client.post("/api/sessions", json=body),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 201]
+        assert len({a.json()["session"]["id"] for a in answers}) == 1
+        assert len(await _chats(console)) == 1
+        assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+async def test_a_key_used_for_another_message_is_a_conflict_and_makes_no_chat(
+    tmp_path: Path,
+) -> None:
+    async with chats_console(tmp_path) as (console, client, _):
+        made = await client.post(
+            "/api/sessions", json=_as_task_body("Find hotels", "create-3")
+        )
+        other = await client.post(
+            "/api/sessions", json=_as_task_body("Book flights", "create-3")
+        )
+        assert other.status_code == 409
+        assert other.json()["error"]["code"] == "submission_conflict"
+        assert await _chats(console) == [made.json()["session"]["id"]]
+
+
+async def test_a_key_used_by_a_task_in_a_chat_returns_that_chat(tmp_path: Path) -> None:
+    async with chats_console(tmp_path) as (console, client, _):
+        side = await _side(client, tmp_path, "Trip plan")
+        sent = await _post_turn(
+            client, side, "/task Find hotels", client_request_id="create-4"
+        )
+        assert sent.status_code == 200, sent.text
+        again = await client.post(
+            "/api/sessions", json=_as_task_body("/task Find hotels", "create-4")
+        )
+        # The same job under the same key: the chat that has it, not a second one.
+        assert again.status_code == 200, again.text
+        assert again.json()["session"]["id"] == side
+        assert again.json()["repeated"] is True
+        assert await _chats(console) == [side]
+
+
+async def test_an_as_task_create_whose_task_does_not_start_leaves_no_chat(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    from localmelo.support.gateway.task_policy import TaskPolicyError
+
+    async with chats_console(tmp_path) as (console, client, _):
+
+        async def refuse(*args: Any, **kwargs: Any) -> Any:
+            raise TaskPolicyError("The objective is not allowed.")
+
+        monkeypatch.setattr(console.workers, "create_spec", refuse)
+        made = await client.post("/api/sessions", json=_as_task_body("Find hotels"))
+        assert made.status_code == 400, made.text
+        assert "not allowed" in made.json()["error"]["message"]
+        assert await _chats(console) == []
 
 
 # ── 11. A side chat's page is as new as its tasks ──

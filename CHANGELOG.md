@@ -22,7 +22,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chat too. A chat's words reach its own tasks first and another chat's only
   when they fit none of its own; words that fit several ask which with a
   one-tap suggestion for each. Deleting a side chat hands its unfinished tasks,
-  chores and waiting approvals to the main chat. [#NN]
+  chores and waiting approvals to the main chat. Starting a chat with **Run as
+  a task** through the API repeats safely: the same `client_request_id` returns
+  the same chat and task. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

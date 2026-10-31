@@ -1006,8 +1006,10 @@ with the echo.
 - `as_task` on a task session is 400 `invalid_request`; the main chat and a
   side chat take it (so does `POST /api/sessions` with `turn.as_task`: the chat is
   made first, empty, titled by the message, and the answer is 201 with the
-  `session` and the task's `echo`, no turn; it is not idempotent, and a task
-  that cannot start leaves no chat), and a side chat's code rules (`/task`, control phrases,
+  `session` and the task's `echo`, no turn; a repeated `client_request_id` answers
+  200 with the chat and echo the first made and `repeated: true`, the key of another
+  message is 409 `submission_conflict`, and a task that cannot start is 400 and
+  leaves no chat), and a side chat's code rules (`/task`, control phrases,
   follow-ups, chores and reminders) apply from its second message, the task
   belonging to that side chat. A repeated `client_request_id` of a delegation
   answers the same echo.

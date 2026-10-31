@@ -25,6 +25,7 @@ from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     go_ahead_text,
 )
+from localmelo.support.gateway.front_rules import route as rules_route
 from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
@@ -42,7 +43,9 @@ from localmelo.support.sessions.submissions import (
 )
 
 from .bodies import Body
+from .cards import card_json
 from .errors import ApiError
+from .front import ECHO_EVENT
 from .registry import STOP_REASON
 from .shapes import submission_json, turn_json
 
@@ -222,32 +225,87 @@ async def _create_for_task(
     """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
 
     The answer is 201 with the chat and the task's ``echo``, and no turn. A
-    task that cannot start leaves no chat behind.
+    task that cannot start leaves no chat behind. With a *key* (the turn's
+    ``client_request_id``, which is the task's request key) a repeat answers 200
+    with the chat and echo the first made (``repeated``): a second chat is never
+    made, even for two requests at once; the key used for another message is 409
+    ``submission_conflict``.
     """
     assert body.turn is not None
-    entry, _ = await _sessions_call(
-        console,
-        console.sessions.create(body.workspace, None, mode=body.approvals),
-    )
-    chat = entry.session_id
-    try:
-        echo = await _store_call(
+    async with console.sessions.keyed(key):
+        if key is not None:
+            repeated = await _repeated_create(console, key, composed)
+            if repeated is not None:
+                return repeated
+        entry, _ = await _sessions_call(
             console,
-            console.front_for(chat).route(
-                body.turn.text, composed, as_task=True, key=key
+            console.sessions.create(body.workspace, None, mode=body.approvals),
+        )
+        chat = entry.session_id
+        try:
+            echo = await _store_call(
+                console,
+                console.front_for(chat).route(
+                    body.turn.text, composed, as_task=True, key=key
+                ),
+                chat,
+            )
+            if echo is None or echo.get("echo") != "started":
+                # The task did not start: its echo says why, and the chat has nothing.
+                raise ApiError(
+                    400, "invalid_request", str((echo or {}).get("line") or "")
+                )
+            await _store_call(
+                console,
+                console.store.rename_session(chat, short_title(composed)),
+                chat,
+            )
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await console.sessions.delete(chat)
+            raise
+        info = await _require_session(console, chat)
+        return JSONResponse(
+            status_code=201,
+            content={"session": console.session_body(info), "echo": echo},
+        )
+
+
+async def _repeated_create(
+    console: Console, key: str, composed: str
+) -> JSONResponse | None:
+    """The answer to a create whose *key* made a task already, or ``None`` when it made none."""
+    record = await _store_call(console, console.workers.tasks.by_request_key(key))
+    if record is None:
+        return None
+    work = rules_route(composed, as_task=True).text.strip()
+    chat = record.front_id
+    info = await console.store.get_session(chat) if chat else None
+    echo = None
+    if (
+        info is not None
+        and info.kind == "chat"
+        and record.spec.get("objective") == work
+    ):
+        found = await console.store.events_of_type(info.id, ECHO_EVENT, limit=200)
+        echo = next(
+            (
+                card_json(event)
+                for event in found
+                if (event.event.get("data") or {}).get("task_id") == record.task_id
+                and (event.event.get("data") or {}).get("echo") == "started"
             ),
-            chat,
+            None,
         )
-        await _store_call(
-            console, console.store.rename_session(chat, short_title(composed)), chat
-        )
-    except BaseException:
-        with contextlib.suppress(Exception):
-            await console.sessions.delete(chat)
-        raise
-    info = await _require_session(console, chat)
+    if info is None or echo is None:
+        raise ApiError(409, "submission_conflict", t("errors.messageIdUsed"))
     return JSONResponse(
-        status_code=201, content={"session": console.session_body(info), "echo": echo}
+        status_code=200,
+        content={
+            "session": console.session_body(info),
+            "echo": echo,
+            "repeated": True,
+        },
     )
 
 
