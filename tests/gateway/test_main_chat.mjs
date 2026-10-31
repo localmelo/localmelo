@@ -195,3 +195,41 @@ test('a done card keeps the lines of the answer, and the page lets a line break 
   cardNode({doc, card, open: () => {}});
   assert.equal(doc.made.find((item) => item.className === 'main-card-line').textContent, 'Changed the rule.\nTests: 12 passed.');
 });
+
+test('a chore proposal offers Save chore, Just once and Cancel until a later line answers it', () => {
+  const echoes = mainChat.mergeEchoes([], [
+    {id: 2, ts: NOON - 30, data: {echo: 'chore', line: 'Run this every weekday at 8:30?', title: 'Brief', text: 'brief me on my calendar', level: 2,
+      when: 'every weekday at 8:30', schedule: {kind: 'weekdays', at: '08:30'}, typed: 'every weekday at 8:30, brief me on my calendar'}},
+    {id: 3, ts: NOON - 20, data: {echo: 'chore_saved', chore_id: 'c1', title: 'Brief', of: 2, line: 'Saved: Brief · every weekday at 8:30'}},
+    {id: 4, ts: NOON - 10, data: {echo: 'checkin', items: 2, line: 'Your brief is ready.'}},
+  ]);
+  assert.deepEqual(echoes.map((echo) => echo.kind), ['chore', 'chore_saved', 'checkin']);
+  // None of the three names a task: the proposal and the saved line still have their buttons.
+  assert.deepEqual(mainChat.echoActions(echoes[0], false), [['Save chore', 'save'], ['Just once', 'once'], ['Cancel', 'cancel']]);
+  assert.deepEqual(mainChat.echoActions(echoes[1], false), [['Undo', 'undo']]);
+  assert.deepEqual(mainChat.echoActions(echoes[2], false), [], 'the check-in is only a note');
+  assert.deepEqual([...mainChat.answered(echoes)], [2]);
+  assert.deepEqual(mainChat.echoActions(echoes[0], mainChat.answered(echoes).has(2)), []);
+});
+
+test('a chore proposal is drawn as the question, the work it would repeat and three buttons that act', () => {
+  const made = [];
+  const doc = {createElement: (tag) => {
+    const node = {tag, className: '', textContent: '', dataset: {}, children: [], handlers: {}, attributes: {},
+      setAttribute(key, value) { this.attributes[key] = value; }, append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; }, addEventListener(type, fn) { this.handlers[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  const echo = mainChat.readEcho({id: 2, ts: NOON, data: {echo: 'chore', line: 'Run this every weekday at 8:30?', title: 'Brief',
+    text: 'brief me on my calendar', level: 2, typed: 'every weekday at 8:30, brief me on my calendar'}});
+  const acted = [];
+  const [bubble, line] = mainChat.echoNodes({doc, echo, act: (...args) => acted.push(args.slice(1))});
+  assert.equal(bubble.children[0].textContent, 'every weekday at 8:30, brief me on my calendar');
+  const text = (node) => [node.textContent, ...node.children.map(text)].filter(Boolean).join(' | ');
+  assert.equal(text(line), '◷ | Run this every weekday at 8:30? | Normal | brief me on my calendar | Save chore | Just once | Cancel');
+  const buttons = made.filter((node) => node.tag === 'button');
+  assert.deepEqual(buttons.map((node) => node.className), ['outline-button', 'link-button', 'link-button']);
+  buttons.forEach((node) => node.handlers.click());
+  assert.deepEqual(acted, [['save'], ['once'], ['cancel']]);
+});

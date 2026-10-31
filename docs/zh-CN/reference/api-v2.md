@@ -80,7 +80,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
     ],
     "waiting": [],
-    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2},
+    "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
   },
   "uptime_s": 132.4
@@ -99,7 +99,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
-- `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中 Melo 的状态策略会读取它，应用目前还不显示 Melo。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
+- `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
 
 ## GET /api/activity
 
@@ -328,6 +328,23 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 客户端若按版本号寻址 API v2，也可以通过 `/api/v2/tasks/{task_id}/resume` 访问该路由；其他任务路由使用 `/api` 前缀。
 
+## Chores
+
+按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，在工作区下属于它自己的文件夹中运行，归定时事项所属的对话（`front_id`：主对话或某个旁支对话）。每个定时事项带有 `revision`，每次更改都会使它加一。
+
+```json
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0}}
+```
+
+- `GET /api/chores` 返回 `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`，最早的在前。传旁支对话的 `?session_id=ID` 只保留该对话自己的，并给出 `"scope": "chat"`；主对话的 id、空值或不传 `session_id` 则列出全部。未知或不是对话的 id 返回 404 `not_found`。
+- `POST /api/chores` 接受 `request`（必填，不超过 100,000 个字符）、`schedule`，以及可选的 `title`（不超过 200 个字符；默认从请求派生）、`level`（`Today`、`Normal`、`Whenever`、`If idle`，或 1 到 4；默认按请求中的用词，与任务相同）和 `front_id`（某个对话；默认主对话）。`schedule` 是 `{"kind": "daily" | "weekdays", "at": "HH:MM"}`（本地时间）或 `{"kind": "hours", "every": 1..24}`；其他键会被拒绝。无效的请求体返回 400 `invalid_request`；最多保存 50 个（409 `chore_limit`）。返回 201 `{"chore"}`；第一次 `next_run` 是该时间表的下一个时间再加最多 120 秒的抖动。
+- `PATCH /api/chores/{id}` 接受读到的 `revision`，以及 `title`、`request`、`schedule`、`level` 和 `enabled`（至少一个）。过期的 revision 返回 409 `stale_revision`，未知的定时事项返回 404 `not_found`。新的 `schedule` 或 `enabled: true` 会从现在起重新计划 `next_run`（错过的日子不补跑）；`enabled: false` 把它置为 null。
+- `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
+- `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
+- `PUT /api/checkin` 配合 `{"on": false}` 切换 check-in（保存在文件中），返回 `{"checkin": {...}}`；关闭期间 `next_at` 为 null。
+
+`last` 是该事项最近一次运行的任务当前状态（`state` 取任务的状态：`queued`、`running`、`held`、`waiting`、`parked`、`interrupted`、`done`、`failed`、`cancelled` 或 `expired`；`line` 是结果的第一句话，或没有完成的原因）。网关用每 30 秒一次、不调用模型的检查来启动到期的事项；电脑睡眠期间到期的事项在下一次检查时只运行一次，上一次运行还没结束的事项跳过这一次，崩溃后重复的启动是同一个任务（键为 `chore:<id>:<planned time>`）。
+
 ## GET /api/sessions
 
 最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。
@@ -443,10 +460,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
 ```
 
-- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
 - 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
-- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level", "level"?: "Today" | "P1" | 1}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。撤销、应用和开始只答复一次（409 `already_answered`）；未知的回执或任务为 404。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "Today" | "P1" | 1}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复），`once` 把它的工作作为一个任务开始，`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。
 
 ## GET /api/sessions/{id}/events
 

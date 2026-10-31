@@ -91,6 +91,9 @@ final class PetController: NSObject {
     var openWaiting: () -> Void = {}
     /// Told when the person hides Melo or brings it back.
     var hiddenChanged: (Bool) -> Void = { _ in }
+    /// The "On the desktop" choice: the submenus of the pet's menu and the menu bar's, and who hears a new choice.
+    let desktop = DesktopMenu()
+    var desktopChanged: (DesktopMode) -> Void = { _ in }
     private(set) var mood = PetMood.unknown
     private(set) var settings: PetSettings
     var environment: PetEnvironment { gate.environment }
@@ -106,6 +109,9 @@ final class PetController: NSObject {
     private var poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
     private var shownState: PetState?
     private var applied: (plan: PetMotionPlan, animate: Bool)?
+    // The activity pill is on the desktop in the pet's place; and until when the pet wags after a "Done" of the pill.
+    private var pillUp = false
+    private var wagUntil: Date?
 
     var hiddenByPerson: Bool { settings.hidden }
     var isShown: Bool { panel.isVisible }
@@ -121,6 +127,8 @@ final class PetController: NSObject {
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: petPanelSize),
                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
+        desktop.show(settings.mode)
+        desktop.choose = { [weak self] in self?.setDesktop($0) }
         panel.contentView = view
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -165,19 +173,42 @@ final class PetController: NSObject {
         reconcile()
     }
 
-    /// The person hid Melo (Hide Melo) or brought it back (Show Melo); remembered.
+    /// The person hid Melo (Hide Melo) or brought it back (Show Melo); remembered. Showing again brings back what the
+    /// person had: Melo with the pill, or Melo alone.
     func setHidden(_ hidden: Bool) {
-        guard settings.hidden != hidden else { return }
-        settings.hidden = hidden
+        setDesktop(hidden ? .nothing : settings.pill ? .pill : .pet)
+    }
+
+    /// The person chose what is on the desktop; remembered.
+    func setDesktop(_ mode: DesktopMode) {
+        guard settings.mode != mode else { return }
+        let hidden = settings.hidden
+        settings.mode = mode
         save()
-        hiddenChanged(hidden)
+        desktop.show(mode)
+        if hidden != settings.hidden { hiddenChanged(settings.hidden) }
+        desktopChanged(mode)
         reconcile()
+    }
+
+    /// The activity pill appeared or went. While it is there the pet is not; when it goes the pet comes back, and wags
+    /// for a few seconds if the pill's "Done" ran out.
+    func pillShowing(_ showing: Bool, wags: Bool) {
+        pillUp = showing
+        if wags { wagUntil = Date().addingTimeInterval(pillWagFor) }
+        reconcile()
+    }
+
+    /// The pill was dropped at `spot` of the screen `key`: the pet comes back there.
+    func rememberSpot(screen key: String, spot: PetSpot) {
+        settings.remember(screen: key, spot: spot)
+        save()
     }
 
     // MARK: Showing and hiding
 
     private func reconcile() {
-        let wanted = petShouldShow(windowShown: windowShown, hiddenByPerson: settings.hidden)
+        let wanted = petShouldShow(windowShown: windowShown, hiddenByPerson: settings.hidden) && !pillUp
         if wanted && !panel.isVisible {
             guard picture(for: .lieIdle) != nil, place() else { return }
             touched = Date()
@@ -209,6 +240,8 @@ final class PetController: NSObject {
         let old = mood
         mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched),
                        poseSeed: poseSeed)
+        if let until = wagUntil, mood == .resting { mood = Date() < until ? .done : mood }
+        if let until = wagUntil, Date() >= until { wagUntil = nil }
         if shownState == nil || mood != old { view.describe(mood) }
         // A beat plays when the mood begins: when the pet appears, and when what it does changes.
         let beginning = shownState == nil || petMotionPlan(old) != petMotionPlan(mood)
@@ -273,6 +306,7 @@ final class PetController: NSObject {
         for (title, action) in [("Open localmelo", #selector(menuOpen)), ("Hide Melo", #selector(menuHide))] {
             menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
         }
+        menu.addItem(desktop.makeItem())
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
             .target = NSApp

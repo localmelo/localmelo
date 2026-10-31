@@ -86,6 +86,8 @@ struct RecentOutcome: Equatable {
     let id: String
     let outcome: RunOutcome
     let endedAgo: TimeInterval
+    /// What it was called; empty when the gateway did not say.
+    var title = ""
 }
 
 /// The newest outcome, or nil when none finished yet, the field is missing (an older gateway) or damaged.
@@ -97,7 +99,8 @@ func recentOutcome(_ data: Data) -> RecentOutcome? {
           let id = entry["id"] as? String, (1...128).contains(id.count),
           let word = entry["outcome"] as? String, let outcome = RunOutcome(rawValue: word),
           let ago = entry["ended_s_ago"] as? Double, ago.isFinite, ago >= 0 else { return nil }
-    return RecentOutcome(kind: kind, id: id, outcome: outcome, endedAgo: ago)
+    return RecentOutcome(kind: kind, id: id, outcome: outcome, endedAgo: ago,
+                         title: plainLine(entry["title"] as? String, limit: 200))
 }
 
 /// Seconds a finished run shows as done, and a failed one as an error, before the pet goes back to rest.
@@ -268,24 +271,47 @@ enum PetClick: Equatable {
 
 func petClickTarget(_ mood: PetMood) -> PetClick { mood == .waiting ? .waiting : .window }
 
-/// What the app remembers about the pet between launches: whether the person hid it, the screen it was last on,
-/// and its spot on each screen. A missing, damaged or partly damaged file gives what is left of it.
+/// What is on the desktop while the window is put away: Melo and the activity pill (the default), Melo alone, or
+/// nothing. Chosen in the menu bar's menu and the pet's menu.
+enum DesktopMode: String, CaseIterable {
+    case pill, pet, nothing
+
+    var title: String {
+        ["pill": "Melo and the activity pill", "pet": "Melo only", "nothing": "Nothing"][rawValue] ?? rawValue
+    }
+}
+
+/// What the app remembers about the pet between launches: whether the person hid it, whether the activity pill may
+/// take its place while work runs, the screen it was last on, and its spot on each screen. A missing, damaged or
+/// partly damaged file gives what is left of it.
 struct PetSettings: Equatable, Codable {
     var hidden = false
+    var pill = true
     var screen: String?
     var spots: [String: PetSpot] = [:]
 
     init() {}
 
+    /// The menu's choice: hidden is "Nothing"; else the pill's flag says Melo with or without the pill. Choosing
+    /// Nothing keeps the pill's flag, so Show Melo brings back what was there.
+    var mode: DesktopMode {
+        get { hidden ? .nothing : pill ? .pill : .pet }
+        set {
+            hidden = newValue == .nothing
+            if newValue != .nothing { pill = newValue == .pill }
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self)
         hidden = (try? values.decode(Bool.self, forKey: .hidden)) ?? false
+        pill = (try? values.decode(Bool.self, forKey: .pill)) ?? true
         screen = try? values.decode(String.self, forKey: .screen)
         let raw = (try? values.decode([String: PetSpot].self, forKey: .spots)) ?? [:]
         spots = raw.filter { $0.value.dx.isFinite && $0.value.dy.isFinite && $0.key.count <= 128 }
     }
 
-    private enum Keys: String, CodingKey { case hidden, screen, spots }
+    private enum Keys: String, CodingKey { case hidden, pill, screen, spots }
 
     /// `key` is where the pet was dropped, at `spot`. Other screens keep theirs, up to 16 of them.
     mutating func remember(screen key: String, spot: PetSpot) {

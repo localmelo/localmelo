@@ -21,8 +21,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var webView: WKWebView!
     private var statusView: StatusView!
     private var menuBar: MenuBar!
-    // Melo on the desktop while the window is put away.
+    // Melo on the desktop while the window is put away, and the activity pill that takes the pet's place while work runs.
     private var pet: PetController!
+    private var pill: PillController!
     // Where "Waiting for your approval" goes: the console route of the first chat or task that waits.
     private var pendingRoute: String?
     private var child: Process?
@@ -122,12 +123,26 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         pet.openWaiting = { [weak self] in self?.openWaiting() }
         pet.hiddenChanged = { [weak self] hidden in self?.menuBar.showPetLine.isHidden = !hidden }
         menuBar.showPetLine.isHidden = !pet.hiddenByPerson
+        menuBar.offerDesktop(pet.desktop.makeItem())
+        pill = PillController(pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"),
+                              settings: { [weak self] in self?.pet.settings ?? PetSettings() },
+                              remember: { [weak self] key, spot in self?.pet.rememberSpot(screen: key, spot: spot) })
+        pill.openWindow = { [weak self] in self?.openWindow() }
+        pill.openWaiting = { [weak self] in self?.openWaiting() }
+        pill.openRoute = { [weak self] route in self?.open(route: route) }
+        pill.view.menu = pet.view.menu
+        pill.showingChanged = { [weak self] showing, wags in self?.pet.pillShowing(showing, wags: wags) }
+        pet.desktopChanged = { [weak self] mode in self?.pill.desktop(mode) }
+        pill.desktop(pet.settings.mode)
         updatePet()
     }
 
     // The pet lies on the desktop while the window is closed, minimized or the app hidden.
     private func updatePet() {
-        pet?.windowShown(petWindowShown(visible: window.isVisible, minimized: window.isMiniaturized, appHidden: NSApp.isHidden))
+        let shown = petWindowShown(visible: window.isVisible, minimized: window.isMiniaturized, appHidden: NSApp.isHidden)
+        // The pet hears first when the window comes back and last when it goes away, so neither flashes.
+        let hear: [(Bool) -> Void] = [{ self.pet?.windowShown($0) }, { self.pill?.windowShown($0) }]
+        (shown ? hear : hear.reversed()).forEach { $0(shown) }
     }
 
     @objc private func showPet() { pet.setHidden(false) }
@@ -177,9 +192,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     // The window, then the chat or task that waits. The route reaches the page as an argument, never as
     // script text, and the console follows the hash as it does for a link.
-    @objc private func openWaiting() {
+    @objc private func openWaiting() { open(route: pendingRoute) }
+
+    private func open(route: String?) {
         openWindow()
-        guard let route = pendingRoute else { return }
+        guard let route = route else { return }
         webView?.callAsyncJavaScript("location.hash = route", arguments: ["route": route], in: nil, in: .page)
     }
 
@@ -284,6 +301,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         signInFailures = 0
         updateSignInItems()
         pet?.update(health: nil, stopped: false)
+        pill?.update(health: nil, stopped: false)
         port = 0
         showStep()
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
@@ -514,6 +532,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.signInFailures = 0
                 self.menuBar.show(menuBarState(data))
                 self.pet.update(health: data, stopped: false)
+                self.pill.update(health: data, stopped: false)
                 self.pendingRoute = waitingRoute(data)
                 self.refreshPageState()
                 guard health.store == "ok" else {
@@ -769,6 +788,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         child = nil
         menuBar.show(.unknown)
         pet.update(health: nil, stopped: true)
+        pill.update(health: nil, stopped: true)
         pendingRoute = nil
         statusView.showFailure(failureNotice(reason: text, ready: ready))
         openWindow()

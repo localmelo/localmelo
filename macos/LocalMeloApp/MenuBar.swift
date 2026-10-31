@@ -31,6 +31,12 @@ final class MenuBar {
         show(.unknown)
     }
 
+    /// The "On the desktop" choice, in the menu after "Show Melo".
+    func offerDesktop(_ item: NSMenuItem) {
+        guard let menu = statusItem.menu else { return }
+        menu.insertItem(item, at: menu.index(of: showPetLine) + 1)
+    }
+
     func show(_ state: MenuBarState) {
         var waiting = false
         if case .waiting = state { waiting = true }
