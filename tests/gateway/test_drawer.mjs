@@ -245,3 +245,19 @@ test('developer mode adds the Events tab, memory internals and run counters; off
   assert.equal(h.find('Events').hidden, true);
   assert.match(h.text(), /No tools available/);
 });
+
+test('the Tools tab lists the steps the person approved in this chat, and Revoke takes one back', async () => {
+  let listed = [{id: 'e1', tool: 'python_exec', folder: '/w', verdict: 'routine', categories: [], preview: 'print(1)\nprint(2)', at: 1_800_000_000}];
+  const h = harness({
+    'GET /sessions/s%2F1/tools': () => ({...emptyTools, approvals: listed}),
+    'DELETE /sessions/s%2F1/approvals/e1': () => { listed = []; return {}; },
+  });
+  await h.drawer.open();
+  assert.match(h.text(), /Steps you approved here.*run these exact steps again in the same folder without asking.*High-impact steps always ask/);
+  assert.match(h.text(), /print\(1\) print\(2\).*python_exec · approved at/);
+  const revoke = h.find('Revoke');
+  assert.equal(revoke.attributes['aria-label'], 'Revoke your approval of print(1) print(2)');
+  await revoke.click();
+  assert.deepEqual(h.calls.slice(1), [['/sessions/s%2F1/approvals/e1', 'DELETE'], ['/sessions/s%2F1/tools', 'GET']]);
+  assert.doesNotMatch(h.text(), /Steps you approved here/);
+});

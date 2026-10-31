@@ -4,28 +4,45 @@
 keeps "allow this tool for the session" as a grant of the tool's name.
 :class:`ApprovalBroker` gives each session an ask function that waits for
 an answer from elsewhere, such as the web console's approval route.
-Grants and pending requests live in memory only: a restart forgets both.
+:class:`ApprovalLedger` keeps the approvals the person gave in each chat,
+and :class:`OwnedTaskPolicy` lets a task of that chat use them (#369).
+Grants, recorded approvals and pending requests live in memory only: a
+restart forgets them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import math
+import os
+import time
+import uuid
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from localmelo.melo.contracts.approvals import (
+    ALLOWED_ONCE,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
     ReviewMode,
+    find_auto,
     review_mode,
 )
-from localmelo.melo.contracts.review import covered_by_grant, offers_grant
+from localmelo.melo.contracts.review import (
+    RULED_TOOLS,
+    ActionReview,
+    covered_by_grant,
+    offers_grant,
+    step_key,
+)
+
+logger = logging.getLogger(__name__)
 
 AskFunction = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 
@@ -220,6 +237,13 @@ class ApprovalBroker:
         entry = self._pending.get(request_id)
         return entry.request if entry is not None and not entry.answer.done() else None
 
+    def session_of(self, request_id: str) -> str | None:
+        """The session whose request *request_id* waits for an answer, else ``None``."""
+        entry = self._pending.get(request_id)
+        return (
+            entry.session_id if entry is not None and not entry.answer.done() else None
+        )
+
     def pending(self, session_id: str) -> list[ApprovalRequest]:
         """The requests of *session_id* that wait for an answer, oldest first."""
         return [
@@ -257,3 +281,323 @@ class ApprovalBroker:
                 )
                 denied += 1
         return denied
+
+
+# ── The approvals the person gave, per chat (#369) ──
+
+# Recorded approvals a chat keeps, and steps that ran on one, at most.
+LEDGER_KEPT: Final = 200
+USES_KEPT: Final = 500
+
+
+def reusable(tool_name: str, review: ActionReview | None) -> bool:
+    """Whether an approval of a call of *tool_name* reviewed as *review* may run the same step again.
+
+    Only a call of a tool melo's rules read (:data:`RULED_TOOLS`) that the
+    rules themselves found routine, in no category. Never a high-impact one
+    (#279: ``self`` and the click-only categories included); never an
+    undecided one (melo could not see what it runs: a file too big or not
+    read, a command built at run time); never one a model settled; never a
+    tool the rules do not read (a network or MCP tool is routine to them
+    unread); never a call nothing reviewed. Those ask every time.
+    """
+    return (
+        tool_name in RULED_TOOLS
+        and review is not None
+        and review.verdict == "routine"
+        and review.by == "rules"
+        and not review.categories
+    )
+
+
+def _folder(workspace_root: str | None) -> str:
+    return os.path.realpath(workspace_root) if workspace_root else ""
+
+
+def request_step(request: ApprovalRequest) -> str:
+    """The step key of *request*, as auto mode keys it: the exact call, folder and files read."""
+    review = request.review
+    inputs = review.inputs if review is not None else ()
+    return step_key(
+        request.tool_name, request.arguments, request.workspace_root, inputs
+    )
+
+
+@dataclass(frozen=True)
+class RecordedApproval:
+    """One step the person allowed in a chat or in one of its tasks."""
+
+    entry_id: str
+    chat_id: str
+    tool: str
+    step_key: str
+    folder: str
+    verdict: str
+    categories: tuple[str, ...]
+    preview: str
+    at: float
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "id": self.entry_id,
+            "tool": self.tool,
+            "folder": self.folder,
+            "verdict": self.verdict,
+            "categories": list(self.categories),
+            "preview": self.preview,
+            "at": self.at,
+        }
+
+
+@dataclass(frozen=True)
+class ApprovalUse:
+    """A task's step that ran on a recorded approval, without asking."""
+
+    entry_id: str
+    chat_id: str
+    task_id: str
+    request_id: str
+    preview: str
+    approved_at: float
+    at: float
+
+
+class ApprovalLedger:
+    """The approvals the person gave in each chat: "already approved" by code.
+
+    An entry is the person's Allow of one exact step (its tool, its
+    :func:`request_step` key and its folder) in a chat or in a task the chat
+    owns. :meth:`match` finds an entry for a request of the same tool, key
+    and folder when both reviews are routine by the rules (:func:`reusable`);
+    the model never decides what matches. Memory only, like grants.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock
+        self._entries: dict[str, OrderedDict[str, RecordedApproval]] = {}
+        self._uses: deque[ApprovalUse] = deque(maxlen=USES_KEPT)
+        # The tools chat *id* holds a grant of now; the console sets it.
+        self.grants_of: Callable[[str], frozenset[str]] = lambda chat_id: frozenset()
+
+    def record(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
+        """Keep the person's Allow of *request*; ``None`` when it may never be used again."""
+        review = request.review
+        if review is None or not reusable(request.tool_name, review):
+            return None
+        key = request_step(request)
+        entries = self._entries.setdefault(chat_id, OrderedDict())
+        for old in [e.entry_id for e in entries.values() if e.step_key == key]:
+            del entries[old]
+        entry = RecordedApproval(
+            uuid.uuid4().hex[:12],
+            chat_id,
+            request.tool_name,
+            key,
+            _folder(request.workspace_root),
+            review.verdict,
+            review.categories,
+            request.preview,
+            self._clock(),
+        )
+        entries[entry.entry_id] = entry
+        while len(entries) > LEDGER_KEPT:
+            entries.popitem(last=False)
+        return entry
+
+    def match(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
+        """The entry of chat *chat_id* that allowed exactly *request*'s step, else ``None``."""
+        if not reusable(request.tool_name, request.review):
+            return None
+        key, folder = request_step(request), _folder(request.workspace_root)
+        for entry in self._entries.get(chat_id, {}).values():
+            same = (entry.tool, entry.step_key, entry.folder) == (
+                request.tool_name,
+                key,
+                folder,
+            )
+            if same and entry.verdict != "high" and not entry.categories:
+                return entry
+        return None
+
+    def used(
+        self, entry: RecordedApproval, task_id: str, request: ApprovalRequest
+    ) -> ApprovalUse:
+        """Note that task *task_id* ran *request* on *entry*."""
+        use = ApprovalUse(
+            entry.entry_id,
+            entry.chat_id,
+            task_id,
+            request.request_id,
+            request.preview,
+            entry.at,
+            self._clock(),
+        )
+        self._uses.append(use)
+        return use
+
+    def entries(self, chat_id: str) -> list[RecordedApproval]:
+        """Chat *chat_id*'s recorded approvals, newest first."""
+        return list(reversed(self._entries.get(chat_id, {}).values()))
+
+    def revoke(self, chat_id: str, entry_id: str) -> bool:
+        """Take back one recorded approval; whether there was one. Steps that ran stay run."""
+        entries = self._entries.get(chat_id)
+        return entries is not None and entries.pop(entry_id, None) is not None
+
+    def drop(self, chat_id: str) -> None:
+        """Forget a deleted chat's recorded approvals."""
+        self._entries.pop(chat_id, None)
+
+    def uses_of(self, task_id: str) -> list[dict[str, Any]]:
+        """The steps of *task_id* that ran on a recorded approval; ``live`` while it stands."""
+        return [
+            {
+                "entry_id": use.entry_id,
+                "chat_id": use.chat_id,
+                "request_id": use.request_id,
+                "preview": use.preview,
+                "approved_at": use.approved_at,
+                "at": use.at,
+                "live": use.entry_id in self._entries.get(use.chat_id, {}),
+            }
+            for use in self._uses
+            if use.task_id == task_id
+        ]
+
+
+class OwnedTaskPolicy:
+    """A task's policy: its chat's grants and recorded approvals, and *inner*.
+
+    In Ask, before *inner* asks the person, a routine call of a tool the
+    owner chat holds a grant of runs as under a session grant, and a call
+    whose exact step the person allowed in that chat or one of its tasks
+    runs with origin ``earlier``; *on_use* is told. When *inner* asks the
+    person and they allow, the approval is recorded in the chat that owns
+    the task when they answer (nothing, when that chat went meanwhile). In
+    Auto, *inner* decides first (it asks nobody); only a step it blocked
+    could run on a recorded approval, and it blocks none that is reusable.
+    Auto's Allow once is never recorded: it stays one exact step, once.
+    *owner* gives the chat that owns the task now, and *started* when a
+    chat began. A task the person did not start is never wrapped (its
+    approvals are never remembered).
+
+    Grants and recorded approvals are used only after :meth:`review_window`
+    read the owner chat's start, and only while that chat still owns the
+    task: the task's steps are then reviewed with every file changed since
+    that chat began, so code an earlier task of the chat planted is read
+    before the chat's approval covers a step. Without that start, the
+    person is asked.
+    """
+
+    def __init__(
+        self,
+        inner: ApprovalPolicy,
+        ledger: ApprovalLedger,
+        task_id: str,
+        owner: Callable[[], Awaitable[str | None]],
+        on_use: Callable[[ApprovalUse], Awaitable[None]] | None = None,
+        *,
+        started: Callable[[str], Awaitable[float | None]] | None = None,
+    ) -> None:
+        self.inner = inner
+        self._ledger = ledger
+        self._task_id = task_id
+        self._owner = owner
+        self._on_use = on_use
+        self._started = started
+        # The owner chat as last read, for review_mode (which cannot await).
+        self._chat: str | None = None
+        # The chat whose start the review window begins at, and that start.
+        self._window_chat: str | None = None
+        self._window: float | None = None
+
+    def _auto(self) -> bool:
+        return find_auto(self.inner) is not None
+
+    async def review_window(self) -> float | None:
+        """When the task's review window starts: its owner chat's start.
+
+        ``None`` (Auto, which uses neither, or a start that cannot be read):
+        the task's steps are reviewed from the task's own start, and its
+        chat's grants and approvals are not used.
+        """
+        self._window_chat = self._window = None
+        if self._auto() or self._started is None:
+            return None
+        chat = await self._owner()
+        if not chat:
+            return None
+        try:
+            started = await self._started(chat)
+        except Exception:
+            logger.warning("Could not read when chat %s began", chat, exc_info=True)
+            return None
+        if started is None or not math.isfinite(started):
+            return None
+        self._window_chat, self._window = chat, started
+        return started
+
+    def _reviewed_since(self, chat: str | None) -> bool:
+        """Whether the steps were reviewed from *chat*'s start."""
+        return bool(chat) and self._window is not None and chat == self._window_chat
+
+    def _granted(self, tool_name: str) -> bool:
+        chat = self._chat
+        return (
+            self._reviewed_since(chat)
+            and not self._auto()
+            and tool_name in self._ledger.grants_of(chat or "")
+        )
+
+    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
+        mode = review_mode(self.inner, request)
+        return "silent" if mode == "ask" and self._granted(request.tool_name) else mode
+
+    async def _earlier(
+        self, chat: str, request: ApprovalRequest
+    ) -> ApprovalDecision | None:
+        """The step runs on the person's recorded approval of it, else ``None``."""
+        entry = self._ledger.match(chat, request)
+        if entry is None:
+            return None
+        use = self._ledger.used(entry, self._task_id, request)
+        if self._on_use is not None:
+            try:
+                await self._on_use(use)
+            except Exception:
+                logger.warning("Could not show a used approval", exc_info=True)
+        return ApprovalDecision(
+            True, f"earlier approval {entry.entry_id}", origin="earlier"
+        )
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self._chat = chat = await self._owner()
+        if self._auto():
+            # Auto asks nobody: what it runs (a routine step, an Allow once)
+            # runs as it would. It blocks only steps that are not routine,
+            # which match no approval: kept so the person outranks Auto if
+            # that ever changes.
+            decision = await self.inner.decide(request)
+            if not chat or decision.allow or decision.origin != "auto":
+                return decision
+            if not self._reviewed_since(chat):
+                return decision
+            return await self._earlier(chat, request) or decision
+        if chat and self._reviewed_since(chat):
+            if self._granted(request.tool_name) and covered_by_grant(request.review):
+                return ApprovalDecision(True, origin="session")
+            earlier = await self._earlier(chat, request)
+            if earlier is not None:
+                return earlier
+        decision = await self.inner.decide(request)
+        if (
+            chat
+            and isinstance(decision, ApprovalDecision)
+            and decision.allow
+            and decision.origin == "user"
+            and decision.reason != ALLOWED_ONCE
+            # The chat that asked still owns the task: a deleted chat's Allow is not the main chat's.
+            and await self._owner() == chat
+        ):
+            self._ledger.record(chat, request)
+        return decision

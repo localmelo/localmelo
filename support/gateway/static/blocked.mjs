@@ -91,6 +91,12 @@ export function stepText(name, args, preview = '') {
   return (line || String(preview ?? '')).slice(0, 400);
 }
 
+/** A step's code or command on one line, cut to *max* characters: for a row that names it. */
+export function stepLine(text, max = 120) {
+  const line = String(text ?? '').split(/\s+/).filter(Boolean).join(' ');
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+}
+
 /**
  * Where an Allow once stands: `open` (the button), `pending` (allowed, not run yet), `used` (ran at
  * `at`) or `expired`. `until` is when the allowance runs out (from the server), `used` when a later

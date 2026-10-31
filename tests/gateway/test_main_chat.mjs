@@ -311,3 +311,85 @@ test('the card of a reminder says Reminder: and the persons words, done or not',
   // An approval a reminder's run asks for is still an approval.
   assert.equal(cardWords({...base, state: 'waiting', reminder: true}).heading, 'Needs your approval: send the report');
 });
+
+// ── A task's approvals in the chat that owns it ──
+
+const blockedRow = (id, request, at = NOON) => ({id, ts: at, data: {
+  state: 'blocked', source_id: 't', source_kind: 'task', title: 'Tidy the repo', line: 'Blocked: deletes files', at,
+  request_id: request, step_key: `key-${request}`, name: 'python_exec', preview: "import shutil\nshutil.rmtree('.git')",
+  review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes .git.']}, can_allow: true,
+}});
+
+test('a step Auto blocked in a task is a card of its own, with the block and Allow once', () => {
+  const card = readCard(blockedRow(9, 'r9'));
+  assert.deepEqual([card.state, card.requestId, card.stepKey, card.name, card.canAllow], ['blocked', 'r9', 'key-r9', 'python_exec', true]);
+  // Every block stays between turns, each with its own Allow once; a later card of the task does not fold them.
+  const done = readCard({id: 11, ts: NOON + 2, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Tidy the repo', at: NOON + 2}});
+  const cards = [card, readCard(blockedRow(10, 'r10', NOON + 1)), done];
+  assert.deepEqual(timeline([], cards, NOON + 5).filter((item) => item.kind === 'card').map((item) => item.card.id), [9, 10, 11]);
+  assert.deepEqual(cardWords(card), {mark: '⊘', heading: 'A step was blocked: Tidy the repo', action: 'Open task'});
+  const doc = fakeDoc();
+  const allowed = [];
+  const node = cardNode({doc, card, open: () => {}, block: {onAllow: () => allowed.push(card.requestId)}});
+  assert.equal(node.dataset.state, 'blocked');
+  // The block says what and why; the stored line is for the list and the terminal.
+  assert.equal(doc.made.find((item) => item.className === 'main-card-line'), undefined);
+  // The step as the task's page shows it: the call's preview, as code wrote it.
+  assert.equal(doc.made.find((item) => item.className === 'block-step').textContent, "import shutil\nshutil.rmtree('.git')");
+  const allow = doc.made.find((item) => item.tag === 'button' && item.textContent === 'Allow once');
+  allow.listeners.click();
+  assert.deepEqual(allowed, ['r9']);
+  // Where the server offers no Allow once, there is none.
+  assert.equal(mainChat.cardBlock({...card, canAllow: false}).allow, false);
+  const none = fakeDoc();
+  cardNode({doc: none, card: {...card, canAllow: false}, open: () => {}});
+  assert.equal(none.made.some((item) => item.textContent === 'Allow once'), false);
+  assert.equal(mainChat.cardBlock(done), null);
+});
+
+test('a waiting task card holds its approval card, and its own button only opens the task', () => {
+  const doc = fakeDoc();
+  const approval = {tag: 'section', className: 'approval-card', children: []};
+  const opened = [];
+  const card = readCard(asking(3, 'r1'));
+  cardNode({doc, card, open: (value) => opened.push(value), approval});
+  const text = doc.made.find((item) => item.className === 'main-card-text');
+  assert.equal(text.children.at(-1), approval);
+  const buttons = doc.made.filter((item) => item.tag === 'button');
+  assert.deepEqual(buttons.map((item) => [item.className, item.textContent]), [['link-button', 'Open task']]);
+  buttons[0].listeners.click();
+  assert.deepEqual(opened, [card]);
+  // An answered card shows no approval card, whatever it is given.
+  const answered = fakeDoc();
+  cardNode({doc: answered, card: {...card, state: 'answered', answer: 'allowedOnce', line: 'Allowed once'}, open: () => {}, approval});
+  assert.equal(answered.made.find((item) => item.className === 'main-card-text').children.includes(approval), false);
+});
+
+test('a step that ran on an earlier approval is a row with Revoke, which outlives its task', () => {
+  const now = 1_800_000_000;
+  const echoes = mainChat.mergeEchoes([], [
+    {id: 20, ts: now - 30, data: {echo: 'earlier', task_id: 't', title: 'Check the notes', entry_id: 'e1', approved_at: now - 600, preview: 'print(1)\n',
+      line: 'Used your approval from 14:02', said: {key: 'approvals.used', params: {time: '14:02'}}}},
+  ]);
+  const [used] = echoes;
+  assert.equal(used.kind, 'earlier');
+  assert.deepEqual(mainChat.echoActions(used, false), [['Revoke', 'revoke']]);
+  // The task ended: its other rows lose their buttons, this one keeps Revoke.
+  const ended = new Set(['t']);
+  assert.equal(mainChat.echoDone(used, new Set(), ended), false);
+  assert.equal(mainChat.echoDone({id: 21, kind: 'control', task_id: 't'}, new Set(), ended), true);
+  const doc = fakeDoc();
+  const acted = [];
+  mainChat.echoNodes({doc, echo: used, act: (echo, does) => acted.push([echo.id, does])});
+  // The time as the page writes one, not the gateway's stored words.
+  const approved = new Date((now - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, `Used your approval from ${approved}`);
+  assert.equal(doc.made.find((item) => item.className === 'echo-sub').textContent, 'Task “Check the notes” ran print(1)');
+  doc.made.find((item) => item.tag === 'button').listeners.click();
+  assert.deepEqual(acted, [[20, 'revoke']]);
+  // Revoked: the row that answers it takes its button away.
+  const both = mainChat.mergeEchoes(echoes, [{id: 22, ts: now, data: {echo: 'revoked', of: 20, task_id: 't', line: 'Revoked: that step asks you again next time'}}]);
+  const done = mainChat.answered(both);
+  assert.equal(mainChat.echoDone(used, done, new Set()), true);
+  assert.deepEqual(mainChat.echoActions(both[1], false), []);
+});

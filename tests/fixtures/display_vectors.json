@@ -70,6 +70,7 @@
     ["success", "none", {"allowed": true, "origin": "user", "remember": false}, "allowed", "Allowed once by you"],
     ["success", "none", {"allowed": true, "origin": "user", "remember": true}, "allowed for the session", "Allowed by you for this session"],
     ["success", "none", {"allowed": true, "origin": "session", "remember": false}, "allowed by a session grant", "Allowed by a grant for this session"],
+    ["success", "none", {"allowed": true, "origin": "earlier", "remember": false}, "your earlier approval", "Allowed: you approved this exact step before"],
     ["success", "none", {"allowed": true, "origin": "policy", "remember": false}, "auto-allowed", "Allowed: approvals are set to auto"],
     ["blocked", "approval_denied", {"allowed": false, "origin": "user", "remember": false, "reason": "keep the\n item first"}, "denied: keep the item first", "Denied by you: keep the item first"],
     ["blocked", "approval_denied", {"allowed": false, "origin": "user", "remember": false}, "denied", "Denied by you"],

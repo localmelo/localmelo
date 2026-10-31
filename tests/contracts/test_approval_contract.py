@@ -81,6 +81,7 @@ class TestApprovalDecision:
             {"allow": True, "origin": "grant"},
             {"allow": False, "remember": True},
             {"allow": False, "origin": "session"},
+            {"allow": False, "origin": "earlier"},
             {"allow": True, "origin": "timeout"},
         ],
     )
@@ -94,6 +95,7 @@ class TestApprovalDecision:
             {"allow": True, "remember": True},
             {"allow": True, "origin": "session"},
             {"allow": True, "remember": True, "origin": "session"},
+            {"allow": True, "origin": "earlier"},
             {"allow": False, "origin": "timeout"},
             {"allow": False, "reason": "no", "origin": "policy"},
         ],

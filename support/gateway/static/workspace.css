@@ -339,6 +339,16 @@ button:hover:not(:disabled) {
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-note { color: var(--ink-2); font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
+/* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
+.main-card[data-state="blocked"] { box-shadow: inset 3px 0 0 var(--warn); }
+.main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
+.main-card .block-card { margin: var(--space-2) 0 0; padding: 0; background: none; border: 0; box-shadow: none; }
+.main-card .block-mark { display: none; }
+.main-card .block-title { font-size: var(--text-small); }
+.main-card .block-why { padding-left: 0; }
+.main-card :is(.block-step, .block-foot, .block-error) { margin-left: 0; }
+/* A task's approval, answered in the card that says it waits. */
+.main-card .approval-card { margin: 10px 0 0; }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
    amber when it jumps the queue (Now, Today), green for Normal, grey below. */
 .echo { display: flex; align-items: flex-start; gap: 10px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
@@ -363,6 +373,7 @@ button:hover:not(:disabled) {
 /* A task's question (#369): its fields fold under the row; the answer and the person's reply are quoted. */
 .echo[data-kind="task_ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
 .echo[data-kind="task_answered"] .echo-mark { background: var(--tint); color: var(--accent); }
+.echo[data-kind="earlier"] .echo-mark { background: var(--tint); color: var(--ok); }
 :is(.ask-details, .ask-fields, .ask-quote, .ask-reply) { flex: 1 0 100%; min-width: 0; }
 .ask-details summary { width: fit-content; color: var(--accent); cursor: pointer; }
 .ask-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 6px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
@@ -1281,6 +1292,8 @@ dialog::backdrop {
 .drawer-event pre { margin: 2px 0; font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
+.drawer-subhead { margin: 18px 0 2px; font-size: var(--text-body); }
+.drawer-approval-step, .task-earlier-step { display: block; overflow: hidden; color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1655,6 +1668,12 @@ dialog::backdrop {
 .approval-why { margin: 0 0 2px; font-weight: 600; }
 .approval-reasons { margin: 0 0 8px; padding-left: 20px; line-height: 1.5; }
 .approval-asked { margin: 0 0 10px; color: var(--ink-2); line-height: 1.5; }
+/* melo's explanation of a task's step: the model's words, set apart from the step and the reasons code wrote. */
+.approval-explain { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 2px 0 0 var(--ink-3); }
+.approval-explain-label { margin: 0; color: var(--ink-2); font-size: var(--text-caption); font-weight: 600; }
+.approval-explain-text { margin: 2px 0 0; line-height: 1.5; }
+.approval-explain-note { margin: 6px 0 0; color: var(--ink-3); font-size: var(--text-caption); line-height: 1.45; }
+.approval-explaining { margin: 10px 0 0; color: var(--ink-3); font-size: var(--text-caption); }
 /* A diff: its rows fill the box, so a removed or added one is tinted edge to edge. */
 .approval-diff { padding: 0; white-space: normal; }
 .diff-row { display: grid; grid-template-columns: 4ch 1.5ch minmax(0, 1fr); gap: 0 var(--space-2); padding: 0 10px; white-space: pre-wrap; }
@@ -1673,6 +1692,7 @@ dialog::backdrop {
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: 6px 14px; }
 .approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.approval-remembered { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
 .failure-hint { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
 .failure-error { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
 .failure-card[data-severity="error"] .failure-error,
@@ -2404,6 +2424,15 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-blocked > p { margin: 0; }
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
 .task-block > .block-card { margin: 0; }
+/* Steps that ran on the person's earlier approval: the step, when, and Revoke. */
+.task-earlier { display: grid; gap: var(--space-2); }
+.task-earlier h2 { margin-bottom: 0; }
+.task-earlier > p { margin: 0; }
+.task-earlier-list { margin: 0; padding: 0; list-style: none; }
+.task-earlier-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.task-earlier-when { grid-column: 1; color: var(--ink-3); font-size: var(--text-caption); }
+.task-earlier-row > :is(button, .task-earlier-revoked) { grid-column: 2; grid-row: 1 / span 2; }
+.task-earlier-revoked { color: var(--ink-3); }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
