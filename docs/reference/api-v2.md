@@ -1850,7 +1850,7 @@ panel uses these routes.
   "before_ids", "after_id", "text", "source_turn", "quote", "before_texts", "verdict", "proposal", "guard"}]}`: `quote` is the evidence span;
   `before_texts` snapshots the superseded texts in `before_ids` order. `op` is `O1` (duplicates merged: `before_ids` superseded by
   `after_id`), `O2` (a newer typed value written and superseding `before_ids`), `O2b` (the older note of a subject
-  superseded by the newer active note `after_id`, which is kept; nothing is written), `O3` (a lost fact written),
+  superseded by the newer active note `after_id`, which is kept; nothing is written; by the rules or, with a model, by an update), `O3` (a lost fact written),
   `ADD`, `UPDATE`, `RETIRE` (no replacement, `after_id` null) or `O4` (a pronoun resolved to a named person).
   Model variants default to twelve requests; `refused` counts invalid proposals, `ms` is elapsed time,
   and `processed` lists completed `[session_id, turn]` ids. `selected` lists those ids in actual
@@ -1860,7 +1860,7 @@ panel uses these routes.
   sensitive fields are replaced by `[redacted]`. `guard` is null, or for an `ADD` or an update the numbers of the existing-fact
   check: `{note_id, coverage, subject_same, polarity_same, cosine, overlap, held}` (`cosine` null when the vectors are not comparable).
   `skipped` holds `{session_id, turn, text, quote, guard}` for each fact a rule did not write because an active note held it (at most 100);
-  a written `O2` or `O3` change carries its `guard` too, null for any other.
+  a written `O2` or `O3` change carries its `guard` too, null for any other. A proposal about a note an `O2b` of the same run retired is `noop`.
   `verdict` is `applied`, `noop`, or `refused:<check>`: `quote_not_in_text`, `sensitive`,
   `unsupported`, `wrong_owner`, `stale`, `decide_mismatch`, `not_newer`, `self_target` (the note
   named was written from the turn's own words), `no_negation`, `no_shared_term`, `edited`, or `parse`. `noop` also covers operations left unapplied after

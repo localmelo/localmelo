@@ -21,6 +21,13 @@ from .test_sleep_model import Scripted, op
 memory = rules.memory
 chats = rules.chats
 
+
+@pytest.fixture()
+def model_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Switch the ``O2b`` rule off, so a test sees what the model's proposal does."""
+    monkeypatch.setattr(sleep, "replacements", lambda notes, sources: [])
+
+
 TRAIN = "You take the 7:40 train to work."
 PARAPHRASE = "Your usual train to the office is the 7:40."
 AT = rules.LONG_AGO
@@ -323,14 +330,16 @@ async def pair(
     *,
     topics: tuple[str, str] = ("about", "about"),
     edited: str = "",
+    tag: str = "",
 ) -> tuple[int, int]:
     """The older note (session ``o``) and the newer one (session ``n``), both
-    active, each with its text and the quote the user typed."""
+    active, each with its text and the quote the user typed. *tag* tells the
+    sessions of two pairs apart."""
     older = await rules.put(
         memory,
         old[0],
         AT,
-        session="o",
+        session="o" + tag,
         topic=topics[0],
         quote=old[1],
         vector=[0.0, 1.0],
@@ -340,7 +349,7 @@ async def pair(
         memory,
         new[0],
         AT + 20,
-        session="n",
+        session="n" + tag,
         topic=topics[1],
         quote=new[1],
         vector=[1.0, 0.0],
@@ -384,6 +393,7 @@ C4 = (
 )
 async def test_model_update_retires_the_older_note_a_newer_active_one_holds(
     memory: ChatMemory,
+    model_only: None,
     old: tuple[str, str],
     new: tuple[str, str],
     text: str,
@@ -405,7 +415,7 @@ async def test_model_update_retires_the_older_note_a_newer_active_one_holds(
 
 
 async def test_o2b_is_undone_as_one_run_and_never_removes_the_kept_note(
-    memory: ChatMemory,
+    memory: ChatMemory, model_only: None
 ) -> None:
     older, newer = await pair(memory, *C4)
     source = turn("n", C4[1][1], AT + 20)
@@ -432,7 +442,7 @@ async def test_o2b_is_undone_as_one_run_and_never_removes_the_kept_note(
 
 
 async def test_undo_leaves_the_older_note_when_a_later_note_replaced_the_kept_one(
-    memory: ChatMemory,
+    memory: ChatMemory, model_only: None
 ) -> None:
     older, newer = await pair(memory, *C4)
     source = turn("n", C4[1][1], AT + 20)
@@ -458,8 +468,8 @@ async def test_undo_leaves_the_older_note_when_a_later_note_replaced_the_kept_on
     assert await states(memory) == {older: "superseded", newer: "superseded"}
 
 
-async def test_the_twenty_change_cap_still_holds_for_o2b(
-    memory: ChatMemory, monkeypatch: pytest.MonkeyPatch
+async def test_the_twenty_change_cap_still_holds_for_the_models_o2b(
+    memory: ChatMemory, model_only: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(sleep, "MAX_CHANGES", 1)
     first = await pair(memory, *C4)
@@ -606,7 +616,9 @@ async def test_a_note_the_user_edited_is_never_retired_or_kept(
     assert await states(memory) == {older: "active", newer: "active"}
 
 
-async def test_an_older_value_never_retires_a_newer_note(memory: ChatMemory) -> None:
+async def test_an_older_value_never_retires_a_newer_note(
+    memory: ChatMemory, model_only: None
+) -> None:
     older, newer = await pair(memory, *C4)
     source = turn("o", C4[0][1], AT)
     report = await run_model(
@@ -760,3 +772,164 @@ async def test_the_prompt_lists_notes_with_ids_and_dates_and_names_the_older_not
     prompt = system.content or ""
     assert '"#id (date) text"' in prompt
     assert "older note" in prompt and "never a note written from that same" in prompt
+
+
+# ── The rule O2b: no model call ──
+
+
+async def tidy(memory: ChatMemory) -> sleep.SleepReport:
+    """A rules run over the notes as they are (no chat turn, no model)."""
+    return await sleep.run(*memory.stores(), [], variant="rules")
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "topics"),
+    [
+        (*C3, ("projects", "decisions")),
+        (*C4, ("people", "people")),
+        (
+            ("Your gym day is Monday.", "My gym day is Monday."),
+            ("Your gym day moved to Friday.", "my gym day moved to Friday"),
+            ("preferences", "preferences"),
+        ),
+    ],
+)
+async def test_rules_retire_the_older_note_a_newer_active_one_replaced(
+    memory: ChatMemory,
+    old: tuple[str, str],
+    new: tuple[str, str],
+    topics: tuple[str, str],
+) -> None:
+    older, newer = await pair(memory, old, new, topics=topics)
+    report = await tidy(memory)
+    (change,) = report.changes
+    assert (change.op, change.before_ids, change.after_id) == ("O2b", [older], newer)
+    assert change.before_texts == [old[0]] and change.quote == new[1]
+    assert change.proposal is None and report.model_calls == 0
+    assert await states(memory) == {older: "superseded", newer: "active"}
+    assert await rules.texts(memory) == {new[0]}  # nothing is written
+    assert (await tidy(memory)).changes == []  # a second run has nothing to do
+
+
+async def test_rules_read_the_time_of_the_source_turns(memory: ChatMemory) -> None:
+    """The note said later wins whatever order its row was written in, and the
+    older value is not recovered from its turn once the newer one replaced it."""
+    newer = await rules.put(memory, C4[1][0], AT, session="n", quote=C4[1][1])
+    older = await rules.put(memory, C4[0][0], AT + 90, session="o", quote=C4[0][1])
+    turns = [turn("o", C4[0][1], AT - 50), turn("n", C4[1][1], AT + 20)]
+    report = await sleep.run(*memory.stores(), turns, variant="rules")
+    assert [(c.op, c.before_ids, c.after_id) for c in report.changes] == [
+        ("O2b", [older], newer)
+    ]
+    assert await rules.texts(memory) == {C4[1][0]}
+
+
+async def test_rule_undo_puts_the_older_note_back(memory: ChatMemory) -> None:
+    older, newer = await pair(memory, *C3)
+    report = await tidy(memory)
+    undone = await memory.undo_sleep(report.run_id)
+    assert undone == {"run_id": report.run_id, "restored": 1, "removed": 0, "kept": 0}
+    assert await states(memory) == {older: "active", newer: "active"}
+
+
+async def test_rule_o2b_counts_against_the_change_cap_and_the_next_run_goes_on(
+    memory: ChatMemory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sleep, "MAX_CHANGES", 1)
+    first = await pair(memory, *C3, tag="1")
+    second = await pair(memory, *C4, tag="2")
+    report = await tidy(memory)
+    assert report.capped and len(report.changes) == 1
+    done = {n for n, s in (await states(memory)).items() if s == "superseded"}
+    assert len(done) == 1 and done <= {first[0], second[0]}
+    again = await tidy(memory)
+    assert len(again.changes) == 1 and again.changes[0].op == "O2b"
+    assert {n for n, s in (await states(memory)).items() if s == "active"} == {
+        first[1],
+        second[1],
+    }
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # Other subjects: a gym day is not a swim day, nor a piano class a dance one.
+        (
+            ("Your gym day is Monday.", "My gym day is Monday."),
+            ("Your swim day is Thursday.", "My swim day is Thursday."),
+        ),
+        (
+            ("你的钢琴课在周三。", "我的钢琴课在周三。"),
+            ("你的舞蹈课在周五。", "我的舞蹈课在周五。"),
+        ),
+        (
+            ("Your piano class is on Wednesday.", "My piano class is on Wednesday."),
+            ("Your dance class is on Friday.", "My dance class is on Friday."),
+        ),
+        # The summer and the no-longer note, in the order a bench seeds them.
+        (
+            ("You live in Lisbon for the summer.", "I live in Lisbon for the summer."),
+            ("You no longer live in Lisbon.", "I no longer live in Lisbon."),
+        ),
+        # A third person's note is not the user's.
+        (
+            ("Priya's manager is Tom Lee.", "Priya's manager is Tom Lee."),
+            ("Your new manager is Daniel Kim.", "My new manager is Daniel Kim."),
+        ),
+        (
+            ("Your manager is Daniel Kim.", "My manager is Daniel Kim."),
+            ("Priya's new manager is Tom Lee.", "Priya's new manager is Tom Lee."),
+        ),
+        (
+            (
+                "Tom Briggs's office is in room 9C.",
+                "Tom Briggs's office is in room 9C.",
+            ),
+            (
+                "Tom Briggs's new office is in room 12.",
+                "Tom Briggs's new office is in room 12.",
+            ),
+        ),
+    ],
+)
+async def test_rules_leave_other_subjects_scopes_and_other_peoples_notes(
+    memory: ChatMemory, old: tuple[str, str], new: tuple[str, str]
+) -> None:
+    older, newer = await pair(memory, old, new)
+    report = await tidy(memory)
+    assert not [c for c in report.changes if c.op == "O2b"]
+    assert not report.changes
+    assert await states(memory) == {older: "active", newer: "active"}
+
+
+@pytest.mark.parametrize("edited", ["old", "new"])
+async def test_rules_never_retire_or_keep_a_note_the_user_reworded(
+    memory: ChatMemory, edited: str
+) -> None:
+    older, newer = await pair(memory, *C4, edited=edited)
+    report = await tidy(memory)
+    assert not report.changes
+    assert await states(memory) == {older: "active", newer: "active"}
+
+
+async def test_a_run_that_retired_a_note_makes_the_models_proposals_noops(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, *C4)
+    source = turn("n", C4[1][1], AT + 20)
+    text = "Your new manager is Daniel Kim from next week."
+    report = await run_model(
+        memory,
+        [source],
+        [[op("UPDATE", C4[1][1], text, older), op("UPDATE", C4[1][1], text, newer)]],
+    )
+    (change,) = report.changes  # the rule's, counted once
+    assert (change.op, change.before_ids, change.after_id) == ("O2b", [older], newer)
+    assert change.proposal is None
+    assert [r["verdict"] for r in report.proposals] == ["noop", "noop"]
+    assert report.refused == 0 and not report.capped
+    assert await states(memory) == {older: "superseded", newer: "active"}
+    # One undo of the run puts the older note back.
+    undone = await memory.undo_sleep(report.run_id)
+    assert undone is not None and undone["restored"] == 1
+    assert await states(memory) == {older: "active", newer: "active"}

@@ -14,10 +14,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   known subjects. Reports list selected turns and each model operation's bounded,
   secret-redacted verdict; applied changes carry the same label. [#389]
 - Note tidying keeps a paraphrase out (cosine from 0.85) but never a changed value
-  or the opposite statement (a negation in only one of the two). When a newer
-  active note already says what an update proposes, or the update names that
-  newer note, the older note of that subject is superseded and the newer one is
-  kept. Each report entry shows the text of the note it targeted and the numbers
+  or the opposite statement (a negation in only one of the two). When two of the
+  user's own active notes say one subject with different values, the older is
+  superseded and the newer kept, without a model call (a model update that names
+  the newer note, or says what it holds, does the same). Each report entry shows the text of the note it targeted and the numbers
   behind the existing-fact check; a note written from the same message is refused
   as `self_target`. Notes the tidying writes are recall only: never pinned into
   every prompt. [#NN]

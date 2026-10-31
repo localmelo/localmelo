@@ -18,12 +18,13 @@ code checks on every proposal. All variants make at most
   the same polarity (both or neither negate), is not of a known other subject and
   is close: cosine at least 0.85, or at least half of non-value content words
   overlap without comparable embeddings. The numbers behind each decision are
-  kept (``Change.guard``, or ``SleepReport.skipped`` for a note not written).
-
-The model variants add ``O2b``: when the model proposes an update whose text an
-active newer note already holds, or targets the newer note itself, the older
-note of that subject with another value is superseded by the newer one, which
-is kept (no new note).
+  kept (``Change.guard``, or ``SleepReport.skipped`` for a note not written);
+- ``O2b`` retire what a newer note replaced: of two of the user's own active
+  notes, the older says one subject with another value (:func:`replaced_by`) and
+  is superseded by the newer, which is kept. No new note, no model call. The
+  model variants reach the same change when a proposed update's text an active
+  newer note already holds, or when it names the newer note itself; a note a rule
+  already retired makes that proposal a ``noop``.
 
 Every write passes the checks a note passes (:func:`records.unsupported`,
 :func:`records.wrong_owner`, :func:`records.sensitive`) on the user's own typed
@@ -366,7 +367,7 @@ def _stale(text: str, turn: SleepTurn, turns: Sequence[SleepTurn]) -> bool:
     Include completed turns too: the backlog can outlive the retraction's replay.
     Check individual sentences so an unrelated negation cannot retract a fact.
     """
-    key = records.subject_key(text)
+    key = _subject(text)
     for later in turns:
         if later.started_at <= turn.started_at:
             continue
@@ -377,7 +378,7 @@ def _stale(text: str, turn: SleepTurn, turns: Sequence[SleepTurn]) -> bool:
                 return True
             if (
                 key
-                and any(key == other for other, _ in records.said(sentence))
+                and any(key == _plain_key(other) for other, _ in records.said(sentence))
                 and records.unsupported(text, [sentence])
             ):
                 return True
@@ -547,13 +548,17 @@ def _when(note: StoredEntry, sources: dict[tuple[str, int], SleepTurn]) -> float
     return source.started_at if source is not None else note.created_at
 
 
-def _subject(text: str) -> str:
-    """:func:`records.subject_key` of *text*, without a leading "new" or "current"."""
-    name, _, how = records.subject_key(text).partition("|")
+def _plain_key(key: str) -> str:
+    """A :func:`records.subject_key` without a leading "new" or "current"."""
+    name, _, how = key.partition("|")
     words = name.split()
     if len(words) > 1 and words[0] in _QUALIFIERS:
         name = " ".join(words[1:])
     return f"{name}|{how}" if name else ""
+
+
+def _subject(text: str) -> str:
+    return _plain_key(records.subject_key(text))
 
 
 def replaced_by(
@@ -581,6 +586,43 @@ def replaced_by(
     return bool(
         records.value_terms(newer.text) - records._evidence([older.text])
     ) and bool(records.unsupported(older.text, [newer.text]))
+
+
+def replacements(
+    notes: Sequence[StoredEntry], sources: dict[tuple[str, int], SleepTurn]
+) -> list[tuple[StoredEntry, list[int]]]:
+    """O2b: each note to keep and the older notes it replaced (:func:`replaced_by`).
+
+    Newest first; a note an even newer one replaced keeps nothing. Only the
+    user's own notes: one about another person is left to :func:`duplicates`.
+    Notes with neither one subject nor most of their words in common are not
+    compared, which :func:`records.decide` would not match either.
+    """
+    own = [n for n in notes if records._owner(n.text) in (None, "user")]
+    newest = sorted(own, key=lambda n: (_when(n, sources), n.id), reverse=True)
+    newest = newest[:MAX_NOTES]
+    subjects = {n.id: _subject(n.text) for n in newest}
+    words = {n.id: content_tokens(n.text) for n in newest}
+    gone: set[int] = set()
+    out: list[tuple[StoredEntry, list[int]]] = []
+    for at, keep in enumerate(newest):
+        if keep.id in gone or _edited(keep):
+            continue
+        older = [
+            old.id
+            for old in newest[at + 1 :]
+            if old.id not in gone
+            and not _edited(old)
+            and (
+                (subjects[keep.id] and subjects[keep.id] == subjects[old.id])
+                or overlap(words[keep.id], words[old.id]) >= records.SUPERSEDE_OVERLAP
+            )
+            and replaced_by(keep, old, sources)
+        ]
+        if older:
+            gone.update(older)
+            out.append((keep, older))
+    return out
 
 
 async def run(
@@ -678,6 +720,51 @@ async def run(
     return report
 
 
+async def _keep(
+    store: SqliteLongTerm,
+    report: SleepReport,
+    active: Sequence[StoredEntry],
+    sources: dict[tuple[str, int], SleepTurn],
+    keep: StoredEntry,
+    older: Sequence[int],
+    op: str,
+) -> None:
+    """Supersede the notes *older* by *keep*, which stays (``O1``, ``O2b``).
+
+    The change quotes what the user said for *keep*; with no safe quote it is
+    not made.
+    """
+    source_key = (keep.session_id, int(keep.provenance.get("turn") or 0))
+    source_turn = sources.get(source_key)
+    quote = (
+        str(keep.provenance.get("quote") or "")
+        or (source_turn.typed if source_turn is not None else keep.text)[:300]
+    )
+    if records.sensitive(quote):
+        quote = records.quote_for(keep.text, [source_turn.typed]) if source_turn else ""
+    if not quote or records.sensitive(quote):
+        return
+    verb = "merged into" if op == "O1" else "replaced by"
+    if done := await store.set_status(
+        older,
+        "superseded",
+        keeper=keep.id,
+        admitted_by="sleep",
+        reason=f"{verb} {keep.id} by sleep {report.run_id}",
+    ):
+        report.changes.append(
+            Change(
+                op,
+                done,
+                keep.id,
+                keep.text,
+                list(source_key),
+                quote=quote,
+                before_texts=_before_texts(done, active),
+            )
+        )
+
+
 async def _tidy(
     store: SqliteLongTerm,
     index: ConversationIndex,
@@ -693,36 +780,13 @@ async def _tidy(
         if len(report.changes) >= MAX_CHANGES:
             report.capped = True
             return
-        source_key = (keep.session_id, int(keep.provenance.get("turn") or 0))
-        source_turn = sources.get(source_key)
-        quote = (
-            str(keep.provenance.get("quote") or "")
-            or (source_turn.typed if source_turn is not None else keep.text)[:300]
-        )
-        if records.sensitive(quote):
-            quote = (
-                records.quote_for(keep.text, [source_turn.typed]) if source_turn else ""
-            )
-        if not quote or records.sensitive(quote):
-            continue
-        if done := await store.set_status(
-            older,
-            "superseded",
-            keeper=keep.id,
-            admitted_by="sleep",
-            reason=f"merged into {keep.id} by sleep {report.run_id}",
-        ):
-            report.changes.append(
-                Change(
-                    "O1",
-                    done,
-                    keep.id,
-                    keep.text,
-                    list(source_key),
-                    quote=quote,
-                    before_texts=_before_texts(done, active),
-                )
-            )
+        await _keep(store, report, active, sources, keep, older, "O1")
+    active = await store.active_entries()
+    for keep, older in replacements(active, sources):
+        if len(report.changes) >= MAX_CHANGES:
+            report.capped = True
+            return
+        await _keep(store, report, active, sources, keep, older, "O2b")
     for turn, cand in recoverable(fresh, await store.active_entries()):
         active = await store.active_entries()
         if _stale(cand.text, turn, turns) or not _allowed(turn, cand, active):
@@ -945,6 +1009,12 @@ class _ModelPass:
                 self.report.refused += 1
         return True
 
+    def _retired(self, note_id: int) -> bool:
+        """Whether this run already retired *note_id* for a newer note (``O2b``)."""
+        return any(
+            c.op == "O2b" and note_id in c.before_ids for c in self.report.changes
+        )
+
     async def _target_text(self, proposal: Any) -> str:
         """The text of the note a proposal names, whatever its status."""
         note_id = proposal.get("note_id") if isinstance(proposal, dict) else None
@@ -1035,6 +1105,9 @@ class _ModelPass:
         own = False
         if op != "ADD":
             if old is None:
+                # A rule of this run (or an earlier proposal) already retired it.
+                if type(note_id) is int and self._retired(note_id):
+                    return "noop"
                 return "refused:decide_mismatch"
             if rewrite and _edited(old):
                 return "refused:edited"
@@ -1104,7 +1177,10 @@ class _ModelPass:
             if replaced := await self._replace(turn, old, text, quote, active, own):
                 return replaced
             if own:
-                return "refused:self_target"
+                kept = any(
+                    c.op == "O2b" and c.after_id == old.id for c in self.report.changes
+                )
+                return "noop" if kept else "refused:self_target"
             if action != "UPDATE" or target != note_id:
                 return "refused:decide_mismatch"
         before_changes = len(self.report.changes)
