@@ -356,7 +356,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   until the next task starts. **On the desktop**, in the menu-bar menu and in
   Melo's menu, chooses the pill with Melo (the default), Melo only or nothing.
   `GET /api/health` `status.recent` also says what the finished run was called
-  (`title`) ([#NN]).
+  (`title`) ([#326]).
 
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
@@ -2614,6 +2614,7 @@ earlier milestones.
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
+[#326]: https://github.com/localmelo/localmelo/pull/326
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
