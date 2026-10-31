@@ -393,7 +393,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (the same for "have/has/had a X on/at/in/every Y"), so the second replaces the
   first. A reply that opens with a short interjection, "Got it — I've noted that
   Dr. Kowalski's office is on Pine Street.", keeps the fact named after "I've
-  noted", not the words before it ([#NN]).
+  noted", not the words before it. A floor is not a city: "你住在3楼。" no
+  longer replaces "You live in Utrecht." (a value with a digit or a unit word
+  such as 楼/floor/apartment is another kind than a place or a name, for home,
+  job, name and timezone), and "我搬到7楼了" / "I moved to Berlin." now state a
+  new home ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

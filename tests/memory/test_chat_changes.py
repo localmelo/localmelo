@@ -299,3 +299,26 @@ def test_have_without_a_place_or_time_keeps_no_subject_and_look_alikes_apart() -
     piano = "Your piano class is on Saturday."
     assert records.decide(piano, [entry(9, swim)], kind="semantic")[0] == "NEW"
     assert records.decide(swim, [entry(9, piano)], kind="semantic")[0] == "NEW"
+
+
+def test_values_of_another_kind_stay_apart_and_moved_to_is_a_home() -> None:
+    from localmelo.tests.memory.test_third_party_subjects import entry
+
+    city, floor = "You live in Utrecht.", "你住在3楼。"
+    assert records.decide(floor, [entry(1, city)], kind="semantic")[0] == "NEW"
+    assert records.decide(city, [entry(1, floor)], kind="semantic")[0] == "NEW"
+    assert records.changes("我住在3楼。", [entry(1, city)]) == []
+    apt = "I live in apartment 4B."
+    assert records.decide(apt, [entry(1, city)], kind="semantic")[0] == "NEW"
+    assert records.changes(apt, [entry(1, city)]) == []
+    assert records.decide("你搬到7楼了。", [entry(2, floor)], kind="semantic") == (
+        "UPDATE",
+        2,
+    )
+    (cand,) = records.changes("我搬到7楼了。", [entry(2, floor)])
+    assert cand.text == "你搬到7楼了。"
+    (cand,) = records.changes("I moved to Berlin.", [entry(1, city)])
+    assert cand.text == "You moved to Berlin."
+    assert records.decide(cand.text, [entry(1, city)], kind="semantic") == ("UPDATE", 1)
+    lisbon = "You live in Lisbon."
+    assert records.decide(city, [entry(3, lisbon)], kind="semantic") == ("UPDATE", 3)

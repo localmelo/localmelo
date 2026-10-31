@@ -118,7 +118,8 @@ _SUBJECTS: Final = tuple(
         (
             "home",
             rf"{_WHO} (?:live|lives|reside|resides) (?:in|at|on|near)\b"
-            r"|(?:我|你|用户)(?:现在)?住在",
+            r"|(?:我|你|用户)(?:现在)?住在"
+            rf"|\b(?:i|you|we|user)(?:'ve| have)? moved to\b|(?:我|你|用户)搬(?:到|去)",
         ),
         (
             "job",
@@ -129,6 +130,12 @@ _SUBJECTS: Final = tuple(
 )
 # The subjects a verb names: a statement of one needs no lexicon marker.
 _VERB_SUBJECTS: Final = frozenset(key for key, _ in _SUBJECTS)
+# A verb key's value is a "unit" (a floor, a room, a number) or a "place"/"name";
+# a unit never replaces a place ("Utrecht" and "3楼" are different things).
+_UNIT = re.compile(
+    r"\d|[楼层室号栋]|单元"
+    r"|\b(?:floors?|apts?|apartments?|rooms?|units?|suites?|buildings?)\b"
+)
 # "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject, and how Y
 # relates to it (:func:`_relation`) tells a name from a day or a description.
 _ATTRIBUTE = r"((?:[\w'’-]+ ){0,5}?[\w'’-]+) (?:is|are|was|were)\b ?(.*)$"
@@ -865,8 +872,8 @@ def _subject(text: str) -> tuple[str, str]:
         return third
     folded = normalise(text)
     for key, pattern in _SUBJECTS:
-        if pattern.search(folded):
-            return key, ""
+        if found := pattern.search(folded):
+            return key, "unit" if _UNIT.search(folded[found.start() :]) else ""
     if found := _OWNED.match(folded):
         words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
         stems = " ".join(stem(w) for w in words if w not in _ARTICLES)
@@ -971,6 +978,8 @@ def decide(
         if normalise(entry.text) == folded:
             return "IGNORE", entry.id
         theirs, their_how = _subject(entry.text)
+        if mine == theirs and mine in _VERB_SUBJECTS and how != their_how:
+            continue
         if mine and theirs and (mine != theirs or how == their_how):
             score = 1.0 if mine == theirs else 0.0
         elif _near(vector, embed_model, entry) and value_apart(text, entry.text):
