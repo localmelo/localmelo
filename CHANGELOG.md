@@ -19,7 +19,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   says how late it ran. The Scheduled tab lists it, then shows when it ran
   (**Edit time** takes a date and time). In the API a chore's schedule can be
   `{"kind": "once", "at": "2026-10-30T09:00"}`, at most a year ahead, and a
-  chore body gains `late_min`. [#NN]
+  chore body gains `late_min`. [#354]
 - The web console and the macOS app speak Simplified Chinese. They follow the
   browser's or the Mac's languages; **Settings → Appearance → Language**
   (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`
@@ -2906,3 +2906,4 @@ earlier milestones.
 [#350]: https://github.com/localmelo/localmelo/pull/350
 [#352]: https://github.com/localmelo/localmelo/pull/352
 [#353]: https://github.com/localmelo/localmelo/pull/353
+[#354]: https://github.com/localmelo/localmelo/pull/354
