@@ -607,6 +607,19 @@ _TITLE_LEAD: Final = re.compile(
     r"^(?:(?:/task|please|pls|kindly|could you|can you|would you|请|麻烦你?|帮我|帮忙)[\s,，]*)+",
     re.IGNORECASE,
 )
+# A level word that opens a title ("no rush: tidy the photos", "今天修一下"): the words
+# triage reads as urgency, ease or today, then an optional colon or comma and spaces.
+# A Latin word must end there, so "Today's news" keeps its word.
+_TODAY_CUE: Final = _words("今天|today|tonight|今晚")
+_LEVEL_CUE: Final = re.compile(
+    "^(?:"
+    + "|".join(
+        re.escape(word) + ("" if _has_cjk(word) else r"(?![\w'’-])")
+        for word in sorted((*_URGENT, *_EASY, *_TODAY_CUE), key=len, reverse=True)
+    )
+    + r")[：:，,]?\s*",
+    re.IGNORECASE,
+)
 _TITLE_TAIL: Final = frozenset(
     _words("the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so")
 )
@@ -615,15 +628,23 @@ TITLE_CHARS: Final = 48
 TITLE_CHARS_ZH: Final = 24
 
 
+def _without_level_cue(text: str) -> str:
+    """*text* without the level word that opens it, if more text follows it."""
+    cue = _LEVEL_CUE.match(text)
+    rest = text[cue.end() :] if cue else text
+    return rest if rest.strip() else text
+
+
 def short_title(text: str) -> str:
     """A task's short title: the request's first sentence, paths as file names, cut at a word.
 
-    The person's own words, without "please" and the like; never cut
-    mid-word: at most :data:`TITLE_CHARS` characters (24 for Chinese),
-    without a trailing "the", "in" or punctuation.
+    The person's own words, without "please" and the like or a level word that
+    opens the request; never cut mid-word: at most :data:`TITLE_CHARS` characters
+    (24 for Chinese), without a trailing "the", "in" or punctuation.
     """
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
     first = _TITLE_LEAD.sub("", lines[0] if lines else "").strip()
+    first = _without_level_cue(first)
     first = re.split(r"(?<=[^\d][.!?])\s|[。！？；;]", first, maxsplit=1)[0]
     # A path reads as its file's name; a link and "and/or" stay as they are.
     first = " ".join(

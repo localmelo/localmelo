@@ -366,6 +366,22 @@ def test_short_titles_cut_at_a_word() -> None:
 
 
 @pytest.mark.parametrize(
+    ("typed", "title"),
+    [
+        ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
+        ("今天修一下：路由规则改掉", "修一下：路由规则改掉"),
+        ("no rush: tidy the photos", "tidy the photos"),
+        ("Please, no rush: tidy the photos", "tidy the photos"),
+        ("today", "today"),
+        ("today:", "today"),
+        ("Today's news summary", "Today's news summary"),
+    ],
+)
+def test_a_level_word_that_opens_a_title_is_dropped(typed: str, title: str) -> None:
+    assert short_title(typed) == title
+
+
+@pytest.mark.parametrize(
     ("typed", "task"),
     [
         ("continue the old report", DONE),
