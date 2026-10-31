@@ -122,6 +122,17 @@ When the model is not the saved default, a row after the folder gives the server
 - The everyday commands come first: `/model`, `/new`, `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`.
 - A message that starts with `/` and a lowercase name is a command; an unknown name prints `Unknown command /NAME. /help lists the commands.` and keeps the draft, and `/etc/hosts is broken` is a message.
 - To send a message that starts like a command, start it with a space.
+- What a command prints hangs under it behind a quiet `└`, so you can tell which lines belong to which command; later lines line up under the first, and warnings and errors keep their colour.
+- A plain terminal (`NO_COLOR`, `TERM=dumb`, ASCII symbols) gets the same layout with `|`; a list such as `/model` stays a list, and what it prints when it closes hangs too.
+
+```text
+› /status
+  └ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1 · ✓ answers
+    folder     ~/demo-project
+    chat       new
+    approvals  asks before running commands or changing files
+    context    not measured yet
+```
 
 | Command | What it does |
 |---|---|

@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- In the terminal, what a `/` command prints hangs under the command behind a
+  quiet `└` (`|` with ASCII symbols), indented one step: later lines line up
+  under the first, a wrapped line continues under itself, and warnings and
+  errors keep their colour. One helper draws it for commands, `!` shell
+  results and tool-call details, so all three share one shape; pickers stay
+  as they are, and what they print when they close hangs under the command.
+  `/new` keeps its full-width rule. [#NN]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the
