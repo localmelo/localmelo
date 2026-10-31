@@ -92,6 +92,17 @@ def test_a_write_commit_or_checkout_is_not_routine(tmp_path: Path, calls: str) -
         "    subprocess.run(list(a), start_new_session=True)\nsh('ls')",
         # A helper that changes its arguments before running them.
         "import subprocess\ndef sh(a):\n    subprocess.run(fix(a))\nsh(['ls'])",
+        "import subprocess\ndef sh(*a):\n    a = ('rm', '-rf', 'x')\n"
+        "    subprocess.run(list(a))\nsh('ls')",
+        "import subprocess\ndef sh(c):\n    c.append('--force')\n"
+        "    subprocess.run(c)\nsh(['ls'])",
+        "import subprocess\ndef sh(c):\n    c[0] = 'rm'\n    subprocess.run(c)\nsh(['ls'])",
+        # A method, or a helper reached another way than by its name.
+        "import subprocess\nclass T:\n    def run(self, *a):\n"
+        "        subprocess.run(list(a))\nT().run('rm', '-rf', 'x')",
+        VARARGS + 'globals()["run"]("rm", "-rf", "x")',
+        "import subprocess, functools\n@functools.cache\ndef run(*a):\n"
+        "    subprocess.run(list(a))\nrun('ls')",
     ],
 )
 def test_a_helper_melo_cannot_follow_is_not_routine(tmp_path: Path, code: str) -> None:

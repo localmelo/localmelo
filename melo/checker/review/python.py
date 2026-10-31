@@ -126,8 +126,12 @@ def _helper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.Call | None:
     name = args.vararg.arg if args.vararg else None
     if name is None and len(args.args) - len(args.defaults) == 1:
         name = args.args[0].arg
+    if node.decorator_list or name is None:
+        return None
     found = None
     for inner in ast.walk(node):
+        if _changes(inner, name):
+            return None  # the argv it runs may not be what its caller passed
         if not isinstance(inner, ast.Call):
             continue
         func = inner.func
@@ -167,6 +171,21 @@ def _helper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.Call | None:
     return found
 
 
+def _changes(node: ast.AST, name: str) -> bool:
+    """Whether *node* rebinds, changes or calls a method of the parameter *name*."""
+    store = (ast.Store, ast.Del)
+    if isinstance(node, ast.Name) and node.id == name:
+        return isinstance(node.ctx, store)
+    if isinstance(node, ast.Attribute | ast.Subscript):
+        value = node.value
+        return isinstance(value, ast.Name) and value.id == name
+    return isinstance(node, ast.Global | ast.Nonlocal) and name in node.names
+
+
+# Names that reach a function without calling it by its name.
+_INDIRECT = frozenset(["globals", "locals", "vars", "getattr", "__import__"])
+
+
 class _Review:
     def __init__(self, ctx: Context, f: Findings, tree: ast.AST) -> None:
         self.ctx, self.f, self.busy = ctx, f, set[str]()
@@ -176,29 +195,48 @@ class _Review:
         self.later: list[ast.AST] = []  # the calls and imports, once all is bound
         # Local helpers that run their arguments as a command (see _helper),
         # by name: the calls of one are reviewed at each call site instead.
+        # Only a module's own functions, called by their name: a method, a
+        # helper passed as a value (map(run, …)), reached as an attribute or
+        # by globals() is not followed, and its call is reviewed as before.
         self.helpers: dict[str, ast.Call] = {}
-        for node in ast.walk(tree):
+        defined: list[str] = []
+        for node in getattr(tree, "body", []):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                defined.append(node.name)
                 inner = _helper(node)
-                if inner is not None and node.name not in self.helpers:
+                if inner is not None:
                     self.helpers[node.name] = inner
-                elif node.name in self.helpers:  # defined twice: not followed
-                    self.helpers.pop(node.name)
-        self.forwarded = {id(inner) for inner in self.helpers.values()}
+        nodes = list(ast.walk(tree))
         loads = [
             n.id
-            for n in ast.walk(tree)
+            for n in nodes
             if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
         ]
         called = [
             n.func.id
-            for n in ast.walk(tree)
+            for n in nodes
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         ]
+        attrs = [
+            n.attr
+            for n in nodes
+            if isinstance(n, ast.Attribute)
+            and not (isinstance(n.value, ast.Name) and n.value.id == "subprocess")
+        ]
+        all_defs = [
+            n.name
+            for n in nodes
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+        ]
         for name in list(self.helpers):
-            if loads.count(name) != called.count(name):
-                # Passed around (map(run, …)): its commands cannot be read.
-                self.forwarded.discard(id(self.helpers.pop(name)))
+            if (
+                loads.count(name) != called.count(name)
+                or name in attrs
+                or all_defs.count(name) > 1
+                or _INDIRECT & set(loads)
+            ):
+                self.helpers.pop(name)
+        self.forwarded = {id(inner) for inner in self.helpers.values()}
         for node in ast.walk(tree):
             if type(node) not in _BINDS:
                 continue

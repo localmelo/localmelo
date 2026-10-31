@@ -267,8 +267,8 @@ class AgentOptions:
       gateway's sessions build it per Agent, from the backend the Agent
       talks to). The fixed system section carries it right after the base
       text, in planning and reflection requests. ``None`` (the default)
-      adds nothing: direct runs, workers and the benchmark send the base
-      text alone.
+      adds nothing: direct runs and the benchmark send the base text alone
+      (the gateway's task workers give their guide here).
     - ``task_aids``: set by the gateway's task workers. With two steps left
       in the run's last attempt, the next planning request ends with
       :data:`~localmelo.melo.agent._task_aids.FINISH_NOTE`, which asks the model to

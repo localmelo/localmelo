@@ -305,9 +305,9 @@ class ConsoleSessions:
         if entry is not None and entry.agent is not None:
             root = entry.agent.workspace_root
             assert root is not None
-            if entry.main and root != self._main_folder():
+            if entry.main and not entry.runner.busy and root != self._main_folder():
                 # The default folder changed: the main chat follows it with
-                # a new Agent on the same conversation.
+                # a new Agent on the same conversation (after a running turn).
                 await self._keep_locked(entry)
             else:
                 # A folder deleted while the Agent was open is still the 400

@@ -1264,7 +1264,8 @@ class TaskWorkers:
         home = (getattr(options, "tool_env", None) or {}).get("HOME")
         if home in self._homes:
             self._homes.discard(home)
-            shutil.rmtree(home, ignore_errors=True)
+            # Off the loop: a task's caches can make it large.
+            await asyncio.to_thread(shutil.rmtree, home, True)
         if failed:
             raise RuntimeError("Worker cleanup failed")
 
