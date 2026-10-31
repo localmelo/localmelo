@@ -42,7 +42,7 @@ In the web console and the app, melo remembers across chats.
 | How | When | Examples |
 |---|---|---|
 | You ask | A message that asks melo to remember a fact is kept at once, whatever the model does. | "remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…", "帮我记一下…" |
-| melo judges it worth keeping | You tell melo something lasting about yourself or your work, or a finished task's result in the chat is worth keeping: the model keeps a note with its `remember` tool. A clear, lasting fact about you that the model left is kept after its answer, in your words. | "I prefer short answers", "call me Ray", "I live in Utrecht", "my advisor is Dr. Okafor", "我的导师是周教授", "we decided to use Qwen3-Embedding-0.6B" |
+| melo judges it worth keeping | You tell melo something lasting about yourself or your work, or a finished task's result in the chat is worth keeping: the model keeps a note with its `remember` tool. It is told to keep a plain, lasting fact about you (where you live, your name, a person, your schedule, a preference) in that turn. | "I prefer short answers", "call me Ray", "I live in Utrecht", "my advisor is Dr. Okafor", "我的导师是周教授", "we decided to use Qwen3-Embedding-0.6B" |
 
 - A note is one sentence addressed to you, with its topic (About you, Preferences, People, Projects or Decisions), your words and the chat it came from.
 - A line under your message says `Remembered: you prefer short answers · Undo`; Undo forgets the note and brings back the one it replaced.
@@ -51,8 +51,8 @@ In the web console and the app, melo remembers across chats.
   - With an embedding model, so does a sentence that differs only in one short value: `I go to the gym on Fridays` after `… on Mondays`.
   - Look-alikes of another subject stay apart: `my flight to Faro` beside `my flight to Porto`, `我的游泳课` beside `我的书法课`; so does a value of another kind: `my cat is grey` beside `my cat is called Biscuit`.
   - The replaced note is kept but never recalled or listed; Undo under the new note brings it back.
-- A note kept already is not written twice.
-- Not notes: questions, to-dos ("remember to buy milk"), "if" sentences ("if I lived in Lisbon…"), negations ("I don't live in Lisbon anymore"), the past ("my name was Pip"), what others think ("my mom thinks…") and passing states ("my build is failing").
+- A note kept already is not written twice. Questions and to-dos ("remember to buy milk") are not notes.
+- `[memory] keep_statements = true` (off by default; `-X memory.keep_statements=on` for one run, listed by `melo -h all`) is a developer setting for comparison: after the model answers, code also keeps a plain, lasting fact you stated that the model did not keep ("I live in …", "my advisor is …", "我的…是…"), never a question, an "if", a "not", the past, what others think or a passing state ("my build is failing").
 
 What code checks before a note is kept:
 
