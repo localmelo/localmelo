@@ -83,9 +83,10 @@ def expect(*ports: int | None) -> None:
     """
     _expected.clear()
     for port in ports:
-        if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
-            if port not in _expected:
-                _expected.append(port)
+        if isinstance(port, bool) or not isinstance(port, int):
+            continue
+        if 0 < port < 65536 and port not in _expected:
+            _expected.append(port)
 
 
 def unregister(port: int | None) -> None:
