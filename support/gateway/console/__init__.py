@@ -157,6 +157,8 @@ class Console:
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
         self.front = Front(self)
+        # What a side chat ended with is recalled from any chat (#369).
+        self.front.add_side_listener(self.memory.side_ended)
         # The side chats' fronts, made when a chat first needs one.
         self._side_fronts: dict[str, Front] = {}
         own_front = self.options.front_builder or not self.options.builder

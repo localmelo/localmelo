@@ -573,6 +573,25 @@ async def test_side_summary_is_emitted_once_per_ending_with_the_chat_and_its_wor
         assert len(heard) == 1
 
 
+async def test_a_side_chats_ending_is_kept_in_memory_for_every_chat(
+    tmp_path: Path,
+) -> None:
+    async with chats_console(tmp_path, sides=[[answer("Planned: May 3 to 7.")]]) as (
+        console,
+        client,
+        _,
+    ):
+        await _side(client, tmp_path, "Plan the trip")
+        await client.get("/api/sessions")
+        await console.memory.drain()
+        found = await console.memory.search("when is the trip planned, May?")
+        assert any(
+            item.source.startswith("chat “Plan the trip” · summary")
+            and "Planned: May 3 to 7." in item.text
+            for item in found
+        )
+
+
 async def test_the_main_chats_own_tasks_and_runs_are_not_side_news(
     tmp_path: Path,
 ) -> None:

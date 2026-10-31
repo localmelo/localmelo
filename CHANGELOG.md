@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- What a side chat ended with is kept in memory: other chats recall its summary
+  like an earlier turn (`chat “<title>” · summary`), never as a note. Part of
+  #369. [#NN]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the
