@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
+  still completes). The bottom line always names the mode with its key,
+  `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key
+  goes below 60 columns, the mode stays), and one quiet line says what
+  changed. It is the same switch as `/approvals ask` and `/approvals auto`:
+  per chat, and in the main chat and the side chats it goes to the chat on
+  the gateway, so the console and the app show it too (`/approvals ask|auto`
+  now works there as well). The key never reaches Deny or `--yolo`, does
+  nothing while a question, a list or an approval is open, and waits for a
+  turn to end. Closes #386. [#NN]
 - In the terminal, what a `/` command prints hangs under the command behind a
   quiet `└` (`|` with ASCII symbols), indented one step: later lines line up
   under the first, a wrapped line continues under itself, and warnings and

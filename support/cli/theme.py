@@ -322,6 +322,8 @@ class Palette:
                 **{f"markdown.h{level}": "none" for level in range(1, 8)},
                 # A slash command named in what melo says (Start it, then /retry).
                 "command": accent + RichStyle(bold=True),
+                # Auto's name in the transcript, as the bar draws it.
+                "mode_auto": self.look("run").rich() + RichStyle(bold=True),
             }
         )
 
@@ -344,6 +346,9 @@ class Palette:
                 "tool": "bold",
                 "shell": "ansimagenta",
                 "yolo": "ansiwhite bg:ansired",
+                # Auto in the bar: the colour of what melo runs, bold so that it
+                # also stands out from the muted Ask without a colour (NO_COLOR).
+                "mode_auto": f"{self.look('run').pt()} bold".strip(),
                 "prompt": f"{accent.pt()} bold".strip(),
                 "placeholder": muted.pt(),
                 "status": muted.pt(),

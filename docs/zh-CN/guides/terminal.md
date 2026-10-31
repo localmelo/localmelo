@@ -67,7 +67,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
 - 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
 - 任务向对话求助时，会有一行灰色文字 `Task “Fix tests” asks: <problem>`（中文目录里是「任务「Fix tests」在问：…」），随后是 melo 的回答，上面没有你的消息。接着是 `→ melo answered “Fix tests” · <answer>`，或者 `! “Fix tests” needs your answer: <question>`：只有这一个任务在等时，在这里发一条消息回答（`→ Sent to “Fix tests” as your answer`；10 秒内可在 `melo console` 里撤销）；有几个在等时，这一行会写 `several wait: /answer Fix tests …`。
-- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/approvals`、`/browser` 和 `/mcp` 只在终端自己的对话里可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
+- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用；`/approvals ask` 和 `/approvals auto` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>
 
@@ -118,9 +118,11 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | Ctrl+O | 列出本轮的步骤（轮次运行期间；轮次结束后列出上一轮）；Esc 关闭列表。 |
 | Ctrl+T | 列出聊天之外的任务（网关的任务）；在某个任务上按 Enter 列出它的操作。 |
 | Tab | 补全命令或列出的模型；↑ ↓ 在菜单中选择，Enter 确认所选项。 |
+| Shift+Tab | 在[“询问”和“自动”](#auto-mode)之间切换这个对话：Ask 变成 Auto，Auto 变成 Ask，Deny 变成 Ask。补全菜单打开时，它仍像以前一样在菜单里向后移动。 |
 | Ctrl+L | 清屏。 |
 | Ctrl+Z | 无操作（此版本的 melo 不会挂起）。 |
 
+- **Shift+Tab** 用一个按键完成 `/approvals ask` 和 `/approvals auto` 做的事：状态栏显示当前模式（`ask · shift+tab` 或 `auto · shift+tab`，Auto 用自己的颜色），并有一行淡色的话说明变了什么：`Auto: routine steps run; risky ones are blocked with the reason.` 或 `Ask: melo asks before running commands or changing files.` 有问题或列表打开时它什么都不做（绝不替你回答），轮次运行期间也不做（模式在两轮之间切换，与 `/approvals` 相同；Esc 可停止当前轮次）。它不会切到 Deny；使用 `--yolo` 时，它只说明 YOLO 已开启，不带 `--yolo` 重新启动才会打开询问。
 - **队列。** 一次只能有一条消息等待，显示为 `↳ Queued for the next turn: …`；如果当前轮次以 `completed` 以外的状态结束，消息会返回输入框，不会发送。
 - **停止。** Esc 立即停止当前轮次（`■ Stopped`）；回答输出后，melo 最多花 2 秒记录运行步骤（参见[程序性记忆](../concepts/procedures.md)），下一条消息会等待记录完成。
 - **历史记录。** 消息和命令保存在 `~/.cache/localmelo/cli_history` 中（权限为 0600；超过 1 MB 时保留最新的 1,000 条），文件内容绝不会保存到其中；无法打开该文件时，会话在内存中保留历史记录并提示你。
@@ -291,7 +293,7 @@ from-the-child
 
 - Ctrl+T 列出任务；在某个任务上按 Enter 会提供 Pause 或 Resume、Raise to、Lower to 和 Stop（会先询问），效果与 `melo task pause|resume|level|stop` 完全相同。
 - melo 每 5 秒向网关询问一次任务，并且只在存在网关令牌（`~/.cache/localmelo/gateway/auth`）时才询问。
-- 终端较窄时，先去掉细节，再去掉数字；这一栏从不折行。只有模式不是 `ask` 时，它才显示在右边缘。
+- 终端较窄时，先去掉细节，再去掉数字；这一栏从不折行。模式总是显示在右边缘，旁边是切换它的按键（`ask · shift+tab`、`auto · shift+tab`）；窄于 60 列时按键先去掉，模式保留。Auto 有自己的颜色；使用 `NO_COLOR` 或 ASCII（`auto - shift+tab`）时，靠字重保持可辨。
 - 这些数字来自 melo 已经收到的事件；不会向模型服务器查询。`[cli] status_line = "off"` 只保留运行区、标题和最近一次请求的上下文。
 - 设置 `NO_COLOR` 或 `LOCALMELO_ASCII=1` 时，各区仍然分开（`│` 或 `|`），ASCII 写作 `in 3.0k out 15`。
 
@@ -366,7 +368,7 @@ from-the-child
 
 在自动模式下什么都不会询问：常规步骤直接运行，有风险的步骤或你没要求的步骤会被拦下并说明原因。
 
-- **切换：** `/approvals auto` 为这个对话打开它，`/approvals ask` 关闭它。`[approvals] mode`（控制台的 **新对话开始时**，或单次运行用 `-X approvals.mode=auto`）让终端自己的对话以它开始。
+- **切换：** 按 Shift+Tab（见[按键](#keys)），或输入 `/approvals auto` 为这个对话打开它，`/approvals ask` 关闭它。在主对话和侧边对话里，切换会发给网关上的那个对话，所以控制台和应用也会看到；`deny` 和 `forget` 仍只在终端自己的对话里可用。`[approvals] mode`（控制台的 **新对话开始时**，或单次运行用 `-X approvals.mode=auto`）让终端自己的对话以它开始。
 - **会运行什么：** 在文件夹内、不安装、不下载、不发送、不删除任何东西的步骤；melo 无法判断的步骤先交给你的模型。它的 `shell_exec` 和 `python_exec` 调用在写入沙箱中运行，所以即使没有规则发现，写入文件夹之外也会失败，而且它们既读不到 melo 的登录令牌，也连不上 melo 自己的 API。自动模式是审查，不是围墙：把工作交给另一个应用或程序的步骤由审查来判断（拦下，或交给你的模型检查），而不是由沙箱隔离。
 - **会拦下什么：** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置以及来自网络的代码，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: installs software`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。
 - **允许它：** 说“go ahead”（继续），melo 会再试一次；你的模型会核对你的话确实要求了它。只有点按钮才能允许的步骤（密码或密钥、系统设置、以后自动运行的东西、来自网络的代码或 melo 无法检查的代码）需要用控制台的 **Allow once**。

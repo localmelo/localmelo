@@ -122,6 +122,9 @@ PLACEHOLDER: Final = "Ask melo · / for commands"
 # Continuation rows of the input box start this many cells in.
 PREFIX_CELLS: Final = 2
 
+# The key beside the mode in the bar goes below this many columns; the mode stays.
+MODE_KEY_MIN_WIDTH: Final = 60
+
 HISTORY_MAX_BYTES: Final = 1_000_000
 HISTORY_KEPT: Final = 1_000
 
@@ -137,6 +140,9 @@ class StatusBar:
     title: str
     mode: str
     mode_style: str = "class:muted"
+    # The key that switches the mode (``shift+tab``), drawn muted after it
+    # when the bar is wide enough; empty when the key does nothing.
+    mode_key: str = ""
     # The usage zone (#282): cost or tokens, the context, the cache or the
     # limits; empty with [cli] status_line = "off" but for the context.
     usage: tuple[BarPart, ...] = ()
@@ -201,15 +207,20 @@ def status_fragments(
     The zones keep their place: what the session uses, the work beside the
     chat, and the run (while a turn runs its brief steps and the key that
     lists them, else the chat's title). The mode always shows, at the right
-    edge. When the width is short, the title is cut and then goes, then the
+    edge, with the key that switches it (``shift+tab``) until the width falls
+    below :data:`MODE_KEY_MIN_WIDTH`. When the width is short, the title is cut and then goes, then the
     work's details, then the usage's (right to left, a key last), then a
     running turn's key, then the figures right to left; a running turn's
     figure stays. Every cut counts cells, and no part is a bare ellipsis.
     """
     # Control characters (a pasted ^Z) count the cells they are drawn in.
     mode = cut_cells(shown(bar.mode), max(1, width - 3), ellipsis)
-    # No mode (ask, which everyone expects): the room of its cells and gap is the rest's.
-    room = width - 2 - (cells(mode) + 1 if mode else 0)
+    # The key's hint follows the mode where the width allows it.
+    key = dot + shown(bar.mode_key) if mode and bar.mode_key else ""
+    if width < MODE_KEY_MIN_WIDTH or cells(mode) + cells(key) > width - 3:
+        key = ""
+    # No mode: the room of its cells and gap is the rest's.
+    room = width - 2 - (cells(mode + key) + 1 if mode else 0)
     usage = [replace(part, text=shown(part.text)) for part in bar.usage if part.text]
     work = [replace(part, text=shown(part.text)) for part in bar.work if part.text]
     running = bool(bar.run)
@@ -265,12 +276,13 @@ def status_fragments(
             else:
                 left.append((_ROLE_STYLES.get(part.role, "class:status"), part.text))
     drawn = sum(cells(text) for _, text, *_ in left)
-    gap = max(1 if mode else 0, width - 2 - drawn - cells(mode))
+    gap = max(1 if mode else 0, width - 2 - drawn - cells(mode + key))
     return [
         ("class:status", "  "),
         *left,
         ("class:status", " " * gap),
         (bar.mode_style, mode),
+        *([("class:muted", key)] if key else []),
     ]
 
 
@@ -1305,6 +1317,18 @@ class InteractiveApp:
         def _(event: KeyPressEvent) -> None:
             self._tab()
 
+        # Over prompt_toolkit's "previous completion", which stays while the
+        # menu is open. Not while a question is open: it is never answered
+        # by a key that switches the mode.
+        @kb.add(
+            "s-tab",
+            filter=in_input
+            & ~has_completions
+            & ~Condition(lambda: bool(self._question)),
+        )
+        def _(event: KeyPressEvent) -> None:
+            self._mode_key()
+
         # Over prompt_toolkit's emacs "operate and get next", which melo never used.
         @kb.add(
             STEPS_BINDING, filter=in_input & ~Condition(lambda: bool(self._question))
@@ -1342,6 +1366,15 @@ class InteractiveApp:
             pass
 
         return kb
+
+    def _mode_key(self) -> None:
+        """Shift+Tab: the session switches Ask and Auto, else a hint says why not."""
+        switch = getattr(self.controller, "cycle_mode", None)
+        if switch is None:
+            return
+        hint = switch()
+        if hint:
+            self.hint(hint)
 
     def _tab(self) -> None:
         """Tab: the next completion; before the menu shows, complete at once.

@@ -160,7 +160,7 @@ Forgot note 3.
 [block.auto-switch]
 title = ["Switch a chat to Auto", "把对话切换到“自动”"]
 mode = "chat"
-caption = ["Type it in the terminal chat; /approvals ask goes back.", "在终端对话里输入；/approvals ask 切回“询问”。"]
+caption = ["Type it in the terminal chat, or press Shift+Tab; /approvals ask or Shift+Tab again goes back.", "在终端对话里输入，或按 Shift+Tab；/approvals ask 或再按一次 Shift+Tab 切回“询问”。"]
 text = '''
 /approvals auto
 '''

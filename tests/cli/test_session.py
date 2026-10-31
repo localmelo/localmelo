@@ -1728,19 +1728,31 @@ async def test_status_all_wraps_its_rows_under_their_labels(
     assert "not reachable: connection refused" in " ".join(map(str.strip, rows))
 
 
-async def test_the_status_bar_names_the_approval_mode_only_when_it_is_not_ask(
+async def test_the_status_bar_always_names_the_approval_mode_and_its_key(
     setup: Setup,
 ) -> None:
     session = setup.session
-    assert session.status_bar().mode == ""  # ask is what everyone expects
+    bar = session.status_bar()
+    assert (bar.mode, bar.mode_key, bar.mode_style) == (
+        "ask",
+        "shift+tab",
+        "class:muted",
+    )
     for mode in ("auto", "deny"):
         session.approvals.set_mode(mode)  # type: ignore[arg-type]
-        assert session.status_bar().mode == mode
+        bar = session.status_bar()
+        assert (bar.mode, bar.mode_key) == (mode, "shift+tab")
+    assert session.status_bar().mode_style == "class:muted"  # deny
+    session.approvals.set_mode("auto")
+    assert session.status_bar().mode_style == "class:mode_auto"
     session.approvals.set_mode("ask")
     session.developer = True
     assert session.status_bar().mode == "ask"
     session.approvals.mode = "yolo"
-    assert session.status_bar().mode == "⚠ YOLO: no approvals"
+    bar = session.status_bar()
+    # --yolo is never left by the key, so the bar names no key.
+    assert (bar.mode, bar.mode_key) == ("⚠ YOLO: no approvals", "")
+    assert bar.mode_style == "class:yolo"
 
 
 async def test_retry_runs_the_last_turn_again(setup: Setup) -> None:

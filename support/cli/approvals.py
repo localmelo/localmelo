@@ -61,6 +61,11 @@ _MODE_WORDS: Final = {
     "deny": "never runs commands or changes files",
     "yolo": "runs everything without asking (--yolo)",
 }
+# The quiet line a switch leaves in the transcript (the key and /approvals say the same).
+MODE_SWITCHED: Final = {
+    "ask": "Ask: melo asks before running commands or changing files.",
+    "auto": "Auto: routine steps run; risky ones are blocked with the reason.",
+}
 # What a session grant covers, in the words of the panel that asked.
 _GRANT_WORDS: Final = {
     "shell_exec": "shell commands",
@@ -435,6 +440,16 @@ class EditSnapshots:
     def clear(self) -> None:
         """Drop every snapshot, as ``/new`` does."""
         self._snapshots.clear()
+
+
+def next_mode(mode: Mode) -> Literal["ask", "auto"] | None:
+    """What Shift+Tab switches *mode* to: Ask to Auto, Auto and Deny to Ask.
+
+    ``None`` under ``--yolo``: the key never leaves it, and never reaches Deny.
+    """
+    if mode == "yolo":
+        return None
+    return "auto" if mode == "ask" else "ask"
 
 
 def approval_words(mode: Mode, grants: Iterable[str]) -> str:
