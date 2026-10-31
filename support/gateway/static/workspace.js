@@ -20,6 +20,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
@@ -189,7 +190,7 @@ function unreadCard() {
 }
 
 function levelName(level) {
-  return `P${level || 2}`;
+  return levelCode(level);
 }
 
 function notify(message, { sticky = false, kind = "" } = {}) {
@@ -1139,7 +1140,7 @@ function mainNodes(view, turns) {
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
-      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho, developer: developerMode });
+      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
     }
     return [el("div", "day-divider", item.label)];
   });
@@ -2228,7 +2229,7 @@ function renderLevelMenu() {
   const menu = $("level-menu");
   menu.replaceChildren();
   for (const number of [1, 2, 3, 4]) {
-    const item = el("button", "level-item", levelName(number) + (number === 1 ? " · urgent" : number === 4 ? " · background" : ""));
+    const item = el("button", "level-item", levelLabel(number));
     item.type = "button";
     item.setAttribute("role", "menuitemradio");
     item.setAttribute("aria-checked", String(number === level));

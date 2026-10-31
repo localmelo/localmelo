@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/index.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -65,21 +66,31 @@
       <section class="section" id="quickstart">
         <h2>Quick start</h2>
         <p>You need Python 3.11 or later, Git and <a href="https://docs.astral.sh/uv/">uv</a> on macOS (Linux should work; Windows is not supported).</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Install</figcaption>
-          <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-uv sync --extra gateway
-source .venv/bin/activate</code></pre>
-        </figure>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Run a task with oMLX</figcaption>
-          <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
-        </figure>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Run a task with Ollama</figcaption>
-          <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
-        </figure>
+        <!-- usage:steps --><ol class="steps">
+<li class="step"><h3><a href="quickstart.html#install">Install</a></h3>
+<p>Clone the repository and let uv set it up.</p>
+<figure class="usage" aria-label="Install" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#run-your-first-task">Run a first task</a></h3>
+<p>Point melo at your model server and ask a question; the answer prints on stdout.</p>
+<figure class="usage" aria-label="Run a task with oMLX" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure>
+<figure class="usage" aria-label="Run a task with Ollama" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with Ollama</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">Open the main chat</a></h3>
+<p>Run melo with no task: the first run finds your server and saves the setup.</p>
+<figure class="usage" aria-label="The main chat" data-copy="melo"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">Hand it a task</a></h3>
+<p>Ask for bigger work in the chat: it becomes a task and comes back as a card.</p>
+<figure class="step-shot"><img src="../assets/img/cards.webp" alt="Three cards in the main chat: a finished task with what it changed and its tests, an approval that was answered, and one that waits for you." width="1280" height="800" loading="lazy"></figure></li>
+<li class="step"><h3><a href="quickstart.html#set-up-an-embedding-model">See what it remembers</a></h3>
+<p>melo keeps notes across chats; list them, or forget one.</p>
+<figure class="usage" aria-label="What melo remembers" data-copy="melo memory list&#10;melo memory forget 3 -y"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">list</span></span>
+<span class="ln out"><span class="o">   3  Preferences  You prefer short answers.</span></span>
+<span class="ln out"><span class="o">      from chat “I prefer short answers”, Oct 30</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">forget</span> <span class="a">3</span> <span class="f">-y</span></span>
+<span class="ln out"><span class="o">Forgot note 3.</span></span></code></pre></figure></li>
+</ol><!-- /usage -->
         <ul>
           <li>Keep the folder name <code>localmelo</code>: the package is built from it.</li>
           <li>On a Mac with Apple silicon, <a href="https://github.com/jundot/omlx">oMLX</a> is the recommended model server; elsewhere, <a href="https://ollama.com">Ollama</a>.</li>

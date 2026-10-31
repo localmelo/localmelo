@@ -50,11 +50,11 @@
 <a id="hand-work-to-the-main-chat"></a>
 ## 把工作交给主对话
 
-![主对话：回答了一个问题；以 Normal 开始的任务已完成回来；以 Today 开始的任务打开了级别列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
+![主对话：回答了一个问题；一个任务已完成回来；一个任务打开了优先级列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
 
-- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · Normal`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
 - **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样，并配一个简短的标题。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
-- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
+- **优先级写作 P0 到 P5。** 一行里显示代码（`P1`），悬停可看含义。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 P1（今天），"no rush"、"不急" 为 P3（有空时），其余为 P2（正常）。那一行的 **Change** 会打开列表（`P0 · runs first; others wait`、`P1 · today`、`P2 · normal`、`P3 · when there is time`、`P4 · only when the computer is idle`、`P5 · on hold until you start it`；含义依次是：最先运行，其他任务等待；今天；正常；有空时；仅在电脑空闲时；暂停，等你启动），设定你自己的优先级，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
@@ -70,7 +70,7 @@
 - **说一次就行。** 一条消息，如 `every weekday at 8:30, brief me on my calendar` 或 `每天早上九点 总结我的邮件`，会出现一张卡片 `Run this every weekday at 8:30?`，带 **Save chore**、**Just once** 和 **Cancel**。你点按之前不会保存或开始任何东西，也没有模型读取这个时间安排。
 - **三种安排。** 每天某个时间、每个工作日某个时间，或每 1 到 24 小时。没有说时间时，由一天中的时段决定（`every morning` 是 8:00，`every evening` 是 18:00），否则是 9:00。`every Monday` 或 `every 30 minutes` 不会被读取：它像普通消息一样交给主对话。
 - **准时运行。** 网关运行期间，定时事项会作为任务在工作区里自己的文件夹中开始，比约定时间晚不超过三分钟，绝不提前。电脑睡眠期间错过的一次，会在唤醒时只运行一次；上一次运行还没结束的事项会跳过下一次。
-- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
+- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行会看到它的优先级（`Priority: P2 · normal`），并可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
 - **Check-in。** 每 30 分钟它会看有没有要告诉你的事：某个事项刚结束的运行，或一个等了你整整一个周期的任务。没有就什么也不做，也不用模型；有的话，调用一次模型写一条简短的说明，作为一张卡片发到主对话。它的开关可以把它关掉。
 
 <a id="pictures-in-the-answer"></a>
@@ -99,7 +99,7 @@
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
-选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用文字表示的优先级（**Now**、**Today**、**Normal**、**Whenever**、**If idle**；开发者模式加上 P0 到 P4），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
+选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用代码表示的优先级（`P0` 到 `P4`，各带含义；P5 就是 Pause），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
 
 **Workers** 列出上述范围内的 worker：当前对话启动的任务，运行中的在前，然后是今天完成的。每一行有标题、用文字表示的状态（`Working`、`Waiting for your approval`、`Waiting to start`、`Paused`、`Done`、`Failed`、`Stopped`）、时间，已完成的 worker 还有一行结果。选中一个 worker，会展开它实时的步骤，完成后展开它的历史，并提供 **Pause** 或 **Resume**、**Stop** 和优先级，与 Activity 相同。主对话的 Workers 还会列出记录为会话的 worker 运行，例如 `melo worker`。没有 worker 时，标签页会说明它们何时出现（`This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.`）。底部的 **All tasks** 和 **All worker runs** 打开对应的视图。
 
@@ -196,7 +196,7 @@
 
 ## 调度与停止
 
-在开发者模式下，对话标题栏有一个级别标签（P1 至 P4，默认 P2），用于设置调度器如何相对于其他对话排列该对话的调用；级别只保存在内存中，不会持久化。标题和级别标签旁边的机器状态行会显示其他持有者的 GPU 锁（`GPU lock: <holder> · <purpose>`，附带 `(recorded)` 或 `(chats wait)`）、`GPU lock: yours`、`GPU lock unreadable`、`· ETA passed`，以及电池状态（`Battery 55% · discharging`）。使用交流电且没有锁时不显示任何内容。级别标签是菜单按钮：按 Enter 或向下箭头会打开菜单，焦点落在对话当前的级别上，方向键、Home 和 End 在各级别之间移动，Escape 关闭菜单并回到按钮。调用等待时（等待可用槽位、后台上限或其他持有者的锁），标题栏的状态标签和状态文字会显示 `Waiting: <reason>`，侧边栏显示 `● Waiting`，实时行也显示相同的等待状态；原因使用调度器自身的代码（`Resources`、`Priority` 等），只有等待其他持有者的 GPU 锁（`Reservation`）时显示 "Waiting for this Mac's GPU"，与横幅的说法一致。这些与终端显示的是同一组信息，通过网关共享的同一个门控机制读写：会话上的 `level` 和 `held`、列表上的 `machine`，以及用于设置它们的 `POST /api/sessions/{id}/level` 和 `POST /api/presence`。
+在开发者模式下，对话标题栏有一个级别标签（P1 至 P4，默认 P2，菜单里写出各自的含义），用于设置调度器如何相对于其他对话排列该对话的调用；级别只保存在内存中，不会持久化。标题和级别标签旁边的机器状态行会显示其他持有者的 GPU 锁（`GPU lock: <holder> · <purpose>`，附带 `(recorded)` 或 `(chats wait)`）、`GPU lock: yours`、`GPU lock unreadable`、`· ETA passed`，以及电池状态（`Battery 55% · discharging`）。使用交流电且没有锁时不显示任何内容。级别标签是菜单按钮：按 Enter 或向下箭头会打开菜单，焦点落在对话当前的级别上，方向键、Home 和 End 在各级别之间移动，Escape 关闭菜单并回到按钮。调用等待时（等待可用槽位、后台上限或其他持有者的锁），标题栏的状态标签和状态文字会显示 `Waiting: <reason>`，侧边栏显示 `● Waiting`，实时行也显示相同的等待状态；原因使用调度器自身的代码（`Resources`、`Priority` 等），只有等待其他持有者的 GPU 锁（`Reservation`）时显示 "Waiting for this Mac's GPU"，与横幅的说法一致。这些与终端显示的是同一组信息，通过网关共享的同一个门控机制读写：会话上的 `level` 和 `held`、列表上的 `machine`，以及用于设置它们的 `POST /api/sessions/{id}/level` 和 `POST /api/presence`。
 
 停止操作会取消运行；光标在消息输入框内时按 Escape 也会停止，在其他位置按 Escape 只会关闭已打开的内容，在 Tasks 和 Workers 里与在对话中一样。正在进行的模型请求会被放弃，但模型服务器可能仍会完成计算；正在运行的 `python_exec` 子进程会连同其进程组被终止。`python_exec` 代码在子进程中运行，因此网关在其运行期间仍能响应其他请求。工具的限制参见[工具与 MCP](../reference/tools.md)。该轮次以 `cancelled` 状态保存，保存完成后对话即可接收下一条消息。每条消息都能看到该对话先前的回答，与[会话](gateway.md#sessions)相同。
 

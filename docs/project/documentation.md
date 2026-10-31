@@ -109,6 +109,11 @@ historical fragment, not when merely adding a new heading to an unsplit page.
 - Add a new website page in both languages, and to the navigation of every
   website page. Memory design is the exception: it is a design record, and
   the Architecture and Roadmap pages link to it instead.
+- Commands on the website and in the READMEs are generated terminal blocks:
+  edit `scripts/usage_blocks.toml`, then run `uv run python scripts/usage_blocks.py sync`
+  (a test fails while a page is stale). In a Markdown guide, tag a command
+  script `shell` and a transcript with `$ ` prompts `console`; the builder
+  draws both as the same blocks.
 - Check every command you document by running it.
 - Keep `for-agents.md` in step with every change to behaviour, options,
   output or feature status, and add new pages to `llms.txt`. It is written

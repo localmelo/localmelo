@@ -20,7 +20,7 @@ You need:
 
 ## Install
 
-```bash
+```shell
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 uv sync --extra gateway
@@ -42,7 +42,7 @@ from anywhere else.
 
 ### Install with pip
 
-```bash
+```shell
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 python3 -m venv .venv
@@ -62,7 +62,7 @@ linked to this checkout, so source changes apply without reinstalling.
 > See also the [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
 > and [What the checks do](../guides/tools-mcp.md#what-the-checks-do).
 
-```bash
+```shell
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
@@ -82,7 +82,7 @@ server load a large one: pass `--model <id>`.
 With [oMLX](../guides/model-servers.md#serve-a-model-with-omlx), use its URL
 and the name of a model folder:
 
-```bash
+```shell
 melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
 
@@ -96,7 +96,7 @@ For every option, see the [command-line reference](../reference/cli.md).
 
 ## Get the result as JSON
 
-```bash
+```shell
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7?"
 ```
 
@@ -145,7 +145,7 @@ completed passed
 and `failed` when one did not, or could not run. A run that ends `completed`
 with a failed check exits with code 4, so a script can stop on it:
 
-```bash
+```shell
 melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.json && echo "check passed"
 ```
 
@@ -235,7 +235,7 @@ cloud API, first run `export OPENAI_API_KEY="<your key>"` (or your vendor's
 variable) in this terminal: the wizard's test request uses that key. Run the
 wizard, then start the gateway:
 
-```bash
+```shell
 melo setup
 melo serve
 ```
@@ -288,7 +288,7 @@ The examples pipe the gateway bearer token from its private file to curl, keepin
 it out of command-line arguments and shell history. Do not enable verbose curl
 output or log the header; same-user processes can still read the token file.
 
-```bash
+```shell
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -311,7 +311,7 @@ link. See [Interactive conversations](#interactive-conversations).
 Press Ctrl+C in the first terminal to stop the gateway. Tasks use the saved
 configuration:
 
-```bash
+```shell
 melo "What is 6*7?"
 ```
 
@@ -325,7 +325,7 @@ the real address, and `melo console --port PORT` and
 With the gateway running, `melo-task` sends a brief to it, as in
 [Run a worker task](#run-a-worker-task), and lists the tasks:
 
-```bash
+```shell
 melo-task new --brief brief.md
 melo-task list
 ```
@@ -348,7 +348,7 @@ tool it waits for. Run `melo console` in a terminal to open the console,
 and answer the request in the Tasks view. Then show the
 task:
 
-```bash
+```shell
 melo-task show c5b2d38ceecc
 ```
 
@@ -368,7 +368,7 @@ it finishes, a spinner shows what melo is doing and the time while the model
 works, and the answer prints as Markdown, with the files a turn changed named
 under its footer:
 
-```bash
+```shell
 melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
 # --model it uses the server's only chat model or its one loaded model;

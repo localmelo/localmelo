@@ -324,7 +324,7 @@ class CliSession:
                 )
             )
             if self.work is not None:
-                work = tuple(work_parts(self.work.summary, words=self.work.words))
+                work = tuple(work_parts(self.work.summary))
         elif last:
             usage = (BarPart(f"ctx {format_tokens(last)}"),)
         return StatusBar(

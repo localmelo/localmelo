@@ -18,7 +18,7 @@
 
 ## 安装
 
-```bash
+```shell
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 uv sync --extra gateway
@@ -35,7 +35,7 @@ uv 会创建虚拟环境 `.venv/`（如果没有 Python 3.13，还会安装它�
 
 ### 使用 pip 安装
 
-```bash
+```shell
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 python3 -m venv .venv
@@ -52,7 +52,7 @@ pip install -e ".[gateway]"
 > [!WARNING]
 > 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，见[选择内置工具](../guides/tools-mcp.md#choose-the-built-in-tools)。另见[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../guides/tools-mcp.md#what-the-checks-do)。
 
-```bash
+```shell
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
@@ -62,7 +62,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 
 使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx) 时，填写它的 URL 和模型文件夹的名称：
 
-```bash
+```shell
 melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
 
@@ -74,7 +74,7 @@ melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 
 ## 以 JSON 获取结果
 
-```bash
+```shell
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7?"
 ```
 
@@ -117,7 +117,7 @@ completed passed
 
 最后一轮的所有检查都以 0 退出时，`tests.state` 为 `passed`；有检查失败或无法运行时为 `failed`。运行以 `completed` 结束但检查失败时，退出码为 4，脚本可以据此停下：
 
-```bash
+```shell
 melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.json && echo "check passed"
 ```
 
@@ -163,7 +163,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 配置向导还可以配置嵌入服务器或云端 API。对于云端 API，先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
 
-```bash
+```shell
 melo setup
 melo serve
 ```
@@ -195,7 +195,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 
 示例把网关的 bearer token 从其私有文件通过管道传给 curl，使它不出现在命令行参数和 shell 历史中。不要开启 curl 的详细输出，也不要记录这个请求头；同一用户的其他进程仍能读取 token 文件。
 
-```bash
+```shell
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
@@ -213,7 +213,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 
 在第一个终端中按 Ctrl+C 停止网关。任务使用已保存的配置：
 
-```bash
+```shell
 melo "What is 6*7?"
 ```
 
@@ -225,7 +225,7 @@ melo "What is 6*7?"
 
 网关运行时，`melo-task` 把简报发给它（简报写法见[运行 worker 任务](#run-a-worker-task)），并列出任务：
 
-```bash
+```shell
 melo-task new --brief brief.md
 melo-task list
 ```
@@ -241,7 +241,7 @@ c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
 
 默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console` 打开控制台，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
 
-```bash
+```shell
 melo-task show c5b2d38ceecc
 ```
 
@@ -259,7 +259,7 @@ c5b2d38ceecc  done
 
 不带任务运行 `melo`，即可在终端中对话。每次工具调用完成时都会显示，模型工作时会以旋转指示器显示 melo 在做什么和用时，答案以 Markdown 输出，该轮改动的文件会在页脚下点出：
 
-```bash
+```shell
 melo
 # Or talk to an OpenAI-compatible server that is not saved. Without
 # --model it uses the server's only chat model or its one loaded model;
