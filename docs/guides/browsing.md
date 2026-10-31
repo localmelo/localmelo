@@ -1,8 +1,12 @@
 # Browsing with melo
 
-This guide shows how to let melo read web pages in Safari, what it can and cannot do there, and who decides which sites it may open. It is for people who chat with melo in the terminal or the web console on a Mac. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
+Let melo read web pages in Safari, on a Mac, from the terminal or the web console. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
 
-Browsing is **off by default** and **read-only in this first part**. melo opens pages in Safari's *automation windows*, follows links and reads what it finds. It does not click buttons, fill in forms, sign in, post or buy. Those come later (see [What is coming](#what-is-coming)).
+![A terminal chat in which melo opens a web page and says what it contains.](../assets/img/browser.webp)
+
+- Browsing is **off by default** and **read-only in this first part**.
+- melo opens pages in Safari's *automation windows*, follows links and reads what it finds.
+- It does not click buttons, fill in forms, sign in, post or buy; those come later (see [What is coming](#what-is-coming)).
 
 ## What you need
 
@@ -18,9 +22,11 @@ In the terminal chat:
 /browser
 ```
 
-shows whether browsing is on and, when it is, checks that Safari answers. It then offers a list: **Turn browsing on** or **Leave it off**. `/browser on` and `/browser off` do the same without the list. The choice is saved as `[browser] driver` in `~/.cache/localmelo/config.toml` when you have a saved configuration, and the chat continues in a new Agent, so nothing you said is lost.
+- It shows whether browsing is on and, when it is, checks that Safari answers; then a list offers **Turn browsing on** or **Leave it off**.
+- `/browser on` and `/browser off` do the same without the list.
+- The choice is saved as `[browser] driver` in `~/.cache/localmelo/config.toml` when you have a saved configuration, and the chat goes on in a new Agent, so nothing you said is lost.
 
-To turn it on for one run only, without saving:
+For one run only, without saving:
 
 ```bash
 melo -X browser.driver=safari-automation
@@ -33,30 +39,31 @@ In the config file:
 driver = "safari-automation"
 ```
 
-`"off"` is the default.
-
-The web console reads the same setting when it opens a chat; change it with `melo config set browser.driver safari-automation` and open a new chat.
+`"off"` is the default. The web console reads the same setting when it opens a chat: change it with `melo config set browser.driver safari-automation` and open a new chat.
 
 ## Set up Safari
 
 Safari has to allow outside programs to open automation windows. In Safari:
 
-1. Open **Settings**, then the **Developer** tab. If there is no Developer tab, open the **Advanced** tab and tick **Show features for web developers** first.
+1. Open **Settings**, then the **Developer** tab. With no Developer tab, open **Advanced** and tick **Show features for web developers** first.
 2. Tick **Allow remote automation** (its full label may read "Allow remote automation and external agents").
 
-When it is off, melo says so in its answer to the first browsing call and in `/browser`:
+When it is off, melo says so in its first browsing answer and in `/browser`:
 
 ```text
 Safari is not set up for melo yet. In Safari, open Settings > Developer and turn on "Allow remote automation" ...
 ```
 
-Turn the switch on and ask again; melo tries to connect again on every call, so you do not restart it. If the check still fails after both switches are on, Apple's one-time WebDriver setup is `safaridriver --enable` in Terminal (it asks for your password); melo never runs it for you.
-
-melo starts Safari's automation server only on the first browsing call (or `/browser`). A chat that never browses opens nothing.
+- Turn the switch on and ask again; melo connects again on every call, so you do not restart it.
+- If the check still fails with both switches on, Apple's one-time setup is `safaridriver --enable` in Terminal (it asks for your password); melo never runs it for you.
+- melo starts Safari's automation server only on the first browsing call (or `/browser`); a chat that never browses opens nothing.
 
 ## What the automation windows are
 
-Safari opens them apart from your own windows, with an orange address field. They start from a clean slate, like a private window: **none of your sign-ins, cookies or AutoFill are available**, nothing is kept afterwards, and only one automation session runs at a time. A pane over the window catches your mouse and keyboard; breaking it offers to stop the session. So melo can read pages that need no sign-in. Pages that only show for a signed-in person, and sites that challenge automated browsers, may not work in this part.
+- They open apart from your own windows, with an orange address field.
+- They start clean, like a private window: **none of your sign-ins, cookies or AutoFill are available**, and nothing is kept afterwards.
+- Only one automation session runs at a time; a pane over the window catches your mouse and keyboard, and breaking it offers to stop the session.
+- So melo reads pages that need no sign-in; pages for signed-in people, and sites that challenge automated browsers, may not work yet.
 
 ## What melo can do
 
@@ -100,7 +107,10 @@ elements:
 
 ## What is coming
 
-This is part 1 of browsing. Planned next, in this order: acting in your own signed-in browser (a Chrome extension; clicks and typing, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in), then saved chores that run on a schedule (for example a daily check-in) with steps you approved once. None of that exists yet.
+Browsing is built in parts; none of the next two exists yet.
+
+- Acting in your own signed-in browser (a Chrome extension): clicks and typing, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in.
+- Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.
 
 ## Troubleshooting
 

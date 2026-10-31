@@ -16,13 +16,14 @@ into promises.
 
 ## Pages people read
 
-The website pages (`docs/en/*.html`, `docs/zh-CN/*.html`) and the two
-READMEs are for people who skim. The guides and references below keep the
-page template above.
+The website pages (`docs/en/*.html`, `docs/zh-CN/*.html`), the two READMEs,
+the guides (`docs/guides/`) and the concepts (`docs/concepts/`) are for people
+who skim. The reference pages keep the page template above: exact tables and
+lists, with no PR or issue numbers in their prose.
 
 ### Layout
 
-- A section is a heading and at most five short points, one line each.
+- A section is a heading and at most five short points, one line each; a guide keeps the exact detail in a table or a code block, not in a paragraph.
 - No paragraph is longer than two sentences.
 - Plain words from the reader's side ("You can …"); internals only on a page about internals.
 - The roadmap is a board in three columns, Now, Next and Later: cards with a title, one line and a status chip (building, testing or done).
@@ -30,7 +31,8 @@ page template above.
 
 ### Pictures and numbers
 
-- A picture before words: a screenshot, a short loop or a diagram for each feature section that has one; a table for a comparison.
+- A picture before words: a screenshot, a short loop or a diagram for each feature section that has one, placed under the heading; a table for a comparison.
+- A guide that renames or removes a heading keeps the old one as an anchor (`<a id="old-heading"></a>`) so links and the manifest still resolve.
 - Pictures live in `docs/assets/img/` as WebP, at most 1280 pixels wide, with alt text; a page's pictures stay under 3 MB, and both languages show the same ones.
 - No PR or issue numbers on these pages; where a reader may want detail, add a small "What changed" link to the changelog.
 - `docs/for-agents.md`, `docs/llms.txt` and the changelog stay exact and terse, and keep their PR numbers.

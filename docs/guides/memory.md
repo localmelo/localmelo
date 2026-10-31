@@ -1,6 +1,6 @@
 # Guide: Memory
 
-This guide shows how to keep memory between runs, inspect and reset it, turn it off, and what it keeps about you. Read it before you enable memory for a project; the files and options are in the [memory reference](../reference/memory.md).
+Keep memory between runs, inspect and reset it, turn it off, and see what it keeps about you. Read it before you enable memory for a project; the files and options are in the [memory reference](../reference/memory.md).
 
 ## Keep memory between runs
 
@@ -9,83 +9,54 @@ export LOCALMELO_PERSIST_MEMORY=1
 melo "What is 6*7?"
 ```
 
-- `LOCALMELO_PERSIST_MEMORY` turns persistence on with any non-empty value,
-  even `0` or `false`. To turn it off, run `unset LOCALMELO_PERSIST_MEMORY`.
-- The files go to `~/.cache/localmelo/memory/`. `LOCALMELO_MEMORY_DIR`
-  chooses another directory. Its value is used as given: a `~` that the
-  shell does not expand, such as a quoted one, is not expanded either.
-- `--memory-dir DIR` turns persistence on for one direct run, in `DIR`,
-  whatever the variables say. `~` is expanded:
+- `LOCALMELO_PERSIST_MEMORY` turns persistence on with any non-empty value, even `0` or `false`; `unset LOCALMELO_PERSIST_MEMORY` turns it off.
+- The files go to `~/.cache/localmelo/memory/`; `LOCALMELO_MEMORY_DIR` chooses another directory, used as given (a `~` the shell does not expand is not expanded either).
+- `--memory-dir DIR` turns persistence on for one direct run, in `DIR`, whatever the variables say; `~` is expanded:
 
   ```bash
   melo --memory-dir ~/melo-memory "What is 6*7?"
   ```
 
-- A gateway uses the variables it was started with. All its sessions save to
-  the same files.
-- History keeps the model's reasoning for 30 days; see
-  [Model calls](../reference/memory.md#model-calls). `LOCALMELO_THINKING_RETENTION_DAYS` sets
-  another number of days, such as `7` or `0.5`, for `history.db` and the
-  session store's `sessions.db` alike (see [Sessions](../reference/memory.md#sessions)). A value
-  that is not a number above 0 stops `melo` before it runs anything; see
-  [Usage errors](../reference/cli.md#usage-errors).
-- Recalling long-term memory in a later process needs persistence, memory on
-  and an earlier stored entry. In `legacy`, the persistent long-term store
-  also needs an embedding backend. Explicit reasoning modes can persist
-  text-only entries without one and find them with BM25. In explicit modes,
-  recall must be enabled and include the `long` kind; `drop` and `replay`
-  leave `auto` recall off by default.
-- Attempt digests are admitted to long-term memory only when they contain a
-  confirmed file write or an eligible passing check. Recall prefers digests
-  from the same task and workspace; older keyless digests count as cross-task.
-  By default, a new task receives no cross-task digests until a same-task
-  digest matches. When the final attempt has no evidence, the last
-  evidence-bearing attempt's digest is kept. General facts and other
-  non-digest memories are not gated. See
-  [digest recall](../reference/memory.md#digest-recall).
+- A gateway uses the variables it was started with, and all its sessions save to the same files.
+- History keeps the model's reasoning for 30 days (see [Model calls](../reference/memory.md#model-calls)); `LOCALMELO_THINKING_RETENTION_DAYS` sets another number of days, such as `7` or `0.5`, for `history.db` and the session store's `sessions.db` alike (see [Sessions](../reference/memory.md#sessions)); a value that is not a number above 0 stops `melo` before it runs anything (see [Usage errors](../reference/cli.md#usage-errors)).
+
+What a later run recalls:
+
+- Recalling long-term memory in a later process needs persistence, memory on and an earlier stored entry.
+- In `legacy`, the persistent long-term store also needs an embedding backend; explicit reasoning modes persist text-only entries without one and find them with BM25.
+- In explicit modes, recall must be enabled and include the `long` kind; `drop` and `replay` leave `auto` recall off by default.
+- Attempt digests enter long-term memory only with a confirmed file write or an eligible passing check; recall prefers digests from the same task and workspace, and a new task gets no cross-task digests until a same-task digest matches (see [digest recall](../reference/memory.md#digest-recall)).
 
 ## Experimental typed facts
 
-Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit
-reasoning mode. This opt-in retains supported short facts and can preserve an
-older assertion as labelled history when a verified, ordered change replaces it.
-Ambiguous or unlinked facts are not silently linked. The parser and source check
-are conservative and incomplete; recall is relevance-limited. See the
-[typed assertions reference](../reference/memory.md#experimental-typed-assertions).
+Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit reasoning mode.
+
+- It retains supported short facts, and can keep an older assertion as labelled history when a verified, ordered change replaces it.
+- Ambiguous or unlinked facts are not silently linked; the parser and source check are conservative and incomplete, and recall is relevance-limited.
+- See the [typed assertions reference](../reference/memory.md#experimental-typed-assertions).
 
 ## Notes melo keeps about you
 
-In the web console and the app, melo keeps short notes about you across chats
-(see [Memory across chats](../concepts/memory.md#memory-across-chats)). It keeps
-one two ways, and never asks you to confirm it:
+![The Memory tab: notes melo keeps about you, each with its source chat and Edit and Delete buttons.](../assets/img/memory-tab.webp)
 
-- **Ask it.** "Remember that Sam has the lab keys", "keep in mind that my group
-  meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…" or "帮我记一下…" is
-  kept at once.
-- **Tell it.** "I prefer short answers" or "call me Ray" is kept when melo
-  judges it worth keeping, as it does with a finished task's result in the
-  chat. It never keeps what only a web page, a file or a tool's output says,
-  and never a password or key.
+In the web console and the app, melo keeps short notes about you across chats (see [Memory across chats](../concepts/memory.md#memory-across-chats)). It keeps one two ways, and never asks you to confirm it:
 
-Each note shows under your message as `Remembered: … · Undo`. To see, reword
-or forget notes later, use the console's **Memory** tab, `/memory` in the
-terminal, or `melo memory list` and `melo memory forget`. To stop keeping
-notes, run `melo config set memory.across_chats false` and restart
-`melo serve` or the app.
+- **Ask it.** "Remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…" or "帮我记一下…" is kept at once.
+- **Tell it.** "I prefer short answers" or "call me Ray" is kept when melo judges it worth keeping, as it does with a finished task's result in the chat; never what only a web page, a file or a tool's output says, and never a password or key.
+- Each note shows under your message as `Remembered: … · Undo`.
+- To see, reword or forget notes later, use the console's **Memory** tab, `/memory` in the terminal, or `melo memory list` and `melo memory forget`.
+- To stop keeping notes, run `melo config set memory.across_chats false` and restart `melo serve` or the app.
 
 ## Turn long-term memory off
 
-`--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term
-memory off for a run: nothing is recalled from it or written to it, and
-reflections are not promoted. Working memory and history work as usual.
-`embedding_backend = "none"` disables the embedding backend, not memory
-itself; explicit reasoning modes can still store and recall text-only entries.
-To set an embedding model, see [Set up an embedding model](embedding.md).
+- `--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term memory off for a run: nothing is recalled from it or written to it, and reflections are not promoted.
+- Working memory and history work as usual.
+- `embedding_backend = "none"` disables the embedding backend, not memory itself; explicit reasoning modes can still store and recall text-only entries.
+- To set an embedding model, see [Set up an embedding model](embedding.md).
 
 ## Inspect memory
 
-The files are SQLite databases. Read them with the `sqlite3` command-line
-tool, and use only `SELECT` queries:
+The files are SQLite databases: read them with the `sqlite3` command-line tool, and use only `SELECT` queries:
 
 ```bash
 cd ~/.cache/localmelo/memory
@@ -117,16 +88,12 @@ sqlite3 procedures.db "SELECT routine_id, substr(query_text, 1, 60), place FROM 
 sqlite3 procedures.db "SELECT routine_id, status, steps, level, model FROM episodes ORDER BY created_at DESC LIMIT 10"
 ```
 
-`melo-procedures export` prints all of procedural memory as JSON lines; see
-[melo-procedures](../reference/procedures.md#export-and-forget).
-
-Replace `<task_id>` with an id from the task list, or with the `task_id` of
-the JSON line.
+- `melo-procedures export` prints all of procedural memory as JSON lines (see [melo-procedures](../reference/procedures.md#export-and-forget)).
+- Replace `<task_id>` with an id from the task list, or with the `task_id` of the JSON line.
 
 ## Reset memory
 
-The Python API can forget memory. There is no command yet; a
-`melo --forget task|all` command comes with the UI work.
+The Python API can forget memory. There is no command yet; a `melo --forget task|all` command comes with the UI work.
 
 ```python
 import asyncio
@@ -152,38 +119,17 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`agent.hippo` is the same facade over the stores an agent has opened, so a
-running script can call `forget` there too; the script above opens both
-files even when the agent has no embedding provider. `SqliteHistory` and
-`SqliteLongTerm` have `forget(task_id)` and `forget_all()` themselves, as
-do the in-memory `History` and `LongTerm`.
+`agent.hippo` is the same facade over the stores an agent has opened, so a running script can call `forget` there too. `SqliteHistory` and `SqliteLongTerm` have `forget(task_id)` and `forget_all()` themselves, as do the in-memory `History` and `LongTerm`.
 
-- **What `forget(task_id)` removes.** The task's rows from history's
-  `tasks`, `steps` and `llm_calls` tables. In long-term memory, the entries
-  whose metadata names the task: a reflection's metadata has `"task_id"`,
-  a step summary's has only `"step_id"`, so a per-task forget removes the
-  task's reflections from long-term memory and leaves its step summaries.
-  `forget_all()` removes every long-term entry and every row of the three
-  history tables.
-- **What it does not touch.** Working memory (the current conversation),
-  procedural memory (`melo-procedures forget` clears that), and the session
-  stores (the console's chats are in
-  `~/.cache/localmelo/gateway/sessions.db`), or the legacy playground's
-  memory in `~/.cache/localmelo/playground/` when enabled.
-- **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock.
-  The deletes overwrite what they free (`PRAGMA secure_delete=ON`), and a
-  checkpoint then truncates the WAL, so the forgotten text is not left in
-  the database file or its `-wal` file. If another connection keeps the WAL
-  from being truncated, the checkpoint is skipped with a WARNING in the log
-  and a later checkpoint clears it. A forget is safe while localmelo runs;
-  removing the files is not.
+- **What `forget(task_id)` removes.** The task's rows from history's `tasks`, `steps` and `llm_calls` tables, and the long-term entries whose metadata names the task: its reflections (`"task_id"`), not its step summaries (only `"step_id"`).
+- **What `forget_all()` removes.** Every long-term entry and every row of the three history tables.
+- **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget` clears that), the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`) and the legacy playground's memory in `~/.cache/localmelo/playground/`.
+- **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock; the deletes overwrite what they free (`PRAGMA secure_delete=ON`) and a checkpoint truncates the WAL, so the text is not left in the database file or its `-wal` file; if another connection keeps the WAL from truncating, the checkpoint is skipped with a WARNING and a later one clears it.
+- A forget is safe while localmelo runs; removing the files is not.
 
-To delete everything, including what the API does not touch, stop every
-localmelo process and remove the files:
+To delete everything, including what the API does not touch, stop every localmelo process and remove the files:
 
-1. Stop every localmelo process: direct runs, `melo serve`, and the
-   background service. Stop the service with `melo serve uninstall`; a
-   plain `kill` is undone by launchd.
+1. Stop every localmelo process: direct runs, `melo serve`, and the background service (stop it with `melo serve uninstall`; a plain `kill` is undone by launchd).
 2. Remove the files:
 
    ```bash
@@ -218,49 +164,25 @@ sqlite3 ~/.cache/localmelo/memory/history.db "DELETE FROM llm_calls"
 sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''"
 ```
 
-The second leaves the reasoning that `content` holds: the `<think>` copy at
-the start of an Ollama reply, which retention then no longer removes, and
-the inline block of a reply from a server without a reasoning parser. To
-remove all the stored reasoning, use the first.
-
-If you set `LOCALMELO_MEMORY_DIR` or used `--memory-dir`, remove the files in
-that directory instead.
+- The second leaves the reasoning that `content` holds: the `<think>` copy at the start of an Ollama reply, which retention then no longer removes, and the inline block of a reply from a server without a reasoning parser; to remove all the stored reasoning, use the first.
+- If you set `LOCALMELO_MEMORY_DIR` or used `--memory-dir`, remove the files in that directory instead.
 
 > [!WARNING]
-> Removing the files while localmelo runs can corrupt them. Stop localmelo
-> first.
+> Removing the files while localmelo runs can corrupt them. Stop localmelo first.
 
 ## Privacy
 
-- The files are not encrypted. `history.db` holds your tasks, the model's
-  text, every tool call with its arguments, and every tool result, each
-  after the redaction of [Model calls](../reference/memory.md#model-calls). It also
-  holds the model's reasoning for every call, redacted and kept 30 days by
-  default; see [Model calls](../reference/memory.md#model-calls).
-  `long_term.db` holds step summaries and reflections, redacted, with their
-  embedding vectors. `procedures.db` holds each task's query, normalized, the folder
-  it ran in, and its tool calls' labels: file names and program names,
-  never their content or output. The query and the labels pass a minimal
-  redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of
-  [Model calls](../reference/memory.md#model-calls), then a URL's password
-  (`postgres://app:<redacted>@host`, the user name kept) and the value of
-  `NAME=value` or `NAME: value` when NAME contains `key`, `token`,
-  `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`).
-  Anything else stays as written, such as host names, paths and other
-  values.
-- Images that tools return are stored only as references: the MIME type, the
-  SHA-256 digest and the size, never the image itself.
-- The interactive UI keeps every turn, with its tool calls and output, in
-  `~/.cache/localmelo/cli/sessions.db`, and your messages in
-  `~/.cache/localmelo/cli_history` (both `0600`, plain text, not
-  encrypted); `~/.cache/localmelo/logs/cli.log` records request URLs and
-  errors.
-- The files are as private as your home directory. To remove them, see
-  [Reset memory](#reset-memory). The Python API's `forget` overwrites the
-  cells it deletes and truncates the WAL, so the text does not stay in the
-  database file's free pages or in `history.db-wal`/`long_term.db-wal`.
-- The console stores its session rows and turns in
-  `~/.cache/localmelo/gateway/sessions.db`. The legacy playground is disabled
-  by default; when enabled with `melo serve --playground`, it saves
-  its chats' history and procedural memory, and their long-term memory when
-  an embedding model is selected, in `~/.cache/localmelo/playground/`.
+| File | What it holds |
+|---|---|
+| `~/.cache/localmelo/memory/history.db` | Your tasks, the model's text, every tool call with its arguments and every tool result, each after the redaction of [Model calls](../reference/memory.md#model-calls); also the model's reasoning for every call, redacted and kept 30 days by default. |
+| `~/.cache/localmelo/memory/long_term.db` | Step summaries and reflections, redacted, with their embedding vectors. |
+| `~/.cache/localmelo/memory/procedures.db` | Each task's normalized query, the folder it ran in and its tool calls' labels (file names and program names, never their content or output). |
+| `~/.cache/localmelo/cli/sessions.db` and `~/.cache/localmelo/cli_history` | Every terminal turn with its tool calls and output; your messages (both `0600`). |
+| `~/.cache/localmelo/gateway/sessions.db` | The console's session rows and turns. |
+| `~/.cache/localmelo/playground/` | Only with `melo serve --playground` (disabled by default): its chats' history and procedural memory, and long-term memory when an embedding model is selected. |
+
+- The files are not encrypted; they are as private as your home directory.
+- The query and the labels in `procedures.db` pass a minimal redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of [Model calls](../reference/memory.md#model-calls), then a URL's password (`postgres://app:<redacted>@host`, the user name kept) and the value of `NAME=value` or `NAME: value` when NAME contains `key`, `token`, `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`); anything else stays as written, such as host names, paths and other values.
+- Images that tools return are stored only as references: the MIME type, the SHA-256 digest and the size, never the image itself.
+- `~/.cache/localmelo/logs/cli.log` records request URLs and errors.
+- To remove the files, see [Reset memory](#reset-memory); the Python API's `forget` overwrites the cells it deletes and truncates the WAL, so the text does not stay in `history.db-wal` or `long_term.db-wal`.

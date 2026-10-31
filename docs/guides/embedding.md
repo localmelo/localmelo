@@ -1,34 +1,24 @@
 # Set up an embedding model
 
-An embedding model is optional. localmelo never downloads or starts one: you
-run a model server, and localmelo calls a model that server already serves.
+An embedding model is optional. localmelo never downloads, starts or serves one: you run a model server, and localmelo calls a model that server already serves.
 
 ## What it buys
 
-Without an embedding backend, working memory and history still work. With
-memory on, explicit reasoning modes can admit text-only long-term entries and
-find them with BM25; persistence keeps those entries between processes. For
-explicit-mode recall, the trigger must be enabled and include the `long` kind.
-In `legacy`, long-term writes and recall require an embedding backend. See
-[Memory](../concepts/memory.md#what-localmelo-remembers).
+- Without an embedding backend, working memory and history still work.
+- With memory on, explicit reasoning modes can keep text-only long-term entries and find them with BM25; the trigger must be enabled and include the `long` kind. In `legacy`, long-term writes and recall need an embedding backend (see [Memory](../concepts/memory.md#what-localmelo-remembers)).
+- An embedding backend adds vector-similarity search; text-only entries are still found with BM25.
+- In `compress` and `compress+replay`, the `auto` retriever also ranks task-local recall with the embedding provider; without one it uses the LLM at start and attempt and BM25 at step and tool (see [recall in the loop](../concepts/memory.md#recall-in-the-loop)).
 
-An embedding backend adds vector-similarity search for entries with vectors.
-Text-only entries are still found with BM25. In `compress` and
-`compress+replay`, the `auto` retriever also uses the embedding provider to
-rank task-local recall; without one, `auto` uses the LLM at start and attempt
-and BM25 at step and tool. The [recall reference](../concepts/memory.md#recall-in-the-loop)
-explains the triggers and other modes.
+An offline comparison of the three retrievers, at capped grade-2 recall@3 over 97 gold queries:
 
-An offline comparison measured the three retrievers at capped grade-2
-recall@3 over 97 gold queries: `bm25` 0.284, `llm` 0.576 and `embedding`
-0.636. The difference between `embedding` and `llm` is +0.06 with a 95%
-confidence interval of [−0.055, +0.179], so at that size the two are not
-distinguishable; only the gain over `bm25` is. Choosing an embedding model
-first is therefore a product choice — the best point estimate, no extra chat
-call, and a model that can be small and local — not a proven win.
+| Retriever | recall@3 |
+|---|---|
+| `bm25` | 0.284 |
+| `llm` | 0.576 |
+| `embedding` | 0.636 |
 
-localmelo itself never downloads, starts or serves a model. The commands
-below are for your own server.
+- `embedding` against `llm` is +0.06 with a 95% confidence interval of [−0.055, +0.179]: at that size the two cannot be told apart, only the gain over `bm25` can.
+- Choosing an embedding model first is a product choice (the best point estimate, no extra chat call, a model that can be small and local), not a proven win.
 
 ## Check the server
 
@@ -41,16 +31,13 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
 ```
 
-The second reply must hold a non-empty `data[0].embedding` array. A model
-listing alone is only a candidate: OpenAI-compatible servers, including oMLX
-and Ollama, do not say which ids are embedding models, so the embeddings
-request is the check. localmelo uses the same request as its probe and never
-saves an embedding model that did not answer it.
+- The second reply must hold a non-empty `data[0].embedding` array.
+- A model listing alone is only a candidate: OpenAI-compatible servers, including oMLX and Ollama, do not say which ids are embedding models.
+- localmelo uses the same request as its probe and never saves an embedding model that did not answer it.
 
 ## Ollama
 
-The recommended model is `qwen3-embedding:0.6b`; `nomic-embed-text` is a
-smaller English-only alternative.
+The recommended model is `qwen3-embedding:0.6b`; `nomic-embed-text` is a smaller English-only alternative.
 
 ```bash
 ollama pull qwen3-embedding:0.6b
@@ -60,9 +47,7 @@ curl -sS http://127.0.0.1:11434/v1/embeddings \
 melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
 ```
 
-In the wizard, choose `2` for `Ollama (local endpoint)`, accept
-`http://localhost:11434` and type `qwen3-embedding:0.6b` as the model. The
-wizard writes:
+In the wizard, choose `2` for `Ollama (local endpoint)`, accept `http://localhost:11434` and type `qwen3-embedding:0.6b` as the model. The wizard writes:
 
 ```toml
 chat_backend = "ollama"
@@ -75,17 +60,17 @@ embedding_url = "http://127.0.0.1:11434"
 embedding_model = "qwen3-embedding:0.6b"
 ```
 
-Ollama's `embedding_url` has no `/v1`, as its `chat_url` has none; the
-backend adds `/v1` for embeddings (`POST /v1/embeddings`). Chat goes to
-Ollama's own `/api/chat` API. For the smaller model, pull `nomic-embed-text`
-and use that id instead.
+- Ollama's `embedding_url` has no `/v1`, as its `chat_url` has none; the backend adds `/v1` for embeddings (`POST /v1/embeddings`).
+- Chat goes to Ollama's own `/api/chat` API.
+- For the smaller model, pull `nomic-embed-text` and use that id instead.
 
 ## oMLX
 
-oMLX serves embeddings and chats from the same endpoint. Put the model in its
-model directory and keep the chat server as it is. Keep `embed` in the folder
-name of a Qwen3-Embedding model, as in `Qwen3-Embedding-0.6B`: oMLX
-recognizes that model by its name. Then check the id oMLX lists:
+oMLX serves embeddings and chats from the same endpoint.
+
+- Put the model in oMLX's model directory and keep the chat server as it is.
+- Keep `embed` in the folder name of a Qwen3-Embedding model, as in `Qwen3-Embedding-0.6B`: oMLX recognizes that model by its name.
+- The model id is oMLX's own, usually the folder name; `GET /v1/models` gives ids but no type, so the embeddings request below is the check.
 
 ```bash
 curl -sS http://127.0.0.1:8000/v1/models
@@ -94,10 +79,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
 ```
 
-`GET /v1/models` gives ids but no type, so it cannot tell you which ids are
-embedding models: the embeddings request above is the check. The model id is
-oMLX's own, usually the folder name. Then add its embedding fields to the
-`[vllm]` table that holds oMLX's chat settings:
+Then add its embedding fields to the `[vllm]` table that holds oMLX's chat settings:
 
 ```toml
 chat_backend = "omlx"
@@ -114,8 +96,7 @@ See [oMLX](model-servers.md#omlx) for the rest of that setup.
 
 ## vLLM
 
-vLLM serves an embedding model as its own endpoint. This is not run on this
-Mac (no vLLM here); check the flag in `vllm serve --help` for your version.
+vLLM serves an embedding model as its own endpoint. This was not run for this guide; check the flag in `vllm serve --help` for your version.
 
 ```bash
 vllm serve Qwen/Qwen3-Embedding-0.6B --task embed --port 8001
@@ -136,7 +117,7 @@ embedding_model = "Qwen/Qwen3-Embedding-0.6B"
 
 ## SGLang and MLC
 
-The same pattern works for SGLang, not run here:
+The same pattern works for SGLang (not run for this guide):
 
 ```bash
 python -m sglang.launch_server --model-path Qwen/Qwen3-Embedding-0.6B --is-embedding --port 30001
@@ -146,8 +127,7 @@ curl -sS http://127.0.0.1:30001/v1/embeddings \
 melo setup    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
 ```
 
-MLC needs a compiled embedding artifact; a chat artifact does not serve
-embeddings. With `<artifact>` as the compiled Qwen3-Embedding directory:
+MLC needs a compiled embedding artifact; a chat artifact does not serve embeddings. With `<artifact>` as the compiled Qwen3-Embedding directory:
 
 ```bash
 mlc_llm serve <artifact> --port 8080
@@ -157,17 +137,11 @@ curl -sS http://127.0.0.1:8080/v1/embeddings \
 melo setup    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
 ```
 
-The SGLang and MLC commands above are not run on this Mac. The archived backend smoke used a
-compiled `Qwen3-Embedding-0.6B-q0f16-MLC` artifact on MLC and
-`qwen3-embedding` as the served id.
+An earlier backend check used a compiled `Qwen3-Embedding-0.6B-q0f16-MLC` artifact on MLC, with `qwen3-embedding` as the served id; the commands above were not run again.
 
 ## A second server
 
-Chat and embedding backends are independent. A cloud chat model can use a
-local embedding server, and a local chat server can use another local server
-for embeddings. In the wizard, the generic `1`–`4` options ask for the
-embedding endpoint's URL and model, so pick the family of the embedding
-server, not of the chat server:
+Chat and embedding backends are independent: a cloud chat model can use a local embedding server, and a local chat server can use another local server for embeddings. In the wizard, the generic `1`–`4` options ask for the embedding endpoint's URL and model, so pick the family of the embedding server, not of the chat server:
 
 ```toml
 chat_backend = "openai"
@@ -186,49 +160,25 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## What changes
 
-- The memory row of `/status all` (and of `/status` in developer mode) and of
-  developer mode's banner names the backend and model, for example
-  `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B`
-  (`oMLX` where the config file says `omlx`). Without one, `/status all` says
-  `no long-term memory (no embedding backend)` and the banner says
-  `no long-term memory · melo setup adds one` (or
-  `-X endpoint.embedding_url=URL adds one` in a `--url` session; the first run
-  has just said how, so its banner omits it). This row describes the embedding
-  configuration, not whether explicit modes can use text-only long-term
-  memory.
-- A new long-term store starts empty. Eligible entries may be admitted as runs
-  end and steps complete; existing text-only entries are not re-embedded.
-- Changing the model changes the vector space. A stored vector whose
-  dimension differs from the new model's is skipped, so old entries stop
-  ranking instead of breaking recall. To reclaim the space, stop localmelo
-  and remove `~/.cache/localmelo/memory/long_term.db*`; see
-  [Reset memory](memory.md#reset-memory).
-- The web workspace also has connection settings. See
-  [the web workspace](web-console.md#web-workspace).
+- The memory row of `/status all` (and of `/status` in developer mode) and of developer mode's banner names the backend and model, for example `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B` (`oMLX` where the config file says `omlx`).
+- Without one, `/status all` says `no long-term memory (no embedding backend)` and the banner says `no long-term memory · melo setup adds one` (or `-X endpoint.embedding_url=URL adds one` in a `--url` session).
+- A new long-term store starts empty; existing text-only entries are not re-embedded.
+- Changing the model changes the vector space: a stored vector of another dimension is skipped, so old entries stop ranking instead of breaking recall. To reclaim the space, stop localmelo and remove `~/.cache/localmelo/memory/long_term.db*` (see [Reset memory](memory.md#reset-memory)).
+- The web workspace also has connection settings (see [the web workspace](web-console.md#web-workspace)).
 
 ## Check it works
 
-- Start `melo` in a terminal and type `/status all`: its memory row names the
-  embedding model.
-- The `memory` row of `/status all` comes from the same text.
-- Run a task that uses a tool, end it, then run a related task. Persistence
-  can make admitted entries available to later runs; recall also depends on
-  the mode, enabled triggers and relevant matches. See
-  [Keep memory between runs](memory.md#keep-memory-between-runs).
-- To measure a model on your own corpus, use
-  `melo-retrieve --retriever embedding …`; see
-  [Offline retrieval](../reference/retrieval.md).
+- Start `melo` in a terminal and type `/status all`: its memory row names the embedding model.
+- Run a task that uses a tool, end it, then run a related task; recall depends on the mode, the enabled triggers and relevant matches (see [Keep memory between runs](memory.md#keep-memory-between-runs)).
+- To measure a model on your own corpus, use `melo-retrieve --retriever embedding …`; see [Offline retrieval](../reference/retrieval.md).
 
 ## Troubleshooting
 
-- **HTTP 404** on the embeddings request: the server does not serve that
-  model id. List the models and use an id it lists.
-- **HTTP 400** on the embeddings request: the id is a chat model, not an
-  embedding model. Pick an embedding model, not a chat one.
-- **Connection refused**: the server is not running at that URL, or the URL
-  is wrong.
-- **The model changed and recall is empty**: the old vectors have another
-  dimension and are skipped. Restore the old model, or remove
-  `long_term.db*` and let it fill again.
+| You see | Why and what to do |
+|---|---|
+| **HTTP 404** on the embeddings request | The server does not serve that model id: list the models and use an id it lists. |
+| **HTTP 400** on the embeddings request | The id is a chat model: pick an embedding model. |
+| **Connection refused** | The server is not running at that URL, or the URL is wrong. |
+| **The model changed and recall is empty** | The old vectors have another dimension and are skipped: restore the old model, or remove `long_term.db*` and let it fill again. |
 
 More errors: [Troubleshooting](../reference/troubleshooting.md#an-embedding-model-cannot-be-used).
