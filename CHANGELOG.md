@@ -39,7 +39,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Today, Normal, Whenever, If idle, Later) and only developer mode showed the
   codes. Typing is unchanged: "today", "no rush", "later", the old words,
   `P1` and `1` still set the same levels. The API still answers `level_word`
-  beside `level` ([#NN]).
+  beside `level` ([#343]).
 
 ### Security
 
@@ -2786,3 +2786,4 @@ earlier milestones.
 [#334]: https://github.com/localmelo/localmelo/pull/334
 [#335]: https://github.com/localmelo/localmelo/pull/335
 [#342]: https://github.com/localmelo/localmelo/pull/342
+[#343]: https://github.com/localmelo/localmelo/pull/343
