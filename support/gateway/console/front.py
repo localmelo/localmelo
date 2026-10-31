@@ -774,10 +774,13 @@ class Front:
                     first = first or echo
             return first
         if len(matches) == 1:
-            key = "alreadyDone" if matches[0].state == "done" else "stillWorking"
-            return await self._failed(
-                typed, f"front.echo.{key}", title=matches[0].title
-            )
+            ref = matches[0]
+            if ref.state in ("parked", "interrupted"):
+                return await self.control(
+                    ref, "resume", show=typed
+                )  # paused: it resumes
+            key = "alreadyDone" if ref.state == "done" else "stillWorking"
+            return await self._failed(typed, f"front.echo.{key}", title=ref.title)
         return None
 
     def _now(self) -> datetime:

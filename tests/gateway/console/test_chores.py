@@ -352,6 +352,27 @@ async def test_a_due_chore_starts_one_user_rule_task_and_plans_its_next_run(
         assert llm.requests == []
 
 
+async def test_a_chore_run_that_used_all_its_steps_says_so_in_the_readers_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(client, "Brief me", BRIEF)
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await console.workers.tasks.change(
+            task_id, state="failed", actor="scheduler", failure_reason="Out of steps"
+        )
+        [chore] = (await client.get("/api/chores")).json()["chores"]
+        assert (chore["last"]["state"], chore["last"]["line"]) == (
+            "failed",
+            "Ran out of steps",
+        )
+        chinese = await client.get(
+            "/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"}
+        )
+        assert chinese.json()["chores"][0]["last"]["line"] == "步数用完了"
+
+
 async def test_a_run_waits_for_its_jitter_and_never_starts_early(
     tmp_path: Path,
 ) -> None:

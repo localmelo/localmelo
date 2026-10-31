@@ -480,6 +480,19 @@ async def test_continue_the_task_says_when_it_is_done_or_still_working(
         assert llm.requests == []
 
 
+async def test_continue_the_task_resumes_a_paused_task_whatever_the_length(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        paused = await _delegated(console, client, "Hide the recovery card section")
+        await console.workers.update(paused, state="pause")
+        assert (await _task(console, paused)).state == "parked"
+        echo = (await _say(client, console, CONTINUE)).json()["echo"]
+        assert (echo["echo"], echo["action"]) == ("control", "resume")
+        assert (await _task(console, paused)).state == "queued"
+        assert llm.requests == []
+
+
 # ── A question that asks for a short answer is answered here ──
 
 

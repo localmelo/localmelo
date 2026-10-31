@@ -39,6 +39,7 @@ from localmelo.support.gateway.chore_store import (
     Chore,
     ChoreStore,
 )
+from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import FINISHED, level_word
 from localmelo.support.gateway.i18n import current, said_text, t, using
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
@@ -318,6 +319,8 @@ class ChoreRunner:
         if record.state == "done":
             turns = await self.console.store.list_turns(record.task_id, limit=1)
             line = result_line("", turns[-1].answer) if turns else ""
+        elif is_out_of_steps(record.state, record.wait_reason):
+            line = t("cards.outOfSteps")
         elif record.state in FINISHED:
             line = record.wait_reason or t("chores.stoppedEarly")
         at = record.finished_at or record.started_at or record.created_at
