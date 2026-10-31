@@ -56,6 +56,7 @@
   - 一条笔记会替换同一主题的旧笔记，不论主题分类：`I live in Lisbon` 之后的 `I live in Utrecht`、`call me R.` 之后的 `call me Ray`、`…是阿凯` 之后的 `我的健身教练是小宇`。
   - 配置了嵌入模型时，只差一个简短值的句子也会替换旧笔记：`… on Mondays` 之后的 `I go to the gym on Fridays`。
   - 另一个主题的相似句子互不替换：`my flight to Porto` 旁边的 `my flight to Faro`、`我的书法课` 旁边的 `我的游泳课`；另一类值也不替换：`my cat is called Biscuit` 旁边的 `my cat is grey`。
+  - 关于同一个人的另一件事也会保留：`Tom Briggs's office is in room 9C` 不会替换 `your manager is Tom Briggs`，`马可的生日是三月九号` 不会替换 `马可的工作室在中山路88号`。同一件事的新值则会替换：`…is in room 12A` 替换 `…is in room 9C`。
   - 被替换的笔记会保留，但不再被召回或列出；新笔记下的 Undo 会把它恢复。
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。单纯的 "Noted, thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。

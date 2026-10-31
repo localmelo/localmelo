@@ -372,8 +372,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   cut off; the same cut had saved a "remember that …" request as "Your piano
   teacher is Mr.". A note about someone else may not become one about you: for
   "Marco's studio is on Main Street." a note "Your studio is on Main Street."
-  is refused, with the wording to use ("Marco's …"), and so is the reverse
-  ([#NN]).
+  is refused, with the wording to use ("Marco's …"), and so is the reverse.
+  A different fact about the same person no longer replaces the first: "Tom
+  Briggs's office is in room 9C." had replaced "Your manager is Tom Briggs."
+  (a note about someone else had no subject, so the two shared words, his
+  name, counted as the same fact), and "Who is my manager?" lost its answer.
+  A note about someone else ("Name's X is …", "Dr. Yuki Tanaka's …",
+  "马可的工作室在…") now has its owner and attribute as its subject, and a note
+  whose subject the other's words do not hold never replaces it by shared
+  words alone; a new value of the same fact still does ("…room 9C" then
+  "…room 12A") ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

@@ -22,8 +22,10 @@ Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): th
 kept, not recalled, and comes back with an undo of the new one. The subject is
 what a note is about without its value (:func:`subject`); with an embedding
 model, a note close in meaning that differs from an old one in one short span
-is the same subject too (:func:`value_apart`). A new record lists the turns
-whose facts it replaced (``provenance["replaces"]``), so recall can rank them
+is the same subject too (:func:`value_apart`). A third party's fact names its
+owner as well, so "Tom Briggs's office is in room 9C." never replaces "Your
+manager is Tom Briggs.", whatever words they share. A new record lists the
+turns whose facts it replaced (``provenance["replaces"]``), so recall can rank them
 below it. Chat turns follow the same rule among themselves: of two turns whose
 typed words state one subject with different values, the older is replaced by
 the newer (:func:`newer_turns`), with or without a note.
@@ -127,13 +129,15 @@ _SUBJECTS: Final = tuple(
 _VERB_SUBJECTS: Final = frozenset(key for key, _ in _SUBJECTS)
 # "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject, and how Y
 # relates to it (:func:`_relation`) tells a name from a day or a description.
-_OWNED = re.compile(
-    r"^(?:my|your|our|(?:the )?user['’]s) ((?:[\w'’-]+ ){0,5}?[\w'’-]+) "
-    r"(?:is|are|was|were)\b ?(.*)$"
-)
+_ATTRIBUTE = r"((?:[\w'’-]+ ){0,5}?[\w'’-]+) (?:is|are|was|were)\b ?(.*)$"
+_OWNED = re.compile(rf"^(?:my|your|our|(?:the )?user['’]s) {_ATTRIBUTE}")
 _OWNED_ZH = re.compile(
     r"^(?:我|你|用户)的?([^\s，,。是叫姓]{1,12}?)(?:现在|也)?([是叫姓].*)$"
 )
+# What follows a third party's "Name's" / "NAME的": "office is in room 9C",
+# "工作室在中山路88号" (a place is "在", which the user's own form leaves alone).
+_THIRD = re.compile(rf"^{_ATTRIBUTE}")
+_THIRD_ZH = re.compile(r"^([^\s，,。是叫姓在]{1,12}?)(?:现在|也)?([是叫姓在].*)$")
 _RELATIONS: Final = frozenset({"called", "named", "on", "at", "in", "from"})
 _DESCRIBES: Final = frozenset(
     {"a", "an", "very", "so", "really", "quite", "too", "not", "always", "never"}
@@ -791,6 +795,8 @@ def _relation(value: str) -> str:
     "a doctor", "橙色的"), or ``""`` for a plain value ("Juno", "小宇")."""
     if value[:1] in ("叫", "姓"):
         return value[0]
+    if value[:1] == "在":
+        return "at"
     if value[:1] == "是":
         return "desc" if value.endswith("的") else ""
     words = [w for w in value.split() if w not in _STILL]
@@ -798,8 +804,34 @@ def _relation(value: str) -> str:
     return first if first in _RELATIONS else "desc" if first in _DESCRIBES else ""
 
 
+def _third_party(text: str) -> tuple[str, str] | None:
+    """:func:`_subject` of "Tom Briggs's office is in room 9C" or "马可的工作室在
+    中山路88号": the owner's name with the attribute, never the user's own
+    subject. ``None`` unless *text* starts with a third party's possessive;
+    ``("", "")`` when it says no "X is Y" of them."""
+    owner = _owner(text)
+    if owner is None or owner == "user":
+        return None
+    sentence = text.strip()
+    found = _OWNER_EN.match(sentence)
+    pattern, joint = _THIRD, "'s "
+    if found is None:
+        found = _OWNER_ZH.match(sentence)
+        pattern, joint = _THIRD_ZH, "的"
+    read = pattern.match(normalise(sentence[found.end() :])) if found else None
+    if read is None:
+        return "", ""
+    attribute = read.group(1)
+    if joint != "的":
+        words = _TOKEN.findall(_POSSESSIVE.sub("", attribute))
+        attribute = " ".join(stem(w) for w in words if w not in _ARTICLES)
+    return normalise(owner) + joint + attribute, _relation(read.group(2))
+
+
 def _subject(text: str) -> tuple[str, str]:
     """:func:`subject` and the relation of its value (:func:`_relation`)."""
+    if (third := _third_party(text)) is not None:
+        return third
     folded = normalise(text)
     for key, pattern in _SUBJECTS:
         if pattern.search(folded):
@@ -819,7 +851,10 @@ def subject(text: str) -> str:
     "I live in Lisbon", "You live in Utrecht" and "The user lives in Utrecht"
     are ``home``; "my weekly sync is on Friday" is ``weekly sync``; "我的健身
     教练是小宇" is ``健身教练``. Look-alikes keep apart: "flight to porto" is
-    not "flight to faro", "书法课" is not "游泳课".
+    not "flight to faro", "书法课" is not "游泳课". A third party's own fact
+    names its owner too: "Tom Briggs's office is in room 9C" is ``tom briggs's
+    office`` and "马可的工作室在中山路88号" is ``马可的工作室``, never the user's
+    ``manager`` or ``工作室``.
     """
     return _subject(text)[0]
 
@@ -855,6 +890,17 @@ def value_apart(text: str, other: str) -> bool:
     return longest <= VALUE_TOKENS and frame >= max(2.0, value)
 
 
+def _lacks(subject_: str, text: str) -> bool:
+    """Whether *text* lacks a word of the subject *subject_* names (an owner, an
+    attribute). A subject a verb names ("home", "name") has no words of its own."""
+    if not subject_ or subject_ in _VERB_SUBJECTS:
+        return False
+    tokens = _TOKEN.findall(normalise(text))
+    words = {*tokens, *(stem(w) for w in tokens)}
+    wanted = _TOKEN.findall(subject_.replace("'s ", " "))
+    return any(w not in words for w in wanted if w not in _CJK_FILLER)
+
+
 def _near(vector: Sequence[float] | None, model: str, entry: StoredEntry) -> bool:
     """Whether *vector* (of *model*) and *entry*'s are close in meaning."""
     mine, theirs = unit(vector), unit(entry.vector)
@@ -875,9 +921,12 @@ def decide(
 
     An old record of the same :func:`subject`, its value related the same way
     ("is on", "is called", a plain value), is replaced, whatever its topic; two
-    records that name different subjects never replace each other. Else, with
-    vectors, one close in meaning and :func:`value_apart`; else one of the
-    same *kind* that shares most content words ("said again in other words").
+    records that name different subjects never replace each other, and the
+    fallback to shared words refuses a record that names a subject the other's
+    text does not hold ("Your manager is Tom Briggs." beside "Tom Briggs's
+    office is in room 9C."). Else, with vectors, one close in meaning and
+    :func:`value_apart`; else one of the same *kind* that shares most content
+    words ("said again in other words").
     """
     folded = normalise(text)
     mine, how = _subject(text)
@@ -892,7 +941,9 @@ def decide(
             score = 1.0 if mine == theirs else 0.0
         elif _near(vector, embed_model, entry) and value_apart(text, entry.text):
             score = 1.0
-        elif not kind or entry.kind == kind:
+        elif (not kind or entry.kind == kind) and not (
+            _lacks(mine, entry.text) or _lacks(theirs, text)
+        ):
             score = overlap(tokens, content_tokens(entry.text))
         else:
             score = 0.0
