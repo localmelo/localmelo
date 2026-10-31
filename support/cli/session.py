@@ -502,18 +502,21 @@ class CliSession:
     def _main_chat_command(
         self, command: commands.Command | None, name: str, arguments: str, text: str
     ) -> tuple[commands.Command | None, str, str] | str | None:
-        """A command in the main chat: sent, refused, renamed or left as it is.
+        """A command in the main chat or a side chat: sent, refused, renamed or left as it is.
 
-        ``/task …`` goes to the main chat as a message (its rule starts a
-        task); ``/new`` and ``/clear`` start a side chat; a command of the
-        terminal's own chat says so. A string is the hint that keeps the draft.
+        ``/task …`` goes to the open chat as a message (its rule starts a
+        task that chat owns); ``/new`` and ``/clear`` start a side chat; a
+        command of the terminal's own chat says so. A string is the hint that
+        keeps the draft.
         """
         assert self.remote is not None
         if command is not None and command.name == "task":
-            if not self.remote.chat.main:
+            chat = self.remote.chat
+            if not chat.main and chat.id is None:
+                # A side chat its first message has not made yet has no tasks to own.
                 self.out.print(
                     self._text(
-                        "Tasks start from the main chat: /main, then /task …",
+                        "Send this chat's first message first, then /task …",
                         style="error",
                     )
                 )

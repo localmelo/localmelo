@@ -328,8 +328,16 @@
   "chat.showEarlier": "Show earlier turns",
   "chat.sideChats": "Side chats",
   "chat.stopFailed": "Could not stop the response: {problem}",
+  "chat.tasksWait": {
+    "one": "A task waits for you",
+    "other": "{n} tasks wait for you"
+  },
   "chat.tokens": "{n} tokens",
   "chat.waiting": "Waiting",
+  "chat.waitingInSide": {
+    "one": "1 waiting in a side chat",
+    "other": "{n} waiting in side chats"
+  },
   "chat.welcome": "A quiet space to think, build, and explore with your own model.",
   "chat.welcomeMain": "This is your main chat. Side chats and tasks report back here.",
   "chat.welcomeReady": "{model} is ready. Start a conversation below.",

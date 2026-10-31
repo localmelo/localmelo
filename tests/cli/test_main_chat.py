@@ -153,10 +153,10 @@ class FakeGateway:
             session_id = parts[2]
             if method == "POST":
                 text = body["text"]
-                if session_id == MAIN and text.startswith("/task"):
+                if text.startswith("/task"):
                     data = {"echo": "started", "task_id": "t1", "title": text[6:],
                             "line": f"Started a task: {text[6:]} · Normal"}  # fmt: skip
-                    echo_id = self.emit(MAIN, "attention.echo", data, None)
+                    echo_id = self.emit(session_id, "attention.echo", data, None)
                     return httpx.Response(200, json={"echo": {"id": echo_id, **data}})
                 if any(
                     t["status"] == "running" for t in self.turns.get(session_id, [])
@@ -457,13 +457,46 @@ async def test_side_starts_a_side_chat_made_by_its_first_message(
         "/api/sessions/side00000001",
         {"title": "Trip plans"},
     ) in gateway.requests
-    # /task belongs to the main chat; /main goes back to it.
+    # /task starts a task this side chat owns; /main goes back to the main chat.
     assert session.enter("/task x") is None
-    assert "Tasks start from the main chat" in setup.out.text()
+    await _until(lambda: "Started a task: x" in setup.out.text())
+    await setup.idle()
+    assert gateway.requests[-1][:2] == ("POST", "/api/sessions/side00000001/turns")
+    assert gateway.requests[-1][2]["text"] == "/task x"
+    assert "Send this chat's first message first" not in setup.out.text()
     assert session.enter("/main") is None
     await _until(lambda: "◆ Main chat" in setup.out.text())
     await setup.idle()
     assert session.status_bar().title == "Main chat"
+
+
+async def test_task_in_a_side_chat_not_yet_made_asks_for_its_first_message(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    assert setup.session.enter("/side Trip plans") is None
+    await _until(lambda: "first message starts it" in setup.out.text())
+    await setup.idle()
+    posts = len([r for r in gateway.requests if r[0] == "POST"])
+    assert setup.session.enter("/task x") is None
+    assert "Send this chat's first message first, then /task …" in setup.out.text()
+    assert len([r for r in gateway.requests if r[0] == "POST"]) == posts
+    assert "Tasks start from the main chat" not in setup.out.text()
+
+
+def test_an_echo_about_another_chats_task_says_whose_it_is() -> None:
+    plain = echo_line({"echo": "control", "line": "Paused: Slides"}, UNICODE, 80)
+    side = echo_line(
+        {"echo": "control", "line": "Paused: Slides", "from_chat": "Trip plan"},
+        UNICODE,
+        80,
+    )
+    main = echo_line(
+        {"echo": "control", "line": "Paused: Slides", "from_main": True}, UNICODE, 80
+    )
+    assert plain.plain == "→ Paused: Slides"
+    assert side.plain == "→ Paused: Slides  from Trip plan"
+    assert main.plain == "→ Paused: Slides  from Main chat"
 
 
 async def test_chats_lists_the_main_chat_first_and_opens_the_one_picked(

@@ -52,6 +52,7 @@ Route = Literal[
     "control",
     "follow",
     "continue",
+    "choose",
     "chore",
     "reminder",
     "work",
@@ -119,6 +120,7 @@ class Routed:
     task: TaskRef | None = None
     title: str = ""  # a short title for work code starts as a task
     matches: tuple[TaskRef, ...] = ()  # the tasks "continue the … task" names
+    pick: str = ""  # "choose": the one-tap suggestion to offer for each match
 
 
 def norm(text: str) -> str:
@@ -198,28 +200,30 @@ def _title_tokens(title: str) -> set[str]:
     return words | {run[i : i + 2] for run in runs for i in range(len(run) - 1)}
 
 
-def named_task(
+def named_tasks(
     typed: str,
     phrase: str,
     tasks: Sequence[TaskRef],
     *,
     strict: bool = True,
     finished: bool = False,
-) -> TaskRef | None:
-    """The one open task *typed* names, besides its control *phrase*, or None.
+) -> list[TaskRef]:
+    """Every open task *typed* names, besides its control *phrase*: one when it is clear, more when it is not.
 
-    Strict (code's own route): what is left is the task's id, its title, or
-    a part of exactly one title (3 characters at least, 2 for Chinese).
-    Loose (a tool's principal check): also a word of the title, of 4
-    letters at least, written in *typed*. With *finished*, a finished task
-    can be the one named too.
+    A task whose id is written is the one. Strict (code's own route): what
+    is left names the tasks whose title holds it (3 characters at least, 2
+    for Chinese; the exact ones first). Loose (a tool's principal check):
+    when that does not single one out, the tasks with a word of the title,
+    of 4 letters at least, written in *typed* do. With *finished*, a
+    finished task can be named too.
     """
     text = norm(typed)
     rest = _rest(text, phrase)
     open_tasks = [task for task in tasks if finished or task.state not in FINISHED]
     for task in open_tasks:
         if task.task_id and re.search(rf"\b{re.escape(task.task_id)}\b", text):
-            return task
+            return [task]
+    held: list[TaskRef] = []
     if rest and len(rest) >= (2 if _has_cjk(rest) else 3):
         # A title is read as the rest is: without filler ("Fix the e2e check"
         # is named by "fix e2e check").
@@ -234,11 +238,12 @@ def named_task(
             if any(rest in title for title in titles[task.task_id])
         ]
         if len(found) == 1:
-            return found[0]
+            return found
+        held = found
     if strict:
-        return None
+        return held
     words = set(re.findall(r"\w+", text))
-    found = [
+    loose = [
         task
         for task in open_tasks
         if any(
@@ -246,7 +251,45 @@ def named_task(
             for token in _title_tokens(task.title)
         )
     ]
+    return loose or held
+
+
+def named_task(
+    typed: str,
+    phrase: str,
+    tasks: Sequence[TaskRef],
+    *,
+    strict: bool = True,
+    finished: bool = False,
+) -> TaskRef | None:
+    """The one open task *typed* names, besides its control *phrase*, or None.
+
+    See :func:`named_tasks`: ``None`` when it names none, and when it names
+    more than one.
+    """
+    found = named_tasks(typed, phrase, tasks, strict=strict, finished=finished)
     return found[0] if len(found) == 1 else None
+
+
+def _job_tokens(text: str) -> set[str]:
+    """The stems of the words that say what a job is (3 letters or more, no filler; Chinese by pairs)."""
+    text = norm(text)
+    words = {w[:5] for w in re.findall(r"[^\W\d_]{3,}", text) if w not in _FILLER}
+    runs = re.findall(r"[\u3400-\u9fff]{2,}", text)
+    return words | {run[i : i + 2] for run in runs for i in range(len(run) - 1)}
+
+
+def names_job(typed: str, title: str, objective: str) -> bool:
+    """Whether the job a model proposes (*title*, *objective*) is what the person's words *typed* name.
+
+    At least half of the word stems of the job's name (its title; else the
+    objective's first words) are in *typed*. A task the model makes up from a
+    file or a page names work the person never wrote. The objective may say
+    more than the person did (paths, steps), so it is not compared.
+    """
+    want = _job_tokens(typed)
+    name = _job_tokens(title) or _job_tokens(" ".join(objective.split()[:8]))
+    return bool(want and name) and len(want & name) / len(name) >= 0.5
 
 
 def allows(typed: str, action: Action, task: TaskRef) -> bool:
@@ -697,44 +740,76 @@ SHORT_CHARS: Final = 120
 CONTROL_CHARS: Final = 80
 
 
+def _pool(
+    typed: str, phrase: str, tasks: Sequence[TaskRef], fallback: Sequence[TaskRef]
+) -> list[TaskRef]:
+    """*tasks*, and *fallback* too only when the words name none of *tasks*.
+
+    A chat's own tasks come first: words that name one of them, clearly or
+    not, finished or not, never reach another chat's task.
+    """
+    if fallback and not named_tasks(typed, phrase, tasks, finished=True):
+        return [*tasks, *fallback]
+    return list(tasks)
+
+
 def route(
-    typed: str, tasks: Sequence[TaskRef] = (), *, as_task: bool = False
+    typed: str,
+    tasks: Sequence[TaskRef] = (),
+    *,
+    as_task: bool = False,
+    fallback: Sequence[TaskRef] = (),
 ) -> Routed:
-    """What the main chat does with *typed*, by code's rules (design 2.4)."""
+    """What a chat does with *typed*, by code's rules (design 2.4).
+
+    *tasks* are the chat's own tasks; *fallback* are the other chats' ones,
+    which the words reach only when they name none of the chat's own. Words
+    that name more than one task are a ``choose`` route: the chat asks which.
+    """
     stripped = typed.strip()
     command = re.match(r"^/task(?:\s+|$)", stripped)
     if as_task or command:
         work = stripped[command.end() :] if command else stripped
         return Routed("delegate", text=work.strip())
     text = norm(stripped)
+    everyone = [*tasks, *fallback]
     if len(text) <= CONTROL_CHARS:
         found = control_action(stripped)
         if found is not None:
-            task = named_task(stripped, found[1], tasks)
-            if task is not None:
-                return Routed("control", action=found[0], task=task)
+            pool = _pool(stripped, found[1], tasks, fallback)
+            named = named_tasks(stripped, found[1], pool)
+            if len(named) == 1:
+                return Routed("control", action=found[0], task=named[0])
+            if named:
+                return Routed("choose", pick=found[0], matches=tuple(named))
     if _REPEATS.search(text):
         return Routed("chore")
     if parse_reminder(stripped, _ANY_TIME) is not None:
         return Routed("reminder")
     name = continue_name(stripped)
     if name and not is_question(stripped):
-        found_tasks = tuple(task for task in tasks if title_matches(name, task))
+        mine = tuple(task for task in tasks if title_matches(name, task))
+        found_tasks = mine or tuple(
+            task for task in fallback if title_matches(name, task)
+        )
         if found_tasks:
             one = found_tasks[0] if len(found_tasks) == 1 else None
             return Routed("continue", task=one, matches=found_tasks)
     cue = follow_cue(stripped)
     if len(text) <= CONTROL_CHARS and cue is not None and not is_question(stripped):
-        task = named_task(stripped, cue, tasks, finished=True)
-        if task is not None:
-            return Routed("follow", task=task)
+        pool = _pool(stripped, cue, tasks, fallback)
+        named = named_tasks(stripped, cue, pool, finished=True)
+        if len(named) == 1:
+            return Routed("follow", task=named[0])
+        if named:
+            return Routed("choose", pick="send", matches=tuple(named))
     if _GREETING.match(text) or brief_question(stripped):
         return Routed("answer")
     if work_request(stripped) and not (
         cue is not None
         and any(
             named_task(stripped, "", [task], strict=False, finished=True)
-            for task in tasks
+            for task in everyone
         )
     ):
         # A follow-up word with a task's name may continue that task: the
@@ -771,6 +846,8 @@ __all__ = [
     "level_number",
     "level_word",
     "named_task",
+    "named_tasks",
+    "names_job",
     "names_files",
     "reply_language",
     "route",

@@ -26,7 +26,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   that chat, and a chat acts on its own tasks first, then on the other chats'
   (the line says whose). The main chat's Activity still lists every task and
   names the side chat on the ones it did not start (`From Trip plan`), and its
-  next message reads one line when a side chat finished work. [#NN]
+  next message reads one line when a side chat finished work. A side chat whose
+  task waits for you gets the dot on its row, and the main chat's row counts
+  them (`1 waiting in a side chat`). The terminal's `/task` works in a side
+  chat too. A chat's words reach its own tasks first and another chat's only
+  when they fit none of its own; words that fit several ask which with a
+  one-tap suggestion for each. Deleting a side chat hands its unfinished tasks,
+  chores and waiting approvals to the main chat. Starting a chat with **Run as
+  a task** through the API repeats safely: the same `client_request_id` returns
+  the same chat and task. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the
@@ -70,6 +78,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A task the model proposes starts only when your words ask for it or name the
+  job; otherwise the chat shows `Start this as a task?` with your own message,
+  in the main chat and in side chats. The news a chat reads with its next
+  message is told once per task and per side chat, five at a time with the rest
+  on the following message, and survives a gateway restart. [#NN]
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
   title drops a level word that opens its request and is followed by a colon or

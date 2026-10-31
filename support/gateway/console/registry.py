@@ -19,7 +19,7 @@ import contextlib
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -765,6 +765,16 @@ class ConsoleSessions:
                 t("errors.notDirectory", path=display.home_label(path)),
             )
         return os.path.realpath(path)
+
+    @contextlib.asynccontextmanager
+    async def keyed(self, client_request_id: str | None) -> AsyncIterator[None]:
+        """Run one create of *client_request_id* at a time, so a repeat finds what the first made."""
+        lock = self._create_lock(client_request_id)
+        try:
+            async with lock or contextlib.nullcontext():
+                yield
+        finally:
+            self._release_create_lock(client_request_id, lock)
 
     def _create_lock(self, client_request_id: str | None) -> asyncio.Lock | None:
         """The lock of *client_request_id*'s create, or ``None`` for an unkeyed one."""

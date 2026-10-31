@@ -557,6 +557,25 @@ test("a window grown past the sheet's width closes the sheet, so the page is not
   assert.deepEqual([h.root.classList.contains('sheet-open'), h.chat.inert, h.backdrop.hidden], [false, false, true]);
 });
 
+test("an edit open on Scheduled does not follow the panel to another chat", async () => {
+  const sample = (id, title) => ({id, title, request: title, schedule: {kind: 'daily', at: '09:00'}, when: 'every day at 9:00', level: 2, level_word: 'Normal',
+    enabled: true, revision: 1, next_run: 86400 * 400 + 7200, last_run: null, last: null});
+  const h = harness({openChat: 'side-1'});
+  h.chores = (id) => (id === 'side-2' ? [sample('b', 'Second chore')] : [sample('a', 'First chore')]);
+  await h.panel.update(health());
+  h.tabs()[2].click();
+  await settle();
+  h.body().find((node) => node.className === 'sched-head').click();
+  h.body().find((node) => node.attributes?.['aria-label'] === 'Edit time: First chore').click();
+  assert.ok(h.body().find((node) => node.className === 'sched-form'), 'the first chat\'s chore is being edited');
+  h.open = 'side-2';
+  await h.panel.follow();
+  await settle();
+  assert.match(h.body().text(), /Second chore/);
+  assert.ok(!h.body().text().includes('First chore'));
+  assert.equal(h.body().find((node) => node.className === 'sched-form'), null, 'the editor did not stay');
+});
+
 test('Scheduled lists the check-in and the chores of the open chat, and reads them again as the panel refreshes', async () => {
   const sample = (id, title) => ({id, title, request: title, schedule: {kind: 'daily', at: '09:00'}, when: 'every day at 9:00', level: 2, level_word: 'Normal',
     enabled: true, revision: 1, next_run: 86400 * 400 + 7200, last_run: null, last: null});

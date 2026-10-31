@@ -709,7 +709,9 @@ A one-time chore whose `request` starts with `Reminder: ` is a reminder. Its run
 ## GET /api/sessions
 
 The newest sessions first. Only `chat` sessions are listed by default: the
-side chats of the main chat, which the list names in `main`.
+side chats of the main chat, which the list names in `main`. A side chat is
+listed once it has a turn, or an `attention.echo` or `attention.card` event
+(it took a task by code and has no turn).
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
@@ -729,7 +731,11 @@ side chats of the main chat, which the list names in `main`.
   object, plus `last_card`: its newest [card](#cards-in-the-main-chat), or
   `null`. A client marks the main chat unread while `last_card.id` is newer
   than the last card it showed. `main` is `null` only while the store cannot
-  be read.
+  be read. A side chat in the list has `waiting_tasks` (only when above 0): how
+  many of its tasks wait for the person's answer (held on an approval or an
+  input), and `main` has `waiting_in_side` (only when above 0): the same count
+  over all side chats. A client marks the side chat's row and shows the count
+  on the main chat's.
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
   matches a session's title or any turn's user text. `has_more` says that
   older sessions exist beyond the page.
@@ -998,7 +1004,12 @@ with the echo.
   `<title> → P3`, `Undone: <title> is back to P2`); `typed` is the message it
   answers; `of` is the echo it answers.
 - `as_task` on a task session is 400 `invalid_request`; the main chat and a
-  side chat take it, and a side chat's code rules (`/task`, control phrases,
+  side chat take it (so does `POST /api/sessions` with `turn.as_task`: the chat is
+  made first, empty, titled by the message, and the answer is 201 with the
+  `session` and the task's `echo`, no turn; a repeated `client_request_id` answers
+  200 with the chat and echo the first made and `repeated: true`, the key of another
+  message is 409 `submission_conflict`, and a task that cannot start is 400 and
+  leaves no chat), and a side chat's code rules (`/task`, control phrases,
   follow-ups, chores and reminders) apply from its second message, the task
   belonging to that side chat. A repeated `client_request_id` of a delegation
   answers the same echo.
@@ -1517,6 +1528,9 @@ the person's message that asks melo to go ahead.
   its entries in memory's chat index. The notes melo made in the chat stay (a note
   outlives its chat, and then lists as `from a deleted chat`); `?notes=forget` forgets
   them too. Any other value of `notes` is 400.
+- A side chat's unfinished tasks and chores are the main chat's from then on (their
+  `front_id` becomes the main chat's), and the cards that still wait for the
+  person are written again in the main chat; finished tasks keep their record.
 - In the in-progress security-1b changes, 409 `session_busy` refuses a
   delete while a turn is running or a start is queued; it does not cancel
   the turn or delete its row. Cancel or wait for it to finish, then retry.

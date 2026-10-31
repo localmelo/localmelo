@@ -172,10 +172,13 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Same words, same priorities.** In a side chat, `/task …`, **Run as a task**, `pause the slides` and the model's own judgment work as in the main chat, at the same P0 to P5 levels and under the same scheduler. The first message of a new side chat goes to the model, which can start a task itself; the code words work from the second message on.
 - **A task comes back to the chat that started it.** Its line (`Started: Find hotels · P2`, with **Change** and **Undo**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
 - **The main chat still sees everything.** Activity and Workers list every task; one a side chat started reads `From Trip plan`.
-- **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. A task of another chat can still be named: its line reads `From Main chat` or `From Trip plan`.
+- **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. Words that fit several tasks of this chat show a one-tap `Suggested: pause …` for each, and never reach another chat's task. A task of another chat can still be named, by its id, its chat or words that fit none of this chat's own: its line reads `From Main chat` or `From Trip plan`. The same holds when the model picks the task.
+- **Only your words start a task.** When the model proposes a task your message did not ask for (a file or a page suggested it), the chat shows `Start this as a task?` with your own message and starts nothing until you tap. The main chat does the same.
+- **Deleting a side chat** hands its unfinished tasks, chores and waiting approvals to the main chat, which then shows their cards and reads their results; finished tasks keep their record.
+- **A task that waits for you shows on the list.** The side chat's row gets the dot and reads `A task waits for you`; the main chat's row reads `1 waiting in a side chat`.
 - **The main chat hears when a side chat finishes work.** With your next message it reads one line, the side chat's name and a short summary, when that chat answered or one of its tasks finished. It is information, not a message.
 - **Chores and reminders belong to the chat that made them.** One saved in a side chat runs as that chat's task and reports there, not in the main chat's check-in.
-- The terminal starts tasks from the main chat only (`/main`, then `/task …`).
+- The terminal's `/task …` starts a task in a side chat too, once the chat has its first message.
 
 ## When a task is stuck, it asks its chat
 
