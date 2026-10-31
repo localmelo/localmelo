@@ -205,6 +205,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A model that is told not to think (`enable_thinking = false`) is no longer
+  failed for an answer it did give, and one failed turn no longer fails the
+  rest of the chat. After a reply that carried reasoning, every later plain
+  answer was taken for unfinished thinking, and a reply whose words the server
+  put in its reasoning field had no answer at all; the run ended `melo did not
+  finish an answer`. With thinking off, those words are the answer. Counted
+  reasoning tokens or a `<think>` that never closes still count as unfinished,
+  and models that think are unchanged. A turn that ends without an answer still
+  shows `[no answer: ...]` in the chat and the saved turn, but the model now
+  reads a note, `[The previous request ended without an answer.]`, in its place,
+  so it no longer copies the label as its own reply. [#NN]
 - A broken model reply is no longer shown as the answer. A reply that starts
   with a spelled-out `<thinking>...</thinking>` block now has that block as its
   thinking, as a `<think>` block does, and the person no longer sees it while the
