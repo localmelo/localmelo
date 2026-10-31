@@ -220,7 +220,8 @@ def ending_words(ending: Any) -> tuple[str, str]:
     """
     if not isinstance(ending, dict) or ending.get("state") not in ENDINGS:
         return "", ""
-    reasons = ending.get("reasons") if isinstance(ending.get("reasons"), list) else []
+    reasons = ending.get("reasons")
+    reasons = reasons if isinstance(reasons, list) else []
     why = [str(ending.get("question") or "")]
     why += [t_in("en", f"ending.reason.{code}") for code in reasons if code in _WHY]
     return t_in("en", f"ending.state.{ending['state']}"), "; ".join(w for w in why if w)

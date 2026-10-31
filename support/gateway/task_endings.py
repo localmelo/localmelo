@@ -126,8 +126,9 @@ def python_test(code: str) -> tuple[str, bool]:
         ):
             return command, True
     for item in ast.walk(tree):
-        test = getattr(item, "test", None)
-        if not isinstance(item, ast.Assert | ast.If) or "returncode" not in _src(test):
+        if not isinstance(item, ast.Assert | ast.If):
+            continue
+        if "returncode" not in _src(item.test):
             continue
         if isinstance(item, ast.Assert) or any(
             isinstance(n, ast.Raise)
