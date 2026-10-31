@@ -281,6 +281,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The app's pill says **stopped**, not failed, for a task that used all its
+  steps, as the console already does: `status.recent` reads the task's reason. [#365]
+- A Chinese ask that says to change code, run the tests and commit
+  (`今天修一下：……改掉，跑测试，过了就提交`) starts a task at once, as the English
+  one already did, instead of the main chat searching first. [#365]
 - A model that is told not to think (`enable_thinking = false`) is no longer
   failed for an answer it did give, and one failed turn no longer fails the
   rest of the chat. After a reply that carried reasoning, every later plain
@@ -3006,3 +3011,4 @@ earlier milestones.
 [#360]: https://github.com/localmelo/localmelo/pull/360
 [#361]: https://github.com/localmelo/localmelo/pull/361
 [#362]: https://github.com/localmelo/localmelo/pull/362
+[#365]: https://github.com/localmelo/localmelo/pull/365

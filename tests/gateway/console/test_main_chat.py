@@ -484,9 +484,9 @@ async def test_a_task_that_ran_out_of_steps_comes_back_as_a_stopped_card(
         # Stopped, not failed: its line is what is left, or the plain words.
         assert (card["state"], card["source_id"]) == ("stopped", task_id)
         assert card["line"] == line
-        # The health reply still tells the app a task did not finish.
+        # The health reply says stopped too, so the app's pill reads as the console.
         recent = (await client.get("/api/health")).json()["status"]["recent"]
-        assert recent["outcome"] == "failed"
+        assert recent["outcome"] == "stopped"
 
 
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(
