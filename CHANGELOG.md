@@ -29,7 +29,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   under the earlier gate learns its steps again once. The interactive UI, the
   console, the app and the gateway always use the new defaults, except the
   console's main chat, which still hands a turn that runs out of steps to a
-  task ([#NN]).
+  task ([#353]).
 
 - When a task asks for a closing line, such as `FINAL ANSWER: ...`, and the
   answer lacks it, one more request, without tools, asks for that line from
@@ -37,7 +37,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   task's own text only, a task that names none is left as it is, and a request
   that fails leaves the answer as it was. The JSON record gains `"format_fixed":
   true` for such a run (absent otherwise). `-X agent.answer_on_stop=off` turns
-  it off together with the answer request ([#NN]).
+  it off together with the answer request ([#353]).
 
 - Auto mode, part 1: the terminal's `/approvals auto` now means auto mode.
   Nothing asks: routine steps run, and a step that installs, downloads,
@@ -2894,3 +2894,4 @@ earlier milestones.
 [#348]: https://github.com/localmelo/localmelo/pull/348
 [#350]: https://github.com/localmelo/localmelo/pull/350
 [#352]: https://github.com/localmelo/localmelo/pull/352
+[#353]: https://github.com/localmelo/localmelo/pull/353
