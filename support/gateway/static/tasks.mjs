@@ -2,6 +2,8 @@ import {taskLive} from './task-live.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
+// "Live" is for a task whose process is writing now; the work of any other task is its steps.
+const RUNNING = new Set(['running', 'held']);
 const MISSING = 'Resume unavailable: recovery information is missing.';
 const WARNING = 'A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once.';
 
@@ -20,8 +22,12 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * (task-live.mjs): `live.nodes(view, redraw)` draws the folded turns of the
  * task's session, and `open`, `schedule` and `cancel` are passed on to follow
  * its events. The section is redrawn on its own, never the whole card, so a
- * reason being typed in an approval card keeps its focus. `developer()` says
- * whether developer mode is on: the scheduler's priority (P2) is shown only then.
+ * reason being typed in an approval card keeps its focus. A task that ended
+ * opens with its answer: `live.result(view, redraw)` gives `{answer, steps}`,
+ * the answer (and, if it did not complete, why) above the facts and the work
+ * folded under "Steps"; "Live" heads the work only while the task runs.
+ * `developer()` says whether developer mode is on: the scheduler's priority
+ * (P2) and its words are shown only then.
  * `chooseFolder()` (optional) asks the macOS app's folder panel for a path and
  * resolves it, or null; without it, Choose a folder opens a path field. A task
  * that could not use its folder offers it, and starts again in the folder chosen.
@@ -37,12 +43,14 @@ function defaultEvery(fn, ms) {
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
-    busy: '', evidence: '', dialog: null, pending: null, again: null, folderField: false, folderText: ''};
+    busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: ''};
   let active = false;
   let stopPolling = null;
   const liveBox = doc.createElement('section');
   liveBox.className = 'task-live';
-  const {nodes: liveNodes, ...follow} = liveOptions ?? {};
+  const answerBox = doc.createElement('section');
+  answerBox.className = 'task-answer';
+  const {nodes: liveNodes, result: liveResult, ...follow} = liveOptions ?? {};
   const live = liveOptions ? taskLive({api, changed: drawLive, statusRow, doc, ...follow}) : null;
 
   function node(tag, text, className) {
@@ -76,12 +84,13 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (state.evidence === 'missing_card') return 'Recovery information is missing.';
     if (state.evidence) return `Resume was refused: ${state.evidence.replaceAll('_', ' ')}.`;
     if (RESUMABLE.has(task.state)) return 'Checked when you press Resume.';
-    return 'Not needed in this state.';
+    return '';
   }
 
   function list() {
     const rows = [...state.tasks].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-    const nodes = [node('p', 'Scheduler tasks. Open one to see its recovery card and actions.', 'muted')];
+    const intro = developer() ? 'Scheduler tasks. Open one to see its recovery card and actions.' : 'Open a task to see what it did.';
+    const nodes = [node('p', intro, 'muted')];
     nodes.push(button('Refresh', () => show('')));
     if (!rows.length && !state.error) nodes.push(node('p', 'No tasks yet.'));
     for (const task of rows) {
@@ -107,14 +116,18 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     // A refused folder says why in its own box below, in words.
     if (task.wait_reason && !task.folder_problem) row('Waiting', task.wait_reason);
     if (task.workspace_label) row('Workspace', task.workspace_label);
-    row('Evidence', evidenceText(task));
-    const nodes = [back, meta];
+    // Evidence is shown when there is some to show, never as "not needed".
+    const evidence = evidenceText(task);
+    if (evidence) row('Evidence', evidence);
+    const nodes = [back];
+    if (live) { drawLive(); nodes.push(answerBox); }
+    nodes.push(meta);
     if (task.folder_problem) nodes.push(folderBox(task));
     if (task.not_committed) nodes.push(node('p', task.not_committed, 'task-note'));
     if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
-    if (live) { drawLive(); nodes.push(liveBox); }
+    if (live) nodes.push(liveBox);
     nodes.push(node('h2', 'Recovery card'));
     nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', 'No recovery card is saved.', 'muted'));
     const actions = node('div', undefined, 'task-actions');
@@ -136,14 +149,35 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     return nodes;
   }
 
-  // The folded work of the task's session, in its own box beside the approval card.
+  // The task's session as the page shows it. A task that ended opens with its answer (above the
+  // facts) and folds its work under Steps; any other task heads its work Live while it runs, else Steps.
   function drawLive() {
     const view = live.state.view;
-    const turns = view && state.mode === 'card' ? liveNodes(view, drawLive) : [];
-    const shown = turns.length ? [node('h2', 'Live'), ...turns] : [];
+    const task = state.task;
+    const open = Boolean(view) && state.mode === 'card';
+    let top = [];
+    let shown = [];
+    if (open && FINISHED.has(task?.state) && liveResult) {
+      const {answer, steps} = liveResult(view, drawLive);
+      top = answer;
+      if (steps.length) shown.push(stepsFold(steps));
+    } else if (open) {
+      const turns = liveNodes(view, drawLive);
+      if (turns.length) shown = [node('h2', RUNNING.has(task?.state) ? 'Live' : 'Steps'), ...turns];
+    }
     if (live.state.error && state.mode === 'card') shown.push(node('p', live.state.error, 'muted'));
+    answerBox.hidden = !top.length;
+    answerBox.replaceChildren(...top);
     liveBox.hidden = !shown.length;
     liveBox.replaceChildren(...shown);
+  }
+
+  function stepsFold(steps) {
+    const fold = node('details', undefined, 'task-steps');
+    fold.open = state.stepsOpen;
+    fold.addEventListener('toggle', () => { state.stepsOpen = fold.open; });
+    fold.append(node('summary', 'Steps'), ...steps);
+    return fold;
   }
 
   function dialog() {
@@ -210,7 +244,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const epoch = ++state.epoch;
     live?.leave();
     Object.assign(state, {mode: id ? 'card' : 'list', error: '', notice: '', busy: '', evidence: '',
-      dialog: null, pending: null, again: null, task: null});
+      dialog: null, pending: null, again: null, task: null, stepsOpen: false});
     root.hidden = false;
     render();
     if (id) statusRow?.follow(id);

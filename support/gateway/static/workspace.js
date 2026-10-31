@@ -512,7 +512,8 @@ function syncUI() {
   $("new-btn").disabled = false;
   if (taskMode) {
     $("header-title").textContent = "Tasks";
-    $("header-model").textContent = "Scheduler tasks";
+    // "Scheduler" is the developer's word for what people call tasks.
+    $("header-model").textContent = developerMode ? "Scheduler tasks" : "";
     document.title = "localmelo · Tasks";
   } else if (workerMode) {
     const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
@@ -1131,7 +1132,7 @@ function mainNodes(view, turns) {
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
   // A task that came back finished takes no more changes: its lines lose their buttons.
-  const ended = new Set((view?.cards ?? []).filter((card) => card.state !== "waiting").map((card) => card.sourceId));
+  const ended = new Set((view?.cards ?? []).filter((card) => card.state === "done" || card.state === "failed").map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
     if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard })];
@@ -1157,6 +1158,8 @@ async function actOnEcho(echo, does, level) {
   try {
     const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}) } });
     if (S.view && mainActive()) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
+    panel.refresh();
   } catch (error) {
     notify(error.message || "Could not change the task. Try again.");
   }
@@ -1173,7 +1176,8 @@ let heldTimer = null;
 
 function holdOrShow(view, frame) {
   const typing = document.activeElement === input && input.value.trim() && Date.now() - lastKey < TYPING_HOLD_MS;
-  if (frame.data?.state === "waiting" || !typing) {
+  // A waiting card shows at once, and so does the answer to one: it is the person's own act.
+  if (frame.data?.state === "waiting" || frame.data?.state === "answered" || !typing) {
     view.cards = mergeCards(view.cards ?? [], [frame]);
     return;
   }
@@ -2349,6 +2353,7 @@ const tasks = setupTasks({
   developer: () => developerMode,
   live: {
     nodes: taskLiveNodes,
+    result: taskResultNodes,
     open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
     schedule: (fn, ms) => setTimeout(fn, ms),
     cancel: (id) => clearTimeout(id),
@@ -2454,17 +2459,18 @@ function leaveWorkers() {
 
 // A turn's work, answer and end state as the read-only views show them. `empty`
 // is the line for a turn without events, or "" to draw its work group.
-function turnWork(turn, sessionId, render, empty) {
+function turnSteps(turn, sessionId, render, empty) {
+  if (empty) return [el("p", "muted", empty)];
+  const summary = workSummary(turn, {});
+  const group = workBox(summary, true);
+  const inline = Boolean(turn.finishedAt) && summary === "Thought";
+  for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
+  return [group];
+}
+
+// How a turn ended: its status line and, when it did not complete, why.
+function turnStatus(turn) {
   const nodes = [];
-  if (empty) nodes.push(el("p", "muted", empty));
-  else {
-    const summary = workSummary(turn, {});
-    const group = workBox(summary, true);
-    const inline = Boolean(turn.finishedAt) && summary === "Thought";
-    for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
-    nodes.push(group);
-  }
-  if (turn.answer) nodes.push(answerNode(turn.answer));
   if (turn.status) {
     const info = statusText(turn.status, turn.cause);
     const line = el("p", "turn-status");
@@ -2481,9 +2487,27 @@ function turnWork(turn, sessionId, render, empty) {
   return nodes;
 }
 
+function turnWork(turn, sessionId, render, empty) {
+  return [...turnSteps(turn, sessionId, render, empty), ...(turn.answer ? [answerNode(turn.answer)] : []), ...turnStatus(turn)];
+}
+
 // The Live section of a task card: its session's turns that hold work or an answer.
 function taskLiveNodes(view, render) {
   return view.turns.flatMap((turn) => (turn.items.length || turn.answer ? turnWork(turn, view.id, render, "") : []));
+}
+
+// A task that ended: its newest answer as in a chat (and, when it did not complete, why it ended),
+// and its work as the steps to unfold. An earlier turn's answer stays with its steps.
+function taskResultNodes(view, render) {
+  const turns = view.turns.filter((turn) => turn.items.length || turn.answer);
+  const last = turns.findLast((turn) => turn.answer) ?? turns.at(-1);
+  const newest = view.turns.at(-1);
+  const answer = [...(last?.answer ? [answerNode(last.answer)] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
+  const steps = turns.flatMap((turn) => {
+    if (turn !== last) return turnWork(turn, view.id, render, "");
+    return turn.items.length ? turnSteps(turn, view.id, render, "") : [];
+  });
+  return {answer, steps};
 }
 
 function renderWorkers() {
@@ -2584,6 +2608,21 @@ function setRoute(id) {
   } catch {
     /* A page opened without a location still works. */
   }
+}
+
+/** `#/scheduled`: the chat that is open (the main chat when none is) with the panel on its Scheduled tab. */
+function scheduledRoute() {
+  return (globalThis.location?.hash || "") === "#/scheduled";
+}
+
+async function showScheduled() {
+  leaveWorkers();
+  const id = S.activeId || S.main?.id || "";
+  if (id && S.activeId !== id) await openSession(id);
+  else if (id) setRoute(id); // the address names the chat again
+  panel.select("scheduled");
+  // Below 900 px the panel is a sheet; wider, it already sits beside the chat.
+  if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
 }
 
 function hashId() {
@@ -2772,6 +2811,7 @@ async function init() {
   const fromWorker = workerRoute();
   const fromTask = taskRoute();
   const fromHash = hashId();
+  const wantsScheduled = scheduledRoute();
   const wantsNew = (globalThis.location?.hash || "") === "#/new";
   let wanted = "";
   if (fromHash) {
@@ -2793,6 +2833,7 @@ async function init() {
     renderMessages(true);
     syncUI();
   }
+  if (wantsScheduled && S.authenticated) await showScheduled();
   if (!S.authenticated) return;
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") await checkSubmission(slot, entry.clientRequestId);
@@ -2920,6 +2961,7 @@ globalThis.addEventListener?.("hashchange", async () => {
   if (task !== null) { showTasks(task); return; }
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
+  if (scheduledRoute()) { await showScheduled(); return; }
   const wasWorker = workerMode;
   leaveWorkers();
   const id = hashId();

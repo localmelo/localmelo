@@ -95,6 +95,13 @@ _PICTURE_SUFFIXES: Final = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".
 _PATH_END: Final = ".,;:!?)"
 MADE_PICTURE: Final = "Made a picture"
 WROTE_CODE: Final = "Wrote some code"
+# A card carries this many lines of an answer, each cut at this many characters.
+CARD_LINES: Final = 2
+LINE_CHARS: Final = 120
+# An answer that only says it is done: "Done.", "All done", "已完成。".
+_ACK: Final = r"(?:done|completed?|finished|all done|ok(?:ay)?|已完成|完成了?|好了)"
+_ONLY_ACK: Final = re.compile(rf"^{_ACK}[\s.!。！]*$", re.IGNORECASE)
+_LEAD_ACK: Final = re.compile(rf"^{_ACK}(?:[.!](?=\s)|[。！])\s*", re.IGNORECASE)
 
 
 def _prose(text: str) -> str:
@@ -150,6 +157,47 @@ def result_line(note: str, answer: str) -> str:
         return first
     cut = first[: RESULT_CHARS - 1].rsplit(" ", 1)[0] or first[: RESULT_CHARS - 1]
     return cut.rstrip(",;: ") + "…"
+
+
+def _cut(text: str, chars: int) -> str:
+    """*text* in at most *chars* characters, cut at a word with ``…``."""
+    if len(text) <= chars:
+        return text
+    cut = text[: chars - 1].rsplit(" ", 1)[0] or text[: chars - 1]
+    return cut.rstrip(",;: ") + "…"
+
+
+def answer_lines(answer: str, count: int = CARD_LINES) -> str:
+    """The first *count* lines of an answer, in plain words, one per line.
+
+    What a card in the main chat shows of a finished task: what changed, the
+    tests, the commit. An opening ``Done.`` is left out when more follows, code
+    and markup are not shown, a path reads as its file's name, and each line
+    is cut at :data:`LINE_CHARS`. An answer of one paragraph gives its first
+    sentences. A run's own marker reads as what happened (``Stopped before
+    answering``), an answer that is only code ``Wrote some code``, and an
+    answer that only says it is done, ``Done.`` itself.
+    """
+    raw = split_thinking(answer or "")[1]
+    marker = _MARKER.match(raw)
+    if marker:
+        return _MARKER_WORDS[marker.group(1)]
+    lines = [line for line in _FENCE.sub("\n", raw).splitlines() if line.strip()]
+    code = [line for line in lines if _CODE_LINE.search(line)]
+    if len(lines) >= 3 and 2 * len(code) >= len(lines):
+        lines = [line for line in lines if line not in code]
+    rows = [
+        " ".join(_MARKUP.sub("", line).replace("`", "").replace("**", "").split())
+        for line in lines
+    ]
+    rows = [row for row in rows if row]
+    kept = [row for row in rows if not _ONLY_ACK.match(row)]
+    if not kept:
+        return rows[0] if rows else (WROTE_CODE if raw.strip() else "")
+    kept[0] = _LEAD_ACK.sub("", kept[0]) or kept[0]
+    if len(kept) == 1:
+        kept = [part for part in _SENTENCE.split(kept[0]) if part.strip()]
+    return "\n".join(_cut(_no_paths(row), LINE_CHARS) for row in kept[:count])
 
 
 def local_midnight(now: float) -> float:
@@ -250,7 +298,7 @@ async def _task_rows(
     return rows
 
 
-def _answer(data: Mapping[str, Any]) -> str:
+def answer_word(data: Mapping[str, Any]) -> str:
     """How an ``approval.resolved`` ended, in the words a row lists."""
     outcome, origin = data.get("outcome"), data.get("origin")
     if outcome == "withdrawn":
@@ -294,7 +342,7 @@ def approvals_of(events: Iterable[StoredEvent]) -> dict[str, list[dict[str, Any]
                 "at": float(ts) if isinstance(ts, int | float) else 0.0,
             }
         elif key in asked:
-            asked[key]["answer"] = _answer(data)
+            asked[key]["answer"] = answer_word(data)
     found: dict[str, list[dict[str, Any]]] = {}
     for (session_id, _), item in asked.items():
         found.setdefault(session_id, []).append(item)
@@ -419,6 +467,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
 __all__ = [
     "MAX_ROWS",
     "add_routes",
+    "answer_lines",
+    "answer_word",
     "approvals_of",
     "day_activity",
     "local_midnight",

@@ -146,12 +146,15 @@ and closing the open side chat goes back to the main chat too. Chats made before
 chat existed are its side chats, as they were.
 
 When a side chat's run ends, or a task finishes, fails or waits for your approval, the
-main chat shows a card under the day it happened: `Done: Plan the Tokyo trip` with the
-answer's first sentence, `Did not finish: Fix CI` with how it ended, or `Fix CI needs your
-approval`. **Open side chat**, **Open task** or **Review** goes to it. A card is not a
-message: the model never reads it. Between two of your messages a busy side chat keeps
-only its newest card. A stop of your own, a shutdown or an approval answered before the
-main chat was looked at makes no card.
+main chat shows a card under the day it happened:
+
+- `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
+- `Did not finish: Fix CI` with why it ended.
+- `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
+- A title is the one the main chat gave the task, or the first part of your request, cut at a word.
+- **Open side chat**, **Open task** or **Review** goes to the source. A card is not a message: the model never reads it.
+
+Between two of your messages a busy side chat keeps only its newest card. A stop of your own, a shutdown or an approval answered before the main chat was looked at makes no card.
 
 The panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
 the main chat all of today's. For runs of earlier days, an empty main chat links **See what
@@ -166,6 +169,18 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Levels in words.** Now, Today, Normal, Whenever, If idle, Later. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it Today, "no rush" makes it Whenever, anything else is Normal. **Change** on the line sets your own level, which stays.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
 - **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question asks **Start this as a task?** first. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
+
+## Chores that repeat
+
+![The main chat asks "Run this every weekday at 8:30?" with Save chore, Just once and Cancel](../assets/img/chore-proposal.webp)
+
+![The Scheduled tab: the check-in with its switch, two chores with their next run and how the last run went, and one chore open to Run now, Edit time and Delete](../assets/img/scheduled-tab.webp)
+
+- **Say it once.** A message such as `every weekday at 8:30, brief me on my calendar` or `每天早上九点 总结我的邮件` makes a card, `Run this every weekday at 8:30?`, with **Save chore**, **Just once** and **Cancel**. Nothing is saved or started until you tap, and no model reads the schedule.
+- **Three schedules.** Every day at a time, every weekday at a time, or every 1 to 24 hours. With no time, a day part sets it (`every morning` is 8:00, `every evening` 18:00), else 9:00. `every Monday` or `every 30 minutes` is not read: it goes to the main chat as any message does.
+- **Runs on time.** While the gateway runs, a chore starts as a task in its own folder of your workspace, within three minutes after its time and never before. A run missed while the computer slept happens once when it wakes, and a chore whose last run has not ended skips its next turn.
+- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
+- **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task that has waited for you a whole beat. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
 
 ## Pictures in the answer
 
@@ -202,8 +217,7 @@ On the right of the chat is Melo's panel. At the top is Melo's portrait, with a 
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
 settings**. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
-End move between them, and the panel opens the tab you used last. Scheduled says what it will list; Activity,
-Workers and Memory work today.
+End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
 workers it started; the main chat's panel, and the panel with no chat open, list everything of the day. Melo's status
@@ -350,9 +364,13 @@ redacted.
 **Tasks** (`#/tasks`; in default mode, in the sidebar once a task exists) lists the
 scheduler's tasks, newest update first, with state, priority (developer mode only) and
 title. Open one (`#/tasks/<id>`) to see its state, the saved
-recovery card (shown as plain text), the evidence status and the actions its
+recovery card (shown as plain text), the evidence status when there is some and the actions its
 state allows, and the same status row as a chat (a task has no row until it has
-run). Like Workers, the view replaces the chat while it is open.
+run). Like Workers, the view replaces the chat while it is open. The header says
+**Tasks**; developer mode adds "Scheduler tasks".
+
+- A task that ended opens with its answer, set as in a chat, above its facts. A task that
+  did not complete says why in the same place. Its steps are folded under **Steps**.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A
@@ -369,8 +387,10 @@ run). Like Workers, the view replaces the chat while it is open.
   (Deny); pausing or stopping the task withdraws the card. While it is open,
   the view reads the task (or the list) again every 3 seconds and redraws only
   what changed, so a request that arrives later appears by itself.
-- A started task shows a **Live** section below its approval card: its steps,
-  tool calls and model text, drawn as the Workers view draws a run. The card
+- A started task shows its steps below its approval card, under **Live** while it runs
+  and under **Steps** otherwise: its steps, tool calls and model text, drawn as the
+  Workers view draws a run. A `python_exec` step names the command its code runs
+  (`grep -rn DEFAULT_WORKSPACE .`) rather than its first import. The card
   reads the task's session once (`GET /api/sessions/<task id>/turns?events=true`)
   and, while the task runs or waits for approval, follows
   `GET /api/sessions/<task id>/events?after=<last id>`. New events are folded in
@@ -379,8 +399,8 @@ run). Like Workers, the view replaces the chat while it is open.
   approval card keeps its focus. A hidden tab closes the stream and a shown one
   resumes after the last event. When the task is done, failed, cancelled,
   expired, interrupted or parked, the stream closes after one last read; a
-  resumed task is followed again. A task that never started shows no Live
-  section, and a finished task shows its work once. The console shows task
+  resumed task is followed again. A task that never started shows no steps,
+  and a finished task shows its work once. The console shows task
   events as it shows a chat's: the same authenticated loopback, no extra
   redaction.
 - **Stop** uses the task's own stop, not the chat's. It is available until the

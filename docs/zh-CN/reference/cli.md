@@ -18,6 +18,7 @@ melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free p
 melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
+melo serve stop                              # stop the gateway that is running
 melo -h all                                  # every option, command and setting
 ```
 
@@ -38,7 +39,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`。 | `list -n N`、`forget ID`、`forget -y` |
-| `melo serve [install\|uninstall\|status]` | 运行网关，或把它作为登录服务管理（macOS）。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -62,7 +63,7 @@ melo -h all                                  # every option, command and setting
 | `--save-session` | `--title` |
 | `--reconfigure` | `melo setup` |
 | `--serve` | `melo serve` |
-| `--daemon` | `melo serve install|uninstall|status` |
+| `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
 | `--enable-playground` | `melo serve --playground` |
@@ -114,6 +115,7 @@ melo -h all                                  # every option, command and setting
 
 - `-X KEY=VALUE`（长格式 `--set KEY=VALUE`，可重复）只对本次运行修改一项设置。值按 TOML 读取（`true`、`5`、`"v3"`），否则当作文本；`on` 和 `off` 也表示布尔值。`-X` 优先于配置文件，配置文件优先于默认值，并且从不写入文件。出现在 `--` 之后时，它是任务文字。
 - 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
+- `-X agent.answer_on_stop=on` 也会为服务器因预算或速率限制拒绝了请求（HTTP 429，或错误信息说明预算已用完）的运行索要答案：运行仍以 `provider_error` 结束，但 `result` 里是这个答案。见[运行结果](run-results.md#statuses)。
 - `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。未设置的 `agent.window_messages` 在 `keys` 和 `get` 中显示它实际采用的窗口及原因（`64 (local server)`、`20 (cloud)`）。
 - 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
 
@@ -370,7 +372,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 
 - `--workspace`：不指定时，任务在当前文件夹中运行，与以前完全一致。指定后，`~` 会被展开，路径的解析方式与交互式界面相同，运行在该文件夹中：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动。它不增加任何审批（见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。不是文件夹的路径是用法错误（退出码 2，只输出一行）；见[用法错误](#usage-errors)。`melo ""` 和 `--serve` 拒绝该旗标。
 - 三个上下文旗标分别覆盖对应的 `[agent]` 键，在直接模式和交互式界面中均如此。超出预算的请求会在副本上做适配，否则运行以 `context_budget_exceeded` 结束；输出预留不是生成长度上限。见[上下文记账](configuration.md#context-accounting)。
-- `--max-steps`：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 10 个步骤，最多 5 次尝试，总步骤数最多为 `--max-steps`。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。
+- `--max-steps`：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 10 个步骤，最多 5 次尝试，总步骤数最多为 `--max-steps`。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。如果要限制每一个模型请求（规划、反思及其他请求），可设置 `-X agent.max_calls=N`（开发者设置，不小于 2 的整数，没有单独的选项）：运行会在会超出 `N` 的那个请求之前自行停止，并以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。再加上 `-X agent.answer_on_stop=on`，最后一次调用留作不带工具、根据证据索要最终答案的那一次请求，因此运行发出 `N - 1` 个请求，再发这一个。两者都出现在 `melo -h all` 中，记录里有什么见[运行结果](run-results.md#statuses)。
 - `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。`patient` 是开发者设置（`-X agent.reflection_gate=patient` 仅对一次运行生效）。
 - `--tool-exposure`：见[工具的提供方式](tools.md#how-tools-are-offered)。
 - `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`list_files`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。

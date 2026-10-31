@@ -85,6 +85,10 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
     if (path === '/memory/records') return {on: true, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path.startsWith('/chores')) {
+      const id = new URL(path, 'http://x').searchParams.get('session_id') ?? '';
+      return {chores: h.chores?.(id) ?? [], checkin: {on: true, every_min: 30, next_at: 86400 * 400 + 1800, last_at: null}, scope: id ? 'chat' : 'all'};
+    }
     throw new Error(`unexpected ${path}`);
   };
   h.panel = setupPanel({
@@ -497,4 +501,29 @@ test("a window grown past the sheet's width closes the sheet, so the page is not
   wide.matches = true;
   for (const fn of wide.listeners) fn();
   assert.deepEqual([h.root.classList.contains('sheet-open'), h.chat.inert, h.backdrop.hidden], [false, false, true]);
+});
+
+test('Scheduled lists the check-in and the chores of the open chat, and reads them again as the panel refreshes', async () => {
+  const sample = (id, title) => ({id, title, request: title, schedule: {kind: 'daily', at: '09:00'}, when: 'every day at 9:00', level: 2, level_word: 'Normal',
+    enabled: true, revision: 1, next_run: 86400 * 400 + 7200, last_run: null, last: null});
+  const h = harness();
+  h.chores = (id) => (id ? [sample('b', 'Side chore')] : [sample('a', 'Main chore')]);
+  await h.panel.update(health());
+  h.tabs()[2].click();
+  await settle();
+  assert.match(h.body().text(), /Check-in/);
+  assert.match(h.body().text(), /Main chore every day at 9:00/);
+  assert.deepEqual(h.calls.filter(([, path]) => path.startsWith('/chores')).map(([, path]) => path), ['/chores']);
+  // The panel follows the chat: the side chat's own chores replace the main chat's.
+  h.open = 'side-1';
+  await h.panel.follow();
+  await settle();
+  assert.match(h.body().text(), /Side chore/);
+  assert.ok(!h.body().text().includes('Main chore'));
+  assert.deepEqual(h.calls.filter(([, path]) => path.startsWith('/chores')).at(-1), ['GET', '/chores?session_id=side-1', undefined]);
+  // Another tab drops it; back on Scheduled it reads the list again.
+  h.tabs()[0].click();
+  h.tabs()[2].click();
+  await settle();
+  assert.equal(h.calls.filter(([, path]) => path.startsWith('/chores')).length, 3);
 });

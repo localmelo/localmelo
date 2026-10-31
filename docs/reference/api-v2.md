@@ -609,6 +609,23 @@ proves that an older process stopped or that its effects happened only once.
 The route is also reachable at `/api/v2/tasks/{task_id}/resume` for clients
 that address API v2 by its version; other task routes use the `/api` prefix.
 
+## Chores
+
+Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
+
+```json
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0}}
+```
+
+- `GET /api/chores` answers `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`, oldest first. `?session_id=ID` of a side chat keeps that chat's own and gives `"scope": "chat"`; the main chat's id, an empty or no `session_id` lists all. An unknown or non-chat id is 404 `not_found`.
+- `POST /api/chores` takes `request` (required, at most 100,000 characters), `schedule`, and optional `title` (at most 200; default derived from the request), `level` (`Today`, `Normal`, `Whenever`, `If idle`, or 1 to 4; default from the request's words, as for a task) and `front_id` (a chat; default the main chat). `schedule` is `{"kind": "daily" | "weekdays", "at": "HH:MM"}` (local time) or `{"kind": "hours", "every": 1..24}`; other keys are refused. A bad body is 400 `invalid_request`; 50 chores are the most (409 `chore_limit`). Answers 201 `{"chore"}`; the first `next_run` is the schedule's next time plus a jitter of up to 120 s.
+- `PATCH /api/chores/{id}` takes the `revision` read plus `title`, `request`, `schedule`, `level` and `enabled` (at least one). A stale revision is 409 `stale_revision`, an unknown chore 404 `not_found`. A new `schedule` or `enabled: true` plans `next_run` from now (a missed day is not run); `enabled: false` sets it to null.
+- `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
+- `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
+- `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+
+`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
+
 ## GET /api/sessions
 
 The newest sessions first. Only `chat` sessions are listed by default: the
@@ -724,7 +741,8 @@ token total.
   "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
   "agent": "open",
-  "tokens": 18512
+  "tokens": 18512,
+  "last_event_id": 412
 }
 ```
 
@@ -739,6 +757,9 @@ token total.
   first open since the gateway started, and a closed Agent reads `paused`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
+- `last_event_id` is the id of the session's newest stored event (0 for
+  none): a client that streams `GET /api/sessions/{id}/events?after=` this
+  id hears only what comes next.
 - A `pending_approvals` entry's `arguments_complete` is true only when the
   JSON-safe `arguments` preserve the original values without clipping or
   conversion. Clients should not allow a request when it is false or missing;
@@ -750,7 +771,8 @@ token total.
   question for a `high` call ("Install software?") and `""` otherwise;
   `reasons` are at most three sentences that say why melo asks ("Installs
   playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
-  redacted. A `high` call asks every time and the card offers no `session`
+  redacted. `categories` are the rules' categories, strongest first
+  (`install`, `download`, `outside_write`, ...). A `high` call asks every time and the card offers no `session`
   answer.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
@@ -823,19 +845,32 @@ chat's conversation never holds it.
 Its `data`:
 
 ```json
-{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
+{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` is `done`, `failed` or `waiting` (an approval waits for an answer).
-  `source_kind` is `chat` or `task`, and `source_id` is the side chat or the
-  task to open. `line` is one plain line: the answer's first sentence, the way
-  the run ended, or `Waiting for your approval`. `at` is when it happened.
+- `state` is `done`, `failed`, `waiting` (an approval waits for an answer) or
+  `answered` (that approval was answered). `source_kind` is `chat` or `task`,
+  and `source_id` is the side chat or the task to open. `title` is at most 48
+  columns: a title the person or the main chat gave stays, a longer one is cut
+  at a word. `at` is when it happened.
+- `line` is plain words: the first two lines of the answer on a `done` card
+  (an opening `Done.` is left out when more follows), why the run did not
+  finish on a `failed` one (its status in words, then the first line of its
+  error), what is asked on a `waiting` one (`Wants to run Python`, `Wants to
+  write notes.md`), and the answer on an `answered` one (`Allowed once`,
+  `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
+  `Denied`, `No answer in time`, `Not run: it stopped first`).
+- A `waiting` card has a `request_id`. When that approval is answered, a card
+  with state `answered`, the same `request_id` and the answer as its `line`
+  follows it, and a client shows the one card with the answer in place of
+  its Review. An answer is no news: it is never the list's `last_card`, and
+  none is written when the waiting card never was.
 - A side chat's run counts when its turn ends by its run (`cause` `run`); a
   stop by the person, a shutdown or a crash makes no card. A task counts when
   it ends `done`, `failed` or `expired`; a stop by the person makes none.
 - The gateway writes the cards when the main chat or the list is read, and
   once a minute; a waiting card whose approval was answered first is never
-  written. The main chat's stream carries new cards as `attention.card` frames.
+  written, and an approval answered later is followed by its `answered` card. The main chat's stream carries new cards as `attention.card` frames.
 - A task created through `POST /api/tasks` belongs to the chat its
   `front_id` names, else to the main chat; its cards still come to the main
   chat.
@@ -854,17 +889,26 @@ starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`), `ask` (`Start this as a task?`, with `text`, the
-  whole message, `words`, what was typed, and `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
-  message it answers; `of` is the echo it answers.
+  whole message, `words`, what was typed, and `turn_id`), `chore` (a repeating
+  phrase code read: `Run this every weekday at 8:30?`, with `title`, `text`
+  (the work), `schedule`, `when` and `level`), `chore_saved` (with `chore_id`),
+  `checkin` (the check-in's note, with `items`), `undone` or `failed`. `line` is
+  the plain words; `typed` is the message it answers; `of` is the echo it
+  answers.
 - `as_task` on any session but the main chat is 400 `invalid_request`. A
   repeated `client_request_id` of a delegation answers the same echo.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
 - `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
-  "level", "level"?: "Today" | "P1" | 1}` answers 200 `{"echo"}`: Undo a
-  `control` or `level` echo (a stop starts the task again as a new task),
-  apply a `suggest`, start an `ask`, or set a `started` or `level` echo's
-  task to the person's level. Undo, apply and start answer once (409
-  `already_answered`); an unknown echo or task is 404.
+  "level" | "save" | "once" | "cancel", "level"?: "Today" | "P1" | 1}` answers
+  200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
+  again as a new task) or a `chore_saved` one (the chore is deleted), apply a
+  `suggest`, start an `ask`, or set a `started` or `level` echo's task to the
+  person's level. On a `chore` echo, `save` keeps the chore (a `chore_saved`
+  echo answers), `once` starts its work as one task and `cancel` keeps
+  nothing (an `undone` echo answers). Each answers once (409
+  `already_answered`); an unknown echo or task is 404, `save` with 50 chores
+  already kept is 409 `invalid_transition`, and a `do` that does not fit the
+  echo is 400 `invalid_request`.
 
 ## GET /api/sessions/{id}/events
 

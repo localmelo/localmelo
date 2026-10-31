@@ -186,7 +186,15 @@ def test_spec_normalizes_retained_fields_and_defaults() -> None:
     assert TaskSpec.from_payload({"objective": "  First  line \n second"}).title == (
         "First line"
     )
-    assert len(TaskSpec.from_payload({"objective": "x" * 80}).title) == 60
+    # A request with no break is cut where it must be, in 48 columns.
+    assert TaskSpec.from_payload({"objective": "x" * 80}).title == "x" * 47 + "…"
+    title = TaskSpec.from_payload(
+        {
+            "objective": "Fix this today: in tests/cli/test_e2e_pty.py the list_files "
+            "test only checks that the word appears on screen."
+        }
+    ).title
+    assert title == "Fix this today: in tests/cli/test_e2e_pty.py…"
 
 
 @pytest.mark.parametrize(

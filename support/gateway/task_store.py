@@ -1,4 +1,4 @@
-"""The scheduler's task store: component version 4 of the gateway's file.
+"""The scheduler's task store: component version 6 of the gateway's file.
 
 The eight tables of design 4.2 arrive as the ``scheduler`` component of the
 gateway's ``sessions.db``, never of the CLI's file. :meth:`TaskStore.open`
@@ -7,7 +7,9 @@ tables and the version row in one ``BEGIN IMMEDIATE`` transaction on the
 session store's own connection; a newer component is refused, the way a
 newer ``user_version`` is. ``PRAGMA user_version`` stays the session
 schema's, so a terminal ``melo`` that opens no component keeps reading the
-same file.
+same file. Version 6 adds the chores tables of
+:mod:`~localmelo.support.gateway.chore_store`; opening an older file creates
+them and changes no existing row.
 
 Rows are written through :meth:`SessionStore.component_transaction`, so a
 task, the ``kind="task"`` session it names and its first
@@ -33,12 +35,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, get_args
 
+from localmelo.support.gateway.chore_store import CHORE_SCHEMA
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
-SCHEDULER_VERSION: Final = 5
+SCHEDULER_VERSION: Final = 6
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -379,17 +382,18 @@ class TaskStore:
                 for statement in _SCHEMA:
                     await conn.execute(statement)
                 await conn.execute(_SNAPSHOT_SCHEMA)
-                for statement in _RECOVERY_SCHEMA:
+                for statement in _RECOVERY_SCHEMA + CHORE_SCHEMA:
                     await conn.execute(statement)
                 await conn.execute(
                     "INSERT INTO schema_components (name, version) VALUES (?, ?)",
                     (COMPONENT, SCHEDULER_VERSION),
                 )
-            elif current in (1, 2, 3, 4):
+            elif current in (1, 2, 3, 4, 5):
                 if current == 1:
                     await conn.execute(_SNAPSHOT_SCHEMA)
                     await self._migrate_snapshots(conn)
-                for statement in _RECOVERY_SCHEMA:
+                # Version 6 adds the chores tables; every statement is IF NOT EXISTS.
+                for statement in _RECOVERY_SCHEMA + CHORE_SCHEMA:
                     await conn.execute(statement)
                 await self._ensure_host_column(conn)
                 await conn.execute(
@@ -397,7 +401,7 @@ class TaskStore:
                     (SCHEDULER_VERSION, COMPONENT),
                 )
             elif current == SCHEDULER_VERSION:
-                # A store marked v5 before the host column was settled may
+                # A store marked v5 or v6 before the host column was settled may
                 # lack it; add it in place rather than bumping the version.
                 await self._ensure_host_column(conn)
             elif current > SCHEDULER_VERSION:

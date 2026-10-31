@@ -1,6 +1,7 @@
 import {cleanOutput, formatDuration} from './turns.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
+import {setupScheduledTab} from './scheduled-tab.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -11,8 +12,8 @@ import {setupMemoryTab} from './memory-tab.mjs';
  * which follows any session's events) with the actions the terminal's task
  * list offers, and carries the approvals it asked for folded under it, where
  * one that waits is answered. Workers lists the tasks and runs of the same
- * scope. Scheduled says what it will hold; Memory (memory-tab.mjs) lists the
- * notes melo keeps. `update(health)` is called on every health poll: the
+ * scope. Scheduled (scheduled-tab.mjs) lists the check-in and the chores that run on a schedule; Memory
+ * (memory-tab.mjs) lists the notes melo keeps. `update(health)` is called on every health poll: the
  * header follows it, and the list is read again when what runs changed, the
  * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
  * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
@@ -23,9 +24,6 @@ export const GLYPHS = {
   memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●',
 };
 const TABS = [['activity', 'Activity', '≡'], ['workers', 'Workers', '⚙'], ['scheduled', 'Scheduled', '◷'], ['memory', 'Memory', '◎']];
-const SOON = {
-  scheduled: 'Nothing scheduled. Chores that repeat, such as a morning brief, will be listed here.',
-};
 const EMPTY_WORKERS = {
   chat: 'This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.',
   all: 'No workers yet today. When Melo hands a task to a worker, or you run one yourself, it is listed here, running first.',
@@ -107,6 +105,7 @@ export function setupPanel({
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
+  const scheduled = setupScheduledTab({doc, api, developer, clock, chat: () => state.chat});
   const live = taskLive({api: newest, changed: () => drawBody(), doc, ...stream});
   let reads = 0;
 
@@ -421,13 +420,14 @@ export function setupPanel({
   function drawBody() {
     // A priority being chosen is not drawn away.
     if (body.contains(doc.activeElement) && doc.activeElement?.tagName === 'SELECT') return;
-    if (state.tab === 'memory') {
-      // The tab keeps its own state (a note being reworded is not drawn away).
-      if (body.firstChild !== memory.root) { body.replaceChildren(memory.root); memory.show(); }
+    const own = {memory, scheduled}[state.tab];
+    if (own) {
+      // These tabs keep their own state (a note being reworded, a time being edited is not drawn away).
+      if (body.firstChild !== own.root) { body.replaceChildren(own.root); own.show(); }
       return;
     }
     const focused = doc.activeElement?.dataset?.focusKey;
-    const draw = {activity: activityNodes, workers: workersNodes, scheduled: () => [node('p', 'panel-soon', SOON.scheduled)]};
+    const draw = {activity: activityNodes, workers: workersNodes};
     const nodes = draw[state.tab]();
     body.replaceChildren(...nodes);
     if (focused && body.contains(doc.activeElement) === false) {
@@ -459,6 +459,7 @@ export function setupPanel({
     if (open) live.sync(liveState(open));
     else if (state.open) closeRow();
     if (state.tab === 'memory') memory.reload();
+    if (state.tab === 'scheduled') scheduled.reload();
     drawHeader();
     drawBody();
   }

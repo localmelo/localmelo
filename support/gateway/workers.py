@@ -72,7 +72,13 @@ from localmelo.support.gateway.worker_evidence import (
     committed_evidence,
 )
 from localmelo.support.memory import ChatMemory
-from localmelo.support.scheduler.model import TERMINAL_PHASES, LevelSource, Phase, Task
+from localmelo.support.scheduler.model import (
+    TERMINAL_PHASES,
+    LevelSource,
+    Origin,
+    Phase,
+    Task,
+)
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
     build_session_agent,
@@ -350,19 +356,21 @@ class TaskWorkers:
         *,
         front_id: str | None = None,
         request_key: str | None = None,
+        origin: Origin = "user",
     ) -> tuple[dict, bool]:
-        """Create a user's task from a spec trusted code made (the main chat's).
+        """Create a task from a spec trusted code made (the main chat's, or a chore's).
 
         The spec's level and reason are kept as given: the main chat computes
         them from the person's own words. *front_id* is the owner chat, the
-        main chat when ``None``.
+        main chat when ``None``. *origin* is ``user`` for a task the person
+        asked for and ``user_rule`` for one a saved chore starts.
 
-        The task works in the folder its request names, else in its chat's:
-        a side chat's own folder, the default folder for the main chat. A
-        named folder that is refused raises :class:`WorkspaceError`; an
-        inherited one that is refused (outside the allowed roots) still makes
-        the task, failed with ``invalid_workspace`` before it starts, so its
-        card says why: it never runs in another folder.
+        A person's task works in the folder its request names, else in its
+        chat's: a side chat's own folder, the default folder for the main
+        chat. A named folder that is refused raises :class:`WorkspaceError`;
+        an inherited one that is refused (outside the allowed roots) still
+        makes the task, failed with ``invalid_workspace`` before it starts,
+        so its card says why: it never runs in another folder.
         """
         front, key = front_id, request_key
         task_id = uuid.uuid4().hex[:12]
@@ -370,27 +378,29 @@ class TaskWorkers:
             if self._closed:
                 raise RuntimeError("workers are closed")
             existing = await self.tasks.find_existing_request(
-                spec, origin="user", front_id=front or self.front_id, request_key=key
+                spec, origin=origin, front_id=front or self.front_id, request_key=key
             )
             if existing is not None:
                 return await self._body(existing), True
-            inherited = None if spec.workspace else await self._chat_folder(front)
+            inherited = None
+            if not spec.workspace and origin == "user":
+                inherited = await self._chat_folder(front)
             refused = False
             try:
                 workspace = validate_task_workspace(
                     spec.workspace or inherited,
                     self.settings(),
-                    origin="user",
+                    origin=origin,
                     task_id=task_id,
                 )
             except WorkspaceError:
-                if spec.workspace:
+                if spec.workspace or origin != "user":
                     raise
                 refused = True
                 workspace = inherited or configured_root(self.settings())
             record, repeated = await self.tasks.create_task(
                 spec,
-                origin="user",
+                origin=origin,
                 workspace=workspace,
                 request_key=key,
                 task_id=task_id,
@@ -1326,7 +1336,7 @@ class TaskWorkers:
             Task(
                 task_id=record.task_id,
                 root_id=record.root_id,
-                origin="user",
+                origin=cast(Origin, record.origin),
                 phase=cast(Phase, record.state),
                 level=record.level,
                 level_source=cast(LevelSource, record.level_source),

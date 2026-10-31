@@ -10,7 +10,8 @@ end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
 ended, and :func:`activity_text` for what a running session is doing, in
 plain words (:func:`event_activity` reads it from the session's newest
-events; :func:`request_words` puts a call as a request). Nothing here
+events; :func:`request_words` puts a call as a request), and
+:func:`short_title` for a title cut from a request. Nothing here
 imports the UI's libraries or the gateway.
 """
 
@@ -22,6 +23,7 @@ import math
 import os
 import re
 import subprocess
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -556,6 +558,60 @@ def event_activity(
         ):
             return _STATE_WORDS["thinking"]
     return _STATE_WORDS["thinking"]
+
+
+# A title is at most this wide: a wide (CJK) character counts 2.
+TITLE_WIDTH: Final = 48
+# A clause shorter than this is no title ("Fix this today" says nothing).
+_CLAUSE_WIDTH: Final = 16
+_SENTENCE_END: Final = re.compile(r"(?<=[.!?;])\s|(?<=[。！？；])")
+_CLAUSE_END: Final = re.compile(r"(?<=,)\s|(?<=，)")
+_TITLE_TAIL: Final = " ,;:.!?-–—·，；：。！？"
+
+
+def _wide(char: str) -> bool:
+    return unicodedata.east_asian_width(char) in ("W", "F")
+
+
+def title_width(text: str) -> int:
+    """Columns *text* takes: a wide (CJK) character counts 2."""
+    return sum(2 if _wide(char) else 1 for char in text)
+
+
+def short_title(text: str) -> str:
+    """A short title from a request: its first clause, at most :data:`TITLE_WIDTH` wide.
+
+    The first non-blank line, whitespace collapsed, ends at its first
+    sentence end, or at a comma when what comes before it is a clause
+    on its own (at least 16 wide). A clause that is still too long is cut at
+    the last word (or, in Chinese or Japanese, character) that fits and ends
+    in ``…``; one long word with no break is cut where it must be. Nothing
+    longer than the limit comes back, and an empty request reads ``Task``.
+    """
+    line = next((row for row in text.splitlines() if row.strip()), "")
+    line = " ".join(line.split())
+    clause = _SENTENCE_END.split(line, maxsplit=1)[0].rstrip(_TITLE_TAIL)
+    if title_width(clause) <= TITLE_WIDTH:
+        return clause or "Task"
+    for found in _CLAUSE_END.finditer(clause):
+        head = clause[: found.start()].rstrip(_TITLE_TAIL)
+        if title_width(head) > TITLE_WIDTH:
+            break
+        if title_width(head) >= _CLAUSE_WIDTH:
+            return head
+    width = end = 0
+    for char in clause:
+        step = 2 if _wide(char) else 1
+        if width + step > TITLE_WIDTH - 1:
+            break
+        width += step
+        end += 1
+    cut = end
+    while cut > 0 and not (
+        clause[cut] == " " or _wide(clause[cut]) or _wide(clause[cut - 1])
+    ):
+        cut -= 1
+    return clause[: cut or end].rstrip(_TITLE_TAIL) + "…"
 
 
 def clean_output(text: str) -> str:

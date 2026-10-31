@@ -136,8 +136,9 @@ melo serve uninstall
 ## Stop the gateway
 
 - In its terminal, press Ctrl+C.
+- One running in the background (the one `melo` starts for the main chat, say): `melo serve stop`. It prints `Stopped the gateway on port N.`, or `No gateway is running.`
 - For the background service, run `melo serve uninstall`. A plain `kill`
-  does not help: launchd starts the gateway again.
+  or `melo serve stop` does not help: launchd starts the gateway again.
 
 - Stopping closes every session; a session still running a task has its agent closed, and the task ends as `crashed`.
 - SIGTERM first waits up to 3 seconds for runs in flight, then cancels the ones left: the client's request fails and the run ends `crashed`.

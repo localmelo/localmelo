@@ -3597,6 +3597,7 @@ const TURNS_T1 = 'GET /sessions/t1/turns?limit=50&events=true';
 const liveStarted = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Objective of t1'}};
 const liveTool = (id, extra = {}) => ({id, turn: 1, type: 'tool.started', ts: Date.now() / 1000, data: {step: 1, call_id: `c${id}`, name: 'file_read', arguments: {}, preview: 'a.txt'}, ...extra});
 const liveBox = (h) => findNode(h.element('task-panel'), (node) => node.classList.contains('task-live'));
+const answerBox = (h) => findNode(h.element('task-panel'), (node) => node.classList.contains('task-answer'));
 const taskStream = (h) => FakeEventSource.instances.filter((source) => source.url.includes('/sessions/t1/events')).at(-1);
 const taskReads = (h) => h.net.calls.filter((call) => call.path.startsWith('/sessions/t1/turns')).length;
 
@@ -3649,11 +3650,86 @@ test('a finished task shows its folded work once and opens no stream', async () 
     [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'completed', answer: 'All done', events: [liveStarted, liveTool(2)]})], has_earlier: false},
   });
   assert.match(flatten(liveBox(h)), /file_read/);
-  assert.match(flatten(liveBox(h)), /All done/);
+  assert.match(flatten(answerBox(h)), /All done/);
+  assert.doesNotMatch(flatten(liveBox(h)), /All done/, 'the answer is above the steps, not in them');
   assert.equal(taskStream(h), undefined);
   const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
   await poll.handler(); await settle();
   assert.equal(taskReads(h), 1);
+});
+
+const answerText = '**Changed** the deadline rule.\n\n- Tests: 12 passed\n- Committed `abc1234`';
+const taskPage = (h) => h.element('task-panel');
+const doneTask = (extra = {}, turn = {}) => openTask({
+  'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'done', ...extra})}),
+  [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'completed', answer: answerText, events: [liveStarted, liveTool(2)], ...turn})], has_earlier: false},
+});
+
+test('a finished task page opens with its answer as Markdown, above the facts, with its steps folded under Steps', async () => {
+  const h = await doneTask();
+  const panel = taskPage(h);
+  const answer = answerBox(h);
+  assert.equal(answer.hidden, false);
+  assert.ok(findNode(answer, (node) => node.classList.contains('answer')), 'drawn as an answer is in a chat');
+  assert.match(findNode(answer, (node) => node.classList.contains('answer')).innerHTML, /<strong>Changed<\/strong>.*<li><p>Tests: 12 passed<\/p><\/li>.*<code>abc1234<\/code>/s);
+  const order = (node) => panel.children.indexOf(node);
+  const facts = findNode(panel, (node) => node.tag === 'dl');
+  const back = findNode(panel, (node) => node.tag === 'a' && node.textContent === 'Back to tasks');
+  assert.ok(order(back) < order(answer) && order(answer) < order(facts), 'title, back link, answer, then the facts');
+  assert.ok(order(facts) < order(liveBox(h)), 'the steps come after the facts');
+  const fold = findNode(liveBox(h), (node) => node.tag === 'details' && node.classList.contains('task-steps'));
+  assert.equal(fold.open, false, 'folded');
+  assert.equal(fold.children[0].textContent, 'Steps');
+  assert.ok(findNode(fold, (node) => node.classList.contains('tool-card')), 'the work is under it');
+  assert.doesNotMatch(flatten(panel), /Live/);
+  assert.doesNotMatch(flatten(panel), /Evidence|Not needed in this state/, 'no evidence to show, no row');
+  fold.open = true; fold.listeners.toggle.forEach((fn) => fn());
+  assert.equal(h.run('tasks.state.stepsOpen'), true, 'the fold stays as the person left it');
+});
+
+test('a task that ended without completing says why where its answer would be', async () => {
+  const h = await doneTask({state: 'failed'}, {status: 'provider_error', answer: '', result: {status: 'provider_error', result: '', error: 'connection refused', n_tool: 1, steps: 1}});
+  assert.match(flatten(answerBox(h)), /Could not get an answer from the model server/);
+  assert.match(flatten(answerBox(h)), /connection refused/);
+  assert.doesNotMatch(flatten(liveBox(h)), /connection refused/);
+  assert.equal(findNode(liveBox(h), (node) => node.tag === 'summary' && node.textContent === 'Steps') !== null, true);
+});
+
+test('a task still going heads its work Live; one that waits or paused heads it Steps, and evidence shows when there is some', async () => {
+  const running = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running'})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'running', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
+    'GET /sessions/t1/status': {session_id: 't1', segments: []},
+  });
+  assert.equal(findNode(liveBox(running), (node) => node.tag === 'h2' && node.textContent === 'Live') !== null, true);
+  assert.equal(answerBox(running).hidden, true);
+  const paused = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'parked'})}),
+    [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'cancelled', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
+  });
+  assert.equal(findNode(liveBox(paused), (node) => node.tag === 'h2' && node.textContent === 'Steps') !== null, true);
+  assert.equal(findNode(liveBox(paused), (node) => node.textContent === 'Live'), null);
+  assert.match(flatten(taskPage(paused)), /Evidence Checked when you press Resume/);
+});
+
+test('the Tasks header says Tasks alone in default mode, and a developer keeps the scheduler words', async () => {
+  const routes = {'GET /tasks': {tasks: [taskRow('t1', {state: 'done'})]}, 'GET /tasks/t1': {task: taskRow('t1', {state: 'done'})}};
+  const person = harness(defaultMode(routes));
+  await person.run('init()');
+  person.context.location.hash = '#/tasks';
+  await person.windowListeners.hashchange[0](); await settle();
+  assert.equal(person.element('header-title').textContent, 'Tasks');
+  assert.equal(person.element('header-model').textContent, '');
+  assert.doesNotMatch(flatten(person.element('task-panel')), /Scheduler|recovery card/);
+  person.context.location.hash = '#/tasks/t1';
+  await person.windowListeners.hashchange[0](); await settle();
+  assert.equal(person.element('header-model').textContent, '');
+  const developer = harness(baseRoutes(routes));
+  await developer.run('init()');
+  developer.context.location.hash = '#/tasks';
+  await developer.windowListeners.hashchange[0](); await settle();
+  assert.equal(developer.element('header-model').textContent, 'Scheduler tasks');
+  assert.match(flatten(developer.element('task-panel')), /Scheduler tasks\. Open one to see its recovery card/);
 });
 
 test('a task that never started shows nothing live and reads no session', async () => {
@@ -3689,7 +3765,8 @@ test('the live stream closes in a hidden tab, resumes after the last id, and end
   assert.equal(second.closed, true, 'the stream ends when the task is done');
   assert.equal(taskReads(h), 2, 'one more read catches up with the last events');
   assert.equal(findNode(liveBox(h), (node) => node.classList.contains('tool-card')) !== null, true);
-  assert.equal(findNode(liveBox(h), (node) => node.textContent === 'Live') !== null, true);
+  assert.equal(findNode(liveBox(h), (node) => node.textContent === 'Live'), null, 'a task that ended is no longer Live');
+  assert.equal(findNode(liveBox(h), (node) => node.tag === 'summary' && node.textContent === 'Steps') !== null, true);
 });
 
 test('leaving the task card, or opening another task, closes the live stream and drops its tail', async () => {
@@ -4183,6 +4260,40 @@ test('cards are events in the main chat: by day, a busy source shows its newest,
   assert.equal(h.state().activeId, 'a');
 });
 
+test('an approval card follows its approval: the answer replaces Review, live and after a reload', async () => {
+  const waiting = cardRow(5, {at: NOW - 60, state: 'waiting', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Wants to run a command', request_id: 'r1'});
+  const h = harness(mainRoutes({}, {cards: [waiting]}));
+  await h.run('init()');
+  const card = () => findNode(h.element('messages'), (node) => node.dataset?.cardId === '5');
+  const buttons = () => flatten(card()).includes('Review');
+  assert.match(h.text('messages'), /Needs your approval: Fix CI.*Wants to run a command.*Review/);
+  // The same event the panel's fold reads: the answer arrives as a card that follows this one.
+  h.stream().emit({id: 31, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'answered', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Allowed for this task', request_id: 'r1', at: NOW}});
+  assert.equal(card().dataset.state, 'answered');
+  assert.equal(h.element('messages').children.filter((node) => node.dataset?.cardId).length, 1, 'one card, not two');
+  assert.match(h.text('messages'), /Approval for Fix CI.*Allowed for this task.*Open task/);
+  assert.doesNotMatch(h.text('messages'), /Review|Needs your approval/);
+  assert.equal(buttons(), false);
+  assert.equal(h.state().view.turns.length, 0, 'An answer is no turn');
+  // After a reload the page reads both rows and shows the same one card.
+  const again = harness(mainRoutes({}, {cards: [waiting, cardRow(31, {state: 'answered', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Denied', request_id: 'r1'})]}));
+  await again.run('init()');
+  assert.match(again.text('messages'), /Approval for Fix CI.*Denied.*Open task/);
+  assert.doesNotMatch(again.text('messages'), /Review/);
+});
+
+test('a task whose approval was answered still takes changes on its echo lines until it ends', async () => {
+  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · Normal'})];
+  const cards = [
+    cardRow(81, {at: NOW - 20, ts: NOW - 20, state: 'waiting', source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Wants to run a command', request_id: 'r1'}),
+    cardRow(82, {at: NOW - 10, ts: NOW - 10, state: 'answered', source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Allowed once', request_id: 'r1'}),
+  ];
+  const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes}}));
+  await h.run('init()');
+  assert.match(h.text('messages'), /Approval for Find jobs.*Started: Find jobs/);
+  assert.notEqual(findNode(h.element('messages'), (node) => node.textContent === 'Change'), null);
+});
+
 test('an unread card puts a dot on the main chat until it is open', async () => {
   const last = {id: 9, ts: NOW, at: NOW, state: 'waiting', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: ''};
   const h = harness(mainRoutes({}, {last}));
@@ -4341,7 +4452,7 @@ test('while the person types, a result card waits; a waiting card shows at once'
   h.stream().emit({id: 70, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'done', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: 'Fixed.', at: NOW}});
   assert.doesNotMatch(h.text('messages'), /Done: Fix CI/);
   h.stream().emit({id: 71, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'waiting', source_id: 'a', source_kind: 'chat', title: 'Plan the trip', line: '', at: NOW}});
-  assert.match(h.text('messages'), /Plan the trip needs your approval/);
+  assert.match(h.text('messages'), /Needs your approval: Plan the trip/);
   await h.run('send()');
   assert.match(h.text('messages'), /Done: Fix CI/, 'The next send shows what waited');
 });

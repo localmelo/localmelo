@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Final, cast, get_args
 
 from localmelo.support.scheduler.model import Origin
+from localmelo.support.sessions.display import short_title
 
 # Where a task's folder starts when neither the request nor the config names
 # one (the same path the console's sessions use).
@@ -189,9 +190,8 @@ def _text(value: object, name: str, *, max_chars: int, required: bool) -> str:
 
 
 def _derive_title(objective: str) -> str:
-    first = next((line.strip() for line in objective.splitlines() if line.strip()), "")
-    first = " ".join(first.split())
-    return first[:60].rstrip() or "Task"
+    """The title of a task that came without one: its request's first clause."""
+    return short_title(objective)
 
 
 def _workspace_text(value: object) -> str:

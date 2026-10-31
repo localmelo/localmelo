@@ -35,7 +35,15 @@
 
 **New side chat**（`⌘ K`）开始一个专注的对话，有自己的文件夹：文件夹选择提供默认文件夹、最近用过的文件夹和 **Choose a folder…**，对话会一直保留你的选择。它列在主对话下面。旁支对话的页眉以 **Main chat ›** 开头，点按即可返回；关闭正在打开的旁支对话也会回到主对话。主对话出现之前创建的对话原样成为它的旁支对话。
 
-旁支对话的一次运行结束，或任务完成、失败或等你批准时，主对话会在事情发生的那一天下面显示一张卡片：`Done: Plan the Tokyo trip` 加上回答的第一句，`Did not finish: Fix CI` 加上它结束的方式，或 `Fix CI needs your approval`。**Open side chat**、**Open task** 或 **Review** 会前往它。卡片不是消息：模型从不读取它。在你的两条消息之间，一个忙碌的旁支对话只保留最新的一张卡片。你自己的停止、关机，或在查看主对话之前就已答复的审批，都不会产生卡片。
+旁支对话的一次运行结束，或任务完成、失败或等你批准时，主对话会在事情发生的那一天下面显示一张卡片：
+
+- `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
+- `Did not finish: Fix CI` 加上它结束的原因。
+- `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
+- 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
+- **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
+
+在你的两条消息之间，一个忙碌的旁支对话只保留最新的一张卡片。你自己的停止、关机，或在查看主对话之前就已答复的审批，都不会产生卡片。
 
 面板的 **Workers** 标签页列出当前对话的 worker：旁支对话列出它自己的，主对话列出今天的全部。要看更早几天的运行，空的主对话会链接到 **See what worker runs did**（有运行或终端对话之后出现；开发者模式下始终出现）。
 
@@ -50,6 +58,19 @@
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
 - **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问，会先问 **Start this as a task?**。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
 
+<a id="chores-that-repeat"></a>
+## 定时事项
+
+![主对话问“Run this every weekday at 8:30?”，下面是 Save chore、Just once 和 Cancel](../../assets/img/chore-proposal.webp)
+
+![Scheduled 标签页：带开关的 check-in，两个定时事项及其下次运行和上次运行的结果，其中一个展开显示 Run now、Edit time 和 Delete](../../assets/img/scheduled-tab.webp)
+
+- **说一次就行。** 一条消息，如 `every weekday at 8:30, brief me on my calendar` 或 `每天早上九点 总结我的邮件`，会出现一张卡片 `Run this every weekday at 8:30?`，带 **Save chore**、**Just once** 和 **Cancel**。你点按之前不会保存或开始任何东西，也没有模型读取这个时间安排。
+- **三种安排。** 每天某个时间、每个工作日某个时间，或每 1 到 24 小时。没有说时间时，由一天中的时段决定（`every morning` 是 8:00，`every evening` 是 18:00），否则是 9:00。`every Monday` 或 `every 30 minutes` 不会被读取：它像普通消息一样交给主对话。
+- **准时运行。** 网关运行期间，定时事项会作为任务在工作区里自己的文件夹中开始，比约定时间晚不超过三分钟，绝不提前。电脑睡眠期间错过的一次，会在唤醒时只运行一次；上一次运行还没结束的事项会跳过下一次。
+- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
+- **Check-in。** 每 30 分钟它会看有没有要告诉你的事：某个事项刚结束的运行，或一个等了你整整一个周期的任务。没有就什么也不做，也不用模型；有的话，调用一次模型写一条简短的说明，作为一张卡片发到主对话。它的开关可以把它关掉。
+
 <a id="pictures-in-the-answer"></a>
 ## 回答里的图片
 
@@ -63,7 +84,7 @@
 <a id="the-panel-beside-a-chat"></a>
 ## 对话旁的面板
 
-对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。Scheduled 说明它将来会列出什么；目前能用的是 Activity、Workers 和 Memory。
+对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。
 
 面板显示属于当前打开的对话的内容。侧边对话的面板列出这个对话自己的活动和它启动的 worker；主对话的面板，以及没有打开任何对话时的面板，列出今天的全部内容。Melo 的状态行也跟随对话：在侧边对话里，它说明这个对话在做什么。打开另一个对话会重新读取列表。
 
@@ -123,11 +144,13 @@
 
 ## 任务
 
-**Tasks**（`#/tasks`；默认模式下，有任务后才出现在侧边栏）列出调度器的任务，按最近更新排在前面，显示状态、优先级（仅开发者模式）和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。和 Workers 一样，打开这个视图时它会取代对话。
+**Tasks**（`#/tasks`；默认模式下，有任务后才出现在侧边栏）列出调度器的任务，按最近更新排在前面，显示状态、优先级（仅开发者模式）和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、有证据时的证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。和 Workers 一样，打开这个视图时它会取代对话。页眉写 **Tasks**；开发者模式再加上 "Scheduler tasks"。
+
+- 已结束的任务以它的回答开头，排版与对话中相同，位于各项信息之上；没有完成的任务在同一处写出原因。它的步骤折叠在 **Steps** 下。
 
 - 已停放或中断的任务会显示 **Resume**。页面先询问服务器，只有服务器要求时才请你确认：对话框会写 "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once."，并提供 **Resume anyway** 和 **Cancel**。按 Escape 即取消。在你选择 **Resume anyway** 之前不会记录任何东西；确认在五分钟内有效，网关重启后失效。
 - 请求运行工具的任务会显示状态 "Waiting for your approval"，以及和对话相同的批准卡片，包含 **Allow once**、**Allow for this task** 和 **Deny**（可附说明）。通过 `melo-task` 提交的任务也在这里等待批准，别处不会显示。回答后卡片消失，任务继续（允许）或收到拒绝（拒绝）；暂停或停止任务会撤回卡片。视图打开时，每 3 秒重新读取任务（或列表），只重绘有变化的部分，因此之后到达的请求会自动出现。
-- 已开始的任务会在批准卡片下方显示 **Live** 区：它的步骤、工具调用和模型文本，画法与 Workers 视图显示一次运行相同。卡片先读取一次任务的会话（`GET /api/sessions/<task id>/turns?events=true`），任务运行或等待批准期间再跟随 `GET /api/sessions/<task id>/events?after=<last id>`。新事件合并后最多每 150 毫秒绘制一次，不会重新读取之前的工作，也只重绘 Live 区，因此在批准卡片里输入拒绝原因时焦点不会丢失。标签页隐藏时会关闭事件流，重新显示时从最后一个事件之后继续。任务完成、失败、取消、过期、中断或停放时，事件流在最后一次读取后关闭；任务恢复后会再次被跟随。从未开始的任务没有 Live 区，已结束的任务只显示一次它的工作过程。控制台显示任务事件的方式与显示对话事件相同：同一个需要身份验证的回环地址，不做额外脱敏。
+- 已开始的任务会在批准卡片下方显示它的步骤：运行时在 **Live** 下，其余时候在 **Steps** 下：步骤、工具调用和模型文本，画法与 Workers 视图显示一次运行相同。`python_exec` 步骤写出它的代码所运行的命令（`grep -rn DEFAULT_WORKSPACE .`），而不是第一行 import。卡片先读取一次任务的会话（`GET /api/sessions/<task id>/turns?events=true`），任务运行或等待批准期间再跟随 `GET /api/sessions/<task id>/events?after=<last id>`。新事件合并后最多每 150 毫秒绘制一次，不会重新读取之前的工作，也只重绘 Live 区，因此在批准卡片里输入拒绝原因时焦点不会丢失。标签页隐藏时会关闭事件流，重新显示时从最后一个事件之后继续。任务完成、失败、取消、过期、中断或停放时，事件流在最后一次读取后关闭；任务恢复后会再次被跟随。从未开始的任务没有步骤，已结束的任务只显示一次它的工作过程。控制台显示任务事件的方式与显示对话事件相同：同一个需要身份验证的回环地址，不做额外脱敏。
 - **Stop** 使用任务自己的停止操作，而不是对话的停止。在任务结束前都可用，并且优先于正在进行的 Resume。
 - 已经开始但没有保存卡片的任务会显示 "Resume unavailable: recovery information is missing." 和 **Start again as a new task**，它会根据原始目标创建一个单独的新任务。之前那个任务的效果是未知的，也不会被撤销。
 

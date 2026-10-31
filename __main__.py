@@ -1950,7 +1950,7 @@ def _build_parser(
     )
     parser.add_argument(
         "--daemon",
-        choices=["install", "uninstall", "status"],
+        choices=["install", "uninstall", "status", "stop"],
         help="Manage launchd daemon",
     )
     for old_name, names in _NEW_SPELLINGS.items():
@@ -2117,6 +2117,13 @@ def main() -> None:
             info = daemon.status()
             for k, v in info.items():
                 print(f"  {k}: {v}")
+        elif args.daemon == "stop":
+            from localmelo.support import gateway_endpoint
+
+            code, line = gateway_endpoint.stop()
+            print(line)
+            if code:
+                raise SystemExit(code)
         return
 
     # Checked for direct mode, the `melo ""` loop and the gateway alike,
@@ -2537,6 +2544,13 @@ def _build_direct_mode_agent(
         config_value_error("[agent] answer_on_stop must be a boolean")
     if budget_cfg.agent.answer_on_stop:
         options = dataclasses.replace(options, answer_on_stop=True)
+    calls = budget_cfg.agent.max_calls
+    if calls is not None and (
+        isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
+    ):
+        config_value_error(f"[agent] max_calls must be an int >= 2, got {calls!r}")
+    if calls is not None:
+        options = dataclasses.replace(options, max_calls=calls)
 
     if not isinstance(budget_cfg.agent.confine_direct_runs, bool):
         config_value_error("[agent] confine_direct_runs must be a boolean")
