@@ -19,8 +19,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   second block of the same kind ends the turn with that explanation. Before,
   auto ran routine steps and still asked about the rest. Under a chat grant in
   ask mode, your model now reviews a step the rules cannot judge before it
-  runs on the grant. The terminal tags a blocked step `blocked: installs
-  software`; events record each decision ([#NN]).
+  runs on the grant. A review asks a local model for a short answer at
+  temperature 0 with thinking off, so it answers in time. The terminal tags
+  a blocked step `blocked: installs software`; events record each decision
+  ([#NN]).
 
 - Settings is organized by subject: Model server, Memory, Chats and folders,
   Scheduled and Appearance in a list on the left, the chosen one on the right
