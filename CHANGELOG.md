@@ -210,7 +210,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   thinking, as a `<think>` block does, and the person no longer sees it while the
   reply streams or in the answer. An answer of dots, dashes or emoji only (no
   letter or digit in any script) counts as an empty reply, so the model is asked
-  once more. Short real answers such as `OK`, `好` or `1` are kept. [#NN]
+  once more. Short real answers such as `OK`, `好` or `1` are kept. [#356]
 - Memory answers give the current value, and notes say who they are about. After
   you update a fact, asking about it recalled the older chat as well, marked
   `(older; replaced by a newer note)`, and the answer named both ("Utrecht, the
@@ -2913,3 +2913,4 @@ earlier milestones.
 [#352]: https://github.com/localmelo/localmelo/pull/352
 [#353]: https://github.com/localmelo/localmelo/pull/353
 [#354]: https://github.com/localmelo/localmelo/pull/354
+[#356]: https://github.com/localmelo/localmelo/pull/356
