@@ -27,7 +27,8 @@ from typing import Any, Final, cast
 
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent.options import reasoning_refusal
-from localmelo.support import config, onboard
+from localmelo.melo.contracts import own_gateway
+from localmelo.support import config, gateway_endpoint, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
@@ -71,6 +72,22 @@ class Choice:
     checked: bool = False
     warning: str = ""
     models: tuple[str, ...] = ()
+
+
+def expect_gateway(cfg: config.Config, endpoint_path: str | None = None) -> None:
+    """Tell auto mode the ports melo's gateway may listen on (#339).
+
+    The terminal's own chat runs no gateway, so its Auto steps are kept off
+    the one the app or ``melo --serve`` runs, in the review and in the
+    sandbox: the port the settings give it, and the running gateway's own
+    (its endpoint file), when that differs.
+    """
+    port = getattr(getattr(cfg, "gateway", None), "port", None)
+    live = gateway_endpoint.read(endpoint_path)
+    own_gateway.expect(
+        port if isinstance(port, int) else None,
+        live.port if live is not None else None,
+    )
 
 
 def ui_terminal() -> bool:
@@ -550,6 +567,7 @@ async def main_async(
 
         approver = TerminalApprover()
         session_config = config.load()
+        expect_gateway(session_config)
         # Config validation never fails on [cli] (a display preference), and a
         # --base-url session validates nothing at all, so both paths land here:
         # a bad value falls back with a warning rather than turning streaming
@@ -624,7 +642,12 @@ async def main_async(
             agent=agent,
             renderer=renderer,
             approver=approver,
-            mode="yolo" if args.yolo else "ask",
+            # [approvals] mode: the terminal's own chat starts as a new chat does.
+            mode=(
+                "yolo"
+                if args.yolo
+                else "auto" if session_config.approvals.mode == "auto" else "ask"
+            ),
             resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
             stream=session_config.cli.stream,
             reasoning_tags=session_config.cli.reasoning_tags,

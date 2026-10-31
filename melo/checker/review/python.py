@@ -6,6 +6,7 @@ import ast
 import base64
 import dataclasses
 import os
+import re
 import shlex
 from collections import Counter
 from itertools import product
@@ -14,14 +15,20 @@ from typing import Any
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import shell
 from localmelo.melo.checker.review.paths import (
+    SENDING,
     Context,
     Findings,
+    engine_socket,
+    own_port,
+    reach_own,
     resolve,
+    search,
     secret_name,
     shown,
     touch,
     under,
 )
+from localmelo.melo.checker.review.paths import own_api as shell_own_api
 
 _RUNS = set(
     [
@@ -38,6 +45,19 @@ _SHELL_RUNS = set(
     ["system", "popen", "getoutput", "getstatusoutput", "create_subprocess_shell"]
 )
 _SPAWNS = ("os.exec", "os.spawn", "os.posix_spawn", "asyncio.create_subprocess")
+# Modules and names that have another program run commands for melo:
+# AppleScript and Apple Events, and Cocoa's app launcher and task runner.
+_DRIVERS = set(["appscript", "applescript", "py_applescript", "ScriptingBridge"])
+_DRIVER_NAMES = set(["NSAppleScript", "NSWorkspace", "NSTask", "SBApplication"])
+# Calls that connect to a server or a socket, by their last name.
+_SOCKET_CALLS = set(
+    ["connect", "connect_ex", "create_connection", "open_unix_connection", "request"]
+    + ["urlopen", "Request", "get", "post", "put", "patch", "delete", "head", "Session"]
+    + ["UnixHTTPConnection", "HTTPConnection", "Client", "AsyncClient", "HTTPTransport"]
+    + ["AsyncHTTPTransport", "UnixConnector", "DockerClient", "APIClient", "from_env"]
+)
+# An HTTP request line written to a socket: b'POST /path HTTP/1.1…'.
+_REQUEST_LINE = re.compile(r"^b?['\"]?([A-Z]+) ")
 _PATH_OPS = {
     **dict.fromkeys(
         ["write_text", "write_bytes", "touch", "symlink_to", "hardlink_to"], "write"
@@ -57,6 +77,7 @@ _OS_OPS = {
 _MOVES = set(["os.rename", "os.replace", "shutil.move"])
 _COPIES = set(
     ["shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree", "os.symlink"]
+    + ["os.link", "shutil.copymode", "shutil.copystat"]
 )
 _SAVES = set(
     [
@@ -283,6 +304,12 @@ class _Review:
                 if inner is not None:
                     self.helpers[node.name] = (inner, node)
         nodes = list(ast.walk(tree))
+        # Whether the code reads a process's exit status, and the calls whose
+        # value is dropped (a statement of its own).
+        self.reads_status = any(
+            isinstance(n, ast.Attribute) and n.attr == "returncode" for n in nodes
+        )
+        self.dropped = {id(n.value) for n in nodes if isinstance(n, ast.Expr)}
         loads = [
             n.id
             for n in nodes
@@ -563,6 +590,7 @@ class _Review:
     def run(self, tree: ast.AST) -> None:
         self.passed(tree)
         for node in self.later:
+            self.f.site = _site(node)
             if isinstance(node, ast.Call):
                 self.call(node)
                 self.code_write(node)
@@ -590,6 +618,7 @@ class _Review:
         for node in nodes:
             if not isinstance(node, ast.Name | ast.Attribute):
                 continue
+            self.f.site = _site(node)
             name = self.name(node)
             if name.split(".")[0] == "ctypes":
                 self.f.doubt("Uses ctypes, which melo cannot check.")
@@ -681,6 +710,12 @@ class _Review:
             self.f.add("credentials", "Reads your browser's cookies.")
         if any(n.startswith("pip._internal") for n in names):
             self.f.add("install", "Runs pip's installer from Python.")
+        if any(
+            n.split(".")[0] in _DRIVERS or n.rsplit(".", 1)[-1] in _DRIVER_NAMES
+            for n in names
+        ):
+            # Another program runs what it is told, outside melo's limits.
+            self.f.add("system", "Drives another app or a shell through macOS.")
         # An import runs the workspace module it names (design rule 8).
         if isinstance(node, ast.Import):
             for a in node.names:
@@ -727,11 +762,25 @@ class _Review:
             )
         ):
             self.process(node, name, attr, kw)
+        elif module == "webbrowser" and attr.startswith("open") and first:
+            # A browser opens a local file with the app it belongs to.
+            for url in self.fold(first):
+                if not isinstance(url, str):
+                    f.doubt("Opens a page or a file melo could not name.")
+                elif url.startswith("file:") or "://" not in url:
+                    shell.opened(ctx, f, url, ctx.root)
         elif attr == "open" and module != "os":
             at = 0 if method else 1
             mode = self.fold(node.args[at] if len(node.args) > at else kw.get("mode"))
             write = any(set(str(m)) & set("wax+") for m in mode if m)
             self.paths(base if method else first, write, "write" if write else "read")
+        elif attr in ("hardlink_to", "symlink_to") and base is not None:
+            # The new link is the receiver; what it points at is read through it.
+            self.paths(first, False, "read")
+            self.paths(base, True, "write")
+        elif attr == "link_to" and base is not None:
+            self.paths(base, False, "read")
+            self.paths(first, True, "write")
         elif attr in _PATH_OPS and base is not None:
             self.paths(base, _PATH_OPS[attr] != "read", _PATH_OPS[attr])
         elif attr in ("rename", "replace") and len(node.args) == 1 and method:
@@ -793,6 +842,92 @@ class _Review:
             for url in self.fold(first):
                 if "://" in str(url) and shell.LARGE.search(str(url).split("?")[0]):
                     shell.download(ctx, f, url, url.rsplit("/", 1)[-1], ctx.root)
+        self.network(node, name, attr, kw, first, base if method else None)
+
+    def network(
+        self,
+        node: ast.Call,
+        name: str,
+        attr: str,
+        kw: dict[str, Any],
+        first: ast.expr | None,
+        base: ast.expr | None,
+    ) -> None:
+        """Searches through ``~/.cache``, requests to melo's own gateway, and requests that send."""
+        ctx, f = self.ctx, self.f
+        if name in ("os.walk", "os.fwalk") or attr == "rglob" and base is not None:
+            roots = self.fold(base if attr == "rglob" else first)
+            if not any(isinstance(r, str) for r in roots):
+                f.doubt("Searches a folder melo could not name.")
+            for root in (r for r in roots if isinstance(r, str)):
+                search(ctx, f, root)
+        elif name in ("glob.glob", "glob.iglob") or attr == "glob" and base is not None:
+            parent = (
+                [""]
+                if attr != "glob" or base is None or name.startswith("glob.")
+                else self.fold(base)
+            )
+            for folder, pattern in product(parent, self.fold(first)):
+                if not isinstance(folder, str) or not isinstance(pattern, str):
+                    f.doubt("Searches a folder melo could not name.")
+                    continue
+                self.globbed(f"{folder}/{pattern}" if folder else pattern)
+        values = [*node.args, *kw.values()]
+        if attr in _SOCKET_CALLS or name in ("docker.from_env", "docker.DockerClient"):
+            texts = [v for a in values for v in self.fold(a) if isinstance(v, str)]
+            if name.startswith("docker.") or any(engine_socket(f, t) for t in texts):
+                if name.startswith("docker."):
+                    f.add(
+                        "system",
+                        "Talks to a container engine, whose containers can reach every file.",
+                    )
+                return
+        # A fetch that sends nothing: a GET of /api/health only asks whether melo runs.
+        methods = {str(m).upper() for m in self.fold(kw.get("method"))} - {"NONE"}
+        sending = not (
+            attr in ("get", "urlopen", "head", "Request", "stream")
+            and not {"data", "json", "files"} & set(kw)
+            and methods <= {"GET", "HEAD"}
+        )
+        for value in (v for a in values for v in self.fold(a)):
+            if isinstance(value, str) and shell_own_api(value, sending=sending):
+                return reach_own(f, value)
+            if (
+                isinstance(value, tuple)
+                and len(value) > 1
+                and own_port(str(value[0]), value[1])
+            ):
+                return reach_own(f, f"{value[0]}:{value[1]}")
+        if len(node.args) > 1 or "port" in kw:
+            port = node.args[1] if len(node.args) > 1 else kw["port"]
+            for host, number in product(self.fold(first), self.fold(port)):
+                if isinstance(host, str) and own_port(host, number):
+                    return reach_own(f, f"{host}:{number}")
+        sent = (
+            [str(m).upper() for m in self.fold(kw.get("method"))]
+            if "method" in kw
+            else []
+        )
+        if attr == "request" and first is not None:
+            sent += [str(m).upper() for m in self.fold(first)]
+        if attr in ("send", "sendall", "sendto") and first is not None:
+            sent += [
+                found.group(1)
+                for m in self.fold(first)
+                if (found := _REQUEST_LINE.match(str(m or "")))
+            ]
+        for verb in (v for v in sent if v in SENDING):
+            how = "over a socket" if attr.startswith("send") else "to a server"
+            return f.add("send_out", f"Sends a {verb} request {how}.")
+
+    def globbed(self, pattern: str) -> None:
+        """A ``glob`` of *pattern*: credentials when it can reach a folder of sign-ins or keys."""
+        cut = re.split(r"[*?[]", pattern, maxsplit=1)[0]
+        folder = cut if cut.endswith("/") or cut == pattern else os.path.dirname(cut)
+        path = resolve(self.ctx, folder or ".")
+        if path is None:
+            return self.f.doubt(f"Searches a folder melo cannot resolve: {pattern}")
+        search(self.ctx, self.f, path, pattern=pattern[len(folder) :] or "*")
 
     def helper_call(self, node: ast.Call, inner: ast.Call, fn: _Def) -> None:
         """One call of a local helper: routine only for literal read-only commands.
@@ -928,14 +1063,25 @@ class _Review:
             )
             first = node.args[0] if node.args else kw.get("args")
             argvs = self.fold(node.args[1] if many else first)
+        status = (
+            self.reads_status
+            or self.fold(kw.get("check")) == ["True"]
+            or attr in ("check_call", "check_output")
+            or (name == "os.system" or attr == "call")
+            and id(node) not in self.dropped
+        )
         for argv in argvs:
             parts = [argv] if isinstance(argv, str) else list(argv or [])
             if isinstance(argv, str) and in_shell:
-                shell.review_shell(ctx.deeper(), f, argv)
+                shell.review_shell(ctx.deeper(), f, argv, status)
             elif not in_shell and any(isinstance(p, str) for p in parts):
                 program = parts[0] if isinstance(parts[0], str) else "?"
                 rest = [p if isinstance(p, str) else "$value" for p in parts[1:]]
-                shell.run_argv(ctx.deeper(), f, [program, *rest], ctx.root)
+                # Wrappers (env, nice, xargs…) run the program they name; input
+                # given to it (input=, stdin=) is code for an interpreter.
+                given = "input" in kw or "stdin" in kw
+                ran = shell.unwrap(f, [program, *rest])
+                shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
                 f.doubt("Runs a command melo could not read.")
 
@@ -1002,6 +1148,14 @@ def _join(sep: str, parts: tuple[Any, ...]) -> Any:
     return None
 
 
+def _site(node: ast.AST) -> str:
+    """A finding's site: the call or name as code, without layout or comments."""
+    try:
+        return "py:" + ast.unparse(node)[:300]
+    except (ValueError, RecursionError):
+        return "py:" + type(node).__name__
+
+
 def review_python(ctx: Context, f: Findings, code: str) -> None:
     if ctx.depth > shell.MAX_DEPTH:
         return f.doubt("Nests code too deeply for melo to check.")
@@ -1009,4 +1163,8 @@ def review_python(ctx: Context, f: Findings, code: str) -> None:
         tree = ast.parse(code)
     except (SyntaxError, ValueError):
         return  # it fails without effect
-    _Review(ctx, f, tree).run(tree)
+    site = f.site
+    try:
+        _Review(ctx, f, tree).run(tree)
+    finally:
+        f.site = site

@@ -32,6 +32,28 @@ final class FolderBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 }
 
+/// The console tells the app which language its page chose, once each time the page loads (so also after Settings
+/// changed it): the menus, the pill and the pet speak it from then on. Only the gateway's own page is heard, and only
+/// a language the app has counts. There is no answer.
+final class LanguageBridge: NSObject, WKScriptMessageHandler {
+    static let name = "localmeloLanguage"
+    private let gatewayPort: () -> Int
+    private let changed: (String) -> Void
+
+    init(gatewayPort: @escaping () -> Int, changed: @escaping (String) -> Void) {
+        self.gatewayPort = gatewayPort
+        self.changed = changed
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard acceptsBridgeMessage(scheme: origin.protocol, host: origin.host, port: origin.port,
+                                   isMainFrame: message.frameInfo.isMainFrame, gatewayPort: gatewayPort()),
+              let language = languageRequest(message.body) else { return }
+        changed(language)
+    }
+}
+
 /// The console's Settings reads and changes what is on the desktop, the same choice as the menus' "On the desktop".
 /// Only the gateway's own page is heard; the answer is always the choice in force afterwards.
 final class DesktopBridge: NSObject, WKScriptMessageHandlerWithReply {

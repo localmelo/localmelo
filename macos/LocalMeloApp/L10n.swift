@@ -66,6 +66,13 @@ func pickLanguage(setting: String, preferred: [String]) -> String {
     return "en"
 }
 
+/// The language a page message names, or nil: anything but `{language: "<a language the app has>"}`.
+func languageRequest(_ body: Any) -> String? {
+    guard let message = body as? [String: Any], let language = message["language"] as? String,
+          L10n.languages.contains(language) else { return nil }
+    return language
+}
+
 /// `[console] language` of the config file's text: `auto` when the file, the table or the key is missing.
 func consoleLanguageSetting(_ config: String?) -> String {
     var table = ""

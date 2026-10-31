@@ -8,6 +8,7 @@ import contextlib
 import contextvars
 import itertools
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -26,7 +27,7 @@ from localmelo.melo.executor.process_gate import (
     gate_supported,
     gated_exec,
 )
-from localmelo.melo.executor.sandbox import WriteConfinement
+from localmelo.melo.executor.sandbox import Confinement
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -83,6 +84,12 @@ _REAP_TIMEOUT_S = 5.0
 # Bytes the file_read of a workspace reads at most. As UTF-8 they always
 # hold the MAX_OUTPUT_LEN characters that the executor's result check keeps.
 MAX_FILE_READ_BYTES = 200_000
+
+# Bytes the file_read of a workspace scans at most to count the file's lines
+# (a longer file reports "N+" lines), and the room left in MAX_OUTPUT_LEN
+# for the note that says which lines it shows.
+MAX_LINE_SCAN_BYTES = 64 * 1024 * 1024
+_NOTE_ROOM = 200
 
 # What one list_files call shows at most (entries at every level), how deep
 # it goes, and how many more entries it counts to say how many it left out
@@ -164,7 +171,7 @@ async def _run_shell(
     stdin: int | None = None,
     timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> tuple[str, int]:
     """Run *command* in a shell; return its output and its exit status.
 
@@ -177,7 +184,7 @@ async def _run_shell(
     :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
     never this process's own. With *confinement*, the shell starts under its
     profile with its temporary folder, and the output starts with its line
-    for refused writes (see :meth:`WriteConfinement.note`).
+    for refused writes (see :meth:`~localmelo.melo.executor.sandbox.WriteConfinement.note`).
     """
     limit = SHELL_TIMEOUT_S if timeout_s is None else timeout_s
     argv = ["/bin/sh", "-c", command]
@@ -251,18 +258,46 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
 @_builtin(
     ToolDef(
         name="file_read",
-        description="Read the contents of a file",
+        description=(
+            "Read the contents of a file. A long file is cut with a note of how "
+            "many lines it has; read a part with start_line and end_line "
+            "(1-based, inclusive) instead of slicing the file in code."
+        ),
         parameters={
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "File path"}},
+            "properties": {
+                "path": {"type": "string", "description": "File path"},
+                "start_line": {
+                    "type": "integer",
+                    "description": "First line to read (default 1)",
+                    "minimum": 1,
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Last line to read (default: the end)",
+                    "minimum": 1,
+                },
+            },
             "required": ["path"],
         },
         semantic_tags=["file", "read", "open", "content", "text"],
     )
 )
-async def _file_read(path: str) -> str:
+async def _file_read(
+    path: str, start_line: int | None = None, end_line: int | None = None
+) -> str:
+    start = _line_range(start_line, end_line)
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: open(path).read())
+    text = await loop.run_in_executor(None, lambda: open(path).read())
+    if start == 1 and end_line is None and len(text) <= MAX_OUTPUT_LEN:
+        return text
+    lines = _split_lines(text)
+    return _view_lines(
+        _select(lines, start, end_line),
+        start,
+        len(lines),
+        size=len(text.encode()),
+    )
 
 
 @_builtin(
@@ -392,7 +427,7 @@ async def _python_exec(code: str) -> str:
 
 def builtins_with_env(
     tool_env: Mapping[str, str],
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> dict[str, ToolFunction]:
     """The unrooted ``shell_exec`` and ``python_exec``, with *tool_env* added.
 
@@ -513,7 +548,7 @@ async def _run_python(
     *,
     cwd: str | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> str:
     """Run *code* in a child Python, in *cwd* (``None``: this directory).
 
@@ -591,7 +626,7 @@ def rooted_builtins(
     *,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> dict[str, tuple[ToolFunction, float | None]]:
     """The built-ins that work in the workspace *root*, by tool name.
 
@@ -674,7 +709,7 @@ def _rooted_shell_exec(
     root: str,
     tool_timeout_s: float | None,
     tool_env: Mapping[str, str] | None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> ToolFunction:
     async def shell_exec(command: str) -> str:
         text, returncode = await _run_shell(
@@ -697,7 +732,7 @@ def _rooted_shell_exec(
 def _rooted_python_exec(
     root: str,
     tool_env: Mapping[str, str] | None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> ToolFunction:
     async def python_exec(code: str) -> str:
         return await _run_python(
@@ -715,10 +750,15 @@ def _record_exit_code(returncode: int) -> None:
 
 
 def _rooted_file_read(root: str) -> ToolFunction:
-    async def file_read(path: str) -> str:
+    async def file_read(
+        path: str, start_line: int | None = None, end_line: int | None = None
+    ) -> str:
         target = os.path.join(root, path)
+        start = _line_range(start_line, end_line)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _read_regular_file, target)
+        return await loop.run_in_executor(
+            None, _read_regular_file, target, start, end_line
+        )
 
     return file_read
 
@@ -783,7 +823,10 @@ def edited_text(text: str, old: str, new: str, path: str = "the file") -> str:
         raise ValueError("old must not be empty; use file_write for a new file")
     count = text.count(old)
     if count == 0:
-        raise ValueError(f"The text to replace is not in {path}; read it again")
+        raise ValueError(
+            f"The text to replace is not in {path}; read the file again and copy "
+            "the text exactly, spaces and line breaks included"
+        )
     if count > 1:
         raise ValueError(
             f"The text to replace occurs {count} times in {path}; "
@@ -792,8 +835,30 @@ def edited_text(text: str, old: str, new: str, path: str = "the file") -> str:
     return text.replace(old, new, 1)
 
 
-def _edit_regular_file(path: str, old: str, new: str) -> str:
-    """Replace the one *old* in the regular UTF-8 file *path* with *new*."""
+def edit_precheck(root: str | None = None) -> Callable[[Mapping[str, Any]], str]:
+    """A check that a ``file_edit`` can apply, to run before anyone is asked.
+
+    It reads the file (joined to *root* when there is one, as the tool does)
+    and returns why the edit cannot apply (no such file, the text to replace
+    empty, missing or not unique), or ``""`` when it can.
+    """
+
+    def check(arguments: Mapping[str, Any]) -> str:
+        path = arguments["path"]
+        target = os.path.join(root, path) if root else path
+        try:
+            edited_text(_read_editable(target), arguments["old"], "", target)
+        except FileNotFoundError:
+            return f"{target} does not exist; file_edit changes an existing file"
+        except (OSError, ValueError) as exc:
+            return str(exc)
+        return ""
+
+    return check
+
+
+def _read_editable(path: str) -> str:
+    """The text of the regular UTF-8 file *path*, which an edit may change."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         _require_regular_file(fd, path)
@@ -804,37 +869,142 @@ def _edit_regular_file(path: str, old: str, new: str) -> str:
             chunks.append(chunk)
     finally:
         os.close(fd)
-    text = b"".join(chunks).decode("utf-8")
+    return b"".join(chunks).decode("utf-8")
+
+
+def _edit_regular_file(path: str, old: str, new: str) -> str:
+    """Replace the one *old* in the regular UTF-8 file *path* with *new*."""
+    text = _read_editable(path)
     _write_regular_file(path, edited_text(text, old, new, path))
     lines = (old.count("\n") + 1, new.count("\n") + 1)
     return f"Edited {path}: {lines[0]} line(s) replaced with {lines[1]}"
 
 
-def _read_regular_file(path: str) -> str:
-    """The text of the regular file *path*, cut as :func:`rooted_builtins` says."""
+def _read_regular_file(path: str, start: int = 1, end: int | None = None) -> str:
+    """The text of the regular file *path*, cut as :func:`rooted_builtins` says.
+
+    *start* and *end* are the first and last line wanted (see
+    :func:`_line_range`).
+    """
     limit = MAX_FILE_READ_BYTES
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         _require_regular_file(fd, path)
-        chunks: list[bytes] = []
-        left = limit + 1  # one byte more tells whether the file is longer
-        while left > 0:
-            chunk = os.read(fd, left)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            left -= len(chunk)
-        data = b"".join(chunks)
-        size = max(os.fstat(fd).st_size, len(data))
+        # The file is read line by line: the lines wanted are kept, up to
+        # the byte cap, and the others are only counted (up to a scan cap).
+        picked: list[bytes] = []
+        held = number = scanned = 0
+        midline = False  # the last read stopped inside a line longer than the cap
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            while scanned < MAX_LINE_SCAN_BYTES:
+                raw = source.readline(limit + 1)
+                if not raw:
+                    break
+                scanned += len(raw)
+                number += 0 if midline else 1
+                midline = len(raw) > limit and not raw.endswith(b"\n")
+                if number >= start and (end is None or number <= end) and held <= limit:
+                    picked.append(raw)
+                    held += len(raw)
+        size = max(os.fstat(fd).st_size, scanned)
     finally:
         os.close(fd)
+    exact = scanned < MAX_LINE_SCAN_BYTES
+    data = b"".join(picked)
     cut = len(data) > limit
     # Strict UTF-8; a character that the limit cuts in two is dropped.
     text = codecs.getincrementaldecoder("utf-8")().decode(data[:limit], final=not cut)
-    if not cut and len(text) <= MAX_OUTPUT_LEN:
+    _require_line(start, number, exact)
+    return _view_lines(
+        _split_lines(text), start, number, exact=exact, size=size, byte_cut=cut
+    )
+
+
+def _line_range(start_line: int | None, end_line: int | None) -> int:
+    """The first line wanted, 1 when none is given; ``ValueError`` for a bad range."""
+    start = 1 if start_line is None else start_line
+    if start < 1 or (end_line is not None and end_line < start):
+        raise ValueError(
+            "start_line and end_line count from 1 and end_line must not come "
+            f"before start_line (got {start_line}, {end_line})"
+        )
+    return start
+
+
+def _require_line(start: int, total: int, exact: bool) -> None:
+    """``ValueError`` when line *start* is past the end of a file of *total* lines."""
+    if start > max(total, 1):
+        more = "" if exact else " or more"
+        raise ValueError(
+            f"start_line {start} is past the end: the file has {total:,} lines{more}"
+        )
+
+
+def _split_lines(text: str) -> list[str]:
+    """The lines of *text* with their line breaks; only a newline ends a line."""
+    return re.findall(r"[^\n]*\n|[^\n]+", text)
+
+
+def _select(lines: list[str], start: int, end: int | None) -> list[str]:
+    """Lines *start* to *end* (1-based, inclusive) of *lines*."""
+    _require_line(start, len(lines), True)
+    return lines[start - 1 : end]
+
+
+def _view_lines(
+    lines: list[str],
+    first: int,
+    total: int,
+    *,
+    exact: bool = True,
+    size: int = 0,
+    byte_cut: bool = False,
+) -> str:
+    """What file_read shows of *lines*, the lines wanted from number *first*.
+
+    The file has *total* lines (at least that many unless *exact*) and
+    *size* bytes. A text that is all of the file and fits MAX_OUTPUT_LEN
+    comes back as it is; any other ends with a note of how many lines the
+    file has, which lines this shows and where to go on (``start_line``).
+    Only whole lines are kept, so the line to go on from is exact; a first
+    line that alone is too long is cut. *byte_cut* says the byte cap ended
+    the last line early.
+    """
+    text = "".join(lines)
+    last = first + len(lines) - 1
+    whole_file = first == 1 and exact and not byte_cut and last == total
+    if whole_file and len(text) <= MAX_OUTPUT_LEN:
         return text
-    note = f"\n... [truncated: the file has {size} bytes]"
-    return text[: MAX_OUTPUT_LEN - len(note)] + note
+    whole = lines[:-1] if byte_cut and not text.endswith("\n") else lines
+    kept: list[str] = []
+    used = 0
+    for line in whole:
+        if used + len(line) > MAX_OUTPUT_LEN - _NOTE_ROOM:
+            break
+        kept.append(line)
+        used += len(line)
+    count = f"{total:,}{'' if exact else '+'}"
+    if not kept:
+        # The first line alone is too long; cut it. A file of one line has
+        # nothing to go on from, and its note names the bytes.
+        if total == 1 and exact:
+            note = f"\n... [truncated: the file has {size} bytes]"
+        else:
+            note = (
+                f"\n... [truncated: the file has {count} lines; line {first} is "
+                f"too long, showing its start; read more with start_line={first + 1}]"
+            )
+        return lines[0][: MAX_OUTPUT_LEN - len(note)] + note
+    shown = first + len(kept) - 1
+    cut = byte_cut or len(kept) < len(lines)
+    note = (
+        f"\n... [{'truncated: ' if cut else ''}the file has {count} lines; "
+        f"showing {first}-{shown}"
+    )
+    if not exact or shown < total:
+        note += f"; read more with start_line={shown + 1}"
+    note += "]"
+    return "".join(kept) + (note[1:] if kept[-1].endswith("\n") else note)
 
 
 def _list_directory(path: str, depth: int) -> str:

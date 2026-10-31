@@ -39,6 +39,7 @@
 
 - `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
 - `Did not finish: Fix CI` 加上它结束的原因。
+- `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped，也有 **Continue**。因其他原因失败的任务仍是 `Did not finish`。
 - `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
 - **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
@@ -52,10 +53,11 @@
 
 ![主对话：回答了一个问题；一个任务已完成回来；一个任务打开了优先级列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
 
-- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
-- **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样，并配一个简短的标题。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
+- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。带有 `briefly`、`in short`、`one line`、`简单说一下` 或 `一句话` 的问题一律在这里回答，只做快速查看：不会被提议作为任务。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不需要模型来判断。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样。主对话这样开始的任务会立刻以你消息的开头部分作为标题开始，等模型回答一次简短的请求（用最低优先级，不会排在真正的工作前面）后，再按你消息的语言改成 3 到 8 个词的标题（`Hide the recovery card in default mode`）；很短的消息本身就是标题，你在这期间给任务起的名字会保留，模型 6 秒内没有回答时，开头部分保持不变。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
 - **优先级写作 P0 到 P5。** 一行里显示代码（`P1`），悬停可看含义。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 P1（今天），"no rush"、"不急" 为 P3（有空时），其余为 P2（正常）。那一行的 **Change** 会打开列表（`P0 · runs first; others wait`、`P1 · today`、`P2 · normal`、`P3 · when there is time`、`P4 · only when the computer is idle`、`P5 · on hold until you start it`；含义依次是：最先运行，其他任务等待；今天；正常；有空时；仅在电脑空闲时；暂停，等你启动），设定你自己的优先级，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
+- **按名字继续已停止的任务。** `Continue the recovery card task where it stopped: run the tests` 或 `继续恢复卡片任务` 会立刻继续标题与这些词相符的那一个已停止的任务，不需要再点一下建议；整条消息就是它的下一轮。有几个已停止的任务相符时，每一个都作为一键发送的建议（`Suggested: send your message to …`）列出，供你挑选。已完成或仍在运行的任务会直接告诉你（`Fix CI is done. There is nothing to continue.`）。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
 - **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问（任意位置有 `?`，或写了 "quick question"），会先问 **Start this as a task?**。它用你这条消息的语言回答。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
@@ -180,8 +182,13 @@
 
 - **自动**跟随浏览器的语言，在 macOS App 里跟随 Mac 的语言：取第一个是英文或简体中文的语言，否则用英文。繁体中文会显示英文。
 - 要指定一种，打开**设置 → 外观 → 语言**：**自动**、**English** 或 **简体中文**。页面会以它重新载入。在终端里运行 `melo config set console.language zh-Hans`（或 `en`，或 `auto`）效果相同，之后重新载入页面。
-- 每个页面都跟随：主对话和它的卡片、面板的标签页、任务、Worker、设置和登录页。
+- 每个页面都跟随：主对话和它的卡片、面板的标签页、任务、后台、设置和登录页。
 - 网关为页面写的文字也用同一种语言：错误信息、面板里的行、主对话的卡片，以及它在你的消息后面加的行（`Started: …`、`Saved: …`，中文里是“已开始：…”“已保存：…”）。终端和其他 API 客户端保持英文。
+- 时间和日期按页面的语言写，而不是按你电脑的设置：英文是 `2:06 AM`、`Oct 31`，中文是 `上午 2:06`、`10月31日`、`星期五`。英文的钟点跟随你的电脑，所以用 24 小时制的电脑保持 24 小时制。
+- 失败运行的详情和**拷贝详情**拷出的那一行用页面的语言；状态、原因、错误文本和运行 id 原样拷出。状态行里的文字（上下文，开发者模式下还有缓存、步骤和队列）也用页面的语言，终端则用英文打印同样的数字。
+- 在中文里，询问高风险步骤的卡片（询问模式）和报告被拦下步骤的卡片（自动模式）都用中文写出问题和原因，按步骤的类别；步骤本身仍按原样显示在卡片上，你的模型写的内容也一样。
+- 定时事项的文字（`every weekday at 8:30`）和每一行说明自己正在做什么的话（`Reading notes.md`，macOS 的活动胶囊也这样显示）都跟随语言，钟点则按页面的格式（`8:30 AM`、`上午 8:30`）。check-in 的提示也用这种语言写：先看设置，其次是页面最近一次请求的语言。
+- 在 macOS App 里，页面以新语言重新载入的那一刻，菜单、活动胶囊和 Melo 的菜单就换了语言，不需要重启。
 - 命令、路径、模型名和级别 P0-P5 从不翻译；术语见[界面术语](../STYLE.md#interface-glossary)。无论设置是什么，Melo 都用你写的语言回答。
 
 <a id="settings"></a>
@@ -241,6 +248,20 @@
 模型服务器完全连不上时，卡片写 `Could not reach the model server`，并问 `Is your model server still running at 127.0.0.1:8000? Start it, then try again.`，其中的地址就是失败的那个地址。卡片不重复错误本身：提供方的原始文字留在 **Details** 中。实心按钮是 **Try again**（该轮次已运行过工具时是 **Continue**，接着做而不是从头开始），**Change the server address** 是打开设置的链接。使用云端模型时，提示是 `Check your network connection, then try again.`，链接仍是 **Open model settings**，因为没有地址可改。以这种方式结束的运行，其工作框也不再列出重试行（卡片已经说过了）；运行仍在重试时它们照常显示。
 
 只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
+
+<a id="auto-mode"></a>
+
+## 自动模式
+
+在 **Auto**（自动）下，melo 不问就做：常规步骤直接运行，有风险的步骤或你没要求的步骤会被拦下并说明原因。默认的 **Ask**（询问）会在运行命令和更改文件前先问你。
+
+- **切换。** 输入框下方模型旁边的按钮写着 **Ask** 或 **Auto**；它的菜单“melo 在这个对话里怎么做”从 melo 的下一步起切换这个对话（已经在等待的卡片保持不变）。新对话以 设置 → 对话与文件夹 → **新对话开始时**（`[approvals] mode`）中的模式开始；主对话在你为它选定模式之前跟随这个设置。
+- **会运行什么。** 在对话文件夹内、不安装、不下载、不发送、不删除任何东西的步骤。melo 无法判断的步骤先交给你的模型，只有在它属于常规且是你要求的内容时才会运行。在自动模式下，写入文件夹之外的操作即使没有被规则发现也会失败：它的输出写着 `writing outside the workspace is not allowed in auto mode`。自动模式下的步骤既读不到 melo 的登录令牌，也连不上 melo 自己的 API。
+- **是审查，不是围墙。** 自动模式会拦下有风险的步骤和偏离你要求的步骤。它的沙箱把步骤的文件限制在文件夹内，并让它碰不到 melo 的登录信息；但把工作交给另一个应用或程序的步骤（打开应用或脚本、用脚本控制另一个应用、交给另一种语言的代码、临时下载并运行的软件包或后台任务）是由审查来判断的，而不是被隔离：这类步骤会被拦下或交给你的模型检查，永远不会当作常规步骤运行。沙箱也不让步骤连接容器引擎。
+- **会拦下什么。** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、来自网络的代码等，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行；如果文件夹里包含正在运行的那份 localmelo，写入那份副本的操作会被拒绝。该步骤的那一行写着 `blocked: installs software`，工作内容下方的卡片说明拦下了什么、为什么，并显示这一步，melo 的回答会给出其他办法。
+- **允许它。** **Allow once**（允许一次）在 30 分钟内只运行这一步一次，并以你的名义发送“Go ahead with the step melo blocked: install software.”；或者回复“继续”。使用密码或密钥、更改系统设置、设置以后自动运行的东西、运行来自网络的代码或 melo 无法检查的代码的步骤，需要点按钮。melo 工作时按钮会等待；之后卡片写着 `Allowed once · ran at 14:02` 或 `Allowance expired`。
+- **任务。** 任务保留创建它时所在对话的模式。任务页面显示 **模式**，并列出 **被拦下的步骤**，每一项都能打开同样的卡片；任务在没有这些步骤的情况下继续，在那里点 **Allow once** 会把消息发给这个任务。定时的例行任务每次运行时采用它所在对话当时的模式。
+- 允许只保存在内存中：重启 localmelo 后会忘记；重试的那一轮没有用到的允许，会在那一轮结束时失效。
 
 <a id="persistence-and-limits"></a>
 

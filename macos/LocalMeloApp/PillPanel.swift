@@ -138,13 +138,18 @@ final class PillView: NSView {
         close.onPress = { [weak self] in self?.onDismiss?() }
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+        describeActions()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// The one custom action's name, in the language now in use.
+    func describeActions() {
         setAccessibilityCustomActions([NSAccessibilityCustomAction(name: L10n.t("app.pill.hide", "Hide until the next task")) { [weak self] in
             self?.onDismiss?()
             return true
         }])
     }
-
-    required init?(coder: NSCoder) { nil }
 
     private static func label(_ size: CGFloat, _ weight: NSFont.Weight) -> NSTextField {
         let field = NSTextField(labelWithString: "")
@@ -302,13 +307,14 @@ final class DesktopMenu: NSObject {
     func makeItem() -> NSMenuItem {
         let menu = NSMenu(title: desktopMenuTitle)
         for mode in DesktopMode.allCases {
-            let item = menu.addItem(withTitle: mode.title, action: #selector(pick(_:)), keyEquivalent: "")
+            let item = menu.addItem(withTitle: "", action: #selector(pick(_:)), keyEquivalent: "").word(mode.menuWord)
             item.target = self
             item.representedObject = mode.rawValue
             items.append(item)
         }
         let entry = NSMenuItem(title: desktopMenuTitle, action: nil, keyEquivalent: "")
         entry.submenu = menu
+        entry.word(.desktop)
         show(current)
         return entry
     }
@@ -402,6 +408,12 @@ final class PillController: NSObject {
     /// Whether the main window is in front of the person.
     func windowShown(_ shown: Bool) {
         windowIsShown = shown
+        evaluate()
+    }
+
+    /// The console's language changed: the line and the labels are written again from the last health reply.
+    func languageChanged() {
+        view.describeActions()
         evaluate()
     }
 

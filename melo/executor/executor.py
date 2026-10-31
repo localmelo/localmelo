@@ -44,6 +44,10 @@ ToolCallable = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
 # Executor.execute_structured); its decision lets the call run or denies it.
 ApprovalGate = Callable[[ExecutionRequest], Awaitable[ApprovalDecision]]
 
+# A tool's own check of a call's arguments, run before the approval gate is
+# asked: the reason the call cannot work, or "" when it can.
+Precheck = Callable[[Mapping[str, Any]], str]
+
 
 class Executor:
     def __init__(
@@ -61,6 +65,7 @@ class Executor:
         self._timeouts_ms: dict[str, float] = {}
         # The tools registered as requiring approval.
         self._marked_for_approval: set[str] = set()
+        self._prechecks: dict[str, Precheck] = {}
         # Tools only the harness may call (see register_harness_tool).
         self._harness_defs: dict[str, ToolDef] = {}
         self._default_timeout_ms = timeout_ms
@@ -79,6 +84,7 @@ class Executor:
         timeout_ms: float | None = None,
         requires_approval: bool = False,
         process_free: bool = False,
+        precheck: Precheck | None = None,
     ) -> None:
         """Register *fn* as the callable for tool *name*.
 
@@ -88,8 +94,15 @@ class Executor:
         gate of :meth:`execute_structured`, when there is one, before it
         runs. Registering a tool again resets both to what that call
         passes, so a call without *requires_approval* clears the mark.
+        *precheck* looks at the arguments of a call that would ask the
+        approval gate and says why it cannot work; such a call is refused
+        with ``INVALID_ARGUMENTS`` and the gate is not asked.
         """
         self._callables[name] = fn
+        if precheck is not None:
+            self._prechecks[name] = precheck
+        else:
+            self._prechecks.pop(name, None)
         if process_free:
             self._process_free.add(name)
         else:
@@ -323,6 +336,16 @@ class Executor:
                     ),
                     error_category=ErrorCategory.INVALID_ARGUMENTS,
                 )
+            precheck = self._prechecks.get(request.tool_name)
+            if precheck is not None:
+                problem = await asyncio.to_thread(precheck, request.arguments)
+                if problem:
+                    return ExecutionOutcome(
+                        tool_name=request.tool_name,
+                        status=ExecutionStatus.ERROR,
+                        error=problem,
+                        error_category=ErrorCategory.INVALID_ARGUMENTS,
+                    )
             # A CancelledError propagates: the call does not run.
             try:
                 decision: object = await approve(request)

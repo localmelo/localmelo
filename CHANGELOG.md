@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
+  file is read in parts instead of being sliced through Python. A read that
+  shows only part of a file now ends with how many lines the file has and the
+  `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400;
+  read more with start_line=401]`); a start past the end is an error that
+  counts the lines. [#361]
+- Auto mode in the console and the app: an **Ask / Auto** chip beside the
+  model switches a chat from melo's next step, and Settings → Chats and
+  folders → **New chats start in** (`[approvals] mode`) picks how new chats
+  start (the terminal's own chat too). A step Auto blocked reads
+  `blocked: installs software` in its row, with a card under the work that
+  says what and why, shows the step and offers **Allow once**: that exact step
+  runs once within 30 minutes, after the message "Go ahead with the step melo
+  blocked: …", or reply "go ahead"; a change to localmelo itself can never be
+  allowed. A task keeps the mode of the chat it came from, shows it on its
+  page and lists its blocked steps with the same card; in Auto nothing holds
+  it. Calls Auto decides run in the write sandbox, so a write outside the
+  folder fails even when no rule caught it. Also: an edit that adds a second
+  call melo cannot read now counts; only the running localmelo is "localmelo
+  itself", not another copy of its source; a step's names for the "did you ask
+  for it" check come from its commands and code, not its other strings; and
+  the browser's site question respects a stopped turn. [#359]
 - Reminders that run once at a time. Say `remind me to send the report on
   Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` in the main chat
   and it shows the date and time it understood (`Remind you on Fri Oct 30 at
@@ -29,6 +51,60 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   stays English. [#350]
 
 ### Changed
+
+- A `file_edit` that cannot apply fails at once and asks no one: the text to
+  replace must occur exactly once, and a missing text, several matches, an
+  empty text or a missing file return a plain error that says what to do
+  (read the file again; take more lines around it) before the approval is
+  asked. [#361]
+- A commit made from a step is refused when its message credits melo or an AI
+  (a `Co-Authored-By` trailer naming melo or an AI, a `Generated with` line, a
+  session link); a trailer that names a person is fine. [#361]
+- A step that goes by the exit status of a pipeline without `pipefail` (Python
+  that reads the `.returncode` of `pytest | tail`, or `pytest | tail && git
+  commit`) is now undecided, and its reason says the status is the last
+  command's, not the test's. [#361]
+- Tasks that stop, and continue. A task that uses all its steps is **Stopped**,
+  not Failed: its card in the main chat, its page, its Activity and Workers
+  rows and `melo task list|show` say so, show the sentence of its answer that
+  says what is left, and offer **Continue**, which picks the task up where it
+  stopped (`POST /api/tasks/{id}/continue`). A task that failed for another
+  reason stays Failed; `--json` and the exit codes of `melo task follow
+  --wait` are unchanged. `Continue the recovery card task where it stopped`
+  or `继续恢复卡片任务` in the main chat continues the one stopped task those
+  words name at once, with no suggestion to tap; with several matches each is
+  offered to pick from, and a task that is done or still working says so. A
+  question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话`
+  is answered in the main chat instead of being offered as a task. A task the
+  main chat starts begins at once and is renamed in 3 to 8 words in your
+  language, not by the first words of your message, when the model answers (a
+  name you gave it meanwhile stays), and a task held on an approval reads `Needs your
+  approval` in the Activity row (a wait for a model slot keeps `Waiting for
+  the model`). [#362]
+- Chinese, finished. Times and dates follow the page's language, not the
+  computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
+  `Oct 31` in English (an English computer on 24 hours keeps its clock), on
+  cards, the panel, task pages, Scheduled, Settings and the details of a
+  run. The panel's tab and every other place that said "Worker" say 后台
+  (后台任务 for a run); the model server's kind and the Settings choices
+  read in Chinese; and so do the status row (the context, and in developer
+  mode the cache, step and queue), a failed run's details and the line
+  **Copy details** copies, chore errors, the question and reasons on the
+  card for a high-impact step (Ask and Auto), a schedule's text with the
+  page's clock (`每个工作日 上午 8:30`), what each row says it is doing
+  (the macOS pill too) and the check-in's note. The status, the error text
+  and the run id are copied as they are, and the terminal and API clients
+  keep English. In the macOS app the menus, the pill and Melo's menu change
+  language at once when Settings changes it, without a restart.
+  `GET /api/sessions/{id}/status` also returns `parts` (the segments as
+  catalog keys and parameters) and a chore `when_said`; `segments` and
+  `when` are unchanged ([#360]).
+
+- Scheduled shows the time a chore is set for (`8:30`), not the few seconds
+  the start is spread by (`8:31`): a chore has `next_at` beside `next_run`,
+  which is still when the run starts, up to 120 seconds later. The line
+  "Wants to run a command" on the main chat's approval card reads in the
+  chosen language too ([#360]).
 
 - A run ends with a usable answer more often. The patient reflection gate
   (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
@@ -205,6 +281,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A model that is told not to think (`enable_thinking = false`) is no longer
+  failed for an answer it did give, and one failed turn no longer fails the
+  rest of the chat. After a reply that carried reasoning, every later plain
+  answer was taken for unfinished thinking, and a reply whose words the server
+  put in its reasoning field had no answer at all; the run ended `melo did not
+  finish an answer`. With thinking off, those words are the answer. Counted
+  reasoning tokens or a `<think>` that never closes still count as unfinished,
+  and models that think are unchanged. A turn that ends without an answer still
+  shows `[no answer: ...]` in the chat and the saved turn, but the model now
+  reads a note, `[The previous request ended without an answer.]`, in its place,
+  so it no longer copies the label as its own reply. [#358]
 - A broken model reply is no longer shown as the answer. A reply that starts
   with a spelled-out `<thinking>...</thinking>` block now has that block as its
   thinking, as a `<think>` block does, and the person no longer sees it while the
@@ -2956,3 +3043,8 @@ earlier milestones.
 [#353]: https://github.com/localmelo/localmelo/pull/353
 [#354]: https://github.com/localmelo/localmelo/pull/354
 [#356]: https://github.com/localmelo/localmelo/pull/356
+[#358]: https://github.com/localmelo/localmelo/pull/358
+[#359]: https://github.com/localmelo/localmelo/pull/359
+[#360]: https://github.com/localmelo/localmelo/pull/360
+[#361]: https://github.com/localmelo/localmelo/pull/361
+[#362]: https://github.com/localmelo/localmelo/pull/362

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,8 +20,10 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.support.gateway.chore_schedule import Schedule
+from localmelo.support.config import ConsoleConfig
+from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
 from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
@@ -346,6 +350,27 @@ async def test_a_due_chore_starts_one_user_rule_task_and_plans_its_next_run(
         # A second tick in the same minute starts nothing, and the model was never called.
         assert await runner.tick() == [] and len(await tasks_of(console)) == 1
         assert llm.requests == []
+
+
+async def test_a_chore_run_that_used_all_its_steps_says_so_in_the_readers_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(client, "Brief me", BRIEF)
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await console.workers.tasks.change(
+            task_id, state="failed", actor="scheduler", failure_reason="Out of steps"
+        )
+        [chore] = (await client.get("/api/chores")).json()["chores"]
+        assert (chore["last"]["state"], chore["last"]["line"]) == (
+            "failed",
+            "Ran out of steps",
+        )
+        chinese = await client.get(
+            "/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"}
+        )
+        assert chinese.json()["chores"][0]["last"]["line"] == "步数用完了"
 
 
 async def test_a_run_waits_for_its_jitter_and_never_starts_early(
@@ -1158,3 +1183,146 @@ async def test_a_reminders_card_shows_the_persons_words_even_when_its_run_failed
             plain, "sched.finished", {"state": "done"}
         )
         assert "reminder" not in await last_card()
+
+
+async def test_a_refused_chore_change_says_why_in_the_page_s_language(
+    tmp_path: Path,
+) -> None:
+    zh = {"X-LocalMelo-Language": "zh-Hans"}
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        # A time in the past, a time too far ahead, and a chore that is gone.
+        for at_text, english, chinese in (
+            (
+                "2026-10-28T06:59",
+                "That time has passed. Choose a new time.",
+                "这个时间已经过了。请选一个新的时间。",
+            ),
+            (
+                "2028-01-05T09:00",
+                "Reminders can be at most a year ahead.",
+                "提醒最多只能设在一年以内。",
+            ),
+        ):
+            body = {
+                "request": "Reminder: call mom",
+                "schedule": {"kind": "once", "at": at_text},
+            }
+            asked = await client.post("/api/chores", json=body)
+            assert asked.json()["error"]["message"] == english
+            told = await client.post("/api/chores", json=body, headers=zh)
+            assert told.json()["error"]["message"] == chinese
+            assert told.json()["error"]["code"] == "invalid_request"
+        chore = await add(client, "Brief me", BRIEF)
+        stale = await client.patch(
+            f"/api/chores/{chore['id']}",
+            json={"revision": 99, "title": "Other"},
+            headers=zh,
+        )
+        assert (
+            stale.json()["error"]["message"]
+            == "这个定时事项已经变了。请重新载入后再试。"
+        )
+        assert stale.json()["error"]["code"] == "stale_revision"
+        await client.delete(f"/api/chores/{chore['id']}")
+        gone = await client.delete(f"/api/chores/{chore['id']}", headers=zh)
+        assert (
+            gone.json()["error"]["message"]
+            == f"找不到 id 为 {chore['id']} 的定时事项。"
+        )
+        plain = await client.delete(f"/api/chores/{chore['id']}")
+        assert plain.json()["error"]["message"] == f"No chore has id {chore['id']}"
+
+
+async def test_the_checkin_is_written_in_the_console_s_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary("你的日程简报好了。")) as (
+        console, client, clock, summary, _
+    ):  # fmt: skip
+        task, _ = await console.workers.create(
+            {"objective": "Make slides", "title": "Slides"}
+        )
+        await set_state(console, task["task_id"], "waiting", clock.now)
+        clock.now += CHECKIN_S + 1
+        # The setting wins; with the setting on auto, the language a page asked for last.
+        assert console.language() == "en"
+        await client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
+        assert console.language() == "zh-Hans"
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["line"] == "你的日程简报好了。"
+        assert summary.facts == [["Slides：在等你"]]
+        # The model is asked for the note in that language too.
+        assert "Simplified Chinese" in chores_module._NOTE_LANGUAGE["zh-Hans"]
+        console.cfg = replace(console.cfg, console=ConsoleConfig(language="en"))
+        assert console.language() == "en"
+
+
+async def test_the_checkin_the_code_writes_is_in_the_console_s_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary(fail=True)) as (
+        console, client, clock, _, _
+    ):  # fmt: skip
+        console.cfg = replace(console.cfg, console=ConsoleConfig(language="zh-Hans"))
+        for title in ("Slides", "Photos"):
+            task, _ = await console.workers.create(
+                {"objective": "Do it", "title": title}
+            )
+            await set_state(console, task["task_id"], "waiting", clock.now)
+        clock.now += CHECKIN_S + 1
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["line"] in (
+            "Slides：在等你；Photos：在等你",
+            "Photos：在等你；Slides：在等你",
+        )
+
+
+async def test_a_chore_carries_its_schedule_as_words_for_the_page(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        assert chore["when"] == "every weekday at 8:30"
+        assert chore["when_said"] == {
+            "key": "schedule.weekdays",
+            "params": {"time": {"clock": 8 * 60 + 30}},
+        }
+        listed = (
+            await client.get("/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"})
+        ).json()
+        assert listed["chores"][0]["when"] == "每个工作日 8:30"
+
+
+async def test_the_next_time_shown_is_the_schedules_and_the_run_starts_within_the_jitter(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, jitter=JITTER_S) as (
+        console,
+        client,
+        clock,
+        _,
+        _,
+    ):
+        store = console.chore_runner.store
+        # Whatever the jitter, a weekday chore set for 8:30 is shown at 8:30.
+        for jitter in (0.0, 1.0, 71.0, JITTER_S - 0.1, JITTER_S):
+            store._jitter = functools.partial(float, jitter)
+            chore = await add(client, f"Brief me {jitter}", BRIEF)
+            assert chore["next_at"] == at("2026-10-28 08:30"), jitter
+            assert chore["next_run"] == at("2026-10-28 08:30") + jitter
+        # An every-N-hours chore names no time: the start is what it shows.
+        hours = await add(client, "Water the plants", {"kind": "hours", "every": 6})
+        assert hours["next_at"] == hours["next_run"]
+        # A reminder shows its own time.
+        reminder = await add(client, "Reminder: call mom", FRIDAY)
+        assert reminder["next_at"] == at("2026-10-30 09:00")
+        # The run starts after the shown time and within the jitter: only the chore with no jitter
+        # starts on the minute, and all of them have started once JITTER_S has passed.
+        clock.now = at("2026-10-28 08:30") + 0.5
+        assert len(await console.chore_runner.tick()) == 1
+        clock.now = at("2026-10-28 08:30") + JITTER_S
+        assert len(await console.chore_runner.tick()) == 4
+        listed = (await client.get("/api/chores")).json()["chores"]
+        brief = [c for c in listed if c["title"].startswith("Brief me")]
+        # Planned again from now: the next slot is shown at 8:30 too.
+        assert {c["next_at"] for c in brief} == {at("2026-10-29 08:30")}

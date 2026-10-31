@@ -1,24 +1,36 @@
+import {saidText} from './i18n.mjs';
+
+// The keys of the developer's segments (`status.*` in the catalogs): the cache, the step and the queue.
+const DEVELOPER_KEYS = /^status\.(cache|step|tasks)/;
+
 /**
  * A new user's row: the cache share, the step and phase and the queue counts
  * are for developers. A sentence such as "1 task waits for you" is not (the
  * server says it only for a task that holds on the person's approval), so it
- * stays.
+ * stays. A segment is its words (`{key, params}`, as the server sends them) or,
+ * from a server that sends only text, the terminal's English text.
  */
 export function plainSegments(segments) {
-  return segments.filter((text) => !text.startsWith('cache') && !text.startsWith('step ') && !text.startsWith('tasks '));
+  return segments.filter((segment) => (typeof segment === 'string'
+    ? !segment.startsWith('cache') && !segment.startsWith('step ') && !segment.startsWith('tasks ')
+    : !DEVELOPER_KEYS.test(segment.key)));
 }
 
 /**
  * The status row: the terminal's status-bar segments for one session, as
  * `GET /api/sessions/{id}/status` folds them on the server (cache share with
  * `--` when the server reports none, context, step, tasks), so the console
- * and the terminal show the same numbers. `api` takes paths relative to /api.
+ * and the terminal show the same numbers. The server sends each segment as
+ * words (`parts`: a catalog key and its parameters), which the row writes in
+ * the page's language, and as the terminal's English text (`segments`), which
+ * it draws when a server sends no parts. `api` takes paths relative to /api.
  * `bump()` asks for a refetch when a frame or a poll arrives; fetches are at
  * least `minGapMs` apart and never overlap, and a late answer for another
  * session is dropped. `schedule`/`cancel` and `clock` are injected for tests.
  * The segments are spans in one clipped line, so a narrow width drops the
  * rightmost first (see `.status-row` in workspace.css). `filter(segments)`
- * picks the ones to draw: default mode draws `plainSegments`.
+ * picks the ones to draw (the words, or the English texts): default mode
+ * draws `plainSegments`.
  */
 export function setupStatusRow({api, root, schedule = setTimeout, cancel = clearTimeout, clock = Date.now, minGapMs = 1000, filter = (segments) => segments}) {
   const doc = root.ownerDocument;
@@ -30,10 +42,10 @@ export function setupStatusRow({api, root, schedule = setTimeout, cancel = clear
   let dirty = false;
 
   function draw(segments) {
-    root.replaceChildren(...segments.map((text) => {
+    root.replaceChildren(...segments.map((segment) => {
       const span = doc.createElement('span');
       span.className = 'status-seg';
-      span.textContent = text;
+      span.textContent = typeof segment === 'string' ? segment : saidText(segment) ?? '';
       return span;
     }));
     root.hidden = segments.length === 0;
@@ -51,7 +63,8 @@ export function setupStatusRow({api, root, schedule = setTimeout, cancel = clear
       // Keep the last row: the next frame or poll asks again.
     }
     inflight = false;
-    if (mine === epoch && Array.isArray(body?.segments)) draw(filter(body.segments));
+    const rows = Array.isArray(body?.parts) ? body.parts : body?.segments;
+    if (mine === epoch && Array.isArray(rows)) draw(filter(rows));
     pump();
   }
 

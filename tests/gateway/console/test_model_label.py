@@ -12,10 +12,12 @@ from typing import Any
 import httpx
 import pytest
 
+from localmelo.support import onboard
 from localmelo.support.backends import discovery
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import probe as probe_module
 from localmelo.support.gateway.console.routes_settings import model_json, settings_json
+from localmelo.support.gateway.i18n import using
 
 # A name that never resolves: no test here can reach a model server.
 URL = "http://omlx.test/v1"
@@ -84,4 +86,30 @@ def test_the_settings_dropdown_names_omlx_beside_vllm() -> None:
     # The other entries are unchanged.
     assert {"key": "ollama", "label": "Ollama (local endpoint)", "kind": "local"} in (
         choices["chat_backends"]
+    )
+
+
+def test_the_generic_kind_reads_in_the_page_s_language_and_names_stay_names() -> None:
+    with using("zh-Hans"):
+        assert model_json(_cfg())["backend_label"] == "兼容 OpenAI 的服务器"
+        assert model_json(_cfg(chat_alias="omlx"))["backend_label"] == "oMLX"
+        choices = settings_json()["choices"]
+        entry = "oMLX 或 vLLM（兼容 OpenAI，本地）"
+        assert {"key": "vllm", "label": entry, "kind": "local"} in choices[
+            "chat_backends"
+        ]
+        assert {"key": "openai", "label": "OpenAI", "kind": "cloud"} in (
+            choices["chat_backends"]
+        )
+        assert {"key": "none", "label": "无（没有长期记忆）"} in choices[
+            "embedding_backends"
+        ]
+    # A client that asks for no language, and the terminal's setup, read English.
+    assert model_json(_cfg())["backend_label"] == GENERIC
+    choices = settings_json()["choices"]
+    assert [(c["key"], c["label"]) for c in choices["chat_backends"]] == (
+        onboard.CHAT_BACKENDS
+    )
+    assert [(c["key"], c["label"]) for c in choices["embedding_backends"]] == (
+        onboard.EMBEDDING_BACKENDS
     )

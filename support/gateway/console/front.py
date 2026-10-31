@@ -48,7 +48,13 @@ from localmelo.melo.executor.search_files import (
     SEARCH_FILES_TOOL,
     rooted_search_files,
 )
-from localmelo.melo.schema import NO_ANSWER_LABEL, RunResult, ToolDef, split_thinking
+from localmelo.melo.schema import (
+    NO_ANSWER_LABEL,
+    Message,
+    RunResult,
+    ToolDef,
+    split_thinking,
+)
 from localmelo.support.config import LocalBackendConfig
 from localmelo.support.gateway.chat_gate import GatedEmbedding, GatedLLM
 from localmelo.support.gateway.chore_schedule import (
@@ -57,13 +63,17 @@ from localmelo.support.gateway.chore_schedule import (
     parse_phrase,
 )
 from localmelo.support.gateway.chore_store import REMINDER_PREFIX, ChoreError
+from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import (
     FINISHED,
+    TITLE_CHARS,
+    TITLE_CHARS_ZH,
     Action,
     TaskRef,
     allows,
     allows_level,
     allows_message,
+    brief_question,
     intention_only,
     is_chinese,
     is_question,
@@ -120,6 +130,21 @@ FRONT_TEXT: Final = (
     "task_message. Never reply with only what you are about to do: do it, or "
     "hand it to a task. Answer in the language of the user's latest message."
 )
+# What the main chat is told when the person asks to be answered briefly.
+BRIEF_NOTE: Final = (
+    "[localmelo · the user asked for a short answer: look in one or two steps at "
+    "most, then answer in a sentence or two from what you found, and say what you "
+    "could not find. Do not start a task for it.]"
+)
+# The hint for a task's title, in task_create and in the title the console asks for.
+TITLE_HINT: Final = "A short title, 3-8 words."
+TITLE_PROMPT: Final = (
+    f"{TITLE_HINT[:-1]} that names the work in the user's request, in the language of "
+    "the request, with no quotes and no full stop. Reply with the title only."
+)
+# A title takes at most this long; the request's own first words stand in after it.
+TITLE_TIMEOUT_S: Final = 6.0
+TITLE_INPUT_CHARS: Final = 1200
 # How long "When should I remind you?" waits for its answer.
 ASK_WHEN_S: Final = 3600.0
 # The first characters of a task's answer the main chat reads, in a list and alone.
@@ -129,6 +154,8 @@ ANSWER_CHARS_ONE: Final = 800
 NEWS_ROWS: Final = 5
 # Tasks one message of the person's may start.
 TASKS_PER_TURN: Final = 1
+# Stopped tasks "continue the … task" offers at most, when several match.
+MAX_PICKS: Final = 4
 _DONE_WORDS: Final = {"stop": "Stopped", "pause": "Paused", "resume": "Resumed"}
 _STATE_WORDS: Final = {
     "queued": "waiting to start",
@@ -157,6 +184,31 @@ def handoff_text(typed: str, *, asks: bool) -> str:
     if is_chinese(typed):
         return ASK_TEXT_ZH if asks else STARTED_TEXT_ZH
     return ASK_TEXT if asks else STARTED_TEXT
+
+
+def wants_title(request: str) -> bool:
+    """Whether *request* is too long to be its own title (one line that fits one is)."""
+    text = request.strip()
+    return "\n" in text or len(text) > (
+        TITLE_CHARS_ZH if is_chinese(text) else TITLE_CHARS
+    )
+
+
+def clean_title(raw: str) -> str:
+    """A model's reply as a task title, or ``""`` when it is not one.
+
+    The first line, without quotes, markup or a ``Title:`` lead; 2 to 10 words
+    (4 to 30 characters for Chinese).
+    """
+    line = next(
+        (row for row in split_thinking(raw or "")[1].splitlines() if row.strip()), ""
+    )
+    title = " ".join(line.replace("**", "").replace("`", "").split())
+    title = re.sub(r"^(?:title|标题)\s*[:：]\s*", "", title, flags=re.IGNORECASE)
+    title = title.strip(" \"'“”‘’「」#*-.。:：")
+    if is_chinese(title):
+        return title if 2 <= len(title) <= 30 else ""
+    return title if 2 <= len(title.split()) <= 10 and len(title) <= 80 else ""
 
 
 def _tell(typed: str) -> str:
@@ -251,7 +303,9 @@ class FrontAgent(Agent):
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
         asks = is_question(turn.typed_text)
-        handed: list[tuple[str, str]] = []
+        # A question that asks for a short answer is answered here, never handed off.
+        quick = brief_question(turn.typed_text)
+        handed: list[tuple[str, str, bool]] = []
         try:
             news = await front.news()
         except Exception:
@@ -260,22 +314,39 @@ class FrontAgent(Agent):
             news = ""
         if news:
             query = f"{query}\n\n{news}"
+        if quick:
+            query = f"{query}\n\n{BRIEF_NOTE}"
 
         def sink(event: AgentEvent) -> None:
             result = event.data.get("result")
             if event.type == "run.finished" and isinstance(result, dict):
                 status = str(result.get("status"))
                 reply = split_thinking(str(result.get("result") or ""))[1]
-                if status in HANDOFF_STATUSES or (
-                    status == "completed"
-                    and not front.made.get(turn.id)
-                    and intention_only(reply)
-                ):
-                    # Out of steps, or only a preamble: the work is handed off.
-                    text = handoff_text(
-                        words, asks=asks and not front.made.get(turn.id)
+                stays = (
+                    quick
+                    and status in HANDOFF_STATUSES
+                    and bool(reply.strip())
+                    and not intention_only(reply)
+                )
+                if (
+                    stays
+                    or status in HANDOFF_STATUSES
+                    or (
+                        status == "completed"
+                        and not front.made.get(turn.id)
+                        and intention_only(reply)
                     )
-                    handed.append((status, text))
+                ):
+                    # Out of steps, or only a preamble: the work is handed off,
+                    # unless a brief question's stop answer is its answer.
+                    text = (
+                        reply.strip()
+                        if stays
+                        else handoff_text(
+                            words, asks=asks and not front.made.get(turn.id)
+                        )
+                    )
+                    handed.append((status, text, stays))
                     done = {
                         **result,
                         "status": "completed",
@@ -286,18 +357,26 @@ class FrontAgent(Agent):
                     event = dataclasses.replace(event, data=data)
             on_event(event)
 
-        outcome = await super().run_task(query, on_event=sink, **kwargs)
+        saved = self.options
+        if quick:
+            # The stop answer is asked for once, so a brief question still gets one.
+            self.options = dataclasses.replace(saved, answer_on_stop=True)
+        try:
+            outcome = await super().run_task(query, on_event=sink, **kwargs)
+        finally:
+            self.options = saved
         if not handed:
             return outcome
-        status, text = handed[0]
+        status, text, stays = handed[0]
         window = self.hippo.working.get_window()
         said = (NO_ANSWER_LABEL.format(status=status), outcome.result)
         if window and window[-1].role == "assistant" and window[-1].content in said:
             window[-1].content = text
-        try:
-            await front.handed_off(turn, asks=asks)
-        except Exception:
-            logger.exception("The main chat could not hand its turn off")
+        if not stays:
+            try:
+                await front.handed_off(turn, asks=asks)
+            except Exception:
+                logger.exception("The main chat could not hand its turn off")
         return dataclasses.replace(outcome, status="completed", result=text, error="")
 
 
@@ -356,7 +435,7 @@ TASK_TOOLS: Final = (
         "files, research or writing. It runs in the background and its result comes "
         "back to this chat. Code sets its priority from the user's own words.",
         {
-            "title": {"type": "string", "description": "A short title, 3-8 words."},
+            "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
                 "type": "string",
                 "description": "What the task should do, with every detail the user gave.",
@@ -529,6 +608,8 @@ def _ref(record: TaskRecord) -> TaskRef:
 
 def _row(record: TaskRecord) -> str:
     state = _STATE_WORDS.get(record.state, record.state)
+    if is_out_of_steps(record.state, record.wait_reason):
+        state = "stopped (ran out of steps; it can continue)"
     return f"{record.task_id} · {record.title} · {state} · {level_code(record.level)}"
 
 
@@ -547,6 +628,8 @@ class Front:
         self._acting = asyncio.Lock()
         # When the main chat's last turn read the tasks that ended.
         self._seen_at = time.time()
+        # The requests for a task's title that are still out.
+        self._naming: set[asyncio.Task[None]] = set()
 
     def typed(self) -> str:
         """What the person typed in the running turn, never an attachment ("" with none).
@@ -658,12 +741,11 @@ class Front:
                 raise ApiError(400, "invalid_request", t("errors.blankTask"))
             return await self.delegate(work, typed=typed, key=key, show=typed)
         if routed.route == "work":
-            title = routed.title
-            return await self.delegate(
-                composed, typed=typed, title=title, key=key, show=typed
-            )
+            return await self.delegate(composed, typed=typed, key=key, show=typed)
         if routed.route == "control" and routed.task and routed.action:
             return await self.control(routed.task, routed.action, show=typed)
+        if routed.route == "continue":
+            return await self._continue_named(routed.matches, composed, typed)
         if routed.route == "follow" and routed.task:
             record = await self.record(routed.task.task_id)
             if record is None:
@@ -674,6 +756,41 @@ class Front:
         if routed.route == "reminder" and typed.strip() == composed.strip():
             found = parse_reminder(typed, self._now())
             return None if found is None else await self._remind(found, typed)
+        return None
+
+    async def _continue_named(
+        self, matches: tuple[TaskRef, ...], composed: str, typed: str
+    ) -> dict[str, Any] | None:
+        """ "Continue the … task": the one stopped task the words name continues at once.
+
+        Several stopped tasks match: each is offered as a one-tap send, for the
+        person to pick from. A task that is done or still working says so.
+        Words that name no stopped task and no single other one go to the model.
+        """
+        stopped = [ref for ref in matches if ref.state in ("failed", "cancelled")]
+        if len(stopped) == 1:
+            record = await self.record(stopped[0].task_id)
+            if record is None:
+                return await self._failed(typed, "front.echo.gone")
+            return await self.follow(record, composed, typed=typed, show=typed)
+        if stopped:
+            first = None
+            for ref in stopped[:MAX_PICKS]:
+                record = await self.record(ref.task_id)
+                if record is not None:
+                    echo = await self.suggest(
+                        record, "send", text=composed, show=None if first else typed
+                    )
+                    first = first or echo
+            return first
+        if len(matches) == 1:
+            ref = matches[0]
+            if ref.state in ("parked", "interrupted"):
+                return await self.control(
+                    ref, "resume", show=typed
+                )  # paused: it resumes
+            key = "alreadyDone" if ref.state == "done" else "stillWorking"
+            return await self._failed(typed, f"front.echo.{key}", title=ref.title)
         return None
 
     def _now(self) -> datetime:
@@ -766,13 +883,23 @@ class Front:
         """Start *work* as a task the main chat owns, at the level the person's words give."""
         level, reason = triage(typed)
         try:
-            spec = TaskSpec.from_payload({"objective": work, "title": title or None})
+            spec = TaskSpec.from_payload(
+                {
+                    "objective": work,
+                    "title": title or short_title(typed.strip() or work),
+                }
+            )
         except TaskPolicyError as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         main = self.console.main_id
-        return await self._start(spec, main, show=show, key=key, turn=turn, of=of)
+        # The task starts at once, under the request's first words; the model's
+        # task_create brings a title of its own, any other long request is named later.
+        echo = await self._start(spec, main, show=show, key=key, turn=turn, of=of)
+        if not title and echo.get("echo") == "started" and wants_title(work):
+            self._name_later(str(echo["task_id"]), spec.title, work)
+        return echo
 
     async def _start(
         self,
@@ -860,6 +987,11 @@ class Front:
             return await self._failed(show, "front.echo.gone")
         if action == "first":
             return await self.set_level(record, 1, show=show, of=of)
+        if action == "resume" and record.state not in ("parked", "interrupted"):
+            # "Continue the … task" on a task that is not paused: it is going already.
+            return await self._failed(
+                show, "front.echo.stillWorking", title=record.title
+            )
         problem = await self._change(record, state=action)
         if problem:
             return await self._failed(
@@ -908,6 +1040,7 @@ class Front:
         *,
         level: int | None = None,
         text: str = "",
+        show: str | None = None,
     ) -> dict[str, Any]:
         """A change the person did not ask for in their own words: one tap applies it."""
         what = (
@@ -929,8 +1062,70 @@ class Front:
         elif action in ("send", "stop", "pause", "resume", "first"):
             extra["said"] = said(f"front.echo.suggest.{action}", title=record.title)
         return await self._echo(
-            "suggest", record.task_id, record.title, f"Suggested: {what}", action=action, **extra
+            "suggest", record.task_id, record.title, f"Suggested: {what}", show,
+            action=action, **extra,
         )  # fmt: skip
+
+    def _name_later(self, task_id: str, first_words: str, request: str) -> None:
+        """Ask the model for the task's title without holding the task back."""
+        task = asyncio.create_task(self._name(task_id, first_words, request))
+        self._naming.add(task)
+        task.add_done_callback(self._naming.discard)
+
+    async def _name(self, task_id: str, first_words: str, request: str) -> None:
+        """Give *task_id* a title that names its work (3-8 words, the request's language).
+
+        The task already runs under *first_words*. The model is asked once,
+        with the words ``task_create`` uses for its title and the lowest level,
+        so it never waits ahead of real work; when it does not answer in time,
+        or not with a title, the first words stay. The title replaces them
+        only while the task still has them: a task the person renamed meanwhile
+        keeps their name, and a title equal to the first words changes nothing.
+        """
+        ask = self.console.options.titler or self._ask_title
+        try:
+            raw = await asyncio.wait_for(
+                ask(request.strip()[:TITLE_INPUT_CHARS]), TITLE_TIMEOUT_S
+            )
+            title = clean_title(raw)
+            if title and title != first_words:
+                store = self.console.store
+                if await store.rename_session(task_id, title, only_if=first_words):
+                    await self.console.workers.tasks.set_title(
+                        task_id, title, was=first_words
+                    )
+        except (
+            Exception
+        ) as exc:  # no model, no answer in time, a store gone: first words
+            logger.info("The task keeps its first words as its title: %s", exc)
+
+    async def drain(self) -> None:
+        """Wait for the title requests that are out (the tests', and the close's)."""
+        await asyncio.gather(*list(self._naming), return_exceptions=True)
+
+    async def aclose(self) -> None:
+        for task in list(self._naming):
+            task.cancel()
+        await self.drain()
+
+    async def _ask_title(self, request: str) -> str:
+        from localmelo.support.backends.registry import get_backend
+
+        cfg = self.console.cfg
+        inner = get_backend(cfg.chat_backend).build_chat_provider(thinking_off(cfg))
+        # A session of its own for each title, dropped from the gate when it is done.
+        session = f"title:{self.console.main_id}:{time.time_ns()}"
+        self.console.gate.set_level(session, 4)  # P4, the lowest a chat's call has
+        gate = self.console.gate.client(session)
+        try:
+            reply = await GatedLLM(inner, gate).chat(
+                [Message("system", TITLE_PROMPT), Message("user", request)]
+            )
+        finally:
+            self.console.gate.forget(session)
+            with contextlib.suppress(Exception):
+                await inner.close()
+        return reply.content
 
     async def handed_off(self, turn: TurnInfo, *, asks: bool) -> None:
         """After a turn that did not settle: start its work, or ask whether to.
@@ -948,10 +1143,7 @@ class Front:
                  "said": said("front.echo.ask")}
             )  # fmt: skip
         else:
-            title = short_title(turn.typed_text or turn.user_text)
-            await self.delegate(
-                turn.user_text, typed=turn.typed_text, title=title, turn=turn
-            )
+            await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
 
     async def _change(self, record: TaskRecord, **change: Any) -> str:
         """Change *record* as the person asked; what stopped it, or ``""``."""
@@ -1094,7 +1286,10 @@ class Front:
                     said=said("front.echo.unsaved", title=title),
                 )  # fmt: skip
         except ChoreError as exc:
-            raise ApiError(409, "invalid_transition", str(exc)) from exc
+            words = exc.words
+            raise ApiError(
+                409, "invalid_transition", said_text(words) if words else str(exc)
+            ) from exc
         except ScheduleError as exc:  # a reminder's time passed before the tap
             raise ApiError(400, "invalid_request", t("front.echo.timePassed")) from exc
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")

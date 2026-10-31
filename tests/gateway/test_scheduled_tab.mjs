@@ -67,6 +67,8 @@ test('the words: when something runs, and how the last run went', () => {
   assert.equal(whenWords(null, now), '');
   assert.match(rowLines(chore('a'), now)[0], /^Next today at 8:30\s?AM$/i);
   assert.deepEqual(rowLines(chore('a', {enabled: false}), now), ['Off']);
+  // The time the schedule names is shown, not the few seconds the start is spread by.
+  assert.match(rowLines(chore('a', {next_at: at(28, 8, 30), next_run: at(28, 8, 30) + 71}), now)[0], /^Next today at 8:30\s?AM$/i);
   assert.deepEqual(rowLines(chore('a', {last: {state: 'done', line: 'Three meetings today.'}}), now).slice(1), ['Last: Done · Three meetings today.']);
   assert.deepEqual(rowLines(chore('a', {last: {state: 'failed', line: 'Stopped before it finished'}}), now).slice(1), ['Last: Did not finish · Stopped before it finished']);
   assert.deepEqual(rowLines(chore('a', {last: {state: 'running', line: ''}}), now).slice(1), ['Last: Running now']);

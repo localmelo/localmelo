@@ -14,6 +14,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
     StreamFragment,
+    thinking_disabled,
 )
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
@@ -455,6 +456,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         }
         self.reasoning_field = reasoning_field
         self.requires_reasoning_replay = requires_reasoning_replay
+        self.thinking_off = thinking_disabled(
+            {**self.extra_body, **self.extra_body_by_kind.get("plan", {})}
+        )
         # Set once the server has answered a request for a stream with a whole
         # reply (see stream_chat); later stream_chat calls then do not ask it
         # to stream.

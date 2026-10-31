@@ -7,7 +7,7 @@
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
-import {language, t} from './i18n.mjs';
+import {formatTime, saidText, t} from './i18n.mjs';
 import {levelLabel} from './levels.mjs';
 
 // Read once, in the page's language (a new language reloads the page).
@@ -23,12 +23,10 @@ export function whenWords(at, now) {
   const time = new Date(at * 1000);
   const day = (stamp) => { const d = new Date(stamp * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
   const ahead = Math.round((day(at) - day(now)) / 86400);
-  // The day and the time as the page's language writes them (in English, as this computer does).
-  const names = language() === 'en' ? [] : 'zh-CN';
-  const clock = time.toLocaleTimeString(names, {hour: 'numeric', minute: '2-digit'});
+  const clock = formatTime(time, 'clock');
   if (ahead <= 0) return t('sched.when.today', {clock});
   if (ahead === 1) return t('sched.when.tomorrow', {clock});
-  const label = ahead < 7 ? time.toLocaleDateString(names, {weekday: 'long'}) : time.toLocaleDateString(names, {month: 'short', day: 'numeric'});
+  const label = formatTime(time, ahead < 7 ? 'weekday' : 'day');
   return t('sched.when.day', {day: label, clock});
 }
 
@@ -41,7 +39,7 @@ export function lateWords(minutes) {
 /** The lines under a row's title: when it runs next (a one-time chore that ran: when), how late, then how the last run went. */
 export function rowLines(chore, now) {
   const done = chore.schedule?.kind === 'once' && !chore.enabled && chore.last_run;
-  const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_run, now)}) : t('common.off');
+  const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_at ?? chore.next_run, now)}) : t('common.off');
   const lines = [first];
   if (chore.late_min) lines.push(lateWords(chore.late_min));
   const ran = RAN.has(chore.last?.state) ? t(`sched.ran.${chore.last.state}`) : chore.last?.state;
@@ -195,7 +193,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     const text = button('sched-head', '', () => { state.open = open ? null : chore.id; state.edit = state.ask = null; draw(); });
     text.setAttribute('aria-expanded', String(open));
     const words = node('span', 'sched-text');
-    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', chore.when),
+    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', saidText(chore.when_said) ?? chore.when),
       ...rowLines(chore, now()).map((line) => node('span', 'sched-line', line)));
     text.append(words);
     head.append(text, toggle(t('sched.switchLabel', {title: chore.title}), chore.enabled, async () => {

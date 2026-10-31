@@ -22,6 +22,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+from localmelo.support.gateway.i18n import said_text
 from localmelo.support.sessions.display import (
     ActivityText,
     activity_text,
@@ -185,6 +186,11 @@ async def recent_outcome(console: Console) -> dict[str, Any] | None:
     }
 
 
+def spoken(text: ActivityText) -> str:
+    """What a session is doing, in the language of the request (English for a client that asks for none)."""
+    return said_text(text.words) if text.words else text.text
+
+
 async def item_activity(
     console: Console, kind: str, owner: str
 ) -> tuple[ActivityText, float]:
@@ -217,7 +223,7 @@ async def _with_activity(
         text, changed[item["id"]] = await item_activity(
             console, item["kind"], item["id"]
         )
-        item.update(activity=text.text, icon=text.icon)
+        item.update(activity=spoken(text), icon=text.icon)
     if not items:
         return None
     asking = {entry["id"] for entry in waiting}

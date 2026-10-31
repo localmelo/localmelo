@@ -13,6 +13,7 @@ from localmelo.melo.executor.builtins import (
     TOOL_EXIT_CODE,
     builtin_names,
     builtins_with_env,
+    edit_precheck,
     rooted_builtins,
 )
 from localmelo.melo.executor.executor import ApprovalGate, Executor
@@ -27,6 +28,8 @@ from localmelo.melo.executor.models import (
 from localmelo.melo.executor.policy import WorkspacePolicy
 from localmelo.melo.executor.preview import call_preview
 from localmelo.melo.executor.sandbox import (
+    AutoConfinement,
+    Confinement,
     ConfinementError,
     WriteConfinement,
     confine,
@@ -44,7 +47,7 @@ def register_builtins(
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
     harness_only: Collection[str] = (),
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -142,6 +145,12 @@ def register_builtins(
             # effect to recover, so a task's capture skips it as a file's.
             process_free=tool_def.name
             in {"file_read", "file_write", "file_edit", "list_files", "git_status"},
+            # A file_edit that cannot apply fails at once and asks no one.
+            precheck=(
+                edit_precheck(workspace_root or None)
+                if tool_def.name == "file_edit"
+                else None
+            ),
         )
 
 
@@ -152,6 +161,8 @@ __all__ = [
     "BUILTINS",
     "ConfinementError",
     "ErrorCategory",
+    "AutoConfinement",
+    "Confinement",
     "ExecutionOutcome",
     "ExecutionRequest",
     "ExecutionStatus",

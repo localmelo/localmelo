@@ -15,15 +15,16 @@ final class MenuBar {
     private let plain: NSImage?
     private let badged: NSImage?
     private var wasWaiting = false
+    private var state = MenuBarState.unknown
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
     init(menu: NSMenu, waiting: Selector, showPet: Selector) {
         let logo = MenuBar.logo()
-        waitingLine = NSMenuItem(title: L10n.t("app.menu.waiting", "Waiting for your approval"), action: waiting, keyEquivalent: "")
-        showPetLine = NSMenuItem(title: L10n.t("app.menu.showPet", "Show Melo"), action: showPet, keyEquivalent: "")
+        waitingLine = NSMenuItem(title: "", action: waiting, keyEquivalent: "").word(.waiting)
+        showPetLine = NSMenuItem(title: "", action: showPet, keyEquivalent: "").word(.showPet)
         showPetLine.isHidden = true
-        let open = L10n.t("app.menu.open", "Open localmelo")
-        menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.title == open } ?? -1) + 1)
+        let open = MenuWord.open.rawValue
+        menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.identifier?.rawValue == open } ?? -1) + 1)
         plain = MenuBar.image(logo, badge: false)
         badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }
@@ -38,7 +39,11 @@ final class MenuBar {
         menu.insertItem(item, at: menu.index(of: showPetLine) + 1)
     }
 
+    /// Writes the lines again, in the language now in use.
+    func refresh() { show(state) }
+
     func show(_ state: MenuBarState) {
+        self.state = state
         var waiting = false
         if case .waiting = state { waiting = true }
         let count = menuTitle(state), label = menuBarLabel(state), line = menuStatusLine(state)

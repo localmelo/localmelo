@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
+from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import DEFAULT_WORKSPACE
@@ -39,7 +40,9 @@ from localmelo.support.sessions.agents import (
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
     AskFunction,
-    RememberingPolicy,
+    ChatMode,
+    ChatPolicy,
+    chat_mode,
 )
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
@@ -161,7 +164,7 @@ class OpenSession:
 
     session_id: str
     runner: SessionRunner
-    policy: RememberingPolicy
+    policy: ChatPolicy
     granted_at: dict[str, float]
     agent: Agent | None
     kept: list[Message] | None = None
@@ -214,6 +217,8 @@ class ConsoleSessions:
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
+        # Each Allow once's watch: it drops the allowance its turn left unused.
+        self._allowance_watches: set[asyncio.Task[None]] = set()
         # One lock per client_request_id while a keyed create runs, so a
         # retried create makes one session.
         self._create_locks: dict[str, asyncio.Lock] = {}
@@ -386,8 +391,9 @@ class ConsoleSessions:
                 memory=self._memory,
             )
             granted_at: dict[str, float] = {}
-            policy = RememberingPolicy(
-                ask=runner.observe(self._timed_ask(session_id, granted_at))
+            policy = ChatPolicy(
+                runner.observe(self._timed_ask(session_id, granted_at)),
+                self.mode_of(info),
             )
             entry = OpenSession(
                 session_id=session_id,
@@ -405,6 +411,7 @@ class ConsoleSessions:
             )
             self._sessions[session_id] = entry
         else:
+            entry.policy.mode = self.mode_of(info)
             try:
                 entry.runner.replace_agent(agent)
             except SessionBusyError as exc:
@@ -593,6 +600,85 @@ class ConsoleSessions:
                 str(exc) or type(exc).__name__,
             ) from exc
 
+    def new_chat_mode(self) -> ChatMode:
+        """The mode a new chat starts in: ``[approvals] mode``, else Ask."""
+        approvals = getattr(self._settings(), "approvals", None)
+        return chat_mode({"approvals": getattr(approvals, "mode", "ask")})
+
+    def mode_of(self, info: SessionInfo) -> ChatMode:
+        """A chat's mode: its own, or for the main chat the new chats' until picked."""
+        default = self.new_chat_mode() if info.kind == "front" else "ask"
+        return chat_mode(info.meta, default)
+
+    async def set_mode(self, session_id: str, mode: ChatMode) -> SessionInfo:
+        """Switch a chat to Ask or Auto: stored, and from its next step.
+
+        A call already waiting for an answer keeps waiting; Auto's
+        allowances and Ask's grants are kept for a later switch back.
+        """
+        async with self.lock(session_id):
+            info = await self._store.update_session(
+                session_id, meta_update={"approvals": mode}
+            )
+            entry = self._sessions.get(session_id)
+            if entry is not None:
+                entry.policy.mode = mode
+            return info
+
+    def allowances(self, session_id: str) -> dict[str, float]:
+        """The steps allowed once in this chat since the gateway started: key -> until."""
+        entry = self._sessions.get(session_id)
+        return {} if entry is None else dict(entry.policy.auto.given)
+
+    def allowance_live(self, session_id: str, key: str) -> bool:
+        """Whether the step *key* has an allowance in this chat not used or run out yet."""
+        entry = self._sessions.get(session_id)
+        return entry is not None and entry.policy.auto.allowed_once(key)
+
+    async def allow_once(
+        self,
+        session_id: str,
+        key: str,
+        categories: list[str],
+        text: str,
+        tool: str = "",
+    ) -> tuple[TurnInfo, float]:
+        """Allow the step *key* once (Auto, #339) and send *text* as the person's message.
+
+        409 ``session_busy`` while a turn runs, so the allowance and the
+        message go together; the message starts the turn that retries it.
+        :class:`BlockError` ``already_allowed`` while an allowance of *key*
+        waits. When the turn ends without using the allowance, it is
+        dropped. Returns the turn and when the allowance runs out.
+        """
+        async with self.lock(session_id):
+            entry = await self.open(session_id)
+            if entry.runner.busy:
+                raise ApiError(409, "session_busy", t("errors.turnRunning"))
+            auto = entry.policy.auto
+            if auto.allowed_once(key):
+                raise BlockError("already_allowed")
+            entry.resumed = None
+            auto.allow_once(key, categories, tool)
+            until = auto.given[key]
+            self._note_turn_start(session_id)
+            try:
+                turn = await entry.runner.start_turn(text, approval=entry.policy)
+            except BaseException:
+                auto.withdraw(key)
+                raise
+            entry.last_used = self._clock()
+            watch = asyncio.create_task(self._drop_unused(entry, key))
+            self._allowance_watches.add(watch)
+            watch.add_done_callback(self._allowance_watches.discard)
+            return turn, until
+
+    async def _drop_unused(self, entry: OpenSession, key: str) -> None:
+        """When the turn Allow once started ends, drop its allowance if unused."""
+        with contextlib.suppress(Exception):
+            await entry.runner.wait()
+        entry.policy.auto.withdraw(key)
+
     def _settings_model(self) -> str:
         """The chat model the settings name, as ``session.model`` records it."""
         settings = self._settings()
@@ -701,20 +787,24 @@ class ConsoleSessions:
         first: tuple[str, str] | None = None,
         *,
         client_request_id: str | None = None,
+        mode: ChatMode | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Create a session, usually with its first turn (``POST /api/sessions``).
 
         *first* is ``(typed, composed)``: the typed text titles the session,
         the composed text is the turn's. *workspace* is the folder, or the
-        default when ``None``. With *client_request_id*, a repeat of an
-        accepted key raises :class:`SubmissionRepeated` with its turn and
+        default when ``None``. *mode* is the chat's Ask or Auto, else the
+        settings' mode for new chats. With *client_request_id*, a repeat of
+        an accepted key raises :class:`SubmissionRepeated` with its turn and
         makes no Agent; a raised error after the Agent was built closes it
         and registers nothing.
         """
         lock = self._create_lock(client_request_id)
         try:
             async with lock or contextlib.nullcontext():
-                return await self._create_locked(workspace, first, client_request_id)
+                return await self._create_locked(
+                    workspace, first, client_request_id, mode or self.new_chat_mode()
+                )
         finally:
             # Outside the block: the lock this task took is free again, so
             # the entry can go. A waiter keeps the object it already has.
@@ -725,6 +815,7 @@ class ConsoleSessions:
         workspace: str | None,
         first: tuple[str, str] | None,
         client_request_id: str | None,
+        mode: ChatMode = "ask",
     ) -> tuple[OpenSession, TurnInfo | None]:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
@@ -741,7 +832,9 @@ class ConsoleSessions:
         await self._make_room("")
         # The row comes before the Agent: the scheduler gate tags every call
         # with the session id, so the id must exist before the first one.
-        info = await self._store.create_session(model=model, workspace=path)
+        info = await self._store.create_session(
+            model=model, workspace=path, meta={"approvals": mode}
+        )
         # Under the session's lock, so a turn started on the new row by
         # another client waits until this create has registered it.
         async with self.lock(info.id):
@@ -787,8 +880,8 @@ class ConsoleSessions:
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
         )
-        policy = RememberingPolicy(
-            ask=runner.observe(self._timed_ask(info.id, granted_at))
+        policy = ChatPolicy(
+            runner.observe(self._timed_ask(info.id, granted_at)), chat_mode(info.meta)
         )
         turn: TurnInfo | None = None
         if has_turn:
@@ -1148,6 +1241,8 @@ class ConsoleSessions:
     async def close_all(self) -> None:
         """Stop every turn and close every Agent within the shutdown budget."""
         self._closed = True
+        for watch in list(self._allowance_watches):
+            watch.cancel()
         entries = list(self._sessions.values())
         deadline = max(CLOSE_ALL_TIMEOUT_S - EXIT_SAVE_RESERVE_S, 0.1)
         for entry in entries:

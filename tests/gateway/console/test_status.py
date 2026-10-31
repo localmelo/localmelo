@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from localmelo.melo.contracts.events import EVENT_FIELDS
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.i18n import said_text
 from localmelo.support.sessions.store import NewSession
 from localmelo.support.usage_snapshot import TaskCounts, UsageSnapshot
 
@@ -101,6 +102,19 @@ async def test_the_status_equals_the_terminal_fold(
         "step 3",
         "tasks 0 running 0 queued",
     ]
+
+
+async def test_the_row_comes_as_words_for_the_page_beside_the_terminal_text(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    session_id = await seed(console, workspace, run_events(time.time(), 400))
+    body = client.get(f"/api/sessions/{session_id}/status").json()
+    # The terminal's English text is those words in English ...
+    assert [said_text(part, "en") for part in body["parts"]] == body["segments"]
+    # ... and the page reads them in its language.
+    chinese = [said_text(part, "zh-Hans") for part in body["parts"]]
+    assert chinese[0].startswith("缓存 67%，空闲 ")
+    assert chinese[1:] == ["上下文 1.0k/8.0k", "第 3 步", "任务 0 个运行、0 个排队"]
 
 
 async def test_a_session_with_no_events_has_no_segments_but_the_tasks(

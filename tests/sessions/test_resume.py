@@ -15,7 +15,13 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import NO_ANSWER_LABEL, SESSION_TEXT_CHARS, clip_session_text
+from localmelo.melo.schema import (
+    NO_ANSWER_LABEL,
+    SESSION_TEXT_CHARS,
+    UNANSWERED_NOTE,
+    clip_session_text,
+    is_no_answer_label,
+)
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
@@ -161,13 +167,16 @@ async def test_pairs_skip_running_and_undone_turns_and_label_a_crash(
         0,
     )
     assert info.messages == 4
-    # The next request is valid: the roles alternate and it ends with the query.
+    # The next request is valid: the roles alternate and it ends with the query,
+    # after the crashed turn's user words and a note in place of its label (#357).
     await store.finish_turn(
         sid, 4, holder=HOLDER, status="completed", cause="run", result=None, answer="4"
     )
     await runner.run_turn("fifth")
     request = llm.requests[-1]
-    assert roles_alternate(request) and request[-1].content == "fifth"
+    assert roles_alternate(request)
+    assert request[-1].content == f"second\n\n{UNANSWERED_NOTE}\n\nfifth"
+    assert not any(is_no_answer_label(m.content) for m in request)
     await agent.close()
     await store.aclose()
 

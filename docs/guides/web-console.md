@@ -142,6 +142,7 @@ main chat shows a card under the day it happened:
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.
+- `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows, each with **Continue**. A task that failed for another reason stays `Did not finish`.
 - `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
 - A title is the one the main chat gave the task, or the first part of your request, cut at a word.
 - **Open side chat**, **Open task** or **Review** goes to the source. A card is not a message: the model never reads it.
@@ -156,10 +157,11 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 
 ![The main chat: a question answered, a task that came back done, a task with its priorities open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
-- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · P2`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
-- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once, with no model call. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`), under a short title. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
+- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". A question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话` is always answered here, after a quick look: it is never offered as a task. Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · P2`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once; no model reads it to decide. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`). A task the main chat starts this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
 - **Priorities as P0 to P5.** A line shows the code (`P1`); hover it for what it means. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
 - **Follow up on a task.** `finish it`, `commit it` or `继续那个任务` goes to the task you mean: a running task reads it at its next step, and a done or stopped one continues in its own session, with what it did before. The line says where it went: `Sent to: Slides`, `Continued: Fix CI`.
+- **Continue a stopped task by name.** `Continue the recovery card task where it stopped: run the tests` or `继续恢复卡片任务` continues the one stopped task whose title those words name, at once and with no suggestion to tap; the whole message is its next turn. When several stopped tasks match, each is offered as a one-tap `Suggested: send your message to …`. A task that is done or still working says so (`Fix CI is done. There is nothing to continue.`).
 - **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
 - **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question (a `?` anywhere, or "quick question") asks **Start this as a task?** first. It answers in the language of your message. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
@@ -439,6 +441,11 @@ The console speaks English or Simplified Chinese (简体中文).
 - To choose one, open **Settings → Appearance → Language**: **Automatic**, **English** or **简体中文**. The page reloads in it. In a terminal, `melo config set console.language zh-Hans` (or `en`, or `auto`) does the same; reload the page after it.
 - Every screen follows: the main chat and its cards, the panel's tabs, Tasks, Workers, Settings and the sign-in page.
 - The gateway writes its own words for the page in the same language: error messages, the panel's rows, the main chat's cards and the lines it adds after your messages (`Started: …`, `Saved: …`). The terminal and other API clients stay English.
+- Times and dates are written in the page's language, not your computer's: `2:06 AM` and `Oct 31` in English, `上午 2:06`, `10月31日` and `星期五` in Chinese. In English the clock follows your computer, so a 24-hour computer keeps its 24-hour clock.
+- A failed run's details and the line **Copy details** copies read in the language; the status, the cause, the error text and the run id are copied as they are. The status row's words (the context, and in developer mode the cache, step and queue) read in it too, while the terminal prints the same figures in English.
+- In Chinese, the card that asks about a high-impact step (Ask) or reports a blocked one (Auto) gives its question and its reasons in Chinese, by the kind of step; the step itself stays on the card as written, and so does anything your model wrote.
+- A schedule's words (`every weekday at 8:30`) and what each row says it is doing (`Reading notes.md`, which the macOS pill shows too) follow the language, and the clock follows the page's format (`8:30 AM`, `上午 8:30`). The check-in's note is written in the language too: the setting, else the language the page asked for last.
+- In the macOS app the menus, the pill and Melo's menu change the moment the page reloads in the new language; nothing needs a restart.
 - Commands, paths, model names and the levels P0-P5 are never translated; the terms follow the [Chinese interface glossary](../zh-CN/STYLE.md#interface-glossary). Melo answers in the language you write in, whatever the setting.
 
 ## Settings
@@ -615,6 +622,54 @@ model is asked once more. When the second reply has no answer either, the card's
 title is `melo did not finish an answer`, the hint `The model's reply held only
 its thinking. Try again, or rephrase the request.`, and the filled button
 **Try again**.
+
+## Auto mode
+
+In **Auto**, melo works without asking: routine steps run, and a risky step
+or a step you did not ask for is blocked and explained. **Ask**, the default,
+asks before commands and file changes.
+
+- **Switch.** The chip beside the model under the message box reads **Ask**
+  or **Auto**; its menu, "How melo works in this chat", switches the chat
+  from melo's next step (a card already waiting stays). A new chat starts in
+  the mode of Settings → Chats and folders → **New chats start in**
+  (`[approvals] mode`); the main chat follows that setting until you pick
+  its mode.
+- **What runs.** Steps inside the chat's folder that install, download, send
+  or delete nothing. A step melo cannot judge goes to your model first and
+  runs only when it is routine and part of what you asked. A write outside
+  the folder fails in Auto even when no rule caught it: its output says
+  `writing outside the workspace is not allowed in auto mode`. A step in
+  Auto can neither read melo's sign-in token nor reach melo's own API.
+- **A reviewer, not a wall.** Auto blocks risky steps and steps that stray
+  from what you asked. Its sandbox keeps a step's files in the folder and
+  away from melo's sign-in, but a step that hands work to another app or
+  program (opening an app or a script, scripting another app, code for
+  another language, a package fetched and run, a background job) is judged
+  by the review, not walled off: such steps are blocked or checked by your
+  model, never run as routine. The sandbox also keeps a step from talking to
+  a container engine.
+- **What is blocked.** Installs, downloads, changes outside the folder,
+  deletes, passwords and keys, system settings, code from the internet and
+  the like, unless your own words ask for them; a change to localmelo itself
+  never runs; in a folder that holds the copy of localmelo that is running,
+  a write under that copy is refused. The step's row reads
+  `blocked: installs software`, a card under
+  the work says what and why and shows the step, and melo's answer gives the
+  other ways.
+- **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
+  and sends "Go ahead with the step melo blocked: install software." as your
+  message; or reply "go ahead". Steps that use passwords or keys, change
+  system settings, set up something that runs later, or run code from the
+  internet or code melo cannot check need the button. While melo works the
+  button waits; afterwards the card reads `Allowed once · ran at 14:02` or
+  `Allowance expired`.
+- **Tasks.** A task keeps the mode its chat had when it was made. Its page
+  shows **Mode** and lists **Blocked steps**, each opening the same card; the
+  task goes on without them, and **Allow once** there sends the message to the
+  task. A scheduled chore takes its chat's mode each time it runs.
+- Allowances live in memory: restarting localmelo forgets them, and one the
+  retried turn did not use goes when that turn ends.
 
 ## Persistence and limits
 

@@ -112,6 +112,8 @@ class SettingsPutBody(_SettingsBaseBody):
     memory_retriever: StrictStr | None = None
     # ``[console] language``: ``auto``, ``en`` or ``zh-Hans``; absent leaves it as it is.
     language: StrictStr | None = None
+    # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
+    approvals: StrictStr | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -148,11 +150,33 @@ def _redact(text: str) -> str:
     return redact_secrets(text)[0]
 
 
+def _kind_words(label: str) -> str:
+    """*label* in the request's language when the page asks for one.
+
+    Only the generic ``OpenAI-compatible server`` is a phrase; every other
+    label is a name (``oMLX``, ``Ollama``) and reads the same everywhere.
+    """
+    if label == discovery.OPENAI_COMPATIBLE_NAME:
+        return t("model.server.openaiCompatible")
+    return label
+
+
+def _choice_label(key: str, label: str) -> str:
+    """The settings' name of a backend choice in the request's language.
+
+    The terminal's onboarding keeps *label*; a choice with no words in the
+    catalog (a cloud provider is a name) reads as it is.
+    """
+    words = t(f"settings.backend.{key}")
+    return label if words == f"settings.backend.{key}" else words
+
+
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend.
 
     A ``vllm`` backend is labelled ``oMLX`` when the config says so or the
-    health probe's last model listing did.
+    health probe's last model listing did. The generic label reads in the
+    language the request asks for (English for a client that asks for none).
     """
     backend = cfg.chat_backend
     section = getattr(cfg, backend, None) if backend else None
@@ -163,7 +187,7 @@ def model_json(cfg: Any) -> dict[str, Any]:
         label = backend
     return {
         "backend": backend,
-        "backend_label": label,
+        "backend_label": _kind_words(label),
         "name": name,
         "embedding": cfg.embedding_backend or "none",
     }
@@ -349,13 +373,13 @@ def settings_json() -> dict[str, Any]:
             "chat_backends": [
                 {
                     "key": key,
-                    "label": label,
+                    "label": _choice_label(key, label),
                     "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
                 }
                 for key, label in onboard.CHAT_BACKENDS
             ],
             "embedding_backends": [
-                {"key": key, "label": label}
+                {"key": key, "label": _choice_label(key, label)}
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
         },
@@ -363,6 +387,9 @@ def settings_json() -> dict[str, Any]:
         "across_chats": cfg.memory.across_chats,
         "memory_retriever": cfg.memory.retriever,
         "language": cfg.console.language,
+        "approvals": (
+            cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
+        ),
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -449,6 +476,14 @@ def _build_candidate(
             f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
         )
 
+    approvals = getattr(body, "approvals", None)
+    if approvals is not None and approvals not in config.APPROVAL_MODES:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"approvals: Must be one of {config.APPROVAL_MODES}.",
+        )
+
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
             409,
@@ -469,6 +504,8 @@ def _build_candidate(
         candidate.memory.retriever = retriever
     if language is not None:
         candidate.console.language = language
+    if approvals is not None:
+        candidate.approvals.mode = approvals
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -536,6 +573,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("memory_retriever")
     if before.console.language != after.console.language:
         changed.append("language")
+    if before.approvals.mode != after.approvals.mode:
+        changed.append("approvals")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

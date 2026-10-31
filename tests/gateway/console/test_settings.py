@@ -1055,6 +1055,28 @@ def test_the_settings_carry_the_console_language_and_save_it_only_when_sent(
     assert config.load().console.language == "zh-Hans"
 
 
+def test_the_settings_carry_how_new_chats_start_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["approvals"] == "ask"
+    auto = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], approvals="auto")
+    )
+    assert auto.status_code == 200 and auto.json()["approvals"] == "auto"
+    assert config.load().approvals.mode == "auto"
+    assert '[approvals]\nmode = "auto"' in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(auto.json()["revision"]))
+    assert kept.json()["approvals"] == "auto", "absent leaves it as it is"
+    yolo = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], approvals="yolo")
+    )
+    assert yolo.status_code == 400
+    assert yolo.json()["error"]["code"] == "invalid_request"
+    assert config.load().approvals.mode == "auto"
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

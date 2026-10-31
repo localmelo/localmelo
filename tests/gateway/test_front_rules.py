@@ -11,6 +11,8 @@ from localmelo.support.gateway.front_rules import (
     allows,
     allows_level,
     allows_message,
+    brief_question,
+    continue_name,
     intention_only,
     is_chinese,
     is_question,
@@ -22,6 +24,7 @@ from localmelo.support.gateway.front_rules import (
     reply_language,
     route,
     short_title,
+    title_matches,
     triage,
 )
 
@@ -379,3 +382,98 @@ def test_a_title_is_named_without_its_filler_words() -> None:
     routed = route("commit Fix the e2e check", [*TASKS, e2e])
     assert (routed.route, routed.task) == ("follow", e2e)
     assert route("pause the slides for the 15:00 meeting", TASKS).task == SLIDES
+
+
+# ── "Continue the … task" and brief questions (#341) ──
+
+RECOVERY = TaskRef("555555555555", "Hide the Recovery card section", "failed")
+RECOVERY_TEST = TaskRef("666666666666", "Fix recovery card test", "cancelled")
+ACTIVITY = TaskRef("777777777777", "Improve Activity row Done text", "done")
+FIX_TITLE = TaskRef("888888888888", "修复恢复卡片的测试", "failed")
+
+
+@pytest.mark.parametrize(
+    ("typed", "name"),
+    [
+        (
+            "Please continue the recovery card task where it stopped: run the tests.",
+            "recovery card",
+        ),
+        ("continue the Activity row task", "activity row"),
+        ("could you resume my fix ci job", "fix ci"),
+        ("继续恢复卡片任务，跑一下测试再提交", "恢复卡片"),
+        ("请继续那个恢复卡片的任务", "恢复卡片"),
+        # No words between the verb and "task" name nothing.
+        ("continue the task", "the"),
+        ("continue", ""),
+        ("what does the recovery card task do", ""),
+    ],
+)
+def test_the_words_that_name_a_task_to_continue(typed: str, name: str) -> None:
+    assert continue_name(typed) == name
+
+
+def test_the_words_match_a_title_by_all_their_words_or_by_its_id() -> None:
+    assert title_matches("recovery card", RECOVERY)
+    assert title_matches("card recovery", RECOVERY)
+    assert title_matches(RECOVERY.task_id, RECOVERY)
+    assert not title_matches("recovery card", ACTIVITY)
+    assert not title_matches("the", RECOVERY)  # filler names nothing
+    assert title_matches("恢复卡片", FIX_TITLE)
+
+
+def test_continue_the_task_routes_to_the_tasks_the_words_name() -> None:
+    tasks = [RECOVERY, ACTIVITY, CI]
+    routed = route("Please continue the recovery card task where it stopped", tasks)
+    assert (routed.route, routed.task, routed.matches) == (
+        "continue",
+        RECOVERY,
+        (RECOVERY,),
+    )
+    # A done task is matched too, so the front can say it is done.
+    assert route("continue the activity row task", tasks).matches == (ACTIVITY,)
+    # Several tasks: no single one, all of them listed.
+    several = route("continue the recovery card task", [RECOVERY, RECOVERY_TEST])
+    assert (several.route, several.task) == ("continue", None)
+    assert several.matches == (RECOVERY, RECOVERY_TEST)
+    assert route("继续恢复卡片任务", [FIX_TITLE]).matches == (FIX_TITLE,)
+
+
+def test_continue_the_task_leaves_what_it_cannot_name_to_the_front() -> None:
+    tasks = [RECOVERY, ACTIVITY]
+    assert route("continue the billing task", tasks).route == "plan"
+    assert route("continue the task", tasks).route == "plan"
+    # A question is not an order; a schedule is a chore.
+    assert route("should I continue the recovery card task?", tasks).route != "continue"
+    assert route("continue the recovery card task every day", tasks).route == "chore"
+    # An open task that is named in few words still resumes.
+    assert route("continue Fix CI", [CI]).route in {"control", "follow"}
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "主对话里卡片上的「Done.」现在是怎么处理的？简单说一下就行。",
+        "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line.",
+        "briefly, what does support/gateway/front.py do?",
+        "In short: why does the card say Done?",
+        "这个函数是做什么的？简单讲讲",
+        "能不能一句话说明为什么卡片只写 Done？",
+    ],
+)
+def test_a_question_that_asks_for_a_brief_answer_is_answered_here(typed: str) -> None:
+    assert brief_question(typed)
+    assert route(typed, TASKS).route == "answer"
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "why does the card say Done?",  # a question, but not a brief one
+        "summarize notes.md briefly",  # not a question
+        "don't answer briefly, why does it fail?",
+        "写一句话的测试",  # not a question
+    ],
+)
+def test_other_messages_are_not_brief_questions(typed: str) -> None:
+    assert not brief_question(typed)

@@ -1686,3 +1686,24 @@ class TestSettingOverrides:
         assert cfg.validate() == ["chat_backend is not set (run 'melo setup')"] + [
             e for e in cfg.validate()[1:]
         ]
+
+
+class TestApprovalsConfig:
+    """``[approvals] mode``: how a new chat starts (#339)."""
+
+    def test_ask_by_default_and_auto_saved_and_loaded_back(
+        self, config_path: Path
+    ) -> None:
+        assert Config().approvals.mode == "ask"
+        cfg = Config(chat_backend="vllm", embedding_backend="none")
+        save(cfg)
+        assert "[approvals]" not in config_path.read_text(encoding="utf-8")
+        cfg.approvals.mode = "auto"
+        save(cfg)
+        assert '[approvals]\nmode = "auto"\n' in config_path.read_text(encoding="utf-8")
+        assert load().approvals.mode == "auto"
+
+    def test_another_mode_is_a_setting_error(self) -> None:
+        cfg = Config()
+        cfg.approvals.mode = "yolo"
+        assert any("[approvals] mode" in e for e in cfg.setting_errors())

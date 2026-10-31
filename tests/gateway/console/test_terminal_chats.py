@@ -307,6 +307,7 @@ async def test_every_write_route_refuses_a_terminal_chat(
             "turn_id": info.id,
             "tool": "file_write",
             "client_request_id": "k",
+            "request_id": "r",
         }
         for (method, path), body in WRITES.items():
             payload = (

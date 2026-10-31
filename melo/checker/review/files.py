@@ -24,9 +24,18 @@ import json
 import os
 import re
 import textwrap
+from collections import Counter
 from collections.abc import Callable
 
-from localmelo.melo.checker.review.paths import Context, Findings, shown
+from localmelo.melo.checker.review.paths import (
+    _SOURCE,
+    Context,
+    Findings,
+    _running,
+    shown,
+    under,
+)
+from localmelo.melo.contracts import own_gateway
 
 # Folders whose files a runner does not count as the project's code.
 _SKIP_DIRS = frozenset(
@@ -122,18 +131,28 @@ def _findings(ctx: Context, path: str, text: str) -> Findings:
 
 
 def _added(f: Findings, new: Findings, old: Findings, lead: str) -> None:
-    """*new*'s findings that *old* lacks, in *f*, each reason after *lead*."""
+    """*new*'s findings that *old* lacks, in *f*, each reason after *lead*.
+
+    Findings compare by category, site (the call or command, a download's
+    whole pipeline with its URL) and reason, counted: a finding is new when
+    its site or its reason is, so a second call like one the file had
+    already, or the same call pointed at another address or package, is
+    added; a call moved or a file reflowed adds nothing.
+    """
 
     def said(reason: str) -> str:
         return f"{lead} {reason[:1].lower()}{reason[1:]}"
 
-    for category, reasons in new.high.items():
-        for reason in reasons:
-            if reason not in old.high.get(category, []):
-                f.add(category, said(reason))
-    for reason in new.unsure:
-        if reason not in old.unsure:
+    had = Counter(old.hits)
+    for category, site, reason in new.hits:
+        if category == "self":
+            continue  # running it later is judged then
+        if had[(category, site, reason)] > 0:
+            had[(category, site, reason)] -= 1
+        elif category == "?":
             f.doubt(said(reason))
+        else:
+            f.add(category, said(reason))
     f.paths += [p for p in new.paths if p not in old.paths]
 
 
@@ -154,8 +173,55 @@ def _old_text(path: str) -> str | None:
         return None
 
 
+# Code in any language: a file that names melo's own places (see _names_own).
+_ANY_CODE = (
+    *_CODE_SUFFIXES,
+    *[".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".mm", ".cs", ".scala", ".r", ".jl"],
+    *[".ps1", ".applescript", ".tcl", ".exs", ".ex", ".dart", ".zig", ".nim", ".vue"],
+    *[".svelte", ".command", ".fish", ".pl", ".pm", ".groovy"],
+)
+# melo's sign-in folder and chat store, written as a literal path.
+_OWN_PLACES = re.compile(
+    r"\.cache[/\\]+localmelo[/\\]+gateway|localmelo[/\\]+gateway[/\\]+(auth|sessions\.db)"
+    r"|gateway[/\\]+auth[/\\]+token"
+)
+
+
+def _names_own(text: str) -> int:
+    """How often *text* names melo's sign-in, its chat store or its gateway's port."""
+    count = len(_OWN_PLACES.findall(text))
+    for port in own_gateway.current().ports:
+        count += len(
+            re.findall(
+                rf"(?i)(localhost|127\.0\.0\.1|::1\]?|0\.0\.0\.0)\W{{0,4}}{port}\b"
+                rf"|\bport\W{{0,4}}{port}\b",
+                text,
+            )
+        )
+    return count
+
+
 def written(ctx: Context, f: Findings, path: str, text: str, old: str = "") -> None:
-    """A write of *text* to *path* over *old*: code takes what it adds."""
+    """A write of *text* to *path* over *old*: code takes what it adds.
+
+    Code in any language that newly names melo's own sign-in, chat store or
+    gateway port is a change to localmelo itself (it would act as melo),
+    unless the workspace is the running localmelo's own source.
+    """
+    name = os.path.basename(path)
+    code = (
+        kind_of(path, text) or name in _CODE_NAMES or name.lower().endswith(_ANY_CODE)
+    )
+    if (
+        code
+        and not under(ctx.root, _running(_SOURCE))
+        and _names_own(text) > _names_own(old)
+    ):
+        f.add(
+            "self",
+            f"Writes {shown(ctx, path)}, code that names melo's own sign-in, chats or "
+            "gateway.",
+        )
     if not kind_of(path, text):
         return
     lead = f"Writes {shown(ctx, path)}, code that"

@@ -21,6 +21,7 @@ except ImportError as e:
     ) from e
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
+from localmelo.melo.contracts import own_gateway
 from localmelo.support import config, gateway_endpoint
 from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
@@ -171,12 +172,23 @@ class GatewayServer:
         starter = getattr(playground, "start", None)
         if starter is not None:
             await starter()
+        # Auto mode's calls may not read its sign-in or chats, nor call it
+        # (#339): known before the console starts a chat or a task.
+        guarded = [str(self.auth.path)]
         if self.console is not None:
-            await self.console.start()
+            guarded.append(self.console.store.path)
+        own_gateway.register(self.port or None, guarded)
+        if self.console is not None:
+            try:
+                await self.console.start()
+            except BaseException:
+                own_gateway.unregister(self.port or None)
+                raise
         logger.info("gateway ready on %s:%d", self.host, self.port)
         try:
             yield
         finally:
+            own_gateway.unregister(self.port or None)
             logger.info("gateway shutting down")
             # Each close must run even when an earlier one raises: the
             # console's aclose releases the gateway store's owner lock last.

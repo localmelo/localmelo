@@ -89,13 +89,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `version` 是已安装包的版本；在检出的代码中则为 `git describe` 的结果。
 - `configured` 表示配置文件是否指定了对话后端；`config_errors` 是对所用设置执行 `Config.validate()` 的结果。
-- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`。未配置嵌入后端时，`model.embedding` 为 `none`。
+- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`（请求带 `X-LocalMelo-Language: zh-Hans` 时是中文；不带该头的客户端读到英文）。未配置嵌入后端时，`model.embedding` 为 `none`。
 - 对于云端后端，`model_server` 为 `null`。对于本地后端，它是 `GET <url>/models` 的缓存结果：在第一次检查结束之前，`reachable` 为 `null`，`checked_s_ago` 为该结果的时长。请求从不等待检查；过期的结果会在后台启动一次检查（30 秒之后，或服务器无响应时的 5 秒之后）。当 `chat_url` 不是绝对的 `http` 或 `https` URL 时，`url_label` 为空，`reachable` 为 `false`；这样的值从不被探测，其文本（包括用户信息）也不会被回显。
 - `limits` 是入口文本上限、会话文本预算，以及以字节计的 API 请求体上限。
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。
 - `sessions.resume_mode` 是当前使用的恢复方式；目前为 `pairs`。
 - `status.running` 按类别统计当前正在运行的内容：`chats`（控制台中有轮次在进行的对话，与 `sessions.running` 相同）、`tasks`（状态为 `running` 的调度任务）、`runs`（直接运行和 `--brief` worker）和 `terminal`（交互式 `melo` 对话）。后两项来自命令行文件，只在租约有效时才计入一个轮次，因此进程已终止的运行不会被计入。`status.tasks` 是状态行所显示的调度队列：`running`、`queued`、`held` 和 `top_level`（其中最高的级别，没有则为 `null`）。`status.items` 列出正在运行的内容，先是对话，然后是任务、运行和终端对话，最多 20 项，每项为 `{"kind", "id", "title", "activity", "icon"}`（`kind` 为 `chat`、`task`、`run` 或 `terminal`；终端对话的标题已脱敏）。计数没有上限。无法读取的存储按没有运行任何内容计；一次调用通过索引读取任务状态，并通过索引读取命令行文件中正在运行的轮次。
-- `activity` 用平实的话说明该项正在做什么，`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
+- `activity` 用平实的话说明该项正在做什么（请求带 `X-LocalMelo-Language` 时用那种语言，macOS 的活动胶囊就是这样；否则是英文），`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Needs your approval`（`wait`，因批准而被扣住的任务）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
@@ -138,7 +138,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `since`（自纪元起的秒数）是这一天的开始；默认是网关所在电脑的本地午夜，不能是将来的时间（`400 invalid_request`），最多往回一周。
 - `session_id`（最多 128 个字符）是面板当前打开的对话。对于侧边对话，`scope` 为 `chat`，行是该对话自己的一行和它启动的任务（任务的 `front_id`）；未知的 id 视为没有任何内容的侧边对话。对于主对话（类型为 `front` 的会话，或 `meta` 里有 `main: true` 的会话），以及不带 `session_id` 时，`scope` 为 `all`，行是一整天的内容，包括 worker 运行和终端对话。
-- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。
+- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。
 - `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令行、代码或文本），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
 - 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`、`approvals`）。
 
@@ -194,6 +194,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）。
 - `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
 - `language` 是 `[console] language`，即控制台的语言：`auto`、`en` 或 `zh-Hans`。
+- `approvals` 是 `[approvals] mode`，即新对话开始时的模式：`ask` 或 `auto`（文件中的其他值按 `ask` 读取）。
 - `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
@@ -211,6 +212,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
+- `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
@@ -299,6 +301,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `POST /api/tasks` 接受 `objective`（或其别名 `prompt`）、可选的 `title`、`workspace`、`level` 和 `request_key`。objective 必须非空，且不超过 100,000 个字符；title 不超过 200 个字符，默认为从 objective 派生的标题。level 为 0–5 的整数或 `P0`–`P5`；省略时为计算出的 P2。提供的 `deadline`（即使为 null）都会被拒绝；截止时间尚不支持。其他字段也会被拒绝。objective 缺失、为空白或过长、title 过长或 level 无效，都返回 400 `invalid_task`；模式或类型错误返回 400 `invalid_request`。创建新任务时返回 202 `{"task": ...}`。显式为空的 `request_key` 返回 400 `invalid_request`。非空的 `request_key` 使同一规范化请求的重复提交返回 200 `{"task": ..., "repeated": true}`；将其用于不同的请求会返回 409 `submission_conflict`。重复提交不会启动新的 worker。
 - `front_id`（可选）是发起该任务的对话：某个旁支对话或主对话的会话 id。任务属于它（即任务的 `front_id`，该对话的面板 Workers 标签页会列出它）；缺失时属于主对话。不指向任何控制台对话的 id（未知 id，或任务的会话）返回 400 `invalid_request`。
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
+- `budget_exhausted` 结束的任务存储为 `failed`，`wait_reason` 为 `Out of steps`，每个任务体都有 `out_of_steps`（它为 `true`）。`GET /api/tasks/{task_id}` 还会给这样的任务加上 `left`，即它的最终回答里说明还剩什么的那一句，去掉开头的标签（`Remaining:`、`What's left:`、`剩下：`；没有这样一句则为 `""`）。`POST /api/tasks/{task_id}/continue`（无请求体）让它在自己的会话里从停下的地方再运行，以控制台的话 "Continue the task from where you stopped." 作为下一轮：202 `{"task": ..., "message": "continued"}`；404 `not_found`；没有用完步数的任务返回 409 `invalid_transition`。
 - `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。`first` 会被 400 `invalid_request` 拒绝；目前不支持。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
 
 暂停会关闭 worker 的围栏，并在一个已在运行的提供方或工具结束时记录待处理的暂停。在持有的计划、反思或未送达的审批处，worker 会停放，关闭其资源，并根据已持久化的证据保存一张卡片。
@@ -311,6 +314,10 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
 /api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
+
+任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。任务在没有被拦下步骤的情况下继续。`POST
+/api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
+"message": "queued"}`（它在下一步读到消息），已结束的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`。任务结束时，它的允许随之失效。
 
 明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
 
@@ -348,7 +355,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，在工作区下属于它自己的文件夹中运行，归定时事项所属的对话（`front_id`：主对话或某个旁支对话）。每个定时事项带有 `revision`，每次更改都会使它加一。
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - 定时事项的 `level`（1 到 4）就是它的优先级：控制台把它显示为 `P` 加数字。`level_word`（`Today`、`Normal` 等）为兼容现有客户端而保留，控制台从不显示它。
@@ -358,6 +365,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
 - `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
 - `PUT /api/checkin` 配合 `{"on": false}` 切换 check-in（保存在文件中），返回 `{"checkin": {...}}`；关闭期间 `next_at` 为 null。
+- `next_at` 是时间表为下一次运行定的时间（`08:30`），控制台显示的是它；`next_run` 是运行真正开始的时间，最多晚 120 秒，免得所有定时事项都在整点同时开始。每 N 小时的定时事项没有指定时刻，两者相等。事项关闭时两者都为 `null`。
+- `when_said` 是 `when` 的词形式：一个词库键和它的参数，其中一天里的时刻写成 `{"clock": minutes after midnight}`（午夜后的分钟数）。页面用自己的语言和钟点写它（`8:30 AM`、`上午 8:30`）；`when` 始终用 24 小时制（`8:30`），语言随请求。
+- check-in 的提示用控制台的语言写：先看 `[console] language` 设置，其次是页面最近一次请求的语言，否则是英文。
 
 一次性事项（`"kind": "once"`）只运行一次。它的 `when` 写作 `once, Fri Oct 30 at 9:00`（控制台里按页面的语言），第一次 `next_run` 是它的时间再加抖动；运行之后网关把它关掉：`enabled` 为 false，`next_run` 为 null，`last_run` 和 `last` 保留。到期时电脑在睡眠或网关没有运行的，会在下一次检查时运行，此时 `late_min` 给出它比约定时间晚了多少分钟开始（晚不到五分钟时为 null）。它不会等上一次运行结束。
 
@@ -465,8 +475,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` 为 `done`、`failed`、`waiting`（有审批在等待答复）或 `answered`（该审批已答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
-- `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
+- `state` 为 `done`、`failed`、`stopped`（任务用完了步数，可用 `POST /api/tasks/{id}/continue` 继续）、`waiting`（有审批在等待答复）或 `answered`（该审批已答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
+- `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`stopped` 卡片上是最终回答里说明还剩什么的那一句（否则是它的前两行，再否则是 `Ran out of steps`）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
 - `waiting` 卡片有 `request_id`。该审批得到答复后，会有一张状态为 `answered`、`request_id` 相同、`line` 为答复的卡片跟在它后面，客户端把这一张卡片显示为带着答复、不再有 Review 的样子。答复不是新消息：它永远不是列表的 `last_card`，等待卡片从未写入时也不会写入答复。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入；之后才答复的审批会跟上它的 `answered` 卡片。主对话的事件流以 `attention.card` 帧送来新卡片。
@@ -529,6 +539,12 @@ worker 运行或终端对话从 CLI 的文件读取。
   "session_id": "3f9c2a7b1d4e",
   "local": true,
   "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "parts": [
+    {"key": "status.cacheIdle", "params": {"share": "67%", "idle": "3m"}},
+    {"key": "status.ctx", "params": {"used": "1.0k", "limit": "8.0k"}},
+    {"key": "status.step", "params": {"step": 3}},
+    {"key": "status.tasks", "params": {"running": 1, "queued": 2, "held": 0}}
+  ],
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
@@ -537,6 +553,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务；有被搁置的任务在等你批准时，最后还有一句 `1 task waits for you`（`N tasks wait for you`）。没有数据的段会被省略。
+- `parts` 是同样的段，写成词：控制台词库的键（`status.*`）和它的参数，每段一项，顺序相同。`segments` 是这些词的英文，与终端打印的一样；网页控制台用自己的语言写它们。
 - 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
 - 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，其中最高的优先级（`top_level`，没有任务时为 `null`），以及 `waiting`（held 任务中在等你批准或回答、而不是在等调度器的任务数）。
 - 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。
@@ -631,6 +648,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - 创建得到的是[主对话](#get-apisessions)的一个旁支对话：`kind` 为 `chat`，`main` 为 false。主对话已经存在；向它发消息请用 `POST /api/sessions/{id}/turns`。
+- `approvals` 是可选的：`ask` 或 `auto`，即新对话的[模式](#ask-and-auto)；缺失时取 `[approvals] mode`。
 - `workspace` 是可选的。缺失或为 `null` 时为 `~/localmelo-workspace`，不存在时以权限 `0700` 创建。其他值必须是绝对路径或以 `~/` 开头，并且是现有目录；其他任何情况都是 400 `invalid_workspace`，且不会创建智能体。
 - `turn` 是可选的。不带它时，回答是仅含 `session` 的 201，会话等待 `POST /api/sessions/{id}/turns`。
 - `session.model` 是本请求中设置的对话模型。第一条消息的文本会成为标题：空白被折叠，最多 60 个字符，超出时以 `…` 结尾。
@@ -721,7 +739,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 ## PATCH /api/sessions/{id}
 
-重命名会话、把它移动到另一个文件夹，或两者同时进行。
+重命名会话、把它移动到另一个文件夹、在 Ask 和 Auto 之间切换，或同时进行其中几项。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
@@ -735,7 +753,35 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话对任一变更都返回 409 `task_session_read_only`。
 - `title` 会被去除首尾空白，且必须为 1 到 200 个字符；其他长度返回 400 `invalid_request`。重命名的标题永远不会被自动标题替换。
 - `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话的工具授权会被遗忘。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
-- 两项变更之后，回答为 200，附带会话。
+- `approvals` 是 `ask` 或 `auto`：从下一步起对话的[模式](#ask-and-auto)；已经在等待回答的调用继续等待。它在一个事务中写入会话的 `meta`，并保留其他键；`session.updated` 带有新的 `meta`。不是控制台对话（`chat` 或 `front`）的会话返回 409 `not_a_chat`。
+- 变更之后，回答为 200，附带会话。
+
+<a id="ask-and-auto"></a>
+
+## Ask 和 Auto
+
+每个控制台对话都有一个模式（#339）：`ask`（melo 在运行命令和更改文件前先问你）或 `auto`（不问任何人；常规步骤直接运行，有风险或超出请求的步骤会被拦下并说明原因）。每个会话对象都带有：
+
+- `approvals`：对话的模式；任务的模式是创建任务时其对话的模式。主对话在被设定之前取 `[approvals] mode`。
+- `allowances`：自网关启动以来在这个对话中被允许一次的步骤，`step_key` -> 允许的到期时间（Unix 秒）；用过或过期后仍保留，便于页面说明。
+
+被拦下的步骤是其调用的 `tool.finished` 记录，带有来源为 `auto` 且 `allowed` 为 false 的 `approval`（见[事件](events.md)）。在 Auto 下，对话的调用在 `[agent] confine_writes` 的写入沙箱中运行：写入文件夹和临时文件夹之外会失败，其输出以一行说明开头。
+
+### POST /api/sessions/{id}/blocks/{request_id}/allow
+
+允许一次以 `approval.request_id` 为 *request_id* 被拦下的步骤，并以本人的名义发送让 melo 继续的消息。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
+```
+
+```json
+{"step_key": "051aab7c5a9691e4d449b7a140164314", "until": 1793401344.2, "turn_id": "9a84…", "turn": {"user_text": "Go ahead with the step melo blocked: install software.", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- 服务器在对话的记录中找到被拦下的步骤；客户端从不发送键。允许只涵盖那个确切的步骤（`step_key`）以及拦下时所列的步骤类别，只运行一次，30 分钟内有效，保存在内存中：重启后会被忘记。重试的调用记录为来源 `user` 且带 `allowance: "once"`。
+- 这条消息（使用控制台的语言）会像 `POST /api/sessions/{id}/turns` 一样开始一个轮次；返回 202，附带该轮次。
+- 对话中没有这个被拦下的步骤时返回 404 `not_found`；更改 localmelo 本身的步骤或已停止轮次未运行的调用返回 409 `not_allowable`；这一步在被拦下之后已凭允许运行过，或仍有一个允许在等待时，返回 409 `already_allowed`；轮次运行期间返回 409 `session_busy`（此时不会允许任何东西）；任务（见下文）返回 409 `task_session_read_only`，其他类型返回 `not_a_chat`。由它开始的那一轮没有用到的允许，会在那一轮结束时失效。
 
 ## DELETE /api/sessions/{id}
 

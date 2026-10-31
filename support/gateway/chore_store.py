@@ -30,6 +30,7 @@ from datetime import tzinfo
 from typing import Any, Final
 
 from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
+from localmelo.support.gateway.i18n import said
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS, MAX_TITLE_CHARS
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
@@ -69,7 +70,15 @@ _COLUMNS: Final = (
 
 
 class ChoreError(SessionStoreError):
-    """A chore operation cannot do what was asked."""
+    """A chore operation cannot do what was asked.
+
+    *words* is the message as a :func:`said`, for the console to say in the
+    reader's language.
+    """
+
+    def __init__(self, message: str, words: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.words = words
 
 
 class ChoreNotFoundError(ChoreError):
@@ -143,6 +152,23 @@ class ChoreStore:
         self._tz = tz
         self._jitter = jitter or (lambda: random.uniform(0.0, JITTER_S))
 
+    def planned(self, chore: Chore) -> float | None:
+        """The time the person's schedule names for the next run, without the start jitter.
+
+        ``next_run`` is when the run starts: that time plus up to
+        :data:`JITTER_S`, so chores do not all start on the minute. A daily,
+        weekday or one-time schedule names its time (``8:30``), which is what
+        a person is told; an every-N-hours one names none, so it stays
+        ``next_run``. ``None`` while the chore has no next run.
+        """
+        if chore.next_run is None:
+            return None
+        if chore.schedule.kind == "hours":
+            return chore.next_run
+        if chore.schedule.kind == "once":
+            return chore.schedule.when(self._tz)
+        return chore.schedule.next_after(chore.next_run - JITTER_S - 1.0, self._tz)
+
     def plan(self, schedule: Schedule, after: float) -> float:
         """The next run after *after*: the schedule's next time and a small jitter, never early."""
         return schedule.next_after(after, self._tz) + self._jitter()
@@ -181,7 +207,10 @@ class ChoreStore:
             cursor = await conn.execute("SELECT COUNT(*) FROM chores")
             row = await cursor.fetchone()
             if row is not None and row[0] >= MAX_CHORES:
-                raise ChoreLimitError(f"At most {MAX_CHORES} chores. Delete one first.")
+                raise ChoreLimitError(
+                    f"At most {MAX_CHORES} chores. Delete one first.",
+                    said("errors.choreLimit", n=MAX_CHORES),
+                )
             await conn.execute(
                 f"INSERT INTO chores ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, NULL, '', '', ?, ?)",
                 (chore_id, front_id, title, request, json.dumps(schedule.to_json()), level,
@@ -205,7 +234,10 @@ class ChoreStore:
         async with self._store.component_transaction("chore_update") as conn:
             chore = await self._get(conn, chore_id)
             if chore.revision != revision:
-                raise ChoreStaleError("This chore changed. Reload it and try again.")
+                raise ChoreStaleError(
+                    "This chore changed. Reload it and try again.",
+                    said("errors.choreStale"),
+                )
             if enabled is None and schedule is not None and schedule.kind == "once":
                 enabled = True  # a new time arms a done reminder again
             new = dataclasses.replace(
@@ -312,7 +344,9 @@ class ChoreStore:
         )
         row = await cursor.fetchone()
         if row is None:
-            raise ChoreNotFoundError(f"No chore has id {chore_id}")
+            raise ChoreNotFoundError(
+                f"No chore has id {chore_id}", said("errors.choreNotFound", id=chore_id)
+            )
         return Chore.from_row(row)
 
 

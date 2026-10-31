@@ -131,6 +131,7 @@ enable_thinking = false
 - [First run](configure.md#first-run) writes the `chat_backend`, `chat_url` and `chat_model` lines (and, with an embedding model, `embedding_backend = "omlx"` with that table's `embedding_url` and `embedding_model`); add the other lines by hand.
 - `request_timeout_s = 600` gives oMLX time to load a model that is not loaded yet; see [Chat request timeout](../reference/configuration.md#chat-request-timeout).
 - The `extra_body` table turns off a Qwen3 model's thinking, which makes each step faster; leave it out to keep thinking on. oMLX applies it unless the model's settings in oMLX force `enable_thinking`.
+- With thinking off, melo takes a reply's text as the answer even when the server sends it in the reasoning field; a reply that still carries counted reasoning tokens and no text is not.
 - For long-term memory, oMLX can serve an embedding model from the same directory: set `embedding_backend = "omlx"` and add `embedding_url = "http://127.0.0.1:8000/v1"` and `embedding_model = "<its id>"` to `[vllm]`; the id and one `POST /v1/embeddings` are the check, since `GET /v1/models` gives no type. See [Set up an embedding model](embedding.md#omlx).
 
 ### Ollama with embeddings

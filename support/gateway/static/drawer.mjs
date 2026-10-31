@@ -1,4 +1,4 @@
-import {t} from './i18n.mjs';
+import {formatTime, t} from './i18n.mjs';
 import {formatDuration, statusText} from './turns.mjs';
 
 /**
@@ -107,7 +107,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   function timestamp(value) {
     if (value == null) return '—';
     const date = new Date(value * 1000);
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    return Number.isNaN(date.getTime()) ? String(value) : formatTime(date, 'full');
   }
   function runsView() {
     if (!runs.length) content.append(node('p', t('drawer.runs.none')));

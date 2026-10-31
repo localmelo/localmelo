@@ -129,7 +129,9 @@ output or log the header; same-user processes can still read the token file.
   `config_errors` is `Config.validate()` on the settings in use.
 - `model.backend_label` is the backend registry's label; for the `vllm` backend it
   is `oMLX` when the config file says `omlx` or a model listing of the server
-  did, else `OpenAI-compatible server`. `model.embedding`
+  did, else `OpenAI-compatible server` (in the language of the request when it
+  sends `X-LocalMelo-Language: zh-Hans`; a client that sends none reads
+  English). `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the
@@ -162,8 +164,9 @@ output or log the header; same-user processes can still read the token file.
   redacted). The counts are not capped. A store that cannot be read counts as
   nothing running; one call reads the task states by their index and the
   running turns of the CLI file by theirs.
-- `activity` says what the item is doing in plain words, and `icon` its kind:
-  `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
+- `activity` says what the item is doing in plain words (in the language of the request when it sends `X-LocalMelo-Language`, as the macOS pill does; English otherwise), and `icon` its kind:
+  `Waiting for your approval` (`wait`), `Needs your approval` (`wait`, a
+  task held on an approval), `Waiting for the model` (`held`, the
   scheduler holds its model call; when the reason is known it says why:
   `Waiting for a higher-priority task`, `Waiting for a free model slot`,
   `Waiting while another job uses the model`, `Waiting for free memory`,
@@ -250,7 +253,10 @@ Without `session_id` (or with the main chat's) the same call lists the whole day
   turn that still runs is in, however early it began), or a task changed since
   then or not finished. `state` is `running`, `waiting` (an approval waits),
   `held` (the scheduler holds its model call), `queued` or `paused` while it is
-  live, else `done`, `failed` or `stopped`. A live row says what it does
+  live, else `done`, `failed` or `stopped`; a task that ran out of steps is
+  `stopped` with `can_continue: true` (its stored state is `failed`), and its
+  `result` is the sentence of its stop answer that says what is left. A live row
+  says what it does
   (`activity` and `icon`, as in [`status.items`](#get-apihealth)); a finished one
   says how in `result`, one line of at most 140 characters (the turn's digest,
   else the answer's first sentence, else for a failure why), and its `icon` is
@@ -339,6 +345,8 @@ file's revision.
   `auto`, `bm25`, `embedding` or `llm`.
 - `language` is `[console] language`, the console's language: `auto`, `en`
   or `zh-Hans`.
+- `approvals` is `[approvals] mode`, the mode a new chat starts in: `ask` or
+  `auto` (another value in the file reads `ask`).
 - `developer_settings` is every key `melo -h all` lists, grouped by section
   in its order (`""` is the top level): `value` is the one in use and
   `default` the default, both as the help prints them; `flag` is the old
@@ -375,6 +383,9 @@ sessions.
 - `language` is optional: `auto`, `en` or `zh-Hans` sets `[console] language`
   (other values are 400 `invalid_request`); omitted, the saved value is kept.
   The page loads again to show the new language.
+- `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
+  new chats start in (other values are 400 `invalid_request`); omitted, the
+  saved value is kept. Chats made before keep their own mode.
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
@@ -530,6 +541,16 @@ Tools run with the user's permissions, not in a sandbox.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
+- A task whose run ended `budget_exhausted` is stored `failed` with
+  `wait_reason` `Out of steps`, and every task body says `out_of_steps`
+  (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,
+  the sentence of its stop answer that says what is left, without a label that opens it
+  (`Remaining:`, `What's left:`, `剩下：`; `""` when no sentence says it).
+  `POST /api/tasks/{task_id}/continue` (no body) runs it again from where it
+  stopped, in its own session, with the console's words "Continue the task from
+  where you stopped." as its next turn: 202 `{"task": ..., "message":
+  "continued"}`; 404 `not_found`, and 409 `invalid_transition` for a task that
+  did not run out of steps.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
@@ -564,6 +585,22 @@ the shape of a session's; empty when none; answer one with `POST
 /api/approvals/{request_id}`, as for a chat), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
+
+A task keeps the [mode](#ask-and-auto) its chat had when it was made
+(`approvals`, `ask` or `auto`); a later switch of the chat does not change
+it. A task in Auto asks nobody, so nothing holds it, and its calls run
+under the write sandbox. Its object adds `blocked`, the steps Auto blocked
+(oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
+`review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
+allowed step ran, else `null`), and `allowances` as a chat's. The task goes
+on without a blocked step. `POST
+/api/tasks/{task_id}/blocks/{request_id}/allow` allows it once (as for a
+chat) and sends the go-ahead message to the task: 202 `{"task": ...,
+"message": "queued"}` for a task that has not finished (it reads it at its
+next step), `"continued"` for one that has (it runs again); 404 `not_found`
+for no such block, 409 `not_allowable` for one that cannot be allowed, 409
+`already_allowed` once the step ran on an allowance or while one waits. A
+task's allowances go when it finishes.
 
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
@@ -648,7 +685,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
@@ -658,6 +695,9 @@ Saved requests that run on a schedule (see [Chores that repeat](../guides/web-co
 - `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+- `next_at` is the time the schedule names for the next run (`08:30`), which the console shows; `next_run` is when the run starts, up to 120 seconds later, so chores do not all start on the minute. For an every-N-hours chore, which names no time, they are equal. Both are `null` while the chore is off.
+- `when_said` is `when` as words: a catalog key and its parameters, where a time of day is `{"clock": minutes after midnight}`. The page writes it in its own language and clock (`8:30 AM`, `上午 8:30`); `when` always writes the 24-hour clock (`8:30`), in the language of the request.
+- The check-in's note is written in the console's language: the `[console] language` setting, else the language the page asked for last, else English.
 
 A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 30 at 9:00` (in the page's language for the console), its first `next_run` is its time plus the jitter, and after its run the gateway switches it off: `enabled` false, `next_run` null, `last_run` and `last` kept. One due while the computer slept or the gateway was down runs at the next tick, and `late_min` then says how many minutes after its time it started (null when it started less than five minutes after it). It never waits for an earlier run to end.
 
@@ -887,15 +927,18 @@ Its `data`:
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` is `done`, `failed`, `waiting` (an approval waits for an answer) or
-  `answered` (that approval was answered). `source_kind` is `chat` or `task`,
+- `state` is `done`, `failed`, `stopped` (a task ran out of steps; it can
+  continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
+  for an answer) or `answered` (that approval was answered). `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
   columns: a title the person or the main chat gave stays, a longer one is cut
   at a word. `at` is when it happened.
 - `line` is plain words: the first two lines of the answer on a `done` card
   (an opening `Done.` is left out when more follows), why the run did not
   finish on a `failed` one (its status in words, then the first line of its
-  error), what is asked on a `waiting` one (`Wants to run Python`, `Wants to
+  error), the sentence of the stop answer that says what is left on a
+  `stopped` one (else its first two lines, else `Ran out of steps`), what is
+  asked on a `waiting` one (`Wants to run Python`, `Wants to
   write notes.md`), and the answer on an `answered` one (`Allowed once`,
   `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
   `Denied`, `No answer in time`, `Not run: it stopped first`).
@@ -1032,6 +1075,12 @@ the CLI's file.
   "session_id": "3f9c2a7b1d4e",
   "local": true,
   "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "parts": [
+    {"key": "status.cacheIdle", "params": {"share": "67%", "idle": "3m"}},
+    {"key": "status.ctx", "params": {"used": "1.0k", "limit": "8.0k"}},
+    {"key": "status.step", "params": {"step": 3}},
+    {"key": "status.tasks", "params": {"running": 1, "queued": 2, "held": 0}}
+  ],
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
@@ -1043,6 +1092,10 @@ the CLI's file.
   right: cache, context, step, tasks, then a sentence such as `1 task waits for
   you` (`N tasks wait for you`) while a held task waits for your approval. A
   segment with no data is left out.
+- `parts` is the same segments as words: a key of the console's catalogs
+  (`status.*`) and its parameters, one for each segment and in the same order.
+  `segments` is those words in English, as the terminal prints them; the web
+  console writes them in its own language.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is
@@ -1196,6 +1249,8 @@ Create a session, usually with its first turn.
 - A create makes a side chat of the [main chat](#get-apisessions): `kind`
   `chat`, `main` false. The main chat already exists; write to it with
   `POST /api/sessions/{id}/turns`.
+- `approvals` is optional: `ask` or `auto`, the new chat's
+  [mode](#ask-and-auto); absent, `[approvals] mode`.
 - `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
   created with mode `0700` when missing. Another value must be absolute or
   start with `~/` and be an existing directory; anything else is 400
@@ -1336,7 +1391,8 @@ event stream, or from `pending_approvals`.
 
 ## PATCH /api/sessions/{id}
 
-Rename the session, move it to another folder, or both.
+Rename the session, move it to another folder, switch it between Ask and
+Auto, or several at once.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
@@ -1355,7 +1411,58 @@ Rename the session, move it to another folder, or both.
   forgotten. The rules are a create's: absolute or `~/`, an existing
   directory, else 400 `invalid_workspace`. 409 `session_busy` while a turn
   runs; a refused move leaves the row as it was.
-- The answer is 200 with the session after both changes.
+- `approvals` is `ask` or `auto`: the chat's [mode](#ask-and-auto) from its
+  next step; a call already waiting for an answer keeps waiting. It is set
+  in the session's `meta` in one transaction that keeps the other keys, and
+  `session.updated` carries the new `meta`. A session that is not a console
+  chat (`chat` or `front`) is 409 `not_a_chat`.
+- The answer is 200 with the session after the changes.
+
+## Ask and Auto
+
+Each console chat has a mode (#339): `ask` (melo asks before commands and
+file changes) or `auto` (nobody is asked; routine steps run, a risky or
+off-request step is blocked and explained). Every session object carries:
+
+- `approvals`: the chat's mode; a task's is the mode its chat had when the
+  task was made. The main chat has `[approvals] mode` until it is set.
+- `allowances`: the steps allowed once in this chat since the gateway
+  started, `step_key` -> when the allowance runs out (Unix seconds); kept
+  after it was used or ran out, so a page can say so.
+
+A blocked step is the `tool.finished` record of its call with an
+`approval` of origin `auto` and `allowed` false (see
+[events](events.md)). In Auto the chat's calls run under the write sandbox
+of `[agent] confine_writes`: a write outside the folder and the temporary
+folders fails, and its output starts with a line that says so.
+
+### POST /api/sessions/{id}/blocks/{request_id}/allow
+
+Allow once the step blocked with `approval.request_id` *request_id*, and send
+the person's message that asks melo to go ahead.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
+```
+
+```json
+{"step_key": "051aab7c5a9691e4d449b7a140164314", "until": 1793401344.2, "turn_id": "9a84…", "turn": {"user_text": "Go ahead with the step melo blocked: install software.", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- The server finds the block in the chat's records; the client never sends
+  a key. The allowance covers that exact step (`step_key`) with the kinds of
+  step the block named, once, for 30 minutes, in memory: a restart forgets
+  it. The retried call is recorded with origin `user` and
+  `allowance: "once"`.
+- The message (in the console's language) starts a turn as
+  `POST /api/sessions/{id}/turns` does; 202 with that turn.
+- 404 `not_found` for no such block in this chat; 409 `not_allowable` for a
+  step that changes localmelo itself or a call a stopped turn did not run;
+  409 `already_allowed` once the step ran on an allowance after the block,
+  or while an allowance of it waits; 409 `session_busy` while a turn runs
+  (nothing is allowed then); 409 `task_session_read_only` for a task (see
+  below) and `not_a_chat` for another kind. An allowance the turn it
+  started did not use goes when that turn ends.
 
 ## DELETE /api/sessions/{id}
 

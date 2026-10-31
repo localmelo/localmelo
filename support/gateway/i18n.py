@@ -12,6 +12,10 @@ language`` setting when it names a language, else the first of the reader's
 preferred languages that the console has (``zh``, ``zh-CN`` or ``zh-Hans`` is
 Simplified Chinese; Traditional Chinese tags are skipped), else English.
 
+The catalogs, :func:`catalog` and :func:`t_in` live in
+:mod:`localmelo.support.words`, which needs no gateway extra; this module adds
+the request's language (and, with it, :func:`t`).
+
 The server answers a request in the language the console page asks for, with
 the ``X-LocalMelo-Language`` header or its ``localmelo_language`` cookie;
 every other client (the terminal, scripts) gets English. While a request is
@@ -20,38 +24,32 @@ handled, :func:`t` uses its language.
 
 from __future__ import annotations
 
-import json
-import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from functools import cache
 from http.cookies import CookieError, SimpleCookie
-from pathlib import Path
 from typing import Any, Final
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-LANGUAGES: Final = ("en", "zh-Hans")
+from localmelo.support.words import (
+    CATALOGS,
+    LANGUAGES,
+    Entry,
+    catalog,
+    format_entry,
+    plural_form,
+    said,
+    said_in,
+    t_in,
+)
+
 SETTINGS: Final = ("auto", *LANGUAGES)
 COOKIE: Final = "localmelo_language"
 HEADER: Final = b"x-localmelo-language"
-CATALOGS: Final = Path(__file__).with_name("static") / "i18n"
 
-_PARAM: Final = re.compile(r"\{(\w+)\}")
 _TRADITIONAL: Final = frozenset({"hant", "tw", "hk", "mo"})
 _current: ContextVar[str] = ContextVar("localmelo_language", default="en")
-
-Entry = str | Mapping[str, str]
-
-
-@cache
-def catalog(language: str) -> dict[str, Entry]:
-    """The catalog of *language*, read once."""
-    data: dict[str, Entry] = json.loads(
-        (CATALOGS / f"{language}.json").read_text(encoding="utf-8")
-    )
-    return data
 
 
 def _language_of(tag: str) -> str | None:
@@ -93,32 +91,6 @@ def accept_languages(header: str) -> list[str]:
     return [tag for _, _, tag in sorted(ranked)]
 
 
-def plural_form(language: str, n: object) -> str:
-    """``one`` or ``other``: English has both, Chinese only ``other``."""
-    return "one" if language == "en" and n == 1 else "other"
-
-
-def format_entry(entry: Entry, params: Mapping[str, Any], language: str) -> str:
-    """*entry* with its parameters filled in; a count picks its plural form first."""
-    if not isinstance(entry, str):
-        entry = entry.get(plural_form(language, params.get("n")), entry["other"])
-    return _PARAM.sub(
-        lambda found: (
-            str(params[found.group(1)]) if found.group(1) in params else found.group()
-        ),
-        entry,
-    )
-
-
-def t_in(language: str, key: str, /, **params: Any) -> str:
-    """The words of *key* in *language*, falling back to English, then to the key."""
-    own = catalog(language) if language in LANGUAGES else {}
-    entry = own.get(key)
-    if entry is None:
-        language, entry = "en", catalog("en").get(key)
-    return key if entry is None else format_entry(entry, params, language)
-
-
 def t(key: str, /, **params: Any) -> str:
     """The words of *key* in the language of the request being handled."""
     return t_in(_current.get(), key, **params)
@@ -129,27 +101,9 @@ def current() -> str:
     return _current.get()
 
 
-def said(key: str, /, **params: Any) -> dict[str, Any]:
-    """Words to store with a record (a card, an echo) so each reader reads them in their language.
-
-    ``{"key": key, "params": params}``; a parameter may itself be a :func:`said`.
-    The record keeps its English ``line`` too, for every client that reads only that.
-    """
-    return {"key": key, "params": params}
-
-
 def said_text(words: Mapping[str, Any], language: str | None = None) -> str:
     """The words of a :func:`said` in *language* (the request's when omitted)."""
-    params = words.get("params")
-    filled = {
-        name: (
-            said_text(value, language)
-            if isinstance(value, Mapping) and "key" in value
-            else value
-        )
-        for name, value in (params.items() if isinstance(params, Mapping) else ())
-    }
-    return t_in(language or _current.get(), str(words.get("key")), **filled)
+    return said_in(language or _current.get(), words)
 
 
 @contextmanager
@@ -176,15 +130,20 @@ def _cookie(headers: Iterable[tuple[bytes, bytes]]) -> str:
     return ""
 
 
-def request_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
-    """What the console page asked for, by header or cookie; English for any other client."""
+def asked_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
+    """The language a request asks for, by header or cookie; ``""`` for any other client."""
     pairs = list(headers)
     asked = next(
         (value.decode("latin-1") for name, value in pairs if name.lower() == HEADER),
         "",
     )
     asked = asked.strip() or _cookie(pairs)
-    return asked if asked in LANGUAGES else "en"
+    return asked if asked in LANGUAGES else ""
+
+
+def request_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
+    """What the console page asked for, by header or cookie; English for any other client."""
+    return asked_language(headers) or "en"
 
 
 def page_language(setting: str, headers: Iterable[tuple[bytes, bytes]]) -> str:
@@ -208,16 +167,27 @@ def page_language(setting: str, headers: Iterable[tuple[bytes, bytes]]) -> str:
 
 
 class LanguageMiddleware:
-    """Sets the language of each HTTP request for :func:`t`."""
+    """Sets the language of each HTTP request for :func:`t`.
 
-    def __init__(self, app: ASGIApp) -> None:
+    *remember*, when given, hears each language a request asks for: the console
+    keeps the last one, to write in it what nobody asked for (a check-in).
+    """
+
+    def __init__(
+        self, app: ASGIApp, remember: Callable[[str], None] | None = None
+    ) -> None:
         self.app = app
+        self.remember = remember
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        token = _current.set(request_language(scope.get("headers", ())))
+        headers = scope.get("headers", ())
+        asked = asked_language(headers)
+        if asked and self.remember is not None:
+            self.remember(asked)
+        token = _current.set(asked or "en")
         try:
             await self.app(scope, receive, send)
         finally:
@@ -225,16 +195,20 @@ class LanguageMiddleware:
 
 
 __all__ = [
+    "CATALOGS",
     "COOKIE",
     "LANGUAGES",
     "SETTINGS",
     "LanguageMiddleware",
+    "Entry",
     "accept_languages",
+    "asked_language",
     "catalog",
     "current",
     "format_entry",
     "page_language",
     "pick_language",
+    "plural_form",
     "request_language",
     "said",
     "said_text",
