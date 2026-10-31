@@ -215,7 +215,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and models that think are unchanged. A turn that ends without an answer still
   shows `[no answer: ...]` in the chat and the saved turn, but the model now
   reads a note, `[The previous request ended without an answer.]`, in its place,
-  so it no longer copies the label as its own reply. [#NN]
+  so it no longer copies the label as its own reply. [#358]
 - A broken model reply is no longer shown as the answer. A reply that starts
   with a spelled-out `<thinking>...</thinking>` block now has that block as its
   thinking, as a `<think>` block does, and the person no longer sees it while the
@@ -2925,3 +2925,4 @@ earlier milestones.
 [#353]: https://github.com/localmelo/localmelo/pull/353
 [#354]: https://github.com/localmelo/localmelo/pull/354
 [#356]: https://github.com/localmelo/localmelo/pull/356
+[#358]: https://github.com/localmelo/localmelo/pull/358
