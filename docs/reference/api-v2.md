@@ -478,7 +478,7 @@ built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
-  deferred to S6b. Pause parks at P5; resume restores the priority before
+  not supported yet. Pause parks at P5; resume restores the priority before
   pause unless a new runnable level is supplied. The saved priority survives
   audit-log retention. If there is no saved snapshot (for example, a task
   created or set at P5, or a v1 pause whose log was already missing), resume

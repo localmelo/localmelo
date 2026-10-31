@@ -46,7 +46,7 @@ holds a call). The gateway closes that gate last at shutdown, after both
 surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
 cause `shutdown`.
 
-S3a.2 task workers use that same gate for model and embedding calls, with
+Task workers use that same gate for model and embedding calls, with
 memory off and gateway tools (no `shell_exec`). Up to four workers can be
 resident; a paused running worker can still occupy a slot. Task rows survive
 restart; startup interrupts uncertain work and preserves proved-never-started
@@ -57,7 +57,7 @@ or resumes; a no-longer-valid folder fails the task rather than running it.
 Pause waits for the next model call: running tools finish, and an answered
 pending approval waits until resume. Resume restores the priority before pause,
 or computed P2 if retention pruned the pause log; an unpaused task returns
-409 `not_paused`. Task PATCH rejects `first` (400); it is deferred to S6b.
+409 `not_paused`. Task PATCH rejects `first` (400); it is not supported yet.
 
 ### Legacy playground
 
