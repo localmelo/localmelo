@@ -57,13 +57,23 @@
           "type": "function",
           "function": {
             "name": "file_read",
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file. A long file is cut with a note of how many lines it has; read a part with start_line and end_line (1-based, inclusive) instead of slicing the file in code.",
             "parameters": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string",
                   "description": "File path"
+                },
+                "start_line": {
+                  "type": "integer",
+                  "description": "First line to read (default 1)",
+                  "minimum": 1
+                },
+                "end_line": {
+                  "type": "integer",
+                  "description": "Last line to read (default: the end)",
+                  "minimum": 1
                 }
               },
               "required": [
@@ -154,13 +164,23 @@
           "type": "function",
           "function": {
             "name": "file_read",
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file. A long file is cut with a note of how many lines it has; read a part with start_line and end_line (1-based, inclusive) instead of slicing the file in code.",
             "parameters": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string",
                   "description": "File path"
+                },
+                "start_line": {
+                  "type": "integer",
+                  "description": "First line to read (default 1)",
+                  "minimum": 1
+                },
+                "end_line": {
+                  "type": "integer",
+                  "description": "Last line to read (default: the end)",
+                  "minimum": 1
                 }
               },
               "required": [
@@ -259,13 +279,23 @@
           "type": "function",
           "function": {
             "name": "file_read",
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file. A long file is cut with a note of how many lines it has; read a part with start_line and end_line (1-based, inclusive) instead of slicing the file in code.",
             "parameters": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string",
                   "description": "File path"
+                },
+                "start_line": {
+                  "type": "integer",
+                  "description": "First line to read (default 1)",
+                  "minimum": 1
+                },
+                "end_line": {
+                  "type": "integer",
+                  "description": "Last line to read (default: the end)",
+                  "minimum": 1
                 }
               },
               "required": [
@@ -383,13 +413,23 @@
           "type": "function",
           "function": {
             "name": "file_read",
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file. A long file is cut with a note of how many lines it has; read a part with start_line and end_line (1-based, inclusive) instead of slicing the file in code.",
             "parameters": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string",
                   "description": "File path"
+                },
+                "start_line": {
+                  "type": "integer",
+                  "description": "First line to read (default 1)",
+                  "minimum": 1
+                },
+                "end_line": {
+                  "type": "integer",
+                  "description": "Last line to read (default: the end)",
+                  "minimum": 1
                 }
               },
               "required": [
