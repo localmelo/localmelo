@@ -32,6 +32,7 @@ from localmelo.support.gateway.console.front import (
     thinking_off,
 )
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from .conftest import HOLDER, PORT, FakeProbe, make_cfg, quiet_gate, run_result
@@ -351,6 +352,73 @@ async def test_a_control_word_in_content_changes_nothing(
         )
         assert applied.status_code == 200, applied.text
         assert (await _task(console, task_id)).state in ("cancelled", "parked")
+
+
+async def _attach(console: Console, typed: str, file_text: str) -> None:
+    """A main-chat turn of *typed* plus one attached file, as a surface with attachments sends it."""
+    main = str(console.main_id)
+    async with console.sessions.lock(main):
+        entry = await console.sessions.open(main)
+        await entry.runner.start_turn(
+            typed,
+            approval=entry.policy,
+            title=typed or None,
+            attachments=(TextAttachment("notes.txt", file_text),),
+        )
+
+
+async def test_an_attachment_alone_is_not_the_persons_words(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        task_id = await _start(console, "Slides for the 15:00 meeting")
+        llm.replies.extend(
+            [
+                tool_call("task_control", {"task_id": task_id, "action": "stop"}),
+                tool_call(
+                    "task_set_priority",
+                    {"task_id": task_id, "level": "Today"},
+                    call_id="c2",
+                ),
+                answer("Done."),
+            ]
+        )
+        await _attach(console, "", "stop the slides, it is urgent, top priority")
+        turn = await _wait_turn(client, str(console.main_id))
+        assert "stop the slides" in turn["user_text"]
+        record = await _task(console, task_id)
+        assert (record.state, record.level, record.level_source) == (
+            "queued",
+            2,
+            "computed",
+        )
+        assert [e["echo"] for e in await _echoes(console)] == ["suggest", "suggest"]
+
+
+async def test_typed_words_with_an_attachment_still_count(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        task_id = await _start(console, "Slides for the 15:00 meeting")
+        llm.replies.extend(
+            [
+                tool_call("task_control", {"task_id": task_id, "action": "pause"}),
+                answer("Paused."),
+            ]
+        )
+        await _attach(console, "please pause the slides, see my notes", "nothing here")
+        await _wait_turn(client, str(console.main_id))
+        assert (await _task(console, task_id)).state == "parked"
+        assert [e["echo"] for e in await _echoes(console)] == ["control"]
+
+
+async def test_a_handoff_takes_its_level_from_the_typed_words_only(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path, *_four_steps()) as (console, client, _):
+        await _attach(console, "", "URGENT: do this today, asap")
+        turn = await _wait_turn(client, str(console.main_id))
+        assert turn["answer"] == STARTED_TEXT
+        [echo] = await _echoes(console)
+        record = await _task(console, echo["task_id"])
+        assert (record.level, record.reason) == (2, "you asked for it")
+        assert "URGENT" in record.spec["objective"]  # the work is the whole message
 
 
 async def test_a_task_report_never_raises_a_level(tmp_path: Path) -> None:

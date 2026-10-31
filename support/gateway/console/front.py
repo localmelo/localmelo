@@ -148,7 +148,7 @@ class FrontAgent(Agent):
         turn = front.current_turn() if front is not None else None
         if front is None or turn is None or on_event is None:
             return await super().run_task(query, on_event=on_event, **kwargs)
-        asks = is_question(turn.typed_text or turn.user_text)
+        asks = is_question(turn.typed_text)
         text = ASK_TEXT if asks else STARTED_TEXT
         handed: list[str] = []
 
@@ -391,9 +391,13 @@ class Front:
         self._acting = asyncio.Lock()
 
     def typed(self) -> str:
-        """The person's own words in the running turn ("" with none)."""
+        """What the person typed in the running turn, never an attachment ("" with none).
+
+        The principal rule and a task's level read only this: a turn whose
+        typed text is empty (an attachment alone, a retry) asks for nothing.
+        """
         turn = self.current_turn()
-        return (turn.typed_text or turn.user_text) if turn is not None else ""
+        return turn.typed_text if turn is not None else ""
 
     def current_turn(self) -> TurnInfo | None:
         """The main chat's running turn: the person's latest typed message."""
@@ -547,12 +551,14 @@ class Front:
 
     async def handed_off(self, turn: TurnInfo, *, asks: bool) -> None:
         """After a turn ran out of steps: start its work, or ask whether to."""
-        typed = turn.typed_text or turn.user_text
+        # The work is the whole message; its level, only the typed words.
         if asks:
-            data = {"echo": "ask", "text": typed, "turn_id": turn.id}
-            await self.echo({**data, "line": "Start this as a task?"})
+            data = {"echo": "ask", "text": turn.user_text, "words": turn.typed_text}
+            await self.echo(
+                {**data, "turn_id": turn.id, "line": "Start this as a task?"}
+            )
         elif not self.made.get(turn.id):
-            await self.delegate(turn.user_text, typed=typed, turn=turn)
+            await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
 
     async def _change(self, record: TaskRecord, **change: Any) -> str:
         """Change *record* as the person asked; what stopped it, or ``""``."""
@@ -617,8 +623,10 @@ class Front:
             raise ApiError(409, "already_answered", "This was answered already.")
         kind = echo.get("echo")
         if do == "start" and kind == "ask":
-            text = str(echo.get("text", ""))
-            return await self.delegate(text, typed=text, of=echo_id)
+            words = str(echo.get("words", ""))
+            return await self.delegate(
+                str(echo.get("text", "")), typed=words, of=echo_id
+            )
         record = await self.record(str(echo.get("task_id", "")))
         if record is None:
             raise ApiError(404, "not_found", "That task is gone.")

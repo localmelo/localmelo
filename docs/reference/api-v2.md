@@ -814,8 +814,8 @@ starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
 
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
-  `action` and maybe `level`), `ask` (`Start this as a task?`, with `text` and
-  `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
+  `action` and maybe `level`), `ask` (`Start this as a task?`, with `text`, the
+  whole message, `words`, what was typed, and `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
   message it answers; `of` is the echo it answers.
 - `as_task` on any session but the main chat is 400 `invalid_request`. A
   repeated `client_request_id` of a delegation answers the same echo.

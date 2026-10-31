@@ -395,7 +395,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
 ```
 
-- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`）、`ask`（`Start this as a task?`，带 `text` 和 `turn_id`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
 - 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
 - `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level", "level"?: "Today" | "P1" | 1}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。撤销、应用和开始只答复一次（409 `already_answered`）；未知的回执或任务为 404。
