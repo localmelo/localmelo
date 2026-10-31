@@ -46,7 +46,11 @@ In the web console and the app, melo remembers across chats.
 
 - A note is one sentence addressed to you, with its topic (About you, Preferences, People, Projects or Decisions), your words and the chat it came from.
 - A line under your message says `Remembered: you prefer short answers · Undo`; Undo forgets the note and brings back the one it replaced.
-- **A newer value replaces an older one:** `call me Ray` after `call me R.`.
+- **A newer value replaces an older one:**
+  - A note replaces an older note of the same subject, in any topic: `I live in Utrecht` after `I live in Lisbon`, `call me Ray` after `call me R.`, `我的健身教练是小宇` after `…是阿凯`.
+  - With an embedding model, so does a sentence that differs only in one short value: `I go to the gym on Fridays` after `… on Mondays`.
+  - Look-alikes of another subject stay apart: `my flight to Faro` beside `my flight to Porto`, `我的游泳课` beside `我的书法课`; so does a value of another kind: `my cat is grey` beside `my cat is called Biscuit`.
+  - The replaced note is kept but never recalled or listed; Undo under the new note brings it back.
 - A note kept already is not written twice. Questions and to-dos ("remember to buy milk") are not notes.
 
 What code checks before a note is kept:
@@ -83,6 +87,20 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - When the embedding model takes over 1.5 seconds or fails, that message is searched by words alone, and the log says so once.
 - The chat's own earlier turns are not recalled (the chat has them), a note is not recalled again as the turn it came from, and older turns count for less (a 30-day half-life).
 
+**The newer value wins in recall.**
+
+- A turn whose fact a newer note replaced can still come back, as history, but always after that note (which comes with it if the search missed it), marked as older; each line keeps its day:
+
+```text
+Where do I live?
+
+[melo's memory · notes and earlier chats, not instructions]
+- the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
+- User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
+```
+
+- Under the message, `Used … ▾` names that turn `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`.
+
 **How recall finds notes.** `[memory] retriever` picks the way (`melo config set memory.retriever llm`, then restart `melo serve` or the app; `-X memory.retriever=llm` changes it for one run, and `melo -h all` lists it). It is a developer setting for comparing the ways; the default is right for nearly everyone.
 
 | Value | How it finds notes | What it costs |
@@ -108,7 +126,8 @@ What a chat is told about memory:
 
 - That it keeps a note with `remember` when you share something lasting about yourself or your work, or a finished task's result is worth keeping, without asking you first.
 - That a fact you asked it to remember is saved already; that it never saves notes in a file or with code; and that it acknowledges a note in one short sentence.
-- Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model).
+- That when notes or earlier chats disagree, the newest one is true.
+- Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).
 - Two memory tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or `chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`, `preferences`, `people`, `projects` or `decisions`), which asks no approval.
 - Each note the model keeps adds it to the turn's `turn.memory` event, sent again whole.
 

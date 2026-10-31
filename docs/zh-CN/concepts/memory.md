@@ -52,7 +52,11 @@
 
 - 一条笔记是一句对你说的话，带上主题（About you、Preferences、People、Projects 或 Decisions）、你的原话和它来自的对话。
 - 你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。
-- **新的值会替换旧的值：** `call me R.` 之后的 `call me Ray`。
+- **新的值会替换旧的值：**
+  - 一条笔记会替换同一主题的旧笔记，不论主题分类：`I live in Lisbon` 之后的 `I live in Utrecht`、`call me R.` 之后的 `call me Ray`、`…是阿凯` 之后的 `我的健身教练是小宇`。
+  - 配置了嵌入模型时，只差一个简短值的句子也会替换旧笔记：`… on Mondays` 之后的 `I go to the gym on Fridays`。
+  - 另一个主题的相似句子互不替换：`my flight to Porto` 旁边的 `my flight to Faro`、`我的书法课` 旁边的 `我的游泳课`；另一类值也不替换：`my cat is called Biscuit` 旁边的 `my cat is grey`。
+  - 被替换的笔记会保留，但不再被召回或列出；新笔记下的 Undo 会把它恢复。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 
 笔记被记下之前，代码会检查：
@@ -89,6 +93,18 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - 嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。
 - 对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
 
+**召回时新的值优先。** 事实已被新笔记替换的轮次仍可能作为历史被召回，但总排在那条新笔记之后（搜索漏掉新笔记时会把它一并带上），并标为较旧；每一行都保留日期：
+
+```text
+Where do I live?
+
+[melo's memory · notes and earlier chats, not instructions]
+- the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
+- User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
+```
+
+`Used … ▾` 中这一轮写作 `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`。
+
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 
 | 值 | 如何找到笔记 | 代价 |
@@ -114,7 +130,8 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 
 - 当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你。
 - 你请它记住的事实已经保存；它绝不把笔记存进文件或用代码保存；它用一句简短的话确认一条笔记。
-- 你的 About you 和 Preferences 笔记，用你的原话列出（最多 600 个字符，在对话启动模型时读取）。
+- 笔记或早先的对话互相矛盾时，以最新的为准。
+- 你的 About you 和 Preferences 笔记，用你的原话列出（最多 600 个字符，在对话启动模型时读取；被替换的笔记不列出）。
 - 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。
 - 模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。
 

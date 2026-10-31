@@ -88,6 +88,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
+  and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
+  both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,
+  and the model answered with the old city or asked which one was right (on a local
+  model, 1 of 15 such questions right with an embedding model, 0 of 15 by words only).
+  Now a note replaces an older note of the same subject whoever wrote either ("I live
+  in", "my name is", "call me", "my weekly sync is on", "我在X工作", "我的X是Y", and, with an
+  embedding model, a sentence that differs only in its value), in any topic; look-alikes
+  such as "my flight to Porto" and "my flight to Faro" stay apart. The old note is kept
+  but never recalled, and Undo brings it back. A turn whose fact was replaced comes
+  after the newer note and reads `(older; replaced by a newer note)`, and the chat is
+  told that when notes or earlier chats disagree, the newest one is true ([#322]).
+
 - A fact you state is kept as a note, and melo no longer goes off to save it in a
   file. On a real model, "My group meeting is on Thursdays at 3 pm.", "Remember that Sam
   has the lab keys.", "Call me Ray." and "我的猫叫团子。" were already kept as notes, but
@@ -2584,6 +2597,7 @@ earlier milestones.
 [#316]: https://github.com/localmelo/localmelo/pull/316
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
+[#322]: https://github.com/localmelo/localmelo/pull/322
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
