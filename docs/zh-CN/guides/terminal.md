@@ -137,6 +137,17 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 以 `/` 和小写名称开头的消息是命令；未知名称会输出 `Unknown command /NAME. /help lists the commands.` 并保留草稿，而 `/etc/hosts is broken` 是一条消息。
 - 要发送以命令样式开头的消息，请在开头加一个空格。
 - [网页控制台和应用](web-console.md#slash-commands)理解同样的命令，名字相同，以命令样式开头的消息也是同一条规则。
+- 命令的输出会挂在该命令之下，前面是一个淡色的 `└`，这样你就能分清哪些行属于哪个命令；后面的行与第一行对齐，警告和错误保留自己的颜色。
+- 纯文本终端（`NO_COLOR`、`TERM=dumb`、ASCII 符号）得到同样的版式，只是连接符为 `|`；`/model` 这样的列表仍然是列表，它关闭时输出的内容同样挂在命令之下。
+
+```text
+› /status
+  └ model      Qwen3-8B · oMLX · http://127.0.0.1:8000/v1 · ✓ answers
+    folder     ~/demo-project
+    chat       new
+    approvals  asks before running commands or changing files
+    context    not measured yet
+```
 
 | 命令 | 作用 |
 |---|---|

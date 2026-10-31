@@ -20,6 +20,7 @@ from localmelo.melo.schema import (
     split_thinking,
 )
 from localmelo.support.cli import mark
+from localmelo.support.cli.hanging import prefix as hung_prefix
 from localmelo.support.cli.text import (
     cells,
     cut_cells,
@@ -460,7 +461,7 @@ def resume_recap(
         said = [row for row in clean_output(typed).splitlines() if row.strip()]
         lines.extend(_marked("›", said[:_TYPED_ROWS]))
         lines.extend(
-            f"    └ attached {clean_output(name)} ({size:,} {unit})"
+            f"  {hung_prefix(symbols)}attached {clean_output(name)} ({size:,} {unit})"
             for name, size, unit in attachment_labels
         )
         answer = split_thinking(turn.answer)[1]

@@ -187,7 +187,7 @@ A task's worker has no long-term memory of its own: it neither recalls nor keeps
 
 ### Side-chat summaries
 
-When a side chat ends, its summary is indexed under that chat as one earlier-chat entry (`Summary of chat “Fix CI”: …`; secrets redacted, at most 2,000 characters). Any other chat recalls it like a turn, and `Used … ▾` names it `chat “Fix CI” · summary`. Ending the chat again replaces the summary; deleting the chat deletes it. It is never a note, and the chat itself never recalls its own summary.
+When a task of a side chat ends, its summary is indexed under that chat as one earlier-chat entry (`Summary of chat “Fix CI”: …`; secrets redacted, at most 2,000 characters). Any other chat recalls it like a turn, and `Used … ▾` names it `chat “Fix CI” · summary`. Ending the chat again replaces the summary; deleting the chat deletes it. It is never a note, and the chat itself never recalls its own summary. The side chat's own answers are recalled as its turns, so they get no summary.
 
 ### A task's questions are not your notes
 

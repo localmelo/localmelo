@@ -21,7 +21,7 @@ from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.termcolors import XTERM, contrast
 from localmelo.support.cli.theme import ASCII, Colour, Palette
 
-from .test_render import Turn, Writes, _block, _header_text, _message
+from .test_render import Turn, Writes, _block, _header_text, _hung_text, _message
 
 
 def _roles(text: Text) -> dict[str, str]:
@@ -142,8 +142,7 @@ def test_a_call_that_did_not_run_is_dim_as_a_whole_glyph_too() -> None:
 
 def test_a_failed_first_line_is_in_the_error_role_and_a_success_is_not() -> None:
     for data, first in (({"exit_code": 1}, "error"), ({}, "")):
-        body = _block(Turn(), output="F..\nmore", **data)[-1]
-        assert isinstance(body, Text)
+        body = _hung_text(_block(Turn(), output="F..\nmore", **data)[-1])
         assert _roles(body).get("F..", "") == first
 
 
@@ -154,9 +153,13 @@ def test_a_write_body_colors_its_change() -> None:
     renderer = Turn().renderer
     new = Snapshot("r1", edits.Target("/w/n.md", exists=False), "a\n", 1, 0)
     old = Snapshot("r2", edits.Target("/w/o.md", exists=True, text="y\n"), "x\n", 1, 1)
-    new_body, old_body = renderer._change_body(new), renderer._change_body(old)
-    assert new_body.plain == "  └ new file, 1 line"
-    assert old_body.plain == "  └ +1 −1 lines"
+    new_hung, old_hung = renderer._change_body(new), renderer._change_body(old)
+    new_body, old_body = _hung_text(new_hung), _hung_text(old_hung)
+    assert new_body.plain == "new file, 1 line"
+    assert old_body.plain == "+1 −1 lines"
+    shown = RecordingOut(80)
+    shown.print(new_hung, old_hung)
+    assert shown.text().splitlines() == ["  └ new file, 1 line", "  └ +1 −1 lines"]
     new_roles, old_roles = _roles(new_body), _roles(old_body)
     assert new_roles["new file"] == "file_new" and new_roles[", 1 line"] == "muted"
     assert old_roles["+1"] == "ok_text" and old_roles["−1"] == "error"
