@@ -4,15 +4,18 @@ This page lists the gateway's HTTP v1 endpoints and notes the API v2 and legacy 
 
 ## HTTP API
 
-Requests and responses are JSON. The examples use the default address. Any
-route requires bearer authentication and can also answer 401, 421 or 403; see
+Requests and responses are JSON. The examples use the default address.
+
+Any route requires bearer authentication and can also answer 401, 421 or 403; see
 [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ### API v2 (web console)
 
 The web console's own API is under `/api/`. It is served only when the
 gateway listens on a loopback address, and it is documented separately in
-[API v2](api-v2.md). Authentication is a compatibility change for existing
+[API v2](api-v2.md).
+
+Authentication is a compatibility change for existing
 clients; API fields otherwise remain additive.
 
 This version serves the reads — `GET /api/health`, `GET /api/settings`,
@@ -26,6 +29,7 @@ approval, forget a session grant, rename or move a session, and delete it.
 Scheduler tasks also have `POST /api/tasks`, `GET /api/tasks`, and
 `GET` and `PATCH /api/tasks/{task_id}`; see
 [Scheduler tasks](api-v2.md#scheduler-tasks-s3a2) for their fields and controls.
+
 The `/api` routes answer the same 421, 403 and 413 as `/v1/` (plus 415 for
 a non-JSON body), and add `Cache-Control: no-store` and the error shape
 `{"error": {"code", "message", "details"}}` to every response.
@@ -34,6 +38,7 @@ A console session runs its turns in the gateway process, one at a time: a
 second turn while one runs is 409 `session_busy`. Its Agent is built when
 the session is first used and kept; when a ninth Agent would open, the
 least recently used idle one is closed with its conversation kept.
+
 Approvals wait in the gateway's memory with no timeout until a client
 answers them or the turn stops, and stopping the gateway ends a waiting
 turn `cancelled` with cause `shutdown`. A console turn passes the
@@ -42,20 +47,28 @@ scheduler gate like a workspace chat: the gateway builds one gate from the
 `n_srv` budget and one call log, and the monitor the workspace page runs
 feeds both (a foreign GPU lock holds a console turn under
 `lock_gate = "wait"`; the battery is read for the page's chip and never
-holds a call). The gateway closes that gate last at shutdown, after both
+holds a call).
+
+The gateway closes that gate last at shutdown, after both
 surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
 cause `shutdown`.
 
 Task workers use that same gate for model and embedding calls, with
 memory off and gateway tools (no `shell_exec`). Up to four workers can be
-resident; a paused running worker can still occupy a slot. Task rows survive
+resident; a paused running worker can still occupy a slot.
+
+Task rows survive
 restart; startup interrupts uncertain work and preserves proved-never-started
 queued tasks, with Stop available while ordinary creation remains unproved.
 Full recovery, deadlines and worker
-accounting are deferred. Workspace validation also runs before a worker starts
+accounting are deferred.
+
+Workspace validation also runs before a worker starts
 or resumes; a no-longer-valid folder fails the task rather than running it.
 Pause waits for the next model call: running tools finish, and an answered
-pending approval waits until resume. Resume restores the priority before pause,
+pending approval waits until resume.
+
+Resume restores the priority before pause,
 or computed P2 if retention pruned the pause log; an unpaused task returns
 409 `not_paused`. Task PATCH rejects `first` (400); it is not supported yet.
 
@@ -63,7 +76,9 @@ or computed P2 if retention pruned the pause log; an unpaused task returns
 
 The internal `/v1/playground/` routes are disabled by default (404), and their
 manager is not started. Opt in with `melo --serve --enable-playground`;
-authentication and Host/Origin checks still apply. Discovery and sessions use
+authentication and Host/Origin checks still apply.
+
+Discovery and sessions use
 the saved local chat backend and model, not request overrides. These routes
 include:
 
@@ -140,8 +155,9 @@ last one too.
 
 `result` is the answer or the run's best effort. When that is empty, it is
 `[<status>] <error>`, for example
-`[provider_error] POST /chat/completions failed with HTTP 500: …`. A run
-that did not complete still returns HTTP 200, and the response has no status
+`[provider_error] POST /chat/completions failed with HTTP 500: …`.
+
+A run that did not complete still returns HTTP 200, and the response has no status
 field; see [Run results](run-results.md#where-results-appear).
 
 ### GET /v1/sessions
@@ -172,13 +188,16 @@ The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
 `{"error": "session not found"}`. In the in-progress security-1b changes, a session with a running task or queued start is
 left alone: the answer is HTTP 409,
 `{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123", "code": "session_busy"}`,
-and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
+and the task goes on.
+
+`is_busy` in [GET /v1/sessions](#get-v1sessions)
 shows which sessions are busy.
 
 The `/v1/agent` API has no route that stops a run, so wait for it to finish
 and close the session after. When enabled, `POST /v1/playground/session/{id}/cancel`
-stops a legacy playground chat, not an `/v1/agent` run. The current
-[web workspace](../guides/web-console.md#web-workspace) instead stops its turns
+stops a legacy playground chat, not an `/v1/agent` run.
+
+The current [web workspace](../guides/web-console.md#web-workspace) instead stops its turns
 with [`POST /api/turns/{turn_id}/cancel`](api-v2.md#post-apiturnsturn_idcancel).
 Stopping the gateway still closes every session, a busy one included; see
 [Stop the gateway](../guides/gateway.md#stop-the-gateway).

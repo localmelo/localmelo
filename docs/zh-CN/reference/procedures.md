@@ -110,7 +110,9 @@ melo-procedures export [--db FILE | --memory-dir DIR]
 melo-procedures forget (--routine ID | --all) [--db FILE | --memory-dir DIR]
 ```
 
-`export` 把 `procedures.db` 的每一行打印为一行 JSON：先是 `table`，然后按名称给出该行的各列，JSON 列作为文本。`forget` 删除一个例程及其单次记录和模板，或者删除每一行，打印 `{"deleted": <rows>}`，并重建文件（`VACUUM`），因此文件及其 `-wal` 都不会保留被删除内容的任何副本。请在没有任何 localmelo 进程运行时执行它。两者都在 `--memory-dir` 中读取 `procedures.db`，否则在 `LOCALMELO_MEMORY_DIR` 中，否则在 `~/.cache/localmelo/memory` 中；两者都不会创建它。
+`export` 把 `procedures.db` 的每一行打印为一行 JSON：先是 `table`，然后按名称给出该行的各列，JSON 列作为文本。`forget` 删除一个例程及其单次记录和模板，或者删除每一行，打印 `{"deleted": <rows>}`，并重建文件（`VACUUM`），因此文件及其 `-wal` 都不会保留被删除内容的任何副本。
+
+请在没有任何 localmelo 进程运行时执行它。两者都在 `--memory-dir` 中读取 `procedures.db`，否则在 `LOCALMELO_MEMORY_DIR` 中，否则在 `~/.cache/localmelo/memory` 中；两者都不会创建它。
 
 <a id="exit-codes"></a>
 

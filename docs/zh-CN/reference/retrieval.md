@@ -64,7 +64,9 @@ melo-retrieve: error: --retriever llm needs --base-url
 
 ## 输入格式
 
-语料库、已标注的查询和原始调用都是 JSON Lines 文件：每行一个 JSON 对象，使用 UTF-8 编码。空行会被跳过，未知的键会被忽略。其他任何问题都会让运行以退出码 2 停止，并输出一行，指明文件和行号：
+语料库、已标注的查询和原始调用都是 JSON Lines 文件：每行一个 JSON 对象，使用 UTF-8 编码。空行会被跳过，未知的键会被忽略。
+
+其他任何问题都会让运行以退出码 2 停止，并输出一行，指明文件和行号：
 
 ```text
 melo-retrieve: error: queries.jsonl:1: relevant id 'demo:d9' is not in the corpus
@@ -243,13 +245,17 @@ melo-retrieve: warning: every llm call fell back to bm25 (provider_error 8); che
 | 2 | 用法错误或输入错误：无法读取的文件、违反格式的行，或无法导出的数据库。 |
 | 130 | Ctrl+C 停止了运行。 |
 
-用法错误会打印用法摘要和一行错误信息；其他错误只打印一行。不会输出回溯（traceback）。已经打印到 stdout 的行保持完整，因此被停止的运行会留下完整的查询行。
+用法错误会打印用法摘要和一行错误信息；其他错误只打印一行。不会输出回溯（traceback）。
+
+已经打印到 stdout 的行保持完整，因此被停止的运行会留下完整的查询行。
 
 <a id="the-typed-long-term-store"></a>
 
 ## 类型化长期存储
 
-有三种模式会读取或写入 R6-lite 的类型化 `long_term.db`。每种模式都与除模型相关选项之外的评估标志互斥，并且与 `--export-run` 也互斥；且都不联系模型：`--base-url`、`--chat-model`、`--embedding-base-url`、`--embedding-model`、`--retrieval-timeout` 和 `--retrieval-extra-body` 会被接受并忽略，因此基准脚本可以在所有地方传入相同的标志。[循环中的召回](../concepts/memory.md#recall-in-the-loop)在 `start` 时读取的正是同一个存储，`--export-store` 则把它展示给基准测试。`DIR` 可以是记忆目录（文件为 `long_term.db`），也可以是文件本身。
+有三种模式会读取或写入 R6-lite 的类型化 `long_term.db`。每种模式都与除模型相关选项之外的评估标志互斥，并且与 `--export-run` 也互斥；且都不联系模型：`--base-url`、`--chat-model`、`--embedding-base-url`、`--embedding-model`、`--retrieval-timeout` 和 `--retrieval-extra-body` 会被接受并忽略，因此基准脚本可以在所有地方传入相同的标志。
+
+[循环中的召回](../concepts/memory.md#recall-in-the-loop)在 `start` 时读取的正是同一个存储，`--export-store` 则把它展示给基准测试。`DIR` 可以是记忆目录（文件为 `long_term.db`），也可以是文件本身。
 
 ```bash
 melo-retrieve --export-store DIR|FILE
@@ -271,7 +277,11 @@ melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
  "links": [], "embed_model": "", "embed_dim": 0}
 ```
 
-基准测试的 T4 读取器读取 `text` 和 `provenance.source_ids`。计数输出到 stderr。文件以只读方式打开：v0 文件以其旧列和旧的推导方式读取（反思依据 `metadata.type` 判断，其他则为 episodic/step_summary），并且**不会**被迁移；比当前版本更新的文件，则在 stderr 输出一行并以退出码 2 结束。没有 `long_term.db` 的目录（即运行没有写入任何内容的基准目录）是一个空存储：stdout 没有输出，stderr 输出 `exported 0 active entries from DIR/long_term.db`，退出码为 0，因此基准脚本无需先检查文件是否存在。不是目录的路径仍保留缺少文件的错误：输出一行，退出码 2。
+基准测试的 T4 读取器读取 `text` 和 `provenance.source_ids`。计数输出到 stderr。
+
+文件以只读方式打开：v0 文件以其旧列和旧的推导方式读取（反思依据 `metadata.type` 判断，其他则为 episodic/step_summary），并且**不会**被迁移；比当前版本更新的文件，则在 stderr 输出一行并以退出码 2 结束。没有 `long_term.db` 的目录（即运行没有写入任何内容的基准目录）是一个空存储：stdout 没有输出，stderr 输出 `exported 0 active entries from DIR/long_term.db`，退出码为 0，因此基准脚本无需先检查文件是否存在。
+
+不是目录的路径仍保留缺少文件的错误：输出一行，退出码 2。
 
 <a id="--export-decisions"></a>
 
@@ -300,7 +310,9 @@ melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
  "session_id": "", "task_text": "plan the move", "task_key": "…"}
 ```
 
-`source` 是 `reasoning_note`、`digest`、`reflection`、`user` 或 `sleep` 之一；`signal` 是 `rehearsal`、`user_request`、`user_statement`、`outcome` 或 `sleep` 之一；未知的值会以退出码 2 结束。可选的 `task_key` 字符串保存在候选项的来源信息中，因此经路由的摘要可以携带运行的召回所查找的同一个键；没有该键的经路由摘要则跨任务。候选项经过与运行相同的边界和策略，写入 `--memory-dir` 下一个仅含文本的存储。每个输入行输出一行，顺序与输入相同：
+`source` 是 `reasoning_note`、`digest`、`reflection`、`user` 或 `sleep` 之一；`signal` 是 `rehearsal`、`user_request`、`user_statement`、`outcome` 或 `sleep` 之一；未知的值会以退出码 2 结束。可选的 `task_key` 字符串保存在候选项的来源信息中，因此经路由的摘要可以携带运行的召回所查找的同一个键；没有该键的经路由摘要则跨任务。
+
+候选项经过与运行相同的边界和策略，写入 `--memory-dir` 下一个仅含文本的存储。每个输入行输出一行，顺序与输入相同：
 
 ```json
 {"candidate_id": "n1", "action": "NEW", "kind": "profile",
@@ -308,7 +320,9 @@ melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
  "reason": "new", "source_ids": ["r1"]}
 ```
 
-边界或准入拒绝时输出 `"action": "REFUSED"` 及原因；没有非空 `files:` 或 `verified:` 行的摘要会在准入时被拒绝。`--memory-dir` 是必需的，并且该命令拒绝默认的 `~/.cache/localmelo/memory` 以及 `LOCALMELO_MEMORY_DIR` 的值（以解析后的路径为准）；目录以 `0700` 权限创建。`--route` 会追加到已有的临时存储，而不是清空它，因此基准测试每次运行都使用一个新目录。对该目录执行 `--export-store`，即可看到路由写入的内容。
+边界或准入拒绝时输出 `"action": "REFUSED"` 及原因；没有非空 `files:` 或 `verified:` 行的摘要会在准入时被拒绝。`--memory-dir` 是必需的，并且该命令拒绝默认的 `~/.cache/localmelo/memory` 以及 `LOCALMELO_MEMORY_DIR` 的值（以解析后的路径为准）；目录以 `0700` 权限创建。
+
+`--route` 会追加到已有的临时存储，而不是清空它，因此基准测试每次运行都使用一个新目录。对该目录执行 `--export-store`，即可看到路由写入的内容。
 
 <a id="from-python"></a>
 

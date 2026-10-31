@@ -18,11 +18,23 @@
 
 一次 `file_read`、`file_write` 或 `list_files` 调用最长可能用 60 秒，一次 MCP 工具调用最长用其服务器的 `timeout`。超过 50,000 个字符的输出会被截断。
 
-`python_exec` 的代码通过标准输入（一个管道）到达子进程，绝不出现在它的 `-c` 参数中：`ps` 看不到代码，调用也不受 `ARG_MAX` 限制（macOS 上约为 1 MiB 的 argv 和环境）。子进程运行一个固定的包装程序；它读完代码后就把文件描述符 0 指向 `/dev/null`，因此 `input()` 会得到 EOF。子进程最多可有 1,024 个打开的文件和一小时的 CPU 时间（POSIX 的 `RLIMIT_NOFILE` 和 `RLIMIT_CPU` 限制）。通常调用的时间限制会先结束它；CPU 限制只会停止比 melo 存活更久、或耗满一小时 CPU 的代码。不设置地址空间限制：macOS 不接受有限的地址空间限制。
+`python_exec` 的代码通过标准输入（一个管道）到达子进程，绝不出现在它的 `-c` 参数中：`ps` 看不到代码，调用也不受 `ARG_MAX` 限制（macOS 上约为 1 MiB 的 argv 和环境）。子进程运行一个固定的包装程序；它读完代码后就把文件描述符 0 指向 `/dev/null`，因此 `input()` 会得到 EOF。
 
-`shell_exec` 和 `python_exec` 以最小环境启动子进程：`PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，再加上 `AgentOptions(tool_env={...})` 添加的内容，别无其他。基于配置的运行和会话还可以另外继承 `[agent] tool_env` 中列出的名称；见[工具环境](configuration.md#tool-environment)。melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点名或映射。`VIRTUAL_ENV`、`PYTHONPATH`、`SSH_AUTH_SOCK` 和代理变量默认不会被继承。暴露 `SSH_AUTH_SOCK` 会允许工具使用你的 SSH 代理，暴露代理变量也会暴露其中的任何凭据。
+子进程最多可有 1,024 个打开的文件和一小时的 CPU 时间（POSIX 的 `RLIMIT_NOFILE` 和 `RLIMIT_CPU` 限制）。通常调用的时间限制会先结束它；CPU 限制只会停止比 melo 存活更久、或耗满一小时 CPU 的代码。
 
-在不带 `--workspace` 的直接运行和网关中，内置工具就是这样工作的。带 `--workspace DIR` 的直接运行和设置了 `workspace_root` 的 Python 智能体把文件工具（`file_read`、`file_write` 和 `list_files`）限制在一个目录内，并在那里启动 `shell_exec` 和 `python_exec`（见[设置工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。交互式界面（单独的 `melo`）也以它的工作区为根目录，并在每次 `shell_exec`、`python_exec` 和 `file_write` 调用前询问，除非用了 `--yolo`；`file_read` 和 `list_files` 只读取，从不询问（见[权限级别](../guides/tools-mcp.md#permission-tiers)）；直接模式没有审批策略，既不提供 `shell_exec` 也不提供 `list_files`，有没有根目录都一样。交互式界面加载 `--mcp-config` 指定的 MCP 服务器，否则加载顶层 `mcp_config` 键指定的那些；启动失败的服务器会让该会话关闭 MCP（`/mcp` 会说明原因）。带审批策略的 Python 运行按同样的权限级别，用自身的策略处理 MCP 工具。
+不设置地址空间限制：macOS 不接受有限的地址空间限制。
+
+`shell_exec` 和 `python_exec` 以最小环境启动子进程：`PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，再加上 `AgentOptions(tool_env={...})` 添加的内容，别无其他。基于配置的运行和会话还可以另外继承 `[agent] tool_env` 中列出的名称；见[工具环境](configuration.md#tool-environment)。
+
+melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点名或映射。`VIRTUAL_ENV`、`PYTHONPATH`、`SSH_AUTH_SOCK` 和代理变量默认不会被继承。
+
+暴露 `SSH_AUTH_SOCK` 会允许工具使用你的 SSH 代理，暴露代理变量也会暴露其中的任何凭据。
+
+在不带 `--workspace` 的直接运行和网关中，内置工具就是这样工作的。带 `--workspace DIR` 的直接运行和设置了 `workspace_root` 的 Python 智能体把文件工具（`file_read`、`file_write` 和 `list_files`）限制在一个目录内，并在那里启动 `shell_exec` 和 `python_exec`（见[设置工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。
+
+交互式界面（单独的 `melo`）也以它的工作区为根目录，并在每次 `shell_exec`、`python_exec` 和 `file_write` 调用前询问，除非用了 `--yolo`；`file_read` 和 `list_files` 只读取，从不询问（见[权限级别](../guides/tools-mcp.md#permission-tiers)）；直接模式没有审批策略，既不提供 `shell_exec` 也不提供 `list_files`，有没有根目录都一样。交互式界面加载 `--mcp-config` 指定的 MCP 服务器，否则加载顶层 `mcp_config` 键指定的那些；启动失败的服务器会让该会话关闭 MCP（`/mcp` 会说明原因）。
+
+带审批策略的 Python 运行按同样的权限级别，用自身的策略处理 MCP 工具。
 
 <a id="how-tools-are-offered"></a>
 
