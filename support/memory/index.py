@@ -73,7 +73,7 @@ def _kept(text: str) -> str:
     """*text* without the sentences a note would refuse (a password, a card number)."""
     for _, sentence in reversed(split_sentences(text)):
         if sensitive(sentence):
-            text = text.replace(sentence, "[not kept]")
+            text = text.replace(sentence, "[left out]")
     return text
 
 

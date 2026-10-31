@@ -264,7 +264,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   replies instead of calling the tool, and a rule about claiming saves made it
   refuse facts it recalled that were never kept as notes. They now say that
   what memory brings back answers the question whether or not it was kept as a
-  note. When a reply says it noted a fact and no note was kept, melo keeps what
+  note. A sentence left out of the chat index because it looked like a password
+  now reads `[left out]` there, not `[not kept]`, which the model read as "this
+  was never kept". When a reply says it noted a fact and no note was kept, melo keeps what
   the reply named after the same checks (your words, no secret, the newer value
   replaces the old one, written to you: "Your flight to Faro is at gate 9", not
   "gate 9 for Faro") and shows it with Undo; when it cannot, nothing is kept

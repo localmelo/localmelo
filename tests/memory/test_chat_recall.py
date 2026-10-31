@@ -370,7 +370,7 @@ def test_a_document_keeps_no_sentence_a_note_would_refuse() -> None:
         "Your card 4111 1111 1111 1111 is noted. Water daily.",
     )
     assert "hunter2" not in text and "4111" not in text
-    assert text == "User: [not kept] Plan the garden.\nmelo: [not kept] Water daily."
+    assert text == "User: [left out] Plan the garden.\nmelo: [left out] Water daily."
 
 
 async def test_a_question_finds_a_turn_that_says_it_in_other_word_forms(
