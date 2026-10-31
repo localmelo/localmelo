@@ -1088,6 +1088,7 @@ class TestSchedulerConfig:
             n_srv=2,
             r_f=0,
             n_fg=0,
+            focus_s=5.0,
             call_log=False,
             call_log_dir="/tmp/x",
         )
@@ -1098,6 +1099,7 @@ class TestSchedulerConfig:
         assert loaded.scheduler.n_srv == 2
         assert loaded.scheduler.r_f == 0
         assert loaded.scheduler.n_fg == 0
+        assert loaded.scheduler.focus_s == 5.0
         assert loaded.scheduler.call_log is False
         assert loaded.scheduler.call_log_dir == "/tmp/x"
         assert loaded.validate() == []
@@ -1110,10 +1112,26 @@ class TestSchedulerConfig:
             {"n_srv": True},
             {"r_f": -1},
             {"n_fg": -1},
+            {"focus_s": 0},
+            {"focus_s": True},
+            {"focus_s": "10"},
+            {"focus_s": float("inf")},
             {"call_log": "yes"},
             {"call_log_dir": 3},
         ],
-        ids=["policy", "n_srv", "n_srv-bool", "r_f", "n_fg", "call_log", "dir"],
+        ids=[
+            "policy",
+            "n_srv",
+            "n_srv-bool",
+            "r_f",
+            "n_fg",
+            "focus-zero",
+            "focus-bool",
+            "focus-text",
+            "focus-inf",
+            "call_log",
+            "dir",
+        ],
     )
     def test_a_bad_scheduler_value_is_a_config_error(
         self, changes: dict[str, Any]
