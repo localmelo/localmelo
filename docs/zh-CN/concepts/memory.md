@@ -138,6 +138,7 @@ Where did I live before?
 | `embed_ms`、`search_ms`、`select_ms` | 嵌入、搜索和选择各花的毫秒数。 |
 | `select_tokens` | 选择用掉的 token（`prompt`、`completion`）。 |
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
+| `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 

@@ -102,7 +102,8 @@ class Recall:
     ``error``, ``unreadable`` (the chat model's reply) or ``no-embedding``
     (the retriever asked for vectors and there is no embedding model).
     *candidates* are the notes and turns that passed to the choice, *used* the
-    ones the message carries.
+    ones the message carries; *block_chars* is the length of the block text
+    appended to the message (0 when there is none).
     """
 
     retriever: str = "bm25"
@@ -115,6 +116,7 @@ class Recall:
     )
     candidates: int = 0
     used: int = 0
+    block_chars: int = 0
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -669,6 +671,8 @@ class ChatMemory:
             kept_lines([cand.quote for cand in found], refused=refused),
         )
         recall.used = len(used)
+        appended = "\n\n" + text if text else ""
+        recall.block_chars = len(appended)
         written: list[records.Written] = []
         if found:
             source = await self._source(store, info)
@@ -682,7 +686,7 @@ class ChatMemory:
                     embed_model=embedded.model,
                 )
         return TurnMemory(
-            "\n\n" + text if text else "",
+            appended,
             tuple(used),
             tuple(written),
             refused,

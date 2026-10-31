@@ -139,7 +139,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   name is Juno." could read as someone naming the assistant. A note without the words you typed reads
   `a note to the user “…”` (or `the user's note “…”` when it starts with "I" or
   "My"). Words that ask for an older value ("before", "earlier") no longer count
-  as content words of the question ([#NN]).
+  as content words of the question. The `recall` object of a turn also reports
+  `block_chars`, the length of the block added to your message (0 when none)
+  ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

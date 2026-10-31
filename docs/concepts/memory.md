@@ -132,6 +132,7 @@ Every recall is timed. The page shows nothing new, but the `turn.memory` event o
 | `embed_ms`, `search_ms`, `select_ms` | Milliseconds spent embedding, searching and choosing. |
 | `select_tokens` | The tokens the choice used (`prompt`, `completion`). |
 | `candidates`, `used` | How many items there were and how many were used. |
+| `block_chars` | How many characters memory added to your message (0 when it added nothing). |
 
 The same object is in the turn's `result` as `memory_recall`, so a client of the HTTP API reads it with the turn.
 

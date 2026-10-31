@@ -730,11 +730,14 @@ class SessionRunner:
         except Exception:
             logger.warning("Memory across chats failed for this turn", exc_info=True)
             return turn.text
+        fits = len(turn.text) + len(found.block) <= MAX_QUERY_LEN
+        if found.recall is not None and not fits:
+            found.recall.block_chars = 0  # a block too long for the message is left out
         data = found.event()
         if data is not None:
             turn.recall = data["recall"]
             emit(data)
-        if found.block and len(turn.text) + len(found.block) <= MAX_QUERY_LEN:
+        if found.block and fits:
             return turn.text + found.block
         return turn.text
 
