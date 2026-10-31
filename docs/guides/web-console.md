@@ -175,7 +175,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. A task of another chat can still be named: its line reads `From Main chat` or `From Trip plan`.
 - **The main chat hears when a side chat finishes work.** With your next message it reads one line, the side chat's name and a short summary, when that chat answered or one of its tasks finished. It is information, not a message.
 - **Chores and reminders belong to the chat that made them.** One saved in a side chat runs as that chat's task and reports there, not in the main chat's check-in.
-- The terminal starts tasks from the main chat only (`/main`, then `/task …`).
+- The terminal's `/task …` starts a task in a side chat too, once the chat has its first message.
 
 ## Chores that repeat
 

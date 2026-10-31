@@ -520,6 +520,9 @@ def echo_line(echo: Mapping[str, Any], symbols: Any, width: int) -> Text:
     )
     if kind == "ask":
         line.append("  /task and your message starts it", style="muted")
+    owner = "Main chat" if echo.get("from_main") else echo.get("from_chat")
+    if owner:  # a task of another chat says whose it is
+        line.append(f"  from {clean_output(str(owner))}", style="muted")
     return line
 
 
