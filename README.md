@@ -37,12 +37,16 @@ remembers across chats and talks to your own model server or a cloud API.
 
 ## Install
 
+<!-- usage:install -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/install.dark.svg"><img alt="Terminal: Install" src="docs/assets/usage/install.light.svg"></picture>
+
 ```bash
 git clone https://github.com/localmelo/localmelo.git
 cd localmelo
 uv sync --extra gateway
 source .venv/bin/activate
 ```
+<!-- /usage -->
 
 Keep the directory name `localmelo`: the package is built from it. Without
 uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.html#install-with-pip).
@@ -52,9 +56,13 @@ uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.h
 On a Mac with Apple silicon, one command, run in the clone, builds the app and
 installs it in `~/Applications` without admin rights:
 
+<!-- usage:app-install -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/app-install.dark.svg"><img alt="Terminal: Build the app" src="docs/assets/usage/app-install.light.svg"></picture>
+
 ```bash
 uv run python scripts/build_macos_app.py --install
 ```
+<!-- /usage -->
 
 - Open localmelo from Spotlight: a native window around the web console.
 - The menu bar shows how many chats and tasks run, and when one waits for you; with the window put away, a small pill says what Melo is doing.
@@ -66,23 +74,35 @@ On a Mac with Apple silicon (macOS 15 or later), [oMLX](https://github.com/jundo
 is the recommended model server. Put each model in its own folder of `~/models`
 ([how](docs/guides/model-servers.md#serve-a-model-with-omlx)), then serve the folder:
 
+<!-- usage:omlx-serve-readme -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/omlx-serve-readme.dark.svg"><img alt="Terminal: Serve the models" src="docs/assets/usage/omlx-serve-readme.light.svg"></picture>
+
 ```bash
 brew tap jundot/omlx https://github.com/jundot/omlx
 brew install jundot/omlx/omlx
 omlx serve --model-dir ~/models --port 8000
 ```
+<!-- /usage -->
 
 In a second terminal, run a task:
+
+<!-- usage:readme-run-omlx -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/readme-run-omlx.dark.svg"><img alt="Terminal: Run a task with oMLX" src="docs/assets/usage/readme-run-omlx.light.svg"></picture>
 
 ```bash
 melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
 ```
+<!-- /usage -->
 
 With [Ollama](https://ollama.com), pull a model with `ollama pull qwen3:8b` and run:
+
+<!-- usage:readme-run-ollama -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/readme-run-ollama.dark.svg"><img alt="Terminal: Run a task with Ollama" src="docs/assets/usage/readme-run-ollama.light.svg"></picture>
 
 ```bash
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
+<!-- /usage -->
 
 - Run `melo` alone to chat; the first run finds a running server and saves a configuration.
 - `melo serve` starts the gateway and opens the web console in your browser.

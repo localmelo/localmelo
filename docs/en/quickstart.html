@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/quickstart.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -38,6 +39,7 @@
     <nav class="sidebar" aria-label="On this page">
       <p class="sidebar-label">On this page</p>
       <a href="#before-you-begin">Before you begin</a>
+      <a href="#five-steps">In five steps</a>
       <a href="#install">Install</a>
       <a href="#run-your-first-task">Run your first task</a>
       <a href="#json-output">Get the result as JSON</a>
@@ -65,12 +67,41 @@
         </ul>
       </section>
 
+      <section class="section" id="five-steps">
+        <h2>In five steps</h2>
+        <!-- usage:steps --><ol class="steps">
+<li class="step"><h3><a href="quickstart.html#install">Install</a></h3>
+<p>Clone the repository and let uv set it up.</p>
+<figure class="usage" aria-label="Install" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#run-your-first-task">Run a first task</a></h3>
+<p>Point melo at your model server and ask a question; the answer prints on stdout.</p>
+<figure class="usage" aria-label="Run a task with oMLX" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure>
+<figure class="usage" aria-label="Run a task with Ollama" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with Ollama</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">Open the main chat</a></h3>
+<p>Run melo with no task: the first run finds your server and saves the setup.</p>
+<figure class="usage" aria-label="The main chat" data-copy="melo"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">Hand it a task</a></h3>
+<p>Ask for bigger work in the chat: it becomes a task and comes back as a card.</p>
+<figure class="step-shot"><img src="../assets/img/cards.webp" alt="Three cards in the main chat: a finished task with what it changed and its tests, an approval that was answered, and one that waits for you." width="1280" height="800" loading="lazy"></figure></li>
+<li class="step"><h3><a href="quickstart.html#set-up-an-embedding-model">See what it remembers</a></h3>
+<p>melo keeps notes across chats; list them, or forget one.</p>
+<figure class="usage" aria-label="What melo remembers" data-copy="melo memory list&#10;melo memory forget 3 -y"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">list</span></span>
+<span class="ln out"><span class="o">   3  Preferences  You prefer short answers.</span></span>
+<span class="ln out"><span class="o">      from chat “I prefer short answers”, Oct 30</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">forget</span> <span class="a">3</span> <span class="f">-y</span></span>
+<span class="ln out"><span class="o">Forgot note 3.</span></span></code></pre></figure></li>
+</ol><!-- /usage -->
+      </section>
+
       <section class="section" id="install">
         <h2>Install</h2>
-        <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-uv sync --extra gateway
-source .venv/bin/activate</code></pre>
+        <!-- usage:install --><figure class="usage" aria-label="Install" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title">Install</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>uv creates <code>.venv/</code> (installing Python 3.13 if needed) with the gateway's dependencies.</li>
           <li>Keep the folder name <code>localmelo</code>: a renamed folder or a ZIP download fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.</li>
@@ -79,11 +110,11 @@ source .venv/bin/activate</code></pre>
         </ul>
 
         <h3 id="install-with-pip">Install with pip</h3>
-        <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[gateway]"</code></pre>
+        <!-- usage:install-pip --><figure class="usage" aria-label="Install with pip" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;python3 -m venv .venv&#10;source .venv/bin/activate&#10;pip install -e &quot;.[gateway]&quot;"><div class="usage-bar"><span class="usage-title">Install with pip</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">python3</span> <span class="f">-m</span> <span class="a">venv</span> <span class="a">.venv</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">pip</span> <span class="s">install</span> <span class="f">-e</span> <span class="q">".[gateway]"</span></span></code></pre></figure><!-- /usage -->
         <p><code>python3</code> must be Python 3.11 or later; <code>-e</code> keeps the install linked to this checkout.</p>
       </section>
 
@@ -92,9 +123,9 @@ pip install -e ".[gateway]"</code></pre>
         <div class="callout warning">
           <p><strong>The model can run shell commands and Python code, and read or write any file you can: there is no sandbox.</strong> To run a task without tools, add <code>--builtins none</code>. See the <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>.</p>
         </div>
-        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
+        <!-- usage:run-ollama --><figure class="usage" aria-label="Run a task with Ollama" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with Ollama</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <p>With <a href="#serve-a-model-with-omlx">oMLX</a>, use its URL and a model folder's name:</p>
-        <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        <!-- usage:run-omlx --><figure class="usage" aria-label="Run a task with oMLX" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>The answer prints on stdout, and the exit code is 0 (<code>echo $?</code> prints <code>0</code>).</li>
           <li><code>-u</code> (<code>--url</code>) picks the server for this run, without a config file; <code>-m</code> (<code>--model</code>) names the model.</li>
@@ -105,7 +136,7 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="json-output">
         <h2>Get the result as JSON</h2>
-        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"</code></pre>
+        <!-- usage:run-json --><figure class="usage" aria-label="One JSON line" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">One JSON line</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="f">-o</span> <span class="a">json</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>stdout holds exactly one JSON line; the exit code is 0 only when <code>status</code> is <code>completed</code>.</li>
         </ul>
@@ -120,15 +151,15 @@ pip install -e ".[gateway]"</code></pre>
       <section class="section" id="save-a-configuration">
         <h2>Save a configuration</h2>
         <p>Run <code>melo</code> in a terminal. With nothing saved, it finds a model server on this computer, asks to use it, and saves <code>~/.cache/localmelo/config.toml</code>:</p>
-        <pre><code>$ melo
-melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
-Found a model server at http://127.0.0.1:11434/v1 (1 model).
-✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-melo remembers across chats by words only; melo setup adds search by meaning.
-Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
-melo 0.1.0 · qwen3:8b (/model to change)
-~/demo-project
-Try: What is this project? · / commands · ctrl+d quit</code></pre>
+        <!-- usage:first-run --><figure class="usage" aria-label="First run" data-copy="melo"><div class="usage-bar"><span class="usage-title">First run</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span>
+<span class="ln out"><span class="o">melo uses a model server on this computer (oMLX, Ollama, LM Studio…).</span></span>
+<span class="ln out"><span class="o">Found a model server at http://127.0.0.1:11434/v1 (1 model).</span></span>
+<span class="ln out"><span class="y">✓</span><span class="o"> http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.</span></span>
+<span class="ln out"><span class="o">melo remembers across chats by words only; melo setup adds search by meaning.</span></span>
+<span class="ln out"><span class="o">Saved to ~/.cache/localmelo/config.toml (melo setup changes it).</span></span>
+<span class="ln out"><span class="o">melo 0.1.0 · qwen3:8b (/model to change)</span></span>
+<span class="ln out"><span class="o">~/demo-project</span></span>
+<span class="ln out"><span class="o">Try: What is this project? · / commands · ctrl+d quit</span></span></code></pre><figcaption>melo finds the server, asks once and saves the configuration.</figcaption></figure><!-- /usage -->
         <figure class="shot">
           <img src="../assets/img/status.webp" alt="/status in the terminal: the model and whether it answers, the folder, the session, the approvals and context use." width="1280" height="1298" loading="lazy">
           <figcaption><code>/status</code> checks that the model answers, and shows the folder, the session and the approvals.</figcaption>
@@ -142,8 +173,8 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
 
         <h3 id="with-the-setup-wizard">With the setup wizard</h3>
         <p>The wizard also sets up an embedding server or a cloud API. For a cloud API, first run <code>export OPENAI_API_KEY="&lt;your key&gt;"</code> (or your vendor's variable).</p>
-        <pre><code>melo setup
-melo serve</code></pre>
+        <!-- usage:setup-serve --><figure class="usage" aria-label="Setup wizard and gateway" data-copy="melo setup&#10;melo serve"><div class="usage-bar"><span class="usage-title">Setup wizard and gateway</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">setup</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">serve</span></span></code></pre></figure><!-- /usage -->
         <div class="table-wrap">
           <table>
             <thead>
@@ -171,16 +202,16 @@ melo serve</code></pre>
           <img src="../assets/img/embedding.webp" alt="The first run finds a model server and asks whether to remember across chats with its embedding model." width="1280" height="291" loading="lazy">
         </figure>
         <p>Long-term memory needs an embedding model that your server already serves. With Ollama:</p>
-        <pre><code>ollama pull qwen3-embedding:0.6b
-curl -sS http://127.0.0.1:11434/v1/embeddings \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+        <!-- usage:embed-ollama --><figure class="usage" aria-label="Embedding model with Ollama" data-copy="ollama pull qwen3-embedding:0.6b&#10;curl -sS http://127.0.0.1:11434/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;qwen3-embedding:0.6b&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;&#10;melo setup"><div class="usage-bar"><span class="usage-title">Embedding model with Ollama</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">ollama</span> <span class="s">pull</span> <span class="a">qwen3-embedding:0.6b</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:11434/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"model": "qwen3-embedding:0.6b", "input": "ping"}'</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">setup</span>  <span class="k"># Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</span></span></code></pre></figure><!-- /usage -->
         <p>With oMLX the chat server also serves the model:</p>
-        <pre><code>curl -sS http://127.0.0.1:8000/v1/models
-curl -sS http://127.0.0.1:8000/v1/embeddings \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</code></pre>
+        <!-- usage:embed-omlx --><figure class="usage" aria-label="Embedding model with oMLX" data-copy="curl -sS http://127.0.0.1:8000/v1/models&#10;curl -sS http://127.0.0.1:8000/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;Qwen3-Embedding-0.6B&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;"><div class="usage-bar"><span class="usage-title">Embedding model with oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>models</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>The reply must hold a non-empty <code>data[0].embedding</code>.</li>
           <li>For oMLX, set <code>embedding_backend = "vllm"</code> with <code>embedding_url</code> and <code>embedding_model</code> (<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX</a>).</li>
@@ -192,13 +223,13 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
       <section class="section" id="start-the-gateway">
         <h2>Start the gateway</h2>
         <p>Run <code>melo serve</code>. From a second terminal, check it and run a task through it; the token goes to curl through a pipe, not the command line:</p>
-        <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
-{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is 6*7?"}'</code></pre>
+        <!-- usage:gateway-check --><figure class="usage" aria-label="Check the gateway and run a task" data-copy="{ printf &#x27;Authorization: Bearer &#x27;; cat ~/.cache/localmelo/gateway/auth/token; printf &#x27;\n&#x27;; } | curl -H @- http://127.0.0.1:8401/v1/health&#10;{ printf &#x27;Authorization: Bearer &#x27;; cat ~/.cache/localmelo/gateway/auth/token; printf &#x27;\n&#x27;; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \&#10;  -H &quot;Content-Type: application/json&quot; \&#10;  -d &#x27;{&quot;query&quot;: &quot;What is 6*7?&quot;}&#x27;"><div class="usage-bar"><span class="usage-title">Check the gateway and run a task</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="x">{</span> <span class="c">printf</span> <span class="q">'Authorization: Bearer '</span><span class="x">;</span> <span class="c">cat</span> <span class="a">~/<wbr>.cache/<wbr>localmelo/<wbr>gateway/<wbr>auth/<wbr>token</span><span class="x">;</span> <span class="c">printf</span> <span class="q">'\n'</span><span class="x">;</span> <span class="x">}</span> <span class="x">|</span> <span class="c">curl</span> <span class="f">-H</span> <span class="a">@-</span> <span class="a">http://127.0.0.1:8401/<wbr>v1/<wbr>health</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="x">{</span> <span class="c">printf</span> <span class="q">'Authorization: Bearer '</span><span class="x">;</span> <span class="c">cat</span> <span class="a">~/<wbr>.cache/<wbr>localmelo/<wbr>gateway/<wbr>auth/<wbr>token</span><span class="x">;</span> <span class="c">printf</span> <span class="q">'\n'</span><span class="x">;</span> <span class="x">}</span> <span class="x">|</span> <span class="c">curl</span> <span class="f">-H</span> <span class="a">@-</span> <span class="f">-X</span> <span class="a">POST</span> <span class="a">http://127.0.0.1:8401/<wbr>v1/<wbr>agent/<wbr>run</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">"Content-Type: application/json"</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"query": "What is 6*7?"}'</span></span></code></pre></figure><!-- /usage -->
         <p>Example output (values vary):</p>
-        <pre><code>{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
-{"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
+        <!-- usage:gateway-output --><figure class="usage" aria-label="Example output"><div class="usage-bar"><span class="usage-title">Example output</span></div><pre class="usage-body"><code><span class="ln out"><span class="o">{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}</span></span>
+<span class="ln out"><span class="o">{"result":"42","session_id":"a7e8f646ca2e"}</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>The health check does not contact the model server; a task does.</li>
           <li>At a terminal on this computer, <code>melo serve</code> opens the console in your browser; <code>melo console</code> opens it again.</li>
@@ -213,12 +244,12 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <figure class="shot">
           <img src="../assets/img/first-answer.webp" alt="A terminal chat: thinking, three tool calls on quiet lines, and the answer with a code sample." width="1280" height="828" loading="lazy">
         </figure>
-        <pre><code>melo
-# Or talk to an OpenAI-compatible server that is not saved. Without
-# -m it uses the server's only chat model or its one loaded model;
-# with several chat models and not exactly one loaded, it exits 2 and lists them:
-melo -u http://127.0.0.1:8000/v1
-melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
+        <!-- usage:interactive --><figure class="usage" aria-label="Chat" data-copy="melo&#10;melo -u http://127.0.0.1:8000/v1&#10;melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID"><div class="usage-bar"><span class="usage-title">Chat</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span>
+<span class="ln note"><span class="k"># Or talk to an OpenAI-compatible server that is not saved. Without</span></span>
+<span class="ln note"><span class="k"># -m it uses the server's only chat model or its one loaded model;</span></span>
+<span class="ln note"><span class="k"># with several chat models and not exactly one loaded, it exits 2 and lists them:</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">YOUR_MODEL_ID</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>Each tool call shows on one line, and the answer prints as Markdown; developer mode adds the step, the phase and the run's progress facts.</li>
           <li>Type <code>/</code> for commands: <code>/help</code>, <code>/model</code>, <code>/status</code>, <code>/attach PATH</code>, <code>/new</code>; Ctrl+D leaves.</li>
@@ -244,25 +275,25 @@ melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ol>
           <li>
             <p>Install oMLX with Homebrew (the oMLX app also installs <code>~/.omlx/bin/omlx</code>):</p>
-            <pre><code>brew tap jundot/omlx https://github.com/jundot/omlx
-brew install jundot/omlx/omlx</code></pre>
+            <!-- usage:omlx-install --><figure class="usage" aria-label="Install oMLX" data-copy="brew tap jundot/omlx https://github.com/jundot/omlx&#10;brew install jundot/omlx/omlx"><div class="usage-bar"><span class="usage-title">Install oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">brew</span> <span class="s">tap</span> <span class="a">jundot/omlx</span> <span class="a">https://github.com/<wbr>jundot/<wbr>omlx</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">brew</span> <span class="s">install</span> <span class="a">jundot/omlx/omlx</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>Put each model in its own folder; the folder's name is the model id:</p>
-            <pre><code>hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit</code></pre>
+            <!-- usage:omlx-download --><figure class="usage" aria-label="Download a model" data-copy="hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit"><div class="usage-bar"><span class="usage-title">Download a model</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">hf</span> <span class="s">download</span> <span class="a">mlx-community/<wbr>Qwen3-8B-4bit</span> <span class="f">--local-dir</span> <span class="a">~/models/Qwen3-8B-4bit</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>Start the server, and leave it running in its own terminal:</p>
-            <pre><code>omlx serve --model-dir ~/models --port 8000</code></pre>
+            <!-- usage:omlx-serve --><figure class="usage" aria-label="Start oMLX" data-copy="omlx serve --model-dir ~/models --port 8000"><div class="usage-bar"><span class="usage-title">Start oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">omlx</span> <span class="s">serve</span> <span class="f">--model-dir</span> <span class="a">~/models</span> <span class="f">--port</span> <span class="a">8000</span></span></code></pre></figure><!-- /usage -->
             <p>Do not set <code>--api-key</code>: localmelo sends no key to a local server. On HTTP 401, turn on <strong>Allow inference without API key</strong> in oMLX's admin page.</p>
           </li>
           <li>
             <p>Check that the server lists the model (<code>"id": "Qwen3-8B-4bit"</code>):</p>
-            <pre><code>curl -sS http://127.0.0.1:8000/v1/models</code></pre>
+            <!-- usage:omlx-models --><figure class="usage" aria-label="List the models" data-copy="curl -sS http://127.0.0.1:8000/v1/models"><div class="usage-bar"><span class="usage-title">List the models</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>models</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>Run a task with that id (a first request loads the model; <code>-X request_timeout_s=600</code> gives it more time):</p>
-            <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
+            <!-- usage:run-omlx --><figure class="usage" aria-label="Run a task with oMLX" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">Run a task with oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
           </li>
         </ol>
         <figure class="shot">
