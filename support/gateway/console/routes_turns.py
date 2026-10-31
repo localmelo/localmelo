@@ -426,6 +426,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
         )
         return JSONResponse(status_code=202, content=_turn_body(turn, resumed))
 
+    @app.post("/api/sessions/{session_id}/undo")
+    async def undo_turn(session_id: str, body: RetryRequest) -> JSONResponse:
+        console.require_store()
+        await _require_session(console, session_id)
+        undone = await _sessions_call(
+            console, console.sessions.undo(session_id, body.turn_id), session_id
+        )
+        return JSONResponse(content={"turn_id": undone.id, "undone": True})
+
     @app.post("/api/turns/{turn_id}/cancel")
     async def cancel_turn(turn_id: str) -> JSONResponse:
         console.require_store()
