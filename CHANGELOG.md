@@ -24,7 +24,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   call melo cannot read now counts; only the running localmelo is "localmelo
   itself", not another copy of its source; a step's names for the "did you ask
   for it" check come from its commands and code, not its other strings; and
-  the browser's site question respects a stopped turn. [#NN]
+  the browser's site question respects a stopped turn. [#359]
 - Reminders that run once at a time. Say `remind me to send the report on
   Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` in the main chat
   and it shows the date and time it understood (`Remind you on Fri Oct 30 at
@@ -2942,3 +2942,4 @@ earlier milestones.
 [#354]: https://github.com/localmelo/localmelo/pull/354
 [#356]: https://github.com/localmelo/localmelo/pull/356
 [#358]: https://github.com/localmelo/localmelo/pull/358
+[#359]: https://github.com/localmelo/localmelo/pull/359
