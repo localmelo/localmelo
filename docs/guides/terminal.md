@@ -249,7 +249,7 @@ The bar under the input box answers "how much has this used" and "what runs besi
 | `idle 2m` | The time since the last request, from one minute on. |
 | `$0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m` | On a cloud API: the session's cost from the prices you configured (see [`[pricing]`](../reference/configuration.md#pricing)) and the tightest rate limit the last response reported, with the time until it resets. melo bundles no prices. |
 | `2/~4 · ctrl+o steps` | While a turn runs: step 2 of about 4 (the task took 4 steps before; `~` marks an estimate), and the key that lists the steps. |
-| `2 running · 1 queued · Today · ctrl+t tasks` | When the gateway has unfinished tasks: their counts by state, the top level and the key that lists them. Levels are words (Now, Today, Normal, Whenever, If idle, Later); developer mode shows P0-P5. |
+| `2 running · 1 queued · P1 · ctrl+t tasks` | When the gateway has unfinished tasks: their counts by state, the top priority (P0 runs first, P1 is today, P2 normal, down to P5 on hold) and the key that lists them. |
 
 - Ctrl+T lists the tasks; Enter on one offers Pause or Resume, Raise to, Lower to and Stop (which asks first), exactly as `melo task pause|resume|level|stop` do.
 - melo asks the gateway for its tasks every 5 seconds, and only when a gateway token exists (`~/.cache/localmelo/gateway/auth`).

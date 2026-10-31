@@ -63,10 +63,6 @@ class WorkTask:
     def level_text(self) -> str:
         return "" if self.level is None else f"P{self.level}"
 
-    def level_label(self, words: bool = False) -> str:
-        """``Today`` with *words* (default mode), else ``P1``; ``""`` without a level."""
-        return level_name(self.level, words) if self.level is not None else ""
-
     @classmethod
     def from_json(cls, data: object) -> WorkTask | None:
         if not isinstance(data, Mapping):
@@ -102,11 +98,6 @@ class WorkSummary:
         return bool(self.running or self.queued or self.held or self.paused)
 
 
-def level_name(level: int, words: bool = False) -> str:
-    """A level as default mode says it (``Today``) or developer mode (``P1``)."""
-    return task_cli.LEVEL_WORDS[level] if words else f"P{level}"
-
-
 def summarize(tasks: Sequence[WorkTask]) -> WorkSummary:
     levels = [t.level for t in tasks if not t.paused and t.level is not None]
     return WorkSummary(
@@ -118,12 +109,11 @@ def summarize(tasks: Sequence[WorkTask]) -> WorkSummary:
     )
 
 
-def work_parts(summary: WorkSummary, *, words: bool = False) -> list[BarPart]:
+def work_parts(summary: WorkSummary) -> list[BarPart]:
     """``2 running · 1 queued · P1 · ctrl+t tasks``; nothing without tasks.
 
     A held task waits for the person (an approval), so it is drawn as a
     warning; the counts are figures, the priority and the key details.
-    With *words* (default mode) the priority is a word: ``Today``, not ``P1``.
     """
     if not summary.any:
         return []
@@ -138,7 +128,7 @@ def work_parts(summary: WorkSummary, *, words: bool = False) -> list[BarPart]:
         if count
     ]
     if summary.top is not None:
-        parts.append(BarPart(level_name(summary.top, words), "figure", detail=True))
+        parts.append(BarPart(f"P{summary.top}", "figure", detail=True))
     return [*parts, BarPart(f"{WORK_KEY} tasks", "key", detail=True)]
 
 
@@ -151,7 +141,7 @@ class Action:
     level: str | None = None
 
 
-def actions(task: WorkTask, *, words: bool = False) -> list[Action]:
+def actions(task: WorkTask) -> list[Action]:
     """What the task's state allows, in the order the list shows it."""
     if task.state not in LIVE:
         return []
@@ -161,8 +151,7 @@ def actions(task: WorkTask, *, words: bool = False) -> list[Action]:
         for step, verb in ((-1, "Raise"), (1, "Lower")):
             to = level + step
             if 0 <= to <= LOWEST_RUNNING:
-                label = f"{verb} to {level_name(to, words)}"
-                found.append(Action(label, "level", f"P{to}"))
+                found.append(Action(f"{verb} to P{to}", "level", f"P{to}"))
     return [*found, Action("Stop", "stop")]
 
 
@@ -218,10 +207,10 @@ class GatewayTasks:
         return WorkTask.from_json(data.get("task"))
 
 
-def task_rows(tasks: Sequence[WorkTask], *, words: bool = False) -> list[str]:
+def task_rows(tasks: Sequence[WorkTask]) -> list[str]:
     """The list's rows: ``P1  running  Fix the parser``, columns lined up."""
     states = max((len(task.state_word) for task in tasks), default=0)
-    labels = [task.level_label(words) or "--" for task in tasks]
+    labels = [task.level_text or "--" for task in tasks]
     width = max((len(label) for label in labels), default=2)
     return [
         f"{label:<{width}}  {task.state_word:<{states}}  {task.title}"
@@ -229,17 +218,13 @@ def task_rows(tasks: Sequence[WorkTask], *, words: bool = False) -> list[str]:
     ]
 
 
-def done_text(
-    task: WorkTask, action: Action, after: WorkTask | None, *, words: bool = False
-) -> str:
+def done_text(task: WorkTask, action: Action, after: WorkTask | None) -> str:
     """What the hint says once the gateway took *action*."""
     if action.command == "stop" and after is not None and after.state in LIVE:
         # A running task's stop lands when its worker has ended.
         return f"Stop requested: {task.title} (it ends when its worker does)"
     if action.command == "level":
-        level = task_cli.LEVELS.index(action.level) if action.level else None
-        shown = action.level if level is None else level_name(level, words)
-        return f"{task.title} is now {shown}"
+        return f"{task.title} is now {action.level}"
     word = {"pause": "Paused", "resume": "Resumed", "stop": "Stopped"}
     return f"{word[action.command]}: {task.title}"
 
@@ -257,9 +242,7 @@ class WorkBeside:
 
     :meth:`watch` asks the gateway every :data:`POLL_S` seconds while the UI
     is open, and only when a gateway token exists; *on_change* (the bar's
-    redraw) runs only when the counts change. *words* says levels in words
-    (Now, Today, Normal, Whenever, If idle, Later), as default mode does;
-    developer mode keeps the P-codes.
+    redraw) runs only when the counts change. Levels read as P-codes.
     """
 
     def __init__(
@@ -268,10 +251,8 @@ class WorkBeside:
         *,
         poll_s: float = POLL_S,
         on_change: Callable[[], None] = lambda: None,
-        words: bool = False,
     ) -> None:
         self.source, self.poll_s, self.on_change = source, poll_s, on_change
-        self.words = words
         self.tasks: list[WorkTask] = []
         self.summary = WorkSummary()
 
@@ -297,15 +278,14 @@ class WorkBeside:
         if not tasks:
             app.hint("No tasks beside this chat: melo task new adds one", 3.0)
             return
-        words = self.words
-        rows = task_rows(tasks, words=words)
+        rows = task_rows(tasks)
         index = await app.choose_from("Tasks beside this chat", rows)
         if index is None:
             return
         task = tasks[index]
-        choices = actions(task, words=words)
+        choices = actions(task)
         title = " · ".join(
-            p for p in (task.title, task.level_label(words), task.state_word) if p
+            p for p in (task.title, task.level_text, task.state_word) if p
         )
         picked = await app.choose_from(title, [choice.label for choice in choices])
         if picked is None:
@@ -324,5 +304,5 @@ class WorkBeside:
         except WorkError as exc:
             app.hint(f"Could not {action.label.lower()}: {exc}", 4.0)
             return
-        app.hint(done_text(task, action, after, words=words), 3.0)
+        app.hint(done_text(task, action, after), 3.0)
         await self.refresh()

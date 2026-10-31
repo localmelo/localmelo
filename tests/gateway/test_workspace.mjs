@@ -19,6 +19,7 @@ import {folderChoices, folderName, setupFolderPicker} from '../../support/gatewa
 import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
+import * as levels from '../../support/gateway/static/levels.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -517,6 +518,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
@@ -723,6 +725,7 @@ function harness(routes, {mobile = false} = {}) {
     setupPictureBox,
     memoryNodes,
     ...mainChat,
+    ...levels,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
@@ -2718,6 +2721,8 @@ test('the level chip writes the level through /api', async () => {
   assert.equal(h.element('level-menu').hidden, false);
   assert.equal(h.element('level-menu').children.length, 4);
   assert.equal(h.element('level-menu').children[1].attributes['aria-checked'], 'true');
+  assert.deepEqual(h.element('level-menu').children.map((item) => item.textContent),
+    ['P1 · today', 'P2 · normal', 'P3 · when there is time', 'P4 · only when the computer is idle']);
   await h.element('level-menu').children[0].listeners.click[0]();
   const [call] = h.net.callsTo('/sessions/a/level');
   assert.equal(call.method, 'POST');
@@ -3939,7 +3944,7 @@ test('the task list and card name the priority in developer mode only', async ()
   assert.doesNotMatch(plainCard, /Priority|P3/);
   const [devList, devCard] = await text(baseRoutes);
   assert.match(devList, /parked · P3 · updated/);
-  assert.match(devCard, /Priority P3/);
+  assert.match(devCard, /Priority P3 · when there is time/);
 });
 
 test('Escape closes what is open in Tasks and Workers too, and stops no chat there', async () => {
@@ -4283,7 +4288,7 @@ test('an approval card follows its approval: the answer replaces Review, live an
 });
 
 test('a task whose approval was answered still takes changes on its echo lines until it ends', async () => {
-  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · Normal'})];
+  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · P2'})];
   const cards = [
     cardRow(81, {at: NOW - 20, ts: NOW - 20, state: 'waiting', source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Wants to run a command', request_id: 'r1'}),
     cardRow(82, {at: NOW - 10, ts: NOW - 10, state: 'answered', source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Allowed once', request_id: 'r1'}),
@@ -4385,26 +4390,34 @@ test('a card from the open side chat is seen there, unless an earlier one is sti
 const echoRow = (id, data) => ({id, ts: NOW - 100 + id, ...data});
 
 test('a message the main chat started as a task shows as the person\'s words and an echo line with its level', async () => {
-  const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · Normal', typed: '/task make slides'});
+  const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: '/task make slides'});
   const h = harness(defaultMode({...mainRoutes({
     'POST /sessions/m/turns': {status: 200, body: {echo: started}},
-    'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → Today', undo: {level: 'auto'}})}},
+    'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → P1', undo: {level: 'auto'}})}},
   }), 'GET /settings': {mode: 'default'}}));
   await h.run('init()');
   assert.equal(h.element('task-btn').hidden, false, 'Run as a task is offered in the main chat');
   h.element('input').value = '/task make slides';
   await h.run('send()');
   assert.equal(Object.keys(h.state().outbox).length, 0, 'No turn: the echo answers the send');
-  assert.match(h.text('messages'), /\/task make slides.*Started: make slides.*Normal.*Change/);
+  assert.match(h.text('messages'), /\/task make slides.*Started: make slides.*P2.*Change/);
   const line = findNode(h.element('messages'), (node) => node.dataset?.echoId === '40');
   assert.equal(line.dataset.kind, 'started');
+  const chip = findNode(line, (node) => node.className === 'echo-level');
+  assert.equal(chip.textContent, 'P2', 'The chip is the code');
+  assert.equal(chip.title, 'normal', 'Its meaning is the tooltip');
+  assert.equal(findNode(chip, (node) => node.className === 'sr-only').textContent, ', normal', 'and part of its accessible name');
   findNode(line, (node) => node.textContent === 'Change').click();
-  const today = findNode(line, (node) => node.textContent === 'Today');
+  assert.deepEqual(findNodes(line, (node) => node.getAttribute?.('role') === 'radio').map((node) => node.textContent), [
+    'P0 · runs first; others wait', 'P1 · today', 'P2 · normal', 'P3 · when there is time',
+    'P4 · only when the computer is idle', 'P5 · on hold until you start it',
+  ], 'every level, its code first');
+  const today = findNode(line, (node) => node.textContent === 'P1 · today');
   assert.equal(today.getAttribute('role'), 'radio');
   today.click();
   await settle();
-  assert.deepEqual(h.net.callsTo('/front/echoes/40')[0].body, {do: 'level', level: 'Today'});
-  assert.match(h.text('messages'), /make slides →.*Today.*Undo/);
+  assert.deepEqual(h.net.callsTo('/front/echoes/40')[0].body, {do: 'level', level: 'P1'});
+  assert.match(h.text('messages'), /make slides →.*P1.*Undo/);
 });
 
 test('Run as a task sends the message as a task; a control echo\'s Undo goes once', async () => {
@@ -4426,7 +4439,7 @@ test('Run as a task sends the message as a task; a control echo\'s Undo goes onc
   assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Undo'), null, 'An undone line offers no second Undo');
 });
 
-test('a suggestion and "Start this as a task?" are one tap; echoes arrive on the stream; levels show P-codes in developer mode', async () => {
+test('a suggestion and "Start this as a task?" are one tap; echoes arrive on the stream; levels show as P-codes', async () => {
   const echoes = [
     echoRow(60, {echo: 'suggest', action: 'stop', task_id: 't1', title: 'Slides', line: 'Suggested: stop Slides'}),
     echoRow(61, {echo: 'ask', text: 'which laptop?', turn_id: 'turn-1', line: 'Start this as a task?'}),
@@ -4437,8 +4450,8 @@ test('a suggestion and "Start this as a task?" are one tap; echoes arrive on the
   findNode(h.element('messages'), (node) => node.textContent === 'Not now').click();
   await settle();
   assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Start as a task'), null);
-  h.stream().emit({id: 62, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'started', task_id: 't2', title: 'Fix CI', level: 1, line: 'Started: Fix CI · Today'}});
-  assert.match(h.text('messages'), /Started: Fix CI.*P1 · Today/);
+  h.stream().emit({id: 62, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'started', task_id: 't2', title: 'Fix CI', level: 1, line: 'Started: Fix CI · P1'}});
+  assert.match(h.text('messages'), /Started: Fix CI\b(?!.*· P1).*P1/, 'The line drops its level; the chip says it');
   assert.equal(h.state().view.turns.length, 0, 'An echo is no turn');
 });
 
@@ -4458,7 +4471,7 @@ test('while the person types, a result card waits; a waiting card shows at once'
 });
 
 test('a task that came back finished offers no more changes on its echo lines', async () => {
-  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · Normal'})];
+  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · P2'})];
   const cards = [cardRow(81, {at: NOW - 10, ts: NOW - 10, source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Two new roles.'})];
   const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes}}));
   await h.run('init()');

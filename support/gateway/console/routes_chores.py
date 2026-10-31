@@ -84,14 +84,12 @@ def _check(function: Callable[[Any], T], value: Any) -> T:
 
 
 def _level(value: object) -> int | None:
-    """A level word or number the chore may have (Today to If idle), or ``None`` when absent."""
+    """A level code, word or number the chore may have (P1 to P4), or ``None`` when absent."""
     if value is None:
         return None
     number = level_number(value)
     if number is None or not 1 <= number <= 4:
-        raise ApiError(
-            400, "invalid_request", "level: Today, Normal, Whenever or If idle"
-        )
+        raise ApiError(400, "invalid_request", "level: P1 to P4")
     return number
 
 
