@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task that is stuck asks the chat that started it instead of stopping. Its
+  question shows there (`Task “Fix tests” asks…`, with the background, the
+  problem, the options and the help it needs), and melo answers it when the
+  chat is free (`melo answered “Fix tests”`), using the chat's tools and memory,
+  or asks you with the choices and their trade-offs and a box for your answer
+  (`“Fix tests” needs your answer`). The task waits without taking a model
+  slot: `Waiting on Main chat`, or `Waiting on you`. A message you send while
+  melo answers is queued and runs next, a question with no answer in 10 minutes
+  lets the task go on with its best option, and melo's answer never approves a
+  step. The chat's `task_get` now reads a running task live. [#NN]
 - Side chats start tasks too. A side chat has the main chat's task tools and
   code words (`/task …`, **Run as a task**, `pause the slides`, chores and
   reminders), the same priorities and the same scheduler. A task belongs to the

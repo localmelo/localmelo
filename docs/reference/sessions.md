@@ -129,8 +129,11 @@ redaction limitations.
   so a refused file is left byte for byte as it was; beside a file in WAL
   mode, SQLite may still create its `-wal` and `-shm` files. A file of a
   newer schema raises
-  `<path> has schema version <n>; this localmelo reads version 2`. Version 1
-  stores are migrated in place by adding nullable `turns.attachments` metadata.
+  `<path> has schema version <n>; this localmelo reads version 3`. Older
+  stores are migrated in place: version 1 gains nullable `turns.attachments`
+  metadata, and versions 1 and 2 gain `turns.origin` (`''` on every turn the
+  person began; `ask_owner` on a chat's internal turn that answers a task's
+  question, `TurnInfo.origin`, which gives a session no title).
 - **The owner lock.** The gateway's store holds a lock on `<path>.owner` for
   its life. A second gateway on the file gets `StoreOwnedError`:
   `Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.`

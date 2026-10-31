@@ -498,6 +498,21 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
 - `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
 
+
+<a id="a-tasks-question"></a>
+
+### 任务的问题
+
+卡住的 worker 会调用 `ask_owner`；它的对话（`front_id`，否则是主对话）会收到带 `task_id`、`title` 和 `ask_id` 的回执：
+
+- `task_ask`：问题本身，带 `fields`（`background`、`situation`、`problem`、`likely_causes`、`options`、`help_needed`、`if_unsolvable`）和 `lead`（对话内部轮次的第一行）；任务自己的对话已被删除时带 `from_chat`（任务的标题）。
+- `task_answered`（`text`，`of` 指问题）：对话用 `task_answer` 作了回答。
+- `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
+- `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
+- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行。
+
+对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
+
 ## GET /api/sessions/{id}/events
 
 会话事件的 Server-Sent Events 流：先是起点之后已保存的事件，然后是实时事件。

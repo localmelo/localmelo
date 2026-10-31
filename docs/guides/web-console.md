@@ -177,6 +177,16 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Chores and reminders belong to the chat that made them.** One saved in a side chat runs as that chat's task and reports there, not in the main chat's check-in.
 - The terminal starts tasks from the main chat only (`/main`, then `/task …`).
 
+## When a task is stuck, it asks its chat
+
+- **The task asks the chat that started it, not you.** A row appears there: `Task “Fix tests” asks…`. **Show the question** opens what the task wrote: the background, where it stands, the problem, the likely causes, its options, the help it needs, and what to tell you if nobody can solve it. Its card and Activity read `Waiting on Main chat` (or the side chat's name).
+- **melo answers when the chat is free.** It never interrupts your own message. It reads the question as information, can look things up with the chat's tools and its memory, and answers: `melo answered “Fix tests”`, with the answer quoted. Several questions to one chat are answered one at a time, oldest first.
+- **Or it asks you.** When only you can decide, a row reads `“Fix tests” needs your answer`: what the task is doing, what happened, what was tried, the choices with their trade-offs, and the question. Type in its box and **Send answer**, or send a message to the task (`tell Fix tests to use B`). The task waits for you as long as you take; its card reads `Waiting on you`.
+- **A message you send meanwhile waits its turn.** While melo answers a task, your message shows as `Queued: this runs once melo has answered “Fix tests”` and runs right after, before the next question.
+- **No answer in 10 minutes.** If melo neither answers nor asks you within 10 minutes of starting on the question, the task goes on with its best option and says so in its report (`No answer for “Fix tests”; it goes on with its best option`). Stopping the task ends the wait at once, and a restart marks the question expired.
+- **Answers never approve.** melo's answer is information for the task. A step that needs your approval still asks you (or Auto's review), as before.
+- A task asks at most 3 times per run. A side chat that was deleted hands its tasks' questions to the main chat, marked `From <task title>`.
+
 ## Chores that repeat
 
 ![The main chat asks "Run this every weekday at 8:30?" with Save chore, Just once and Cancel](../assets/img/chore-proposal.webp)
