@@ -120,6 +120,22 @@ def test_the_ledger_matches_the_exact_step_in_the_same_folder(
     assert ledger.match("chat-1", shell) is None
 
 
+def test_a_runner_whose_unreadable_changed_files_changed_asks_again(
+    folder: str,
+) -> None:
+    # The step key is the command; the files a runner runs that melo could not read
+    # are compared as they were when the person allowed it.
+    def pytest_step(changed: tuple[str, ...]) -> ApprovalRequest:
+        review = ActionReview("undecided", (), ("Runs lib.so.",), changed=changed)
+        return request(folder, code="import pytest; pytest.main()", review=review)
+
+    ledger = ApprovalLedger()
+    entry = ledger.record("chat-1", pytest_step(("lib.so:100:4",)))
+    assert ledger.match("chat-1", pytest_step(("lib.so:100:4",))) == entry
+    assert ledger.match("chat-1", pytest_step(("lib.so:200:9",))) is None
+    assert ledger.match("chat-1", pytest_step(())) is None
+
+
 def test_high_impact_steps_are_never_recorded_or_matched(folder: str) -> None:
     ledger = ApprovalLedger()
     for review in (HIGH, SELF, CLICK, WORDS_ALLOWED, None):
@@ -242,6 +258,27 @@ async def test_an_earlier_approval_runs_a_blocked_auto_step(folder: str) -> None
     policy = owned(ledger, AutoPolicy(task=True))
     decision = await policy.decide(request(folder, review=UNDECIDED))
     assert decision.origin == "earlier"
+
+
+async def test_in_auto_what_auto_runs_runs_as_it_would(folder: str) -> None:
+    ledger = ApprovalLedger()
+    ledger.record("chat-1", request(folder))
+    blocked = request(folder, code="print(2)", review=UNDECIDED)
+    ledger.record("chat-1", blocked)
+    auto = AutoPolicy(task=True)
+    uses: list[ApprovalUse] = []
+    policy = owned(ledger, auto, uses=uses)
+    # A routine step Auto runs anyway uses no approval and shows no row.
+    assert (await policy.decide(request(folder))).origin == "auto"
+    # A step allowed once on the task's page runs on that allowance, once.
+    auto.allow_once(request_step(blocked), [], "python_exec")
+    once = await policy.decide(request(folder, code="print(2)", review=UNDECIDED))
+    assert (once.origin, once.reason) == ("user", ALLOWED_ONCE)
+    assert uses == []
+    # Then only the person's earlier approval runs it.
+    again = await policy.decide(request(folder, code="print(2)", review=UNDECIDED))
+    assert again.origin == "earlier" and len(uses) == 1
+    assert len(ledger.entries("chat-1")) == 2
 
 
 async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(

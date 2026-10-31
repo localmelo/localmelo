@@ -325,6 +325,9 @@ class RecordedApproval:
     categories: tuple[str, ...]
     preview: str
     at: float
+    # The changed files a runner runs that melo could not read, as they were
+    # (``ActionReview.changed``): not in the step key, so compared here.
+    changed: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -357,8 +360,9 @@ class ApprovalLedger:
     An entry is the person's Allow of one exact step (its tool, its
     :func:`request_step` key and its folder) in a chat or in a task the chat
     owns. :meth:`match` finds an entry for a request of the same tool, key
-    and folder when neither review is high-impact (:func:`reusable`); the
-    model never decides what matches. Memory only, like grants.
+    and folder, whose runner reads the same unreadable changed files as they
+    were, when neither review is high-impact (:func:`reusable`); the model
+    never decides what matches. Memory only, like grants.
     """
 
     def __init__(self, clock: Callable[[], float] = time.time) -> None:
@@ -387,6 +391,7 @@ class ApprovalLedger:
             review.categories,
             request.preview,
             self._clock(),
+            tuple(review.changed),
         )
         entries[entry.entry_id] = entry
         while len(entries) > LEDGER_KEPT:
@@ -395,14 +400,16 @@ class ApprovalLedger:
 
     def match(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
         """The entry of chat *chat_id* that allowed exactly *request*'s step, else ``None``."""
-        if not reusable(request.review):
+        review = request.review
+        if review is None or not reusable(review):
             return None
         key, folder = request_step(request), _folder(request.workspace_root)
         for entry in self._entries.get(chat_id, {}).values():
-            same = (entry.tool, entry.step_key, entry.folder) == (
+            same = (entry.tool, entry.step_key, entry.folder, entry.changed) == (
                 request.tool_name,
                 key,
                 folder,
+                tuple(review.changed),
             )
             if same and entry.verdict != "high" and not entry.categories:
                 return entry
@@ -455,16 +462,18 @@ class ApprovalLedger:
 
 
 class OwnedTaskPolicy:
-    """A task's policy: its chat's grants and recorded approvals first, then *inner*.
+    """A task's policy: its chat's grants and recorded approvals, and *inner*.
 
-    Before *inner* decides, a routine call of a tool the owner chat holds a
-    grant of runs as under a session grant (Ask mode), and a call whose exact
-    step the person allowed in that chat or one of its tasks runs with origin
-    ``earlier``; *on_use* is told. When *inner* asks the person and they
-    allow, the approval is recorded in the owner chat. Auto mode's Allow
-    once is never recorded: it stays one exact step, once. *owner* gives the
-    chat that owns the task now. A task the person did not start is never
-    wrapped (its approvals are never remembered).
+    In Ask, before *inner* asks the person, a routine call of a tool the
+    owner chat holds a grant of runs as under a session grant, and a call
+    whose exact step the person allowed in that chat or one of its tasks
+    runs with origin ``earlier``; *on_use* is told. When *inner* asks the
+    person and they allow, the approval is recorded in the owner chat. In
+    Auto, *inner* decides first (it asks nobody); only a step it blocked
+    runs on a recorded approval. Auto's Allow once is never recorded: it
+    stays one exact step, once. *owner* gives the chat that owns the task
+    now. A task the person did not start is never wrapped (its approvals
+    are never remembered).
     """
 
     def __init__(
@@ -498,26 +507,41 @@ class OwnedTaskPolicy:
         mode = review_mode(self.inner, request)
         return "silent" if mode == "ask" and self._granted(request.tool_name) else mode
 
+    async def _earlier(
+        self, chat: str, request: ApprovalRequest
+    ) -> ApprovalDecision | None:
+        """The step runs on the person's recorded approval of it, else ``None``."""
+        entry = self._ledger.match(chat, request)
+        if entry is None:
+            return None
+        use = self._ledger.used(entry, self._task_id, request)
+        if self._on_use is not None:
+            try:
+                await self._on_use(use)
+            except Exception:
+                logger.warning("Could not show a used approval", exc_info=True)
+        return ApprovalDecision(
+            True, f"earlier approval {entry.entry_id}", origin="earlier"
+        )
+
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         self._chat = chat = await self._owner()
+        if self._auto():
+            # Auto asks nobody: what it runs (a routine step, an Allow once)
+            # runs as it would; a step it blocked may match an approval.
+            decision = await self.inner.decide(request)
+            if not chat or decision.allow or decision.origin != "auto":
+                return decision
+            return await self._earlier(chat, request) or decision
         if chat:
             if self._granted(request.tool_name) and covered_by_grant(request.review):
                 return ApprovalDecision(True, origin="session")
-            entry = self._ledger.match(chat, request)
-            if entry is not None:
-                use = self._ledger.used(entry, self._task_id, request)
-                if self._on_use is not None:
-                    try:
-                        await self._on_use(use)
-                    except Exception:
-                        logger.warning("Could not show a used approval", exc_info=True)
-                return ApprovalDecision(
-                    True, f"earlier approval {entry.entry_id}", origin="earlier"
-                )
+            earlier = await self._earlier(chat, request)
+            if earlier is not None:
+                return earlier
         decision = await self.inner.decide(request)
         if (
             chat
-            and not self._auto()
             and isinstance(decision, ApprovalDecision)
             and decision.allow
             and decision.origin == "user"

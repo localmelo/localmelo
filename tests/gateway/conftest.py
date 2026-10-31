@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.support.gateway.console.explain import Explanations
 from localmelo.support.gateway.console.front import Front
 from localmelo.support.sessions.store import SessionStore
 
@@ -62,3 +64,22 @@ def _no_title_requests(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("a test sends no title request")
 
     monkeypatch.setattr(Front, "_ask_title", no_model)
+
+
+@pytest.fixture(autouse=True)
+def _no_explanation_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """melo's explanation of a task's approval is asked of the model only in production.
+
+    Without this, a task that asks would build a provider from the test's
+    config and send a request. A test that wants an explanation passes
+    ``ConsoleOptions(explainer=…)``; without one, a task's approval has none.
+    """
+    start = Explanations.start
+
+    def explained_by_test(
+        self: Explanations, task_id: str, request: ApprovalRequest
+    ) -> None:
+        if self._console.options.explainer is not None:
+            start(self, task_id, request)
+
+    monkeypatch.setattr(Explanations, "start", explained_by_test)
