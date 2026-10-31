@@ -13,6 +13,7 @@ from localmelo.melo.executor.builtins import (
     TOOL_EXIT_CODE,
     builtin_names,
     builtins_with_env,
+    edit_precheck,
     rooted_builtins,
 )
 from localmelo.melo.executor.executor import ApprovalGate, Executor
@@ -144,6 +145,12 @@ def register_builtins(
             # effect to recover, so a task's capture skips it as a file's.
             process_free=tool_def.name
             in {"file_read", "file_write", "file_edit", "list_files", "git_status"},
+            # A file_edit that cannot apply fails at once and asks no one.
+            precheck=(
+                edit_precheck(workspace_root or None)
+                if tool_def.name == "file_edit"
+                else None
+            ),
         )
 
 
