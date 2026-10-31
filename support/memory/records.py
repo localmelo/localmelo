@@ -1078,6 +1078,9 @@ async def write(
 ) -> list[Written]:
     """Write each candidate as a record of *source* (session, turn, chat, surface).
 
+    A project note also keeps the chat's folder (``source["workspace"]``), as an
+    imported one does, so a task in that folder gets it. No other topic does.
+
     *origin* and *created_at* are what the store keeps as the row's source and
     time; sleep writes as ``sleep``, at the time of the turn it read.
     """
@@ -1090,11 +1093,13 @@ async def write(
         if action == "IGNORE":
             continue
         provenance = {
-            **source,
+            **{k: v for k, v in source.items() if k != "workspace"},
             "topic": cand.topic,
             "quote": cand.quote,
             "embed_model": embed_model if vector is not None else "",
         }
+        if cand.topic == "projects" and source.get("workspace"):
+            provenance["workspace"] = source["workspace"]
         old = next((e for e in active if e.id == target), None)
         if old is not None and (replaces := _replaces(old, source)):
             provenance["replaces"] = replaces

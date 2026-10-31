@@ -998,7 +998,7 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1, "capped": 0}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0, "capped": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -1009,7 +1009,7 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 {"batch_id": "e86b19186930", "written_ids": [1, 2], "skipped": 0, "event": {"type": "memory.import", "data": {"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "written": 2}]}}}
 ```
 
-- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。`home` 是用户的主文件夹，客户端据此把 `path` 写成 `~/…`。
+- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate`、`mechanics`（关于其他工具本身的行）和 `capped`（通过了所有检查，但超出 60 条上限）。笔记文件夹按轮次填满这 60 条：每个文件的第一行（它的 `description`）先于任何文件的第二行。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。`home` 是用户的主文件夹，客户端据此把 `path` 写成 `~/…`。
 - `POST /api/memory/import` 写入所选 `source_ids` 的笔记（一批最多 300 条），返回新笔记的 id；`skipped` 统计这些来源中没有写入的笔记（已经是笔记、超过批次上限，或该来源已写入过）。扫描已不存在（网关保留最近四次）时返回 404 `not_found`；来源 id 未知或记忆已关闭时返回 400 `invalid_request`。
 - `GET /api/memory/import/offer` 在记忆开启、且这台电脑上从未提议过导入笔记时返回 `{"pending": true}`；首次运行的卡片先问它，再扫描。对它发 `DELETE` 记下“暂不”，返回 `{"pending": false}`；记录无法写入时返回 `{"pending": true}`（提议仍然有效）。写入笔记（`POST /api/memory/import`）也算提议已经做过，扫描不算。记录是记忆文件夹里的 `import_offer.json`，控制台、App 和终端共用。
 - `memory.import` 事件（`batch_id`，以及每个来源的 `id`、`harness`、`written`）放在响应的 `event` 里：记忆没有可用来发送它的会话通道。
