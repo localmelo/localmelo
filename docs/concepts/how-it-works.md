@@ -51,10 +51,11 @@ With the default `reflect` policy, an attempt that runs out of steps, or repeats
 | `stop` | The run ends as `gate_stopped`. |
 | `decompose` | The task should be split up. localmelo does not split tasks, so the run ends as `gate_stopped`. |
 
-- The continuation gate lets a run continue only when the reflection says the task is still feasible and names a concrete and new next step; otherwise the run ends as `gate_stopped`.
-- With `--reflection-gate utility`, the behavior before that option, the reflection must also estimate that another attempt's gain outweighs its cost and the risk of repeating itself: a utility score of at least 0.1 ([Evaluations](../project/evaluations.md#reflection-gate) compares the two gates).
-- A developer setting, `--reflection-gate patient`, is `flags` with one exception: a `continue` that is feasible and concrete but not novel still starts the next attempt, once per run.
-- With `--reflection-gate patient` and with `answer_on_stop`, the reflection's `useful_evidence`, `failed_hypotheses` and `recommended_avoids` keep at most 8 items of at most 300 characters each.
+- The continuation gate lets a run continue only when the reflection says the task is still feasible and names a concrete next step; otherwise the run ends as `gate_stopped`.
+- By default the gate is patient: a next step that is not new still continues, once per run. A second one ends the run.
+- With `--reflection-gate flags`, a next step that is not new always ends the run.
+- With `--reflection-gate utility`, the behavior before that option, the reflection must also estimate that another attempt's gain outweighs its cost and the risk of repeating itself: a utility score of at least 0.1 ([Evaluations](../project/evaluations.md#reflection-gate) compares the gates).
+- The reflection's `useful_evidence`, `failed_hypotheses` and `recommended_avoids` keep at most 8 items of at most 300 characters each (not with `--reflection-gate flags -X agent.answer_on_stop=off`).
 
 More about reflections:
 
@@ -63,6 +64,13 @@ More about reflections:
 - When no attempt can follow, the reflection is told so; it can still choose `done`, otherwise the run ends as `budget_exhausted` with its best answer as the result.
 - A reply with no reflection (no JSON object with one of the four actions) is asked for once more; if the second has none either, the next attempt starts without a new reflection, or the run ends as `budget_exhausted` (see [Run results](../reference/run-results.md#statuses)).
 - A reply whose JSON has one common slip, such as a stray `]` after a string value, a backslash before a character that JSON has no escape for, or an array that the next key breaks off, is mended and read without a second request.
+
+### Ending with an answer
+
+- A run that stops (`gate_stopped` or `budget_exhausted`) with no answer is asked once more, without tools, for its final answer from what it gathered; `unknown` is allowed.
+- When the task asks for a closing line, such as `FINAL ANSWER: ...`, and the answer lacks it, one more request asks for that line and adds it after the answer.
+- A task that names no closing line is left as it is, and a request that fails leaves the answer as it was.
+- `-X agent.answer_on_stop=off` turns both requests off.
 
 ## Tools in each step
 

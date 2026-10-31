@@ -542,6 +542,8 @@ async def test_side_chats_keep_todays_agent(tmp_path: Path) -> None:
 def test_front_options_and_thinking_off() -> None:
     options = front_options(make_cfg())
     assert (options.max_steps, options.attempt_policy) == (4, "none")
+    # A turn out of steps is handed off; the chat does not ask for an answer first.
+    assert options.answer_on_stop is False
     assert options.builtins == frozenset({"file_read", "list_files"})
     cfg = _vllm()
     off = thinking_off(cfg)

@@ -149,7 +149,7 @@ async def test_a_completed_run_records_its_episode_and_version_1() -> None:
     options = json.loads(version["options_json"])
     assert options == {
         "attempt_policy": "reflect",
-        "reflection_gate": "flags",
+        "reflection_gate": "patient",
         "max_steps": 30,
         "steps_per_attempt": 10,
         "max_attempts": 5,

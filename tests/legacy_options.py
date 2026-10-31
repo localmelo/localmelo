@@ -23,6 +23,19 @@ LEGACY_CACHE_OPTIONS: dict[str, Any] = {
 }
 
 
+# The gate and the answer request at their values before the usable-answers change:
+# ``reflection_gate`` now defaults to ``"patient"`` and ``answer_on_stop`` to ``True``
+# (the options ``--reflection-gate flags`` and ``-X agent.answer_on_stop=off`` set).
+LEGACY_ANSWER_OPTIONS: dict[str, Any] = {
+    "reflection_gate": "flags",
+    "answer_on_stop": False,
+}
+
+
 def legacy_options(**options: Any) -> AgentOptions:
-    """``AgentOptions(**options)`` with the earlier cache defaults, unless given."""
-    return AgentOptions(**{**LEGACY_CACHE_OPTIONS, **options})
+    """``AgentOptions(**options)`` with the earlier defaults, unless given.
+
+    The earlier cache defaults (:data:`LEGACY_CACHE_OPTIONS`) and the earlier gate
+    and answer request (:data:`LEGACY_ANSWER_OPTIONS`).
+    """
+    return AgentOptions(**{**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS, **options})

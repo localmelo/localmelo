@@ -1078,6 +1078,7 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
         _options(
             reasoning="replay",
             reflection_gate=gate,  # type: ignore[arg-type]
+            answer_on_stop=False,  # the request it adds is not what this counts
             max_steps=5,
             steps_per_attempt=1,
             max_attempts=2,

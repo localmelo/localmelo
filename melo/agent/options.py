@@ -67,10 +67,11 @@ class AgentOptions:
 
     The defaults match the agent's behavior from before these options
     existed, except that every step now offers all registered built-ins
-    and runs only the tools it offered (see ``tool_exposure``), and that
+    and runs only the tools it offered (see ``tool_exposure``), that
     a reflection decides on its own checks whether the next attempt
-    starts (see ``reflection_gate``). An invalid value raises
-    ``ValueError`` naming the field.
+    starts, patiently (see ``reflection_gate``), and that a run without
+    a usable answer is asked for one (see ``answer_on_stop``). An
+    invalid value raises ``ValueError`` naming the field.
 
     - ``max_steps``: cap on planning calls for the whole run.
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most
@@ -90,8 +91,8 @@ class AgentOptions:
       the utility score computed from the reflection's own estimates to
       reach 0.1; a reply without a reflection reads as ``stop``, and a
       reflection over the budget as ``decompose``, unless it chooses
-      ``done``, which ends the run as it is. ``"patient"`` (a developer
-      setting) is ``"flags"``, except that a ``continue`` that is feasible
+      ``done``, which ends the run as it is. ``"patient"``, the default,
+      is ``"flags"``, except that a ``continue`` that is feasible
       and concrete but not novel still starts the next attempt, once per
       run; a second one stops the run as ``"flags"`` does. With it, a
       reflection's ``useful_evidence``, ``failed_hypotheses`` and
@@ -289,7 +290,14 @@ class AgentOptions:
       budget is used), as long as ``max_calls`` allows one more request: the
       status stays and the error is the server's. When no request is left,
       or the request fails, the refused run's ``result`` is the latest text
-      the model wrote in the run, if any. Default false: nothing changes.
+      the model wrote in the run, if any. It also keeps the answer format
+      a task asks for: when the task text names a closing line (such as
+      ``FINAL ANSWER:`` or ``Answer:``) and the run's answer lacks it, one more
+      request, without tools, asks the model to restate its answer in that
+      format from what it already has; the run keeps its status and its
+      answer if the request fails, and ``RunResult.format_fixed`` is true when
+      the restated answer is the result. A task that names no format is left
+      as it is. Default true; false sends neither request.
     - ``max_calls``: a limit on the model requests one run sends (planning,
       reflection and auxiliary requests, a retried request once per
       attempt). Before the request that would pass it, the run stops and ends
@@ -337,7 +345,7 @@ class AgentOptions:
     attempt_policy: AttemptPolicy = "reflect"
     steps_per_attempt: int = STEPS_PER_ATTEMPT
     max_attempts: int = MAX_ATTEMPTS
-    reflection_gate: ReflectionGate = "flags"
+    reflection_gate: ReflectionGate = "patient"
     tool_exposure: ToolExposure = "retrieve"
     builtins: frozenset[str] | None = None
     memory: bool = True
@@ -385,7 +393,7 @@ class AgentOptions:
     tool_images: ToolImages = "auto"
     tool_images_keep: int = 3
     tool_images_retire: int = 2
-    answer_on_stop: bool = False
+    answer_on_stop: bool = True
     max_calls: int | None = None
     task_aids: bool = False
 

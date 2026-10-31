@@ -282,6 +282,16 @@ ANSWER_ON_STOP_NOTE = (
 )
 
 
+# AgentOptions.answer_on_stop: the request for the closing line that the task asks
+# for and the answer lacks. {label} is the start of that line.
+CLOSING_LINE_NOTE = (
+    "The task asks for a closing line that starts with {label} but your answer "
+    "above does not have one. Write that line now, in the format the task asks "
+    "for, from your answer above alone: add no new fact and call no tool. Reply "
+    "with that one line only."
+)
+
+
 def _with_hint(note: str, hint: str) -> str:
     """*note* with *hint*, when there is one, on the line after it."""
     return f"{note}\n{hint}" if hint else note
@@ -1264,6 +1274,26 @@ class Chat:
             self.reflection_message(entry).content for entry in reflections or ()
         )
         parts.append(ANSWER_ON_STOP_NOTE)
+        system = self._fixed_system() if self.fixed_prefix else self.system_prompt
+        messages = [
+            Message(role="system", content=system),
+            Message(role="user", content="\n\n".join(parts)),
+        ]
+        return await self._request(messages, tools=None, kind="reflect", closing=True)
+
+    async def closing_line(self, query: str, answer: str, label: str) -> Message:
+        """One request, no tools, for the closing line that *answer* lacks.
+
+        The request is the system message, then one user message: the original
+        task, *answer* and :data:`CLOSING_LINE_NOTE` for *label*. Like
+        :meth:`final_answer`, the call is of kind ``reflect``, counts as
+        auxiliary, and may use the call that ``max_calls`` keeps for it.
+        """
+        parts = [
+            f"Original task: {query}",
+            f"Your answer so far:\n\n{answer}",
+            CLOSING_LINE_NOTE.format(label=label),
+        ]
         system = self._fixed_system() if self.fixed_prefix else self.system_prompt
         messages = [
             Message(role="system", content=system),
