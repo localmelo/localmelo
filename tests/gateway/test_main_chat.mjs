@@ -240,3 +240,41 @@ test('a chore proposal is drawn as the question, the work it would repeat and th
   buttons.forEach((node) => node.handlers.click());
   assert.deepEqual(acted, [['save'], ['once'], ['cancel']]);
 });
+
+test('a reminder proposal names the time and the words, offers Remind me and Cancel, and a "when" question has no buttons', () => {
+  const made = [];
+  const doc = {createElement: (tag) => {
+    const node = {tag, className: '', textContent: '', dataset: {}, children: [], handlers: {}, attributes: {},
+      setAttribute(key, value) { this.attributes[key] = value; }, append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; }, addEventListener(type, fn) { this.handlers[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  const echo = mainChat.readEcho({id: 2, ts: NOON, data: {echo: 'chore', reminder: true, line: 'Remind you on Fri Oct 30 at 9:00?',
+    title: 'send the report', text: 'Reminder: send the report', work: 'send the report', when: 'once, Fri Oct 30 at 9:00',
+    schedule: {kind: 'once', at: '2026-10-30T09:00'}, typed: 'remind me to send the report on Friday at 9'}});
+  assert.deepEqual(mainChat.echoActions(echo, false), [['Remind me', 'save'], ['Cancel', 'cancel']]);
+  assert.deepEqual(mainChat.echoActions(echo, true), []);
+  const acted = [];
+  const [bubble, line] = mainChat.echoNodes({doc, echo, act: (...args) => acted.push(args.slice(1))});
+  assert.equal(bubble.children[0].textContent, 'remind me to send the report on Friday at 9');
+  const text = (node) => [node.textContent, ...node.children.map(text)].filter(Boolean).join(' | ');
+  // The question carries the absolute time; under it, the person's words, not the wrapped request.
+  assert.equal(text(line), '◷ | Remind you on Fri Oct 30 at 9:00? | send the report | Remind me | Cancel');
+  made.filter((node) => node.tag === 'button').forEach((node) => node.handlers.click());
+  assert.deepEqual(acted, [['save'], ['cancel']]);
+  const ask = mainChat.readEcho({id: 3, ts: NOON, data: {echo: 'ask', ask: 'when', work: 'send the report', line: 'When should I remind you?'}});
+  assert.deepEqual(mainChat.echoActions(ask, false), [], 'it is answered by typing a time');
+  assert.deepEqual(mainChat.echoActions({kind: 'ask', text: 'x'}, false), [['Start as a task', 'start'], ['Not now', 'dismiss']]);
+});
+
+test('the card of a reminder says Reminder: and the persons words, done or not', () => {
+  const base = {id: 1, at: NOON, sourceId: 'a', sourceKind: 'task', title: 'send the report', line: ''};
+  const done = readCard({id: 5, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'send the report', reminder: true}});
+  assert.equal(done.reminder, true);
+  assert.equal(readCard({id: 6, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'x'}}).reminder, undefined);
+  assert.deepEqual(cardWords({...base, state: 'done', reminder: true}), {mark: '✓', heading: 'Reminder: send the report', action: 'Open task'});
+  assert.deepEqual(cardWords({...base, state: 'failed', reminder: true}), {mark: '✕', heading: 'Reminder: send the report', action: 'Open task'});
+  // An approval a reminder's run asks for is still an approval.
+  assert.equal(cardWords({...base, state: 'waiting', reminder: true}).heading, 'Needs your approval: send the report');
+});

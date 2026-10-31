@@ -436,13 +436,13 @@ is in `memory_stats.recall_log` and, with its item text, in
 - `action`: the reflection's choice: `continue`, `stop`, `decompose` or
   `done`. With `reflection_gate="utility"` it is `decompose` for a
   reflection over the size limit that did not choose `done`; with the
-  default `"flags"`, such a reflection is trimmed and keeps its choice.
+  default `"patient"` or `"flags"`, such a reflection is trimmed and keeps its choice.
 - `continue_run`: `true` only when another attempt starts. It is `false`
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
 - `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
   `next_step_is_novel`, as booleans; `null` when the reply was not readable.
-- `gate`: the `reflection_gate` in force, `flags`, `utility` or `patient`.
+- `gate`: the `reflection_gate` in force, `patient` (the default), `flags` or `utility`.
 - `utility`: with `"utility"`, the decision's utility (see the option); else
   `null`.
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
@@ -467,7 +467,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
-  gets no event of its own. With the default `reflection_gate="flags"`, a
+  gets no event of its own. With the default `reflection_gate="patient"` or `"flags"`, a
   first reply that has JSON the decoder rejected, and is not a tool call, puts
   one more line after the retry note: the decoder's error and up to 60
   characters around it, for example `Your reply was not valid JSON (Expecting
@@ -475,7 +475,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   again with one JSON object.` In the compress modes the prompt fit can
   refuse a request before it is sent, which reads as an unreadable reply:
   `requests` is then 0, or 1 when only the retry was refused.
-- `readable`: `false` when, with the default `reflection_gate="flags"`, the
+- `readable`: `false` when, with the default `reflection_gate="patient"` or `"flags"`, the
   second reply still held no reflection. `requests` is then 2; `action`,
   `rationale`, `summary` and `best_effort_result` are `null`; and
   `continue_run` is `true`, unless no attempt could start, in which case the

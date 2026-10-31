@@ -11,6 +11,10 @@ with the origin ``user_rule``; :class:`ChoreStore` only keeps the rows.
 Every change bumps ``revision``; a write that names a revision refuses
 (:class:`ChoreStaleError`) when the row has moved on, so two windows never
 overwrite each other unseen. ``chore_meta`` holds the check-in's switch.
+
+A one-time chore (a reminder, schedule kind ``once``) is done after its run:
+the runner switches it off with no next time, and the row stays in the list
+with its last result. A new time on a done one switches it back on.
 """
 
 from __future__ import annotations
@@ -50,6 +54,14 @@ CHORE_SCHEMA: Final = (
 
 # Chores one file holds: the tick reads every enabled one each 30 s.
 MAX_CHORES: Final = 50
+# A reminder is a one-time chore whose request starts with this; its run tells the
+# person the reminder in a sentence, it never does the task.
+REMINDER_PREFIX: Final = "Reminder: "
+REMINDER_NOTE: Final = (
+    "This reminder is due now. Tell it to the user in one short sentence, in the "
+    "language it is written in. Do not do the task yourself."
+)
+REMINDER_REASON: Final = "Reminder"
 _COLUMNS: Final = (
     "chore_id, front_id, title, request, schedule, level, enabled, revision, "
     "next_run, last_run, last_task_id, reported_task_id, created_at, updated_at"
@@ -88,6 +100,10 @@ class Chore:
     reported_task_id: str
     created_at: float
     updated_at: float
+
+    @property
+    def is_reminder(self) -> bool:
+        return self.schedule.kind == "once" and self.request.startswith(REMINDER_PREFIX)
 
     @classmethod
     def from_row(cls, row: Any) -> Chore:
@@ -190,6 +206,8 @@ class ChoreStore:
             chore = await self._get(conn, chore_id)
             if chore.revision != revision:
                 raise ChoreStaleError("This chore changed. Reload it and try again.")
+            if enabled is None and schedule is not None and schedule.kind == "once":
+                enabled = True  # a new time arms a done reminder again
             new = dataclasses.replace(
                 chore,
                 title=(
@@ -243,17 +261,21 @@ class ChoreStore:
         next_run: float | None,
         task_id: str = "",
         ran_at: float | None = None,
+        enabled: bool | None = None,
     ) -> bool:
         """Move *chore* to its next run; with *task_id*, record the run that just started.
 
-        ``False`` when the row changed or went meanwhile: the caller's view was stale.
+        ``enabled=False`` ends a one-time chore. ``False`` is returned when the
+        row changed or went meanwhile: the caller's view was stale.
         """
+        switch = None if enabled is None else int(enabled)
         async with self._store.component_transaction("chore_advance") as conn:
             cursor = await conn.execute(
                 "UPDATE chores SET next_run = ?, last_run = COALESCE(?, last_run), "
                 "last_task_id = CASE WHEN ? = '' THEN last_task_id ELSE ? END, "
+                "enabled = COALESCE(?, enabled), "
                 "revision = revision + 1, updated_at = ? WHERE chore_id = ? AND revision = ?",
-                (next_run, ran_at, task_id, task_id, self._clock(), chore.chore_id, chore.revision),
+                (next_run, ran_at, task_id, task_id, switch, self._clock(), chore.chore_id, chore.revision),
             )  # fmt: skip
             return cursor.rowcount == 1
 
@@ -297,6 +319,9 @@ class ChoreStore:
 __all__ = [
     "CHORE_SCHEMA",
     "MAX_CHORES",
+    "REMINDER_NOTE",
+    "REMINDER_PREFIX",
+    "REMINDER_REASON",
     "Chore",
     "ChoreError",
     "ChoreLimitError",

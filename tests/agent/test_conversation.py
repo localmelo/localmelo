@@ -50,6 +50,7 @@ from localmelo.melo.schema import (
     clip_session_text,
     split_thinking,
 )
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,8 @@ def _agent(
     """An agent with the custom tool, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
     options.setdefault("tool_exposure", "all")
+    for name, value in LEGACY_ANSWER_OPTIONS.items():
+        options.setdefault(name, value)
     agent = Agent(llm=llm, options=AgentOptions(**options), tool_providers=providers)
     agent.hippo.register_tool(ECHO)
     agent.executor.register("echo", (tools or Tools()).echo)

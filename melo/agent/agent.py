@@ -26,6 +26,11 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
+from localmelo.melo.agent._answer_format import (
+    closing_line_of,
+    has_closing_line,
+    requested_closing_label,
+)
 from localmelo.melo.agent._brief_aids import (
     DROPPED_KEPT,
     REFLECTION_ADDENDUM,
@@ -1202,6 +1207,8 @@ class _RunState:
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
     answered_on_stop: bool = False
+    # answer_on_stop: whether result got the closing line the task asks for.
+    format_fixed: bool = False
     # How the run ended on its own limit or on a refusal: "calls" (max_calls) or
     # "refused" (a request refused for a budget or rate limit, with answer_on_stop).
     early_stop: str = ""
@@ -5825,6 +5832,7 @@ class Agent:
                     await self._run_attempts(task, query, run)
                     if self.options.answer_on_stop:
                         await self._answer_on_stop(task, run)
+                        await self._restore_closing_line(task, run)
                     self._keep_best_effort(run)
             except _ToolSetupError as exc:
                 # Reported in the result, not a crash: no traceback.
@@ -6583,6 +6591,7 @@ class Agent:
             ),
             confinement=self._confinement_record(run),
             answered_on_stop=run.answered_on_stop,
+            format_fixed=run.format_fixed,
         )
 
     def _confinement_record(self, run: _RunState) -> dict[str, Any] | None:
@@ -6752,6 +6761,45 @@ class Agent:
         run.result = answer
         run.answered_on_stop = True
         run.answer_thinking = reply.thinking
+
+    async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
+        """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
+
+        For a run that ended ``completed``, ``gate_stopped`` or
+        ``budget_exhausted`` with an answer. The line is detected in the task's
+        own text (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
+        a task that names none is left as it is. One request, without tools
+        (:meth:`Chat.closing_line`), gives the line from the answer alone, and
+        it is added after the answer, which stays as it was.
+        ``RunResult.format_fixed`` is then true. A request that fails or that
+        ``max_calls`` leaves no call for, or a reply with no such line, leaves
+        the run as it was.
+        """
+        if run.status not in ("completed", "gate_stopped", "budget_exhausted"):
+            return
+        _, answer = split_thinking(run.result)
+        label = requested_closing_label(run.task_text) if answer else None
+        if label is None or has_closing_line(answer, label):
+            return
+        try:
+            reply = await self.chat.closing_line(task.query, answer, label)
+        except CallBudgetError as exc:
+            logger.info(
+                "No call left to restore the closing line of %s: %s", task.task_id, exc
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "Could not ask for the closing line of task %s: %s",
+                task.task_id,
+                _exception_text(exc),
+            )
+            return
+        line = closing_line_of(_split_inline_reasoning(reply).content, label)
+        if line is None:
+            return
+        run.result = f"{run.result.rstrip()}\n{line}"
+        run.format_fixed = True
 
     async def _run_reflective_attempts(
         self, task: TaskRecord, query: str, run: _RunState

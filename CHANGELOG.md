@@ -25,6 +25,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   itself", not another copy of its source; a step's names for the "did you ask
   for it" check come from its commands and code, not its other strings; and
   the browser's site question respects a stopped turn. [#NN]
+- Reminders that run once at a time. Say `remind me to send the report on
+  Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` in the main chat
+  and it shows the date and time it understood (`Remind you on Fri Oct 30 at
+  9:00?`) with **Remind me** and **Cancel**; with no time it asks `When should
+  I remind you?` and a reply of just a time (`Friday at 9`) answers it. At the
+  time a card says `Reminder: <your words>`, also when the run did not finish.
+  A reminder missed while the computer slept runs when melo starts again and
+  says how late it ran. The Scheduled tab lists it, then shows when it ran
+  (**Edit time** takes a date and time). In the API a chore's schedule can be
+  `{"kind": "once", "at": "2026-10-30T09:00"}`, at most a year ahead, and a
+  chore body gains `late_min`. [#354]
 - The web console and the macOS app speak Simplified Chinese. They follow the
   browser's or the Mac's languages; **Settings → Appearance → Language**
   (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`
@@ -34,6 +45,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   stays English. [#350]
 
 ### Changed
+
+- A run ends with a usable answer more often. The patient reflection gate
+  (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
+  defaults: a next step that is not new still continues once per run, and a
+  run that stops with no answer is asked once for it. On two sets of 24
+  questions, runs that gave an answer rose from 7 to 17 on the first set and
+  from 19 to 20 on the second. `--reflection-gate flags -X
+  agent.answer_on_stop=off` gives the earlier behavior. A routine learned
+  under the earlier gate learns its steps again once. The interactive UI, the
+  console, the app and the gateway always use the new defaults, except the
+  console's main chat, which still hands a turn that runs out of steps to a
+  task ([#353]).
+
+- When a task asks for a closing line, such as `FINAL ANSWER: ...`, and the
+  answer lacks it, one more request, without tools, asks for that line from
+  the answer alone and it is added after the answer. The line is found in the
+  task's own text only, a task that names none is left as it is, and a request
+  that fails leaves the answer as it was. The JSON record gains `"format_fixed":
+  true` for such a run (absent otherwise). `-X agent.answer_on_stop=off` turns
+  it off together with the answer request ([#353]).
 
 - Auto mode, part 1: the terminal's `/approvals auto` now means auto mode.
   Nothing asks: routine steps run, and a step that installs, downloads,
@@ -2890,3 +2921,5 @@ earlier milestones.
 [#348]: https://github.com/localmelo/localmelo/pull/348
 [#350]: https://github.com/localmelo/localmelo/pull/350
 [#352]: https://github.com/localmelo/localmelo/pull/352
+[#353]: https://github.com/localmelo/localmelo/pull/353
+[#354]: https://github.com/localmelo/localmelo/pull/354

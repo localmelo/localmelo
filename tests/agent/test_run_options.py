@@ -417,7 +417,11 @@ class TestNoReflectionPolicy:
         llm = FakeLLM([_echo_call(str(i)) for i in range(6)])
         # steps_per_attempt and max_attempts only apply to "reflect".
         options = AgentOptions(
-            attempt_policy="none", max_steps=4, steps_per_attempt=1, max_attempts=1
+            attempt_policy="none",
+            max_steps=4,
+            steps_per_attempt=1,
+            max_attempts=1,
+            answer_on_stop=False,
         )
         agent = _echo_agent(llm, options)
         assert await agent.run("echo q") == "[budget_exhausted] Max steps reached"

@@ -67,6 +67,8 @@ export function readCard(row) {
     ...(String(data.said?.key ?? "").startsWith("cards.answer.") ? {answer: data.said.key.slice(13)} : {}),
     // A waiting card and the answer that follows it share this.
     ...(data.request_id ? {requestId: String(data.request_id)} : {}),
+    // The card of a reminder's run: its heading is "Reminder: <the person's words>".
+    ...(data.reminder === true ? {reminder: true} : {}),
   };
 }
 
@@ -159,6 +161,7 @@ export function cardWords(card) {
     const denied = card.answer ? card.answer === "denied" : card.line.startsWith("Denied");
     return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
+  if (card.reminder) return {mark: card.state === "failed" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
   return {mark: "✓", heading: t("mainChat.card.done", {title}), action: open};
 }
@@ -228,6 +231,8 @@ export function answered(echoes) {
 export function echoActions(echo, done) {
   if (done || !echo.task_id && !["ask", "chore", "chore_saved"].includes(echo.kind)) return [];
   const undo = [t("mainChat.echo.undo"), "undo"];
+  // A reminder runs once, at its time: there is no "just once" for it.
+  if (echo.kind === "chore" && echo.reminder) return [[t("mainChat.echo.remind"), "save"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore_saved") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {
@@ -239,7 +244,8 @@ export function echoActions(echo, done) {
     const word = ["stop", "pause", "resume", "first"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
-  if (echo.kind === "ask") return [[t("mainChat.echo.start"), "start"], [t("mainChat.echo.notNow"), "dismiss"]];
+  // "When should I remind you?" is answered by typing a time.
+  if (echo.kind === "ask") return echo.ask === "when" ? [] : [[t("mainChat.echo.start"), "start"], [t("mainChat.echo.notNow"), "dismiss"]];
   return [];
 }
 
@@ -281,8 +287,8 @@ export function echoNodes({doc, echo, done = false, act}) {
     chip.append(el("span", "sr-only", `, ${levelMeaning(level)}`));
     body.append(chip);
   }
-  // A chore's proposal names the work it would repeat, under the question.
-  if (echo.kind === "chore" && echo.text) body.append(el("p", "echo-sub", echo.text));
+  // A chore's proposal names the work it would repeat (a reminder, its words), under the question.
+  if (echo.kind === "chore" && (echo.work || echo.text)) body.append(el("p", "echo-sub", echo.work || echo.text));
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done)) {
     const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);

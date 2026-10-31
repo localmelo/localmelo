@@ -57,10 +57,11 @@ an attempt that runs out of steps, or repeats itself ─► reflection ─► do
 | `stop` | 运行以 `gate_stopped` 结束。 |
 | `decompose` | 任务应当拆分。localmelo 不拆分任务，因此运行以 `gate_stopped` 结束。 |
 
-- 只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续；否则运行以 `gate_stopped` 结束。
-- 使用 `--reflection-gate utility`（该选项出现前的行为）时，反思还必须估计再次尝试的收益超过成本和重复风险：效用分数至少为 0.1（[评测](../project/evaluations.md#reflection-gate)比较了两种判定）。
-- 开发者设置 `--reflection-gate patient` 与 `flags` 只有一处不同：选择 `continue`、可行且具体但不新的下一步，仍会开始下一次尝试，每次运行一次。
-- 使用 `--reflection-gate patient` 以及使用 `answer_on_stop` 时，反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符。
+- 只有当反思认为任务仍可行，并提出具体的下一步时，继续判定才允许运行继续；否则运行以 `gate_stopped` 结束。
+- 默认的判定很有耐心：不新的下一步仍会继续，每次运行一次；第二次则结束运行。
+- 使用 `--reflection-gate flags` 时，不新的下一步总会结束运行。
+- 使用 `--reflection-gate utility`（该选项出现前的行为）时，反思还必须估计再次尝试的收益超过成本和重复风险：效用分数至少为 0.1（[评测](../project/evaluations.md#reflection-gate)比较了这些判定）。
+- 反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符（使用 `--reflection-gate flags -X agent.answer_on_stop=off` 时没有这个限制）。
 
 关于反思的更多说明：
 
@@ -69,6 +70,15 @@ an attempt that runs out of steps, or repeats itself ─► reflection ─► do
 - 如果无法开始下一次尝试，反思会收到这一信息；它仍可选择 `done`，否则运行以 `budget_exhausted` 结束，并以反思给出的最佳答案作为结果。
 - 如果回复没有反思（没有包含四种行动之一的 JSON 对象），localmelo 会再请求一次；如果第二次回复仍没有，则不带新反思开始下一次尝试，或以 `budget_exhausted` 结束（见[运行结果](../reference/run-results.md#statuses)）。
 - 如果回复的 JSON 只有一处常见小错误，例如字符串值后多出一个 `]`、JSON 没有对应转义的字符前多出的反斜杠，或被下一个键打断而没有闭合的数组，localmelo 会先修补再读取，无需第二次请求。
+
+<a id="ending-with-an-answer"></a>
+
+### 以答案收尾
+
+- 以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的内容索要最终答案；允许回答 `unknown`。
+- 任务要求有收尾行（例如 `FINAL ANSWER: ...`）而答案里没有时，会再发出一次请求索要这一行，并把它加在答案之后。
+- 没有指明收尾行的任务保持原样；请求失败时，答案保持原样。
+- `-X agent.answer_on_stop=off` 会关闭这两种请求。
 
 <a id="tools-in-each-step"></a>
 

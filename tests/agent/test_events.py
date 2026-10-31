@@ -45,6 +45,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -217,6 +218,8 @@ def _agent(
     """An agent with the custom tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
     options.setdefault("tool_exposure", "all")
+    for name, value in LEGACY_ANSWER_OPTIONS.items():
+        options.setdefault(name, value)
     agent = Agent(
         llm=llm,
         embedding=embedding,

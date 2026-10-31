@@ -162,7 +162,9 @@ def test_a_run_that_stops_without_answer_on_stop_sends_max_calls_requests(
     serve: Any, tmp_path: Path
 ) -> None:
     server = serve({})
-    code, record, _ = _run(server, tmp_path, "agent.max_calls=3")
+    code, record, _ = _run(
+        server, tmp_path, "agent.max_calls=3", "agent.answer_on_stop=off"
+    )
     assert len(server.bodies) == 3
     assert (code, record["status"], record["result"]) == (2, "budget_exhausted", "")
     assert "answered_on_stop" not in record
@@ -185,7 +187,7 @@ def test_a_refusal_ends_as_before_when_answer_on_stop_is_off(
     serve: Any, tmp_path: Path
 ) -> None:
     server = serve({3: (400, BUDGET_BODY), 4: _answer("never asked")})
-    code, record, _ = _run(server, tmp_path)
+    code, record, _ = _run(server, tmp_path, "agent.answer_on_stop=off")
     assert len(server.bodies) == 3
     assert (code, record["status"], record["result"]) == (2, "provider_error", "")
     assert "answered_on_stop" not in record and "max_calls" not in record["config"]

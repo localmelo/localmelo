@@ -11,7 +11,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, RunResult, ToolDef
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, LEGACY_CACHE_OPTIONS
 
 
 class FakeLLM(BaseLLMProvider):
@@ -109,9 +109,9 @@ async def test_legacy_usage_keeps_its_three_keys_and_config_its_eleven() -> None
             "reasoning_tokens": 1,
         },
     )
-    result = await Agent(llm=llm, options=_options(**LEGACY_CACHE_OPTIONS)).run_task(
-        "q"
-    )
+    result = await Agent(
+        llm=llm, options=_options(**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS)
+    ).run_task("q")
     assert result.usage == {
         "prompt_tokens": 10,
         "completion_tokens": 2,

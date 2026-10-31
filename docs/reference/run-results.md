@@ -43,8 +43,8 @@ Details:
   (see [Events](events.md#reflection)). With `--reflection-gate utility`, an unreadable
   reflection stops the run too, and so does one over the size limit unless
   it chose `done`.
-- **An answer when a run stops.** With the developer setting `[agent]
-  answer_on_stop = true` (`-X agent.answer_on_stop=on`), a run that ends
+- **An answer when a run stops.** By default (the developer setting `[agent]
+  answer_on_stop`, `true`; `-X agent.answer_on_stop=off` turns it off), a run that ends
   `gate_stopped` or `budget_exhausted` with an empty `result` makes one more
   request, without tools, that asks for the final answer from the working
   window and the latest reflection, in the format the task asks for, with
@@ -56,6 +56,16 @@ Details:
   error that says a budget is used): the status and `error` stay the server's, and
   `result` is the answer, or, when that request fails, the latest text the model
   wrote in the run.
+- **A closing line the task asks for.** With the same setting, when the task text
+  names a line the answer must carry (for example "End your reply with one line:
+  FINAL ANSWER: <answer>", a last line that must start with `Answer:`, or a closing
+  line `最终答案：`) and the run's `result` has no line that starts with it, one more
+  request, without tools, asks for that line from the answer alone. The line is added
+  after the answer, which stays as it was, and the record gains `"format_fixed":
+  true`. The request counts in `n_aux`. It runs for a run that ends `completed`,
+  `gate_stopped` or `budget_exhausted` with a `result`. A task that names no such
+  line, an answer that has it, a request that fails, or a reply without the line
+  leaves the run as it was.
 - **A call budget.** The developer setting `[agent] max_calls = N` (`-X
   agent.max_calls=N`, a whole number of 2 or more) makes a direct run count its
   model requests (planning, reflection and the rest, each attempt of a retried
@@ -172,6 +182,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 | `confinement` | Only in a run that confines its writes (a `--brief` worker or a saved task, see [Writes stay in the workspace](cli.md#confined-writes)): `{"writes": "confined", "refused_writes": N}`, N being the writes outside the workspace this run's `shell_exec` and `python_exec` reported refused, or `{"writes": "not_confined", "reason": "..."}` off macOS. Absent otherwise. |
 | `answered_on_stop` | Only `true`, and only in a run whose `result` came from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
+| `format_fixed` | Only `true`, and only in a run whose `result` got the closing line the task asks for, from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
 
 `config` holds:
 
@@ -181,7 +192,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
-| `answer_on_stop` | `true` when the run set it; absent otherwise. |
+| `answer_on_stop` | `true` when the run had it on (the default); absent with `-X agent.answer_on_stop=off`. |
 | `max_calls` | The run's call budget when it set one; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |

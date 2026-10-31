@@ -79,9 +79,14 @@ pixels unless the server says the model reads images, as
 ``tests/agent/test_tool_images.py`` and ``tests/cli/test_tool_images_e2e.py`` check.
 The developer setting ``[agent] answer_on_stop`` (no flag; ``-X agent.answer_on_stop=on``)
 adds a check of its config value and its application to the options in
-``_build_direct_mode_agent``, which has a new hash; off, the default, leaves the options
+``_build_direct_mode_agent``, which has a new hash; off, the then default, leaves the options
 and so the requests, stdout and exit codes as they were, as
-``tests/agent/test_gate_patient.py`` checks. The developer setting ``[agent] max_calls``
+``tests/agent/test_gate_patient.py`` checks. The setting now defaults to on, as the
+reflection gate now defaults to ``patient`` (``AgentOptions``): ``_build_direct_mode_agent``
+takes the config value whichever way it points (a new hash again, and the options object
+is the same one while the value agrees), ``_direct_options`` is unchanged, and
+``--reflection-gate flags -X agent.answer_on_stop=off`` send the earlier requests, as
+``tests/agent/test_legacy_freeze.py`` and ``tests/cli/test_answer_on_stop_config.py`` check. The developer setting ``[agent] max_calls``
 (no flag; ``-X agent.max_calls=30``) adds a check of its config value and its application
 to the options in ``_build_direct_mode_agent``, which has a new hash again; unset, the
 default, leaves the options and so the requests, stdout and exit codes as they were, as
@@ -110,7 +115,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "6b195926ace8e0cb774ea7b54a1daa23bfe98dacb9c43f8cc8cf0c783fb217ac",
+    "_build_direct_mode_agent": "e63a11d7f6528c1e3c0f95900a525ab8f85627d27baff707b13579d58b2a2f67",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
