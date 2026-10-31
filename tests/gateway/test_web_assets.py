@@ -315,7 +315,10 @@ async def test_chat_url_placeholder_matches_the_omlx_hint(
     settings = await client.get("/assets/settings.mjs")
     assert "settings.${set}.${name}" in settings.text
     words = (await client.get("/assets/i18n/en.json")).json()
-    assert "oMLX supports the OpenAI-compatible adapter." in words["settings.developer.urlHint"]
+    assert (
+        "oMLX supports the OpenAI-compatible adapter."
+        in words["settings.developer.urlHint"]
+    )
 
 
 @pytest.mark.parametrize(
