@@ -24,7 +24,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chores and tasks you did not start always ask, and Auto's Allow once is
   never remembered. A step Auto blocked in a task shows in its chat with
   **Allow once**. The task's page and the chat's Details list what ran this
-  way, with Revoke. Part of #369. [#NN]
+  way, with Revoke. Part of #369. [#385]
 - A short, read-only setup preview when terminal first run finds no model
   server: the recommendation, download/cache amounts and free space.
   `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
@@ -3241,3 +3241,4 @@ earlier milestones.
 [#382]: https://github.com/localmelo/localmelo/pull/382
 [#383]: https://github.com/localmelo/localmelo/pull/383
 [#384]: https://github.com/localmelo/localmelo/pull/384
+[#385]: https://github.com/localmelo/localmelo/pull/385
