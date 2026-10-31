@@ -52,6 +52,7 @@ Route = Literal[
     "control",
     "follow",
     "continue",
+    "choose",
     "chore",
     "reminder",
     "work",
@@ -119,6 +120,7 @@ class Routed:
     task: TaskRef | None = None
     title: str = ""  # a short title for work code starts as a task
     matches: tuple[TaskRef, ...] = ()  # the tasks "continue the … task" names
+    pick: str = ""  # "choose": the one-tap suggestion to offer for each match
 
 
 def norm(text: str) -> str:
@@ -198,28 +200,30 @@ def _title_tokens(title: str) -> set[str]:
     return words | {run[i : i + 2] for run in runs for i in range(len(run) - 1)}
 
 
-def named_task(
+def named_tasks(
     typed: str,
     phrase: str,
     tasks: Sequence[TaskRef],
     *,
     strict: bool = True,
     finished: bool = False,
-) -> TaskRef | None:
-    """The one open task *typed* names, besides its control *phrase*, or None.
+) -> list[TaskRef]:
+    """Every open task *typed* names, besides its control *phrase*: one when it is clear, more when it is not.
 
-    Strict (code's own route): what is left is the task's id, its title, or
-    a part of exactly one title (3 characters at least, 2 for Chinese).
-    Loose (a tool's principal check): also a word of the title, of 4
-    letters at least, written in *typed*. With *finished*, a finished task
-    can be the one named too.
+    A task whose id is written is the one. Strict (code's own route): what
+    is left names the tasks whose title holds it (3 characters at least, 2
+    for Chinese; the exact ones first). Loose (a tool's principal check):
+    when that does not single one out, the tasks with a word of the title,
+    of 4 letters at least, written in *typed* do. With *finished*, a
+    finished task can be named too.
     """
     text = norm(typed)
     rest = _rest(text, phrase)
     open_tasks = [task for task in tasks if finished or task.state not in FINISHED]
     for task in open_tasks:
         if task.task_id and re.search(rf"\b{re.escape(task.task_id)}\b", text):
-            return task
+            return [task]
+    held: list[TaskRef] = []
     if rest and len(rest) >= (2 if _has_cjk(rest) else 3):
         # A title is read as the rest is: without filler ("Fix the e2e check"
         # is named by "fix e2e check").
@@ -234,11 +238,12 @@ def named_task(
             if any(rest in title for title in titles[task.task_id])
         ]
         if len(found) == 1:
-            return found[0]
+            return found
+        held = found
     if strict:
-        return None
+        return held
     words = set(re.findall(r"\w+", text))
-    found = [
+    loose = [
         task
         for task in open_tasks
         if any(
@@ -246,6 +251,23 @@ def named_task(
             for token in _title_tokens(task.title)
         )
     ]
+    return loose or held
+
+
+def named_task(
+    typed: str,
+    phrase: str,
+    tasks: Sequence[TaskRef],
+    *,
+    strict: bool = True,
+    finished: bool = False,
+) -> TaskRef | None:
+    """The one open task *typed* names, besides its control *phrase*, or None.
+
+    See :func:`named_tasks`: ``None`` when it names none, and when it names
+    more than one.
+    """
+    found = named_tasks(typed, phrase, tasks, strict=strict, finished=finished)
     return found[0] if len(found) == 1 else None
 
 
@@ -549,11 +571,63 @@ _TEST_CUE: Final = re.compile(r"测试|运行测试|tests?\b|pytest", re.IGNOREC
 _COMMIT_CUE: Final = re.compile(r"提交|push|commits?\b", re.IGNORECASE)
 # The ask negated is not an ask: "今天不用改，跑测试再提交".
 _PIPELINE_NO: Final = re.compile(
-    r"(?:不用|不需要|无需|不必|不要|先不|暂时不|别)\s*(?:再|去|用)?\s*(?:改|修|测|提交|动手)"
+    r"(?:不用|不需要|无需|不必|不要|先不|暂时不|别|勿|禁止|不许|不得|不准|请勿|切勿)\s*(?:再|去|用)?\s*(?:改|修|测|提交|动手)"
     r"|\b(?:don['’]t|do\s+not|no\s+need\s+to|never|not\s+worth)\s+(?:even\s+)?(?:re-?)?"
     r"(?:fix|change|edit|update|refactor|rename|replace|remove|delete|add|test|commit|push)\w*",
     re.IGNORECASE,
 )
+
+
+# What is said in quotation marks is mentioned, not asked: "the log says “删除 a.md”".
+# An ASCII single quote opens a span only after a non-letter and closes before one, so the
+# apostrophes of "don't", "it's" and "users'" open nothing.
+_QUOTED: Final = re.compile(
+    r'"[^"]*"|“[^”]*”|`[^`]*`|「[^」]*」|『[^』]*』|«[^»]*»|‘[^’]*’(?=\W|$)'
+    r"|(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
+)
+# A prohibition before a Chinese change verb in the same clause: do not, stop, no, never.
+_NO_ZH: Final = re.compile(
+    r"(?<![分区特告辨差])别|不要|不用|不必|不需要|无需|勿|禁止|不许|不得|不准|不能|不可|不想|"
+    r"先不|暂不|暂时不|不再|没有|没"
+)
+_CLAUSE_ZH: Final = re.compile(r"[，,、；;：:]")
+
+
+def _forbidden_zh(first: str, at: int) -> bool:
+    """Whether a prohibition governs the change verb at *at* in *first*.
+
+    One in its own clause does. So does one earlier in an enumeration it
+    belongs to: after 、 whatever follows, and after a comma a clause that
+    opens with a verb when the clause before it holds one
+    ("不要删除 a.md、修改 b.md", "不要删除 a.md，修改 b.md"); a clause with words of
+    its own ("，请修复 b.md") or a ；/： ends it.
+    """
+    marks = [(found.start(), found.group()) for found in _CLAUSE_ZH.finditer(first)]
+    end = at
+    while True:
+        before = [mark for mark in marks if mark[0] < end]
+        start = before[-1][0] + 1 if before else 0
+        clause = first[start:end]
+        if _NO_ZH.search(clause):
+            return True
+        if not before:
+            return False
+        where, mark = before[-1]
+        earlier = [m for m in marks if m[0] < where]
+        previous = first[(earlier[-1][0] + 1 if earlier else 0) : where]
+        if mark == "、" or (
+            mark in "，," and not clause.strip() and _CHANGE_ZH.search(previous)
+        ):
+            end = where
+            continue
+        return False
+
+
+def _asked_zh(first: str) -> bool:
+    """Whether a change verb of *first* (one Chinese sentence) is asked for: one no prohibition governs."""
+    return any(
+        not _forbidden_zh(first, verb.start()) for verb in _CHANGE_ZH.finditer(first)
+    )
 
 
 def names_files(text: str) -> bool:
@@ -592,15 +666,18 @@ def work_request(typed: str) -> bool:
     text = norm(typed)
     if not text or is_question(typed):
         return False
+    # The verb counts only outside quotation marks and when nothing forbids it:
+    # "不要删除 a.md，只解释它", "never delete a.md", "the log says “删除 a.md”".
+    bare = _QUOTED.sub(" ", text).strip()
     if names_files(text):
-        if _has_cjk(text[:24]):
-            lead = text[_LEAD_ZH.match(text).end() :]  # type: ignore[union-attr]
+        if _has_cjk(bare[:24]):
+            lead = bare[_LEAD_ZH.match(bare).end() :]  # type: ignore[union-attr]
             first = re.split(r"[。！？；\n]", lead, maxsplit=1)[0]
-            return bool(_CHANGE_ZH.search(first))
+            return _asked_zh(first)
         return bool(
-            _LEAD_EN.match(text) or _LEAD_EN.match(_LOCATION.sub("", text, count=1))
+            _LEAD_EN.match(bare) or _LEAD_EN.match(_LOCATION.sub("", bare, count=1))
         )
-    return _pipeline(text)
+    return _pipeline(bare)
 
 
 _TITLE_LEAD: Final = re.compile(
@@ -697,44 +774,76 @@ SHORT_CHARS: Final = 120
 CONTROL_CHARS: Final = 80
 
 
+def _pool(
+    typed: str, phrase: str, tasks: Sequence[TaskRef], fallback: Sequence[TaskRef]
+) -> list[TaskRef]:
+    """*tasks*, and *fallback* too only when the words name none of *tasks*.
+
+    A chat's own tasks come first: words that name one of them, clearly or
+    not, finished or not, never reach another chat's task.
+    """
+    if fallback and not named_tasks(typed, phrase, tasks, finished=True):
+        return [*tasks, *fallback]
+    return list(tasks)
+
+
 def route(
-    typed: str, tasks: Sequence[TaskRef] = (), *, as_task: bool = False
+    typed: str,
+    tasks: Sequence[TaskRef] = (),
+    *,
+    as_task: bool = False,
+    fallback: Sequence[TaskRef] = (),
 ) -> Routed:
-    """What the main chat does with *typed*, by code's rules (design 2.4)."""
+    """What a chat does with *typed*, by code's rules (design 2.4).
+
+    *tasks* are the chat's own tasks; *fallback* are the other chats' ones,
+    which the words reach only when they name none of the chat's own. Words
+    that name more than one task are a ``choose`` route: the chat asks which.
+    """
     stripped = typed.strip()
     command = re.match(r"^/task(?:\s+|$)", stripped)
     if as_task or command:
         work = stripped[command.end() :] if command else stripped
         return Routed("delegate", text=work.strip())
     text = norm(stripped)
+    everyone = [*tasks, *fallback]
     if len(text) <= CONTROL_CHARS:
         found = control_action(stripped)
         if found is not None:
-            task = named_task(stripped, found[1], tasks)
-            if task is not None:
-                return Routed("control", action=found[0], task=task)
+            pool = _pool(stripped, found[1], tasks, fallback)
+            named = named_tasks(stripped, found[1], pool)
+            if len(named) == 1:
+                return Routed("control", action=found[0], task=named[0])
+            if named:
+                return Routed("choose", pick=found[0], matches=tuple(named))
     if _REPEATS.search(text):
         return Routed("chore")
     if parse_reminder(stripped, _ANY_TIME) is not None:
         return Routed("reminder")
     name = continue_name(stripped)
     if name and not is_question(stripped):
-        found_tasks = tuple(task for task in tasks if title_matches(name, task))
+        mine = tuple(task for task in tasks if title_matches(name, task))
+        found_tasks = mine or tuple(
+            task for task in fallback if title_matches(name, task)
+        )
         if found_tasks:
             one = found_tasks[0] if len(found_tasks) == 1 else None
             return Routed("continue", task=one, matches=found_tasks)
     cue = follow_cue(stripped)
     if len(text) <= CONTROL_CHARS and cue is not None and not is_question(stripped):
-        task = named_task(stripped, cue, tasks, finished=True)
-        if task is not None:
-            return Routed("follow", task=task)
+        pool = _pool(stripped, cue, tasks, fallback)
+        named = named_tasks(stripped, cue, pool, finished=True)
+        if len(named) == 1:
+            return Routed("follow", task=named[0])
+        if named:
+            return Routed("choose", pick="send", matches=tuple(named))
     if _GREETING.match(text) or brief_question(stripped):
         return Routed("answer")
     if work_request(stripped) and not (
         cue is not None
         and any(
             named_task(stripped, "", [task], strict=False, finished=True)
-            for task in tasks
+            for task in everyone
         )
     ):
         # A follow-up word with a task's name may continue that task: the
@@ -771,6 +880,7 @@ __all__ = [
     "level_number",
     "level_word",
     "named_task",
+    "named_tasks",
     "names_files",
     "reply_language",
     "route",

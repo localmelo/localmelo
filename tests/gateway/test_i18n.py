@@ -119,7 +119,7 @@ PY_ENGLISH = {
     "front_id must name a console chat",
     "Choose what to change.",
     "Worker filters require kind=worker or kind=terminal.",
-    "as_task: tasks start from the main chat",
+    "as_task: tasks start from a chat",
     "reason: only a denial takes a reason",
 }
 # Swift: the app's log lines, the gateway's own command line, and names.

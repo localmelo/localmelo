@@ -166,6 +166,11 @@ function mainActive() {
   return !!S.activeId && (S.main?.id === S.activeId || isMain(S.view?.session));
 }
 
+/** Whether the open chat shows its cards and echoes: the main chat always, a side chat once it has started a task. */
+function showsItems(view = S.view) {
+  return mainActive() || (view?.cards?.length ?? 0) + (view?.echoes?.length ?? 0) > 0;
+}
+
 /** A chat not sent yet: under a main chat, it is a side chat. */
 function newTitle() {
   return t(S.main ? "chat.newSide" : "chat.new");
@@ -510,8 +515,8 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  // Run as a task: the main chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !mainActive() || !!turn;
+  // Run as a task: a chat starts the message as a task, without asking the model.
+  $("task-btn").hidden = !S.activeId || !!turn;
   $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
@@ -558,7 +563,7 @@ function renderSessions() {
     workerMode,
     developerMode,
     unread?.id ?? 0,
-    main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.updated_at, main.last_card?.id],
+    main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.waiting_in_side || 0, main.updated_at, main.last_card?.id],
     new Date().toDateString(),
     S.sessions.map((session) => [
       session.id,
@@ -568,6 +573,7 @@ function renderSessions() {
       session.busy,
       session.held || "",
       session.pending_approvals || 0,
+      session.waiting_tasks || 0,
       session.updated_at,
     ]),
   ]);
@@ -631,16 +637,20 @@ function mainRow(main, unread) {
   info.title = t("chat.main");
   if (active) info.setAttribute("aria-current", "page");
   const asking = (main.pending_approvals || 0) > 0;
+  // Tasks of side chats that wait for the person: those chats' rows carry the dot, this row the count.
+  const inSide = main.waiting_in_side || 0;
+  const sideWords = inSide ? t("chat.waitingInSide", { n: inSide }) : "";
   const meta = asking
     ? t("chat.needsApproval")
     : main.busy
       ? t(main.held ? "chat.waiting" : "header.working")
       : unread
         ? unread.state === "waiting" ? t("chat.needsYou", { title: unread.title || t("chat.aSideChat") }) : t("chat.newResult", { title: unread.title || t("chat.aResult") })
-        : "";
+        : sideWords;
   const when = shortTime(Math.max(main.updated_at || 0, Number(main.last_card?.ts) || 0), nowSeconds());
-  const dot = asking || unread
-    ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}" title="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}"></span>`
+  const label = esc(asking ? t("header.approvalNeeded") : unread ? t("chat.newResults") : sideWords);
+  const dot = asking || unread || inSide
+    ? `<span class="attention-dot${asking || inSide || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${label}" title="${label}"></span>`
     : "";
   info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">${esc(t("chat.main"))}</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
   info.addEventListener("click", () => {
@@ -660,9 +670,11 @@ function sessionRow(session, active) {
   info.dataset.initial = (title(session).trim()[0] || "·").toUpperCase();
   info.title = title(session);
   if (session.id === active) info.setAttribute("aria-current", "page");
-  const asking = session.pending_approvals > 0;
-  const marker = asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
-  const needed = esc(t("header.approvalNeeded"));
+  // A task this chat started waits for the person: the row says so, as an approval of its own does.
+  const tasksWait = session.waiting_tasks > 0 ? t("chat.tasksWait", { n: session.waiting_tasks }) : "";
+  const asking = session.pending_approvals > 0 || !!tasksWait;
+  const marker = tasksWait ? `${tasksWait} · ` : asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
+  const needed = esc(session.pending_approvals > 0 ? t("header.approvalNeeded") : tasksWait);
   const dot = asking ? `<span class="attention-dot" role="img" aria-label="${needed}" title="${needed}"></span>` : "";
   info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${esc(marker)}${esc(chatMeta(session))}</div>`;
   info.addEventListener("click", () => {
@@ -1028,8 +1040,8 @@ function viewSnapshot() {
     view?.hasEarlier ?? false,
     earlierLoading,
     turns,
-    mainActive() ? (view?.cards ?? []).map((card) => card.id) : null,
-    mainActive() ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
+    showsItems(view) ? (view?.cards ?? []).map((card) => card.id) : null,
+    showsItems(view) ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
     mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
@@ -1065,7 +1077,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
-  const nodes = mainActive() ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
+  const nodes = showsItems(view) ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);
     earlier.disabled = earlierLoading;
@@ -1138,7 +1150,7 @@ async function loadEarlier() {
   }
 }
 
-/** The main chat: its turns, the cards side chats and tasks sent back, and its echoes, under day dividers. */
+/** A chat's turns, the cards side chats and tasks sent back, and its echoes, under day dividers (the main chat; a side chat with tasks). */
 function mainNodes(view, turns) {
   const newest = turns[turns.length - 1];
   const echoes = view?.echoes ?? [];
@@ -1167,9 +1179,13 @@ async function actOnEcho(echo, does, level) {
     renderMessages(false);
     return;
   }
+  // The chat the tap is made in: the answer belongs to it, not to the chat open when it arrives.
+  const view = S.view;
   try {
-    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}) } });
-    if (S.view && mainActive()) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    // A side chat's echo is found in that chat.
+    const chat = mainActive() ? {} : { session_id: S.activeId };
+    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}), ...chat } });
+    if (view && S.view === view) view.echoes = mergeEchoes(view.echoes ?? [], [body.echo]);
     // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
     panel.refresh();
   } catch (error) {
@@ -1193,7 +1209,7 @@ function holdOrShow(view, frame) {
     view.cards = mergeCards(view.cards ?? [], [frame]);
     return;
   }
-  heldCards.push(frame);
+  heldCards.push({ view, frame });
   clearTimeout(heldTimer);
   heldTimer = setTimeout(showHeld, TYPING_HOLD_MS);
 }
@@ -1204,7 +1220,10 @@ function showHeld() {
     heldTimer = setTimeout(showHeld, TYPING_HOLD_MS - (Date.now() - lastKey));
     return;
   }
-  if (S.view && heldCards.length) S.view.cards = mergeCards(S.view.cards ?? [], heldCards);
+  // A result shows in the chat it came for. One held for a chat the person has left comes
+  // back with that chat's page.
+  const mine = heldCards.filter((item) => item.view === S.view).map((item) => item.frame);
+  if (S.view && mine.length) S.view.cards = mergeCards(S.view.cards ?? [], mine);
   heldCards = [];
   renderMessages(false);
 }

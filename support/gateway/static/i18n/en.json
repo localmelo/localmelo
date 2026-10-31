@@ -279,6 +279,7 @@
   "chat.earlierFailed": "Could not load earlier turns: {problem}",
   "chat.escToStop": "Esc to stop",
   "chat.expired": "This chat expired or the gateway restarted. Create a new chat to continue.",
+  "chat.fromChat": "From {title}",
   "chat.levelFailed": "Could not change the chat level: {problem}",
   "chat.loadFailed": "Could not load the chat: {problem}",
   "chat.loadingEarlier": "Loading earlier turns…",
@@ -300,8 +301,16 @@
   "chat.showEarlier": "Show earlier turns",
   "chat.sideChats": "Side chats",
   "chat.stopFailed": "Could not stop the response: {problem}",
+  "chat.tasksWait": {
+    "one": "A task waits for you",
+    "other": "{n} tasks wait for you"
+  },
   "chat.tokens": "{n} tokens",
   "chat.waiting": "Waiting",
+  "chat.waitingInSide": {
+    "one": "1 waiting in a side chat",
+    "other": "{n} waiting in side chats"
+  },
   "chat.welcome": "A quiet space to think, build, and explore with your own model.",
   "chat.welcomeMain": "This is your main chat. Side chats and tasks report back here.",
   "chat.welcomeReady": "{model} is ready. Start a conversation below.",

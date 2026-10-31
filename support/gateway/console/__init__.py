@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -60,12 +61,12 @@ from . import (
     routes_tasks,
     routes_turns,
 )
-from .cards import MainChatCards
+from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
-from .front import Front, FrontAgent, build_front_agent
+from .front import Front, FrontAgent, SideAgent, build_front_agent
 from .probe import ModelServerProbe, Probe
-from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
 from .worker_reader import WorkerReader
 
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
 
     from localmelo.melo.agent import Agent
     from localmelo.support.config import Config
+    from localmelo.support.gateway.task_store import TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +156,14 @@ class Console:
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
         self.front = Front(self)
+        # The side chats' fronts, made when a chat first needs one.
+        self._side_fronts: dict[str, Front] = {}
         own_front = self.options.front_builder or not self.options.builder
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
-            builder=self.options.builder,
+            builder=self.options.builder or self._side_agent,
             front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
@@ -236,6 +240,98 @@ class Console:
             )
         if isinstance(agent, FrontAgent):
             agent.front = self.front
+        return agent
+
+    def front_for(self, chat_id: str | None) -> Front:
+        """The front of a chat: the main chat's (``None``), or the side chat *chat_id*'s."""
+        if chat_id is None or chat_id == self.main_id:
+            return self.front
+        front = self._side_fronts.get(chat_id)
+        if front is None:
+            front = self._side_fronts[chat_id] = Front(self, chat_id)
+        return front
+
+    async def forget_front(self, chat_id: str) -> None:
+        """Drop a deleted side chat's front."""
+        front = self._side_fronts.pop(chat_id, None)
+        if front is not None:
+            await front.aclose()
+
+    async def effective_owner(self, front_id: str | None) -> str | None:
+        """The chat that owns work *front_id* started, as things stand: that chat while it exists, else the main chat.
+
+        The one answer cards, news and the selection of a task all use, so a
+        task whose chat went (and not yet rehomed, or ended while it went)
+        belongs to the main chat everywhere.
+        """
+        main = self.main_id
+        if not front_id or front_id == main:
+            return main
+        try:
+            info = await self.store.get_session(front_id)
+        except SessionStoreError:
+            return front_id  # unreadable: leave it where it was
+        return front_id if info is not None and info.kind == "chat" else main
+
+    async def effective(self, records: list[TaskRecord]) -> list[TaskRecord]:
+        """*records* with each task's ``front_id`` its :meth:`effective_owner`."""
+        owners: dict[str | None, str | None] = {}
+        found = []
+        for record in records:
+            if record.front_id not in owners:
+                owners[record.front_id] = await self.effective_owner(record.front_id)
+            owner = owners[record.front_id]
+            found.append(
+                record
+                if owner == record.front_id or not record.front_id
+                else dataclasses.replace(record, front_id=owner)
+            )
+        return found
+
+    async def delete_chat(self, chat_id: str, *, forget_notes: bool = False) -> None:
+        """Delete side chat *chat_id*; its unfinished work and waiting cards are the main chat's.
+
+        One transition, held against the cards: no card is written while it runs,
+        so none is lost with the chat, and what is delivered meanwhile is written
+        to the main chat after it. The chat's unfinished tasks, and the ones that
+        end meanwhile, become the main chat's (a finished one keeps its record), so
+        their cards and their news agree; so do its chores and the approvals that
+        still wait for the person, on a card written again in the main chat.
+        """
+        main = self.main_id
+        async with self.cards.holding():
+            waiting = await self.cards.waiting_in(chat_id)
+            going = await self.workers.tasks.unfinished(chat_id)
+            await self.sessions.delete(chat_id, forget_notes=forget_notes)
+            moved = set(await self.workers.tasks.rehome(chat_id, main, also=going))
+            await self.chore_runner.store.rehome(chat_id, main)
+            pending = {
+                request.request_id
+                for task_id in moved
+                for request in self.broker.pending(task_id)
+            }
+            for card in waiting:
+                if main is not None and card.get("request_id") in pending:
+                    await self.store.append_session_event(main, CARD_EVENT, card)
+        await self.forget_front(chat_id)
+
+    async def _side_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        """A side chat's Agent: the full agent loop with the task tools of its own front."""
+        front = self.front_for(session_id)
+        agent = await default_builder(
+            settings,
+            workspace,
+            mcp_config,
+            session_id,
+            gate=self.gate,
+            memory=self.memory,
+            tools=[front.tools],
+            agent_class=SideAgent,
+        )
+        if isinstance(agent, FrontAgent):
+            agent.front = front
         return agent
 
     # ── The gate ──
@@ -399,7 +495,8 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
-        await self.front.aclose()
+        for each in (self.front, *self._side_fronts.values()):
+            await each.aclose()
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()

@@ -1,9 +1,13 @@
-"""Cards in the main chat: what a side chat or a task came back with.
+"""Cards: what a side chat or a task came back with.
 
 When a side chat's run ends, a task finishes or fails, or either waits for an
-approval, the main chat gets a card: an ``attention.card`` event that belongs
-to no turn. A card is an event, never a turn: no model reads it, and the main
-chat's window never holds it. Its data is ``state`` (``done``, ``failed``,
+approval, a chat gets a card: an ``attention.card`` event that belongs to no
+turn. A side chat's own run comes back to the main chat. A task comes back to
+the chat that started it, the main chat or a side chat, and when a side
+chat finishes work (its own answer, or one of its tasks) the main chat's
+next turn also reads one line about it (:meth:`Front.side_done
+<localmelo.support.gateway.console.front.Front.side_done>`). A card is an
+event, never a turn: no model reads it, and a chat's window never holds it. Its data is ``state`` (``done``, ``failed``,
 ``stopped``, ``waiting`` or ``answered``), the ``source_id`` and ``source_kind`` (``chat``
 or ``task``) it opens, the source's short ``title`` and its plain ``line``: up
 to two lines of the answer on a done card, the reason on a failed one, what is
@@ -23,7 +27,11 @@ the console page asks for.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import time
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.support.gateway.i18n import (
@@ -42,7 +50,7 @@ from localmelo.support.sessions.display import (
     status_text,
     title_width,
 )
-from localmelo.support.sessions.store import StoredEvent
+from localmelo.support.sessions.store import SessionInfo, StoredEvent
 
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, is_out_of_steps, not_committed
@@ -122,10 +130,12 @@ class MainChatCards:
         self._console = console
         self._main_id: str | None = None
         self._heard_events: list[StoredEvent] = []
-        # The approvals with a waiting card and no answer yet; read once per flush.
-        self._unanswered: set[str] | None = None
+        # The approvals with a waiting card and no answer yet, by the chat that
+        # holds the card; read once per flush.
+        self._unanswered: dict[str, set[str]] | None = None
         # The newest card, for the list's unread dot.
         self._last: StoredEvent | None = None
+        self._flushing = asyncio.Lock()
 
     @property
     def last(self) -> dict[str, Any] | None:
@@ -178,31 +188,87 @@ class MainChatCards:
         main = self._main_id
         if main is None:
             return
+        # One flush at a time, so a caller that finds nothing left to write
+        # returns only when the writing another one began is done.
+        async with self._flushing:
+            await self._write_heard(main)
+
+    async def _write_heard(self, main: str) -> None:
         heard, self._heard_events = self._heard_events, []
         self._unanswered = None
         # What is stored reads the same to every reader: English, whoever asked.
         with using("en"):
             await self._write(main, heard)
 
+    @contextlib.asynccontextmanager
+    async def holding(self) -> AsyncIterator[None]:
+        """Write what is heard, then write no card until the block ends.
+
+        What is heard meanwhile waits, and is written after it to whoever owns
+        its task by then: a chat that changes hands inside the block (a deleted
+        side chat's tasks) is not written to.
+        """
+        main = self._main_id
+        async with self._flushing:
+            if main is not None:
+                await self._write_heard(main)
+            yield
+
     async def _write(self, main: str, heard: list[StoredEvent]) -> None:
         for stored in heard:
             # A card is best effort: a source deleted meanwhile, a store that
             # closed or a task that is gone leaves the main chat without it.
             try:
-                card = await self._build(stored)
-                if card is not None:
+                built = await self._build(main, stored)
+                if built is not None:
+                    owner, card = built
                     at = stored.event.get("ts")
                     await self._console.store.append_session_event(
-                        main, CARD_EVENT, {**card, "at": at}
+                        owner, CARD_EVENT, {**card, "at": at}
                     )
+                    await self._side_done(main, owner, card, at)
             except Exception as exc:
-                logger.debug("No card in the main chat: %s", exc)
+                logger.debug("No card: %s", exc)
 
-    async def _build(self, stored: StoredEvent) -> dict[str, Any] | None:
+    async def _side_done(
+        self, main: str, owner: str, card: dict[str, Any], at: object
+    ) -> None:
+        """A side chat's finished run, or its finished task, is news for the main chat."""
+        chat = card["source_id"] if card["source_kind"] == "chat" else owner
+        if card.get("state") != "done" or card.get("reminder") or chat == main:
+            return
+        info = await self._console.store.get_session(chat)
+        if info is not None:
+            when = float(at) if isinstance(at, int | float) else time.time()
+            await self._console.front.side_done(
+                chat, card_title(info.title), card["line"], when
+            )
+
+    async def _owner(self, main: str, info: SessionInfo) -> str:
+        """The chat a card goes to: for a task the one that started it, else the main chat."""
+        if info.kind != "task":
+            return main
+        try:
+            front = (await self._console.workers.tasks.get_task(info.id)).front_id
+        except TaskStoreError:
+            return main
+        return await self._console.effective_owner(front) or main
+
+    async def _build(
+        self, main: str, stored: StoredEvent
+    ) -> tuple[str, dict[str, Any]] | None:
         store = self._console.store
         info = await store.get_session(stored.session_id)
         if info is None or info.kind not in ("chat", "task"):
             return None
+        owner = await self._owner(main, info)
+        card = await self._card(owner, info, stored)
+        return None if card is None else (owner, card)
+
+    async def _card(
+        self, owner: str, info: SessionInfo, stored: StoredEvent
+    ) -> dict[str, Any] | None:
+        store = self._console.store
         kind = stored.event.get("type")
         data = stored.event.get("data") or {}
         card: dict[str, Any] = {
@@ -224,7 +290,7 @@ class MainChatCards:
                 **_waiting_words(data),
             }
         if kind == "approval.resolved":
-            return await self._answer_card(card, data)
+            return await self._answer_card(owner, card, data)
         if kind == "turn.finished":
             # A side chat's own run; a task's turns end in its sched event.
             if info.kind != "chat" or data.get("cause") != "run":
@@ -289,20 +355,22 @@ class MainChatCards:
         return first.removeprefix(REMINDER_PREFIX)
 
     async def _answer_card(
-        self, card: dict[str, Any], data: dict[str, Any]
+        self, owner: str, card: dict[str, Any], data: dict[str, Any]
     ) -> dict[str, Any] | None:
         """The card that follows a waiting one with its answer, or ``None``.
 
         There is none when no waiting card of this approval was written (it
-        was answered before anything read the main chat), or when it was
-        followed already.
+        was answered before anything read the chat that holds it), or when it
+        was followed already.
         """
         asked = data.get("request_id")
         if self._unanswered is None:
-            self._unanswered = await self._read_unanswered()
-        if not asked or asked not in self._unanswered:
+            self._unanswered = {}
+        if owner not in self._unanswered:
+            self._unanswered[owner] = await self._read_unanswered(owner)
+        if not asked or asked not in self._unanswered[owner]:
             return None
-        self._unanswered.discard(asked)
+        self._unanswered[owner].discard(asked)
         name = _ANSWERS.get(answer_word(data), "answered")
         if card["source_kind"] == "task" and name == "allowedForChat":
             name = "allowedForTask"
@@ -313,24 +381,26 @@ class MainChatCards:
             **_words(f"cards.answer.{name}"),
         }
 
-    async def _read_unanswered(self) -> set[str]:
-        """The request ids of the newest waiting cards that no answer follows."""
-        if self._main_id is None:
-            return set()
+    async def waiting_in(self, owner: str) -> list[dict[str, Any]]:
+        """The newest waiting cards of chat *owner* that no answer follows, as stored."""
         found = await self._console.store.events_of_type(
-            self._main_id, CARD_EVENT, limit=_LOOK_BACK
+            owner, CARD_EVENT, limit=_LOOK_BACK
         )
-        waiting: set[str] = set()
+        waiting: dict[str, dict[str, Any]] = {}
         for event in found:
             item = event.event.get("data") or {}
             asked = item.get("request_id")
             if not asked:
                 continue
             if item.get("state") == "waiting":
-                waiting.add(asked)
+                waiting[asked] = item
             elif item.get("state") == "answered":
-                waiting.discard(asked)
-        return waiting
+                waiting.pop(asked, None)
+        return list(waiting.values())
+
+    async def _read_unanswered(self, owner: str) -> set[str]:
+        """The request ids of the newest waiting cards of *owner* that no answer follows."""
+        return {str(card["request_id"]) for card in await self.waiting_in(owner)}
 
 
 def _is_news(data: object) -> bool:

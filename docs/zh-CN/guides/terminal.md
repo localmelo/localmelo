@@ -65,7 +65,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 - `/chats` 列出主对话和它的侧边对话（方向键和 Enter），`/side [title]` 在当前文件夹开始一个侧边对话，`/main` 回到主对话。状态栏显示当前打开的对话。
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
-- 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会开始一个任务，与控制台相同。
+- 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
 - `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/approvals`、`/browser` 和 `/mcp` 只在终端自己的对话里可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>
@@ -164,7 +164,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/chats` | 在主对话中：以列表列出主对话和它的侧边对话；按 Enter 打开，`New side chat` 新开一个。 |
 | `/side [title]` | 在主对话中：在当前文件夹开始一个侧边对话，由第一条消息创建。在那里 `/new` 和 `/clear` 也是如此。 |
 | `/main` | 从侧边对话回到主对话。 |
-| `/task TEXT` | 在主对话中：开始一个任务，与控制台里的 `/task` 相同。 |
+| `/task TEXT` | 在当前对话（主对话或旁支对话）里开始一个任务，与控制台里的 `/task` 相同；任务属于那个对话。旁支对话要先有第一条消息，`/task` 才能用。 |
 | `/exit`（也可用 `/quit`） | 退出；正在运行的轮次会先被停止。 |
 
 - `/new`、`/clear`、`/sessions`、`/resume`、`/undo`、`/retry`、`/model` 和 `/backend` 在轮次运行期间会被拒绝：草稿保留，提示为 `/model is not available while a turn runs (esc stops it).`

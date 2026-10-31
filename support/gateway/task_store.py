@@ -31,7 +31,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, get_args
 
@@ -45,6 +45,12 @@ SCHEDULER_VERSION: Final = 6
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
+
+# A chat made for a task is a submission of the create scope: the key it came with
+# is a row of its own, apart from ``request_key`` (the key of a message to a chat).
+_CREATE_KEYS: Final = """CREATE TABLE IF NOT EXISTS task_creates (
+  create_key TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL UNIQUE REFERENCES tasks(task_id) ON DELETE CASCADE)"""
 
 # One statement each; the migration runs them all inside one transaction.
 _SCHEMA: Final = (
@@ -93,6 +99,7 @@ _SCHEMA: Final = (
   start REAL NOT NULL, end REAL, power TEXT, battery_pct REAL,
   thermal TEXT, lock_state TEXT, user_present INTEGER)""",
     "CREATE INDEX IF NOT EXISTS tasks_state_level ON tasks(state, level_eff)",
+    _CREATE_KEYS,
     "CREATE INDEX IF NOT EXISTS priority_events_task ON priority_events(task_id, ts)",
     "CREATE INDEX IF NOT EXISTS sched_log_ts ON sched_log(ts)",
     "CREATE INDEX IF NOT EXISTS idle_windows_start ON idle_windows(start)",
@@ -396,6 +403,7 @@ class TaskStore:
                 for statement in _RECOVERY_SCHEMA + CHORE_SCHEMA:
                     await conn.execute(statement)
                 await self._ensure_host_column(conn)
+                await conn.execute(_CREATE_KEYS)
                 await conn.execute(
                     "UPDATE schema_components SET version = ? WHERE name = ?",
                     (SCHEDULER_VERSION, COMPONENT),
@@ -404,6 +412,9 @@ class TaskStore:
                 # A store marked v5 or v6 before the host column was settled may
                 # lack it; add it in place rather than bumping the version.
                 await self._ensure_host_column(conn)
+                await conn.execute(
+                    _CREATE_KEYS
+                )  # IF NOT EXISTS: older v6 files lack it
             elif current > SCHEDULER_VERSION:
                 raise SessionStoreError(
                     f"{self._store.path} has scheduler schema version {current}; "
@@ -727,6 +738,7 @@ class TaskStore:
         workspace: str,
         front_id: str | None = None,
         request_key: str | None = None,
+        create_key: str | None = None,
         task_id: str | None = None,
         meta: Mapping[str, Any] | None = None,
         deadline: float | None = None,
@@ -754,6 +766,15 @@ class TaskStore:
         body["deadline"] = deadline
         now = self._clock()
         async with self._store.component_transaction("task_create") as conn:
+            if create_key is not None:
+                row = await _first(
+                    conn,
+                    f"{_SELECT_TASK} WHERE task_id = "
+                    "(SELECT task_id FROM task_creates WHERE create_key = ?)",
+                    (create_key,),
+                )
+                if row is not None:
+                    return TaskRecord.from_row(row), True
             if request_key is not None:
                 record = await self._find_request(
                     conn, spec, origin, front_id, request_key, deadline
@@ -814,6 +835,11 @@ class TaskStore:
                     now,
                 ),
             )
+            if create_key is not None:
+                await conn.execute(
+                    "INSERT INTO task_creates (create_key, task_id) VALUES (?, ?)",
+                    (create_key, identifier),
+                )
             if _recovery_proof:
                 await conn.execute(
                     "INSERT INTO recovery_provenance (task_id, first_start, unsafe_resume) "
@@ -988,6 +1014,17 @@ class TaskStore:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             return record
 
+    async def by_create_key(self, create_key: str) -> TaskRecord | None:
+        """The task a create of the create scope made under *create_key*, or ``None``."""
+        async with self._store.component_transaction("task_by_create_key") as conn:
+            row = await _first(
+                conn,
+                f"{_SELECT_TASK} WHERE task_id = "
+                "(SELECT task_id FROM task_creates WHERE create_key = ?)",
+                (create_key,),
+            )
+        return None if row is None else TaskRecord.from_row(row)
+
     async def list_tasks(self, states: Sequence[str] | None = None) -> list[TaskRecord]:
         """Every task, newest first, or only those in *states* (by the state index)."""
         where = ""
@@ -1041,6 +1078,41 @@ class TaskStore:
                 (title, task_id, was),
             )
             return bool(cursor.rowcount)
+
+    async def unfinished(self, front_id: str) -> list[str]:
+        """The ids of chat *front_id*'s tasks that have not ended."""
+        ended = ", ".join("?" * len(_TERMINAL_STATES))
+        async with self._store.component_transaction("task_unfinished") as conn:
+            rows = await _rows(
+                conn,
+                f"SELECT task_id FROM tasks WHERE front_id = ? AND state NOT IN ({ended})",
+                (front_id, *_TERMINAL_STATES),
+            )
+        return [row[0] for row in rows]
+
+    async def rehome(
+        self, front_id: str, to: str | None, *, also: Collection[str] = ()
+    ) -> list[str]:
+        """Hand chat *front_id*'s unfinished tasks, and those of *also* whatever state they are in now, to chat *to*; their ids.
+
+        A task that ended before the hand-over and is not in *also* keeps its
+        record, its owner included; one that ended while the chat was going
+        (it was unfinished when *also* was read) follows the rest.
+        """
+        ended = ", ".join("?" * len(_TERMINAL_STATES))
+        marks = ", ".join("?" * len(also))
+        where = (
+            f"front_id = ? AND (state NOT IN ({ended})"
+            + (f" OR task_id IN ({marks})" if also else "")
+            + ")"
+        )
+        args = (front_id, *_TERMINAL_STATES, *also)
+        async with self._store.component_transaction("task_rehome") as conn:
+            rows = await _rows(conn, f"SELECT task_id FROM tasks WHERE {where}", args)
+            await conn.execute(
+                f"UPDATE tasks SET front_id = ? WHERE {where}", (to, *args)
+            )
+        return [row[0] for row in rows]
 
     async def priority_events(self, task_id: str) -> list[dict[str, Any]]:
         async with self._store.component_transaction("task_events") as conn:
