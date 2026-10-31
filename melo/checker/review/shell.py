@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shlex
@@ -206,6 +207,7 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     cwd, before, url, bare_before = ctx.root, "", "", False
+    said: str | None = None  # what the last command printed, when literal
     for op, argv, redirs in segments:
         body, writes = None, []
         for kind, target in redirs:
@@ -225,7 +227,9 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
         if not argv:
             continue
         prog = os.path.basename(argv[0])
-        _writes_code(ctx, f, argv, body, writes, cwd)
+        piped = said if op in ("|", "|&") else None
+        said = _literal_output(argv, body, piped)
+        _writes_code(ctx, f, argv, said, writes, cwd)
         if prog == "cd":
             cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
             continue
@@ -406,32 +410,78 @@ def _runs_project(prog: str, words: list[str]) -> bool:
     return prog in _BUILDS and bool(words) and words[0] in _BUILDS[prog]
 
 
+def _printf(args: list[str]) -> str | None:
+    """What ``printf FORMAT ARGS…`` prints, for ``%s``, ``%b``, ``%d`` and escapes."""
+    if not args:
+        return None
+    fmt = args[0].replace("\\n", "\n").replace("\\t", "\t")
+    parts, rest, out = re.split(r"%[sbd]", fmt), list(args[1:]), []
+    holes = len(parts) - 1
+    while True:
+        take, rest = rest[:holes], rest[holes:]
+        take += [""] * (holes - len(take))
+        out.append(
+            parts[0] + "".join(v + p for v, p in zip(take, parts[1:], strict=True))
+        )
+        if not rest or not holes:
+            return "".join(out).replace("%%", "%")
+
+
+def _literal_output(argv: list[str], body: str | None, piped: str | None) -> str | None:
+    """What a command prints when melo can tell: ``echo``, ``printf``, a
+    here-document, ``cat`` or ``tee`` of a pipe, ``base64 -d`` of one."""
+    prog, args = os.path.basename(argv[0]), argv[1:]
+    words = [a for a in args if not a.startswith("-")]
+    if prog == "echo":
+        return " ".join(a for a in args if a not in ("-n", "-e", "-E")) + "\n"
+    if prog == "printf":
+        return _printf(args)
+    if prog in ("cat", "tee") and body is not None:
+        return body + "\n"
+    if prog == "cat" and not words or prog == "tee":
+        return piped
+    if prog == "base64" and {"-d", "-D", "--decode"} & set(args) and piped:
+        try:
+            return base64.b64decode(piped.strip(), validate=False).decode()
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return None
+
+
 def _writes_code(
     ctx: Context,
     f: Findings,
     argv: list[str],
-    body: str | None,
+    text: str | None,
     writes: list[tuple[str, str]],
     cwd: str,
 ) -> None:
-    """``cat > x.py <<EOF``, ``tee``, ``echo … > x.sh``: the code it writes.
+    """``cat > x.py <<EOF``, ``… | tee``, ``echo … > x.sh``, ``cp a.py b.py``.
 
     Literal text written to a code file is classified as a write of it
-    (:func:`~.files.written`); ``>>`` adds to what is there.
+    (:func:`~.files.written`), and so is a copy of a local file; ``>>``
+    adds to what is there.
     """
     prog, args = os.path.basename(argv[0]), argv[1:]
-    if prog in ("cat", "tee") and body is not None:
-        text = body + "\n"
-    elif prog == "echo":
-        text = " ".join(a for a in args if a not in ("-n", "-e", "-E")) + "\n"
-    elif prog == "printf" and len(args) == 1:
-        text = args[0].replace("\\n", "\n")
-    else:
+    words = [a for a in args if not a.startswith("-")]
+    if prog == "cp" and len(words) == 2:
+        source = resolve(ctx, words[0], cwd)
+        target = resolve(ctx, words[1], cwd)
+        if source is None or target is None:
+            return
+        if os.path.isdir(target):
+            target = os.path.join(target, os.path.basename(source))
+        copied = file_rules._old_text(source)
+        if copied:
+            old = file_rules._old_text(target) or ""
+            file_rules.written(ctx, f, target, copied, old)
+        return
+    if text is None:
         return
     targets = list(writes)
     if prog == "tee":
         mode = ">>" if "-a" in args else ">"
-        targets += [(mode, a) for a in args if not a.startswith("-")]
+        targets += [(mode, a) for a in words]
     for kind, target in targets:
         path = resolve(ctx, target, cwd)
         if path is None:
@@ -487,8 +537,16 @@ def _pip(ctx: Context, f: Findings, args: list[str], interp: str) -> None:
 
 
 def _python(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
-    """A Python interpreter run with *argv*; ``"?"`` names an unknown program."""
+    """A Python interpreter run with *argv*; ``"?"`` names an unknown program.
+
+    An interpreter in the workspace (``.venv/bin/python``) runs its
+    environment's ``.pth`` files at its start: those changed in this chat
+    are read.
+    """
     interp, i = argv[0], 1
+    where_it = resolve(ctx, interp, cwd) if "/" in interp else None
+    if where_it is not None and where(ctx, where_it, write=False) == "inside":
+        file_rules.site_hooks(ctx, f, os.path.basename(interp))
     while i < len(argv):
         arg, rest = argv[i], argv[i + 1 :]
         if arg in ("-V", "--version", "-h", "--help"):

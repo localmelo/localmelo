@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import dataclasses
 import os
 import shlex
@@ -409,15 +410,11 @@ class _Review:
         )
 
     def imported_name(self, node: ast.AST) -> str:
-        """The module ``__import__("m")`` or ``import_module("m")`` gives, or ``""``."""
+        """The module ``__import__("m")`` or ``import_module("o" + "s")`` gives, or ``""``."""
         if not isinstance(node, ast.Call) or not node.args:
             return ""
-        first = node.args[0]
-        name = self.name(node.func)
-        if name in ("__import__", "importlib.import_module") and isinstance(
-            first, ast.Constant
-        ):
-            return str(first.value)
+        if self.name(node.func) in ("__import__", "importlib.import_module"):
+            return _literal(node.args[0]) or ""
         return ""
 
     def name(self, node: ast.AST) -> str:
@@ -460,8 +457,18 @@ class _Review:
         return "?"
 
     def looked_up(self, func: ast.AST) -> bool:
-        """Whether the function *func* names is found by a run-time lookup."""
+        """Whether the function *func* names is found by a run-time lookup.
+
+        ``m = import_module(name)`` then ``m.f(…)`` is one too.
+        """
         for node in ast.walk(func):
+            if isinstance(node, ast.Name) and any(
+                isinstance(value, ast.Call)
+                and self.name(value.func) in _LOOKUPS
+                and self.name(value) == "?"
+                for value in self.bound.get(node.id, [])
+            ):
+                return True
             if isinstance(node, ast.Attribute) and node.attr in _DUNDERS:
                 return True
             if isinstance(node, ast.Name) and node.id in ("__builtins__", "builtins"):
@@ -544,7 +551,7 @@ class _Review:
             return [_join("/", c) for c in combos]
         if (name in _PASS or name == "shutil.which") and args:
             return args[0]
-        if attr == "absolute":
+        if attr in ("absolute", "decode"):
             return self.fold(base)
         if attr == "split" and not args or name == "shlex.split":
             source = args[0] if args else self.fold(base)
@@ -600,6 +607,31 @@ class _Review:
                 if any(n.split(".")[0] == "ctypes" for n in names):
                     self.f.doubt("Uses ctypes, which melo cannot check.")
 
+    def decoded(self, node: ast.AST) -> list[str]:
+        """``base64.b64decode("…")`` of a literal, as the text it writes.
+
+        Only for what a write puts in a file: code that ``exec``s decoded
+        text stays opaque.
+        """
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "decode"
+        ):
+            return self.decoded(node.func.value)
+        if not isinstance(node, ast.Call) or not node.args:
+            return []
+        if self.name(node.func) not in (
+            "base64.b64decode",
+            "base64.standard_b64decode",
+        ):
+            return []
+        literal = _literal(node.args[0])
+        try:
+            return [] if literal is None else [base64.b64decode(literal).decode()]
+        except (ValueError, UnicodeDecodeError):
+            return []
+
     def code_write(self, node: ast.Call) -> None:
         """``open(p, "w").write(code)`` or ``Path(p).write_text(code)`` of a code file.
 
@@ -633,6 +665,7 @@ class _Review:
         if target is None:
             return
         texts = [v for v in self.fold(node.args[0]) if isinstance(v, str)]
+        texts += self.decoded(node.args[0])
         for value in (v for v in self.fold(target) if isinstance(v, str)):
             path = resolve(self.ctx, value)
             if path is None:
@@ -949,6 +982,16 @@ class _Review:
             for value in values:
                 main = name == "runpy.run_module"
                 file_rules.module(self.ctx, self.f, value, main=main)
+
+
+def _literal(node: ast.AST) -> str | None:
+    """*node* as a string when it is made of string literals only (``"o" + "s"``)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _literal(node.left), _literal(node.right)
+        return None if left is None or right is None else left + right
+    return None
 
 
 def _join(sep: str, parts: tuple[Any, ...]) -> Any:

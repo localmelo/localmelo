@@ -45,8 +45,13 @@ _CODE_NAMES = frozenset(
     + ["Rakefile", "Gemfile", "pom.xml", "build.rs", "go.mod", "Package.swift"]
     + [".pre-commit-config.yaml", "CMakeLists.txt"]
 )
-# Python runs the import lines of a .pth file in site-packages at every start.
-_PTH_GLOBS = [f"{venv}/lib/python*/site-packages/*.pth" for venv in (".venv", "venv")]
+# Python runs the import lines of a .pth file in site-packages at every start,
+# and sitecustomize/usercustomize there.
+_PTH_GLOBS = [
+    f"{venv}/lib/python*/site-packages/{name}"
+    for venv in (".venv", "venv")
+    for name in ("*.pth", "sitecustomize.py", "usercustomize.py")
+]
 # Files a runner's walk looks at, at most; more is a doubt.
 MAX_FILES = 5000
 # The largest file whose old text an edit or a write is compared with.
@@ -312,6 +317,21 @@ def runner(ctx: Context, f: Findings, prog: str) -> None:
             f"Runs {prog}, which runs files changed in this chat that melo does "
             f"not read ({names}{more})."
         )
+
+
+def site_hooks(ctx: Context, f: Findings, prog: str) -> None:
+    """An interpreter of the workspace's environment: its start hooks changed
+    in this chat (``.pth`` files, ``sitecustomize``) are read."""
+    if ctx.since is None:
+        return
+    for pattern in _PTH_GLOBS:
+        for path in sorted(glob.glob(os.path.join(ctx.root, pattern))):
+            if not _changed(path, ctx.since):
+                continue
+            text = f.take(path, key=False)
+            if text:
+                lead = f"Runs {prog}, which runs {shown(ctx, path)}, changed in this chat, which"
+                _added(f, _findings(ctx, path, text), Findings(), lead)
 
 
 def hooks(ctx: Context, f: Findings, prog: str) -> None:
