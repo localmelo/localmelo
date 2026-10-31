@@ -38,7 +38,7 @@ from localmelo.melo.schema import RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
-from localmelo.support.cli import browsing, commands, usershell
+from localmelo.support.cli import browsing, commands, hanging, usershell
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
@@ -56,6 +56,7 @@ from localmelo.support.cli.attachments import (
 from localmelo.support.cli.attachments import (
     load as load_attachment,
 )
+from localmelo.support.cli.hanging import Hung
 from localmelo.support.cli.main_chat import GatewayError, MainChat
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.picker import ModelRow
@@ -426,6 +427,10 @@ class CliSession:
         """A line of melo's, in the session's symbols, cleaned (:func:`_line`)."""
         return _line(in_symbols(text, self.renderer.symbols), style)
 
+    def _hung(self, text: str, style: str | None = None) -> Hung:
+        """A line of melo's hung under the line above it, behind the connector."""
+        return Hung(self._text(text, style), self.renderer.symbols)
+
     # ── Enter ──
 
     def enter(self, text: str) -> str | None:
@@ -567,8 +572,12 @@ class CliSession:
     # ── Tasks ──
 
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
-        """Run *coroutine* as a session task, kept until it ends."""
-        task = asyncio.ensure_future(coroutine)
+        """Run *coroutine* as a session task, kept until it ends.
+
+        It prints at the left edge even when a command starts it: only the
+        command's own output hangs under its echo.
+        """
+        task = hanging.spawn_detached(coroutine)
         self._tasks.add(task)
         task.add_done_callback(self._task_done)
         return task
@@ -611,8 +620,8 @@ class CliSession:
         staged, self._attachments = self._attachments, ()
         for item in staged:
             self.out.print(
-                self._text(
-                    f"  └ attached {item.path} ({len(item.content.encode('utf-8')):,} bytes)",
+                self._hung(
+                    f"attached {item.path} ({len(item.content.encode('utf-8')):,} bytes)",
                     "muted",
                 )
             )
@@ -842,16 +851,24 @@ class CliSession:
             return
         self.renderer.echo(text)
         try:
-            await self._command(name, arguments)
-        except (ValueError, SessionStoreError, SessionBusyError, GatewayError) as exc:
-            message = (
-                DELETED
-                if isinstance(exc, UnknownSessionError)
-                else BUSY if isinstance(exc, SessionBusyError) else str(exc)
-            )
-            self.out.print(self._text(f"✗ {message}", style="error"))
-            if self.app is not None and restore:
-                self._give_back(text)
+            # What the command prints hangs under its echo, an error too.
+            with hanging.under_command(self.renderer.symbols):
+                try:
+                    await self._command(name, arguments)
+                except (
+                    ValueError,
+                    SessionStoreError,
+                    SessionBusyError,
+                    GatewayError,
+                ) as exc:
+                    message = (
+                        DELETED
+                        if isinstance(exc, UnknownSessionError)
+                        else BUSY if isinstance(exc, SessionBusyError) else str(exc)
+                    )
+                    self.out.print(self._text(f"✗ {message}", style="error"))
+                    if self.app is not None and restore:
+                        self._give_back(text)
         finally:
             if self._work is asyncio.current_task():
                 self._work, self._state = None, "idle"
@@ -907,14 +924,14 @@ class CliSession:
             async with self._terminal_handed_over():
                 result = await run.run()
             self._shell_output = usershell.snapshot(result)
-            line = f"  └ {result.status()} · {format_duration(result.elapsed_s)}"
+            line = f"{result.status()} · {format_duration(result.elapsed_s)}"
             self.out.print(
-                self._text(line, "muted" if result.returncode == 0 else "error")
+                self._hung(line, "muted" if result.returncode == 0 else "error")
             )
             if self._shell_output is not None:
                 self.out.print(
-                    self._text(
-                        "  └ /attach ! shows this output (redacted, "
+                    self._hung(
+                        "/attach ! shows this output (redacted, "
                         f"{self._shell_output.size_bytes:,} bytes) and asks before attaching it",
                         "muted",
                     )
@@ -1556,7 +1573,8 @@ class CliSession:
         if not self.out.clear_screen():
             self._print_new_chat_rule()
         elif self.welcome is not None:
-            self.welcome()
+            with hanging.full_width():  # nothing is above it to hang under
+                self.welcome()
 
     async def _start_over(self) -> None:
         if self.runner is not None:
@@ -1573,10 +1591,12 @@ class CliSession:
         self.stream = self._default_stream
 
     def _print_new_chat_rule(self) -> None:
-        label = " New chat "
-        side = max(2, (self.out.width - len(label)) // 2)
-        rule = self.renderer.symbols.rule
-        self.out.print(self._text(rule * side + label + rule * side, style="muted"))
+        """The rule between chats: a divider, so it spans the row, not hung."""
+        with hanging.full_width():
+            label = " New chat "
+            side = max(2, (self.out.width - len(label)) // 2)
+            rule = self.renderer.symbols.rule
+            self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
     async def model(self, arguments: str) -> None:
         """``/model``: pick one of the server's models, or switch to one by name and save it."""
