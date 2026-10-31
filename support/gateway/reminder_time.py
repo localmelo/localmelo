@@ -59,42 +59,14 @@ _BEFORE_WEAK = re.compile(r"(?:请|麻烦你?|一定|务必|千万|你|please|pl
 _WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
           "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12}  # fmt: skip
 _SECONDS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
-_UNITS_ZH = {
-    "分钟": "m",
-    "小时": "h",
-    "钟头": "h",
-    "天": "d",
-    "周": "w",
-    "星期": "w",
-    "礼拜": "w",
-}
-_DAYS_EN = {
-    "yesterday": -1,
-    "today": 0,
-    "tonight": 0,
-    "tomorrow": 1,
-    "tmrw": 1,
-    "tmr": 1,
-}
+_UNITS_ZH = {"分钟": "m", "小时": "h", "钟头": "h", "天": "d", "周": "w", "星期": "w", "礼拜": "w"}  # fmt: skip
+_DAYS_EN = {"yesterday": -1, "today": 0, "tonight": 0, "tomorrow": 1, "tmrw": 1, "tmr": 1}  # fmt: skip
 _DAYS_ZH = {"昨天": (-1, ""), "今天": (0, ""), "今晚": (0, "night"), "今早": (0, "morning"),
             "明天": (1, ""), "明早": (1, "morning"), "明晚": (1, "night"),
             "后天": (2, ""), "大后天": (3, "")}  # fmt: skip
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _WEEKDAYS_ZH = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-_MONTHS = (
-    "jan",
-    "feb",
-    "mar",
-    "apr",
-    "may",
-    "jun",
-    "jul",
-    "aug",
-    "sep",
-    "oct",
-    "nov",
-    "dec",
-)
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")  # fmt: skip
 
 
 def _month(group: str) -> str:
