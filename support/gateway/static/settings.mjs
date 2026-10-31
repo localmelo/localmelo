@@ -732,7 +732,8 @@ export function setupSettings({
   $("s-open-scheduled").addEventListener("click", () => openTab("scheduled"));
   $("s-change").addEventListener("click", () => {
     const open = $("s-change").getAttribute("aria-expanded") !== "true";
-    if (!open) restoreDrafts();
+    // The form starts from the saved connection, and closing it drops what was typed.
+    restoreDrafts();
     editor(open);
     if (open) {
       $("s-editor").scrollIntoView?.({block: "nearest"});

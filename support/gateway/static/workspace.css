@@ -2265,7 +2265,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .st-back { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; min-height: 44px; margin: var(--space-2) 0 0 var(--space-2); padding: 0 var(--space-2); border: 0; background: none; color: var(--accent); font-size: var(--text-body); }
   .st-body { padding: var(--space-2) var(--space-4) var(--space-6); }
   .st-row { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
-  .st-row:not([data-stack]) .st-text { flex: 1 1 12rem; }
+  .st-row:not([data-stack]) .st-text { flex: 1 1 10rem; }
   .st-row:has(> .st-switch) { flex-wrap: nowrap; }
   .st-foot { padding: 0 var(--space-4); }
   .st-value { max-width: 100%; text-align: left; }

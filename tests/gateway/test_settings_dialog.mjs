@@ -838,3 +838,21 @@ test('a change saved while Settings closes still refreshes the page, and a named
   await phone.open('model');
   assert.equal(phone.element('settings-frame').dataset.view, 'section', '"Change the server address" lands on its section');
 });
+
+test('after Undo the form opens on the connection as it is saved again', async () => {
+  let revision = 1;
+  const h = harness({'GET /settings': full(), 'PUT /settings': (body) => {
+    const sections = {...fixture().sections, mlc: {...fixture().sections.mlc, ...(body.sections.mlc || {})}};
+    return full({revision: `rev${++revision}`, sections});
+  }});
+  await h.open();
+  await h.element('s-change').emit('click');
+  await change(h, 's-chat-model', 'new-model');
+  await h.element('create-btn').emit('click');
+  assert.equal(h.puts().at(-1).options.body.sections.mlc.chat_model, 'new-model');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.sections.mlc.chat_model, 'old');
+  await h.element('s-change').emit('click');
+  assert.equal(h.element('s-chat-model').value, 'old');
+});
