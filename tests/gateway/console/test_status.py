@@ -146,30 +146,69 @@ async def test_the_fold_is_cached_by_the_last_event_id(
     assert fresh["cache"]["last_percent"] == 90
 
 
+class Record:
+    def __init__(self, state: str, level_eff: int, wait_reason: str = "") -> None:
+        self.state, self.level_eff, self.wait_reason = state, level_eff, wait_reason
+
+
 async def test_tasks_come_from_the_task_store(
     client: TestClient,
     console: Console,
     workspace: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class Record:
-        def __init__(self, state: str, level_eff: int) -> None:
-            self.state, self.level_eff = state, level_eff
-
     async def listed(states: Any = None) -> list[Record]:
         return [
             Record("running", 2),
             Record("queued", 3),
             Record("queued", 1),
-            Record("held", 4),
+            Record("held", 4, "Waiting for a free model slot"),
             Record("done", 0),
         ]
 
     monkeypatch.setattr(console.workers.tasks, "list_tasks", listed)
     turn = await seed_turn(console.store, workspace)
     body = client.get(f"/api/sessions/{turn.session_id}/status").json()
-    assert body["tasks"] == {"running": 1, "queued": 2, "held": 1, "top_level": 1}
+    assert body["tasks"] == {
+        "running": 1,
+        "queued": 2,
+        "held": 1,
+        "top_level": 1,
+        "waiting": 0,
+    }
+    # A task held for a free model slot waits for the scheduler, not for the person.
     assert body["segments"][-1] == "tasks 1 running 2 queued 1 held"
+
+
+async def test_a_task_held_on_an_approval_waits_for_you(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def listed(states: Any = None) -> list[Record]:
+        return [
+            Record("running", 2),
+            Record("held", 2, "Waiting for a free model slot"),
+            Record("held", 2, "approval"),
+        ]
+
+    monkeypatch.setattr(console.workers.tasks, "list_tasks", listed)
+    turn = await seed_turn(console.store, workspace)
+    body = client.get(f"/api/sessions/{turn.session_id}/status").json()
+    assert body["tasks"]["held"] == 2 and body["tasks"]["waiting"] == 1
+    # The developer segment is unchanged; the sentence follows it.
+    assert body["segments"][-2:] == [
+        "tasks 1 running 0 queued 2 held",
+        "1 task waits for you",
+    ]
+
+    async def both(states: Any = None) -> list[Record]:
+        return [Record("held", 2, "approval"), Record("held", 3, "approval")]
+
+    monkeypatch.setattr(console.workers.tasks, "list_tasks", both)
+    body = client.get(f"/api/sessions/{turn.session_id}/status").json()
+    assert body["segments"][-1] == "2 tasks wait for you"
 
 
 def test_an_unknown_session_is_not_found(client: TestClient) -> None:

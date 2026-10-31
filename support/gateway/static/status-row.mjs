@@ -1,7 +1,11 @@
-/** A new user's row: the cache share, the step and phase and the scheduler's queue are for developers. */
+/**
+ * A new user's row: the cache share, the step and phase and the queue counts
+ * are for developers. A sentence such as "1 task waits for you" is not (the
+ * server says it only for a task that holds on the person's approval), so it
+ * stays.
+ */
 export function plainSegments(segments) {
-  return segments.filter((text) => !text.startsWith('cache') && !text.startsWith('step ')
-    && !(text.startsWith('tasks ') && !/ \d+ held$/.test(text)));
+  return segments.filter((text) => !text.startsWith('cache') && !text.startsWith('step ') && !text.startsWith('tasks '));
 }
 
 /**

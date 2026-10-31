@@ -220,6 +220,26 @@ def test_tasks_segment_only_with_a_task_store() -> None:
     ]
 
 
+def test_a_task_that_waits_for_you_gets_a_sentence_after_the_counts() -> None:
+    snap = UsageSnapshot()
+    for words in (False, True):
+        one = TaskCounts(running=1, queued=0, held=2, waiting=1)
+        assert status_segments(snap, local=True, now=T0, tasks=one, words=words) == [
+            "tasks 1 running 0 queued 2 held",
+            "1 task waits for you",
+        ]
+        two = TaskCounts(running=0, queued=0, held=2, waiting=2)
+        assert status_segments(snap, local=True, now=T0, tasks=two, words=words) == [
+            "tasks 0 running 0 queued 2 held",
+            "2 tasks wait for you",
+        ]
+    # Nothing waits for the person: no sentence, and the field defaults to 0.
+    assert TaskCounts(1, 2, 3, 1).waiting == 0
+    assert status_segments(
+        snap, local=True, now=T0, tasks=TaskCounts(0, 0, 1, None, 0)
+    ) == ["tasks 0 running 0 queued 1 held"]
+
+
 # ── The same row in words, for default mode ──
 
 
