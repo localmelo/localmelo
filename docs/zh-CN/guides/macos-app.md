@@ -23,7 +23,7 @@ uv run python scripts/build_macos_app.py --install
 ```
 
 - 从 Spotlight 或 `~/Applications` 打开 localmelo：应用是 `~/Applications/LocalMelo.app`，只有旧副本的 bundle id 是 `org.localmelo.app` 时才会替换它。
-- 只有 `PATH` 上没有其他 `melo` 时，才会把 `~/.local/bin/melo` 链接到应用的启动器；已有的 `melo` 绝不会被替换。
+- 只有 `PATH` 上没有其他 `melo` 时（检出目录自己的 `.venv/bin/melo` 不算），才会把 `~/.local/bin/melo` 链接到应用的启动器；已有的 `melo` 绝不会被替换。
 - 升级时先退出 localmelo，再运行同一命令；固定版本的 Python 缓存在 `~/Library/Caches/LocalMelo`。
 
 若要移除应用和链接（仅此而已，设置和对话仍保留在 `~/.cache/localmelo`）：

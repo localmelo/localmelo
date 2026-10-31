@@ -19,7 +19,7 @@ uv run python scripts/build_macos_app.py --install
 ```
 
 - Open localmelo from Spotlight or `~/Applications`: the app is `~/Applications/LocalMelo.app`, and an earlier copy is replaced only when its bundle id is `org.localmelo.app`.
-- `~/.local/bin/melo` links to the app's launcher only when no other `melo` is on `PATH`; an existing `melo` is never replaced.
+- `~/.local/bin/melo` links to the app's launcher only when no other `melo` is on `PATH` (the checkout's own `.venv/bin/melo` does not count); an existing `melo` is never replaced.
 - To upgrade, quit localmelo and run the same command again; the pinned Python is cached in `~/Library/Caches/LocalMelo`.
 
 To remove the app and the link, and nothing else (settings and chats stay in `~/.cache/localmelo`):

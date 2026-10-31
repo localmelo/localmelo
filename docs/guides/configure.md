@@ -21,7 +21,8 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo looks on this computer at ports 8000, 8400, 11434 and 30000 (`GET /v1/models`) and offers the first server that lists a model, a chat model first.
 - Every question with a fixed set of answers is a list: ↑ ↓ or a number move, Enter confirms, Esc takes the safe answer (see [Questions are lists](terminal.md#questions-are-lists)).
-- The model list shows chat models only, and marks the ones the server says are in memory `(loaded)`.
+- The model list shows chat models only, and marks the ones the server says are in memory `(loaded)`: setup asks `GET /v1/models/status` (oMLX) or `GET /api/ps` (Ollama), one second each and without a key.
+- The first loaded model is the default; with none loaded there is no default, so move to a model with ↑ ↓ (or type a number, piped).
 - Piped answers are numbered instead (`Model [1]:`); an embedding or reranking model is tagged and is never the default.
 - No chat request is sent, so the server does not load a model for the check.
 
