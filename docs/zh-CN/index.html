@@ -40,6 +40,9 @@
       <p class="sidebar-label">本页内容</p>
       <a href="#quickstart">快速开始</a>
       <a href="#features">能做什么</a>
+      <a href="#auto">自动模式</a>
+      <a href="#reminders">提醒</a>
+      <a href="#stopped">已停止的任务</a>
       <a href="#roadmap">路线图</a>
       <a href="#security">安全</a>
     </nav>
@@ -107,7 +110,7 @@
         <div class="show-grid">
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#hand-work-to-the-main-chat">
             <img src="../assets/img/main-chat-search.webp" alt="主对话通过搜索文件夹回答了一个问题，然后开始一个任务，接着一句话要求提交它。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>一个主对话，旁边是旁支对话</strong><span>提问，或者交代工作：更大的工作按优先级成为任务，完成后以卡片回来。</span></span>
+            <span class="show-text"><strong>一个主对话，旁边是旁支对话</strong><span>提问，或者交代工作：更大的工作按优先级（P0 到 P5）成为任务，完成后以卡片回来。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md#memory-across-chats">
             <img src="../assets/img/memory-tab.webp" alt="“记忆”标签页：melo 记下的关于你的笔记，每条都有来源对话以及编辑和删除按钮。" width="1280" height="800" loading="lazy">
@@ -137,8 +140,63 @@
             <img src="../assets/img/browser.webp" alt="终端里的对话：melo 打开一个网页并说出它的内容。" width="1280" height="552" loading="lazy">
             <span class="show-text"><strong>读网页</strong><span>打开浏览功能后，melo 在你能看到的 Safari 窗口里读网页。</span></span>
           </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#language">
+            <img src="../assets/img/console-zh.webp" alt="简体中文的网页控制台：主对话、一个设为 8:30 的定时事项和面板的标签页，时间按中文习惯书写。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>English 和简体中文</strong><span>控制台和 App 支持简体中文。在设置里选择，或让“自动”跟随你的浏览器。</span></span>
+          </a>
         </div>
         <p class="more-link">另外：<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">模型服务器</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/gateway.md">HTTP API</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">worker 运行</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a> 和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#use-melo-in-scripts">脚本</a>。</p>
+      </section>
+
+      <section class="section" id="auto">
+        <h2>自动模式</h2>
+        <figure class="shot">
+          <img src="../assets/img/auto-blocked.webp" alt="“自动”下的一个对话：安装绘图软件包的步骤被拦下，卡片说明原因、显示该步骤并提供“允许一次”，melo 的回答解释了其他办法。" width="1280" height="800" loading="lazy">
+          <figcaption>在“自动”下，安装软件的步骤会被拦下。卡片说明原因，并提供“允许一次”。</figcaption>
+        </figure>
+        <ul>
+          <li>用输入框下模型旁边的小标签选择<strong>自动</strong>，或在设置里让每个新对话都从它开始。</li>
+          <li>常规步骤不问就运行；有风险的步骤和你没要求的步骤会被拦下，melo 会说明原因。</li>
+          <li>点<strong>允许一次</strong>，或回复“继续”，那一步就只运行一次。</li>
+          <li>步骤只在对话的文件夹里动文件，碰不到 melo 自己的登录信息：“自动”是审查员，不是围墙。</li>
+          <li>任务沿用创建它的对话的模式。</li>
+        </ul>
+        <!-- usage:auto-switch --><figure class="usage" aria-label="把对话切换到“自动”" data-copy="/approvals auto"><div class="usage-bar"><span class="usage-title">把对话切换到“自动”</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="c">/approvals</span> <span class="a">auto</span></span></code></pre><figcaption>在终端对话里输入；/approvals ask 切回“询问”。</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#auto-mode">指南中的自动模式</a></p>
+      </section>
+
+      <section class="section" id="reminders">
+        <h2>提醒</h2>
+        <figure class="shot">
+          <img src="../assets/img/reminder-proposal.webp" alt="说出“remind me to send the report on Friday at 9”之后的主对话：melo 问“Remind you on Fri Nov 6 at 9:00?”，提醒内容是“send the report”，下面有“Remind me”按钮和“Cancel”。" width="1280" height="800" loading="lazy">
+          <figcaption>melo 会显示它理解的日期和时间。你点“提醒我”之前不会保存任何东西。</figcaption>
+        </figure>
+        <ul>
+          <li>用平常的话说，中文和英文都行：<code class="wrap">两小时后提醒我喝水</code>。</li>
+          <li>没说时间，melo 会问你几点，而不是自己猜。</li>
+          <li>到点，主对话里的一张卡片会告诉你，已完成的提醒留在“定时”标签页里。</li>
+          <li>电脑睡眠时错过了，醒来后 melo 会提醒你，并说明晚了多久。</li>
+        </ul>
+        <!-- usage:reminder --><figure class="usage" aria-label="让 melo 提醒你" data-copy="remind me to send the report on Friday at 9&#10;提醒我明天九点给导师发邮件"><div class="usage-bar"><span class="usage-title">让 melo 提醒你</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">remind me to send the report on Friday at 9</span></span>
+<span class="ln cmd"><span class="p">›</span> <span class="q">提醒我明天九点给导师发邮件</span></span></code></pre><figcaption>在主对话里输入。melo 会显示它理解的日期和时间，等你点“提醒我”。</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">指南中的提醒</a></p>
+      </section>
+
+      <section class="section" id="stopped">
+        <h2>已停止的任务可以继续</h2>
+        <figure class="shot">
+          <img src="../assets/img/task-stopped.webp" alt="主对话里的一张卡片写着“Stopped”，说明还剩什么（运行两个改过的测试文件并提交），带“Continue”和“Open task”两个按钮。" width="1280" height="800" loading="lazy">
+          <figcaption>步数用完的任务显示“已停止”，说明还剩什么，并提供“继续”。</figcaption>
+        </figure>
+        <ul>
+          <li>步数用完的任务显示<strong>已停止</strong>，而不是失败。</li>
+          <li><strong>继续</strong>会从停下的地方接着做，并带着它之前做的事。</li>
+          <li>也可以在主对话里说出任务名，melo 会立刻继续它。</li>
+          <li>说“简单说一下”或“一句话”，主对话会用一两句话回答；它开始的任务也会有简短的名字。</li>
+        </ul>
+        <!-- usage:continue-task --><figure class="usage" aria-label="继续已停止的任务" data-copy="continue the recovery card task&#10;继续恢复卡片任务"><div class="usage-bar"><span class="usage-title">继续已停止的任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">continue the recovery card task</span></span>
+<span class="ln cmd"><span class="p">›</span> <span class="q">继续恢复卡片任务</span></span></code></pre><figcaption>在主对话里输入；“继续”和“任务”之间的词指明是哪个任务。</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#the-main-chat-and-side-chats">指南中的任务</a></p>
       </section>
 
       <section class="section" id="roadmap">
@@ -155,7 +213,7 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>7</small></h3>
+            <h3>接下来 <small>9</small></h3>
             <ul>
               <li class="board-card"><strong>在新版本上第二轮自用</strong><span>通过主对话做这个仓库的真实工作，找出并修好仍然绊住人的地方。</span></li>
               <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
@@ -164,6 +222,8 @@
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
               <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
+              <li class="board-card"><strong>带入其他助手的记忆</strong><span>计划中：首次设置时，melo 读取你电脑上其他编程助手保存的笔记并带入，可撤销。</span></li>
+              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>计划中：melo 离线回顾最近的对话，合并重复的笔记、保留较新的值，可撤销。</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -178,7 +238,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>8</small></h3>
+          <h3>已完成 <small>12</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -188,6 +248,10 @@
             <li class="board-card"><strong>浏览网页</strong><span>melo 在你能看到的窗口里读网页并跟随链接。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>秋田犬 Melo 和胶囊</strong><span>App、控制台和桌面上的宠物，以及说明正在运行什么的胶囊。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>重要的调用先问你</strong><span>安装、下载和文件夹之外的改动总会先问你，并说明原因。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>自动模式</strong><span>每个对话可选“询问”或“自动”：常规步骤直接运行，有风险的步骤被拦下并说明原因，“允许一次”放行一步。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>中文控制台和 App</strong><span>控制台和 App 支持简体中文，时间和日期按中文习惯书写。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>提醒</strong><span>说一次就行，比如“提醒我明天九点给导师发邮件”，到点 melo 会告诉你。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>停下后可继续</strong><span>步数用完的任务显示“已停止”，点“继续”就从停下的地方接着做。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="./updates.html#updates">最新变化</a>和<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">变更详情（英文）</a>。</p>
@@ -201,6 +265,7 @@
         <ul>
           <li>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。</li>
           <li>在 macOS 上，worker 运行（<code>melo worker</code>）和保存的任务只能在自己的工作区内写文件。</li>
+          <li>在 macOS 上的“自动”模式下，一个步骤还会在写入沙箱里运行：它的文件只留在文件夹里，碰不到 melo 自己的登录信息。</li>
           <li>新建的记忆文件只有你能读取（权限 0600）。</li>
           <li>网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听；<code>melo console</code> 会打印一次性登录链接。</li>
           <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</li>

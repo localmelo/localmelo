@@ -31,8 +31,12 @@ remembers across chats and talks to your own model server or a cloud API.
 
 - Talk to one main chat in the terminal (`melo`), the web console (`melo serve`) or the Mac app: it answers, or hands bigger work to a task by priority, and a card says what happened.
 - Let melo remember across chats: the newer fact wins, and the Memory tab lets you read, edit or forget each note.
-- Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished. Ask for a reminder, like `remind me to send the report on Friday at 9`, and it shows the date it understood, then tells you at that time.
+- Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished.
+- Ask for a reminder, like `remind me to send the report on Friday at 9`: melo shows the date it understood, then tells you at that time.
 - Approve what matters: melo asks before commands and file writes, and shows the change.
+- Choose Auto for a chat and melo works without asking: routine steps run, risky ones are blocked with the reason, and **Allow once** lets one through.
+- When a task runs out of steps it reads Stopped, and **Continue** picks it up where it left off.
+- Use the console and the app in English or 简体中文.
 - Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
 
 ## Install
@@ -126,6 +130,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 
 - The model can run shell commands and Python, and read or write any file you can.
 - On macOS, a worker run (`melo worker`) and a saved task can write only in their workspace.
+- In Auto mode on macOS, a step also runs in a write sandbox: its files stay in the folder and away from melo's own sign-in.
 - The gateway requires authentication and refuses non-loopback binds.
 - Its token does not protect against malicious processes under your own OS user.
 - Read [SECURITY.md](SECURITY.md) and [what the checks do](docs/guides/tools-mcp.md#what-the-checks-do).

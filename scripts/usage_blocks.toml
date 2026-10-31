@@ -3,7 +3,8 @@
 # Edit a block here, then run `uv run python scripts/usage_blocks.py sync`: it rewrites each
 # `<!-- usage:ID -->` region in docs/ and the READMEs and the pictures in docs/assets/usage/.
 # `mode = "console"` is a transcript (`$ ` lines are commands, the rest is output);
-# `mode = "shell"` (the default) is a script: every line is a command and `#` starts a comment.
+# `mode = "shell"` (the default) is a script: every line is a command and `#` starts a comment;
+# `mode = "chat"` is what you type into melo's own chat: every line is one message, marked with `›`.
 # `title` and `caption` are [English, Chinese]; `svg = true` also draws the block as light and dark pictures for the READMEs.
 
 [block.install]
@@ -154,6 +155,32 @@ $ melo memory list
       from chat “I prefer short answers”, Oct 30
 $ melo memory forget 3 -y
 Forgot note 3.
+'''
+
+[block.auto-switch]
+title = ["Switch a chat to Auto", "把对话切换到“自动”"]
+mode = "chat"
+caption = ["Type it in the terminal chat; /approvals ask goes back.", "在终端对话里输入；/approvals ask 切回“询问”。"]
+text = '''
+/approvals auto
+'''
+
+[block.reminder]
+title = ["Ask for a reminder", "让 melo 提醒你"]
+mode = "chat"
+caption = ["Type it in the main chat. melo shows the date and time it understood and waits for you to tap Remind me.", "在主对话里输入。melo 会显示它理解的日期和时间，等你点“提醒我”。"]
+text = '''
+remind me to send the report on Friday at 9
+提醒我明天九点给导师发邮件
+'''
+
+[block.continue-task]
+title = ["Continue a stopped task", "继续已停止的任务"]
+mode = "chat"
+caption = ["Type it in the main chat; the words between “continue” and “task” name the task.", "在主对话里输入；“继续”和“任务”之间的词指明是哪个任务。"]
+text = '''
+continue the recovery card task
+继续恢复卡片任务
 '''
 
 [block.dev-setup]
