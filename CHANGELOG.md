@@ -80,7 +80,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   language, not by the first words of your message, when the model answers (a
   name you gave it meanwhile stays), and a task held on an approval reads `Needs your
   approval` in the Activity row (a wait for a model slot keeps `Waiting for
-  the model`). [#NN]
+  the model`). [#362]
 - Chinese, finished. Times and dates follow the page's language, not the
   computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
   `Oct 31` in English (an English computer on 24 hours keeps its clock), on
@@ -3005,3 +3005,4 @@ earlier milestones.
 [#359]: https://github.com/localmelo/localmelo/pull/359
 [#360]: https://github.com/localmelo/localmelo/pull/360
 [#361]: https://github.com/localmelo/localmelo/pull/361
+[#362]: https://github.com/localmelo/localmelo/pull/362
