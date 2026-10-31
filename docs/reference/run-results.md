@@ -28,8 +28,8 @@ Details:
 - **`failed`.** The error says which check refused the run, for example
   `Plan check failed: Prompt too large: <n> chars` or
   `Response check failed: …`. A reply with neither a tool call nor text is
-  an empty reply: localmelo asks the model to continue and plans again, and
-  the step counts. Two empty replies in a row end the run with the error
+  an empty reply (so is text with no letter or digit, such as dots only):
+  localmelo asks the model to continue and plans again, and the step counts. Two empty replies in a row end the run with the error
   `empty replies`. A reply that is only unfinished thinking (see
   [How it works](../concepts/how-it-works.md)) is stored as thinking and
   counts as an empty reply; a row that held one ends with the error

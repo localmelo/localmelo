@@ -11,10 +11,17 @@ import re
 
 from localmelo.melo.checker import redaction
 from localmelo.melo.checker._stream_redaction import LineRedactor, snapshot_rules
-from localmelo.melo.schema import ReasoningTags, split_thinking
+from localmelo.melo.schema import (
+    ReasoningTags,
+    split_leading_thinking,
+    split_thinking,
+)
 
 _TAG = re.compile(r"</?think>", re.IGNORECASE)
 _TAGS = ("<think>", "</think>")
+# What an explicit reply may begin with: a ``<think>`` or a ``<thinking>`` block.
+_OPENINGS = ("<think>", "<thinking>")
+_SPELLED_CLOSING = re.compile(r"</thinking>", re.IGNORECASE)
 
 
 def _split_for_display(text: str) -> tuple[str, str]:
@@ -25,10 +32,15 @@ def _split_for_display(text: str) -> tuple[str, str]:
     tag anywhere keeps the remainder out of content. A trailing partial tag is
     withheld from content, since its intended meaning cannot be determined.
     This is intentionally more conservative than schema.split_thinking for
-    malformed or multiple blocks.
+    malformed or multiple blocks. A closed ``<thinking>`` block that starts
+    the reply is thinking, as in schema.split_thinking.
     """
     content: list[str] = []
     thinking: list[str] = []
+    spelled = split_leading_thinking(text)
+    if spelled is not None:
+        thinking.append(spelled[0])
+        text = spelled[1]
     depth = 0
     pos = 0
     for tag in _TAG.finditer(text):
@@ -108,6 +120,7 @@ class StreamFilter:
         self._content = LineRedactor(self._snapshot)
         self._thinking: list[str] = []
         self._pending = ""
+        self._looked = 0
         self._state = {
             None: "buffer",
             "none": "content",
@@ -120,13 +133,32 @@ class StreamFilter:
         if self._state == "start":
             stripped = self._pending.lstrip()
             lower = stripped.lower()
-            if not final and (not stripped or "<think>".startswith(lower)):
+            if not final and (
+                not stripped or any(tag.startswith(lower) for tag in _OPENINGS)
+            ):
                 return ""
             if lower.startswith("<think>"):
                 self._pending = stripped[len("<think>") :]
                 self._state = "thinking"
+            elif lower.startswith("<thinking>"):
+                self._state = "block"
             else:
                 self._state = "content"
+        if self._state == "block":
+            # A spelled-out block is thinking only once it is closed: held
+            # until then, and shown as it is if the reply ends without it.
+            # Only the text since the last look is searched for the tag.
+            closed = _SPELLED_CLOSING.search(self._pending, self._looked)
+            spelled = split_leading_thinking(self._pending) if closed else None
+            if spelled is not None:
+                self._thinking.append(spelled[0])
+                self._pending = spelled[1]
+                self._state = "content"
+            elif final:
+                self._state = "content"
+            else:
+                self._looked = max(0, len(self._pending) - len("</thinking>"))
+                return ""
         if self._state == "thinking":
             close = "</think>"
             match = re.search(re.escape(close), self._pending, re.IGNORECASE)
