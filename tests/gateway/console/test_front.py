@@ -8,6 +8,7 @@ no request reaches a model server.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 from collections.abc import AsyncIterator
@@ -200,6 +201,19 @@ async def test_a_control_phrase_changes_the_task_and_undo_puts_it_back(
         assert again["line"].startswith("Started again: Slides")
         assert (await _task(console, again["task_id"])).state == "queued"
         assert llm.requests == []
+
+
+async def test_two_taps_at_once_start_one_task(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, _):
+        ask = {"echo": "ask", "text": "which laptop?", "turn_id": "t", "line": "Start?"}
+        echo = await console.front.echo(ask)
+        url = f"/api/front/echoes/{echo['id']}"
+        answers = await asyncio.gather(
+            client.post(url, json={"do": "start"}),
+            client.post(url, json={"do": "start"}),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 409]
+        assert len(await console.workers.tasks.list_tasks()) == 1
 
 
 async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -> None:
@@ -435,10 +449,12 @@ def test_front_options_and_thinking_off() -> None:
     options = front_options(make_cfg())
     assert (options.max_steps, options.attempt_policy) == (4, "none")
     assert options.builtins == frozenset({"file_read", "list_files"})
-    cfg = make_cfg()
+    cfg = _vllm()
     off = thinking_off(cfg)
-    assert off.mlc.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
-    assert cfg.mlc.extra_body == {}  # the settings themselves are not changed
+    assert off.vllm.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert cfg.vllm.extra_body == {}  # the settings themselves are not changed
+    mlc = make_cfg()
+    assert thinking_off(mlc) is mlc
     ollama = dataclasses.replace(
         make_cfg(),
         chat_backend="ollama",
@@ -449,9 +465,15 @@ def test_front_options_and_thinking_off() -> None:
     assert thinking_off(cloud) is cloud
 
 
+def _vllm() -> Config:
+    """The test settings on an OpenAI-compatible server (oMLX, vLLM)."""
+    cfg = make_cfg()
+    return dataclasses.replace(cfg, chat_backend="vllm", vllm=cfg.mlc)
+
+
 async def test_the_gateway_builds_the_front_for_the_main_chat(tmp_path: Path) -> None:
     console = Console(
-        make_cfg(),
+        _vllm(),
         port=PORT,
         options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"),

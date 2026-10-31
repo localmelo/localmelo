@@ -20,6 +20,7 @@ applies with one tap.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import dataclasses
 import logging
@@ -112,11 +113,14 @@ def front_options(settings: Config | None) -> AgentOptions:
 def thinking_off(settings: Config) -> Config:
     """*settings* whose local chat server is asked for no thinking (the front's own provider).
 
-    Only an OpenAI-compatible local server takes ``chat_template_kwargs``; a
-    cloud vendor and Ollama's native API are left as they are.
+    Only the servers that take ``chat_template_kwargs`` are asked: oMLX and
+    vLLM (``vllm``) and SGLang; MLC, Ollama and a cloud vendor are left as
+    they are.
     """
     section = getattr(settings, settings.chat_backend, None)
-    if settings.chat_backend == "ollama" or not isinstance(section, LocalBackendConfig):
+    if settings.chat_backend not in ("vllm", "sglang") or not isinstance(
+        section, LocalBackendConfig
+    ):
         return settings
     settings = copy.deepcopy(settings)
     section = getattr(settings, settings.chat_backend)
@@ -292,7 +296,7 @@ class FrontTools(BaseToolProvider):
                 "Not done: one task per message. Tell the user what else could start."
             )
         echo = await front.delegate(
-            str(objective or title), typed=turn.typed_text, title=str(title), turn=turn
+            str(objective or title), typed=front.typed(), title=str(title), turn=turn
         )
         if echo.get("echo") != "started":
             return f"Not done: {echo.get('line', '')}"
@@ -330,8 +334,7 @@ class FrontTools(BaseToolProvider):
         number = level_number(level)
         if record is None or number is None:
             return "Not done: name a task from task_list and one of Now, Today, Normal, Whenever, If idle, Later."
-        turn = front.current_turn()
-        typed = turn.typed_text if turn is not None else ""
+        typed = front.typed()
         raise_ = number < record.level
         # Words raise a task to Today at most: Now is the person's own tap.
         number = max(number, 1)
@@ -346,8 +349,7 @@ class FrontTools(BaseToolProvider):
         record = await front.record(str(task_id))
         if record is None or action not in _DONE_WORDS:
             return "Not done: name a task from task_list and stop, pause or resume."
-        turn = front.current_turn()
-        typed = turn.typed_text if turn is not None else ""
+        typed = front.typed()
         act: Action = action  # type: ignore[assignment]
         if not allows(typed, act, _ref(record)):
             await front.suggest(record, act)
@@ -385,6 +387,13 @@ class Front:
         self.tools = FrontTools(self)
         # Tasks each turn of the main chat started, by turn id.
         self.made: dict[str, int] = {}
+        # One tap on an echo at a time, so an Undo or a Start runs once.
+        self._acting = asyncio.Lock()
+
+    def typed(self) -> str:
+        """The person's own words in the running turn ("" with none)."""
+        turn = self.current_turn()
+        return (turn.typed_text or turn.user_text) if turn is not None else ""
 
     def current_turn(self) -> TurnInfo | None:
         """The main chat's running turn: the person's latest typed message."""
@@ -594,6 +603,10 @@ class Front:
 
     async def act(self, echo_id: int, do: str, level: object = None) -> dict[str, Any]:
         """The person's tap on an echo: Undo, Apply, Start as a task, or a level."""
+        async with self._acting:
+            return await self._act(echo_id, do, level)
+
+    async def _act(self, echo_id: int, do: str, level: object) -> dict[str, Any]:
         found = await self._echoes(after_id=echo_id - 1)
         echo = found[0].event.get("data") if found and found[0].id == echo_id else None
         if not isinstance(echo, dict):
