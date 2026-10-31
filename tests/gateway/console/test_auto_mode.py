@@ -296,6 +296,14 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
         assert (allowed["origin"], allowed["allowance"]) == ("user", "once")
         session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
         assert set(session["allowances"]) == {block["step_key"]}
+        # The step ran on it: the same block cannot be allowed again.
+        used = await client.post(
+            f"/api/sessions/{sid}/blocks/{block['request_id']}/allow"
+        )
+        assert (used.status_code, used.json()["error"]["code"]) == (
+            409,
+            "already_allowed",
+        )
 
         await client.post(f"/api/sessions/{sid}/turns", json={"text": "Do it again"})
         await wait_turn(client, sid)
@@ -329,6 +337,47 @@ async def test_a_step_that_changes_localmelo_itself_cannot_be_allowed(
             "not_allowable",
         )
         assert ran.codes == []
+
+
+@pytest.mark.asyncio
+async def test_an_allowance_its_turn_did_not_use_goes_and_one_waiting_refuses(
+    tmp_path: Path,
+) -> None:
+    plans = [
+        step(DELETE),
+        _answer("I left .git as it is."),
+        _answer("I will not delete it after all."),
+        step(DELETE, "call_2"),
+        _answer("Done."),
+    ]
+    async with auto_console(tmp_path, plans) as (console, client, ran, _llm):
+        sid = await create(client, tmp_path, "Tidy the notes", approvals="auto")
+        await wait_turn(client, sid)
+        [block] = await approvals(console, sid)
+        url = f"/api/sessions/{sid}/blocks/{block['request_id']}/allow"
+        assert (await client.post(url)).status_code == 202
+        await wait_turn(client, sid)
+        # The model did not try again: the allowance is gone with its turn.
+        entry = console.sessions.get(sid)
+        assert entry is not None
+        deadline = time.monotonic() + TIMEOUT_S
+        while entry.policy.auto.allowed_once(block["step_key"]):
+            assert time.monotonic() < deadline, "the allowance stayed"
+            await asyncio.sleep(0.01)
+        session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
+        assert session["allowances"] == {} and ran.codes == []
+        # One waiting refuses a second click.
+        entry.policy.auto.allow_once(block["step_key"], ["delete"], "python_exec")
+        waiting = await client.post(url)
+        assert (waiting.status_code, waiting.json()["error"]["code"]) == (
+            409,
+            "already_allowed",
+        )
+        entry.policy.auto.withdraw(block["step_key"])
+        # Allowed again, it runs.
+        assert (await client.post(url)).status_code == 202
+        await wait_turn(client, sid)
+        assert ran.codes == [DELETE]
 
 
 # ── Saved tasks keep their chat's mode ──
@@ -399,6 +448,15 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
         assert blocked["used_at"] is not None
         missing = await client.post(f"/api/tasks/{task_id}/blocks/nope/allow")
         assert missing.status_code == 404
+        # Finished, the task keeps no policy; the block that ran is not offered again.
+        assert task_id not in console.workers._auto
+        again = await client.post(
+            f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"
+        )
+        assert (again.status_code, again.json()["error"]["code"]) == (
+            409,
+            "already_allowed",
+        )
 
 
 @pytest.mark.asyncio

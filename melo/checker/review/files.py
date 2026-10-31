@@ -125,20 +125,22 @@ def _findings(ctx: Context, path: str, text: str) -> Findings:
 def _added(f: Findings, new: Findings, old: Findings, lead: str) -> None:
     """*new*'s findings that *old* lacks, in *f*, each reason after *lead*.
 
-    Findings compare by category and site (the call or command), counted:
-    a second call like one the file had already, even with the same words
-    for a reason, is added; a call moved or a file reflowed adds nothing.
+    Findings compare by category, site (the call or command, a download's
+    whole pipeline with its URL) and reason, counted: a finding is new when
+    its site or its reason is, so a second call like one the file had
+    already, or the same call pointed at another address or package, is
+    added; a call moved or a file reflowed adds nothing.
     """
 
     def said(reason: str) -> str:
         return f"{lead} {reason[:1].lower()}{reason[1:]}"
 
-    had = Counter((category, site) for category, site, _ in old.hits)
+    had = Counter(old.hits)
     for category, site, reason in new.hits:
         if category == "self":
             continue  # running it later is judged then
-        if had[(category, site)] > 0:
-            had[(category, site)] -= 1
+        if had[(category, site, reason)] > 0:
+            had[(category, site, reason)] -= 1
         elif category == "?":
             f.doubt(said(reason))
         else:

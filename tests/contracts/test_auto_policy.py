@@ -116,6 +116,16 @@ async def test_an_allowance_runs_its_step_once_until_it_runs_out() -> None:
     assert (await policy.decide(request)).allow is False
 
 
+def test_an_allowance_is_news_only_for_its_tool_and_can_be_withdrawn() -> None:
+    policy = AutoPolicy()
+    policy.allow_once("k", ["install"], "python_exec")
+    # A shell block hears nothing of a Python step's allowance.
+    assert policy.has_allowances("python_exec")
+    assert not policy.has_allowances("shell_exec")
+    assert policy.withdraw("k") and "k" not in policy.given
+    assert not policy.withdraw("k") and not policy.has_allowances()
+
+
 def test_an_allowance_counts_wall_clock_time() -> None:
     # A closed lid stops the monotonic clock on macOS, not the wall clock.
     import time

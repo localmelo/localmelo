@@ -8,7 +8,9 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass, field, replace
+from urllib.parse import urlparse
 
+from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
 # Under the home folder. Reads count too: passwords, keys and cookies. An
@@ -292,6 +294,69 @@ def where(ctx: Context, path: str, *, write: bool) -> str:
     if any(under(path, p) for p in _SYSTEM) and not under(path, "/usr/local"):
         return "system"
     return "outside"
+
+
+_LOOPBACK = re.compile(r"localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0|0")
+# What melo's gateway serves: its console API and its run API.
+_OWN_PATHS = re.compile(r"/(api|v1)(/|$)")
+# An address with a port, perhaps with a path: localhost:8401/api/x.
+_ADDRESS = re.compile(r"^(\[[0-9a-fA-F:.]+\]|[\w.-]+):\d+(/\S*)?$")
+# A request line's method in a literal sent over a socket, or a method named.
+SENDING = ("POST", "PUT", "PATCH", "DELETE")
+
+
+def loopback(host: str) -> bool:
+    """Whether *host* names this computer (``localhost``, ``127.x``, ``::1``)."""
+    return bool(_LOOPBACK.fullmatch(host.strip("[]").lower()))
+
+
+def own_port(host: str, port: object) -> bool:
+    """Whether *host* and *port* are this computer's gateway (registered port)."""
+    gateway = own_gateway.current().port
+    return gateway is not None and loopback(host) and str(port) == str(gateway)
+
+
+def own_api(text: str) -> bool:
+    """Whether the URL or address *text* reaches melo's own gateway.
+
+    That is this computer on the gateway's port, or this computer with a
+    path under ``/api/`` or ``/v1/`` on any port (a gateway this process
+    does not know of).
+    """
+    if "://" not in text and not _ADDRESS.match(text):
+        return False
+    try:
+        url = urlparse(text if "://" in text else "http://" + text)
+        port = url.port
+    except ValueError:
+        return False
+    host = url.hostname or ""
+    if not loopback(host):
+        return False
+    return own_port(host, port) or bool(_OWN_PATHS.match(url.path or ""))
+
+
+def reach_own(f: Findings, text: str) -> None:
+    """A request to melo's own gateway changes localmelo itself (it acts as you)."""
+    f.add("self", f"Sends a request to melo's own gateway ({text[:80]}).")
+
+
+def searches_cache(ctx: Context, path: str) -> bool:
+    """Whether a search from *path* goes through ``~/.cache``, where apps keep sign-ins."""
+    cache = os.path.join(ctx.home.rstrip("/"), ".cache")
+    return under(path, cache) or under(cache, path)
+
+
+def search(ctx: Context, f: Findings, raw: str, cwd: str | None = None) -> None:
+    """A search through the folder *raw* (find, grep -r, os.walk): credentials when it covers ``~/.cache``."""
+    path = resolve(ctx, raw, cwd)
+    if path is None:
+        f.doubt(f"Searches a folder melo cannot resolve: {raw}")
+    elif searches_cache(ctx, path):
+        f.add(
+            "credentials",
+            f"Searches {shown(ctx, path)}, where apps keep sign-in tokens.",
+        )
 
 
 def shown(ctx: Context, path: str) -> str:

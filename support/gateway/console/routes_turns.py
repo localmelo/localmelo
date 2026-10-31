@@ -20,7 +20,11 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.review import offers_grant
-from localmelo.support.gateway.auto_blocks import allowable, find_block, go_ahead_text
+from localmelo.support.gateway.auto_blocks import (
+    BlockError,
+    block_to_allow,
+    go_ahead_text,
+)
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -468,21 +472,25 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(409, "task_session_read_only", t("errors.taskChange"))
         if info.kind not in ("chat", "front"):
             raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
-        approval = await _store_call(
-            console, find_block(console.store, session_id, request_id), session_id
-        )
-        if approval is None:
-            raise ApiError(404, "not_found", t("errors.blockNotFound"))
-        allowed = allowable(approval)
-        if allowed is None:
-            raise ApiError(409, "not_allowable", t("errors.blockNotAllowable"))
-        key, categories = allowed
-        text = _check_text(console, go_ahead_text(categories), session_id)
-        turn, until = await _sessions_call(
-            console,
-            console.sessions.allow_once(session_id, key, categories, text),
-            session_id,
-        )
+        try:
+            key, categories, tool = await _store_call(
+                console,
+                block_to_allow(
+                    console.store,
+                    session_id,
+                    request_id,
+                    lambda key: console.sessions.allowance_live(session_id, key),
+                ),
+                session_id,
+            )
+            text = _check_text(console, go_ahead_text(categories), session_id)
+            turn, until = await _sessions_call(
+                console,
+                console.sessions.allow_once(session_id, key, categories, text, tool),
+                session_id,
+            )
+        except BlockError as exc:
+            raise ApiError(exc.status, exc.code, exc.message) from exc
         return JSONResponse(
             status_code=202,
             content={"step_key": key, "until": until, **_turn_body(turn, None)},

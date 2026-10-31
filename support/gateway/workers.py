@@ -36,10 +36,8 @@ from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_searc
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.auto_blocks import (
-    BlockError,
-    allowable,
+    block_to_allow,
     blocked_steps,
-    find_block,
     go_ahead_text,
 )
 from localmelo.support.gateway.chat_gate import (
@@ -622,20 +620,26 @@ class TaskWorkers:
         The block is found in the task's records; the allowance is kept in
         the task's :class:`AutoPolicy`, and the message goes as the person's
         (:meth:`message`): queued for a running task, or continuing a
-        finished one. :class:`BlockError` for an unknown block or one that
-        cannot be allowed.
+        finished one. :class:`BlockError` for an unknown block, one that
+        cannot be allowed, or one allowed already (it ran on its allowance,
+        or one waits). The task's policy goes when it finishes, and with it
+        an allowance it did not use.
         """
         await self.tasks.get_task(task_id)
-        approval = await find_block(self.store, task_id, request_id)
-        if approval is None:
-            raise BlockError("not_found")
-        allowed = allowable(approval)
-        if allowed is None:
-            raise BlockError("not_allowable")
-        key, categories = allowed
+        held = self._auto.get(task_id)
+        key, categories, tool = await block_to_allow(
+            self.store,
+            task_id,
+            request_id,
+            lambda key: held is not None and held.allowed_once(key),
+        )
         policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
-        policy.allow_once(key, categories)
-        return await self.message(task_id, go_ahead_text(categories))
+        policy.allow_once(key, categories, tool)
+        try:
+            return await self.message(task_id, go_ahead_text(categories))
+        except BaseException:
+            policy.withdraw(key)
+            raise
 
     async def _continue(
         self, current: TaskRecord, text: str, *, level: int | None, reason: str
@@ -2137,6 +2141,9 @@ class TaskWorkers:
                         and task_id not in self._invalid_workspace
                     ):
                         unread = inbox.drain()
+                    if not unread:
+                        # Finished: its allowances go, used or not (#339).
+                        self._auto.pop(task_id, None)
                     try:
                         if (
                             task_id not in self._invalid_workspace

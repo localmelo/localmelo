@@ -325,6 +325,7 @@
   "errors.blankMessage": "text: the message must not be blank",
   "errors.blankTask": "Say what the task should do.",
   "errors.blobNotFound": "Blob not found.",
+  "errors.blockAllowedAlready": "This step was allowed already.",
   "errors.blockNotAllowable": "This step cannot be allowed.",
   "errors.blockNotFound": "No blocked step has this id here.",
   "errors.defaultWorkspace": "Could not create the default workspace {path}: {problem}",

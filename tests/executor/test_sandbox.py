@@ -14,6 +14,7 @@ import contextlib
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from localmelo.melo.contracts import own_gateway
+from localmelo.melo.contracts.own_gateway import OwnGateway
 from localmelo.melo.executor import sandbox
 from localmelo.melo.executor.builtins import ToolFunction, rooted_builtins
 from localmelo.melo.executor.env import child_env
@@ -489,3 +492,98 @@ class TestReal:
                 for left in pid_file.read_text().split():
                     with contextlib.suppress(OSError):
                         os.kill(int(left), signal.SIGKILL)
+
+
+# ── Auto mode closes melo's own gateway (#339) ──
+
+
+def test_the_auto_profile_closes_the_gateway_s_files_and_port() -> None:
+    guard = OwnGateway(port=8401, files=("/h/.cache/localmelo/gateway/auth",))
+    text = profile(["/ws"], guard)
+    # The denials come after the folders allowed, so they win.
+    assert text.index("(allow file-write*") < text.index("(deny file-read* file-write*")
+    assert '(subpath "/h/.cache/localmelo/gateway/auth")' in text
+    assert text.endswith('(deny network-outbound (remote ip "localhost:8401"))\n')
+    assert "network" not in profile(["/ws"], OwnGateway(port=None, files=()))
+    assert "file-read" not in profile(["/ws"])
+
+
+def test_the_default_guard_covers_the_sign_in_and_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    found = own_gateway.current()
+    base = os.path.realpath(tmp_path / ".cache/localmelo/gateway")
+    assert {f"{base}/auth", f"{base}/sessions.db", f"{base}/sessions.db-wal"} <= set(
+        found.files
+    )
+    own_gateway.register(8471, [str(tmp_path / "other.db")])
+    try:
+        found = own_gateway.current()
+        assert found.port == 8471
+        assert os.path.realpath(tmp_path / "other.db-shm") in found.files
+    finally:
+        own_gateway.unregister(8471)
+    assert own_gateway.current().port is None
+
+
+def _listening() -> tuple[socket.socket, int]:
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(4)
+    port = server.getsockname()[1]
+    if 8400 <= port <= 8799 or port in (8955, 11434, 11500):
+        server.close()
+        pytest.skip("the system picked a port the benchmark keeps")
+    return server, port
+
+
+@pytest.mark.usefixtures("no_user_temp")
+class TestRealGuard:
+    async def test_an_auto_call_cannot_find_the_token_nor_reach_the_gateway(
+        self, ws: Path, home: Path
+    ) -> None:
+        auth = home / ".cache/localmelo/gateway/auth"
+        auth.mkdir(parents=True)
+        (auth / "token").write_text("secret")
+        (home / ".cache/other.txt").write_text("fine")
+        gateway, gateway_port = _listening()
+        other, other_port = _listening()
+        if sys.platform != "darwin":
+            pytest.skip("writes are confined only on macOS")
+        try:
+            guard = OwnGateway(port=gateway_port, files=(str(auth.resolve()),))
+            try:
+                c = confine(str(ws), child_env({"HOME": str(home)}), guard=guard)
+            except ConfinementError as exc:
+                pytest.skip(str(exc))
+            assert c is not None
+            tools = rooted_builtins(
+                str(ws), tool_env={"HOME": str(home)}, confinement=c
+            )
+            shell, python = tools["shell_exec"][0], tools["python_exec"][0]
+            found = await shell(
+                "find ~/.cache -name token -exec cat {} \\; ; cat ~/.cache/other.txt"
+            )
+            assert "secret" not in found and "fine" in found
+            assert "may not read or change melo's own sign-in" in found
+            code = (
+                "import glob, os, socket\n"
+                "print([n for r, d, f in os.walk(os.path.expanduser('~/.cache')) for n in f])\n"
+                "print(glob.glob(os.path.expanduser('~/.cache/*/gateway/auth/*')))\n"
+                f"socket.create_connection(('127.0.0.1', {other_port}), 2).close()\n"
+                "print('other port ok')\n"
+                f"socket.create_connection(('127.0.0.1', {gateway_port}), 2)\n"
+            )
+            with pytest.raises(RuntimeError) as failed:
+                await python(code)
+            said = str(failed.value)
+            assert "['other.txt']" in said and "\n[]\n" in said
+            assert "other port ok" in said and "PermissionError" in said
+            sent = await shell(
+                f"curl -s -m 2 -X POST http://127.0.0.1:{gateway_port}/api/x; echo rc=$?"
+            )
+            assert "rc=7" in sent  # curl: could not connect
+        finally:
+            gateway.close()
+            other.close()

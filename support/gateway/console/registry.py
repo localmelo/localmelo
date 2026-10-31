@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
+from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import DEFAULT_WORKSPACE
@@ -216,6 +217,8 @@ class ConsoleSessions:
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
+        # Each Allow once's watch: it drops the allowance its turn left unused.
+        self._allowance_watches: set[asyncio.Task[None]] = set()
         # One lock per client_request_id while a keyed create runs, so a
         # retried create makes one session.
         self._create_locks: dict[str, asyncio.Lock] = {}
@@ -627,25 +630,54 @@ class ConsoleSessions:
         entry = self._sessions.get(session_id)
         return {} if entry is None else dict(entry.policy.auto.given)
 
+    def allowance_live(self, session_id: str, key: str) -> bool:
+        """Whether the step *key* has an allowance in this chat not used or run out yet."""
+        entry = self._sessions.get(session_id)
+        return entry is not None and entry.policy.auto.allowed_once(key)
+
     async def allow_once(
-        self, session_id: str, key: str, categories: list[str], text: str
+        self,
+        session_id: str,
+        key: str,
+        categories: list[str],
+        text: str,
+        tool: str = "",
     ) -> tuple[TurnInfo, float]:
         """Allow the step *key* once (Auto, #339) and send *text* as the person's message.
 
         409 ``session_busy`` while a turn runs, so the allowance and the
         message go together; the message starts the turn that retries it.
-        Returns the turn and when the allowance runs out.
+        :class:`BlockError` ``already_allowed`` while an allowance of *key*
+        waits. When the turn ends without using the allowance, it is
+        dropped. Returns the turn and when the allowance runs out.
         """
         async with self.lock(session_id):
             entry = await self.open(session_id)
             if entry.runner.busy:
                 raise ApiError(409, "session_busy", t("errors.turnRunning"))
+            auto = entry.policy.auto
+            if auto.allowed_once(key):
+                raise BlockError("already_allowed")
             entry.resumed = None
-            entry.policy.auto.allow_once(key, categories)
+            auto.allow_once(key, categories, tool)
+            until = auto.given[key]
             self._note_turn_start(session_id)
-            turn = await entry.runner.start_turn(text, approval=entry.policy)
+            try:
+                turn = await entry.runner.start_turn(text, approval=entry.policy)
+            except BaseException:
+                auto.withdraw(key)
+                raise
             entry.last_used = self._clock()
-            return turn, entry.policy.auto.given[key]
+            watch = asyncio.create_task(self._drop_unused(entry, key))
+            self._allowance_watches.add(watch)
+            watch.add_done_callback(self._allowance_watches.discard)
+            return turn, until
+
+    async def _drop_unused(self, entry: OpenSession, key: str) -> None:
+        """When the turn Allow once started ends, drop its allowance if unused."""
+        with contextlib.suppress(Exception):
+            await entry.runner.wait()
+        entry.policy.auto.withdraw(key)
 
     def _settings_model(self) -> str:
         """The chat model the settings name, as ``session.model`` records it."""
@@ -1209,6 +1241,8 @@ class ConsoleSessions:
     async def close_all(self) -> None:
         """Stop every turn and close every Agent within the shutdown budget."""
         self._closed = True
+        for watch in list(self._allowance_watches):
+            watch.cancel()
         entries = list(self._sessions.values())
         deadline = max(CLOSE_ALL_TIMEOUT_S - EXIT_SAVE_RESERVE_S, 0.1)
         for entry in entries:

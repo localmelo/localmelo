@@ -102,6 +102,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
+    ALLOWED_ONCE,
     STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
@@ -1678,10 +1679,18 @@ class _ApprovalGate:
             )
             self._record(asking, origin="error", reason=_exception_text(no_decision))
             raise no_decision
-        if self._mode == "auto" and decided.allow and decided.origin == "user":
-            self._allowance = True  # nobody is asked in auto mode: an allowance
+        # Who decided, not the mode the call began in: a chat may switch
+        # while the call is reviewed.
+        allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
+        if decided.origin == "auto" or allowance:
+            self._mode = "auto"
+            auto = find_auto(self._policy) or auto
+        elif self._mode == "auto":
+            self._mode = "ask"
+        self._allowance = decided.allow and allowance
         if decided.allow and self._confinement is not None:
-            # The mode may have changed since the call began: it decides.
+            # A call auto mode let run starts confined; one a person allowed
+            # does not.
             self._confinement.on = self._mode == "auto"
             if self._confinement.on:
                 await asyncio.to_thread(self._confinement.ready)
@@ -1703,7 +1712,7 @@ class _ApprovalGate:
     ) -> str:
         """Keep an auto-mode block and return the note the model reads."""
         task = auto is not None and auto.task
-        changed = auto is not None and auto.has_allowances()
+        changed = auto is not None and auto.has_allowances(asking.tool_name)
         if self._reviewer is None:
             return block_note(self.review, words=words, task=task, changed=changed)
         return self._reviewer.blocked(
@@ -1959,14 +1968,14 @@ class Agent:
         if self.options.confine_writes:
             env = child_env(self.options.tool_env)
             self._confinement = confine(folder, env)
-        # Without confinement of its own, the calls auto mode decides are
-        # confined still (#339): nobody approves them.
-        self._auto_confinement: AutoConfinement | None = None
-        if not self.options.confine_writes:
-            tool_env = self.options.tool_env
-            self._auto_confinement = AutoConfinement(
-                folder, lambda: child_env(tool_env)
-            )
+        # The calls auto mode decides run under a profile of their own
+        # (#339): nobody approves them, so it confines their writes even
+        # without confine_writes and closes melo's own gateway to them. The
+        # other calls start under the Agent's confinement, as before.
+        tool_env = self.options.tool_env
+        self._auto_confinement = AutoConfinement(
+            folder, lambda: child_env(tool_env), base=self._confinement
+        )
         self._tool_providers: tuple[BaseToolProvider, ...] = tuple(tool_providers)
         # Tool setup (_ensure_tools) runs once, under this lock. It ends
         # either ready or failed; a failure is kept as its error text.
@@ -2188,7 +2197,7 @@ class Agent:
             harness_only=(
                 {"shell_exec"} if self.options.brief_check is not None else ()
             ),
-            confinement=self._confinement or self._auto_confinement,
+            confinement=self._auto_confinement,
         )
         # The names of the built-ins registered above (see list_tools), and
         # R5's recall tool when its trigger is on. It is not a builtin_names()

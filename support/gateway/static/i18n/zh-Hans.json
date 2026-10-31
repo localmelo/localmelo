@@ -310,6 +310,7 @@
   "errors.blankMessage": "text：消息不能为空",
   "errors.blankTask": "请说明这个任务要做什么。",
   "errors.blobNotFound": "找不到这个数据块。",
+  "errors.blockAllowedAlready": "这一步已经允许过了。",
   "errors.blockNotAllowable": "这一步不能被允许。",
   "errors.blockNotFound": "这里没有这个被拦下的步骤。",
   "errors.defaultWorkspace": "无法创建默认工作区 {path}：{problem}",

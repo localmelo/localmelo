@@ -13,11 +13,13 @@ import os
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import (
+    ALLOWED_EXACTLY,
     STOPPED_NOTE,
     ApprovalDecision,
     ApprovalRequest,
@@ -188,7 +190,9 @@ async def test_only_a_call_auto_decides_is_confined(tmp_path: Path) -> None:
     assert seen == [False, True]
 
 
-def test_an_agent_that_confines_its_runs_has_no_second_switch(tmp_path: Path) -> None:
+def test_an_agent_that_confines_its_runs_closes_the_gateway_to_auto_calls_only(
+    tmp_path: Path,
+) -> None:
     if sys.platform != "darwin":
         pytest.skip("writes are confined on macOS")
     (tmp_path / "ws").mkdir()
@@ -196,7 +200,52 @@ def test_an_agent_that_confines_its_runs_has_no_second_switch(tmp_path: Path) ->
         llm=FakeModel([]),
         options=AgentOptions(workspace_root=str(tmp_path / "ws"), confine_writes=True),
     )
-    assert agent._auto_confinement is None
+    switch = agent._auto_confinement
+    assert switch.base is agent._confinement is not None
+    # An Ask call starts under the Agent's own profile, which reads anything.
+    asked = switch.argv(["true"])
+    assert asked[:2] == ["/usr/bin/sandbox-exec", "-p"] and "file-read" not in asked[2]
+    switch.on = True
+    switch.ready()
+    decided = switch.argv(["true"])
+    assert "(deny file-read* file-write*" in decided[2]
+    assert "gateway/auth" in decided[2]
+
+
+@pytest.mark.asyncio
+async def test_a_switch_to_auto_during_the_review_confines_the_call_auto_decides(
+    tmp_path: Path,
+) -> None:
+    seen: list[bool] = []
+    agent, _ = _agent(FakeModel(_plans_of(ROUTINE)), tmp_path / "ws")
+    switch = agent._auto_confinement
+
+    async def python_exec(code: str) -> str:
+        seen.append(switch.on)
+        return "ok"
+
+    agent.executor.register("python_exec", python_exec, requires_approval=True)
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        raise AssertionError("an Auto decision asks nobody")
+
+    policy = ChatPolicy(ask)
+    reviewer = agent._reviewer
+    assert reviewer is not None
+    review = reviewer.review
+
+    async def slow_review(*args: Any, **kwargs: Any) -> Any:
+        # The person picks Auto while the call is reviewed.
+        policy.mode = "auto"
+        return await review(*args, **kwargs)
+
+    reviewer.review = slow_review  # type: ignore[method-assign]
+    recorder = Recorder()
+    await agent.run_task("list the files", on_event=recorder, approval=policy)
+
+    assert seen == [True]
+    [approval] = _approvals(recorder)
+    assert (approval["origin"], approval.get("mode")) == ("auto", "auto")
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writes are confined on macOS")
@@ -246,3 +295,27 @@ async def test_an_auto_call_cannot_write_outside_its_folder_even_unreviewed(
         target.unlink(missing_ok=True)
         if outside.exists() and not any(outside.iterdir()):
             os.rmdir(outside)
+
+
+# ── "The user allowed one exact step" only for a block of that tool ──
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "told"), [("python_exec", True), ("shell_exec", False)]
+)
+async def test_a_block_hears_of_an_allowance_only_for_its_own_tool(
+    tmp_path: Path, tool: str, told: bool
+) -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        raise AssertionError("auto mode asks nobody")
+
+    policy = ChatPolicy(ask, "auto")
+    policy.auto.allow_once("another-step", ["delete"], tool)
+    llm = FakeModel(_plans_of(DELETE))
+    agent, fake = _agent(llm, tmp_path / "ws")
+
+    await agent.run_task("tidy the notes", approval=policy)
+
+    [note] = llm.tool_messages()
+    assert fake.ran == [] and (ALLOWED_EXACTLY.strip() in note) is told

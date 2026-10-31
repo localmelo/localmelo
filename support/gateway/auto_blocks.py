@@ -5,11 +5,13 @@ its ``approval`` has origin ``auto``, ``allowed`` false, the call's
 ``review`` and its ``step_key``. Allow once finds the block by the
 approval's ``request_id`` in that session's records (a client never sends a
 key), allows that key once in the session's :class:`AutoPolicy`, and sends
-the person's message that asks melo to go ahead.
+the person's message that asks melo to go ahead. A block whose step ran on
+an allowance, or has one waiting, is not allowed again.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from localmelo.melo.contracts.review import TITLES
@@ -18,11 +20,25 @@ from localmelo.support.sessions.store import SessionStore
 
 
 class BlockError(LookupError):
-    """No block to allow: *code* is ``not_found`` or ``not_allowable``."""
+    """No block to allow: *code* is ``not_found``, ``not_allowable`` or ``already_allowed``."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+    @property
+    def status(self) -> int:
+        """The HTTP status the API answers with."""
+        return 404 if self.code == "not_found" else 409
+
+    @property
+    def message(self) -> str:
+        """What the API says, in the console's language."""
+        if self.code == "not_found":
+            return t("errors.blockNotFound")
+        if self.code == "already_allowed":
+            return t("errors.blockAllowedAlready")
+        return t("errors.blockNotAllowable")
 
 
 def _approval(event: dict[str, Any]) -> dict[str, Any]:
@@ -57,18 +73,48 @@ def allowable(approval: dict[str, Any]) -> tuple[str, list[str]] | None:
     return key, categories
 
 
-async def find_block(
-    store: SessionStore, session_id: str, request_id: str
-) -> dict[str, Any] | None:
-    """The approval of the block *request_id* in *session_id*, or ``None``."""
+async def block_to_allow(
+    store: SessionStore,
+    session_id: str,
+    request_id: str,
+    live: Callable[[str], bool] = lambda key: False,
+) -> tuple[str, list[str], str]:
+    """The step key, categories and tool of the block *request_id* Allow once may run.
+
+    :class:`BlockError` ``not_found`` for no such block in *session_id*,
+    ``not_allowable`` for one that can never be allowed (:func:`allowable`),
+    and ``already_allowed`` once the step ran on an allowance after it, or
+    while *live* says its key has one not used yet.
+    """
+    found = None
     for stored in reversed(await store.auto_records(session_id, limit=200)):
         approval = _approval(stored.event)
         if (
             approval.get("request_id") == request_id
             and approval.get("allowed") is False
         ):
-            return approval
-    return None
+            found = stored
+            break
+    if found is None:
+        raise BlockError("not_found")
+    approval = _approval(found.event)
+    allowed = allowable(approval)
+    if allowed is None:
+        raise BlockError("not_allowable")
+    key, categories = allowed
+    block = next(
+        (
+            b
+            for b in await blocked_steps(store, session_id)
+            if b["request_id"] == request_id
+        ),
+        None,
+    )
+    if live(key) or (block is not None and block["used_at"] is not None):
+        raise BlockError("already_allowed")
+    raw = found.event.get("data")
+    tool = str(raw.get("name") or "") if isinstance(raw, dict) else ""
+    return key, categories, tool
 
 
 def step_words(categories: list[str]) -> str:

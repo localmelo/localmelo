@@ -203,6 +203,8 @@ def find_auto(policy: object) -> AutoPolicy | None:
 
 # How long an "Allow once" of a blocked step stays good, in seconds.
 ALLOW_ONCE_S: Final = 30 * 60
+# The reason of the decision that runs a step on its allowance.
+ALLOWED_ONCE: Final = "allowed once"
 
 
 class AutoPolicy:
@@ -230,21 +232,33 @@ class AutoPolicy:
         # A saved task's policy: a blocked step is offered on the task's page.
         self.task = task
         self._clock = clock
-        self._allowed: dict[str, tuple[float, frozenset[str]]] = {}
+        # key -> (until, categories, tool) of each allowance not used yet.
+        self._allowed: dict[str, tuple[float, frozenset[str], str]] = {}
         self.given: dict[str, float] = {}
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         return "auto"
 
-    def allow_once(self, key: str, categories: Iterable[str]) -> None:
+    def allow_once(self, key: str, categories: Iterable[str], tool: str = "") -> None:
         """Allow the step *key* once, for the next :data:`ALLOW_ONCE_S` seconds.
 
         *categories* are those of the blocked step the user saw: a run of
-        it whose review finds any other is not allowed by this.
+        it whose review finds any other is not allowed by this. *tool* is
+        the step's tool, so only a block of that tool hears of it.
         """
         until = self._clock() + ALLOW_ONCE_S
-        self._allowed[key] = (until, frozenset(categories))
+        self._allowed[key] = (until, frozenset(categories), tool)
         self.given[key] = until
+
+    def withdraw(self, key: str) -> bool:
+        """Drop the allowance of *key* when it was not used; whether there was one.
+
+        Its :attr:`given` entry goes too, so the step can be allowed again.
+        """
+        if self._allowed.pop(key, None) is None:
+            return False
+        self.given.pop(key, None)
+        return True
 
     def allowed_once(self, key: str) -> bool:
         """Whether *key* has an allowance that has not run out (it is not used)."""
@@ -254,9 +268,13 @@ class AutoPolicy:
             return False
         return kept is not None
 
-    def has_allowances(self) -> bool:
-        """Whether any step is allowed once and not used or run out yet."""
-        return any(self.allowed_once(key) for key in list(self._allowed))
+    def has_allowances(self, tool: str | None = None) -> bool:
+        """Whether a step (of *tool*, when given) is allowed once and not used or run out."""
+        return any(
+            self.allowed_once(key)
+            for key, kept in list(self._allowed.items())
+            if tool is None or kept[2] in ("", tool)
+        )
 
     def forget(self) -> None:
         """Drop every allowance."""
@@ -277,7 +295,7 @@ class AutoPolicy:
             and set(review.categories) <= self._allowed[key][1]
         ):
             del self._allowed[key]
-            return ApprovalDecision(True, "allowed once", origin="user")
+            return ApprovalDecision(True, ALLOWED_ONCE, origin="user")
         if review is None:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":

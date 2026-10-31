@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from pydantic import StrictFloat, StrictInt, StrictStr
 
 from localmelo.support.gateway.auto_blocks import BlockError
-from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.resume_evidence import (
     ConfirmationRequiredError,
     RecoveryUnknownError,
@@ -168,9 +167,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 console, console.workers.allow_once(task_id, request_id)
             )
         except BlockError as exc:
-            if exc.code == "not_found":
-                raise ApiError(404, "not_found", t("errors.blockNotFound")) from exc
-            raise ApiError(409, "not_allowable", t("errors.blockNotAllowable")) from exc
+            raise ApiError(exc.status, exc.code, exc.message) from exc
         return JSONResponse(
             status_code=202,
             content={"task": _approvals(console, task), "message": outcome},

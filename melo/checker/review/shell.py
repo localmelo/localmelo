@@ -11,15 +11,33 @@ from urllib.parse import urlparse
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
+    SENDING,
     Context,
     Findings,
+    loopback,
+    own_api,
+    own_port,
+    reach_own,
     resolve,
+    search,
     shown,
     touch,
     where,
 )
 
 MAX_DEPTH = 3
+# Programs that reach a server, and HTTPie's names (method first: http POST url).
+_HTTPIE = set(["http", "https", "xh", "xhs"])
+_NETWORK = (
+    set(["curl", "wget", "nc", "ncat", "netcat", "telnet", "socat", "websocat"])
+    | _HTTPIE
+)
+# Searches that walk folders on their own, and the options of searches that take a value.
+_RECURSIVE = set(["rg", "ag", "ack", "fd", "fdfind"])
+_SEARCH_VALUED = set(
+    ["-e", "-f", "--regexp", "--file", "--include", "--exclude", "--exclude-dir"]
+    + ["-A", "-B", "-C", "-m", "--max-count", "-g", "--glob", "-t", "--type", "-T"]
+)
 _OPS = re.compile(r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]")
 _SEPARATORS = set([";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;"]) | {
     "\n"
@@ -216,9 +234,15 @@ def _review_shell(ctx: Context, f: Findings, command: str) -> None:
         return f.doubt("Has a quote that does not close.")
     cwd, before, url, bare_before = ctx.root, "", "", False
     said: str | None = None  # what the last command printed, when literal
+    # The last command's site, and the folders it searched when it was a find.
+    last_site, searched = "", list[str]()
     for op, argv, redirs in segments:
         # A finding's site: the command as its words (see Findings.hits).
         f.site = "sh:" + " ".join([op, *argv, *(k + t for k, t in redirs)])[:300]
+        if op in ("|", "|&"):
+            # What a search printed goes on to another command: it reads it.
+            for root in searched:
+                search(ctx, f, root, cwd)
         body, writes = None, []
         for kind, target in redirs:
             if kind in _WRITES and not target.isdigit():
@@ -255,9 +279,14 @@ def _review_shell(ctx: Context, f: Findings, command: str) -> None:
             or (op == "<(" and bare_before and prog in ("curl", "wget"))
         ):
             host = urlparse(url or (links + [""])[0]).netloc or "the internet"
+            # The site is the whole pipeline, its URL with it: a new address
+            # in an edit is a new finding.
+            site = f.site
+            f.site = f"{last_site} {site}"[:600]
             f.add("remote_code", f"Runs code downloaded from {host}.")
             if "get-pip" in url + " ".join(links):
                 f.add("install", "Installs pip with get-pip.py.")
+            f.site = site
         elif bare and op in ("|", "|&") and before == "decode":
             f.add("opaque", "Runs encoded text as code.")
         elif bare and op in ("|", "|&"):
@@ -269,6 +298,8 @@ def _review_shell(ctx: Context, f: Findings, command: str) -> None:
         fetch = prog in ("curl", "wget") and not _output(argv)[0]
         before = "fetch" if fetch else "decode" if decode else ""
         url, bare_before = (links + [""])[0], bare
+        last_site = f.site
+        searched = _find_roots(argv[1:]) if prog == "find" else []
 
 
 def _unwrap(f: Findings, argv: list[str]) -> list[str]:
@@ -296,6 +327,35 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
         # xargs adds arguments melo cannot see.
         argv = rest[i:] + (["$value"] if prog == "xargs" and rest[i:] else [])
     return argv
+
+
+def _find_roots(args: list[str]) -> list[str]:
+    """The folders a ``find`` with *args* searches."""
+    end = next((i for i, a in enumerate(args) if a[:1] in "-(!"), len(args))
+    return args[:end] or ["."]
+
+
+def _method(argv: list[str]) -> str:
+    """The method a ``curl``, ``wget`` or HTTPie command names, upper case, else ``""``.
+
+    ``curl -X POST``, ``-XPOST``, ``--request POST``, ``--request=POST``,
+    ``curl --json`` (a POST), ``wget --method=POST`` and ``http POST url``.
+    """
+    prog, args = os.path.basename(argv[0]), argv[1:]
+    for i, arg in enumerate(args):
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if arg in ("-X", "--request", "--method"):
+            return nxt.upper()
+        if arg.startswith(("--request=", "--method=")):
+            return arg.split("=", 1)[1].upper()
+        if prog == "curl" and re.fullmatch(r"-X\w+", arg):
+            return arg[2:].upper()
+        if prog == "curl" and arg in ("--json", "--json-data"):
+            return "POST"
+    words = [a for a in args if not a.startswith("-")]
+    if prog in _HTTPIE and words and words[0].upper() in (*SENDING, "GET", "HEAD"):
+        return words[0].upper()
+    return ""
 
 
 def _output(argv: list[str]) -> tuple[str, bool]:
@@ -349,19 +409,33 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
     elif prog in ("curl", "wget"):
         target, sends = _output(argv)
         host = urlparse(([a for a in args if "://" in a] + [""])[0])
-        if sends:
+        method = _method(argv)
+        if method in SENDING:
+            f.add(
+                "send_out",
+                f"Sends a {method} request to {host.netloc or 'a server'}.",
+            )
+        elif sends:
             f.doubt(f"Sends data to {host.netloc or 'a server'}.")
         if target:
             download(ctx, f, host.geturl(), target, cwd)
+    elif prog in _HTTPIE and _method(argv) in SENDING:
+        host = urlparse(([a for a in args if "://" in a] + [""])[0])
+        f.add(
+            "send_out",
+            f"Sends a {_method(argv)} request to {host.netloc or 'a server'}.",
+        )
     elif prog in ("rm", "rmdir", "unlink", "trash"):
         for arg in words:
             touch(ctx, f, arg, "delete", cwd)
     elif prog == "find":
-        end = next((i for i, a in enumerate(args) if a[:1] in "-(!"), len(args))
-        roots = args[:end] or ["."]
+        roots = _find_roots(args)
         if "-delete" in args:
             for root in roots:
                 touch(ctx, f, root, "delete", cwd)
+        if {"-exec", "-execdir", "-ok", "-okdir"} & set(args):
+            for root in roots:
+                search(ctx, f, root, cwd)
         for flag in {"-exec", "-execdir", "-ok"} & set(args):
             rest = args[args.index(flag) + 1 :]
             rest = rest[: next((i for i, a in enumerate(rest) if a in ";+"), len(rest))]
@@ -397,10 +471,55 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
         path = resolve(ctx, argv[0], cwd)
         if path and where(ctx, path, write=False) == "inside":
             script(ctx, f, argv[0], "", cwd)
+    if prog in _RECURSIVE or prog in ("grep", "egrep", "fgrep") and _recursive(args):
+        for arg in _searched(args):
+            search(ctx, f, arg, cwd)
+    if prog in _NETWORK:
+        _reaches(f, args)
     if _runs_project(prog, words):
         file_rules.runner(ctx, f, prog)
     if prog == "git" and set(plain[:1]) & _HOOKED:
         file_rules.hooks(ctx, f, f"git {plain[0]}")
+
+
+def _searched(args: list[str]) -> list[str]:
+    """The folders a ``grep -r``, ``rg`` and the like search: its words after the pattern.
+
+    The values of options (``--include x``) are not folders; the pattern is
+    the first word unless ``-e`` or ``-f`` gave it.
+    """
+    out, skip, given = [], False, False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in _SEARCH_VALUED:
+            skip = True
+            given = given or arg in ("-e", "-f", "--regexp", "--file")
+        elif arg.startswith("-"):
+            given = given or arg.startswith(("--regexp=", "--file="))
+        else:
+            out.append(arg)
+    return out if given else out[1:]
+
+
+def _recursive(args: list[str]) -> bool:
+    """Whether ``grep`` *args* search folders: ``-r``, ``-R``, ``--recursive``."""
+    return any(
+        a in ("--recursive", "--dereference-recursive")
+        or re.fullmatch(r"-[A-Za-z]*[rR][A-Za-z]*", a)
+        for a in args
+    )
+
+
+def _reaches(f: Findings, args: list[str]) -> None:
+    """A request to melo's own gateway: a URL or ``host:port`` to it, or ``nc host port``."""
+    words = [a for a in args if not a.startswith("-") or "://" in a]
+    for i, word in enumerate(words):
+        if own_api(word):
+            return reach_own(f, word)
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if loopback(word) and own_port(word, nxt):
+            return reach_own(f, f"{word} {nxt}")
 
 
 def _runs_project(prog: str, words: list[str]) -> bool:

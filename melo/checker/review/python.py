@@ -6,6 +6,7 @@ import ast
 import base64
 import dataclasses
 import os
+import re
 import shlex
 from collections import Counter
 from itertools import product
@@ -14,14 +15,19 @@ from typing import Any
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import shell
 from localmelo.melo.checker.review.paths import (
+    SENDING,
     Context,
     Findings,
+    own_port,
+    reach_own,
     resolve,
+    search,
     secret_name,
     shown,
     touch,
     under,
 )
+from localmelo.melo.checker.review.paths import own_api as shell_own_api
 
 _RUNS = set(
     [
@@ -38,6 +44,8 @@ _SHELL_RUNS = set(
     ["system", "popen", "getoutput", "getstatusoutput", "create_subprocess_shell"]
 )
 _SPAWNS = ("os.exec", "os.spawn", "os.posix_spawn", "asyncio.create_subprocess")
+# An HTTP request line written to a socket: b'POST /path HTTP/1.1…'.
+_REQUEST_LINE = re.compile(r"^b?['\"]?([A-Z]+) ")
 _PATH_OPS = {
     **dict.fromkeys(
         ["write_text", "write_bytes", "touch", "symlink_to", "hardlink_to"], "write"
@@ -795,6 +803,83 @@ class _Review:
             for url in self.fold(first):
                 if "://" in str(url) and shell.LARGE.search(str(url).split("?")[0]):
                     shell.download(ctx, f, url, url.rsplit("/", 1)[-1], ctx.root)
+        self.network(node, name, attr, kw, first, base if method else None)
+
+    def network(
+        self,
+        node: ast.Call,
+        name: str,
+        attr: str,
+        kw: dict[str, Any],
+        first: ast.expr | None,
+        base: ast.expr | None,
+    ) -> None:
+        """Searches through ``~/.cache``, requests to melo's own gateway, and requests that send."""
+        ctx, f = self.ctx, self.f
+        if name in ("os.walk", "os.fwalk") or attr == "rglob" and base is not None:
+            roots = self.fold(base if attr == "rglob" else first)
+            if not any(isinstance(r, str) for r in roots):
+                f.doubt("Searches a folder melo could not name.")
+            for root in (r for r in roots if isinstance(r, str)):
+                search(ctx, f, root)
+        elif name in ("glob.glob", "glob.iglob") or attr == "glob" and base is not None:
+            parent = (
+                [""]
+                if attr != "glob" or base is None or name.startswith("glob.")
+                else self.fold(base)
+            )
+            for folder, pattern in product(parent, self.fold(first)):
+                if not isinstance(folder, str) or not isinstance(pattern, str):
+                    f.doubt("Searches a folder melo could not name.")
+                    continue
+                self.globbed(f"{folder}/{pattern}" if folder else pattern)
+        values = [*node.args, *kw.values()]
+        for value in (v for a in values for v in self.fold(a)):
+            if isinstance(value, str) and shell_own_api(value):
+                return reach_own(f, value)
+            if (
+                isinstance(value, tuple)
+                and len(value) > 1
+                and own_port(str(value[0]), value[1])
+            ):
+                return reach_own(f, f"{value[0]}:{value[1]}")
+        if len(node.args) > 1 or "port" in kw:
+            port = node.args[1] if len(node.args) > 1 else kw["port"]
+            for host, number in product(self.fold(first), self.fold(port)):
+                if isinstance(host, str) and own_port(host, number):
+                    return reach_own(f, f"{host}:{number}")
+        sent = (
+            [str(m).upper() for m in self.fold(kw.get("method"))]
+            if "method" in kw
+            else []
+        )
+        if attr == "request" and first is not None:
+            sent += [str(m).upper() for m in self.fold(first)]
+        if attr in ("send", "sendall", "sendto") and first is not None:
+            sent += [
+                found.group(1)
+                for m in self.fold(first)
+                if (found := _REQUEST_LINE.match(str(m or "")))
+            ]
+        for verb in (v for v in sent if v in SENDING):
+            how = "over a socket" if attr.startswith("send") else "to a server"
+            return f.add("send_out", f"Sends a {verb} request {how}.")
+
+    def globbed(self, pattern: str) -> None:
+        """A ``glob`` of *pattern*: a search through ``~/.cache`` when it can reach there."""
+        cut = re.split(r"[*?[]", pattern, maxsplit=1)[0]
+        folder = cut if cut.endswith("/") or cut == pattern else os.path.dirname(cut)
+        path = resolve(self.ctx, folder or ".")
+        if path is None:
+            return self.f.doubt(f"Searches a folder melo cannot resolve: {pattern}")
+        rest = pattern[len(folder) :]
+        cache = os.path.join(self.ctx.home.rstrip("/"), ".cache")
+        if (
+            under(path, cache)
+            or under(cache, path)
+            and re.search(r"\*\*|(^|/)\.|\.cache", rest)
+        ):
+            search(self.ctx, self.f, path)
 
     def helper_call(self, node: ast.Call, inner: ast.Call, fn: _Def) -> None:
         """One call of a local helper: routine only for literal read-only commands.
