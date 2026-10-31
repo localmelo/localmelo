@@ -285,7 +285,7 @@ async def _task_rows(
         if state == "running":
             await _live(row, console)
         elif state in LIVE:
-            text = activity_text(state=state)
+            text = activity_text(state=state, reason=console.gate.held(record.task_id))
             row.update(activity=text.text, icon=text.icon)
         else:
             turn = sessions.get(record.task_id)

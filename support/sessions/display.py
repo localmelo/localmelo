@@ -410,6 +410,17 @@ _STATE_WORDS: Final[Mapping[str, ActivityText]] = {
     "remembering": ActivityText("Remembering", "memory"),
     "thinking": ActivityText("Thinking", "think"),
 }
+# Why the scheduler holds a model call, by the gate's reason code. A code not
+# listed reads like a plain hold.
+_HELD_WORDS: Final[Mapping[str, str]] = {
+    "Priority": "Waiting for a higher-priority task",
+    "Resources": "Waiting for a free model slot",
+    "Reservation": "Waiting while another job uses the model",
+    "Memory": "Waiting for free memory",
+    "Battery": "Waiting for the battery",
+    "Thermal": "Waiting for the Mac to cool down",
+    "IdleOnly": "Waiting until the Mac is idle",
+}
 _BROWSER_READS: Final = frozenset(
     {"browser_read", "browser_find", "browser_back", "browser_tabs", "browser_wait"}
 )
@@ -426,9 +437,13 @@ def activity_text(
     *,
     state: str = "",
     root: str | None = None,
+    reason: str = "",
 ) -> ActivityText:
     """The words for a *state* (``waiting``, ``held``, ``queued``, ``paused``,
     ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
+
+    A ``held`` state with the scheduler's *reason* code says why: ``Waiting for
+    a higher-priority task``, ``Waiting for a free model slot``.
 
     A tool reads by what it does: ``Reading notes.md``, ``Looking through
     ~/talk``, ``Writing slides.md``, ``Running the tests``, ``Running a
@@ -437,6 +452,8 @@ def activity_text(
     shown, never a command line, code or text. A tool this table does not
     know reads ``Using a tool``; no state and no tool reads ``Thinking``.
     """
+    if state == "held" and reason in _HELD_WORDS:
+        return ActivityText(_HELD_WORDS[reason], "held")
     if state in _STATE_WORDS:
         return _STATE_WORDS[state]
     args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}

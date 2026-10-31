@@ -384,6 +384,18 @@ test('a task names its folder in Activity and in Workers; a row without one adds
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
 });
 
+test('a held worker says why in the server\'s words, a plain hold keeps the state words', async () => {
+  const day = [
+    task({id: 't1', title: 'Slides', state: 'held', activity: 'Waiting for a higher-priority task', icon: 'held', at: 4000}),
+    task({id: 't2', title: 'Taxes', state: 'held', activity: '', icon: 'held', at: 3000}),
+  ];
+  const h = harness({rows: day});
+  await h.panel.update(health());
+  h.tabs()[1].click();
+  const lines = h.root.findAll((node) => node.className === 'activity-line').map((line) => line.textContent);
+  assert.deepEqual(lines, ['Waiting for a higher-priority task', 'Waiting for the model']);
+});
+
 test('Workers says when workers appear: for a side chat and for the main chat, and keeps its links in developer mode', async () => {
   const chats = [row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.'})];
   const side = harness({rows: chats, openChat: 'c1'});

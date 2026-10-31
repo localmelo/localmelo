@@ -29,9 +29,9 @@ The page polls its chats every 2.5 seconds, so a held chat shows
 (`Resources` for the first blocked call, `Priority` for later ones). A hold
 is a wait: it never counts against the 600-second bound on a turn, and a
 Stop during a hold ends the turn as cancelled. A held call also wakes at
-least every 30 seconds (the focus window) to re-run the policy, so a hold
-that only waited for the typing window to expire ends on its own, with no
-new request and no timer in the gate. The gateway has one monitor task for
+least every `focus_s` seconds (the focus window, 10 by default) to re-run the
+policy, so a hold that only waited for the typing window to expire ends on its
+own, with no new request and no timer in the gate. The gateway has one monitor task for
 the GPU lock and one for the battery
 ([below](#the-gpu-lock-and-the-battery-s2b)); the gate itself still has no
 timer.
@@ -44,6 +44,7 @@ The `[scheduler]` table of `config.toml` sets the policy:
 | `n_srv` | `8` | the model server's slots |
 | `r_f` | `1` | slots kept for callers the gate cannot see (the CLI and direct runs); it is forced to 0 when `n_srv <= 2` |
 | `n_fg` | `1` | background P2-P4 calls allowed in flight while a chat is focused (P1 is exempt) |
+| `focus_s` | `10` | the focus window in seconds: a chat is focused while a call of its turn is running and for this long after its last call or keystroke |
 | `call_log` | `true` | write one JSONL call log per gateway run |
 | `call_log_dir` | `""` | the log's parent directory; `~/.cache/localmelo/scheduler` when empty |
 | `gpu_lock_file` | `""` | the shared GPU lock to read; empty means no lock reader |
@@ -54,7 +55,8 @@ The lane is the chat being typed in: `POST /api/presence` sets it while you
 type (the legacy `POST /v1/playground/presence` does so only when the
 playground is enabled, under the in-progress security-1b changes), and every run
 sets it too — a turn through the turn routes, a retry, and a create with a
-first turn. Its next call is admitted before
+first turn. Opening a chat sends the same heartbeat and counts for `focus_s`
+seconds, no longer. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
 `n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
 `retrieve` and `estimate` calls are never held by the policy and never
@@ -92,6 +94,30 @@ Not gated, exactly as before: direct mode (`melo --url … -- <task>` and
 `melo` with a config), the interactive CLI, and the legacy `/v1/agent/run`
 route. They build their providers in their own process or inside `melo/`, so
 the gate never sees their calls, and `r_f` keeps a slot for them.
+
+<a id="who-runs-first"></a>
+
+## Who runs first
+
+- **By level, then age.** A task that comes back from an approval, a hold or a pause is admitted like a new one, whatever order the answers came in: the higher level first, the older one first within a level.
+- **A call in flight is never cut short.** A lower task's call finishes; its next step waits behind the higher task's.
+- **A full set of workers makes room.** When all four worker slots are taken and a higher task waits, the lowest worker parks at its next step boundary, never in the middle of a tool, and queues again.
+- **Equals never swap.** Tasks of the same level do not displace each other, and a worker that waits for your answer keeps its slot and its question.
+- **An open chat is not a busy chat.** A chat is focused while a turn runs in it, and `focus_s` seconds after its last call or keystroke; an idle chat leaves the server's free slots to your tasks.
+
+<a id="why-a-task-waits"></a>
+
+## Why a task waits
+
+The panel and the activity rows say why a held task waits, in words:
+
+| Words | Meaning |
+|---|---|
+| `Waiting for a higher-priority task` | a task of a higher level is first in line |
+| `Waiting for a free model slot` | every slot the policy allows is in use |
+| `Waiting while another job uses the model` | a foreign GPU lock is held (see below) |
+| `Waiting for free memory`, `Waiting for the battery`, `Waiting for the Mac to cool down`, `Waiting until the Mac is idle` | a machine rule holds the call |
+| `Waiting for the model` | any other hold |
 
 ## The GPU lock and the battery (S2b)
 

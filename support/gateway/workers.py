@@ -91,6 +91,11 @@ from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
+# True while the scheduler itself pauses or resumes a worker to make room, so
+# that only a person's own pause, resume or stop ends the automatic requeue.
+_MAKING_ROOM: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "making_room", default=False
+)
 _CAPTURE_RETRY_SECONDS = 10.0
 # What a task's worker is told on every planning request (as its identity).
 WORKER_GUIDE = (
@@ -246,6 +251,9 @@ class TaskWorkers:
         self._unavailable: set[str] = set()
         self._failure_events: dict[str, asyncio.Event] = {}
         self._quarantined: set[str] = set()
+        # Lower-level workers asked to park for a higher-level queued task.
+        self._yielding: set[str] = set()
+        self._yield_tasks: set[asyncio.Task[None]] = set()
         self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
@@ -474,6 +482,10 @@ class TaskWorkers:
             raise ValueError("state must be pause, resume or stop")
         if level is None and state is None:
             raise ValueError("level or state is required")
+        if state is not None and not _MAKING_ROOM.get():
+            # The person's own pause, resume or stop is theirs: the scheduler
+            # does not queue the worker again behind it.
+            self._yielding.discard(task_id)
         if isinstance(level, str):
             level = level.strip().lower()
             if level == "first":
@@ -1354,9 +1366,10 @@ class TaskWorkers:
     async def _schedule(self) -> None:
         if self._closed:
             return
+        records = await self.tasks.list_tasks()
         rows = [
             r
-            for r in await self.tasks.list_tasks()
+            for r in records
             if r.task_id in self._eligible
             and r.task_id not in self._runs
             and r.state == "queued"
@@ -1370,8 +1383,89 @@ class TaskWorkers:
                 r.task_id,
             )
         )
-        for record in rows[: max(0, MAX_WORKERS - len(self._runs))]:
+        free = max(0, MAX_WORKERS - len(self._runs))
+        for record in rows[:free]:
             self._runs[record.task_id] = asyncio.create_task(self._run(record.task_id))
+        self._make_room(rows[free:], records)
+
+    def _make_room(
+        self, waiting: builtins.list[TaskRecord], records: builtins.list[TaskRecord]
+    ) -> None:
+        """Ask the lowest-level workers to park, for queued tasks of a higher level.
+
+        Every worker slot is taken and a task that outranks a resident one
+        waits: the lowest resident parks at its next step boundary (a held
+        plan or reflection, never mid-tool) and is queued again, so a task
+        comes back by level and age like a new one. Equal levels never
+        displace each other, and a worker waiting for an answer is left alone.
+        """
+        need = len(waiting) - len(self._yielding)
+        if need <= 0 or self._closed:
+            return
+        by_id = {r.task_id: r for r in records}
+        victims = sorted(
+            (
+                r
+                for task_id in self._runs
+                if (r := by_id.get(task_id)) is not None and self._can_yield(r)
+            ),
+            key=lambda r: (-r.level_eff, -r.created_at, r.task_id),
+        )
+        for wanted, victim in zip(waiting[:need], victims, strict=False):
+            if victim.level_eff <= wanted.level_eff:
+                break
+            self._yielding.add(victim.task_id)
+            task = asyncio.create_task(self._yield(victim.task_id))
+            self._yield_tasks.add(task)
+            task.add_done_callback(self._yield_tasks.discard)
+
+    def _can_yield(self, record: TaskRecord) -> bool:
+        task_id = record.task_id
+        runner = self._runners.get(task_id)
+        return (
+            record.state in ("running", "held")
+            and runner is not None
+            and runner.busy
+            and task_id not in self._approval_points
+            and not self.broker.pending(task_id)
+            and not (
+                {task_id}
+                & (
+                    self._stopping
+                    | self._pause_requested
+                    | self._park_winners
+                    | self._quarantined
+                    | self._unavailable
+                    | self._yielding
+                )
+            )
+        )
+
+    async def _yield(self, task_id: str) -> None:
+        """Park a worker at its next step boundary, then queue it again."""
+        try:
+            token = _MAKING_ROOM.set(True)
+            try:
+                await self.update(task_id, state="pause")
+            finally:
+                _MAKING_ROOM.reset(token)
+            run = self._runs.get(task_id)
+            if run is not None:
+                await asyncio.wait({run})
+            if task_id not in self._yielding or self._closed:
+                return
+            if (await self.tasks.get_task(task_id)).state == "parked":
+                token = _MAKING_ROOM.set(True)
+                try:
+                    await self.update(task_id, state="resume")
+                finally:
+                    _MAKING_ROOM.reset(token)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("Worker %s could not make room for a higher task", task_id)
+        finally:
+            self._yielding.discard(task_id)
 
     async def _workspace(self, task_id: str) -> str:
         session = await self.store.get_session(task_id)
@@ -1883,5 +1977,9 @@ class TaskWorkers:
             for runner in self._runners.values():
                 runner.cancel(cause="shutdown")
             running = list(self._runs.values())
+            yields = list(self._yield_tasks)
+        for task in yields:
+            task.cancel()
+        await asyncio.gather(*yields, return_exceptions=True)
         if running:
             await asyncio.gather(*running, return_exceptions=True)
