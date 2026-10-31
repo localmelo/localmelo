@@ -3,7 +3,9 @@
 Find the message you see, then read its cause and fix. A run that did not
 complete names its status in the line
 `melo: run ended with status <status>: <error>`, or in the `status` field of
-the JSON line. The interactive UI says the same in plain words, as
+the JSON line.
+
+The interactive UI says the same in plain words, as
 `✗ Could not reach the model server at URL.` with what to do under it; the
 sections below are titled by the line of a task, and their causes and fixes
 apply to both.
@@ -240,8 +242,12 @@ Piped, the list is one line, `[r]etry, [s]ave anyway, [N]o [N]:`.
 A gateway HTTP 401 means its bearer or browser session is missing or invalid.
 Run `melo console` in a terminal to sign in again: it opens the console in your
 browser, or over SSH or when no browser starts it prints a fresh single-use
-link. Add `--port PORT` when needed. For API clients use the private gateway token;
-rotation invalidates existing browser sessions. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
+link.
+
+Add `--port PORT` when needed. For API clients use the private gateway token;
+rotation invalidates existing browser sessions.
+
+See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 ### `melo --serve --reconfigure` does not return
 
