@@ -53,7 +53,9 @@ completed
 
 带有 `on_event` 或审批策略的运行是*交互式*运行。这只在运行被取消时才有区别：它会以 `cancelled` 而不是 `crashed` 结束（见[停止运行](../guides/python.md#stop-a-run)）。
 
-要在不让运行成为交互式的情况下观察它，请把函数作为 `observe` 传入。它接收的事件相同，但被取消的运行会以 `crashed` 结束，与没有接收函数的运行一样。`on_event` 和 `observe` 只能给出其中一个，不能两个都给。
+要在不让运行成为交互式的情况下观察它，请把函数作为 `observe` 传入。它接收的事件相同，但被取消的运行会以 `crashed` 结束，与没有接收函数的运行一样。
+
+`on_event` 和 `observe` 只能给出其中一个，不能两个都给。
 
 要同时了解运行所处的位置，请与其中任一项一起传入 `progress=True`：运行随后还会报告 [`run.progress`](#runprogress) 事件。
 
@@ -264,7 +266,9 @@ CLI 在其计划行出现之前会忽略此事件；会话运行器会保存它�
 - `admitted_by`：`rehearsal`、`user_request`、`user_statement`、`outcome` 或 `sleep`。
 - `entry_id`：新条目的 id，对于 `IGNORE` 为 `null`。
 
-它不携带文本，也不携带条目 id 之外的 id；决策日志才是审计的依据。边界拒绝不发出任何事件，而是计入 `candidates_refused`。在 `legacy` 中不发出 `memory` 事件。CLI 会忽略它。
+它不携带文本，也不携带条目 id 之外的 id；决策日志才是审计的依据。边界拒绝不发出任何事件，而是计入 `candidates_refused`。
+
+在 `legacy` 中不发出 `memory` 事件。CLI 会忽略它。
 
 <a id="notice"></a>
 
@@ -327,7 +331,11 @@ CLI 在其计划行出现之前会忽略此事件；会话运行器会保存它�
 
 ### run.progress：运行进度
 
-用于显示运行所处的位置。只有当 `run_task` 同时收到 `progress=True` 和接收函数时才会出现。会话轮次的接收函数属于其运行器，因此只有当其 `SessionRunner` 以 `progress=True` 构建时，该轮次才会存储并转发 `run.progress` 事件（见[会话](../guides/sessions.md#run-a-conversation)）。每个键始终存在，未知时为 `null`。它显示的内容依据运行的例程，即[程序记忆](../concepts/procedures.md)在该模型和这些选项下记住的内容：
+用于显示运行所处的位置。只有当 `run_task` 同时收到 `progress=True` 和接收函数时才会出现。
+
+会话轮次的接收函数属于其运行器，因此只有当其 `SessionRunner` 以 `progress=True` 构建时，该轮次才会存储并转发 `run.progress` 事件（见[会话](../guides/sessions.md#run-a-conversation)）。每个键始终存在，未知时为 `null`。
+
+它显示的内容依据运行的例程，即[程序记忆](../concepts/procedures.md)在该模型和这些选项下记住的内容：
 
 | 键 | 含义 |
 |---|---|
@@ -380,7 +388,9 @@ asyncio.run(main())
 0 ended 2 Explore
 ```
 
-在第 1 级，应把各项显示为最近几次运行做了什么，而不是待办清单：这次运行可能会做其他工作。运行开始时，会在至多 1 秒内查找一次该例程；这段时间计入运行的 `timeout_s`。若查找失败或耗时更长，则为第 0 级。进度跟踪器内部的失败只会结束运行的 `run.progress` 事件，而不会结束运行本身。
+在第 1 级，应把各项显示为最近几次运行做了什么，而不是待办清单：这次运行可能会做其他工作。运行开始时，会在至多 1 秒内查找一次该例程；这段时间计入运行的 `timeout_s`。
+
+若查找失败或耗时更长，则为第 0 级。进度跟踪器内部的失败只会结束运行的 `run.progress` 事件，而不会结束运行本身。
 
 <a id="runfinished"></a>
 
@@ -457,4 +467,6 @@ asyncio.run(main())
 
 ## 稳定性
 
-在架构版本 1（`v` 为 1）内，类型和键只会增加，绝不会删除或重命名。忽略你不认识的类型和键。在 `prefix` 出现之前存储的 `assistant.message` 或 `reflection` 不包含该键（`localmelo.melo.contracts.events` 中的 `OPTIONAL_EVENT_FIELDS` 列出了这类键，会话存储也接受缺少它们的事件）。`localmelo.melo.contracts` 中的 `EVENT_FIELDS` 把每个类型映射到其键，`localmelo.support.sessions.store` 中的 `SESSION_EVENT_FIELDS` 则映射每个会话类型。
+在架构版本 1（`v` 为 1）内，类型和键只会增加，绝不会删除或重命名。忽略你不认识的类型和键。
+
+在 `prefix` 出现之前存储的 `assistant.message` 或 `reflection` 不包含该键（`localmelo.melo.contracts.events` 中的 `OPTIONAL_EVENT_FIELDS` 列出了这类键，会话存储也接受缺少它们的事件）。`localmelo.melo.contracts` 中的 `EVENT_FIELDS` 把每个类型映射到其键，`localmelo.support.sessions.store` 中的 `SESSION_EVENT_FIELDS` 则映射每个会话类型。

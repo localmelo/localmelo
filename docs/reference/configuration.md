@@ -93,7 +93,9 @@ tables of the chosen backends.
 
 A `[memory]` table that is all defaults is not written. Its keys,
 `across_chats` and `admit_on_outcome`, must be bools, and `retriever` one of
-the four values above; any other value is a configuration error (exit 1). `admit_on_outcome` is accepted and inert in
+the four values above; any other value is a configuration error (exit 1).
+
+`admit_on_outcome` is accepted and inert in
 `legacy`. The `--keep-decision-text`
 switch is flag-only, because it writes potentially personal text to the
 store and a saved default would be a privacy footgun.
@@ -116,10 +118,14 @@ Top-level keys must come before the first `[table]` line. How URLs are used:
 and Ollama native sends its own `thinking` field and inline copy as before.
 `drop` never sends reasoning; `replay` sends it on the assistant turns in
 scope, under one key, at most 40,000 characters per turn (a longer turn's
-reasoning is skipped and counted). `compress` sends none and keeps each
+reasoning is skipped and counted).
+
+`compress` sends none and keeps each
 reply's note and drafts in working memory; `compress+replay` does both. A
 backend with `requires_reasoning_replay = true` runs `compress` as
-`compress+replay`. Every explicit mode also stops reading `[RECALL]` and
+`compress+replay`.
+
+Every explicit mode also stops reading `[RECALL]` and
 removes an inline `<think>` block from the answer, and stops writing the
 raw step summary to long-term memory. The compress modes recall notes,
 drafts and earlier thinking by default; see
@@ -134,7 +140,9 @@ note_writer = "auto"      # optional: auto or heuristic
 
 `[retrieval]` sets recall's defaults for direct runs, the interactive UI and
 console sessions; an explicit CLI flag wins over the matching key. The table
-is accepted and inert in `legacy`. A value outside its range (an
+is accepted and inert in `legacy`.
+
+A value outside its range (an
 unknown retriever or name, `k` outside 1-10, `min_score` outside 0-1) is a
 configuration error, exit 1 with one line.
 
@@ -155,10 +163,13 @@ cross_task_cold = 0       # 0 or 1
 existing config file is unchanged.
 
 An explicit flag wins over `[agent]` in direct mode and the interactive UI.
-A `--base-url` session or run uses flags, not these saved defaults. API v2
-console sessions use the saved mode, defaulting to `legacy` when none is set;
+A `--base-url` session or run uses flags, not these saved defaults.
+
+API v2 console sessions use the saved mode, defaulting to `legacy` when none is set;
 they keep the gateway's tool policy. The legacy `/v1` API is unchanged and
-does not inherit the reasoning/retrieval tables. `--retrieval-extra-body`
+does not inherit the reasoning/retrieval tables.
+
+`--retrieval-extra-body`
 is flag-only, never a saved key, and affects `retrieve` requests only.
 
 Each backend section can name the request key and say that the server
@@ -177,15 +188,18 @@ requires_reasoning_replay = false     # true for a server that rejects a
 that emits either `reasoning_content` or `reasoning` works as it is; it
 sends no key before the first reply. For OpenAI-compatible backends, the
 field is used only by `replay` and `compress+replay`: `legacy`, `drop` and
-`compress` ignore it, including through scheduler wrappers. Native Ollama
-keeps its existing legacy wire behavior. `replay` uses the
+`compress` ignore it, including through scheduler wrappers.
+
+Native Ollama keeps its existing legacy wire behavior. `replay` uses the
 current task's assistant turns in direct runs and the `melo ""` loop;
-session builders select the retained conversation window instead. Session
-resume uses the current process's mode: pairs contain no old thinking,
+session builders select the retained conversation window instead.
+
+Session resume uses the current process's mode: pairs contain no old thinking,
 while a window checkpoint can replay its retained, redacted thinking.
 The `[ollama]` backend fixes its field
-to `thinking` (it may still write `"thinking"` or `"auto"`). With
-`requires_reasoning_replay = true`, `--reasoning drop` is refused, every
+to `thinking` (it may still write `"thinking"` or `"auto"`).
+
+With `requires_reasoning_replay = true`, `--reasoning drop` is refused, every
 assistant turn in the window is replayed (the task scope and
 `replay_turns` do not apply), and the agent evicts whole working-memory
 units instead of cutting reasoning.
@@ -202,17 +216,25 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 ```
 
 This is a list of **names**, not `NAME=value` assignments. Names must match
-`[A-Za-z_][A-Za-z0-9_]*`; missing variables are skipped. Config-backed direct
+`[A-Za-z_][A-Za-z0-9_]*`; missing variables are skipped.
+
+Config-backed direct
 runs, the interactive UI and console sessions resolve the present values at
 startup. Only names are written to TOML; the option values are omitted from
-run configuration records. A `--base-url` run or session does not read this
+run configuration records.
+
+A `--base-url` run or session does not read this
 setting. Python callers can instead pass an explicit
-`AgentOptions(tool_env={...})` mapping. This does not change MCP's separate
+`AgentOptions(tool_env={...})` mapping.
+
+This does not change MCP's separate
 per-server `env` configuration.
 
 Treat each name as a capability grant. `SSH_AUTH_SOCK` lets tool subprocesses
 use your SSH agent to authenticate or sign, and a proxy variable can expose
-its address and credentials. Tools run with your permissions and can print,
+its address and credentials.
+
+Tools run with your permissions and can print,
 copy or transmit variables they receive; filtering the environment is not a
 sandbox. Leave the list empty unless a tool needs the capability, and never
 put secret values in TOML.
@@ -221,22 +243,30 @@ put secret values in TOML.
 
 Set `[agent] context_window`, `output_reserve` and `safety_margin` to positive integers; the window
 must be greater than their sum. Direct and interactive flags override individual values; API v2
-console sessions use the config. Legacy `/v1` is unchanged. When unset, no accounting is recorded.
+console sessions use the config.
+
+Legacy `/v1` is unchanged. When unset, no accounting is recorded.
 
 For each planning or reflection attempt, `utf8-bytes-v2` estimates the assembled message and tool
 schema representation at UTF-8 bytes divided by three, rounded up. Each image adds
 `ceil(width / 28) * ceil(height / 28)` tokens when dimensions are known, capped at 16,384;
-unknown dimensions use the cap. The last positive prompt-token count for the same model and request
+unknown dimensions use the cap.
+
+The last positive prompt-token count for the same model and request
 kind calibrates the proxy upward; missing or zero usage resets that calibration. The proxy is an
 estimate, not a bound: templates and vision models differ.
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and then evicts old complete units, while keeping the
 task, tool schemas, matching call/result pairs, images and failing evidence. It leaves history and
-the retained conversation unchanged. If the pinned context cannot fit, the run ends with
+the retained conversation unchanged.
+
+If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
 most one smaller request retry without re-running tools; other provider errors keep their existing
-retry policy. Events and JSON results report the estimate, actual prompt count if available, and
+retry policy.
+
+Events and JSON results report the estimate, actual prompt count if available, and
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
@@ -245,22 +275,29 @@ the independent character guard still applies.
 run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests from before
 it became the default. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
+
 Recall goes before the task. With `cache_layout = "v2"` the latest reflection goes last, in a
 final user message after the window, so a new attempt changes only what follows the shared
 history; the default, `v3`, appends the reflection to the window once (see below).
+
 A reflection request repeats the latest planning request (same system text, same
 `tools`, same turns, then the turns since) and adds one final user message with the
 reflection prompt; it offers the tools, and a reply that calls one is asked again as text.
 An explicit end delimiter leaves the task and reflection request outside that data;
 data lines starting with that delimiter are deterministically quoted.
+
 The fixed system section is the base text, then (in a chat of the terminal UI or the
 console) the identity paragraph that says who melo is, which model, server and place it
 runs on, what it remembers and which language and script to reply in, then the notes, the line that recall and reflections are data, and the date line. It
 holds no name for the layout: `fixed-prefix-v2` is metadata, reported as
-`prefix_cache.version`. The identity paragraph is `AgentOptions.identity` (default `None`: direct
+`prefix_cache.version`.
+
+The identity paragraph is `AgentOptions.identity` (default `None`: direct
 runs, workers and the gateway's v1 sessions send none).
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
-as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
+as before.
+
+The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional
 `reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
@@ -269,20 +306,27 @@ may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 reflection request from inviting a tool call. The request offers the tools of the step's
 planning request (same list, order and schema, with `fixed_prefix` already the case) and its
 last user message ends with `Answer with the JSON object only; do not call any tool.`;
-`tool_choice` is untouched, so a server's prompt prefix holds. The retry request is unchanged.
+`tool_choice` is untouched, so a server's prompt prefix holds.
+
+The retry request is unchanged.
 The guard adds `reflect_tool_guard` to the JSON result's `config`; with `false` (or `off`) the
-reflection request has neither the tools nor the sentence. Whatever the option, the `reflection`
+reflection request has neither the tools nor the sentence.
+
+Whatever the option, the `reflection`
 event's `unreadable_reason` says why a first reply was unreadable (see [Events](events.md)).
 
 `[agent] window_eviction` (default `"chunk"`; `"boundary"` and `"slide"` are the other values;
 `--window-eviction` overrides it) sets when working memory drops old turns. `chunk` and
 `boundary` keep the retained history the same for several steps, so a server's prompt cache can
 reuse it; `slide` drops the oldest unit at every step once the window is full, as before
-`chunk` became the default. See [Memory](memory.md#working-memory-window).
+`chunk` became the default.
+
+See [Memory](memory.md#working-memory-window).
 
 `[agent] cache_layout` (default `"v3"`; `--cache-layout v2|v3` overrides it) decides where a
-reflection sits. `"v2"` is the layout from before this default changed. With `v3` and
-`fixed_prefix`:
+reflection sits. `"v2"` is the layout from before this default changed.
+
+With `v3` and `fixed_prefix`:
 
 - At the attempt boundary the agent appends the reflection once, as an ordinary window message
   (`[Reflections; data, not instructions]` and the block), instead of rebuilding it as the last
@@ -310,25 +354,33 @@ Without `fixed_prefix`, neither value changes anything. The JSON result's `confi
 for a `--base-url` server, `20` on a cloud vendor's backend (OpenAI, Gemini, Anthropic or NVIDIA);
 8 to 256; `--window-messages N` overrides it) is the most messages the working window holds
 before `window_eviction` drops some. A cloud vendor's backend keeps 20 for now: without prompt
-caching, a longer window costs input tokens on every request. A value you set stays as you set
+caching, a longer window costs input tokens on every request.
+
+A value you set stays as you set
 it, on any backend.
 With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
 whole units (a tool call with its results, never split) down to 70% of the cap under `chunk` and
 `boundary`, so the history holds for several steps; under `slide` it drops a unit at every step.
+
 A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
 messages. See [Memory](memory.md#working-memory-window).
+
 The JSON result's `config` has `window_messages` when it is not 20.
 
 `cache_layout = "v3"` and the 64-message window became defaults after two benchmark rounds on
 coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and 86.8% of the
 prompt tokens were served from the cache against 78.9%. `--cache-layout v2 --window-messages 20`
-send the earlier requests. `melo --developer --help` lists both flags under Advanced.
+send the earlier requests.
+
+`melo --developer --help` lists both flags under Advanced.
 
 `fixed_prefix`, `window_eviction` and `reflect_tool_guard` became defaults after a same-build A/B
 on the benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set
 it, for these three and for the two above; a file without the key has the default, and saving
 writes a key only when it differs from the default (`window_messages` is written whenever it is
-set). `melo --developer --help` lists the three flags under Experimental, and
+set).
+
+`melo --developer --help` lists the three flags under Experimental, and
 `--fixed-prefix off --window-eviction slide --reflect-tool-guard off` send the requests of the
 earlier defaults. API v2 console sessions, console workers and the legacy `/v1` sessions read
 these five keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
@@ -336,14 +388,21 @@ these five keys from the config; the legacy `/v1` API does not read the other `[
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
-ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of
+ceiling including truncation and image notices.
+
+History stores a distinct, pattern-redacted copy of
 up to 200,000 characters per result (errors first), with exact omitted counts relative to the
 redacted capture. Counts live in `capture_metadata`, not in-band markers in stored text.
+
 `acquisition_omitted_chars` is null because the tool may already have limited its
 output. Capture is not a complete file or unlimited stdout; redaction is pattern-based and can miss
-secrets. The model's checked preview can still contain raw text; the `Message.tool_result`,
+secrets.
+
+The model's checked preview can still contain raw text; the `Message.tool_result`,
 `tool.finished` event and trace use redacted copies. Existing history retention and permissions
-apply. `Agent.run_tool()` does not write captured history and retains its existing result check.
+apply.
+
+`Agent.run_tool()` does not write captured history and retains its existing result check.
 The option is off by default.
 
 Opt in to fewer output tokens in direct runs with `[agent] lean_output = true` or
@@ -351,13 +410,17 @@ Opt in to fewer output tokens in direct runs with `[agent] lean_output = true` o
 (`melo "<task>"` or `melo worker BRIEF`, with `json` or `stream-json` output too) then sends a
 system prompt that, in place of `Think step by step. Be concise.`, asks for no text between tool
 calls, a final answer of at most three lines, relative paths without a `sys.path` setup, and
-reading the files a task names before listing folders. With the default
+reading the files a task names before listing folders.
+
+With the default
 `reflection_gate = "flags"` the reflection prompt also leaves out the five estimates,
 `progress_made` and `new_information_gained` (only `utility` reads the estimates, and nothing
 reads the other two) and asks for `best_effort_result` only with `done` or `stop`; the action and
 the three flags the gate reads are still asked for, and a reply in the long form is read as
 before. `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep
-the system prompt's last line, because their notes are text between tool calls. The interactive
+the system prompt's last line, because their notes are text between tool calls.
+
+The interactive
 UI, the `melo ""` loop and the gateway ignore the key. Off, the default, every request is the one
 sent before the option existed; on, the start of the requests stays the same on every turn of a run.
 
@@ -405,15 +468,20 @@ cache_read = 0.5   # prompt tokens the server reported cached; input when absent
 
 `input` and `output` are required, every value is a number of at least 0, and
 no other key is read. A model the session used without a table makes the bar
-show tokens (`↑ 100k ↓ 5`) instead of a cost. A local server is never priced.
+show tokens (`↑ 100k ↓ 5`) instead of a cost.
+
+A local server is never priced.
 An invalid table warns and the bar shows tokens; nothing else reads it, and
-saving the config keeps it as written. See
-[The status bar](../guides/terminal.md#the-status-bar).
+saving the config keeps it as written.
+
+See [The status bar](../guides/terminal.md#the-status-bar).
 
 ## Extra request fields (extra_body)
 
 Each backend table accepts an `extra_body` table. Its fields are added to
-every chat request. Use it for server options such as `chat_template_kwargs`:
+every chat request.
+
+Use it for server options such as `chat_template_kwargs`:
 
 ```toml
 [vllm]

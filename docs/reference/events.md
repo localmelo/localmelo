@@ -63,7 +63,9 @@ of `crashed` (see [Stop a run](../guides/python.md#stop-a-run)).
 
 To watch a run without making it interactive, pass the function as
 `observe` instead. It receives the same events, but a cancelled run ends as
-`crashed`, as a run without a sink does. Give `on_event` or `observe`, not
+`crashed`, as a run without a sink does.
+
+Give `on_event` or `observe`, not
 both.
 
 To also learn where the run stands, pass `progress=True` with either: the
@@ -375,7 +377,9 @@ One event per admission decision, after its store transaction commits.
 
 It carries no text and no ids beyond the entry id; the decision log is the
 audit surface. A boundary refusal emits nothing and counts
-`candidates_refused`. No `memory` event is emitted in `legacy`. The CLI
+`candidates_refused`.
+
+No `memory` event is emitted in `legacy`. The CLI
 ignores it.
 
 ### notice
@@ -508,11 +512,15 @@ See [Reflection](../concepts/how-it-works.md#reflection) and
 ### run.progress
 
 Where the run stands, for a progress display. It comes only when
-`run_task` gets `progress=True` and a sink. A session turn's sink is its
+`run_task` gets `progress=True` and a sink.
+
+A session turn's sink is its
 runner's, so the turn stores and forwards `run.progress` events only when
 its `SessionRunner` was built with `progress=True` (see
 [Sessions](../guides/sessions.md#run-a-conversation)). Every key is always present,
-`null` where it is unknown. What it shows rests on the run's routine, as
+`null` where it is unknown.
+
+What it shows rests on the run's routine, as
 [procedural memory](../concepts/procedures.md) remembers it on this model with these
 options:
 
@@ -571,7 +579,9 @@ When the model runs `ls` and then answers, it prints:
 At level 1, show the items as what the last runs did, not as a to-do list:
 this run may do other work. The run's start looks the routine up once,
 for at most 1 second, which counts toward the run's `timeout_s`; a lookup
-that fails or takes longer gives level 0. A failure inside the tracker
+that fails or takes longer gives level 0.
+
+A failure inside the tracker
 ends the run's `run.progress` events, never the run.
 
 ### run.finished
@@ -747,8 +757,9 @@ The store guarantees:
 ## Stability
 
 Within schema version 1 (`v` 1), types and keys are only ever added, never
-removed or renamed. Ignore types and keys you do not know. A stored
-`assistant.message` or `reflection` from before `prefix` existed lacks that key
+removed or renamed. Ignore types and keys you do not know.
+
+A stored `assistant.message` or `reflection` from before `prefix` existed lacks that key
 (`OPTIONAL_EVENT_FIELDS` in `localmelo.melo.contracts.events` lists such
 keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and

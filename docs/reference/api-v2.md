@@ -2,22 +2,30 @@
 
 API v2 is the web console's HTTP API. It is served under `/api/` on the
 gateway, only when the gateway listens on a loopback address
-(`127.0.0.1`, `localhost` or `::1`). Protected routes require a bearer
+(`127.0.0.1`, `localhost` or `::1`).
+
+Protected routes require a bearer
 token or signed-in browser cookie; do not expose the gateway. See [Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).
 
 Apart from the authentication requirement, API fields remain additive:
 endpoints, optional request fields and response keys are added. A client may ignore keys it does not
-know. This page documents every API v2 route: health, settings, key status,
+know.
+
+This page documents every API v2 route: health, settings, key status,
 connection test, model listing, sessions, turns, SSE events, blobs, pictures,
 submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
 `POST /api/auth/logout` revokes the cookie. `POST /api/auth/rotate` requires
-the bearer and rotates it. The login exchange requires a matching Origin. When
+the bearer and rotates it.
+
+The login exchange requires a matching Origin. When
 the macOS app started the gateway, it also requires the app's
 `X-LocalMelo-Instance` header, and a code is valid only for the instance it was
 issued for; a missing, different or differently bound value is refused before
-the code is consumed. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
+the code is consumed.
+
+See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
@@ -25,10 +33,14 @@ it under the session's id. See [Scheduler](../guides/scheduler.md#the-gate-on-ch
 
 JSON request bodies and JSON responses use UTF-8. Event streams use
 `text/event-stream`, image blobs and pictures use their image media type, and a successful
-204 response has no body. A request with a non-empty body
+204 response has no body.
+
+A request with a non-empty body
 needs `Content-Type: application/json`, and a body may have at most 1 MiB
 (1,048,576 bytes). Every string in a request must be valid UTF-8 without
-lone surrogates. Responses carry `Cache-Control: no-store`,
+lone surrogates.
+
+Responses carry `Cache-Control: no-store`,
 `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`
 (except blobs, whose policy is `default-src 'none'; sandbox; frame-ancestors 'none'`, and pictures, see
 [their route](#get-apisessionsidpictures)),
@@ -64,8 +76,9 @@ every route below:
 
 The gateway logs the cause of a 500, whose response carries a fixed
 message. A 503 repeats the store's reason with the home folder written as
-`~`; it never carries a traceback, a lease holder or a key. The legacy
-`/v1/*` routes keep their own bodies, including FastAPI's `422` and
+`~`; it never carries a traceback, a lease holder or a key.
+
+The legacy `/v1/*` routes keep their own bodies, including FastAPI's `422` and
 `{"detail": ...}`.
 
 ## GET /api/health
@@ -103,7 +116,7 @@ output or log the header; same-user processes can still read the token file.
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
     ],
     "waiting": [],
-    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2},
+    "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
   },
   "uptime_s": 132.4
@@ -169,8 +182,9 @@ output or log the header; same-user processes can still read the token file.
   the macOS app's menu bar reads the list at each poll. `sessions.pending_approvals`
   counts the open chats' requests only.
 - `status.recent` says how the newest finished chat turn, task, run or terminal
-  turn ended: `{"kind", "id", "outcome", "ended_s_ago"}`, or `null` when none did
-  (or when no store can be read). `kind` is as in `status.items`. `outcome` is
+  turn ended: `{"kind", "id", "title", "outcome", "ended_s_ago"}`, or `null` when none
+  did (or when no store can be read). `kind` is as in `status.items`; `title` is
+  what it was called (at most 200 characters, empty when it cannot be read). `outcome` is
   `done` (a run that completed, a task that is done), `stopped` (the person
   stopped it, or a task was cancelled or expired) or `failed` (any other end of
   a run, such as `provider_error`, `budget_exhausted` or `stuck`, and a failed
@@ -178,8 +192,7 @@ output or log the header; same-user processes can still read the token file.
   is `failed`. `ended_s_ago` is its age in seconds, to a tenth. A turn that a
   shutdown, a crash recovery, a takeover, a close or a park ended is no outcome,
   and an undone turn does not count. It is for a client that shows how the last
-  run went: the macOS app's policy for Melo reads it, and the app does not draw
-  Melo yet. One call reads the newest finished turn of
+  run went: the macOS app's pet and activity pill read it. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
 
 ## GET /api/activity
@@ -348,8 +361,9 @@ sessions.
 
 Check candidate settings with a one-message chat ping and, when an
 embedding backend is selected, a one-word embedding ping, bounded to 30
-seconds. Takes the `PUT /api/settings` body without `revision`. In the
-in-progress security-1b changes, authenticated probes accept explicitly
+seconds. Takes the `PUT /api/settings` body without `revision`.
+
+In the in-progress security-1b changes, authenticated probes accept explicitly
 typed absolute HTTP or HTTPS URLs and do not follow redirects; a redirect
 is a failed probe. These probes can contact the supplied host.
 
@@ -386,7 +400,9 @@ Never returns the variable's value.
 
 List the models of a local backend (`GET <url>/models` with a 5 s timeout).
 In the in-progress security-1b changes, authenticated requests may supply an
-absolute HTTP or HTTPS URL; redirects are not followed. The supplied host
+absolute HTTP or HTTPS URL; redirects are not followed.
+
+The supplied host
 can be contacted.
 
 ```bash
@@ -413,7 +429,9 @@ Look for a model server on this machine, as the terminal's first run does. It
 asks `GET <url>/models` of each URL in `LOCALMELO_DETECT_URLS` with a 1 s
 timeout (by default `127.0.0.1` ports 8000, 8400, 11434 and 30000; an empty
 value turns detection off), then `GET <root>/api/version` of the server it
-found, and, between several chat models, its status routes. It works before
+found, and, between several chat models, its status routes.
+
+It works before
 anything is configured, takes no parameters and writes nothing. The web console's
 setup card calls it, and only while the card is shown.
 
@@ -448,11 +466,14 @@ setup card calls it, and only while the card is shown.
 ## Scheduler tasks (S3a.2)
 
 These routes create and control user-origin tasks in the gateway process.
-They are separate from chat turns but use the same scheduler gate. Each task
-has a `kind="task"` session with the same id; its session events and turns
+They are separate from chat turns but use the same scheduler gate.
+
+Each task has a `kind="task"` session with the same id; its session events and turns
 can be inspected through the existing session routes. A worker uses the
 built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
-`list_files`) with memory off. Tools run with the user's permissions, not in a sandbox.
+`list_files`) with memory off.
+
+Tools run with the user's permissions, not in a sandbox.
 
 - `POST /api/tasks` accepts `objective` (or its alias `prompt`), optional
   `title`, `workspace`, `level` and `request_key`. The objective must be
@@ -492,11 +513,14 @@ built-ins `file_read`, `file_write` and `python_exec` (not `shell_exec` or
 Pause closes the worker fence and records pending pause while an already-running
 provider or tool finishes. At a held plan, reflection or undelivered approval,
 the worker parks, closes its resources and saves a card from persisted evidence.
+
 An undelivered approval is withdrawn; resume starts from the card and asks again.
-A task paused before it starts does not start a worker until resumed. If a park
-cannot be saved, the worker retries with its fence closed; after three failed
+A task paused before it starts does not start a worker until resumed.
+
+If a park cannot be saved, the worker retries with its fence closed; after three failed
 attempts it saves an interrupted task and card. If the store cannot persist that
 outcome, resume and stop return 503 `store_unavailable` until finalization succeeds.
+
 A failed resource close quarantines the worker and keeps its slot counted; after
 retries, the interrupted task reports `cleanup failed; slot held until restart`.
 
@@ -505,7 +529,9 @@ source, `wait_reason`, `pending_approvals` (the approvals the task waits for, in
 the shape of a session's; empty when none; answer one with `POST
 /api/approvals/{request_id}`, as for a chat), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
-implemented yet. Explicit user workspaces must be existing directories
+implemented yet.
+
+Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
 workspace selection is described in [Scheduler](scheduler.md#tasks-workers-and-the-scheduler-store-s3a).
 Invalid workspace requests return 400 `invalid_workspace`; a workspace that
@@ -513,14 +539,20 @@ becomes invalid before a run or resume fails the task with
 `wait_reason="invalid_workspace"` instead of running it.
 
 At most four workers are resident at once, including quarantined workers.
-Task rows persist across gateway restarts. Startup interrupts uncertain tasks,
+Task rows persist across gateway restarts.
+
+Startup interrupts uncertain tasks,
 retains valid parked cards and preserves pending pause, without replay. Every
 create records a durable never-started proof inside the create transaction,
 before any launch; a runnable queued task with that proof may run once after a
-start fence. Recovered tasks with
+start fence.
+
+Recovered tasks with
 uncertain history reject `PATCH` resume and priority changes until controlled
 Resume is used; Stop remains available. A failure to persist
-startup recovery keeps the store unavailable. Retrying the same `request_key`
+startup recovery keeps the store unavailable.
+
+Retrying the same `request_key`
 returns the existing task and does not restart it.
 
 ### Controlled Resume
@@ -528,7 +560,9 @@ returns the existing task and does not restart it.
 `POST /api/tasks/{task_id}/resume` accepts `operation_id` (required, non-empty,
 at most 200 characters) and an optional `confirmation_token`. It is the only
 route that resumes a task recovered by startup; `PATCH` stays fenced for that
-work. It returns 202 `{"task": ..., "operation_id": ...}` when the transition
+work.
+
+It returns 202 `{"task": ..., "operation_id": ...}` when the transition
 is committed.
 
 The route consumes evidence, never absence of evidence:
@@ -561,11 +595,14 @@ The route consumes evidence, never absence of evidence:
 An operation ID names one operation. A retry with the same `operation_id`
 returns 202 with the current task, whatever payload it carries, and never
 starts a second turn or re-authorizes a transition; a token is consumed at most
-once. A restart drops tokens. A Resume committed before a restart is re-admitted
+once.
+
+A restart drops tokens. A Resume committed before a restart is re-admitted
 on startup when its turn never started; once that turn has started, a retry of
 the operation returns 409 `invalid_transition` instead of pretending the queued
-work still waits. Stop always
-wins: it invalidates pending tokens and cancels a queued resumed turn before a
+work still waits.
+
+Stop always wins: it invalidates pending tokens and cancels a queued resumed turn before a
 worker starts a provider or tool. Neither a free Resume nor a confirmation
 proves that an older process stopped or that its effects happened only once.
 
@@ -786,7 +823,9 @@ The session's turns, oldest first within the page.
 When a side chat's run ends, or a task finishes, fails or waits for an
 approval, the main chat gets a card: an `attention.card` session event that
 belongs to no turn. A card is never a turn: no model reads it, and the main
-chat's conversation never holds it. Its `data`:
+chat's conversation never holds it.
+
+Its `data`:
 
 ```json
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
@@ -886,7 +925,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 The numbers the terminal's `/status` and status bar show for one chat, task or
 worker session, folded on the server from its stored events with the
 terminal's own code, so both agree. The segments are the compact ones of the
-terminal's developer mode; its default mode says the same figures in words. A worker run or terminal chat is read from
+terminal's developer mode; its default mode says the same figures in words.
+
+A worker run or terminal chat is read from
 the CLI's file.
 
 ```bash
@@ -999,7 +1040,9 @@ for a client that never learned the new session's id.
 
 The routes below change something. Most take a JSON body; `POST
 /api/turns/{turn_id}/cancel` and `DELETE /api/sessions/{id}` take none and
-ignore one. From a browser, a write must be same-origin: a state-changing
+ignore one.
+
+From a browser, a write must be same-origin: a state-changing
 request from another origin is 403 `foreign_origin`. A body is strict — an
 unknown field is 400 `invalid_request` with the field named
 (`body.model: Extra inputs are not permitted`).

@@ -279,12 +279,13 @@ async def test_the_newest_finished_chat_turn_is_the_recent_outcome(
     set_turn(console, older.session_id, finished_at=time.time() - 500)
     newest = await seed_turn(console.store, workspace, title="Newest")
     found = status(client)["recent"]
-    assert found.keys() == {"kind", "id", "outcome", "ended_s_ago"}
+    assert found.keys() == {"kind", "id", "title", "outcome", "ended_s_ago"}
     assert (found["kind"], found["id"], found["outcome"]) == (
         "chat",
         newest.session_id,
         "done",
     )
+    assert found["title"] == "Newest"
     assert 0 <= found["ended_s_ago"] < 5
     # The age counts from the end of the turn, to a tenth of a second.
     set_turn(console, newest.session_id, finished_at=time.time() - 42.26)
@@ -395,6 +396,49 @@ async def test_a_finished_task_is_a_recent_outcome(
     found = status(client)["recent"]
     assert (found["kind"], found["id"], found["outcome"]) == ("task", "t9", outcome)
     assert 2.5 <= found["ended_s_ago"] <= 8
+    assert (
+        found["title"] == ""
+    )  # no task t9 in the store: empty, and health still answers
+
+
+async def test_a_finished_task_and_run_say_what_they_were_called(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    cli_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The activity pill reads "Done: <title>" from ``recent.title``: tasks, runs and long titles too."""
+    await begin(cli_path, "worker", "A worker run", finish=True)
+    assert status(client)["recent"]["title"] == "A worker run"
+    with sqlite3.connect(cli_path) as conn:
+        conn.execute("UPDATE turns SET finished_at = ?", (time.time() - 900,))
+    chat = await seed_turn(console.store, workspace, title="Fix the build")
+    assert status(client)["recent"]["title"] == "Fix the build"
+    set_turn(console, chat.session_id, finished_at=1.0)
+
+    async def latest() -> tuple[str, str, float]:
+        return ("t1", "done", time.time())
+
+    class Record:
+        title = "Slides for the 3 pm meeting"
+
+    async def get_task(task_id: str) -> Record:
+        assert task_id == "t1"
+        return Record()
+
+    monkeypatch.setattr(console.workers.tasks, "latest_finished", latest)
+    monkeypatch.setattr(console.workers.tasks, "get_task", get_task)
+    found = status(client)["recent"]
+    assert (found["kind"], found["title"]) == ("task", "Slides for the 3 pm meeting")
+
+    async def broken(task_id: str) -> Record:
+        raise SessionStoreError("unreadable")
+
+    monkeypatch.setattr(console.workers.tasks, "get_task", broken)
+    assert (
+        status(client)["recent"]["title"] == ""
+    )  # an unreadable title never fails health
 
 
 async def test_an_unreadable_part_leaves_the_others_and_never_fails_health(

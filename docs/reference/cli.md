@@ -21,7 +21,9 @@ melo -h all                                  # every option, command and setting
 ```
 
 Quote the task and put it after `--` so option-like text is unambiguous.
-Several words without quotes are joined with spaces. Existing task command
+Several words without quotes are joined with spaces.
+
+Existing task command
 lines, abbreviations and the `melo ""` loop keep their previous parsing.
 
 <a id="commands-and-short-options"></a>
@@ -30,7 +32,9 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 Eight command words name what `melo` does. A word counts only as the first
 argument and only as an exact match, so `melo "setup the project"` (one quoted
 argument) and `melo -- setup the project` are tasks, while `melo setup a venv`
-prints a hint and exits 2 before any model is built. A task that is one command
+prints a hint and exits 2 before any model is built.
+
+A task that is one command
 word after options, as in `melo -X gateway.port=9000 serve`, is refused the same
 way, and the message says where the word goes (`melo serve -X gateway.port=9000`).
 `melo -- serve` runs the task "serve"; an option value such as
@@ -177,13 +181,17 @@ Forgot note 3.
 In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
+
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
 loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
 it prints one line saying that `shell_exec` is off in direct mode and that
 `melo "" --builtins all` reopens the loop with it on (the line is absent when
-the tool is already on). The loop takes `--base-url`, `--chat-model` and
+the tool is already on).
+
+The loop takes `--base-url`, `--chat-model` and
 `--builtins`; the other direct-mode options are usage errors with it. Its
 conversation is separate from the web workspace's chats.
+
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
@@ -197,29 +205,40 @@ Every direct run (`melo "<task>"` and `melo --brief FILE`) is recorded as a
 so the web console's Workers view and the macOS app show it, a running one
 included. Recording changes nothing the run sends or prints: the model's
 requests, stdout, the JSON result and the exit code are the same, and a run
-costs about 20 ms more before its first request. Put the task after `--`; the
+costs about 20 ms more before its first request.
+
+Put the task after `--`; the
 first task line is the title, and `--save-session TITLE` sets another.
-`--parent-run ID` links a launcher and needs no other flag. Opt out for one run
+`--parent-run ID` links a launcher and needs no other flag.
+
+Opt out for one run
 with `--no-save-session`, or for the whole home with `record_direct = false`
 under `[sessions]` in the config (see the
 [configuration reference](configuration.md)); an explicit `--save-session` or
 `--parent-run` records regardless of the config. A store that cannot be opened
 or written never fails the run: one line,
 `melo: could not record this run (<reason>); the run is unchanged`, goes to
-stderr and the run goes on unrecorded. Workers are not offered by `-c`, `-r`,
+stderr and the run goes on unrecorded.
+
+Workers are not offered by `-c`, `-r`,
 or the chat picker. Workspace and git metadata use `--workspace` when supplied,
 otherwise the current working directory.
 
 `--import-session dsh-jsonl FILE [--title TITLE]` imports a dsh JSONL log
 without a task. Reimporting identical file contents is a no-op; unknown or
-invalid lines are counted. The gateway can list and read worker history via
+invalid lines are counted.
+
+The gateway can list and read worker history via
 its read-only [worker API](api-v2.md#get-apisessions), but cannot continue or edit it.
 
 Worker records are local, unencrypted, and stored with file mode 0600. Stored
 text passes the existing secret redactor, and recognizable reads of sensitive
-files are replaced by a path-labelled placeholder. Redaction is pattern-based:
+files are replaced by a path-labelled placeholder.
+
+Redaction is pattern-based:
 arbitrary secrets printed by a command, echoed by the model, or loaded through
 an unrecognized tool can still be retained. Review the data before sharing it.
+
 Thinking is subject to the session retention policy.
 
 ## Default and developer mode
@@ -236,7 +255,9 @@ Every option parses and works in both modes, from the command line and from
 the config file, so scripts and the benchmark keep running: the mode hides an
 option from help, it does not remove it. `--developer` takes effect for help
 wherever it stands on the command line (`melo --help --developer` works), and
-needs its full name. A `[ui] mode` that is neither `"default"` nor
+needs its full name.
+
+A `[ui] mode` that is neither `"default"` nor
 `"developer"` prints one line on stderr and shows the default help; it never
 stops a run or the gateway.
 
@@ -744,13 +765,16 @@ These are usage errors:
 
 **With `--brief`:** JSON is a versioned worker result: `v`, `status`, `run_id`,
 `exit_code`, `head_sha`, `git_dirty`, `tests`, `run` and `error`. HEAD and dirty
-state come from the workspace, and are null when unavailable. `run` is the
-run record without `config`, or null for startup or transport errors. Without a
+state come from the workspace, and are null when unavailable.
+
+`run` is the run record without `config`, or null for startup or transport errors. Without a
 `Check:` line in the brief, `tests` is `recorded` only for the last passing
-recognized test check of the final attempt, otherwise `not_recorded`. A
-recorded item contains the raw command or Python code, redacted and capped at
+recognized test check of the final attempt, otherwise `not_recorded`.
+
+A recorded item contains the raw command or Python code, redacted and capped at
 2,000 characters with `command_truncated`, its nullable exit code and
 `tool_event` source. It is evidence from tool output, not a guarantee that a task is correct.
+
 With a `Check:` line, `tests` is the harness's own result instead (see below):
 `passed` or `failed`, with one item per command of the gate's last run, each
 with `command`, `command_truncated`, `exit_code`, `duration_s` and the source
@@ -762,22 +786,31 @@ With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
-process death or a broken pipe can leave no result. Drain stdout and check
+process death or a broken pipe can leave no result.
+
+Drain stdout and check
 both the final record and the exit code. Agent construction failures after a
 valid brief, including config-file values the agent would refuse and an
-invalid TOML file, produce `startup_error` with `run: null` and exit 1. A
-`--base-url` brief with no `--chat-model`, on a server that serves several chat
+invalid TOML file, produce `startup_error` with `run: null` and exit 1.
+
+A `--base-url` brief with no `--chat-model`, on a server that serves several chat
 models and does not say which one is loaded, produces it too, with `exit_code` 2
 and the list in `error` (see [General](#general)). For
 event output failures the worker attempts a `transport_error` result with
 `run: null` and exits 1; a failed or blocked output may prevent that record
-from arriving. A broken pipe while the startup record is written still exits
+from arriving.
+
+A broken pipe while the startup record is written still exits
 1. Usage errors remain resultless. Worker output uses pattern-based
 redaction and omits some recognizable sensitive-file reads, including simple
 shell and Python reads. A startup error's text is redacted too, and the
-user's home directory is shown as `~`. Arbitrary commands, code and model
+user's home directory is shown as `~`.
+
+Arbitrary commands, code and model
 output can still expose secrets: the stream is not a secret boundary. Review
-before sharing. Direct runs, this one included, are recorded by default (see above).
+before sharing.
+
+Direct runs, this one included, are recorded by default (see above).
 
 A `--brief` run also differs from a plain task in four ways. The query is the
 brief followed by one fixed paragraph, the same on every request: make the
@@ -785,14 +818,18 @@ smallest change that satisfies the task as soon as you know where it goes, run
 the task's check commands after each change, fix what you broke (tests that
 assert the old behaviour included), read the lines you will edit first because
 earlier tool output leaves the context after about ten steps, and say in the
-final answer which checks ran and their result. A reflection whose action is
+final answer which checks ran and their result.
+
+A reflection whose action is
 `continue` starts the next attempt while steps and attempts remain, whatever
 its three flags say (the `reflection` event still records them). When an
 attempt boundary finds the workspace unchanged since the run started, the next
 attempt's first request carries the line "Nothing has changed in the workspace
 yet. Start this attempt by writing the part of the task you can already write,
 then continue." and a `no_change` notice is emitted; a workspace that is not a
-git tree gets neither. Runs without `--brief` are unchanged.
+git tree gets neither.
+
+Runs without `--brief` are unchanged.
 
 Three more aids keep a brief run writing. After 6 steps in a row in which the
 workspace digest has not changed since the last change seen (or the start), one
@@ -800,7 +837,9 @@ user line, "You have read for 6 steps without changing anything. Write the part
 of the task you can already write now (the smallest item first), then
 continue.", is added and a `no_change` notice with detail `{"scope": "step"}`
 is emitted; the count restarts at each attempt and after each probe, so the line
-comes at most once every 6 steps (the boundary line stays). When the window or a
+comes at most once every 6 steps (the boundary line stays).
+
+When the window or a
 fit drops tool output, the run remembers one line per dropped result (tool, its
 key argument shortened to 80 characters, output length, newest 8) and each
 planning request ends with "Earlier tool output no longer in your context:
@@ -814,33 +853,44 @@ boundary line above is added, it ends with "Start with: <that direction>"
 
 The fourth difference is that the run checks itself. A brief names its checks on
 lines that start with `Check:` (no leading space); the rest of each line is one
-shell command, for example `Check: uv run pytest tests/cli -q`. Before the run
-would end `completed`, the harness runs the commands in order, each as a
+shell command, for example `Check: uv run pytest tests/cli -q`.
+
+Before the run would end `completed`, the harness runs the commands in order, each as a
 `shell_exec` call of the run's executor, whether or not the run offers
 `shell_exec` to the model (in direct mode it does not, unless `--builtins all`
 or `--builtins shell_exec` says so; `--builtins none` does not stop the check:
 to skip it, remove the line). Only the harness's call gets past that filter:
-the model's tool list and its own `shell_exec` calls stay as they are. The
-checker's `pre_execute`, the workspace root (`--workspace`), the shell timeout
+the model's tool list and its own `shell_exec` calls stay as they are.
+
+The checker's `pre_execute`, the workspace root (`--workspace`), the shell timeout
 and the redaction apply as they do to the model's own calls. A check passes on
-exit status 0. When one fails, and the attempt has a step left
+exit status 0.
+
+When one fails, and the attempt has a step left
 (or a `done` reflection can start another attempt), the run does not end: the
 next planning request carries one user message with the command, its exit code
 and the last 60 lines of its output, redacted, then "The task's check failed. Fix
 what it shows, run it again, then finish." Each failing check costs one retry,
-and a run has two. The first failure of a round stops the round. A check that is
+and a run has two. The first failure of a round stops the round.
+
+A check that is
 refused is not retried. When a check still fails at the end, the run ends
 `completed` as before, but `tests` is `failed`, a `brief_check_failed` notice
 says so, and the exit code is 4 (see [Exit codes](#exit-codes); stderr gets one
 line, `melo: the brief's check failed: <command> (exit N)`, with `not run` for
 a refused check and `no exit status` for a timeout); when every check of the last round
-passes, `tests` is `passed`. Each run of a check emits a `brief_check` notice
+passes, `tests` is `passed`.
+
+Each run of a check emits a `brief_check` notice
 with its command, exit code and duration. When the run is in its last attempt with exactly two steps of its budget left,
 the workspace has changed since the checks last ran (or since the run started),
 and the gate has not run in that attempt, the harness runs the checks once
-before the next planning request, so the model can still fix what they show. A
-pass changes nothing; a failure sends the same message as the gate and uses one
-of the two retries. `max_steps` stays a hard bound. A brief with no `Check:`
+before the next planning request, so the model can still fix what they show.
+
+A pass changes nothing; a failure sends the same message as the gate and uses one
+of the two retries. `max_steps` stays a hard bound.
+
+A brief with no `Check:`
 line behaves as before, and the model's own account of its checks is still only that.
 
 <a id="confined-writes"></a>
@@ -859,10 +909,13 @@ refused), in uv's cache (`UV_CACHE_DIR`, else `~/.cache/uv`), black's
 terminal, the standard streams, `/dev/fd` and pseudo-terminals, and, when the
 workspace is a linked git worktree, in its own git directory and the repository's
 `objects`: `git status`, `diff` and `add` work, a commit to a branch is refused,
-and the main checkout's files stay unwritable. `uv run`, `uv sync`, `pytest`,
+and the main checkout's files stay unwritable.
+
+`uv run`, `uv sync`, `pytest`,
 `ruff`, `black`, `mypy` and `npm` were measured to need nothing else. Reads and
-the network are not confined. A
-refused write keeps its error and gains a first line (after `[exit code N]`):
+the network are not confined.
+
+A refused write keeps its error and gains a first line (after `[exit code N]`):
 
 ```text
 melo: writing outside the workspace is not allowed in this run (refused: /Users/me/outside.txt); write in /Users/me/project, and put scratch files in $TMPDIR.
@@ -873,10 +926,14 @@ melo: writing outside the workspace is not allowed in this run (refused: /Users/
 missing, or melo runs inside a sandbox that refuses another), the worker stops
 before its first command with a `startup_error` and the line `writes cannot be
 confined to the workspace: <why>; set agent.confine_writes to false to run without
-it (-X agent.confine_writes=false for one run)`. On other systems the run goes on
+it (-X agent.confine_writes=false for one run)`.
+
+On other systems the run goes on
 unconfined, and `run.confinement` is `{"writes": "not_confined", "reason": ...}`.
 `-X agent.confine_writes=false` turns it off for one run; then the result has no
-`confinement` key. Runs without `--brief`, the interactive UI, the web console and
+`confinement` key.
+
+Runs without `--brief`, the interactive UI, the web console and
 the app are not confined, unless the developer setting `[agent] confine_direct_runs
 = true` (`-X agent.confine_direct_runs=true` for one run; off by default) is on: a
 task given on the command line and the `melo ""` loop then get the same
@@ -895,45 +952,63 @@ of each, at most 12, shortened to about 120 characters; a brief with fewer than
 two gets nothing) and marks each from the files `git status` lists as changed
 since the run started: `changed` when a file the item names (a word with a `/`
 or a file extension) was edited, `not yet` when it names files and none was,
-`no file named` otherwise. A mark speaks of edits only; it never says an item is
+`no file named` otherwise.
+
+A mark speaks of edits only; it never says an item is
 done. The marks go into the reflection request at each attempt boundary and into
 the check two steps before the last attempt ends, always as the same block,
 `Items in the brief with no edit yet: 2, 3` followed by those item lines, so the
-planning requests in between keep their prefix. The block is left out when no
+planning requests in between keep their prefix.
+
+The block is left out when no
 item is `not yet`. Each use emits a `brief_items` notice with detail
-`{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`. A
-workspace that is not a git tree gets no block. Without `--brief` the option
+`{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`.
+
+A workspace that is not a git tree gets no block. Without `--brief` the option
 does nothing.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last
-line waits for its newline. The file may initially be absent, but must otherwise
+line waits for its newline.
+
+The file may initially be absent, but must otherwise
 be an append-only regular file (not a symlink), at most 1 MiB total and 16 KiB
 per line. Serialize writers, append each full line in one write and use a fresh
-inbox per run. There is no default inbox: `--brief` alone reads no file, and the
+inbox per run.
+
+There is no default inbox: `--brief` alone reads no file, and the
 inbox path is never put in the model's context.
 
 With `--inbox-fd N`, the same lines, total and per-line limits and
 acknowledgements come from an inherited, readable pipe file descriptor instead.
 The parent opens the pipe, passes the read end (for example with
 `pass_fds=(read_fd,)` in `subprocess.Popen`) and keeps the write end open; it
-appends one complete line at a time. The worker checks that `N` is a pipe before
+appends one complete line at a time.
+
+The worker checks that `N` is a pipe before
 the first model call and makes the read end close-on-exec there, so
 `python_exec`, `shell_exec` and MCP server subprocesses get no copy and cannot
-write the channel. This is the recommended inbox for untrusted tasks. A closed
-fd or one that is not a pipe is refused at the same point as a bad file, as a
+write the channel. This is the recommended inbox for untrusted tasks.
+
+A closed fd or one that is not a pipe is refused at the same point as a bad file, as a
 clean `setup_error` (exit 2) with no model call. An fd has no path, so the
-workspace check below applies only to a file inbox. `--inbox` and `--inbox-fd`
+workspace check below applies only to a file inbox.
+
+`--inbox` and `--inbox-fd`
 cannot be combined.
 
 For a file inbox, the path must resolve outside the run's workspace, after
 symlinks. A path inside it is refused before any model call, because the default
 `file_write` and `python_exec` tools could rewrite it; so are a symlink, FIFO,
 directory, oversized file and unreadable path, which are checked at the same
-point. An empty, non-UTF-8 or oversize message, or a file replaced or truncated
+point.
+
+An empty, non-UTF-8 or oversize message, or a file replaced or truncated
 after a line was accepted, ends the run at the boundary that reads it. All of
 these are `setup_error` runs (exit 2) with the plain message and no traceback,
-not `crashed`. The reader requires the bytes already read to stay a prefix of
+not `crashed`.
+
+The reader requires the bytes already read to stay a prefix of
 the file: a same-inode rewrite that preserves them is accepted as appended
 content, while a shorter file or an earlier changed byte fails. It cannot detect
 a truncate-and-rewrite that keeps every previously read byte.
@@ -941,7 +1016,9 @@ a truncate-and-rewrite that keeps every previously read byte.
 A file inbox is a steering channel, not a trust boundary: same-user processes,
 and `python_exec`/`shell_exec` code with the user's permissions, can still write
 it or any other file. Keeping it outside the workspace only stops the confined
-file tools from rewriting it. The fd channel closes that tool-write path, but it
+file tools from rewriting it.
+
+The fd channel closes that tool-write path, but it
 is not authentication: a process that already holds the write end can steer the
 run, so the parent must not pass that end to the worker's tools or to another
 untrusted process.
@@ -949,12 +1026,18 @@ untrusted process.
 In `stream-json`, `inbox.accepted` reports each inserted line's ending byte
 `offset`, step and attempt, without its text. An acknowledgement means the
 instruction entered the live run's context, not that the model received or
-followed it. Acknowledgements are never dropped: a slow or stalled reader makes
+followed it.
+
+Acknowledgements are never dropped: a slow or stalled reader makes
 the worker wait for the writer instead of skipping records. Messages appended
-after the final planning boundary may never be accepted. Offsets are committed
+after the final planning boundary may never be accepted.
+
+Offsets are committed
 once per live run, not across crashes or restarts; reconcile acknowledgements
 and use a fresh file or pipe for a new run. A saved worker records the redacted
-text in its event history. Redaction can change that text, and session resume
+text in its event history.
+
+Redaction can change that text, and session resume
 does not reconstruct inbox events as conversation messages; do not treat saved
 history as an exact replay.
 
@@ -1057,7 +1140,9 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 
 129, 130 and 143 are what a shell reports for a process ended by that
 signal. Cancelling the setup wizard, or `q` at the first-run questions,
-exits with 0. Before the interactive UI opens, Ctrl-D at a setup question
+exits with 0.
+
+Before the interactive UI opens, Ctrl-D at a setup question
 exits with 0 and Ctrl+C with 130, both after `Setup cancelled.` Leaving the
 UI with `/exit`, Ctrl+D or Ctrl+C twice exits with 0, whatever its turns
 ended with.

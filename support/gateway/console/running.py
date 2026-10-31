@@ -6,8 +6,9 @@ and the worker runs and terminal chats that hold a live lease in the CLI file.
 what runs, newest kinds first, for the header's list: it is capped, and the
 counts are not. ``waiting`` lists the chats and tasks that wait for the
 person's answer to a tool approval, for the macOS app's menu bar. ``recent``
-says how the newest finished chat turn, task, run or terminal turn ended and
-how many seconds ago (``null`` when none did), for the app's desktop pet.
+says how the newest finished chat turn, task, run or terminal turn ended, what
+it was called and how many seconds ago (``null`` when none did), for the app's
+desktop pet and activity pill.
 Each item says what it is doing in plain words (``activity``, with its kind
 ``icon``: :func:`~localmelo.support.sessions.display.activity_text`), and
 ``focus`` names the one item a glance shows: one that waits for the person
@@ -108,10 +109,25 @@ def _turn_outcome(status: str, cause: str) -> str:
     return {"ok": "done", "stopped": "stopped"}.get(severity, "failed")
 
 
+async def _title_of(console: Console, kind: str, owner: str) -> str:
+    """The title of a finished chat, task, run or terminal chat; empty when it cannot be read."""
+    try:
+        if kind == "task":
+            return str((await console.workers.tasks.get_task(owner)).title)[
+                :TITLE_CHARS
+            ]
+        store = console.worker_history if kind in ("run", "terminal") else console.store
+        info = await store.get_session(owner)
+    except (SessionStoreError, OSError, AttributeError):
+        return ""
+    return info.title[:TITLE_CHARS] if info is not None else ""
+
+
 async def recent_outcome(console: Console) -> dict[str, Any] | None:
     """How the newest finished chat turn, task, run or terminal turn ended, or ``None``.
 
-    ``{"kind", "id", "outcome", "ended_s_ago"}``: ``kind`` as in ``items``,
+    ``{"kind", "id", "title", "outcome", "ended_s_ago"}``: ``kind`` as in
+    ``items``, ``title`` what it was called (empty when unreadable),
     ``outcome`` ``done``, ``failed`` or ``stopped``, the age in seconds to
     a tenth. A turn that a shutdown, a crash, a takeover, a close or a park
     ended is no outcome (the store's ``OUTCOME_CAUSES``).
@@ -156,6 +172,7 @@ async def recent_outcome(console: Console) -> dict[str, Any] | None:
     return {
         "kind": kind,
         "id": owner,
+        "title": await _title_of(console, kind, owner),
         "outcome": outcome,
         "ended_s_ago": round(max(0.0, time.time() - finished_at), 1),
     }
