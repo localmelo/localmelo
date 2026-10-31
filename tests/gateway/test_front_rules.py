@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from localmelo.support.gateway.front_rules import (
+    LEVEL_MEANINGS,
     LEVEL_WORDS,
     TaskRef,
     allows,
@@ -13,6 +14,9 @@ from localmelo.support.gateway.front_rules import (
     intention_only,
     is_chinese,
     is_question,
+    level_code,
+    level_label,
+    level_menu,
     level_number,
     level_word,
     reply_language,
@@ -135,6 +139,7 @@ def test_the_bare_today_is_the_reason_too() -> None:
 
 
 def test_levels_in_words() -> None:
+    # The words stay what a person may type and what the API's level_word answers.
     assert LEVEL_WORDS == ("Now", "Today", "Normal", "Whenever", "If idle", "Later")
     assert [level_word(n) for n in (0, 2, 5)] == ["Now", "Normal", "Later"]
     assert level_word(None) == "Normal"
@@ -147,6 +152,39 @@ def test_levels_in_words() -> None:
         None,
     ]
     assert triage("urgent please")[1] == 'you said "urgent"'
+
+
+def test_every_level_reads_as_its_code_and_meaning() -> None:
+    assert LEVEL_MEANINGS == (
+        "runs first; others wait",
+        "today",
+        "normal",
+        "when there is time",
+        "only when the computer is idle",
+        "on hold until you start it",
+    )
+    assert [level_code(n) for n in range(6)] == [f"P{n}" for n in range(6)]
+    assert [level_label(n) for n in range(6)] == [
+        f"P{n} · {meaning}" for n, meaning in enumerate(LEVEL_MEANINGS)
+    ]
+    assert level_label(1) == "P1 · today"
+    # Anything that is not a level reads as P2, as level_word does.
+    assert [level_code(v) for v in (None, 6, -1, "1", True)] == ["P2"] * 5
+    assert level_menu().startswith("P0 (runs first; others wait), P1 (today), P2")
+
+
+def test_old_words_and_codes_set_the_same_level() -> None:
+    same = (
+        (0, ("Now", "now", "P0", "p0", "0", 0)),
+        (1, ("Today", "today", " TODAY ", "P1", "p1", "1", 1)),
+        (2, ("Normal", "normal", "P2", "p2", 2)),
+        (3, ("Whenever", "whenever", "P3", "p3", 3)),
+        (4, ("If idle", "if  idle", "P4", "p4", 4)),
+        (5, ("Later", "later", "P5", "p5", 5)),
+    )
+    for level, spellings in same:
+        assert {level_number(spelling) for spelling in spellings} == {level}
+    assert [level_number(v) for v in ("P6", "p", "6", "-1", "", True)] == [None] * 6
 
 
 def test_questions() -> None:

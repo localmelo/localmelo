@@ -133,7 +133,7 @@ async def test_an_imperative_change_to_named_files_is_a_task_without_a_model_cal
         response = await _say(client, console, FIX)
         assert response.status_code == 200, response.text
         echo = response.json()["echo"]
-        assert echo["line"] == "Started: fix this by today: in test_e2e_pty.py · Today"
+        assert echo["line"] == "Started: fix this by today: in test_e2e_pty.py · P1"
         assert echo["typed"] == FIX
         record = await _task(console, echo["task_id"])
         assert (record.spec["objective"], record.level) == (FIX, 1)
@@ -340,7 +340,7 @@ async def test_what_got_done_names_the_commits_tasks_reported(tmp_path: Path) ->
         assert "Committed b60d0892" in query
         # …and the task tools carry each task's state and the first lines of its answer.
         listed = _tool_result(llm, 1)
-        assert f"{task_id} · Fix the e2e list_files check · done · Normal · " in listed
+        assert f"{task_id} · Fix the e2e list_files check · done · P2 · " in listed
         assert "24 passed. / Committed b60d0892." in listed
         assert "answer: Fixed the check" in _tool_result(llm, 2)
         # Read once: the next turn does not hear it again.

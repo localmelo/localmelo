@@ -2,6 +2,7 @@ import {cleanOutput, formatDuration} from './turns.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
+import {LEVELS, levelLabel} from './levels.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -34,7 +35,6 @@ const STATE_WORDS = {running: 'Working', waiting: 'Waiting for your approval', h
 const ANSWERS = {waiting: 'Waiting for you', 'allowed once': 'Allowed once', 'allowed for this chat': 'Allowed for this chat',
   'allowed automatically': 'Allowed automatically', denied: 'Denied', 'no answer': 'No answer in time', withdrawn: 'Not run: it stopped first'};
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
-const LEVELS = ['Now', 'Today', 'Normal', 'Whenever', 'If idle'];
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
 const OPEN = {chat: 'Open chat', task: 'Open task', run: 'Open run', terminal: 'Open terminal chat'};
 const SHOWN = 8;
@@ -105,7 +105,7 @@ export function setupPanel({
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
-  const scheduled = setupScheduledTab({doc, api, developer, clock, chat: () => state.chat});
+  const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat});
   const live = taskLive({api: newest, changed: () => drawBody(), doc, ...stream});
   let reads = 0;
 
@@ -337,11 +337,12 @@ export function setupPanel({
       button('outline-button', paused ? 'Resume' : 'Pause', () => act(row, {state: paused ? 'resume' : 'pause'})),
       button('outline-button', 'Stop', () => act(row, {state: 'stop'})),
     ];
-    if (!paused && Number.isInteger(row.level) && row.level < LEVELS.length) {
+    // P0 to P4 run; P5 is on hold, which Pause and Resume set.
+    if (!paused && Number.isInteger(row.level) && row.level < LEVELS.length - 1) {
       const menu = node('select', 'activity-level');
       menu.setAttribute('aria-label', 'Priority');
-      LEVELS.forEach((word, level) => {
-        const option = node('option', '', developer() ? `P${level} · ${word}` : word);
+      LEVELS.slice(0, -1).forEach((_, level) => {
+        const option = node('option', '', levelLabel(level));
         option.value = String(level);
         option.selected = level === row.level;
         menu.append(option);
