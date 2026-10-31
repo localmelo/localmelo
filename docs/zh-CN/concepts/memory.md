@@ -48,7 +48,7 @@
 | 方式 | 何时 | 例子 |
 |---|---|---|
 | 你要求时 | 请 melo 记住一个事实的消息会立刻被记下，不管模型做什么。 | "remember that Sam has the lab keys"、"keep in mind that my group meeting is on Thursdays"、"记住：我的车停在B2层"、"别忘了…"、"帮我记一下…" |
-| melo 判断值得记时 | 你告诉 melo 关于你自己或你的工作的长期信息，或对话里一个已完成任务的结果值得保留时，模型用它的 `remember` 工具记一条笔记。模型没有记的陈述就不是笔记。 | "I prefer short answers"、"call me Ray"、"my reading group meets on Tuesdays"、"我习惯用简体中文"、"we decided to use Qwen3-Embedding-0.6B" |
+| melo 判断值得记时 | 你告诉 melo 关于你自己或你的工作的长期信息，或对话里一个已完成任务的结果值得保留时，模型用它的 `remember` 工具记一条笔记。模型被告知：你对自己说出的明确、长期的事实（住在哪里、你的名字、某个人、你的日程、一个偏好），要在这一轮就记下。 | "I prefer short answers"、"call me Ray"、"I live in Utrecht"、"my advisor is Dr. Okafor"、"我的导师是周教授"、"we decided to use Qwen3-Embedding-0.6B" |
 
 - 一条笔记是一句对你说的话，带上主题（About you、Preferences、People、Projects 或 Decisions）、你的原话和它来自的对话。
 - 你的消息下方会显示一行 `Remembered: you prefer short answers · Undo`；Undo 会忘掉这条笔记，并恢复被它替换的那一条。
@@ -58,6 +58,7 @@
   - 另一个主题的相似句子互不替换：`my flight to Porto` 旁边的 `my flight to Faro`、`我的书法课` 旁边的 `我的游泳课`；另一类值也不替换：`my cat is called Biscuit` 旁边的 `my cat is grey`。
   - 被替换的笔记会保留，但不再被召回或列出；新笔记下的 Undo 会把它恢复。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
+- `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
 
 笔记被记下之前，代码会检查：
 
@@ -104,6 +105,9 @@ Where do I live?
 ```
 
 `Used … ▾` 中这一轮写作 `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`。
+
+- 没有笔记时也一样：两个早先轮次里你对同一件事说了不同的值，较旧的一轮排在较新的之后，并以 `(older; replaced by a newer message)` 结尾。
+- 只有较旧的一轮与消息匹配时，较新的一轮会被一并带上，排在前面。
 
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 

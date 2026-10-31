@@ -274,11 +274,15 @@ class MemoryConfig:
     embedding model is set up), ``bm25`` (words only), ``embedding`` (words and
     meaning; an embedding model is required) or ``llm`` (words pick candidates
     and the chat model chooses among them, with no embedding calls).
+    ``keep_statements``, a developer setting for comparison and off by default,
+    makes code keep after a chat turn the plain, lasting facts the user stated
+    that the model did not keep with ``remember``.
     """
 
     admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
+    keep_statements: bool = False
 
 
 @dataclass
@@ -471,7 +475,7 @@ class Config:
         """``[memory]`` holds bools and a known retriever."""
         errors = [
             f"[memory] {name} must be a bool, got {value!r}"
-            for name in ("admit_on_outcome", "across_chats")
+            for name in ("admit_on_outcome", "across_chats", "keep_statements")
             if not isinstance(value := getattr(self.memory, name), bool)
         ]
         if self.memory.retriever not in MEMORY_RETRIEVERS:
@@ -1399,6 +1403,8 @@ def save(cfg: Config) -> None:
             lines.append("across_chats = false")
         if cfg.memory.retriever != "auto":
             lines.append(f"retriever = {_toml_string(cfg.memory.retriever)}")
+        if cfg.memory.keep_statements:
+            lines.append("keep_statements = true")
         lines.append("")
 
     if cfg.browser != BrowserConfig():

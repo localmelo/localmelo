@@ -92,6 +92,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The newer value wins even when no note was kept, and melo is told to keep a
+  lasting fact you state. After the newer-wins change, a local model answered 2 of 5
+  updated facts right with an embedding model and 3 of 5 by words only, and the chat
+  where the old value was said still came back as current for nearly every question:
+  only 2 of 23 plain statements such as "I live in Utrecht." had become notes, so the
+  rule that a newer note replaces an older one seldom fired. Now, of two chat turns
+  where you said one thing with different values, the older comes after the newer and
+  reads `(older; replaced by a newer message)`, even without a note; when only the
+  older turn matches, the newer one comes with it. The chat's instructions and the
+  `remember` tool now say plainly to keep a plain, lasting fact about you (where you
+  live, your name, a person, your schedule, a preference) in the turn you say it, with
+  an English and a Chinese example; nothing asks you to confirm. Look-alikes such as
+  "my flight to Porto" and "my flight to Faro" stay apart. A developer setting for
+  comparison, `[memory] keep_statements` (off by default, `-X
+  memory.keep_statements=on`), makes code keep such a fact after the turn when the
+  model did not, never a question, a to-do, an "if", a "not", the past, what others
+  think, a passing state ("my build is failing") or a secret ([#329]).
+
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
   both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,
@@ -2661,4 +2679,5 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#329]: https://github.com/localmelo/localmelo/pull/329
 [#328]: https://github.com/localmelo/localmelo/pull/328
