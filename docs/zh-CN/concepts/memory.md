@@ -103,8 +103,6 @@ when is my dentist appointment?
 - User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
 ```
 
-- `[memory] context_query = true`（默认关闭；`-X memory.context_query=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：一条消息还会和你在它之前发的那条消息（不超过 30 分钟、没有被撤销）一起搜索，所以在 "who is my advisor?" 之后问 "and where is her office?"，也能找到关于导师办公室的笔记。它只增加候选项；窗口里的召回块已经显示过的内容不会再加一次。
-
 **召回时新的值优先。**
 
 - 召回块只给出当前的值。事实已被新笔记替换的轮次（或你后来对同一件事说了另一个值的轮次）不会出现在其中，所以回答给出新的值，而不是把旧的当作历史一并说出：
@@ -150,7 +148,6 @@ Where did I live before?
 | `select_tokens` | 选择用掉的 token（`prompt`、`completion`）。 |
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
 | `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
-| `context` | 你的上一条消息有没有参与搜索（`[memory] context_query`）：`off`、`used`，没有可用的上一条消息时为 `none`。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 

@@ -1,11 +1,8 @@
-"""A chat remembers its own past, and a follow-up knows what it follows.
+"""A chat remembers its own past.
 
 A chat's turns that its model's window no longer holds are recalled like
 another chat's, as ``this chat``; the ones it still holds are not
 (``window_start``: the turn of the window's first user message, by time stamp).
-With ``[memory] context_query`` on, the message before the current one joins the
-search: its words in a second BM25 list at half weight, its query vector added
-at half weight. Off (the default) changes nothing.
 """
 
 from __future__ import annotations
@@ -14,24 +11,19 @@ import time
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, service
-from localmelo.support.memory.index import Document
 from localmelo.support.memory.recall import (
-    BLOCK_HEADER,
     Item,
     in_view,
-    shown_lines,
     this_chat,
 )
 from localmelo.support.memory.service import CHAT_TURN, window_start
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
-from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding, teach
+from localmelo.tests.memory.chat_memory_helpers import teach
 from localmelo.tests.sessions.helpers import Clock
 
 HOLDER = "test-host:1:own"
@@ -301,7 +293,7 @@ def _prompt(typed: str) -> str:
     return f"User: {typed} melo: Okay."
 
 
-def test_in_view_this_chat_and_the_recall_lines_in_a_window() -> None:
+def test_in_view_and_this_chat() -> None:
     turn = Item("d:1", "User: a melo: b", "chat “a”, Oct 1", "s", 5, 1.0)
     note = Item("r:1", "Your name is Juno.", "chat “a”, Oct 1", "s", 5, 1.0)
     assert in_view(turn, "s", None) and in_view(turn, "s", 5) and in_view(turn, "s", 3)
@@ -309,255 +301,3 @@ def test_in_view_this_chat_and_the_recall_lines_in_a_window() -> None:
     assert not in_view(note, "s", None)  # a note is never in view
     assert this_chat(turn, "s").where.startswith("this chat, ")
     assert this_chat(turn, "t") is turn and this_chat(note, "s") is note
-    block_text = f"question\n\n{BLOCK_HEADER}\n- one (a)\n- two (b)"
-    window = [
-        Message("user", block_text),
-        Message("assistant", "- three"),
-        Message("user", "- four"),
-    ]
-    assert shown_lines(window) == {"- one (a)", "- two (b)"}
-
-
-# ── A query that knows the conversation ──
-
-QUESTION = "who is my advisor?"
-FOLLOW = "and where is her office located?"
-
-
-def cfg_with(context_query: bool) -> Config:
-    cfg = Config()
-    cfg.memory.context_query = context_query
-    return cfg
-
-
-def settings(context_query: bool) -> Callable[[], Config | None]:
-    return lambda: cfg_with(context_query)
-
-
-async def advisor_doc(store: SessionStore, memory: ChatMemory) -> None:
-    """Another chat's turn that answers the question and its follow-up together,
-    but not the follow-up alone: it has "office", not "located"."""
-    other = await said(store, None, "my advisor")
-    await memory.stores()[1].add(
-        Document(
-            session_id=other.session_id,
-            turn=1,
-            surface="gateway",
-            kind="chat",
-            title="Advisor",
-            text="User: my advisor melo: Your advisor has an office in room 214.",
-            created_at=time.time(),
-        )
-    )
-
-
-async def follow_up(
-    store: SessionStore, clock: Clock, *, gap: float = 60.0
-) -> tuple[TurnInfo, TurnInfo]:
-    """A chat that asked QUESTION and, *gap* seconds later, sends FOLLOW."""
-    first = await said(store, None, QUESTION)
-    clock.advance(gap)
-    return first, await running(store, first.session_id, FOLLOW)
-
-
-async def test_a_follow_up_finds_what_the_message_alone_misses_only_with_context_query(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    for setting, label in ((False, "off"), (True, "used")):
-        memory = memory_in(tmp_path / label, settings(setting))
-        await advisor_doc(store, memory)
-        _, follow = await follow_up(store, clock)
-        found = await memory.before_turn(store, follow, FOLLOW)
-        assert found.recall is not None and found.recall.context == label
-        data = found.event()
-        assert data is not None and data["recall"]["context"] == label
-        assert bool(found.used) is setting
-        assert ("room 214" in found.block) is setting
-        assert setting or found.block == ""
-        await memory.aclose()
-
-
-async def test_context_query_is_off_by_default_and_changes_nothing_when_off(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    assert Config().memory.context_query is False
-    for name, memory in (
-        ("none", memory_in(tmp_path / "a")),  # no settings at all
-        ("table", memory_in(tmp_path / "b", settings(False))),
-    ):
-        await advisor_doc(store, memory)
-        _, follow = await follow_up(store, clock)
-        found = await memory.before_turn(store, follow, FOLLOW)
-        assert found.block == "" and found.used == (), name
-        assert found.recall is not None and found.recall.context == "off"
-        await memory.aclose()
-
-
-async def test_with_no_message_before_it_the_search_is_the_plain_one(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    blocks, contexts = [], []
-    for setting in (False, True):
-        memory = memory_in(tmp_path / str(setting), settings(setting))
-        await advisor_doc(store, memory)
-        new = await store.begin_turn(
-            None, "advisor office", holder=HOLDER, new_session=NewSession()
-        )
-        found = await memory.before_turn(store, new, "advisor office")
-        assert found.recall is not None
-        blocks.append(found.block)
-        contexts.append(found.recall.context)
-        await finish(store, new)
-        await memory.aclose()
-    assert blocks[0] == blocks[1] != ""
-    assert contexts == ["off", "none"]
-
-
-async def test_a_message_older_than_thirty_minutes_is_a_different_moment(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    memory = memory_in(tmp_path, settings(True))
-    await advisor_doc(store, memory)
-    _, late = await follow_up(store, clock, gap=31 * 60)
-    found = await memory.before_turn(store, late, FOLLOW)
-    assert found.used == () and found.recall is not None
-    assert found.recall.context == "none"
-    await memory.aclose()
-
-
-async def test_the_message_before_is_the_latest_one_that_is_not_undone(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    memory = memory_in(tmp_path, settings(True))
-    await advisor_doc(store, memory)
-    first = await said(store, None, QUESTION)
-    sid = first.session_id
-    clock.advance(1)
-    await said(store, sid, "what is for lunch?")
-    undone = await store.undo_last_turn(sid)
-    assert undone is not None and undone.turn == 2
-    clock.advance(1)
-    follow = await running(store, sid, FOLLOW)
-    assert await memory._previous(store, follow) == (1, QUESTION)
-    found = await memory.before_turn(store, follow, FOLLOW)
-    assert found.recall is not None and found.recall.context == "used"
-    assert "room 214" in found.block
-    await finish(store, follow)
-    # With the question undone too, there is no message to use.
-    assert (await store.undo_last_turn(sid)) is not None
-    assert (await store.undo_last_turn(sid)) is not None
-    clock.advance(1)
-    alone = await running(store, sid, FOLLOW)
-    assert await memory._previous(store, alone) == (0, "")
-    found = await memory.before_turn(store, alone, FOLLOW)
-    assert found.used == () and found.recall is not None
-    assert found.recall.context == "none"
-    await memory.aclose()
-
-
-class TableEmbedding(BaseEmbeddingProvider):
-    """Explicit unit vectors by text; any other text points away from all of them."""
-
-    model = "table"
-
-    def __init__(self, table: dict[str, tuple[float, float, float]]) -> None:
-        self.table = table
-        self.calls = 0
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        self.calls += 1
-        return [list(self.table.get(text, (0.0, 0.0, 1.0))) for text in texts]
-
-    async def close(self) -> None:
-        return None
-
-
-async def test_a_follow_up_adds_half_the_previous_query_vector_with_no_extra_call(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    # The note is topic A. The question is A. The follow-up alone is 60 degrees
-    # off it (cosine 0.5, under the 0.55 bar); with half the question added it
-    # is 41 degrees off (0.76). No word of either is in the note.
-    question, follow = "who is my landlord?", "and how much is it?"
-    embedding = TableEmbedding(
-        {question: (1.0, 0.0, 0.0), follow: (0.5, 3**0.5 / 2, 0.0)}
-    )
-    recalled: dict[bool, bool] = {}
-    for setting in (False, True):
-        memory = memory_in(tmp_path / str(setting), settings(setting))
-        memory.embedding = lambda: (embedding, embedding.model)  # type: ignore[method-assign]
-        other = await said(store, None, "rent")
-        await memory.stores()[1].add(
-            Document(
-                session_id=other.session_id,
-                turn=1,
-                surface="gateway",
-                kind="chat",
-                title="Rent",
-                text="Rent is 900.",
-                created_at=time.time(),
-                vector=(1.0, 0.0, 0.0),
-                embed_model="table",
-            )
-        )
-        asked = await store.begin_turn(
-            None, question, holder=HOLDER, new_session=NewSession()
-        )
-        await memory.before_turn(store, asked, question)
-        await finish(store, asked)
-        clock.advance(60)
-        second = await running(store, asked.session_id, follow)
-        embedding.calls = 0
-        found = await memory.before_turn(store, second, follow)
-        await finish(store, second)
-        recalled[setting] = bool(found.used)
-        assert embedding.calls == 1  # the follow-up's own embedding, no other call
-        assert found.recall is not None
-        assert found.recall.context == ("used" if setting else "off")
-        await memory.aclose()
-    assert recalled == {False: False, True: True}
-
-
-async def test_the_cache_of_query_vectors_is_bounded_and_keeps_unit_vectors(
-    store: SessionStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(service, "_PRIOR_CHATS", 2)
-    memory = memory_in(tmp_path, settings(True))
-    embedding = FakeEmbedding()
-    memory.embedding = lambda: (embedding, embedding.model)  # type: ignore[method-assign]
-    sessions = []
-    for number in range(3):
-        first = await said(store, None, f"question number {number}")
-        sessions.append(first.session_id)
-        turn = await running(store, first.session_id, f"follow up {number}")
-        await memory.before_turn(store, turn, f"follow up {number}")
-    assert list(memory._prior) == sessions[1:]  # the oldest chat's vector is gone
-    number, model, vector = memory._prior[sessions[2]]
-    assert (number, model) == (2, "fake-embed")
-    assert np.isclose(float(np.linalg.norm(vector)), 1.0)
-    # Off: nothing is kept.
-    plain = memory_in(tmp_path / "off", settings(False))
-    plain.embedding = lambda: (embedding, embedding.model)  # type: ignore[method-assign]
-    await plain.before_turn(store, turn, "follow up 2")
-    assert not plain._prior
-    await memory.aclose()
-    await plain.aclose()
-
-
-async def test_a_line_a_recall_block_in_the_window_shows_is_not_added_again_with_context_query(
-    store: SessionStore, clock: Clock, tmp_path: Path
-) -> None:
-    asked = "advisor office"
-    for setting in (False, True):
-        memory = memory_in(tmp_path / str(setting), settings(setting))
-        await advisor_doc(store, memory)
-        _, follow = await follow_up(store, clock)
-        first = await memory.before_turn(store, follow, asked)
-        assert len(first.used) == 1
-        window = [Message("user", asked + first.block), Message("assistant", "ok")]
-        second = await memory.before_turn(store, follow, asked, window=window)
-        if setting:
-            assert second.used == () and second.block == ""
-        else:  # as before: it is shown again
-            assert second.block == first.block
-        await memory.aclose()

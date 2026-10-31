@@ -30,10 +30,9 @@ from typing import Any, Final
 
 import numpy as np
 
-from localmelo.melo.memory.block import BLOCK_HEADER, strip_block
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.bm25 import BM25Index, tokenize
 from localmelo.melo.memory.hippo.policy import STOPWORDS, normalise
-from localmelo.melo.schema import Message
 
 RRF_K: Final = 60
 MIN_COVERAGE: Final = 0.6
@@ -58,8 +57,6 @@ KEPT_NOTES: Final = 3
 # to the model and the page.
 OLDER: Final = "older; replaced by a newer note"
 OLDER_TURN: Final = "older; replaced by a newer message"
-# The weight of the list ranked for the previous message and this one, against 1.
-CONTEXT_WEIGHT: Final = 0.5
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
 _TITLE_CHARS: Final = 40
@@ -200,18 +197,6 @@ def this_chat(item: Item, session_id: str) -> Item:
     return dataclasses.replace(item, where=f"this chat, {day(item.created_at)}")
 
 
-def shown_lines(messages: Iterable[Message]) -> frozenset[str]:
-    """The recall lines (``- …``) that the recall blocks of the user *messages* show."""
-    lines: set[str] = set()
-    for message in messages:
-        if message.role == "user":
-            block_text = message.content[len(strip_block(message.content)) :]
-            lines.update(
-                line for line in block_text.splitlines() if line.startswith("- ")
-            )
-    return frozenset(lines)
-
-
 def origin(chat: str, gone: bool, at: float) -> str:
     """Where a note came from: ``from chat “Plans”, Oct 30``, or ``from a deleted chat, Oct 30``."""
     return f"from {'a deleted chat' if gone else chat}, {day(at)}"
@@ -299,16 +284,13 @@ def ranked(
     exclude_session: str = "",
     keep_from_turn: int | None = None,
     coverage: float = MIN_COVERAGE,
-    context: str = "",
 ) -> list[Item]:
     """The items that pass the bars for *query*, best first.
 
     *coverage* is the share of the question's content words an item must hold
     to join the BM25 list; a small one lets loose candidates through. The
     turns of *exclude_session* from *keep_from_turn* on (all of them without
-    one) are left out (:func:`in_view`). *context*, the message before this
-    one, adds a second strict BM25 list, for both messages together, fused at
-    :data:`CONTEXT_WEIGHT`: it brings in candidates the message alone misses.
+    one) are left out (:func:`in_view`).
     """
     wanted = gate_terms(query)
     lists: list[list[str]] = []
@@ -329,15 +311,6 @@ def ranked(
     for keys in lists:
         for position, key in enumerate(keys):
             fused[key] = fused.get(key, 0.0) + 1.0 / (RRF_K + position + 1)
-    both = f"{context} {query}"
-    union = gate_terms(both) if context else set()
-    if union:
-        need = max(1, math.ceil(coverage * len(union)))
-        hits = corpus.index.search(stemmed(both), len(corpus.items))
-        for position, key in enumerate(
-            [k for k, _ in hits if len(union & corpus.terms[k]) >= need]
-        ):
-            fused[key] = fused.get(key, 0.0) + CONTEXT_WEIGHT / (RRF_K + position + 1)
     rows: list[tuple[float, bool, Item]] = []
     for key, score in fused.items():
         item = corpus.items[key]

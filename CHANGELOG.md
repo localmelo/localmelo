@@ -192,13 +192,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   recalled like turns of other chats, marked `this chat, Oct 30`, and the ones
   still in view are not; `search_memory` finds them too. The instructions say what
   is true: the chat sees the recent messages, and older parts of the conversation,
-  earlier chats and notes come back with your message when they match. A developer
-  setting for comparison, `[memory] context_query` (off by default, `-X
-  memory.context_query=on`), also searches a message together with the one before
-  it (not undone, at most 30 minutes old), so a follow-up such as "and where is
-  her office?" after "who is my advisor?" finds what it asks about; it adds
-  candidates only and makes no extra embedding request. The `recall` object of a
-  turn reports `context` (`off`, `used` or `none`) ([#NN]).
+  earlier chats and notes come back with your message when they match ([#NN]).
 
 - Notes the model keeps get kept, and it never claims a save it did not make.
   A note passes when its values match what you typed and most of its other

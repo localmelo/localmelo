@@ -30,12 +30,9 @@ import contextvars
 import logging
 import os
 import time
-from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
-
-import numpy as np
 
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
@@ -57,7 +54,6 @@ from localmelo.support.memory.index import (
 from localmelo.support.memory.recall import (
     AUTO_DOCS,
     AUTO_RECORDS,
-    CONTEXT_WEIGHT,
     Corpus,
     Item,
     block,
@@ -69,7 +65,6 @@ from localmelo.support.memory.recall import (
     pick,
     ranked,
     replaced_turns,
-    shown_lines,
     snippet,
     this_chat,
     unit,
@@ -94,10 +89,6 @@ _SELECT_FAILURES: Final = {
 PINNED_CHARS: Final = 600
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
-# A message older than this is a different moment, not the one a follow-up
-# continues (``[memory] context_query``); the vectors kept for it, per chat.
-CONTEXT_GAP_S: Final = 30 * 60
-_PRIOR_CHATS: Final = 64
 _TURN_PAGE: Final = 16
 # The instruction the Qwen3 embedding models expect on a query, not on documents.
 _QWEN3_QUERY: Final = (
@@ -116,10 +107,7 @@ class Recall:
     (the retriever asked for vectors and there is no embedding model).
     *candidates* are the notes and turns that passed to the choice, *used* the
     ones the message carries; *block_chars* is the length of the block text
-    appended to the message (0 when there is none). *context* says whether the
-    message before this one joined the search (``[memory] context_query``):
-    ``off``, ``used``, or ``none`` when there was no message to use (or it was
-    over :data:`CONTEXT_GAP_S` old).
+    appended to the message (0 when there is none).
     """
 
     retriever: str = "bm25"
@@ -133,7 +121,6 @@ class Recall:
     candidates: int = 0
     used: int = 0
     block_chars: int = 0
-    context: str = "off"
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -373,9 +360,6 @@ class ChatMemory:
         self._llm: BaseLLMProvider | None = None
         self._llm_key: tuple[str, ...] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-        # Each chat's latest query vector (turn, model, unit vector), for the
-        # next turn's follow-up: RAM only, the newest _PRIOR_CHATS chats.
-        self._prior: OrderedDict[str, tuple[int, str, np.ndarray]] = OrderedDict()
         self.last_error = ""
         self._warned = False
 
@@ -424,11 +408,6 @@ class ChatMemory:
         """``[memory] keep_statements`` now: a developer setting, off by default."""
         cfg = self._settings()
         return cfg is not None and cfg.memory.keep_statements is True
-
-    def context_query(self) -> bool:
-        """``[memory] context_query`` now: a developer setting, off by default."""
-        cfg = self._settings()
-        return cfg is not None and cfg.memory.context_query is True
 
     def retriever(self) -> str:
         """The ``[memory] retriever`` of the settings now (an unknown value is ``auto``)."""
@@ -578,22 +557,12 @@ class ChatMemory:
         docs_k: int,
         exclude_session: str,
         keep_from_turn: int | None = None,
-        context: str = "",
-        prior: np.ndarray | None = None,
-        shown: frozenset[str] = frozenset(),
     ) -> list[Item]:
-        """Rank for *query* as the retriever says; the numbers go to *recall*.
-
-        *context*, *prior* and *shown* are the follow-up's: the message before
-        this one, its query vector, and the lines the window's recall blocks
-        already show (left out).
-        """
+        """Rank for *query* as the retriever says; the numbers go to *recall*."""
         mode = self.retriever()
         recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
         started = time.perf_counter()
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
-        if vector is not None and prior is not None and prior.shape == vector.shape:
-            vector = unit(vector + CONTEXT_WEIGHT * prior)
         async with self._lock:
             corpus = await self._sync()
             now = time.time()
@@ -605,7 +574,6 @@ class ChatMemory:
                 now=now,
                 exclude_session=exclude_session,
                 keep_from_turn=keep_from_turn,
-                context=context,
             )
             loose = (
                 ranked(
@@ -635,10 +603,8 @@ class ChatMemory:
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
         )
-        # The chat's own turns that left the window read as this chat's, and
-        # a line a recall block in the window shows is not added again.
+        # The chat's own turns that left the window read as this chat's.
         newer = [this_chat(item, exclude_session) for item in newer]
-        newer = [item for item in newer if f"- {item.prompt}" not in shown]
         items = pick(newer, records=records_k, docs=docs_k)
         recall.used = len(items)
         return items
@@ -739,29 +705,11 @@ class ChatMemory:
                 keep_from = await window_start(store, info, window)
             except Exception:
                 logger.warning("Could not tell what the window holds", exc_info=True)
-        shown = shown_lines(window or ()) if self.context_query() else frozenset()
-        found = await self._before_turn(store, info, typed, keep_from, shown)
+        found = await self._before_turn(store, info, typed, keep_from)
         CHAT_TURN.set(
             ChatTurn(store, info, typed, found, emit, keep_from_turn=keep_from)
         )
         return found
-
-    async def _previous(self, store: SessionStore, info: TurnInfo) -> tuple[int, str]:
-        """The turn and typed words of the message before this one: the newest
-        earlier turn of the chat that is not undone, if it is no more than
-        :data:`CONTEXT_GAP_S` old; ``(0, "")`` for none."""
-        page = await store.list_turns(
-            info.session_id, limit=_TURN_PAGE, before=info.turn
-        )
-        for turn in reversed(page):
-            if turn.undone:
-                continue
-            gap = info.started_at - (turn.finished_at or turn.started_at)
-            said = turn.typed_text if turn.attachments else turn.user_text
-            return (
-                (turn.turn, said) if said.strip() and gap <= CONTEXT_GAP_S else (0, "")
-            )
-        return 0, ""
 
     async def _before_turn(
         self,
@@ -769,28 +717,21 @@ class ChatMemory:
         info: TurnInfo,
         typed: str,
         keep_from: int | None = None,
-        shown: frozenset[str] = frozenset(),
     ) -> TurnMemory:
         if not self.enabled:
             return TurnMemory()
         found, refused = records.candidates(typed)
         query = typed[:_QUERY_CHARS]
         recall = Recall()
-        follow_up = self.context_query()
-        recall.context = "none" if follow_up else "off"
         if not query.strip():
             failure = "" if self.embedding()[0] else "no-embedding"
             recall.retriever, recall.fallback = _resolve(self.retriever(), failure)
             return TurnMemory(recall=recall)
-        previous, earlier = await self._previous(store, info) if follow_up else (0, "")
-        if earlier.strip():
-            recall.context = "used"
         started = time.perf_counter()
         embedded = await self._embed(
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
-        prior = self._prior.get(info.session_id)
         used = await self._find(
             query,
             embedded,
@@ -799,21 +740,7 @@ class ChatMemory:
             docs_k=AUTO_DOCS,
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
-            context=earlier[:_QUERY_CHARS],
-            prior=(
-                prior[2] if prior and prior[:2] == (previous, embedded.model) else None
-            ),
-            shown=shown,
         )
-        if (
-            follow_up
-            and embedded.vectors
-            and (vector := unit(embedded.vectors[0])) is not None
-        ):
-            self._prior[info.session_id] = (info.turn, embedded.model, vector)
-            self._prior.move_to_end(info.session_id)
-            while len(self._prior) > _PRIOR_CHATS:
-                self._prior.popitem(last=False)
         # The block gives the current value only: a turn a newer note replaced
         # stays out unless the message asks about the past.
         text, used = block(

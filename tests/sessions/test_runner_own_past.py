@@ -121,7 +121,6 @@ async def test_a_turn_that_left_the_window_is_recalled_as_this_chat(
     assert used["source"] == f"this chat, {today()}"
     assert request.startswith(ASKS + "\n\n" + BLOCK_HEADER)
     assert f"({'this chat'}, {today()})" in request and "Nov 3" in request
-    assert data["recall"]["context"] == "off"
 
 
 async def test_a_turn_the_window_still_shows_is_not_recalled(

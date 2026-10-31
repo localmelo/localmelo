@@ -97,8 +97,6 @@ when is my dentist appointment?
 - User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
 ```
 
-- `[memory] context_query = true` (off by default; `-X memory.context_query=on` for one run, listed by `melo -h all`) is a developer setting for comparison: a message is also searched together with the one you sent before it (not older than 30 minutes, not undone), so "and where is her office?" after "who is my advisor?" finds the note about the advisor's office. It only adds candidates; an item a recall block still in the window shows is not added again.
-
 **The newer value wins in recall.**
 
 - The recall block gives the current value only. A turn whose fact a newer note replaced (or where you said the same thing later with another value) stays out of it, so an answer names the new value and not the old one as history:
@@ -144,7 +142,6 @@ Every recall is timed. The page shows nothing new, but the `turn.memory` event o
 | `select_tokens` | The tokens the choice used (`prompt`, `completion`). |
 | `candidates`, `used` | How many items there were and how many were used. |
 | `block_chars` | How many characters memory added to your message (0 when it added nothing). |
-| `context` | Whether the message before yours joined the search (`[memory] context_query`): `off`, `used`, or `none` when there was no earlier message to use. |
 
 The same object is in the turn's `result` as `memory_recall`, so a client of the HTTP API reads it with the turn.
 
