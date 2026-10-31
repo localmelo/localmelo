@@ -79,6 +79,39 @@ test('a card says what came back in words, never by colour alone', () => {
   assert.equal(cardWords({...base, state: 'answered', line: 'No answer in time'}).mark, '·');
 });
 
+test('a task that ran out of steps is a stopped card that offers Continue before Open task', () => {
+  const base = {id: 2, at: NOON, sourceId: 't9', sourceKind: 'task', title: 'Fix CI', line: 'Remaining: run the tests'};
+  assert.equal(readCard({id: 2, source_id: 't9', source_kind: 'task', state: 'stopped'}).state, 'stopped');
+  assert.deepEqual(cardWords({...base, state: 'stopped'}), {mark: '■', heading: 'Stopped: Fix CI', action: 'Open task', more: 'Continue'});
+  const made = [];
+  const doc = {createElement(tag) {
+    const node = {tag, className: '', textContent: '', type: '', dataset: {}, attributes: {}, children: [], listeners: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+      append(...items) { this.children.push(...items); },
+      addEventListener(type, fn) { this.listeners[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  const opened = [];
+  const resumed = [];
+  const card = {...base, state: 'stopped'};
+  const node = cardNode({doc, card, open: (value) => opened.push(value), resume: (value, button) => resumed.push([value, button.textContent])});
+  assert.equal(node.dataset.state, 'stopped');
+  assert.equal(node.attributes['aria-label'], 'Stopped: Fix CI');
+  assert.equal(made.find((item) => item.className === 'main-card-line').textContent, 'Remaining: run the tests');
+  const foot = made.find((item) => item.className === 'main-card-foot');
+  const buttons = foot.children.filter((item) => item.tag === 'button');
+  assert.deepEqual(buttons.map((item) => [item.className, item.textContent]), [['outline-button', 'Continue'], ['link-button', 'Open task']]);
+  buttons[0].listeners.click();
+  buttons[1].listeners.click();
+  assert.deepEqual(resumed, [[card, 'Continue']]);
+  assert.deepEqual(opened, [card]);
+  // Without a way to continue, the card still opens the task.
+  made.length = 0;
+  cardNode({doc, card, open: () => {}});
+  assert.deepEqual(made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
+});
+
 test('a card node opens its source', () => {
   const made = [];
   const doc = {createElement(tag) {

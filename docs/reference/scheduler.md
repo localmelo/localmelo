@@ -38,7 +38,11 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   `show ID` inspects one. A held task that waits for a tool approval prints
   `Waiting for your approval: <tool> <target> (answer it in the web console,
   Tasks)` (under its row in `list`, in place of the `Waiting:` line in `show`) and
-  `Reason: approval`; there is no `melo-task` verb to answer it. `pause ID`, `resume ID [--level Pn]`,
+  `Reason: approval`; there is no `melo-task` verb to answer it. A task whose
+  run ran out of steps prints `stopped` as its state (`show` adds `Ran out of
+  steps: continue it from the console.` and `Left: …`); `--json` keeps the
+  stored `failed` and adds `out_of_steps`, and `follow --wait` still exits 1.
+  `pause ID`, `resume ID [--level Pn]`,
   `stop ID` and `level ID Pn|auto` control tasks. `list` and `show` print
   levels as words (`Normal`) unless `[ui] mode = "developer"`, which prints `P2`. `first` and deadlines are
   not supported. Pause does not interrupt a running tool. `stop ID` prints
@@ -213,7 +217,9 @@ A held call's activity words come from the gate's reason code
 free model slot`, `Reservation` `Waiting while another job uses the model`,
 `Memory` `Waiting for free memory`, `Battery` `Waiting for the battery`,
 `Thermal` `Waiting for the Mac to cool down` and `IdleOnly` `Waiting until the
-Mac is idle`; any other code, or none, reads `Waiting for the model`.
+Mac is idle`; any other code, or none, reads `Waiting for the model`. A task
+held on an approval or an answer (`wait_reason` `approval` or `input`) is not
+the scheduler's hold: its row reads `Needs your approval`.
 
 The gateway has [task routes](api-v2.md#scheduler-tasks-s3a2) and in-process workers.
 New user tasks are queued by effective priority, rank and creation time, with

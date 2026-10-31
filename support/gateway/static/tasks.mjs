@@ -10,6 +10,8 @@ const RUNNING = new Set(['running', 'held']);
 const STATES = new Set([...RESUMABLE, ...FINISHED, ...RUNNING, 'queued', 'waiting']);
 // A task's state in words (`tasks.state.<state>`); in English, the state itself.
 const stateWord = (state) => (STATES.has(state) ? t(`tasks.state.${state}`) : state);
+// A task whose run used all its steps is stopped, not failed, and can continue (#341).
+const isStopped = (task) => task.out_of_steps === true;
 
 /**
  * Mount the read-and-control view of scheduler tasks. `api` takes paths
@@ -85,7 +87,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
-  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : stateWord(task.state));
+  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : isStopped(task) ? t('tasks.state.stopped') : stateWord(task.state));
 
   function evidenceText(task) {
     if (state.evidence === 'unverified_processes') return t('tasks.evidence.unverified');
@@ -125,7 +127,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
     row(t('tasks.row.updated'), when(task.updated_at));
     // A refused folder says why in its own box below, in words.
-    if (task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), task.wait_reason);
+    if (task.wait_reason && !task.folder_problem && !isStopped(task)) row(t('tasks.row.waiting'), task.wait_reason);
+    // What the run says is left, from its stop answer.
+    if (isStopped(task) && task.left) row(t('tasks.row.left'), task.left);
     if (task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);
     // Evidence is shown when there is some to show, never as "not needed".
     const evidence = evidenceText(task);
@@ -148,6 +152,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const actions = node('div', undefined, 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button(t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), Boolean(state.busy)));
+    }
+    if (isStopped(task)) {
+      actions.append(button(t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), Boolean(state.busy)));
     }
     if (!FINISHED.has(task.state)) {
       actions.append(button(t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), state.busy === 'stop'));
@@ -381,6 +388,18 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
         state.error = errorText(error);
       }
     }
+    render();
+  }
+
+  // Continue picks a task that ran out of steps up where it stopped; its next state is read back.
+  async function keepGoing() {
+    const epoch = state.epoch;
+    const outcome = await act('continue', (id) => api(`${path(id)}/continue`, {method: 'POST'}));
+    if (!outcome || epoch !== state.epoch) return;
+    if (outcome.data) {
+      Object.assign(state, {task: outcome.data.task, notice: t('tasks.continueAccepted')});
+      live?.sync(outcome.data.task);
+    } else state.error = errorText(outcome.error);
     render();
   }
 

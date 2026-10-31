@@ -11,20 +11,30 @@ scripted model; no worker starts.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
     ASK_TEXT,
+    BRIEF_NOTE,
     FRONT_TEXT,
     STARTED_TEXT,
     STARTED_TEXT_ZH,
     answer_head,
+    clean_title,
 )
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import short_title
 from localmelo.tests.sessions.helpers import answer, tool_call
 
+from ..conftest import REAL_ASK_TITLE
 from .conftest import HOLDER, run_result
 from .test_front import _echoes, _four_steps, _say, _start, _task, front_console
 from .test_turn_writes import _wait_turn
@@ -184,7 +194,7 @@ async def test_a_quick_question_at_the_cap_asks(tmp_path: Path) -> None:
         await _say(
             client,
             console,
-            "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line.",
+            "Quick question: which file defines DEFAULT_WORKSPACE?",
         )
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["answer"] == ASK_TEXT
@@ -356,3 +366,380 @@ def test_answer_heads_keep_the_first_lines() -> None:
     )
     assert answer_head("word " * 100, 20) == "word word word word…"
     assert answer_head("key sk-" + "a" * 30) == "key [redacted]"
+
+
+# ── "Continue the … task" (#341) ──
+
+
+async def _stopped(console: Console, task_id: str, reply: str = REPORT) -> None:
+    """*task_id* ran one turn that used all its steps, so it is stopped."""
+    store = console.store
+    record = await _task(console, task_id)
+    turn = await store.begin_turn(task_id, record.spec["objective"], holder=HOLDER)
+    await store.finish_turn(
+        task_id,
+        turn.turn,
+        holder=HOLDER,
+        status="budget_exhausted",
+        cause="run",
+        result=run_result(),
+        answer=reply,
+    )
+    await console.workers.tasks.change(
+        task_id, state="failed", actor="scheduler", failure_reason=OUT_OF_STEPS
+    )
+    console.gate.finish_task(task_id, "failed")
+
+
+CONTINUE = (
+    "Please continue the recovery card task where it stopped: run the two changed "
+    "test files, and commit if they pass."
+)
+
+
+async def test_continue_the_task_continues_the_one_stopped_task_at_once(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        stopped = await _delegated(console, client, "Hide the recovery card section")
+        other = await _delegated(console, client, "Improve the Activity row text")
+        await _stopped(console, stopped)
+        await _finished(console, other)
+        response = await _say(client, console, CONTINUE)
+        assert response.status_code == 200, response.text
+        echo = response.json()["echo"]
+        assert (echo["echo"], echo["how"], echo["task_id"]) == (
+            "sent",
+            "continued",
+            stopped,
+        )
+        assert echo["line"] == "Continued: Hide the recovery card section"
+        assert echo["typed"] == CONTINUE
+        # No model call and no suggestion: the task runs again with the message.
+        record = await _task(console, stopped)
+        assert (record.state, record.card) == ("queued", CONTINUE)
+        assert llm.requests == []
+        assert [e["echo"] for e in await _echoes(console)][-1:] == ["sent"]
+        assert "suggest" not in [e["echo"] for e in await _echoes(console)]
+        assert (await _task(console, other)).state == "done"
+
+
+async def test_continue_the_task_in_chinese(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        stopped = await _delegated(console, client, "修复恢复卡片的测试")
+        await _stopped(console, stopped)
+        echo = (await _say(client, console, "继续恢复卡片任务，然后提交")).json()[
+            "echo"
+        ]
+        assert (echo["echo"], echo["how"]) == ("sent", "continued")
+        assert (await _task(console, stopped)).state == "queued"
+        assert llm.requests == []
+
+
+async def test_several_stopped_tasks_are_each_offered_to_pick_from(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        first = await _delegated(console, client, "Fix the recovery card test")
+        second = await _delegated(console, client, "Hide the recovery card section")
+        await _stopped(console, first)
+        await _stopped(console, second)
+        message = "continue the recovery card task"
+        response = await _say(client, console, message)
+        assert response.status_code == 200, response.text
+        offers = [e for e in await _echoes(console) if e["echo"] == "suggest"]
+        assert {e["task_id"] for e in offers} == {first, second}
+        assert {e["action"] for e in offers} == {"send"}
+        # The first carries the person's message; applying one continues that task.
+        assert [e.get("typed") for e in offers].count(message) == 1
+        assert {(await _task(console, t)).state for t in (first, second)} == {"failed"}
+        applied = await client.post(
+            f"/api/front/echoes/{offers[0]['id']}", json={"do": "apply"}
+        )
+        assert applied.status_code == 200, applied.text
+        assert (await _task(console, offers[0]["task_id"])).state == "queued"
+        assert llm.requests == []
+
+
+async def test_continue_the_task_says_when_it_is_done_or_still_working(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        done = await _delegated(console, client, "Improve the Activity row text")
+        busy = await _delegated(console, client, "Hide the recovery card section")
+        await _finished(console, done)
+        said = (await _say(client, console, "continue the activity row task")).json()
+        assert said["echo"]["echo"] == "failed"
+        assert (
+            said["echo"]["line"]
+            == "Improve the Activity row text is done. There is nothing to continue."
+        )
+        said = (await _say(client, console, "continue the recovery card task")).json()
+        assert (
+            said["echo"]["line"] == "Hide the recovery card section is still working."
+        )
+        assert (await _task(console, done)).state == "done"
+        assert (await _task(console, busy)).state == "queued"
+        assert llm.requests == []
+
+
+async def test_continue_the_task_resumes_a_paused_task_whatever_the_length(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        paused = await _delegated(console, client, "Hide the recovery card section")
+        await console.workers.update(paused, state="pause")
+        assert (await _task(console, paused)).state == "parked"
+        echo = (await _say(client, console, CONTINUE)).json()["echo"]
+        assert (echo["echo"], echo["action"]) == ("control", "resume")
+        assert (await _task(console, paused)).state == "queued"
+        assert llm.requests == []
+
+
+# ── A question that asks for a short answer is answered here ──
+
+
+async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) -> None:
+    replies = [*_four_steps(), answer("It reads Done only when the answer is empty.")]
+    async with front_console(tmp_path, *replies) as (console, client, llm):
+        await _say(
+            client,
+            console,
+            "主对话里卡片上的「Done.」现在是怎么处理的？简单说一下就行。",
+        )
+        turn = await _wait_turn(client, str(console.main_id))
+        assert (turn["status"], turn["answer"]) == (
+            "completed",
+            "It reads Done only when the answer is empty.",
+        )
+        # No "Start this as a task?", no task; the model was asked to be brief.
+        assert await _echoes(console) == []
+        assert await console.workers.tasks.list_tasks() == []
+        assert BRIEF_NOTE in llm.requests[0][-1].content
+        entry = console.sessions.get(str(console.main_id))
+        assert entry is not None and entry.agent is not None
+        assert entry.agent.options.answer_on_stop is False  # only this turn asked
+        assert entry.agent.conversation()[-1].content == turn["answer"]
+
+
+async def test_a_brief_question_with_no_stop_answer_still_asks(tmp_path: Path) -> None:
+    # The stop answer is asked for, and the model keeps calling tools instead.
+    steps = [*_four_steps(), tool_call("task_list", {"x": 2}, call_id="c5")]
+    async with front_console(tmp_path, *steps) as (console, client, _):
+        await _say(client, console, "briefly, how is the Done card made?")
+        turn = await _wait_turn(client, str(console.main_id))
+        assert turn["answer"] == ASK_TEXT
+
+
+# ── A task code starts is named in a few words ──
+
+
+class Titles:
+    """A stand-in for the model's reply to the title request."""
+
+    def __init__(self, reply: str | Exception = "") -> None:
+        self.reply = reply
+        self.asked: list[str] = []
+
+    async def __call__(self, request: str) -> str:
+        self.asked.append(request)
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+
+async def _session_title(console: Console, task_id: str) -> str:
+    info = await console.store.get_session(task_id)
+    assert info is not None
+    return info.title
+
+
+async def _title_events(console: Console, task_id: str) -> list[str]:
+    events = await console.store.list_events(task_id)
+    return [
+        e.event["data"]["title"] for e in events if e.event["type"] == "session.title"
+    ]
+
+
+async def test_a_task_starts_at_once_and_is_named_by_the_model_when_it_answers(
+    tmp_path: Path,
+) -> None:
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def slow(request: str) -> str:
+        asked.append(request)
+        await release.wait()
+        return '"Hide the recovery card in default mode."\nbecause it is empty'
+
+    async with front_console(tmp_path, titler=slow) as (console, client, llm):
+        echo = (await _say(client, console, FIX)).json()["echo"]
+        # The answer did not wait for the title: the task runs under the first words.
+        first = short_title(FIX)
+        assert echo["line"] == f"Started: {first} · P1"
+        task_id = echo["task_id"]
+        assert (await _task(console, task_id)).title == first
+        assert await _session_title(console, task_id) == first
+        assert asked == [FIX]
+        release.set()
+        await console.front.drain()
+        # The task, its session and the event the page reads all say the new title.
+        title = "Hide the recovery card in default mode"
+        record = await _task(console, task_id)
+        assert (record.title, record.spec["objective"]) == (title, FIX)
+        assert await _session_title(console, task_id) == title
+        assert await _title_events(console, task_id) == [title]
+        assert [
+            r["title"] for r in (await client.get("/api/tasks")).json()["tasks"]
+        ] == [title]
+        assert llm.requests == []
+        # The same for /task once the request is longer than a title.
+        again = (await _say(client, console, "/task " + FIX + " " + FIX)).json()["echo"]
+        await console.front.drain()
+        assert (await _task(console, again["task_id"])).title == title
+        assert asked[-1] == FIX + " " + FIX
+
+
+async def test_a_short_request_is_its_own_title_and_asks_no_model(
+    tmp_path: Path,
+) -> None:
+    titles = Titles("Never used")
+    async with front_console(tmp_path, titler=titles) as (console, client, _):
+        echo = (await _say(client, console, "/task make slides from notes.md")).json()[
+            "echo"
+        ]
+        await console.front.drain()
+        assert echo["line"] == "Started: make slides from notes.md · P2"
+        assert titles.asked == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        RuntimeError("no model server"),
+        "",
+        "Fix",
+        "The title of this work is a very long sentence that goes on and on and on",
+        short_title(FIX),  # the model's title is the first words: nothing changes
+    ],
+)
+async def test_a_title_the_model_cannot_give_leaves_the_first_words(
+    tmp_path: Path, reply: str | Exception
+) -> None:
+    async with front_console(tmp_path, titler=Titles(reply)) as (console, client, _):
+        echo = (await _say(client, console, FIX)).json()["echo"]
+        await console.front.drain()
+        record = await _task(console, echo["task_id"])
+        assert record.title == await _session_title(console, record.task_id)
+        assert record.title == short_title(FIX)
+        assert await _title_events(console, record.task_id) == []
+
+
+async def test_a_title_that_takes_too_long_leaves_the_first_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(front_module, "TITLE_TIMEOUT_S", 0.05)
+
+    async def slow(request: str) -> str:
+        await asyncio.sleep(5)
+        return "Too late for this task"
+
+    async with front_console(tmp_path, titler=slow) as (console, client, _):
+        echo = (await _say(client, console, FIX)).json()["echo"]
+        await console.front.drain()
+        assert (await _task(console, echo["task_id"])).title == short_title(FIX)
+        assert await _title_events(console, echo["task_id"]) == []
+
+
+async def test_a_task_the_person_renamed_meanwhile_keeps_their_name(
+    tmp_path: Path,
+) -> None:
+    release = asyncio.Event()
+
+    async def late(request: str) -> str:
+        await release.wait()
+        return "Hide the recovery card in default mode"
+
+    async with front_console(tmp_path, titler=late) as (console, client, _):
+        echo = (await _say(client, console, FIX)).json()["echo"]
+        task_id = echo["task_id"]
+        assert await console.store.rename_session(task_id, "My own name")
+        release.set()
+        await console.front.drain()
+        assert await _session_title(console, task_id) == "My own name"
+        assert await _title_events(console, task_id) == ["My own name"]
+        # The task row was not named either: its first words stay for the list.
+        assert (await _task(console, task_id)).title == short_title(FIX)
+
+
+async def test_the_title_request_asks_at_the_lowest_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, int]] = []
+
+    class Provider(BaseLLMProvider):
+        async def chat(self, messages: list[Message], tools: Any = None) -> Message:
+            gate = holder[0].gate
+            seen.extend(
+                (name, gate.level(name))
+                for name in list(gate._levels)  # noqa: SLF001
+                if name.startswith("title:")
+            )
+            return Message(role="assistant", content="Hide the recovery card now")
+
+        async def close(self) -> None:
+            pass
+
+    class Backend:
+        def build_chat_provider(self, cfg: Any) -> Provider:
+            return Provider()
+
+    holder: list[Console] = []
+    async with front_console(tmp_path) as (console, client, _):
+        holder.append(console)
+        monkeypatch.setattr(
+            "localmelo.support.backends.registry.get_backend", lambda name: Backend()
+        )
+        # The suite's stand-in refuses the request; call the real one.
+        title = await REAL_ASK_TITLE(console.front, FIX)
+        assert title == "Hide the recovery card now"
+        assert [level for _, level in seen] == [4]
+        # Its bookkeeping goes with the request.
+        assert not [
+            n for n in console.gate._levels if n.startswith("title:")
+        ]  # noqa: SLF001
+
+
+async def test_the_model_names_its_own_tasks_without_a_second_request(
+    tmp_path: Path,
+) -> None:
+    titles = Titles("Never used")
+    create = tool_call(
+        "task_create", {"title": "Improve Activity row Done text", "objective": FIX}
+    )
+    async with front_console(tmp_path, create, answer("Started."), titler=titles) as (
+        console,
+        client,
+        _,
+    ):
+        await _say(client, console, "tidy up the Activity row text, no rush")
+        await _wait_turn(client, str(console.main_id))
+        [echo] = [e for e in await _echoes(console) if e["echo"] == "started"]
+        assert echo["title"] == "Improve Activity row Done text"
+        assert titles.asked == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "title"),
+    [
+        ("Fix the list_files test", "Fix the list_files test"),
+        ("**Title:** Fix the list_files test.", "Fix the list_files test"),
+        ("标题：修复文件列表测试", "修复文件列表测试"),
+        ('<think>hm</think>\n"Fix the list_files test"', "Fix the list_files test"),
+        ("Fix", ""),
+        ("", ""),
+        ("one two three four five six seven eight nine ten eleven", ""),
+    ],
+)
+def test_a_models_reply_is_cleaned_into_a_title(raw: str, title: str) -> None:
+    assert clean_title(raw) == title

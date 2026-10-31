@@ -4,10 +4,11 @@ When a side chat's run ends, a task finishes or fails, or either waits for an
 approval, the main chat gets a card: an ``attention.card`` event that belongs
 to no turn. A card is an event, never a turn: no model reads it, and the main
 chat's window never holds it. Its data is ``state`` (``done``, ``failed``,
-``waiting`` or ``answered``), the ``source_id`` and ``source_kind`` (``chat``
+``stopped``, ``waiting`` or ``answered``), the ``source_id`` and ``source_kind`` (``chat``
 or ``task``) it opens, the source's short ``title`` and its plain ``line``: up
 to two lines of the answer on a done card, the reason on a failed one, what is
-asked on a waiting one.
+left on a stopped one (a task that ran out of steps, which can continue), what
+is asked on a waiting one.
 
 A waiting card carries its ``request_id``. When that approval is answered, a
 card with state ``answered``, the same ``request_id`` and the answer in words as
@@ -44,9 +45,9 @@ from localmelo.support.sessions.display import (
 from localmelo.support.sessions.store import StoredEvent
 
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
-from ..finishing import NOT_CONTINUED, not_committed
+from ..finishing import NOT_CONTINUED, is_out_of_steps, not_committed
 from ..task_store import TaskStoreError
-from .activity import answer_lines, answer_word
+from .activity import answer_lines, answer_word, left_line
 
 if TYPE_CHECKING:
     from . import Console
@@ -242,8 +243,14 @@ class MainChatCards:
         note = ""
         if state == "failed" and info.kind == "task":
             note = (await self._console.workers.tasks.get_task(info.id)).wait_reason
+            if is_out_of_steps(state, note):
+                state = "stopped"  # out of steps: it can continue, so it did not fail
         if state == "done":
             ended = {"line": answer_lines(last.answer) if last is not None else ""}
+        elif state == "stopped":
+            answer = last.answer if last is not None else ""
+            line = left_line(answer) or answer_lines(answer)
+            ended = {"line": line} if line else _words("cards.outOfSteps")
         elif note.startswith(NOT_CONTINUED):
             # A continued run that never began: its last turn is an older one.
             ended = {"line": note}

@@ -1994,12 +1994,16 @@ class SessionStore:
             for row in reversed(rows)
         ]
 
-    async def rename_session(self, session_id: str, title: str) -> bool:
+    async def rename_session(
+        self, session_id: str, title: str, *, only_if: str | None = None
+    ) -> bool:
         """Set the title; ``False`` for an unknown session.
 
         The title is stripped and must have 1 to 200 characters. A rename
         writes ``session.title`` and is never replaced by the automatic
-        title (T-12).
+        title (T-12). With *only_if*, the title changes only while it is
+        still that text (``False`` otherwise): a name the person gave in
+        the meantime stays.
         """
         title = check_title(title)
         async with self._lock:
@@ -2008,8 +2012,9 @@ class SessionStore:
             async with self._transaction(conn, "rename_session") as stored:
                 now = self._clock()
                 cursor = await conn.execute(
-                    "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
-                    (title, now, session_id),
+                    "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? "
+                    "AND (? IS NULL OR title = ?)",
+                    (title, now, session_id, only_if, only_if),
                 )
                 if not cursor.rowcount:
                     return False

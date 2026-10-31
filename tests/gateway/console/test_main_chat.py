@@ -11,6 +11,7 @@ import pytest
 
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.cards import CARD_EVENT
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.sessions.store import (
     MAIN_CHAT_TITLE,
     MainChatError,
@@ -440,6 +441,52 @@ async def test_a_continued_run_that_could_not_start_says_so_on_its_card(
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["state"] == "failed"
         assert card["line"] == "Could not continue: the model server is not answering"
+
+
+@pytest.mark.parametrize(
+    ("answer", "line"),
+    [
+        (
+            "Fixed the check. Remaining: run the tests and commit.",
+            "Remaining: run the tests and commit.",
+        ),
+        (
+            "Fixed the check.\nThe tests are written.",
+            "Fixed the check.\nThe tests are written.",
+        ),
+        ("", "Ran out of steps"),
+    ],
+)
+async def test_a_task_that_ran_out_of_steps_comes_back_as_a_stopped_card(
+    tmp_path: Path, answer: str, line: str
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        store = console.store
+        record, _ = await console.workers.create(
+            {"objective": "Fix the report", "request_key": "k"}
+        )
+        task_id = record["task_id"]
+        started = await store.begin_turn(task_id, "Fix the report", holder=HOLDER)
+        await store.finish_turn(
+            task_id,
+            started.turn,
+            holder=HOLDER,
+            status="budget_exhausted",
+            cause="run",
+            result=run_result(),
+            answer=answer,
+        )
+        await console.workers.tasks.change(
+            task_id, state="failed", actor="scheduler", failure_reason=OUT_OF_STEPS
+        )
+        await store.append_session_event(task_id, "sched.finished", {"state": "failed"})
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        # Stopped, not failed: its line is what is left, or the plain words.
+        assert (card["state"], card["source_id"]) == ("stopped", task_id)
+        assert card["line"] == line
+        # The health reply still tells the app a task did not finish.
+        recent = (await client.get("/api/health")).json()["status"]["recent"]
+        assert recent["outcome"] == "failed"
 
 
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(

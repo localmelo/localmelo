@@ -327,6 +327,7 @@ button:hover:not(:disabled) {
 .main-card-mark { grid-row: span 2; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--tint); color: var(--ok); font-weight: 700; }
 .main-card[data-state="waiting"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-state="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
+.main-card[data-state="stopped"] .main-card-mark { background: var(--raised); color: var(--warn); }
 .main-card-text { min-width: 0; }
 .main-card-title { margin: 3px 0 0; font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
 .main-card-line { margin: 2px 0 0; color: var(--ink-2); font-size: var(--text-small); overflow-wrap: anywhere; white-space: pre-line; }
@@ -336,6 +337,7 @@ button:hover:not(:disabled) {
 .main-card[data-answer="denied"] .main-card-mark { color: var(--error); }
 .main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
+.main-card-note { color: var(--ink-2); font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
    amber when it jumps the queue (Now, Today), green for Normal, grey below. */
@@ -369,7 +371,7 @@ button:hover:not(:disabled) {
   .main-face { flex-basis: 40px; width: 40px; height: 40px; }
 }
 @media (max-width: 700px), (pointer: coarse) {
-  .header-parent, .main-card-foot .link-button, .echo-actions button, .echo-level-item, .task-button { min-height: 44px; }
+  .header-parent, .main-card-foot .link-button, .main-card-foot .outline-button, .echo-actions button, .echo-level-item, .task-button { min-height: 44px; }
   /* A tall target on a line as tall as its words. */
   .echo-actions .link-button { margin-block: -12px; }
   /* The target is tall; the line stays as tall as the title. */

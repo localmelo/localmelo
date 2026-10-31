@@ -5,11 +5,14 @@ Pure functions over the text the person typed and the open tasks:
 - :func:`route` picks what the main chat does with a message: ``delegate``
   (``/task …`` or the composer's Run as a task), ``control`` (a control word
   and a task the person named), ``follow`` (a follow-up word and a task the
-  person named, finished ones too), ``chore`` (a repeating phrase, left to the
+  person named, finished ones too), ``continue`` ("continue the recovery card
+  task": the tasks whose titles the words name, stopped ones continue),
+  ``chore`` (a repeating phrase, left to the
   scheduled chores), ``reminder`` (a reminder cue: "remind me to … on Friday at
   9", "提醒我 …"; a one-time chore, or a question about when), ``work`` (an imperative change to named files: a task at
-  once, with a short title), ``answer`` (a greeting or a short question) or
-  ``plan`` (the main chat's own planning step decides).
+  once), ``answer`` (a greeting, a short question, or any question that asks
+  to be answered briefly: it is never handed off as a task) or ``plan`` (the
+  main chat's own planning step decides).
 - :func:`triage` gives a new task its level from the person's own words:
   P1 for urgency words, a deadline today or the bare word "today"
   (``今天``) anywhere, P3 for "no rush", P2 otherwise.
@@ -45,7 +48,15 @@ LEVEL_MEANINGS: Final = (
 FINISHED: Final = frozenset({"done", "failed", "cancelled", "expired"})
 
 Route = Literal[
-    "delegate", "control", "follow", "chore", "reminder", "work", "answer", "plan"
+    "delegate",
+    "control",
+    "follow",
+    "continue",
+    "chore",
+    "reminder",
+    "work",
+    "answer",
+    "plan",
 ]
 Action = Literal["stop", "pause", "resume", "first"]
 
@@ -107,6 +118,7 @@ class Routed:
     action: Action | None = None
     task: TaskRef | None = None
     title: str = ""  # a short title for work code starts as a task
+    matches: tuple[TaskRef, ...] = ()  # the tasks "continue the … task" names
 
 
 def norm(text: str) -> str:
@@ -294,6 +306,62 @@ def allows_message(typed: str, task: TaskRef, *, newest: bool) -> bool:
     if named_task(typed, "", [task], strict=False, finished=True) is not None:
         return True
     return newest and follow_cue(typed) is not None
+
+
+# "continue the recovery card task where it stopped": the words between the verb and
+# "task" name the task. Latin phrases need "task" or "job"; Chinese needs 任务.
+_CONTINUE_EN: Final = re.compile(
+    r"^(?:(?:please|pls|kindly|ok|okay|so|then|just)[\s,]+)*"
+    r"(?:(?:can|could|would) you (?:please )?)?"
+    r"(?:continue|resume|carry on|keep going|go on|pick up)(?: with| on)?\s+"
+    r"(?:(?:the|my|that|this|our)\s+)?(.+?)\s+(?:task|job)\b"
+)
+_CONTINUE_ZH: Final = re.compile(
+    r"^(?:请|麻烦你?|帮我|你)?(?:继续|接着|恢复)(?:做|干|完成)?(?:一下)?"
+    r"(?:那个|这个|上次的|刚才的|之前的)?(.+?)(?:那个|这个)?(?:的)?任务"
+)
+
+
+def continue_name(typed: str) -> str:
+    """The words that name a task in "continue the recovery card task …", or ``""``."""
+    text = norm(typed)
+    for pattern in (_CONTINUE_EN, _CONTINUE_ZH):
+        found = pattern.match(text)
+        if found is not None:
+            return found.group(1).strip(" ,:;，：；")
+    return ""
+
+
+def title_matches(name: str, task: TaskRef) -> bool:
+    """Whether *name* (the words that name a task) is in the task's title or is its id."""
+    wanted, title = _rest(norm(name), ""), norm(task.title)
+    if not wanted:
+        return False
+    if task.task_id and norm(task.task_id) == wanted:
+        return True
+    words = wanted.split()
+    return wanted in title or (len(words) > 1 and all(word in title for word in words))
+
+
+# A question that asks to be answered briefly is a quick question: the main chat
+# answers it after a quick search and never offers it as a task.
+_BRIEF: Final = re.compile(
+    r"\b(?:briefly|in short|in brief|in one line|one[- ]line|in one sentence|in a "
+    r"sentence|a short answer|tl;?dr)\b|简单(?:说|讲|介绍|回答|解释)|简短|简要|一句话"
+)
+BRIEF_CHARS: Final = 300
+
+
+def brief_question(typed: str) -> bool:
+    """A question that says "briefly", "in short", "one line", "简单说一下" or "一句话"."""
+    text = norm(typed)
+    found = _BRIEF.search(text)
+    return (
+        found is not None
+        and len(text) <= BRIEF_CHARS
+        and not _NEGATION.search(text[: found.start()])
+        and is_question(typed)
+    )
 
 
 # ── Delegation and its level ──
@@ -584,12 +652,18 @@ def route(
         return Routed("chore")
     if parse_reminder(stripped, _ANY_TIME) is not None:
         return Routed("reminder")
+    name = continue_name(stripped)
+    if name and not is_question(stripped):
+        found_tasks = tuple(task for task in tasks if title_matches(name, task))
+        if found_tasks:
+            one = found_tasks[0] if len(found_tasks) == 1 else None
+            return Routed("continue", task=one, matches=found_tasks)
     cue = follow_cue(stripped)
     if len(text) <= CONTROL_CHARS and cue is not None and not is_question(stripped):
         task = named_task(stripped, cue, tasks, finished=True)
         if task is not None:
             return Routed("follow", task=task)
-    if _GREETING.match(text):
+    if _GREETING.match(text) or brief_question(stripped):
         return Routed("answer")
     if work_request(stripped) and not (
         cue is not None
@@ -619,6 +693,8 @@ __all__ = [
     "allows",
     "allows_level",
     "allows_message",
+    "brief_question",
+    "continue_name",
     "control_action",
     "follow_cue",
     "intention_only",
@@ -634,6 +710,7 @@ __all__ = [
     "reply_language",
     "route",
     "short_title",
+    "title_matches",
     "triage",
     "work_request",
 ]

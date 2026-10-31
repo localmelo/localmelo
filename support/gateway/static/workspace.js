@@ -1142,10 +1142,10 @@ function mainNodes(view, turns) {
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
   // A task that came back finished takes no more changes: its lines lose their buttons.
-  const ended = new Set((view?.cards ?? []).filter((card) => card.state === "done" || card.state === "failed").map((card) => card.sourceId));
+  const ended = new Set((view?.cards ?? []).filter((card) => ["done", "failed", "stopped"].includes(card.state)).map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
-    if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard })];
+    if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard, resume: continueCard })];
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
@@ -1205,6 +1205,19 @@ function showHeld() {
   if (S.view && heldCards.length) S.view.cards = mergeCards(S.view.cards ?? [], heldCards);
   heldCards = [];
   renderMessages(false);
+}
+
+/** A stopped task's card: Continue picks the task up where it stopped, and the button says so. */
+async function continueCard(card, button) {
+  button.disabled = true;
+  try {
+    await api(`/tasks/${encodeURIComponent(card.sourceId)}/continue`, { method: "POST" });
+    button.replaceWith(el("span", "main-card-note", t("tasks.continueAccepted")));
+    panel.refresh();
+  } catch (error) {
+    button.disabled = false;
+    notify(error.message || t("panel.taskChangeFailed"));
+  }
 }
 
 /** A card's Open: the side chat, or the task. */
@@ -2536,7 +2549,9 @@ function turnStatus(turn) {
     line.dataset.severity = info.severity;
     line.append(statusMarkNode(info.severity), el("span", "", info.title));
     nodes.push(line);
-    const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
+    // A run that used all its steps says so in the title; its raw cause ("Max steps reached") is for a developer.
+    const quiet = turn.status === "completed" || (turn.status === "budget_exhausted" && !developerMode);
+    const error = quiet ? "" : cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0];
     if (error) {
       const text = el("p", "failure-error", error);
       text.dataset.severity = info.severity;

@@ -26,6 +26,7 @@ from localmelo.support.gateway.task_store import (
 )
 from localmelo.support.sessions.store import SessionStoreError
 
+from .activity import left_line
 from .bodies import Body
 from .errors import ApiError
 from .shapes import approval_json
@@ -146,6 +147,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def get_task(task_id: str) -> JSONResponse:
         console.require_store()
         task = await _call(console, console.workers.get(task_id))
+        if task.get("out_of_steps"):
+            # What the run says is left, for the page's "What is left" row.
+            turns = await console.store.list_turns(task_id, limit=1)
+            task["left"] = left_line(turns[-1].answer, bare=True) if turns else ""
         return JSONResponse(content={"task": _approvals(console, task)})
 
     @app.patch("/api/tasks/{task_id}")
@@ -157,6 +162,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
             console, console.workers.update(task_id, level=body.level, state=body.state)
         )
         return JSONResponse(content={"task": _approvals(console, task)})
+
+    @app.post("/api/tasks/{task_id}/continue")
+    async def continue_task(task_id: str) -> JSONResponse:
+        """Continue a task that ran out of steps, from where it stopped (#341)."""
+        console.require_store()
+        task, outcome = await _call(console, console.workers.continue_stopped(task_id))
+        return JSONResponse(
+            status_code=202,
+            content={"task": _approvals(console, task), "message": outcome},
+        )
 
     @app.post("/api/tasks/{task_id}/blocks/{request_id}/allow")
     async def allow_block(task_id: str, request_id: str) -> JSONResponse:

@@ -47,7 +47,13 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     SessionClient,
 )
-from localmelo.support.gateway.finishing import could_not_continue, not_committed
+from localmelo.support.gateway.finishing import (
+    OUT_OF_STEPS,
+    could_not_continue,
+    is_out_of_steps,
+    not_committed,
+)
+from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.process_identity import gone as process_gone
@@ -640,6 +646,18 @@ class TaskWorkers:
         except BaseException:
             policy.withdraw(key)
             raise
+
+    async def continue_stopped(self, task_id: str) -> tuple[dict, str]:
+        """Continue a task that ran out of steps from where it stopped (#341).
+
+        The message is the console's own words, in the language of the
+        request; any other task refuses (a done task has nothing to continue,
+        a running one reads messages as they come).
+        """
+        record = await self.tasks.get_task(task_id)
+        if not is_out_of_steps(record.state, record.wait_reason):
+            raise TaskStoreError("only a task that ran out of steps continues here")
+        return await self.message(task_id, words("failure.continueMessage"))
 
     async def _continue(
         self, current: TaskRecord, text: str, *, level: int | None, reason: str
@@ -2004,6 +2022,9 @@ class TaskWorkers:
                         else "failed"
                     )
                 )
+                if result and result.status == "budget_exhausted":
+                    # Out of steps is a stop the person can continue, not a failure.
+                    failure_reason = OUT_OF_STEPS
         except WorkspaceError:
             if launch_committed and not turn_started:
                 post_fence_failure = True
@@ -2212,6 +2233,8 @@ class TaskWorkers:
         body["allowances"] = dict(policy.given) if policy is not None else {}
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
+        # A run that used all its steps is stopped, and continues from its page (#341).
+        body["out_of_steps"] = is_out_of_steps(record.state, record.wait_reason)
         return body
 
     async def _reconcile(self) -> int:

@@ -18,10 +18,12 @@ from localmelo.support.gateway.console.activity import (
     MAX_SPAN_S,
     answer_lines,
     approvals_of,
+    left_line,
     local_midnight,
     result_line,
 )
 from localmelo.support.gateway.console.worker_reader import WorkerReader
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -344,6 +346,145 @@ def test_a_held_task_says_why_it_waits(
     assert rows["Unknown reason"]["activity"] == "Waiting for the model"
     assert {row["state"] for row in rows.values()} == {"held"}
     assert {row["icon"] for row in rows.values()} == {"held"}
+
+
+def test_a_task_held_on_an_approval_says_so_and_a_slot_wait_keeps_its_words(
+    client: TestClient, console: Console, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks(
+        monkeypatch,
+        console,
+        Task("t-ask", "held", "Needs me", wait_reason="approval"),
+        Task("t-input", "held", "Wants an answer", wait_reason="input"),
+        Task("t-slot", "held", "No slot"),
+        Task("t-late", "held", "Behind another", wait_reason="dependency"),
+    )
+    reasons = {"t-slot": "Resources", "t-late": "Priority"}
+    monkeypatch.setattr(console.gate, "held", lambda task_id: reasons.get(task_id, ""))
+    rows = {row["title"]: row for row in activity(client)["rows"]}
+    assert rows["Needs me"]["activity"] == "Needs your approval"
+    assert rows["Wants an answer"]["activity"] == "Needs your approval"
+    assert rows["Needs me"]["icon"] == "wait"
+    # The scheduler's holds keep the model's words.
+    assert rows["No slot"]["activity"] == "Waiting for a free model slot"
+    assert rows["Behind another"]["activity"] == "Waiting for a higher-priority task"
+    assert {row["state"] for row in rows.values()} == {"held"}
+    chinese = client.get("/api/activity", headers={"X-LocalMelo-Language": "zh-Hans"})
+    words = {row["title"]: row["activity"] for row in chinese.json()["rows"]}
+    assert words["Needs me"] == "需要你批准"
+    assert words["No slot"] == "在等空闲的模型位置"
+
+
+async def test_a_task_that_ran_out_of_steps_reads_stopped_and_can_continue(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = time.time()
+    session = await console.store.begin_turn(
+        None,
+        "fix it",
+        holder=HOLDER,
+        title="",
+        new_session=NewSession(kind="task", model="m", workspace=workspace),
+    )
+    await console.store.finish_turn(
+        session.session_id,
+        session.turn,
+        holder=HOLDER,
+        status="budget_exhausted",
+        cause="run",
+        result=run_result(),
+        answer="Fixed the check. Remaining: run the tests and commit.",
+    )
+    tasks(
+        monkeypatch,
+        console,
+        Task(
+            session.session_id,
+            "failed",
+            "Fix the check",
+            wait_reason=OUT_OF_STEPS,
+            finished_at=now,
+        ),
+        Task("t-broke", "failed", "Broke", wait_reason="no disk", finished_at=now - 5),
+        Task(
+            "t-bare", "failed", "No turn", wait_reason=OUT_OF_STEPS, finished_at=now - 9
+        ),
+    )
+    rows = {row["title"]: row for row in activity(client)["rows"]}
+    stopped = rows["Fix the check"]
+    assert (stopped["state"], stopped["icon"]) == ("stopped", "stopped")
+    assert stopped["result"] == "Remaining: run the tests and commit."
+    assert stopped["can_continue"] is True
+    # A task with no turn left reads the plain words, never the stored reason.
+    assert rows["No turn"]["state"] == "stopped"
+    assert rows["No turn"]["result"] == "Ran out of steps"
+    # A real failure stays failed, with its reason and no Continue.
+    assert (rows["Broke"]["state"], rows["Broke"]["result"]) == ("failed", "no disk")
+    assert "can_continue" not in rows["Broke"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "left"),
+    [
+        (
+            "Fixed the check. Done except for the final commit: `git add a && git commit`.",
+            "Done except for the final commit: git add a && git commit.",
+        ),
+        (
+            "All changed.\n- Still need to run the tests.\n- Pushed.",
+            "Still need to run the tests.",
+        ),
+        ("代码已改好。还需要运行测试并提交。", "还需要运行测试并提交。"),
+        ("Fixed the check and committed abc1234.", ""),
+        ("```\nremaining = 3\n```", ""),
+        ("", ""),
+    ],
+)
+def test_a_stop_answer_says_what_is_left(answer: str, left: str) -> None:
+    assert left_line(answer) == left
+
+
+@pytest.mark.parametrize(
+    ("answer", "bare"),
+    [
+        ("Fixed it. Remaining: run the tests.", "run the tests."),
+        ("Fixed it. REMAINING：run the tests.", "run the tests."),
+        ("Fixed it. What's left: run the tests.", "run the tests."),
+        ("Fixed it. What is left: run the tests.", "run the tests."),
+        ("Fixed it. Left: run the tests.", "run the tests."),
+        ("代码已改好。剩下：运行测试。", "运行测试。"),
+        ("代码已改好。还剩：运行测试。", "运行测试。"),
+        ("代码已改好。还剩下: 运行测试。", "运行测试。"),
+        # No label: the sentence stays as it is.
+        ("Fixed it. Still need to run the tests.", "Still need to run the tests."),
+        (
+            "Fixed it. Done except for the final commit.",
+            "Done except for the final commit.",
+        ),
+        # A label alone has nothing after it: the next sentence that says it is used.
+        ("Remaining:\nStill need to run the tests.", "Still need to run the tests."),
+    ],
+)
+def test_the_task_page_shows_what_is_left_without_the_answers_own_label(
+    answer: str, bare: str
+) -> None:
+    assert left_line(answer, bare=True) == bare
+
+
+def test_a_card_and_a_row_keep_the_sentence_as_the_answer_wrote_it() -> None:
+    assert (
+        left_line("Fixed it. Remaining: run the tests.") == "Remaining: run the tests."
+    )
+    assert left_line("代码已改好。剩下：运行测试。") == "剩下：运行测试。"
+
+
+def test_a_long_sentence_of_what_is_left_is_cut_at_a_word() -> None:
+    got = left_line("Remaining: " + "word " * 60)
+    assert got.startswith("Remaining: word") and got.endswith("…")
+    assert len(got) <= 121
 
 
 @pytest.mark.parametrize("broken", ["day_turns", "tasks_since", "worker_day_turns"])

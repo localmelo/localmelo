@@ -7,6 +7,11 @@ command in the answer and checks that the folder still has changes.
 
 A task that was continued but could not start its next run says so in plain
 words: :func:`could_not_continue` makes the line its card shows.
+
+A task whose run ran out of steps is *stopped*, not failed (#341): the store
+keeps it ``failed`` with :data:`OUT_OF_STEPS` as its reason, and
+:func:`is_out_of_steps` is the one test every surface (card, page, activity
+row, terminal) reads, so each shows Stopped and offers Continue.
 """
 
 from __future__ import annotations
@@ -29,10 +34,18 @@ _LEFT: Final = re.compile(
     re.I,
 )
 COMMAND_CHARS: Final = 300
+# The failure reason of a task whose run ended ``budget_exhausted``; it reads as
+# plain words wherever a reason is shown as it is.
+OUT_OF_STEPS: Final = "Out of steps"
 # How a card starts when a continued run could not start, and how much of the
 # error follows.
 NOT_CONTINUED: Final = "Could not continue"
 _REASON_CHARS: Final = 160
+
+
+def is_out_of_steps(state: str, wait_reason: str) -> bool:
+    """Whether a task with this *state* and failure reason stopped for want of steps."""
+    return state == "failed" and wait_reason == OUT_OF_STEPS
 
 
 def could_not_continue(error: BaseException) -> str:
@@ -72,4 +85,10 @@ async def not_committed(answer: str, folder: str | None) -> str:
     return f"Not committed. Run: {command}"
 
 
-__all__ = ["commit_command", "has_changes", "not_committed"]
+__all__ = [
+    "OUT_OF_STEPS",
+    "commit_command",
+    "has_changes",
+    "is_out_of_steps",
+    "not_committed",
+]

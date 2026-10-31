@@ -64,6 +64,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   that reads the `.returncode` of `pytest | tail`, or `pytest | tail && git
   commit`) is now undecided, and its reason says the status is the last
   command's, not the test's. [#361]
+- Tasks that stop, and continue. A task that uses all its steps is **Stopped**,
+  not Failed: its card in the main chat, its page, its Activity and Workers
+  rows and `melo task list|show` say so, show the sentence of its answer that
+  says what is left, and offer **Continue**, which picks the task up where it
+  stopped (`POST /api/tasks/{id}/continue`). A task that failed for another
+  reason stays Failed; `--json` and the exit codes of `melo task follow
+  --wait` are unchanged. `Continue the recovery card task where it stopped`
+  or `继续恢复卡片任务` in the main chat continues the one stopped task those
+  words name at once, with no suggestion to tap; with several matches each is
+  offered to pick from, and a task that is done or still working says so. A
+  question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话`
+  is answered in the main chat instead of being offered as a task. A task the
+  main chat starts begins at once and is renamed in 3 to 8 words in your
+  language, not by the first words of your message, when the model answers (a
+  name you gave it meanwhile stays), and a task held on an approval reads `Needs your
+  approval` in the Activity row (a wait for a model slot keeps `Waiting for
+  the model`). [#362]
 - Chinese, finished. Times and dates follow the page's language, not the
   computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
   `Oct 31` in English (an English computer on 24 hours keeps its clock), on
@@ -2988,3 +3005,4 @@ earlier milestones.
 [#359]: https://github.com/localmelo/localmelo/pull/359
 [#360]: https://github.com/localmelo/localmelo/pull/360
 [#361]: https://github.com/localmelo/localmelo/pull/361
+[#362]: https://github.com/localmelo/localmelo/pull/362

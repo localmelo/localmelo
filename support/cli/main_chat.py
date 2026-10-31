@@ -74,6 +74,7 @@ NEW_SIDE: Final = "New side chat"
 _CARD_WORDS: Final = {
     "done": ("ok", "ok", "Done"),
     "failed": ("failed", "error", "Not finished"),
+    "stopped": ("stopped", "warn", "Stopped"),
     "waiting": ("warn", "warn", "Waits for you"),
 }
 

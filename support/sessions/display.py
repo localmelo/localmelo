@@ -418,8 +418,19 @@ _STATES: Final[Mapping[str, tuple[str, str]]] = {
 }
 # The reasons the scheduler holds a model call, by the gate's reason code
 # (``activity.held.<code>``). A code not listed reads like a plain hold.
+# ``Approval`` is not the scheduler's: a task held on an approval waits for
+# the person, and says so.
 _HELD_CODES: Final = frozenset(
-    {"Priority", "Resources", "Reservation", "Memory", "Battery", "Thermal", "IdleOnly"}
+    {
+        "Priority",
+        "Resources",
+        "Reservation",
+        "Memory",
+        "Battery",
+        "Thermal",
+        "IdleOnly",
+        "Approval",
+    }
 )
 _BROWSER_READS: Final = frozenset(
     {"browser_read", "browser_find", "browser_back", "browser_tabs", "browser_wait"}
@@ -468,7 +479,9 @@ def activity_text(
     know reads ``Using a tool``; no state and no tool reads ``Thinking``.
     """
     if state == "held" and reason in _HELD_CODES:
-        return _activity(f"activity.held.{reason}", "held")
+        return _activity(
+            f"activity.held.{reason}", "wait" if reason == "Approval" else "held"
+        )
     if state in _STATES:
         return _state(state)
     args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}

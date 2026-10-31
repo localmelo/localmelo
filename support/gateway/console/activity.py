@@ -40,9 +40,16 @@ from localmelo.support.sessions.store import (
     StoredEvent,
 )
 
-from ..finishing import NOT_CONTINUED
+from ..finishing import NOT_CONTINUED, is_out_of_steps
 from .errors import ApiError
-from .running import TASK_OUTCOMES, TITLE_CHARS, _turn_outcome, item_activity, spoken
+from .running import (
+    TASK_OUTCOMES,
+    TITLE_CHARS,
+    WAITS_FOR_YOU,
+    _turn_outcome,
+    item_activity,
+    spoken,
+)
 
 if TYPE_CHECKING:
     from . import Console
@@ -200,6 +207,45 @@ def answer_lines(answer: str, count: int = CARD_LINES) -> str:
     return "\n".join(_cut(_no_paths(row), LINE_CHARS) for row in kept[:count])
 
 
+# A sentence of a stop answer that says what is left undone.
+_LEFT: Final = re.compile(
+    r"\b(?:remaining|remains?|left to|still (?:need|needs|has|have) to|not (?:yet )?"
+    r"(?:done|committed|tested|run)|untested|uncommitted|next step|to-?do|except for|"
+    r"what['’]?s left|what is left)\b|\bleft\s*[:：]"
+    r"|剩下|还剩|还需要?|尚未|未(?:完成|提交|测试|运行)|下一步|待完成|还没",
+    re.IGNORECASE,
+)
+
+
+# A label the stop answer puts before what is left; the task page names the row itself.
+_LEFT_LABEL: Final = re.compile(
+    r"^\s*(?:remaining|what['’]?s left|what is left|left|still to do|"
+    r"剩下|还剩下?|剩余|待完成)\s*[:：]\s*",
+    re.IGNORECASE,
+)
+
+
+def left_line(answer: str, *, bare: bool = False) -> str:
+    """The sentence of a stop answer that says what is left to do, or ``""``.
+
+    ``Done except for the final commit: git add … && git commit …`` gives
+    that sentence, cut as a card's lines are; an answer that names nothing
+    left gives ``""`` and the caller shows the answer's own lines. A card and
+    a row show the sentence as the answer wrote it; with *bare* a label that
+    opens it (``Remaining: run the tests``, ``还剩下：运行测试``) is dropped,
+    for the task page, whose row is called "What is left" already.
+    """
+    raw = _FENCE.sub("\n", split_thinking(answer or "")[1])
+    for line in raw.splitlines():
+        row = " ".join(_MARKUP.sub("", line).replace("`", "").replace("**", "").split())
+        for part in _SENTENCE.split(row):
+            if _LEFT.search(part):
+                text = _LEFT_LABEL.sub("", part) if bare else part
+                if text.strip():
+                    return _cut(_no_paths(text), LINE_CHARS)
+    return ""
+
+
 def local_midnight(now: float) -> float:
     """The start of *now*'s day on this computer's clock."""
     day = time.localtime(now)
@@ -274,6 +320,9 @@ async def _task_rows(
     rows = []
     for record in await console.workers.tasks.tasks_since(since):
         state = TASK_STATES.get(record.state, "queued")
+        # A run that used all its steps is stopped, not failed, and can continue.
+        stopped = is_out_of_steps(record.state, record.wait_reason)
+        state = "stopped" if stopped else state
         at = record.finished_at or record.updated_at
         row = _row("task", record.task_id, record.title, state, at)
         row["level"] = record.level_eff
@@ -285,13 +334,21 @@ async def _task_rows(
         if state == "running":
             await _live(row, console)
         elif state in LIVE:
-            text = activity_text(state=state, reason=console.gate.held(record.task_id))
+            # A task held on an approval waits for the person; any other hold is
+            # the scheduler's, and the gate says why.
+            asks = record.state == "held" and record.wait_reason in WAITS_FOR_YOU
+            reason = "Approval" if asks else console.gate.held(record.task_id)
+            text = activity_text(state=state, reason=reason)
             row.update(activity=spoken(text), icon=text.icon)
         else:
             turn = sessions.get(record.task_id)
             ended = _ended(turn) if turn is not None else (state, state, "")
             result = ended[2] or (record.wait_reason if state == "failed" else "")
-            if record.wait_reason == "invalid_workspace" and state == "failed":
+            if stopped:
+                left = left_line(turn.answer) if turn is not None else ""
+                result = left or ended[2] or t("cards.outOfSteps")
+                row["can_continue"] = True
+            elif record.wait_reason == "invalid_workspace" and state == "failed":
                 result = t("activity.folderRefused")
             elif state == "failed" and record.wait_reason.startswith(NOT_CONTINUED):
                 result = record.wait_reason

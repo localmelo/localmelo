@@ -131,6 +131,9 @@ The panel and the activity rows say why a held task waits, in words:
 | `Waiting for free memory`, `Waiting for the battery`, `Waiting for the Mac to cool down`, `Waiting until the Mac is idle` | a machine rule holds the call |
 | `Waiting for the model` | any other hold |
 
+A task that waits for you, not for the machine, says so: `Needs your approval`
+(and `2 tasks wait for you` in the status row counts only those).
+
 ## The GPU lock and the battery (S2b)
 
 The gateway reads two machine sources and records them; it never writes to
