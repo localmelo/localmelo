@@ -603,10 +603,16 @@ def run_argv(
         review_shell(ctx.deeper(), f, code)
     elif prog in _SHELLS and words:
         script(ctx, f, words[0], "shell", cwd)
-    elif argv[0].startswith(("./", "../", "/")):
+    elif "/" in argv[0]:
+        # A program named by its path, not found on PATH: one in the
+        # workspace, or one made in this chat, is read (a script is judged
+        # by what it says) or, when melo cannot read it (a compiled
+        # program), a doubt.
         path = resolve(ctx, argv[0], cwd)
-        if path and where(ctx, path, write=False) == "inside":
+        if path and (where(ctx, path, write=False) == "inside" or _made(ctx, path)):
             script(ctx, f, argv[0], "", cwd)
+    elif prog == "java":
+        _java(ctx, f, args, cwd)
     if prog in _RECURSIVE or prog in ("grep", "egrep", "fgrep") and _recursive(args):
         for arg in _searched(args):
             search(ctx, f, arg, cwd)
@@ -829,6 +835,36 @@ def _inline(f: Findings, prog: str, args: list[str], stdin: bool) -> None:
                 return f.doubt(
                     "Runs a makefile from its input, which melo does not read."
                 )
+
+
+def _made(ctx: Context, path: str) -> bool:
+    """Whether the program *path* is new: not there yet, or changed in this chat."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return True  # made by this step (cc -o /tmp/t && /tmp/t)
+    return ctx.since is not None and max(info.st_mtime, info.st_ctime) >= ctx.since
+
+
+def _java(ctx: Context, f: Findings, args: list[str], cwd: str) -> None:
+    """``java`` of classes, a jar or a source file in the workspace or made in this chat."""
+    places: list[str] = []
+    for i, arg in enumerate(args):
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if arg in ("-cp", "-classpath", "--class-path", "-jar"):
+            places += nxt.split(":")
+        elif arg.startswith("--class-path="):
+            places += arg.split("=", 1)[1].split(":")
+        elif arg.endswith(".java") and not arg.startswith("-"):
+            places.append(arg)
+    for place in places:
+        path = resolve(ctx, place or ".", cwd)
+        if (
+            path is None
+            or where(ctx, path, write=False) in ("inside", "root")
+            or _made(ctx, path)
+        ):
+            return f.doubt("Runs Java code built here, which melo does not read.")
 
 
 def _starts_program(path: str) -> bool:
