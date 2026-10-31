@@ -165,7 +165,8 @@ output or log the header; same-user processes can still read the token file.
   nothing running; one call reads the task states by their index and the
   running turns of the CLI file by theirs.
 - `activity` says what the item is doing in plain words (in the language of the request when it sends `X-LocalMelo-Language`, as the macOS pill does; English otherwise), and `icon` its kind:
-  `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
+  `Waiting for your approval` (`wait`), `Needs your approval` (`wait`, a
+  task held on an approval), `Waiting for the model` (`held`, the
   scheduler holds its model call; when the reason is known it says why:
   `Waiting for a higher-priority task`, `Waiting for a free model slot`,
   `Waiting while another job uses the model`, `Waiting for free memory`,
@@ -252,7 +253,10 @@ Without `session_id` (or with the main chat's) the same call lists the whole day
   turn that still runs is in, however early it began), or a task changed since
   then or not finished. `state` is `running`, `waiting` (an approval waits),
   `held` (the scheduler holds its model call), `queued` or `paused` while it is
-  live, else `done`, `failed` or `stopped`. A live row says what it does
+  live, else `done`, `failed` or `stopped`; a task that ran out of steps is
+  `stopped` with `can_continue: true` (its stored state is `failed`), and its
+  `result` is the sentence of its stop answer that says what is left. A live row
+  says what it does
   (`activity` and `icon`, as in [`status.items`](#get-apihealth)); a finished one
   says how in `result`, one line of at most 140 characters (the turn's digest,
   else the answer's first sentence, else for a failure why), and its `icon` is
@@ -537,6 +541,15 @@ Tools run with the user's permissions, not in a sandbox.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
+- A task whose run ended `budget_exhausted` is stored `failed` with
+  `wait_reason` `Out of steps`, and every task body says `out_of_steps`
+  (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,
+  the sentence of its stop answer that says what is left (`""` when none does).
+  `POST /api/tasks/{task_id}/continue` (no body) runs it again from where it
+  stopped, in its own session, with the console's words "Continue the task from
+  where you stopped." as its next turn: 202 `{"task": ..., "message":
+  "continued"}`; 404 `not_found`, and 409 `invalid_transition` for a task that
+  did not run out of steps.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
@@ -913,15 +926,18 @@ Its `data`:
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` is `done`, `failed`, `waiting` (an approval waits for an answer) or
-  `answered` (that approval was answered). `source_kind` is `chat` or `task`,
+- `state` is `done`, `failed`, `stopped` (a task ran out of steps; it can
+  continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
+  for an answer) or `answered` (that approval was answered). `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
   columns: a title the person or the main chat gave stays, a longer one is cut
   at a word. `at` is when it happened.
 - `line` is plain words: the first two lines of the answer on a `done` card
   (an opening `Done.` is left out when more follows), why the run did not
   finish on a `failed` one (its status in words, then the first line of its
-  error), what is asked on a `waiting` one (`Wants to run Python`, `Wants to
+  error), the sentence of the stop answer that says what is left on a
+  `stopped` one (else its first two lines, else `Ran out of steps`), what is
+  asked on a `waiting` one (`Wants to run Python`, `Wants to
   write notes.md`), and the answer on an `answered` one (`Allowed once`,
   `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
   `Denied`, `No answer in time`, `Not run: it stopped first`).

@@ -98,6 +98,8 @@ for task in read_trace(Path(sys.argv[1])):
 | `Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down`、`Waiting until the Mac is idle` | 某条机器规则扣住了这次调用 |
 | `Waiting for the model` | 其他任何扣住 |
 
+在等你而不是在等机器的任务会直接说明：`Needs your approval`（状态行里的 `2 tasks wait for you` 也只数这样的任务）。
+
 <a id="the-gpu-lock-and-the-battery-s2b"></a>
 
 ## GPU 锁和电池（S2b）

@@ -39,6 +39,7 @@
 
 - `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
 - `Did not finish: Fix CI` 加上它结束的原因。
+- `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped，也有 **Continue**。因其他原因失败的任务仍是 `Did not finish`。
 - `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
 - **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
@@ -52,10 +53,11 @@
 
 ![主对话：回答了一个问题；一个任务已完成回来；一个任务打开了优先级列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
 
-- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
-- **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样，并配一个简短的标题。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
+- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。带有 `briefly`、`in short`、`one line`、`简单说一下` 或 `一句话` 的问题一律在这里回答，只做快速查看：不会被提议作为任务。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不需要模型来判断。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样。主对话这样开始的任务，会由一次简短的模型请求按你消息的语言起一个 3 到 8 个词的标题（`Hide the recovery card in default mode`）；很短的消息本身就是标题，模型 6 秒内没有回答时，用你消息的开头部分。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
 - **优先级写作 P0 到 P5。** 一行里显示代码（`P1`），悬停可看含义。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 P1（今天），"no rush"、"不急" 为 P3（有空时），其余为 P2（正常）。那一行的 **Change** 会打开列表（`P0 · runs first; others wait`、`P1 · today`、`P2 · normal`、`P3 · when there is time`、`P4 · only when the computer is idle`、`P5 · on hold until you start it`；含义依次是：最先运行，其他任务等待；今天；正常；有空时；仅在电脑空闲时；暂停，等你启动），设定你自己的优先级，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
+- **按名字继续已停止的任务。** `Continue the recovery card task where it stopped: run the tests` 或 `继续恢复卡片任务` 会立刻继续标题与这些词相符的那一个已停止的任务，不需要再点一下建议；整条消息就是它的下一轮。有几个已停止的任务相符时，每一个都作为一键发送的建议（`Suggested: send your message to …`）列出，供你挑选。已完成或仍在运行的任务会直接告诉你（`Fix CI is done. There is nothing to continue.`）。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
 - **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问（任意位置有 `?`，或写了 "quick question"），会先问 **Start this as a task?**。它用你这条消息的语言回答。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
