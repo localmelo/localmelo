@@ -525,6 +525,12 @@ def test_the_default_guard_covers_the_sign_in_and_the_store(
     finally:
         own_gateway.unregister(8471)
     assert own_gateway.current().port is None
+    # No gateway here (the terminal): the settings' port is closed instead.
+    own_gateway.expect(8472)
+    try:
+        assert 'localhost:8472"' in profile(["/ws"], own_gateway.current())
+    finally:
+        own_gateway.expect(None)
 
 
 def _listening() -> tuple[socket.socket, int]:

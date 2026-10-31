@@ -6,7 +6,8 @@ The gateway registers its port and its private files when it starts
 reading or writing those files and connecting to that port, and the action
 review counts a request to melo's own API as a change to localmelo itself.
 Without a gateway in this process the default files under the home folder
-are guarded all the same, and no port is.
+are guarded all the same, and the port is the one the settings give the
+gateway (:func:`expect`, set by the terminal), when known.
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ class OwnGateway:
 
 
 _registered: list[tuple[int | None, tuple[str, ...]]] = []
+# The port the settings give the gateway, for a process that runs none.
+_expected: list[int] = []
 
 
 def _homes() -> list[str]:
@@ -67,6 +70,16 @@ def register(port: int | None, files: Sequence[str] = ()) -> None:
     _registered.append((port, tuple(str(f) for f in files)))
 
 
+def expect(port: int | None) -> None:
+    """The port the settings give the gateway (``[gateway] port``); ``None`` forgets it.
+
+    It counts while no gateway is registered in this process.
+    """
+    _expected.clear()
+    if port is not None and not isinstance(port, bool) and 0 < port < 65536:
+        _expected.append(port)
+
+
 def unregister(port: int | None) -> None:
     """Forget the newest gateway registered with *port* (it stopped)."""
     for i in range(len(_registered) - 1, -1, -1):
@@ -76,7 +89,10 @@ def unregister(port: int | None) -> None:
 
 
 def current() -> OwnGateway:
-    """The port to close (the newest registered) and every file to guard, as real paths."""
+    """The port to close and every file to guard, as real paths.
+
+    The port is the newest registered gateway's, else the expected one.
+    """
     found: list[str] = []
     named = [f for home in _homes() for f in default_files(home)]
     named += [
@@ -86,5 +102,5 @@ def current() -> OwnGateway:
         real = os.path.realpath(path)
         if real not in found:
             found.append(real)
-    ports = [port for port, _ in _registered if port is not None]
+    ports = [port for port, _ in _registered if port is not None] or _expected
     return OwnGateway(port=ports[-1] if ports else None, files=tuple(found))

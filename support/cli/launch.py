@@ -27,6 +27,7 @@ from typing import Any, Final, cast
 
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent.options import reasoning_refusal
+from localmelo.melo.contracts import own_gateway
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.cli.views import BackendInfo
@@ -71,6 +72,17 @@ class Choice:
     checked: bool = False
     warning: str = ""
     models: tuple[str, ...] = ()
+
+
+def expect_gateway(cfg: config.Config) -> None:
+    """Tell auto mode the port the settings give the gateway (#339).
+
+    The terminal's own chat runs no gateway, so its Auto steps are kept off
+    the one the app or ``melo --serve`` runs on that port, in the review and
+    in the sandbox.
+    """
+    port = getattr(getattr(cfg, "gateway", None), "port", None)
+    own_gateway.expect(port if isinstance(port, int) else None)
 
 
 def ui_terminal() -> bool:
@@ -550,6 +562,7 @@ async def main_async(
 
         approver = TerminalApprover()
         session_config = config.load()
+        expect_gateway(session_config)
         # Config validation never fails on [cli] (a display preference), and a
         # --base-url session validates nothing at all, so both paths land here:
         # a bad value falls back with a warning rather than turning streaming

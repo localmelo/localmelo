@@ -637,8 +637,8 @@ def test_a_search_of_the_workspace_stays_routine(ws: Path) -> None:
         f"curl -s {GATEWAY}",
         f"curl -s -X POST -H 'Authorization: Bearer T' {GATEWAY}",
         f"wget -qO- {GATEWAY}",
-        "curl -s localhost:9999/api/sessions",
-        "curl -s http://[::1]:9999/v1/agent/run",
+        "curl -s localhost:8765/api/sessions",
+        "curl -s http://[::1]:8765/v1/agent/run",
         "nc 127.0.0.1 8765",
         f"http POST {GATEWAY}",
     ],
@@ -656,7 +656,7 @@ def test_a_request_to_melo_s_own_gateway_is_itself(
         "c.request('GET', '/api/sessions')",
         "import socket\nsocket.create_connection(('localhost', 8765))",
         f"import urllib.request\nurllib.request.urlopen({GATEWAY!r})",
-        "import requests\nrequests.get('http://127.0.0.1:9999/api/settings')",
+        "import requests\nrequests.get('http://127.0.0.1:8765/api/settings')",
     ],
 )
 def test_python_that_reaches_melo_s_own_gateway_is_itself(
@@ -670,6 +670,35 @@ def test_other_local_servers_stay_open(ws: Path, gateway_port: int) -> None:
     assert sh(ws, "curl -s https://example.com/api/items").verdict == "routine"
     code = "import socket\nsocket.create_connection(('127.0.0.1', 5432))"
     assert py(ws, code).verdict == "routine"
+    # A local model server's API is not melo's, in Ask or Auto.
+    models = "curl -s http://127.0.0.1:8123/v1/models"
+    assert sh(ws, models).verdict == "routine"
+    code = "import requests\nrequests.get('http://localhost:8123/api/tags')"
+    assert py(ws, code).verdict == "routine"
+
+
+def test_without_a_gateway_the_settings_port_is_melo_s(ws: Path) -> None:
+    # The terminal's own chat: no gateway runs here, the settings name its port.
+    from localmelo.support import config
+    from localmelo.support.cli.launch import expect_gateway
+
+    cfg = config.Config()
+    cfg.gateway.port = 8766
+    expect_gateway(cfg)
+    try:
+        assert own_gateway.current().port == 8766
+        post = "curl -s -X POST http://127.0.0.1:8766/api/sessions/s/blocks/r/allow"
+        assert "self" in sh(ws, post).categories
+        assert sh(ws, "curl -s http://127.0.0.1:8123/v1/models").verdict == "routine"
+        # A gateway that runs here wins over the settings.
+        own_gateway.register(8767, [])
+        try:
+            assert own_gateway.current().port == 8767
+        finally:
+            own_gateway.unregister(8767)
+    finally:
+        own_gateway.expect(None)
+    assert own_gateway.current().port is None
 
 
 @pytest.mark.parametrize(

@@ -297,8 +297,6 @@ def where(ctx: Context, path: str, *, write: bool) -> str:
 
 
 _LOOPBACK = re.compile(r"localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0|0")
-# What melo's gateway serves: its console API and its run API.
-_OWN_PATHS = re.compile(r"/(api|v1)(/|$)")
 # An address with a port, perhaps with a path: localhost:8401/api/x.
 _ADDRESS = re.compile(r"^(\[[0-9a-fA-F:.]+\]|[\w.-]+):\d+(/\S*)?$")
 # A request line's method in a literal sent over a socket, or a method named.
@@ -311,7 +309,11 @@ def loopback(host: str) -> bool:
 
 
 def own_port(host: str, port: object) -> bool:
-    """Whether *host* and *port* are this computer's gateway (registered port)."""
+    """Whether *host* and *port* are this computer's gateway.
+
+    Its port is the registered gateway's, else the settings' (see
+    :func:`~localmelo.melo.contracts.own_gateway.current`).
+    """
     gateway = own_gateway.current().port
     return gateway is not None and loopback(host) and str(port) == str(gateway)
 
@@ -319,9 +321,8 @@ def own_port(host: str, port: object) -> bool:
 def own_api(text: str) -> bool:
     """Whether the URL or address *text* reaches melo's own gateway.
 
-    That is this computer on the gateway's port, or this computer with a
-    path under ``/api/`` or ``/v1/`` on any port (a gateway this process
-    does not know of).
+    That is this computer on the gateway's port (see :func:`own_port`);
+    other local servers, a model server's ``/v1/`` included, are not.
     """
     if "://" not in text and not _ADDRESS.match(text):
         return False
@@ -333,7 +334,7 @@ def own_api(text: str) -> bool:
     host = url.hostname or ""
     if not loopback(host):
         return False
-    return own_port(host, port) or bool(_OWN_PATHS.match(url.path or ""))
+    return own_port(host, port)
 
 
 def reach_own(f: Findings, text: str) -> None:
