@@ -26,7 +26,12 @@ from localmelo.support.memory.service import (
     PACK_HEADER,
     is_owner_question,
 )
-from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
+from localmelo.support.sessions.store import (
+    NewSession,
+    SessionStore,
+    StoredEvent,
+    TurnInfo,
+)
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 
 HOLDER = "test-host:1:pack"
@@ -313,6 +318,31 @@ async def test_a_summary_is_recalled_from_another_chat_with_its_label(
         store, side, "what happened with the flaky fixture?"
     )
     assert again.used == ()
+
+
+async def test_a_side_summary_event_is_indexed_in_the_background(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    side = await turn(store, "side work")
+    other = await turn(store, "main work")
+    data = {"chat_id": side.session_id, "title": "Fix CI", "summary": "Reran it."}
+
+    def ended(source: str) -> StoredEvent:
+        event = {"type": "side.summary", "ts": 1.0, "data": {**data, "source": source}}
+        return StoredEvent(None, side.session_id, None, event)
+
+    # The chat's own run is indexed as its turn already: no summary for it.
+    memory.side_ended(ended("chat"))
+    memory.side_ended(StoredEvent(None, side.session_id, None, {"data": {}}))
+    await memory.drain()
+    assert await memory.search("what happened with CI, reran?") == []
+    memory.side_ended(ended("task"))
+    await memory.drain()
+    found = await memory.before_turn(store, other, "what happened with CI, reran?")
+    assert [item.source.split(",")[0] for item in found.used] == [
+        "chat “Fix CI” · summary"
+    ]
+    assert await memory.records() == []
 
 
 async def test_a_second_summary_replaces_the_first_and_is_no_note(

@@ -1160,12 +1160,13 @@ class Front:
         self._side_listeners.append(listener)
 
     async def side_done(
-        self, chat_id: str, title: str, summary: str, at: float
+        self, chat_id: str, title: str, summary: str, at: float, source: str = "chat"
     ) -> None:
         """A side chat finished work: the main chat's next turn reads a line, and ``side.summary`` goes out.
 
         The event is shaped like a stored one (``data``: ``chat_id``, ``title``,
-        ``summary``); nothing is written to memory here.
+        ``summary``, and ``source``: ``chat`` for the chat's own run, else the
+        kind of the task that finished); nothing is written to memory here.
         """
         text = _summary(summary)
         if not text:
@@ -1174,7 +1175,7 @@ class Front:
         self._side_news[chat_id] = (at, title, text)
         while len(self._side_news) > SIDE_NEWS_MAX:
             self._side_news.pop(next(iter(self._side_news)))
-        data = {"chat_id": chat_id, "title": title, "summary": text}
+        data = {"chat_id": chat_id, "title": title, "summary": text, "source": source}
         event = {"type": SIDE_SUMMARY_EVENT, "ts": at, "data": data}
         for listener in list(self._side_listeners):
             try:

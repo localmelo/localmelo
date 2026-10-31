@@ -266,7 +266,7 @@ class MainChatCards:
         if info is not None:
             when = float(at) if isinstance(at, int | float) else time.time()
             await self._console.front.side_done(
-                chat, card_title(info.title), card["line"], when
+                chat, card_title(info.title), card["line"], when, card["source_kind"]
             )
 
     async def _owner(self, main: str, info: SessionInfo) -> str:
