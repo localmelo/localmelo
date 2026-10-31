@@ -559,6 +559,7 @@ async def test_side_summary_is_emitted_once_per_ending_with_the_chat_and_its_wor
             "chat_id": trip,
             "title": "Plan the trip",
             "summary": "Planned: May 3 to 7.",
+            "source": "chat",
         }
         assert event.session_id == trip
         await client.get("/api/sessions")
@@ -576,20 +577,17 @@ async def test_side_summary_is_emitted_once_per_ending_with_the_chat_and_its_wor
 async def test_a_side_chats_ending_is_kept_in_memory_for_every_chat(
     tmp_path: Path,
 ) -> None:
-    async with chats_console(tmp_path, sides=[[answer("Planned: May 3 to 7.")]]) as (
-        console,
-        client,
-        _,
-    ):
-        await _side(client, tmp_path, "Plan the trip")
+    async with chats_console(tmp_path, sides=[[OPENING]]) as (console, client, _):
+        slides = await _side(client, tmp_path, "Slides")
+        task_id = (await _say_in(client, slides, "/task Make slides"))["task_id"]
+        await _finished(console, task_id, "Six slides.\nSaved deck.pptx.")
         await client.get("/api/sessions")
         await console.memory.drain()
-        found = await console.memory.search("when is the trip planned, May?")
-        assert any(
-            item.source.startswith("chat “Plan the trip” · summary")
-            and "Planned: May 3 to 7." in item.text
-            for item in found
-        )
+        found = await console.memory.search("how many slides, deck.pptx?")
+        summaries = [i for i in found if i.source.startswith("chat “Slides” · summary")]
+        assert [i.text for i in summaries] == [
+            "Summary of chat “Slides”: Six slides. Saved deck.pptx."
+        ]
 
 
 async def test_the_main_chats_own_tasks_and_runs_are_not_side_news(

@@ -1479,11 +1479,14 @@ class ChatMemory:
 
     def side_ended(self, event: StoredEvent) -> None:
         """Index a ``side.summary`` event (``data``: ``chat_id``, ``title``,
-        ``summary``) in the background with :meth:`side_summary`; the console's
-        main chat calls it when a side chat finishes work."""
+        ``summary``, ``source``) in the background with :meth:`side_summary`;
+        the console's main chat calls it when a side chat finishes work. A
+        ``chat`` source (the chat's own run) is indexed as its turn already."""
         data = event.event.get("data") or {}
         chat_id, summary = data.get("chat_id"), data.get("summary")
         if not (self.enabled and isinstance(chat_id, str) and chat_id):
+            return
+        if data.get("source", "chat") == "chat":
             return
         if isinstance(summary, str) and summary.strip():
             title = str(data.get("title") or "")
