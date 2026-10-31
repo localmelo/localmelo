@@ -512,7 +512,8 @@ function syncUI() {
   $("new-btn").disabled = false;
   if (taskMode) {
     $("header-title").textContent = "Tasks";
-    $("header-model").textContent = "Scheduler tasks";
+    // "Scheduler" is the developer's word for what people call tasks.
+    $("header-model").textContent = developerMode ? "Scheduler tasks" : "";
     document.title = "localmelo · Tasks";
   } else if (workerMode) {
     const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
@@ -1131,7 +1132,7 @@ function mainNodes(view, turns) {
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
   // A task that came back finished takes no more changes: its lines lose their buttons.
-  const ended = new Set((view?.cards ?? []).filter((card) => card.state !== "waiting").map((card) => card.sourceId));
+  const ended = new Set((view?.cards ?? []).filter((card) => card.state === "done" || card.state === "failed").map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
     if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard })];
@@ -1175,7 +1176,8 @@ let heldTimer = null;
 
 function holdOrShow(view, frame) {
   const typing = document.activeElement === input && input.value.trim() && Date.now() - lastKey < TYPING_HOLD_MS;
-  if (frame.data?.state === "waiting" || !typing) {
+  // A waiting card shows at once, and so does the answer to one: it is the person's own act.
+  if (frame.data?.state === "waiting" || frame.data?.state === "answered" || !typing) {
     view.cards = mergeCards(view.cards ?? [], [frame]);
     return;
   }
@@ -2351,6 +2353,7 @@ const tasks = setupTasks({
   developer: () => developerMode,
   live: {
     nodes: taskLiveNodes,
+    result: taskResultNodes,
     open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
     schedule: (fn, ms) => setTimeout(fn, ms),
     cancel: (id) => clearTimeout(id),
@@ -2452,17 +2455,18 @@ function leaveWorkers() {
 
 // A turn's work, answer and end state as the read-only views show them. `empty`
 // is the line for a turn without events, or "" to draw its work group.
-function turnWork(turn, sessionId, render, empty) {
+function turnSteps(turn, sessionId, render, empty) {
+  if (empty) return [el("p", "muted", empty)];
+  const summary = workSummary(turn, {});
+  const group = workBox(summary, true);
+  const inline = Boolean(turn.finishedAt) && summary === "Thought";
+  for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
+  return [group];
+}
+
+// How a turn ended: its status line and, when it did not complete, why.
+function turnStatus(turn) {
   const nodes = [];
-  if (empty) nodes.push(el("p", "muted", empty));
-  else {
-    const summary = workSummary(turn, {});
-    const group = workBox(summary, true);
-    const inline = Boolean(turn.finishedAt) && summary === "Thought";
-    for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
-    nodes.push(group);
-  }
-  if (turn.answer) nodes.push(answerNode(turn.answer));
   if (turn.status) {
     const info = statusText(turn.status, turn.cause);
     const line = el("p", "turn-status");
@@ -2479,9 +2483,27 @@ function turnWork(turn, sessionId, render, empty) {
   return nodes;
 }
 
+function turnWork(turn, sessionId, render, empty) {
+  return [...turnSteps(turn, sessionId, render, empty), ...(turn.answer ? [answerNode(turn.answer)] : []), ...turnStatus(turn)];
+}
+
 // The Live section of a task card: its session's turns that hold work or an answer.
 function taskLiveNodes(view, render) {
   return view.turns.flatMap((turn) => (turn.items.length || turn.answer ? turnWork(turn, view.id, render, "") : []));
+}
+
+// A task that ended: its newest answer as in a chat (and, when it did not complete, why it ended),
+// and its work as the steps to unfold. An earlier turn's answer stays with its steps.
+function taskResultNodes(view, render) {
+  const turns = view.turns.filter((turn) => turn.items.length || turn.answer);
+  const last = turns.findLast((turn) => turn.answer) ?? turns.at(-1);
+  const newest = view.turns.at(-1);
+  const answer = [...(last?.answer ? [answerNode(last.answer)] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
+  const steps = turns.flatMap((turn) => {
+    if (turn !== last) return turnWork(turn, view.id, render, "");
+    return turn.items.length ? turnSteps(turn, view.id, render, "") : [];
+  });
+  return {answer, steps};
 }
 
 function renderWorkers() {

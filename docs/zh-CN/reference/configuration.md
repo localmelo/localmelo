@@ -74,6 +74,7 @@ chat_model = "qwen3:8b"
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件显示用量区（词元数或费用、`ctx`、缓存和空闲时间或速率限制），网关有任务时还显示任务。`"off"`：只保留运行区（标题或运行中轮次的步骤）和上一次请求的 `ctx`。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
+| `chat` | `[cli]` | `"main"` | 不带任务的 `melo` 打开什么。`"main"`：经网关的主对话，没有网关运行时在后台启动一个。`"local"`：终端自己的对话，不经网关（一次运行用 `-X cli.chat=local`；`-u`、`-c`、`-r` 和 `--yolo` 也会打开它）。开发者设置；其他值会警告并回退。见[主对话](../guides/terminal.md#the-main-chat)。 |
 | `colors` | `[cli]` | `"auto"` | 交互式界面的颜色数量：`"auto"`（根据 `COLORTERM` 和 `TERM`）、`"16"`、`"256"` 或 `"truecolor"`。`NO_COLOR` 仍会关闭颜色。开发者设置：`-X cli.colors=256` 只用于本次运行。其他值会警告并回退。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `background` | `[cli]` | `"auto"` | 交互式界面所用的终端背景：`"auto"`（先询问终端，再看 `COLORFGBG`），什么都不回答的终端（tmux、screen、ssh）可设为 `"dark"` 或 `"light"`。开发者设置：`-X cli.background=light`。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `reasoning_tags` | `[cli]` | 未设置 | 一张 `MODEL = "explicit" \| "closing_only" \| "none"` 表：某模型回复的可信分帧声明；`stream = false` 时也会用它切分完整回复。没有条目的模型使用保守规则（内容一直保留到回复结束）。目前需要手工设置，引导流程还不会询问它。 |

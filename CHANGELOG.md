@@ -365,6 +365,37 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal talks in the main chat. `melo` now opens the same main chat as
+  the web console and the app: its turns, its cards and the tasks it starts.
+  When no gateway runs, melo starts one in the background on the configured
+  port and says so in one line; it keeps running after melo quits, so its
+  tasks go on. melo never starts a second gateway: when the app's gateway
+  holds the main chat on a port of its own, melo talks to that one. When the
+  gateway cannot be reached, one line says why and the terminal keeps its own
+  chat. `/chats` lists the main chat and its side chats, `/side [title]` starts
+  a side chat in this folder and `/main` goes back; the status bar names the
+  open chat. An approval asked in a turn shows as the terminal's usual list
+  and is answered through the gateway, and a card (a side chat or a task that
+  finished, did not finish or waits) is one coloured line that says how to
+  open it. `-X cli.chat=local` (or `[cli] chat = "local"`) keeps the
+  terminal's own chat, as `-u`, `-c`, `-r` and `--yolo` do. Direct runs,
+  worker runs and their exit codes are unchanged. For API clients:
+  `GET /api/sessions/{id}` adds `last_event_id`, and an approval's `review`
+  adds `categories`. See [The main chat](docs/guides/terminal.md#the-main-chat)
+  ([#330]).
+
+- The terminal and the app share one gateway. Every gateway writes
+  `~/.cache/localmelo/gateway/endpoint.json` as it starts and removes it as it
+  stops; the terminal and the app read it first, so whichever starts second
+  uses the running gateway instead of failing on the main chat's store. The
+  app signs in to it as to its own, and Quit leaves a gateway it did not
+  start running (the menu says so). `melo serve stop` stops the gateway that
+  is running, and the line that says the terminal started one names it
+  ([#330]).
+
+- The terminal's work zone and Ctrl+T say task levels in words in default mode
+  (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
+  ([#330]).
 - A run that knows its call budget stops itself and answers from what it has. The
   developer setting `[agent] max_calls = N` (`-X agent.max_calls=N`; a whole number of
   2 or more, unset by default, listed by `melo config keys` and `melo -h all`) makes a
@@ -1614,6 +1645,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Cards and task pages say what happened. In the main chat an approval card
+  follows its approval: once you answer, the same card says how ("Allowed
+  once", "Allowed for this task", "Denied") and offers no Review, live and
+  after a reload. A card's title is short (the one the main chat gave the
+  task, else the first clause of the request, cut at a word within 48
+  columns) and a waiting card reads "Needs your approval: ..." with what it
+  asks. A Done card carries the first two lines of the task's answer (what
+  changed, the tests, the commit), a Did not finish card why, with the
+  error's first line. A finished task's page opens with its answer set as in
+  a chat, its steps folded under "Steps" ("Live" only while it runs), no
+  "Evidence: Not needed in this state." and, in default mode, a header that
+  says "Tasks" alone. A `python_exec` step in the terminal and the console
+  names the command its code runs (`grep -rn DEFAULT_WORKSPACE .`) rather
+  than its first import. The `attention.card` event gains the state
+  `answered` and the key `request_id`; a task created without a title gets a
+  short derived one ([#331]).
+
 - melo remembers two ways, and never asks you to confirm a note. When you ask ("remember
   that Sam has the lab keys", "keep in mind that…", "记住…", "别忘了…", "帮我记一下…"), the
   note is kept at once, as before, even if the model does nothing. Otherwise the chat's
@@ -2680,6 +2728,8 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#330]: https://github.com/localmelo/localmelo/pull/330
 [#329]: https://github.com/localmelo/localmelo/pull/329
 [#328]: https://github.com/localmelo/localmelo/pull/328
 [#332]: https://github.com/localmelo/localmelo/pull/332
+[#331]: https://github.com/localmelo/localmelo/pull/331

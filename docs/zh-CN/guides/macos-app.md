@@ -104,7 +104,9 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 ## 退出与网关
 
-- 打开应用会用 `melo --serve --port 0` 启动它自己的网关：一个空闲端口，从不占用其他工作保留的端口，也不会接管已有的监听者。
+- 打开应用会用 `melo --serve --port 0` 启动它自己的网关：一个空闲端口，从不占用其他工作保留的端口，也不会接管未知的监听者。
+- 已有网关在运行时（例如在终端里由 `melo` 启动的），应用改用它，并以同样的方式登录；应用通过 `~/.cache/localmelo/gateway/endpoint.json` 找到它。
+- 退出应用不会停止不是由它启动的网关，菜单也会写明：**Quit localmelo (the gateway keeps running)**。用 `melo serve stop` 停止它。
 - 关闭窗口会让网关继续运行；只有在有东西会被停止时，退出才会询问，例如 `Quitting stops what is running: 2 tasks and 1 chat.`
 - 直接运行和终端对话属于其他进程，会继续运行：`Not affected: 1 run and 1 terminal chat.`
 - 如果另一个网关占用了控制台存储，请先停止它；后台服务用 `melo serve status` 检查，用 `melo serve uninstall` 移除。

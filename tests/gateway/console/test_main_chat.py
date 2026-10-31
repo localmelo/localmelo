@@ -15,6 +15,7 @@ from localmelo.support.sessions.store import (
     MAIN_CHAT_TITLE,
     MainChatError,
     SessionStore,
+    StoredEvent,
 )
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -206,7 +207,8 @@ async def test_a_side_chat_run_comes_back_as_a_card_not_a_turn(
         assert card["state"] == "done" and card["source_id"] == side
         assert card["source_kind"] == "chat"
         assert card["title"] == "Plan the trip"
-        assert card["line"] == "The trip is planned."
+        # A card carries the first two lines of the answer.
+        assert card["line"] == "The trip is planned.\nDetails follow."
         page = (await client.get(f"/api/sessions/{console.main_id}/turns")).json()
         assert page["turns"] == []
         assert [c["id"] for c in page["cards"]] == [card["id"]]
@@ -234,7 +236,8 @@ async def test_a_waiting_approval_gets_a_card_unless_answered_first(
         [pending] = await _wait_pending(client, side)
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["state"] == "waiting" and card["source_id"] == side
-        assert card["line"] == "Waiting for your approval"
+        assert card["line"] == "Wants to write todo.md"
+        assert card["request_id"] == pending["request_id"]
         await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
         )
@@ -257,6 +260,147 @@ async def test_a_waiting_approval_gets_a_card_unless_answered_first(
         await client.get("/api/sessions")
         cards = await console.store.events_of_type(console.main_id, CARD_EVENT)
         assert [c.event["data"]["state"] for c in cards] == ["done"]
+
+
+async def test_an_answered_approval_follows_its_card_and_is_no_news(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "ws" / "todo.md"
+    write = tool_call("file_write", {"path": str(target), "content": "# TODO"})
+    async with console_with(tmp_path, write, answer("done")) as (console, client, _):
+        side = (await _create(client, tmp_path, "Write the todo"))["session"]["id"]
+        [pending] = await _wait_pending(client, side)
+        waiting = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert waiting["state"] == "waiting"
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
+        )
+        await _wait_turn(client, side)
+        assert console.main_id is not None
+        page = (await client.get(f"/api/sessions/{console.main_id}/turns")).json()
+        states = [card["state"] for card in page["cards"]]
+        assert states == ["waiting", "answered", "done"]
+        _, answered, done = page["cards"]
+        assert answered["request_id"] == waiting["request_id"] == pending["request_id"]
+        assert answered["line"] == "Allowed once" and answered["source_id"] == side
+        assert answered["title"] == "Write the todo"
+        # The answer is the person's own act: the list's newest card is the done one.
+        newest = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert newest["id"] == done["id"]
+        assert console.cards.last is not None and console.cards.last["id"] == done["id"]
+
+
+async def test_each_answer_reads_in_words_and_a_task_grant_is_for_the_task(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path, answer("ok")) as (console, client, _):
+        main = console.main_id
+        assert main is not None
+        sources = {
+            "chat": (await _create(client, tmp_path, "A chat"))["session"]["id"],
+        }
+        store = console.store
+        record, _ = await console.workers.create(
+            {"objective": "A task", "title": "A task", "request_key": "k"}
+        )
+        sources["task"] = record["task_id"]
+        await _wait_turn(client, sources["chat"])
+        ask = 0
+
+        async def resolved(kind: str, **data: Any) -> dict[str, Any]:
+            nonlocal ask
+            ask += 1
+            rid = f"r{ask}"
+            source = sources[kind]
+            await store.append_session_event(
+                main,
+                CARD_EVENT,
+                {
+                    "state": "waiting",
+                    "request_id": rid,
+                    "source_id": source,
+                    "source_kind": kind,
+                    "title": "x",
+                    "line": "",
+                },
+            )
+            event = {
+                "type": "approval.resolved",
+                "ts": 1.0,
+                "data": {
+                    "request_id": rid,
+                    "outcome": "allowed",
+                    "origin": "user",
+                    **data,
+                },
+            }
+            console.cards._heard(StoredEvent(0, source, None, event))
+            await console.cards.flush()
+            cards = await store.events_of_type(main, CARD_EVENT, limit=2)
+            return cards[-1].event["data"]  # type: ignore[no-any-return]
+
+        said = await resolved("task", remember=True)
+        assert said["state"] == "answered" and said["line"] == "Allowed for this task"
+        said = await resolved("chat", remember=True)
+        assert said["line"] == "Allowed for this chat"
+        assert (await resolved("task", remember=False))["line"] == "Allowed once"
+        assert (await resolved("task", origin="policy"))[
+            "line"
+        ] == "Allowed automatically"
+        assert (await resolved("task", outcome="denied"))["line"] == "Denied"
+        assert (await resolved("task", origin="timeout", outcome="denied"))[
+            "line"
+        ] == "No answer in time"
+        assert (await resolved("task", outcome="withdrawn", origin="withdrawn"))[
+            "line"
+        ] == "Not run: it stopped first"
+        # An answer whose waiting card was never written adds no card.
+        before = await store.events_of_type(main, CARD_EVENT, limit=100)
+        event = {
+            "type": "approval.resolved",
+            "ts": 1.0,
+            "data": {"request_id": "never", "outcome": "denied", "origin": "user"},
+        }
+        console.cards._heard(StoredEvent(0, sources["task"], None, event))
+        await console.cards.flush()
+        after = await store.events_of_type(main, CARD_EVENT, limit=100)
+        assert len(after) == len(before)
+
+
+async def test_a_card_title_is_short_and_a_failed_card_gives_the_reason(
+    tmp_path: Path,
+) -> None:
+    long = (
+        "Fix this today: in tests/cli/test_e2e_pty.py the list_files test only "
+        "checks that the word list_files appears on screen."
+    )
+    async with console_with(tmp_path) as (console, client, _):
+        store = console.store
+        record, _ = await console.workers.create(
+            {"objective": long, "request_key": "k"}
+        )
+        assert record["title"] == "Fix this today: in tests/cli/test_e2e_pty.py…"
+        # A title stored long before (cut mid-word at 60) is cut at a word on the card.
+        await store.rename_session(record["task_id"], long[:60])
+        started = await store.begin_turn(record["task_id"], long, holder=HOLDER)
+        await store.finish_turn(
+            record["task_id"],
+            started.turn,
+            holder=HOLDER,
+            status="provider_error",
+            cause="run",
+            result={**run_result(), "error": "connection refused\nsecond line"},
+            answer="",
+        )
+        await store.append_session_event(
+            record["task_id"], "sched.finished", {"state": "failed"}
+        )
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert card["state"] == "failed"
+        assert card["title"] == "Fix this today: in tests/cli/test_e2e_pty.py…"
+        assert card["line"] == (
+            "Could not get an answer from the model server: connection refused"
+        )
 
 
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(
@@ -294,7 +438,8 @@ async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(
         )
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["source_kind"] == "task" and card["state"] == "done"
-        assert card["title"] == "Find jobs" and card["line"] == "Two new roles."
+        assert card["title"] == "Find jobs"
+        assert card["line"] == "Two new roles.\nSaved jobs.md."
         assert console.main_id is not None
         # A stop by the person is no card; a turn of a task is none either.
         await store.append_session_event(

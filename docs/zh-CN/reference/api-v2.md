@@ -388,7 +388,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
   "agent": "open",
-  "tokens": 18512
+  "tokens": 18512,
+  "last_event_id": 412
 }
 ```
 
@@ -396,8 +397,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `mcp_error` 说明本会话为何在没有 MCP 工具的情况下运行，否则为 `""`。目前它始终为 `""`：控制台尚未实现 MCP。
 - `agent` 为 `open`、`paused`（已关闭，但保留其对话）或 `not_loaded`（本网关尚未打开的会话，例如重启之后）。创建操作即使没有轮次也会打开会话；读取路由从不打开会话，而轮次或重试会打开。因此，`not_loaded` 会持续到网关启动后的第一次打开，而已关闭的智能体读作 `paused`。
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
+- `last_event_id` 是该会话最新一条已存事件的 id（没有事件时为 0）：客户端从这个 id 之后读取 `GET /api/sessions/{id}/events?after=`，只会收到之后的事件。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
-- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖。`high` 调用每次都会询问，卡片不提供 `session` 回答。
+- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
 - 对已有文件写入文本的 `file_write`，其 `target` 还带有 `diff`，即这次写入会替换的内容；它在生成响应时读取，显示方式与终端的审批面板相同。新文件或没有文本的调用，`target` 没有 `diff`。
 
@@ -440,12 +442,14 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 它的 `data`：
 
 ```json
-{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
+{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` 为 `done`、`failed` 或 `waiting`（有审批在等待答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`line` 是一行平实的话：回答的第一句、运行结束的方式，或 `Waiting for your approval`。`at` 是事情发生的时间。
+- `state` 为 `done`、`failed`、`waiting`（有审批在等待答复）或 `answered`（该审批已答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
+- `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
+- `waiting` 卡片有 `request_id`。该审批得到答复后，会有一张状态为 `answered`、`request_id` 相同、`line` 为答复的卡片跟在它后面，客户端把这一张卡片显示为带着答复、不再有 Review 的样子。答复不是新消息：它永远不是列表的 `last_card`，等待卡片从未写入时也不会写入答复。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
-- 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入。主对话的事件流以 `attention.card` 帧送来新卡片。
+- 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入；之后才答复的审批会跟上它的 `answered` 卡片。主对话的事件流以 `attention.card` 帧送来新卡片。
 - 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
 
 <a id="echoes-in-the-main-chat"></a>

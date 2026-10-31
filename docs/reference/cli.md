@@ -17,6 +17,7 @@ melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free p
 melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
+melo serve stop                              # stop the gateway that is running
 melo -h all                                  # every option, command and setting
 ```
 
@@ -45,7 +46,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
 | `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`. | `list -n N`, `forget ID`, `forget -y` |
-| `melo serve [install\|uninstall\|status]` | Run the gateway, or manage it as a login service (macOS). | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
 | `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -72,7 +73,7 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--save-session` | `--title` |
 | `--reconfigure` | `melo setup` |
 | `--serve` | `melo serve` |
-| `--daemon` | `melo serve install|uninstall|status` |
+| `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
 | `--enable-playground` | `melo serve --playground` |

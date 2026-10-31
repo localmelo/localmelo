@@ -53,6 +53,7 @@ EQUIVALENT = [
     ("serve install", "--daemon install"),
     ("serve uninstall", "--daemon uninstall"),
     ("serve status", "--daemon status"),
+    ("serve stop", "--daemon stop"),
     ("serve install -p 9001", "--daemon install --port 9001"),
     ("console", "--gateway-login"),
     ("console -p 5000", "--gateway-login --port 5000"),
