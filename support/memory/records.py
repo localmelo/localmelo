@@ -8,23 +8,30 @@ prefer short answers."). Otherwise the chat's model keeps a note with the
 ``remember`` tool when it judges something worth keeping; the note's content
 words must come from what the user typed in that chat or from a finished
 task's result shown there (:func:`unsupported`), never from a page or tool
-output alone. A plain statement is not kept by rule. Each record has at most
-:data:`MAX_RECORD_CHARS` characters, its topic, the user's quote and where it
-was said. Text that looks like a secret is refused, not stored redacted. A new
-record of the same subject supersedes the old one ("call me Ray" after "call
-me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is kept, not recalled,
-and comes back with an undo of the new one. The subject is what a note is
-about without its value (:func:`subject`); with an embedding model, a note
-close in meaning that differs from an old one in one short span is the same
-subject too (:func:`value_apart`). A new record lists the turns whose facts it
-replaced (``provenance["replaces"]``), so recall can rank them below it.
+output alone. The clear cases of that judgement are kept by code too: after
+the turn, a plain first-person statement of a lasting fact that names a
+subject ("I live in …", "my advisor is …", "call me …", "我的…是…") and that no
+note of the turn kept becomes one (:func:`statements`); a question, a to-do,
+a hypothetical, a negation or someone else's opinion never does. Each record
+has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
+and where it was said. Text that looks like a secret is refused, not stored
+redacted. A new record of the same subject supersedes the old one ("call me
+Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
+kept, not recalled, and comes back with an undo of the new one. The subject is
+what a note is about without its value (:func:`subject`); with an embedding
+model, a note close in meaning that differs from an old one in one short span
+is the same subject too (:func:`value_apart`). A new record lists the turns
+whose facts it replaced (``provenance["replaces"]``), so recall can rank them
+below it. Chat turns follow the same rule among themselves: of two turns whose
+typed words state one subject with different values, the older is replaced by
+the newer (:func:`newer_turns`), with or without a note.
 """
 
 from __future__ import annotations
 
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Final
@@ -44,7 +51,7 @@ from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
-from localmelo.support.memory.recall import stem, unit
+from localmelo.support.memory.recall import Item, stem, unit
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
 TOPIC_LABELS: Final = {
@@ -114,6 +121,8 @@ _SUBJECTS: Final = tuple(
         ),
     )
 )
+# The subjects a verb names: a statement of one needs no lexicon marker.
+_VERB_SUBJECTS: Final = frozenset(key for key, _ in _SUBJECTS)
 # "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject, and how Y
 # relates to it (:func:`_relation`) tells a name from a day or a description.
 _OWNED = re.compile(
@@ -174,6 +183,51 @@ _SECRET_WORDS = re.compile(
 )
 _ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+
+# A plain statement: the user's own words about themselves, at most this long
+# once a lead-in ("By the way, …", "对了，…") is set aside.
+STATEMENT_CHARS: Final = 200
+_LEAD_IN = re.compile(
+    r"^(?:(?:btw|by the way|fyi|also|actually|oh|ok|okay|so|and|well|hey|hi|"
+    r"update|news|for the record|just so you know|heads up)\b[\s,:;!.—–-]*)+"
+    r"|^(?:对了|另外|顺便说一下|顺便|其实|告诉你|跟你说)[\s，,：:]*",
+    re.IGNORECASE,
+)
+_MINE = re.compile(r"^(?:i\b|my\b|(?:please )?call me\b|(?:请)?叫我|我)", re.IGNORECASE)
+# Not a plain statement: a hypothetical, a negation, someone's opinion, a
+# to-do, the past, or a question in Chinese words.
+_NOT_PLAIN = re.compile(
+    r"\b(?:if|unless|suppose|supposing|imagine|assuming|pretend|hypothetically"
+    r"|wonder|would|could|might|maybe|perhaps|probably|wish|hope"
+    r"|not|no|never|nobody|nothing|none|neither|nor|anymore"
+    r"|thinks?|thought|says?|said|believes?|claims?|feels?|guess|suspects?"
+    r"|according|need|needs|have to|has to|must|should|remind|todo|to-do"
+    r"|was|were|used to|formerly|previously)\b|n't\b|'d\b"
+    r"|如果|假如|要是|假设|万一|也许|可能|设想|想象|但愿|不|没|别"
+    r"|觉得|认为|以为|听说|据说|相信|(?:他|她|他们|她们|别人|大家|有人)说"
+    r"|需要|提醒|待办|以前|曾经|过去|吗|呢|什么|哪|谁|几|怎么|怎样|为什么|多少|是否",
+    re.IGNORECASE,
+)
+# A value that is a passing state, not a lasting fact ("my build is failing").
+_PASSING_WORDS: Final = (
+    "broken down failing slow stuck missing wrong empty full ready done busy sick "
+    "tired late gone away back out off fine ok okay here there over locked "
+    "delayed cancelled canceled crashed frozen blocked finished"
+)
+_PASSING: Final = frozenset(_PASSING_WORDS.split())
+# A title's "." ends no sentence: the joiner holds it to the name after it.
+_TITLE = re.compile(r"\b(Dr|Mr|Mrs|Ms|Mx|Prof|St|Jr|Sr|Mt)\.\s+")
+_JOINER: Final = "\u2060"
+# A sentence that may carry a request to remember (:func:`said` reads its fact).
+_MAY_ASK = re.compile(
+    r"remember|forget|from now on|in memory|keep in mind|make a note"
+    r"|记住|别忘|以后|记下|记一下",
+    re.IGNORECASE,
+)
+# How many of the newest statements of no subject are compared by meaning,
+# and how many close pairs of them at most, so recall stays quick.
+PLAIN_TURNS: Final = 1_000
+PAIR_CHECKS: Final = 5_000
 
 # The first person in the user's words, in the second person in a record.
 _SWAPS: Final = (
@@ -303,6 +357,125 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
         topic = topic_of(sentence, request=True)
         out.append(Candidate(text, sentence[:MAX_RECORD_CHARS], topic, "user_request"))
     return out, refused
+
+
+def _sentences(typed: str) -> list[str]:
+    """The sentences of the user's *typed* words (a ";" ends one too, a title
+    such as "Dr." does not); none for a message too long to be a statement."""
+    if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
+        return []
+    joined = _TITLE.sub("\\1." + _JOINER, re.sub(r"\s*[;；]\s*", "\n", typed))
+    return [s.replace("." + _JOINER, ". ") for _, s in split_sentences(joined)]
+
+
+def _plain(sentence: str) -> str:
+    """*sentence* without its lead-in when it is a plain first-person statement:
+    not a question, a to-do, a hypothetical, a negation, the past or someone's
+    opinion, and no secret; else ``""``."""
+    text = _LEAD_IN.sub("", " ".join(sentence.split())).strip(" ,，")
+    if (
+        not text
+        or len(text) > STATEMENT_CHARS
+        or text.endswith(("?", "？"))
+        or not _MINE.match(text)
+        or _NOT_PLAIN.search(text)
+        or "`" in text
+        or sensitive(text)
+    ):
+        return ""
+    return text
+
+
+def _lasting(text: str) -> bool:
+    """Whether the value of a "my X is Y" statement lasts: not a passing state
+    ("my build is failing", "my laptop is very slow") or a plan ("… is to …")."""
+    found = _OWNED.match(normalise(text))
+    if found is None:
+        return True
+    words = [w for w in _TOKEN.findall(found.group(2)) if w not in _STILL]
+    first = words[0] if words else ""
+    if first in _RELATIONS:
+        return True
+    return not (
+        first == "to"
+        or (len(first) > 4 and first.endswith("ing"))
+        or _PASSING.intersection(words[:3])
+    )
+
+
+def subject_key(text: str) -> str:
+    """:func:`subject` and how its value relates to it: two statements of one
+    key and different values disagree. ``""`` when *text* names no subject."""
+    mine, how = _subject(text)
+    return f"{mine}|{how}" if mine else ""
+
+
+def _keyed(text: str) -> str:
+    """The :func:`subject_key` of the plain statement *text* when it states a
+    lasting fact (:func:`_lasting`) that the signal lexicon reads as one (not
+    a meta sentence such as "my task is …"); else ``""``."""
+    key = subject_key(text)
+    if not key or not _lasting(text):
+        return ""
+    if key.split("|")[0] not in _VERB_SUBJECTS and not classify_user_text(text).facts:
+        return ""
+    return key
+
+
+def statements(typed: str) -> list[Candidate]:
+    """The lasting facts the user's *typed* words state about themselves, as notes.
+
+    Each is a plain first-person statement (no question, to-do, hypothetical,
+    negation, past or someone else's opinion, no secret) that names a subject
+    ("I live in …", "my advisor is …", "call me …", "我的…是…") with a lasting
+    value, reads as a statement to the signal lexicon (a meta sentence such as
+    "my task is …" does not) and asks nothing to be remembered
+    (:func:`candidates` keeps those). After a turn, code keeps the ones no note
+    of the turn kept.
+    """
+    out: list[Candidate] = []
+    for sentence in _sentences(typed):
+        if _MAY_ASK.search(sentence) and classify_user_text(sentence).remember:
+            continue
+        text = _plain(sentence)
+        if not text or not _keyed(text):
+            continue
+        note = second_person(text)
+        if len(normalise(note)) < 4 or any(c.text == note for c in out):
+            continue
+        topic = topic_of(text, request=False)
+        out.append(
+            Candidate(note, sentence[:MAX_RECORD_CHARS], topic, "user_statement")
+        )
+    return out
+
+
+def covered(cand: Candidate, notes: Iterable[Written]) -> bool:
+    """Whether one of *notes* (kept in the same turn) already says *cand*: the
+    same subject, or most of the same content words."""
+    key = subject_key(cand.text)
+    tokens = content_tokens(cand.text)
+    return any(
+        (key and subject_key(note.text) == key)
+        or overlap(tokens, content_tokens(note.text)) >= SUPERSEDE_OVERLAP
+        for note in notes
+    )
+
+
+def said(typed: str) -> tuple[tuple[str, str], ...]:
+    """What a chat turn's *typed* words state about the user, for
+    :func:`newer_turns`: each plain statement, folded, with its
+    :func:`subject_key` (``""`` for none). A request to remember counts by the
+    fact it carries ("remember that I live in …")."""
+    out: list[tuple[str, str]] = []
+    for sentence in _sentences(typed):
+        facts: Sequence[str] = (sentence,)
+        if _MAY_ASK.search(sentence):
+            facts = classify_user_text(sentence).request_facts or facts
+        for fact in facts:
+            if text := _plain(fact):
+                out.append((_keyed(text), normalise(text)))
+    return tuple(out)
 
 
 def _stem(word: str) -> str:
@@ -490,6 +663,58 @@ def decide(
         if score >= SUPERSEDE_OVERLAP and score >= best_score:
             best, best_score = entry, score
     return ("UPDATE", best.id) if best is not None else ("NEW", None)
+
+
+def newer_turns(items: Iterable[Item]) -> dict[tuple[str, int], Item]:
+    """The chat turns a newer turn replaced, each (session id, turn) to that turn.
+
+    Of the turns whose user stated one subject (:func:`subject_key`, in
+    :attr:`Item.said`) with different values, each older one is replaced by
+    the newest ("I live in Lisbon." by a later "I live in Utrecht."); a turn
+    that said the newest value again is not. With an embedding model, two
+    statements of no subject are one when their turns are close in meaning
+    and they differ in one short value (:func:`value_apart`), among the
+    :data:`PLAIN_TURNS` newest such statements (at most :data:`PAIR_CHECKS`
+    close pairs). No model call.
+    """
+    turns = sorted(
+        (item for item in items if not item.is_record and item.said),
+        key=lambda item: (item.created_at, item.key),
+        reverse=True,
+    )
+    out: dict[tuple[str, int], Item] = {}
+    newest: dict[str, tuple[Item, str]] = {}
+    plain: dict[tuple[str, int], list[tuple[Item, str]]] = {}
+    compared = checks = 0
+    for item in turns:
+        where = (item.session_id, item.turn)
+        for key, text in item.said:
+            if not key:
+                if item.vector is not None and compared < PLAIN_TURNS:
+                    shape = (item.embed_model, int(item.vector.shape[0]))
+                    plain.setdefault(shape, []).append((item, text))
+                    compared += 1
+                continue
+            newer, value = newest.setdefault(key, (item, text))
+            if newer is not item and value != text:
+                out.setdefault(where, newer)
+    for group in plain.values():
+        vectors = np.stack(
+            [item.vector for item, _ in group if item.vector is not None]
+        )
+        close = vectors @ vectors.T >= NEAR_COSINE
+        for first, (newer, text) in enumerate(group):
+            for other in np.flatnonzero(close[first, first + 1 :]) + first + 1:
+                older, value = group[int(other)]
+                where = (older.session_id, older.turn)
+                if older is newer or where in out or value == text:
+                    continue
+                checks += 1
+                if checks > PAIR_CHECKS:
+                    return out
+                if value_apart(text, value):
+                    out[where] = newer
+    return out
 
 
 def _replaces(old: StoredEntry, source: dict[str, Any]) -> list[list[Any]]:

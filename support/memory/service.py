@@ -7,7 +7,9 @@ A chat's runner calls :meth:`ChatMemory.before_turn` before each turn's run
 (keep what the user asks to remember, recall what matches) and
 :meth:`ChatMemory.after_turn` once it ends (index it, off the reply path).
 During the run, the chat's model keeps notes with the ``remember`` tool
-(:meth:`ChatMemory.remember`), checked against what the chat shows.
+(:meth:`ChatMemory.remember`), checked against what the chat shows; after
+it, :meth:`ChatMemory.keep_statements` keeps the lasting facts the user
+stated that no note of the turn kept.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -40,7 +42,12 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import ToolDef, split_thinking
 from localmelo.support.memory import records
-from localmelo.support.memory.index import ConversationIndex, Document, document_text
+from localmelo.support.memory.index import (
+    ConversationIndex,
+    Document,
+    document_text,
+    typed_of,
+)
 from localmelo.support.memory.recall import (
     AUTO_DOCS,
     AUTO_RECORDS,
@@ -214,6 +221,8 @@ def _record_item(entry: StoredEntry) -> Item:
 
 
 def _doc_item(doc: Document) -> Item:
+    # What the user typed in a chat (not a task's prompt) states about them.
+    typed = "" if doc.kind in _TASK_KINDS else typed_of(doc.text)
     return Item(
         key=f"d:{doc.id}",
         text=doc.text,
@@ -223,6 +232,7 @@ def _doc_item(doc: Document) -> Item:
         created_at=doc.created_at,
         vector=unit(doc.vector),
         embed_model=doc.embed_model,
+        said=records.said(typed) if typed else (),
     )
 
 
@@ -288,6 +298,9 @@ class ChatMemory:
         self._records: SqliteLongTerm | None = None
         self._index: ConversationIndex | None = None
         self._corpus = Corpus()
+        # The turns newer turns replaced (records.newer_turns), for one corpus
+        # and its version.
+        self._newer: tuple[Corpus, int, dict[tuple[str, int], Item]] | None = None
         # One statement at a time on each file's connection: a write that
         # began while another task's read was open on it fails at once.
         self._lock = asyncio.Lock()
@@ -435,6 +448,19 @@ class ChatMemory:
             corpus.add(_doc_item(doc))
         return corpus
 
+    def _replaced(self, corpus: Corpus) -> dict[tuple[str, int], Item]:
+        """The turns a newer note or turn replaced, each to the newer one; a
+        note's replacement wins over a turn's."""
+        cached = self._newer
+        if cached is None or cached[0] is not corpus or cached[1] != corpus.version:
+            cached = (
+                corpus,
+                corpus.version,
+                records.newer_turns(corpus.items.values()),
+            )
+            self._newer = cached
+        return {**cached[2], **replaced_turns(corpus)}
+
     async def search(
         self,
         query: str,
@@ -501,15 +527,16 @@ class ChatMemory:
                 if mode == "llm"
                 else []
             )
-            replaced = replaced_turns(corpus)
+            replaced = self._replaced(corpus)
         recall.search_ms = elapsed_ms(started)
         recall.candidates = len(loose) if mode == "llm" else len(found)
         if loose:
             found = await self._select(
                 query, loose, found, recall, k=records_k + docs_k
             )
-        # A turn whose fact a newer note replaced comes after that note.
-        items = pick(newer_first(found, replaced), records=records_k, docs=docs_k)
+        # A turn whose fact a newer note or turn replaced comes after it.
+        newer = newer_first(found, replaced, exclude_session=exclude_session)
+        items = pick(newer, records=records_k, docs=docs_k)
         recall.used = len(items)
         return items
 
@@ -703,6 +730,48 @@ class ChatMemory:
         turn.kept.extend(written)
         turn.publish()
         return f"Remembered: {note} The user sees it and can undo it."
+
+    async def keep_statements(self, info: TurnInfo) -> list[records.Written]:
+        """After the chat turn *info* ran: keep the lasting facts its typed words
+        state (:func:`records.statements`) that no note of the turn kept.
+
+        The model judges what to keep with ``remember``; this keeps the clear
+        cases it left, as it would have: the user's own words, a secret never,
+        the turn's ``turn.memory`` event queued again with them, so the page
+        shows each with Undo. Nothing outside a chat's turn or with memory off.
+        """
+        turn = CHAT_TURN.get()
+        if (
+            not self.enabled
+            or turn is None
+            or turn.info.id != info.id
+            or turn.memory.recall is None
+        ):
+            return []
+        notes = [*turn.memory.remembered, *turn.kept]
+        found = [
+            cand
+            for cand in records.statements(turn.typed)
+            if not records.covered(cand, notes)
+        ]
+        if not found:
+            return []
+        vectors, model, _ = await self._embed(
+            [cand.text for cand in found], EMBED_TIMEOUT_S, query=False
+        )
+        source = await self._source(turn.store, turn.info)
+        async with self._lock:
+            written = await records.write(
+                self.stores()[0],
+                found,
+                vectors or [None] * len(found),
+                source=source,
+                embed_model=model,
+            )
+        if written:
+            turn.kept.extend(written)
+            turn.publish()
+        return written
 
     async def _said(self, turn: ChatTurn) -> list[str]:
         """What the user typed in the earlier turns of this chat (undone ones aside)."""

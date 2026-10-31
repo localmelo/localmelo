@@ -232,8 +232,9 @@ class SessionRunner:
     names, as one ``turn.pictures`` event (:mod:`~.pictures`). With *memory*,
     each turn of a chat recalls what matches its typed text and keeps what it
     asks to remember (a ``turn.memory`` event, queued again whole when the
-    model keeps a note with ``remember``), and a completed turn is indexed;
-    *index_only* (a task's runner) only indexes.
+    model keeps a note with ``remember``, or when, after a completed run, code
+    keeps a lasting fact the user stated that no note kept), and a completed
+    turn is indexed; *index_only* (a task's runner) only indexes.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -695,6 +696,8 @@ class SessionRunner:
             run_exc = exc
         if before is not None:
             await self._note_pictures(turn, before, returned)
+        if returned is not None and returned.status == "completed":
+            await self._keep_statements(turn)
         cancelled = (
             isinstance(run_exc, asyncio.CancelledError) and task.cancelling() > 0
         )
@@ -733,6 +736,20 @@ class SessionRunner:
         if found.block and len(turn.text) + len(found.block) <= MAX_QUERY_LEN:
             return turn.text + found.block
         return turn.text
+
+    async def _keep_statements(self, turn: _Turn) -> None:
+        """Keep the lasting facts the user stated that the model kept no note of.
+
+        It queues ``turn.memory`` again, whole, when it keeps one.
+        """
+        if self._memory is None or self._index_only:
+            return
+        try:
+            await self._memory.keep_statements(turn.turn)
+        except asyncio.CancelledError:
+            return  # the turn's own cancel counter still ends the run as cancelled
+        except Exception:
+            logger.warning("Could not keep what the user stated", exc_info=True)
 
     async def _scan_folder(self, turn: _Turn) -> turn_pictures.Snapshot | None:
         """The picture files in the Agent's folder, or ``None`` when pictures are off."""
