@@ -62,8 +62,9 @@ from localmelo.support.gateway.front_rules import (
     intention_only,
     is_chinese,
     is_question,
+    level_code,
+    level_menu,
     level_number,
-    level_word,
     norm,
     reply_language,
     route,
@@ -357,8 +358,9 @@ TASK_TOOLS: Final = (
     ),
     _tool(
         "task_set_priority",
-        "Change a task's priority when the user asks: Now, Today, Normal, "
-        "Whenever, If idle or Later.",
+        "Change a task's priority when the user asks: "
+        + level_menu()
+        + ". Words such as today or no rush mean the same.",
         {"task_id": _ID, "level": {"type": "string"}},
     ),
     _tool(
@@ -420,7 +422,7 @@ class FrontTools(BaseToolProvider):
         if echo.get("echo") != "started":
             return f"Not done: {echo.get('line', '')}"
         return (
-            f"Started task {echo['task_id']}: {echo['title']} ({level_word(echo['level'])}). "
+            f"Started task {echo['task_id']}: {echo['title']} ({level_code(echo['level'])}). "
             f"Its result comes back to this chat as a card. {_tell(front.typed())}"
         )
 
@@ -452,10 +454,10 @@ class FrontTools(BaseToolProvider):
         record = await front.record(str(task_id))
         number = level_number(level)
         if record is None or number is None:
-            return "Not done: name a task from task_list and one of Now, Today, Normal, Whenever, If idle, Later."
+            return f"Not done: name a task from task_list and one of {level_menu()}."
         typed = front.typed()
         raise_ = number < record.level
-        # Words raise a task to Today at most: Now is the person's own tap.
+        # Words raise a task to P1 at most: P0 is the person's own tap.
         number = max(number, 1)
         if not allows_level(typed, raise_, _ref(record)):
             await front.suggest(record, "level", level=number)
@@ -509,7 +511,7 @@ def _ref(record: TaskRecord) -> TaskRef:
 
 def _row(record: TaskRecord) -> str:
     state = _STATE_WORDS.get(record.state, record.state)
-    return f"{record.task_id} · {record.title} · {state} · {level_word(record.level)}"
+    return f"{record.task_id} · {record.title} · {state} · {level_code(record.level)}"
 
 
 # ── The front ──
@@ -717,7 +719,7 @@ class Front:
             data = event.event.get("data") or {}
             if data.get("echo") == "started" and data.get("task_id") == task["task_id"]:
                 return card_json(event)
-        line = f"{word}: {task['title']} · {level_word(task['level'])}"
+        line = f"{word}: {task['title']} · {level_code(task['level'])}"
         return await self._echo(
             "started", task["task_id"], task["title"], line, show, of,
             level=task["level"], reason=task["reason"],
@@ -809,7 +811,7 @@ class Front:
             return await self._failed(
                 f"Could not change {record.title}: {problem}", show
             )
-        line = f"{record.title} → {level_word(level)}"
+        line = f"{record.title} → {level_code(level)}"
         return await self._echo(
             "level", record.task_id, record.title, line, show, of,
             level=level, undo={"level": before},
@@ -825,7 +827,7 @@ class Front:
     ) -> dict[str, Any]:
         """A change the person did not ask for in their own words: one tap applies it."""
         what = (
-            f"{record.title} → {level_word(level)}"
+            f"{record.title} → {level_code(level)}"
             if action == "level"
             else (
                 f"send your message to {record.title}"
@@ -938,7 +940,7 @@ class Front:
                 raise ApiError(
                     400,
                     "invalid_request",
-                    "level: Now, Today, Normal, Whenever, If idle or Later",
+                    "level: P0 to P5",
                 )
             return await self.set_level(record, number)
         if do == "apply" and kind == "suggest":
@@ -1010,7 +1012,7 @@ class Front:
             raise ApiError(409, "invalid_transition", f"Could not undo: {problem}")
         now = await self.record(record.task_id) or record
         state = (
-            f"back to {level_word(now.level)}"
+            f"back to {level_code(now.level)}"
             if "level" in undo
             else "paused" if undo.get("state") == "pause" else "going again"
         )

@@ -1,4 +1,5 @@
 import {taskLive} from './task-live.mjs';
+import {levelCode, levelLabel} from './levels.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -97,7 +98,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', [stateText(task), developer() ? `P${task.level_eff ?? task.level}` : '', `updated ${when(task.updated_at)}`, task.workspace_label ? `in ${task.workspace_label}` : ''].filter(Boolean).join(' · '), 'muted'));
+        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', `updated ${when(task.updated_at)}`, task.workspace_label ? `in ${task.workspace_label}` : ''].filter(Boolean).join(' · '), 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -111,7 +112,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => meta.append(node('dt', label), node('dd', value));
     row('State', stateText(task));
-    if (developer()) row('Priority', `P${task.level_eff ?? task.level}`);
+    if (developer()) row('Priority', levelLabel(task.level_eff ?? task.level));
     row('Updated', when(task.updated_at));
     // A refused folder says why in its own box below, in words.
     if (task.wait_reason && !task.folder_problem) row('Waiting', task.wait_reason);

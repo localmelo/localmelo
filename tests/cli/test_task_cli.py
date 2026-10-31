@@ -558,7 +558,7 @@ def test_stop_says_when_the_task_has_not_stopped_yet(
         assert len(lines) == 1
 
 
-def test_default_mode_says_levels_in_words_and_takes_them() -> None:
+def test_levels_print_as_p_codes_and_words_still_set_them() -> None:
     finished = {"task_id": "abc", "state": "done", "title": "Write it", "level": 1}
     seen: list[httpx.Request] = []
 
@@ -586,19 +586,32 @@ def test_default_mode_says_levels_in_words_and_takes_them() -> None:
                 client,
                 out=out,
                 stdin=io.StringIO(),
-                words=True,
             )
     text = out.getvalue()
-    assert "  Level: Today\n" in text
-    assert "abc  Today  done   Write it" in text
+    assert "  Level: P1\n" in text
+    assert "abc  P1     done   Write it" in text
+    assert "Today" not in text
+    # The words people type, and the codes, set the same levels.
     assert json.loads(seen[2].content) == {"level": "P4"}
     assert json.loads(seen[3].content)["level"] == "P1"
     with pytest.raises(SystemExit):
         parser().parse_args(["level", "abc", "soon"])
 
 
-def test_main_reads_the_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from localmelo.support import task_cli
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert task_cli._developer() is False
+@pytest.mark.parametrize(
+    ("typed", "code"),
+    [
+        ("now", "P0"),
+        ("Today", "P1"),
+        ("p1", "P1"),
+        ("NORMAL", "P2"),
+        ("whenever", "P3"),
+        ("If idle", "P4"),
+        ("idle", "P4"),
+        ("later", "P5"),
+        ("P5", "P5"),
+        ("auto", "auto"),
+    ],
+)
+def test_old_words_and_codes_name_the_same_level(typed: str, code: str) -> None:
+    assert parser().parse_args(["level", "abc", typed]).level == code

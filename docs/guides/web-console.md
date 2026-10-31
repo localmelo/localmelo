@@ -154,11 +154,11 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 
 ## Hand work to the main chat
 
-![The main chat: a question answered, a task started at Normal that came back done, a task started at Today with its levels open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
+![The main chat: a question answered, a task that came back done, a task with its priorities open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
-- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · Normal`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · P2`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
 - **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once, with no model call. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`), under a short title. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
-- **Levels in words.** Now, Today, Normal, Whenever, If idle, Later. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it Today, "no rush" makes it Whenever, anything else is Normal. **Change** on the line sets your own level, which stays.
+- **Priorities as P0 to P5.** A line shows the code (`P1`); hover it for what it means. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
 - **Follow up on a task.** `finish it`, `commit it` or `继续那个任务` goes to the task you mean: a running task reads it at its next step, and a done or stopped one continues in its own session, with what it did before. The line says where it went: `Sent to: Slides`, `Continued: Fix CI`.
 - **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
@@ -173,7 +173,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Say it once.** A message such as `every weekday at 8:30, brief me on my calendar` or `每天早上九点 总结我的邮件` makes a card, `Run this every weekday at 8:30?`, with **Save chore**, **Just once** and **Cancel**. Nothing is saved or started until you tap, and no model reads the schedule.
 - **Three schedules.** Every day at a time, every weekday at a time, or every 1 to 24 hours. With no time, a day part sets it (`every morning` is 8:00, `every evening` 18:00), else 9:00. `every Monday` or `every 30 minutes` is not read: it goes to the main chat as any message does.
 - **Runs on time.** While the gateway runs, a chore starts as a task in its own folder of your workspace, within three minutes after its time and never before. A run missed while the computer slept happens once when it wakes, and a chore whose last run has not ended skips its next turn.
-- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
+- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to its priority (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
 - **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task that has waited for you a whole beat. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
 
 ## Pictures in the answer
@@ -240,7 +240,7 @@ no separate Approvals tab.
 
 Select a row to open it in place. A running row shows its steps as they happen (a mark, the step in words and its
 time), the last lines of the latest output, and, for a task, **Pause** or **Resume**, **Stop** and its priority in
-words (**Now**, **Today**, **Normal**, **Whenever**, **If idle**; developer mode adds P0 to P4), as the terminal's
+codes (`P0` to `P4`, each with its meaning; P5 is Pause), as the terminal's
 task list offers them. **Open task**, **Open chat** or **Open run** goes to the whole view; a row that waits offers
 **Review**, which opens the chat or task with the approval card. One row is open at a time, and its steps follow the
 session's event stream while it runs.
@@ -491,7 +491,7 @@ was in flight at reload is checked against the store before a retry. It says
 
 ## Scheduling and stopping
 
-In developer mode a chat's header has a level chip (P1 to P4, P2 by default) that sets how the
+In developer mode a chat's header has a level chip (P1 to P4, P2 by default; its menu says what each means) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
 memory and is not saved. Next to the title and the level chip, a machine line
 shows a foreign GPU lock (`GPU lock: <holder> · <purpose>`, with

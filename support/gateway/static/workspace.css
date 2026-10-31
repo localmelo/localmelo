@@ -2031,7 +2031,7 @@ dialog::backdrop {
 .activity-step-time { color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .activity-output { max-height: 6.4em; margin: 8px 0 0; padding: 7px 10px; overflow: hidden; border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.activity-level { min-height: 32px; padding: 0 6px; border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
+.activity-level { max-width: 100%; min-height: 32px; padding: 0 6px; border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
 .activity-open { margin-left: auto; font-size: var(--text-small); }
 .approval-fold { padding: 0 8px 8px 50px; }
 .approval-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-3); font-size: var(--text-caption); }

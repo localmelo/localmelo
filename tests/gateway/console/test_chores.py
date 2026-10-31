@@ -219,6 +219,8 @@ async def test_a_chore_is_created_listed_changed_and_deleted(tmp_path: Path) -> 
         {"request": "Brief me", "schedule": BRIEF, "level": "Later"},
         {"request": "Brief me", "schedule": BRIEF, "level": "Now"},
         {"request": "Brief me", "schedule": BRIEF, "level": 0},
+        {"request": "Brief me", "schedule": BRIEF, "level": "P0"},
+        {"request": "Brief me", "schedule": BRIEF, "level": "P5"},
         {"request": "Brief me", "schedule": BRIEF, "front_id": "no-such-chat"},
         {"request": "Brief me", "schedule": BRIEF, "origin": "user"},
         {"request": "x" * 100_001, "schedule": BRIEF},
@@ -231,7 +233,23 @@ async def test_the_api_refuses_what_is_not_a_chore(
         response = await client.post("/api/chores", json=body)
         assert response.status_code == 400, response.text
         assert response.json()["error"]["code"] == "invalid_request"
+        if "level" in body:
+            assert response.json()["error"]["message"] == "level: P1 to P4"
         assert (await client.get("/api/chores")).json()["chores"] == []
+
+
+async def test_a_chore_takes_its_level_as_a_code_or_a_word(tmp_path: Path) -> None:
+    async with chore_console(tmp_path) as (_, client, _, _, _):
+        chore = await add(client, "Brief me", BRIEF, level="P3")
+        # The API still answers the word beside the number.
+        assert (chore["level"], chore["level_word"]) == (3, "Whenever")
+        for value, level in (("Today", 1), ("p4", 4), ("normal", 2), ("1", 1)):
+            sent = await client.patch(
+                f"/api/chores/{chore['id']}",
+                json={"revision": chore["revision"], "level": value},
+            )
+            chore = sent.json()["chore"]
+            assert chore["level"] == level
 
 
 async def test_a_change_names_a_revision_and_something_to_change(

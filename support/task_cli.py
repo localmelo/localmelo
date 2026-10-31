@@ -16,14 +16,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from localmelo.support.gateway.front_rules import LEVEL_WORDS
 from localmelo.support.loopback import is_loopback
 from localmelo.support.task_follow import FollowError, follow
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_OBJECTIVE_CHARS = 100_000
 LEVELS = tuple(f"P{n}" for n in range(6))
-# Levels in words, P0 to P5: a word is accepted wherever a P-code is.
+# The words people may type for P0 to P5: accepted wherever a P-code is.
 WORDS = ("now", "today", "normal", "whenever", "idle", "later")
 
 
@@ -183,11 +182,12 @@ def _safe(value: object) -> str:
     return "".join(c if c.isprintable() else "?" for c in str(value))
 
 
-def _level_label(task: dict[str, Any], words: bool = False) -> str:
+def _level_label(task: dict[str, Any]) -> str:
+    """``P1``; ``not recorded`` without a level."""
     level = task.get("level")
     if type(level) is not int or not 0 <= level <= 5:
         return "not recorded"
-    return LEVEL_WORDS[level] if words else f"P{level}"
+    return f"P{level}"
 
 
 def execute(
@@ -196,13 +196,8 @@ def execute(
     *,
     out: TextIO,
     stdin: TextIO,
-    words: bool = False,
 ) -> int:
-    """Run a parsed operation using an already authenticated client.
-
-    *words* prints levels as words (``Normal``), as default mode does; the
-    P-codes are developer mode's.
-    """
+    """Run a parsed operation using an already authenticated client."""
     cmd = args.command
     if cmd == "follow":
         if not 0 <= args.after <= 2**63 - 1:
@@ -309,7 +304,7 @@ def execute(
             rows.append(
                 (
                     _safe(task.get("task_id", "")),
-                    _level_label(task, words),
+                    _level_label(task),
                     _safe(task.get("state", "")),
                     _safe(title),
                     _safe(_waiting_approval(task) or ""),
@@ -341,7 +336,7 @@ def execute(
             )
         if cmd == "show":
             print(f"  Title: {_safe(task.get('title') or 'not recorded')}", file=out)
-            print(f"  Level: {_level_label(task, words)}", file=out)
+            print(f"  Level: {_level_label(task)}", file=out)
             approval = _waiting_approval(task)
             wait = task.get("wait_reason")
             reason = task.get("reason") or ("approval" if approval else None)
@@ -424,25 +419,13 @@ def client_headers(url: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Host": f"{host}:{urlsplit(url).port}"}
 
 
-def _developer() -> bool:
-    """Whether ``[ui] mode`` is developer; an unreadable config is default mode."""
-    try:
-        from localmelo.support.config import load
-
-        return load().ui.mode == "developer"
-    except Exception:
-        return False
-
-
 def main(argv: list[str] | None = None, prog: str = "melo-task") -> int:
     args = parser(prog).parse_args(argv)
     try:
         if args.command == "follow" and not 0 <= args.after <= 2**63 - 1:
             raise ValueError("invalid event cursor")
         with connect(getattr(args, "gateway", None)) as client:
-            return execute(
-                args, client, out=sys.stdout, stdin=sys.stdin, words=not _developer()
-            )
+            return execute(args, client, out=sys.stdout, stdin=sys.stdin)
     except KeyboardInterrupt:
         return 130
     except (ValueError, ClientError, FollowError, OSError, httpx.HTTPError) as exc:

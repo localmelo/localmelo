@@ -632,7 +632,7 @@ async def main_async(
             out=out,
             developer=developer,
             pricing=pricing,
-            work=WorkBeside(GatewayTasks(), words=not developer),
+            work=WorkBeside(GatewayTasks()),
             welcome=draw_banner,
         )
 
@@ -683,8 +683,7 @@ async def main_async(
                 session.work = WorkBeside(
                     GatewayTasks(
                         connect=lambda timeout: task_cli.connect(url, timeout=timeout)
-                    ),
-                    words=not developer,
+                    )
                 )
             else:
                 main_wanted = False  # the welcome does not name the main chat
