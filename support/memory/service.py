@@ -810,6 +810,8 @@ class ChatMemory:
         if topic not in records.TOPICS:
             topic = records.topic_of(note, request=False)
         quote = records.quote_for(note, said) if admitted == "user_statement" else ""
+        if quote and (wrong := records.wrong_owner(note, quote)):
+            return wrong
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)

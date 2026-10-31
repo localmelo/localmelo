@@ -218,7 +218,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`Mr.`, `Prof.`, `Dr.`, `St.`, `vs.`, `No. 5`, an initial such as `J. Smith`), which had
   shown "My piano teacher is Mr." and made the chat answer that your note was
   cut off; the same cut had saved a "remember that …" request as "Your piano
-  teacher is Mr." ([#NN]).
+  teacher is Mr.". A note about someone else may not become one about you: for
+  "Marco's studio is on Main Street." a note "Your studio is on Main Street."
+  is refused, with the wording to use ("Marco's …"), and so is the reverse
+  ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

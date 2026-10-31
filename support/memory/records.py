@@ -704,6 +704,73 @@ def quote_for(note: str, said: Sequence[str]) -> str:
     return best[:MAX_RECORD_CHARS]
 
 
+# Whose a sentence is, by its first words (:func:`wrong_owner`): the user's ("my",
+# "your", "我的", "你的") or a named third party's ("Marco's …", "马可的 …"). A
+# "Name's" before a determiner or an adverb is "Name is" ("John's my advisor").
+_OWNER_EN = re.compile(
+    r"(?:(?P<user>(?i:my|our|your|the user['’]s))\b"
+    r"|(?P<name>(?:(?:Dr|Mr|Mrs|Ms|Mx|Prof|St|Mt)\.\s+)?[A-Z][\w-]+(?:\s+[A-Z][\w-]+)*)"
+    r"['’]s(?!\s+(?i:my|our|your|his|her|their|the|an?|not|now|also|still|just|going"
+    r"|been|got|so|here|there|one)\b))"
+)
+_OWNER_ZH = re.compile(
+    r"(?:(?P<user>(?:我|咱|你|您)们?|用户)|(?P<name>[^\s的，,。！？]{1,6}?))的"
+)
+# What "Name's" is not a name: a contraction ("That's why …") or a time word.
+_NOT_OWNERS = re.compile(
+    r"it|that|there|here|what|who|where|when|why|how|let|this|he|she"
+    r"|today|tomorrow|yesterday|tonight"
+)
+_NOT_NAME_ZH = re.compile(
+    "[我你您他她它咱这那在是有和与把被让从到每]|^(?:今|明|昨|周末|现在)"
+)
+
+
+def _owner(sentence: str) -> str | None:
+    """Whose *sentence* is: ``"user"``, a third party's name, or ``None`` when its
+    first words say none (or not clearly: a contraction, a time word)."""
+    text = sentence.strip()
+    if found := _OWNER_EN.match(text):
+        name = found["name"]
+        if found["user"]:
+            return "user"
+        low = name.lower()
+        bad = _NOT_OWNERS.fullmatch(low) or _VALUE_WORD.fullmatch(low)
+        return None if bad else name
+    if found := _OWNER_ZH.match(text):
+        name = found["name"]
+        return "user" if found["user"] else None if _NOT_NAME_ZH.search(name) else name
+    return None
+
+
+def wrong_owner(note: str, quote: str) -> str:
+    """The refusal of *note* when it is about someone else than *quote*, the
+    typed sentence it matches best, is; ``""`` when they agree or say nothing.
+
+    A note about a person the user named ("马可的工作室…") that says "你的工作室…"
+    would come back as a fact about the user, and the other way round. The name
+    must be missing from the other sentence, so "Anna's car" for "My sister
+    Anna's car" is no mix-up.
+    """
+    said, kept = _owner(quote), _owner(note)
+    if not said or not kept or (said == "user") == (kept == "user"):
+        return ""
+    name = kept if said == "user" else said
+    other = quote if said == "user" else note
+    if name.split()[-1].lower() in other.lower():
+        return ""
+    own = "'s …" if name.isascii() else "的…"
+    if said == "user":
+        return (
+            f"Not remembered: the user said that about themselves, not about {name}. "
+            f"Write the note to the user: “{'Your …' if name.isascii() else '你的…'}”."
+        )
+    return (
+        f"Not remembered: that is about {name}, not the user. "
+        f"Write the note about them: “{name}{own}”."
+    )
+
+
 def _relation(value: str) -> str:
     """How the value after "is" (or 是, 叫, 姓) relates to its subject: a word
     such as ``on`` or ``called``, ``desc`` for a description ("very strict",

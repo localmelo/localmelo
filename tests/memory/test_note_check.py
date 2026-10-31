@@ -208,3 +208,69 @@ def test_a_request_with_a_title_is_kept_whole() -> None:
     (cand,) = records.candidates("Remember that my piano teacher is Mr. Bellamy.")[0]
     assert cand.text == "Your piano teacher is Mr. Bellamy."
     assert cand.quote == "my piano teacher is Mr. Bellamy."
+
+
+@pytest.mark.parametrize(
+    ("note", "typed", "name", "wording"),
+    [
+        # The case from the follow-up cell: Marco's studio became the user's.
+        ("你的工作室在中山路88号。", "马可的工作室在中山路88号。", "马可", "马可的…"),
+        (
+            "Your studio is on Main Street.",
+            "Marco's studio is on Main Street.",
+            "Marco",
+            "Marco's …",
+        ),
+        (
+            "Your office is in the Atrium Wing.",
+            "Prof. Duarte's office is in the Atrium Wing.",
+            "Prof. Duarte",
+            "Prof. Duarte's …",
+        ),
+        (
+            "Your phone number is 555-0147.",
+            "Tom Briggs's phone number is 555-0147.",
+            "Tom Briggs",
+            "Tom Briggs's …",
+        ),
+    ],
+)
+def test_a_note_about_someone_else_may_not_become_one_about_the_user(
+    note: str, typed: str, name: str, wording: str
+) -> None:
+    assert records.wrong_owner(note, typed) == (
+        f"Not remembered: that is about {name}, not the user. "
+        f"Write the note about them: “{wording}”."
+    )
+
+
+@pytest.mark.parametrize(
+    ("note", "typed"),
+    [
+        ("马可的工作室在中山路88号。", "马可的工作室在中山路88号。"),
+        ("Marco's studio is on Main Street.", "Marco's studio is on Main Street."),
+        ("Your studio is on Main Street.", "My studio is on Main Street."),
+        ("Your sister's car is red.", "My sister's car is red."),
+        ("你的室友阿杰的老家在宜昌。", "我的室友阿杰的老家在宜昌。"),
+        ("阿杰的老家在宜昌。", "我的室友阿杰的老家在宜昌。"),
+        ("Anna's car is red.", "My sister Anna's car is red."),
+        # Not a possessor: a contraction, a time word, a clause before 的.
+        ("Your parking spot is C14.", "That's why my parking spot is C14."),
+        ("Your advisor is John.", "John's my advisor."),
+        ("Your meeting is at 3pm.", "Tomorrow's meeting is at 3pm."),
+        ("你的周末计划是爬山。", "周末的计划是爬山。"),
+        ("你的家乡是宜昌。", "我爱吃的东西是面条。"),
+        # No possessor at all.
+        ("You live in Utrecht.", "I live in Utrecht."),
+    ],
+)
+def test_the_same_owner_or_none_is_no_mix_up(note: str, typed: str) -> None:
+    assert records.wrong_owner(note, typed) == ""
+
+
+def test_the_user_typed_about_themselves_and_the_note_names_someone_else() -> None:
+    refusal = records.wrong_owner(
+        "Marco's studio is on Main Street.", "My studio is on Main Street."
+    )
+    assert refusal.startswith("Not remembered: the user said that about themselves")
+    assert "not about Marco" in refusal and "“Your …”" in refusal

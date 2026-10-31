@@ -439,3 +439,52 @@ async def test_a_quote_is_not_cut_at_a_title_or_an_initial(
     assert (await memory.remember(note, "people")).startswith("Remembered: ")
     (entry,) = await memory.records()
     assert entry.provenance["quote"] == quote
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "reply"),
+    [
+        (
+            "马可的工作室在中山路88号。",
+            "你的工作室在中山路88号。",
+            "Not remembered: that is about 马可, not the user. "
+            "Write the note about them: “马可的…”.",
+        ),
+        (
+            "Marco's studio is on Main Street.",
+            "Your studio is on Main Street.",
+            "Not remembered: that is about Marco, not the user. "
+            "Write the note about them: “Marco's …”.",
+        ),
+        (
+            "Marco recommended it. My studio is on Main Street.",
+            "Marco's studio is on Main Street.",
+            "Not remembered: the user said that about themselves, not about Marco. "
+            "Write the note to the user: “Your …”.",
+        ),
+    ],
+)
+async def test_a_note_about_the_wrong_person_is_refused_with_the_fix(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, reply: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert await memory.remember(note, "people") == reply
+    assert await memory.records() == []
+
+
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        ("马可的工作室在中山路88号。", "马可的工作室在中山路88号。"),
+        ("Marco's studio is on Main Street.", "Marco's studio is on Main Street."),
+        ("My sister's car is red.", "Your sister's car is red."),
+        ("My studio is on Main Street.", "Your studio is on Main Street."),
+    ],
+)
+async def test_a_note_about_the_same_person_is_kept(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert (await memory.remember(note, "people")).startswith("Remembered: ")
+    (entry,) = await memory.records()
+    assert (entry.text, entry.provenance["quote"]) == (note, typed)
