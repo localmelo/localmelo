@@ -15,7 +15,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chooses one. Every screen is translated: the main chat with its cards and
   lines, the panel's tabs, Tasks, Workers, Settings, the sign-in page, the
   gateway's messages, and the app's menus, pill and quit dialog. The terminal
-  stays English. [#NN]
+  stays English. [#350]
 
 ### Changed
 
@@ -2853,3 +2853,4 @@ earlier milestones.
 [#345]: https://github.com/localmelo/localmelo/pull/345
 [#346]: https://github.com/localmelo/localmelo/pull/346
 [#348]: https://github.com/localmelo/localmelo/pull/348
+[#350]: https://github.com/localmelo/localmelo/pull/350
