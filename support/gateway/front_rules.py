@@ -575,7 +575,9 @@ def _pipeline(text: str) -> bool:
     if _PIPELINE_NO.search(text):
         return False
     edit = _EDIT_ZH if _has_cjk(text) else _EDIT_EN
-    return bool(edit.search(text) and _TEST_CUE.search(text) and _COMMIT_CUE.search(text))
+    return bool(
+        edit.search(text) and _TEST_CUE.search(text) and _COMMIT_CUE.search(text)
+    )
 
 
 def work_request(typed: str) -> bool:
