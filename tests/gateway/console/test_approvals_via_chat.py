@@ -312,7 +312,12 @@ async def test_a_chats_own_approvals_and_grant_cover_its_tasks_only(
             return pending[0] if pending else None
 
         await answer(s, (await until(chat_asks, "the chat did not ask")).request_id)
-        [entry] = s.console.approvals.entries(side)
+
+        async def recorded() -> Any:
+            return s.console.approvals.entries(side)
+
+        # The chat records the Allow once its ask returns, after the answer route.
+        [entry] = await until(recorded, "the chat's Allow was not recorded")
         task = await start(s, front_id=side)
         await ended(s, task)
         assert [a["origin"] for a in await approvals_of(s, task)] == ["earlier"]
@@ -355,6 +360,45 @@ async def test_a_chats_own_approvals_and_grant_cover_its_tasks_only(
             f"/api/sessions/{side}/approvals/{entry.entry_id}"
         )
         assert again.status_code == 404
+
+
+async def test_a_deleted_chats_approvals_go_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plans = plan("print(7)") + plan("print(7)")
+    async with chat_console(tmp_path, monkeypatch, plans) as s:
+        created = await s.client.post(
+            "/api/sessions",
+            json={"turn": {"text": "hello"}, "workspace": str(s.folder)},
+        )
+        assert created.status_code == 201, created.text
+        side = str(created.json()["session"]["id"])
+
+        async def chat_asks() -> Any:
+            pending = s.console.broker.pending(side)
+            return pending[0] if pending else None
+
+        async def recorded() -> Any:
+            return s.console.approvals.entries(side)
+
+        async def idle() -> Any:
+            turns = (await s.client.get(f"/api/sessions/{side}/turns")).json()["turns"]
+            return turns[-1]["status"] != "running"
+
+        await answer(s, (await until(chat_asks, "the chat did not ask")).request_id)
+        await until(recorded, "the chat's Allow was not recorded")
+        await until(idle, "the chat's turn did not end")
+        gone = await s.client.delete(f"/api/sessions/{side}")
+        assert gone.status_code == 204, gone.text
+        assert s.console.approvals.entries(side) == []
+        # Work that chat started is the main chat's now, and the main chat never allowed the step.
+        task = await start(s, front_id=side)
+        request = await waiting(s, task)
+        assert request["arguments"] == {"code": "print(7)"}
+        await answer(s, request["request_id"], "deny")
+        await ended(s, task)
+        assert s.ran.codes == ["print(7)"]
+        assert await echoes(s, s.console.main_id or "", "earlier") == []
 
 
 async def test_the_chat_explains_a_waiting_step_and_the_text_decides_nothing(

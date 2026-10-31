@@ -196,6 +196,20 @@ async def test_a_high_impact_identical_step_asks_every_time(folder: str) -> None
     assert ledger.entries("chat-1") == []
 
 
+async def test_a_step_nothing_reviewed_asks_every_time_and_is_never_recorded(
+    folder: str,
+) -> None:
+    ledger = ApprovalLedger()
+    entry = ledger.record("chat-1", request(folder))
+    person = Asker(ApprovalDecision(True))
+    policy = owned(ledger, RememberingPolicy(person))
+    for _ in range(2):
+        decision = await policy.decide(request(folder, review=None))
+        assert (decision.allow, decision.origin) == (True, "user")
+    assert len(person.asked) == 2
+    assert ledger.entries("chat-1") == [entry]
+
+
 async def test_a_denial_or_a_task_without_a_chat_records_nothing(folder: str) -> None:
     ledger = ApprovalLedger()
     no = owned(ledger, RememberingPolicy(Asker(ApprovalDecision(False, "no"))))
