@@ -14,7 +14,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   shows only part of a file now ends with how many lines the file has and the
   `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400;
   read more with start_line=401]`); a start past the end is an error that
-  counts the lines. [#NN]
+  counts the lines. [#361]
 - Auto mode in the console and the app: an **Ask / Auto** chip beside the
   model switches a chat from melo's next step, and Settings → Chats and
   folders → **New chats start in** (`[approvals] mode`) picks how new chats
@@ -56,14 +56,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   replace must occur exactly once, and a missing text, several matches, an
   empty text or a missing file return a plain error that says what to do
   (read the file again; take more lines around it) before the approval is
-  asked. [#NN]
+  asked. [#361]
 - A commit made from a step is refused when its message credits melo or an AI
   (a `Co-Authored-By` trailer naming melo or an AI, a `Generated with` line, a
-  session link); a trailer that names a person is fine. [#NN]
+  session link); a trailer that names a person is fine. [#361]
 - A step that goes by the exit status of a pipeline without `pipefail` (Python
   that reads the `.returncode` of `pytest | tail`, or `pytest | tail && git
   commit`) is now undecided, and its reason says the status is the last
-  command's, not the test's. [#NN]
+  command's, not the test's. [#361]
 - Chinese, finished. Times and dates follow the page's language, not the
   computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
   `Oct 31` in English (an English computer on 24 hours keeps its clock), on
@@ -2987,3 +2987,4 @@ earlier milestones.
 [#358]: https://github.com/localmelo/localmelo/pull/358
 [#359]: https://github.com/localmelo/localmelo/pull/359
 [#360]: https://github.com/localmelo/localmelo/pull/360
+[#361]: https://github.com/localmelo/localmelo/pull/361
