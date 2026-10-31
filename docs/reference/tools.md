@@ -21,36 +21,45 @@ The `python_exec` code reaches the child on its standard input, a pipe,
 never in its `-c` argument: `ps` does not show the code, and a call has no
 `ARG_MAX` limit (about 1 MiB of argv and environment on macOS). The child
 runs a fixed wrapper; once that has read the code it points fd 0 at
-`/dev/null`, so `input()` gets EOF. The child may have at most 1,024 open
+`/dev/null`, so `input()` gets EOF.
+
+The child may have at most 1,024 open
 files and one hour of CPU time (the POSIX `RLIMIT_NOFILE` and `RLIMIT_CPU`
 limits). The call's time limit normally ends it first; the CPU limit only
-stops code that outlives melo or that spends an hour of CPU. An
-address-space limit is not set: macOS refuses a finite one.
+stops code that outlives melo or that spends an hour of CPU.
+
+An address-space limit is not set: macOS refuses a finite one.
 
 `shell_exec` and `python_exec` start their child with a minimal
 environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`,
 every `LC_*` variable and `TMPDIR`, then whatever
 `AgentOptions(tool_env={...})` adds, and nothing else. Config-backed runs
 and sessions can additionally inherit names listed in `[agent] tool_env`;
-see [Tool environment](configuration.md#tool-environment). An API key in
-melo's own environment reaches no tool unless explicitly named or mapped.
+see [Tool environment](configuration.md#tool-environment).
+
+An API key in melo's own environment reaches no tool unless explicitly named or mapped.
 `VIRTUAL_ENV`, `PYTHONPATH`, `SSH_AUTH_SOCK` and proxy variables are not
-inherited by default. Exposing `SSH_AUTH_SOCK` permits tools to use your SSH
+inherited by default.
+
+Exposing `SSH_AUTH_SOCK` permits tools to use your SSH
 agent, and exposing a proxy variable also exposes any credentials in it.
 
 This is how the built-in tools work in a direct run without `--workspace`
 and in the gateway. A direct run with `--workspace DIR` and a Python agent
 with `workspace_root` keep the file tools (`file_read`, `file_write` and `list_files`) inside a directory and start
 `shell_exec` and `python_exec` there (see
-[With a workspace root](../guides/tools-mcp.md#with-a-workspace-root)). The interactive UI (bare
+[With a workspace root](../guides/tools-mcp.md#with-a-workspace-root)).
+
+The interactive UI (bare
 `melo`) runs with its workspace as the root too, and asks before each
 `shell_exec`, `python_exec` and `file_write` call, unless `--yolo`; `file_read` and
 `list_files` only read, so they never ask (see
 [Permission tiers](../guides/tools-mcp.md#permission-tiers)); direct mode has no approval policy
 and offers neither `shell_exec` nor `list_files`, with or without a root. The interactive UI loads the MCP
 servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
-that fails to start turns MCP off for that session (`/mcp` says why). A
-Python run with an approval policy asks its own policy about an MCP tool by
+that fails to start turns MCP off for that session (`/mcp` says why).
+
+A Python run with an approval policy asks its own policy about an MCP tool by
 the same tiers.
 
 ## How tools are offered

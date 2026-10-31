@@ -1,101 +1,53 @@
 # Procedural memory
 
-Procedural memory learns the steps of tasks you run again and again, such as
-a test suite you fix every day or a daily report, so that a progress display
-can show how far a run is. It keeps what earlier runs did, never what the
-model said: the classes of their tool calls, short labels, step counts and
-times.
+Procedural memory learns the steps of tasks you run again and again, such as a test suite you fix every day or a daily report, so that a progress display can show how far a run is. It keeps what earlier runs did, never what the model said: the classes of their tool calls, short labels, step counts and times.
 
-Every run writes it: when a run ends, through `melo`, the `melo ""` loop,
-the gateway or the Python API, its record is added. With persistence on
-(see [Memory](../guides/memory.md#keep-memory-between-runs)) that is `procedures.db`
-in the memory directory; otherwise procedural memory stays in RAM for the
-agent's life and nothing is written. To keep it off the disk, leave
-persistence off. Nothing here calls a model, reaches a prompt or changes a
-request.
+| Persistence | Where it lives |
+|---|---|
+| On (see [Memory](../guides/memory.md#keep-memory-between-runs)) | `procedures.db` in the memory directory. |
+| Off | RAM, for the agent's life; nothing is written. |
 
-What a run may show from it comes as [`run.progress`](../reference/events.md#runprogress)
-events, to a Python caller that asks with `progress=True`, and as the
-[progress line](../reference/cli.md#progress-line) that `melo "<task>"` draws on a
-terminal: facts on a first run, then the steps and times of past runs. A
-direct run is a process of its own, so `melo` shows past runs only with
-persistence on. Level 2, the bar, is off in this release: replayed on
-recorded runs, the gate did not yet keep bad bars back by the margin it
-must (0.05) on both test sets, so a run shows at most level 1 until a
-later release turns level 2 on, once a set of repeated runs passes the
-replay. `melo-procedures` replays
-the rules on recorded runs, so that they are measured before a run shows
-anything.
+- Every run writes it, through `melo`, the `melo ""` loop, the gateway or the Python API: when a run ends, its record is added.
+- To keep it off the disk, leave persistence off.
+- Nothing here calls a model, reaches a prompt or changes a request.
+
+What a run may show from it:
+
+- [`run.progress`](../reference/events.md#runprogress) events, to a Python caller that asks with `progress=True`.
+- The [progress line](../reference/cli.md#progress-line) that `melo "<task>"` draws on a terminal: facts on a first run, then the steps and times of past runs.
+- A direct run is a process of its own, so `melo` shows past runs only with persistence on.
+- Level 2, the bar, is off in this release: replayed on recorded runs, the gate did not yet keep bad bars back by the margin it must (0.05) on both test sets. A run shows at most level 1 until a later release turns level 2 on, once a set of repeated runs passes the replay.
+- `melo-procedures` replays the rules on recorded runs, so that they are measured before a run shows anything.
 
 ## What a run does
 
-- **At its start**, only when progress was asked for (by a Python caller,
-  or by `melo` drawing its progress line), the run looks its routine up,
-  once, for at most 1 second; without a template, or if the lookup fails,
-  it shows facts only (level 0).
-- **During the run**, it keeps a trace in RAM: each step, and the class and
-  label of each tool call. It keeps no tool output; a test call's last 400
-  characters are read for its summary and dropped.
-- **At its end**, after its last event, it adds its routine (if new), its
-  episode and, when it completed, its template's next version. This takes a
-  few milliseconds and at most 2 seconds; a write that fails is skipped
-  with one INFO line in the log. A run that is cancelled, or that ends
-  after SIGTERM or SIGHUP, adds nothing.
-- The episode records the level the gate gives, also when that is level 2
-  and level 1 is shown, and, when the gate passed, the error the bar would
-  have had: evidence for turning level 2 on. The gate is the one the
-  run's start found when it asked for progress; otherwise, since such a
-  run reads nothing at its start, the one its routine's template gives
-  as the run ends.
-- `run_task(..., routine="name")` in Python, or `melo --routine name`,
-  makes runs one routine, named, in any folder and whatever their wording.
+| When | What happens |
+|---|---|
+| At its start | Only when progress was asked for (by a Python caller, or by `melo` drawing its progress line), the run looks its routine up, once, for at most 1 second. Without a template, or if the lookup fails, it shows facts only (level 0). |
+| During the run | It keeps a trace in RAM: each step, and the class and label of each tool call. It keeps no tool output; a test call's last 400 characters are read for its summary and dropped. |
+| At its end | After its last event, it adds its routine (if new), its episode and, when it completed, its template's next version. This takes a few milliseconds and at most 2 seconds; a write that fails is skipped with one INFO line in the log. A run that is cancelled, or that ends after SIGTERM or SIGHUP, adds nothing. |
+| The level it records | The episode records the level the gate gives, also when that is level 2 and level 1 is shown, and, when the gate passed, the error the bar would have had: evidence for turning level 2 on. The gate is the one the run's start found when it asked for progress; otherwise, since such a run reads nothing at its start, the one its routine's template gives as the run ends. |
+
+- `run_task(..., routine="name")` in Python, or `melo --routine name`, makes runs one routine, named, in any folder and whatever their wording.
 
 ## How it works
 
-- **Routine.** A recurring task. A task given as a query is known by its
-  normalized query and its *place*, the directory its tools work in: the
-  workspace root, or the working directory without one. Normalizing applies
-  NFKC, lowercases, collapses whitespace and masks dates and times as
-  `<date>` and `<time>` (ISO dates, `10/26`, `10/26/2026`, `26.10.2026`,
-  month names with a day or year, weekday names, `2026年`, `10月26日`,
-  `星期一`, `周一`, and `HH:MM[:SS]`). Other numbers stay: "fix issue 123" and
-  "fix issue 456" are two routines. A named routine is one routine in any
-  folder.
-- **Similar task.** A new routine in a folder that holds at least 5 others
-  is compared, by BM25 over their normalized queries, with the folder's
-  latest 1,000. A clear best match lends the run its named steps and past
-  facts, at level 1: a hint, never a bar. The run still starts a routine
-  of its own.
-- **Episode.** One finished run of a routine: its status, steps, attempts,
-  duration, and its *segments*, the runs of consecutive tool calls with the
-  same class and target.
-- **Template.** What runs of one routine on one model with one set of
-  length-shaping options (`attempt_policy`, `reflection_gate`, `max_steps`,
-  `steps_per_attempt`, `max_attempts`) have in common: step statistics and
-  named steps. Every completed run appends a new version, computed from the
-  last 8 completed runs.
-- **Level.** What a display may show from a template:
+| Term | What it is |
+|---|---|
+| Routine | A recurring task. A task given as a query is known by its normalized query and its *place*, the directory its tools work in: the workspace root, or the working directory without one. A named routine is one routine in any folder. |
+| Normalizing | NFKC, lowercase, collapsed whitespace, and dates and times masked as `<date>` and `<time>` (ISO dates, `10/26`, `10/26/2026`, `26.10.2026`, month names with a day or year, weekday names, `2026年`, `10月26日`, `星期一`, `周一`, and `HH:MM[:SS]`). Other numbers stay: "fix issue 123" and "fix issue 456" are two routines. |
+| Similar task | A new routine in a folder that holds at least 5 others is compared, by BM25 over their normalized queries, with the folder's latest 1,000. A clear best match lends the run its named steps and past facts, at level 1: a hint, never a bar. The run still starts a routine of its own. |
+| Episode | One finished run of a routine: its status, steps, attempts, duration, and its *segments*, the runs of consecutive tool calls with the same class and target. |
+| Template | What runs of one routine on one model with one set of length-shaping options (`attempt_policy`, `reflection_gate`, `max_steps`, `steps_per_attempt`, `max_attempts`) have in common: step statistics and named steps. Every completed run appends a new version, computed from the last 8 completed runs. |
+| Level | What a display may show from a template (table below). |
+| The gate | Level 2 needs the routine's own key or name, a model id, at least 2 completed runs in the window, and a *spread* (longest − shortest steps ÷ median) of at most 0.5. A model whose bar was off by more than 0.18 on average over its last 10 scored runs (at least 5) is demoted to level 1 until it does better. The first run of a template is exploration: once 2 later runs completed, it leaves the statistics if it completed and took more steps than all of them. |
+| The bar | After step k starts, with m the median of the window: k ÷ m while k < m; else k ÷ (k + the median remaining steps of the longer runs), or k ÷ (k + 1) when no run was longer. It never moves back, never passes 95% while running, and is 100% only when a run completes. A run longer than every run in the window, a reflection that the window does not expect, or a stuck notice freezes it for the rest of the run. Only a bar can leave the template: at level 1 the run stays `running`. |
 
-  | Level | When | Shows |
-  |---|---|---|
-  | 0 | No template: a first run, another model or other options | Facts only: step, attempt, phase, tests |
-  | 1 | One completed run; or the gate fails; or a similar task; or the model is demoted or has no id | Past runs' steps and times, and their named steps, without a percent |
-  | 2 | The gate passes | A bar as well (off in this release: a run shows level 1) |
-
-- **The gate.** Level 2 needs the routine's own key or name, a model id,
-  at least 2 completed runs in the window, and a *spread* (longest − shortest
-  steps ÷ median) of at most 0.5. A model whose bar was off by more than
-  0.18 on average over its last 10 scored runs (at least 5) is demoted to
-  level 1 until it does better. The first run of a template is exploration:
-  once 2 later runs completed, it leaves the statistics if it completed and
-  took more steps than all of them.
-- **The bar.** After step k starts, with m the median of the window: k ÷ m
-  while k < m; else k ÷ (k + the median remaining steps of the longer runs),
-  or k ÷ (k + 1) when no run was longer. It never moves back, never passes
-  95% while running, and is 100% only when a run completes. A run longer than
-  every run in the window, a reflection that the window does not expect, or
-  a stuck notice freezes it for the rest of the run. Only a bar can leave
-  the template: at level 1 the run stays `running`.
+| Level | When | Shows |
+|---|---|---|
+| 0 | No template: a first run, another model or other options | Facts only: step, attempt, phase, tests |
+| 1 | One completed run; or the gate fails; or a similar task; or the model is demoted or has no id | Past runs' steps and times, and their named steps, without a percent |
+| 2 | The gate passes | A bar as well (off in this release: a run shows level 1) |
 
 ### Classes and phases
 
@@ -108,32 +60,20 @@ Each tool call gets one class:
 | `T` | A call other than `file_read` and `file_write` whose command, code or arguments mention `pytest`, `unittest`, `_test.py`, `verify`, `check` or `assert `; this is checked before the `R` and `W` rules of `shell_exec` and `python_exec` |
 | `X` | Everything else |
 
-A `T` call *passes* when the last 400 characters of its output hold a pytest
-or unittest summary with at least one pass and no failure or error. Its exit
-status alone never makes a pass: agents pipe tests into `tail` or `grep`. A
-call that failed, or whose output starts with `[exit code <n>]`, never
-passes.
+- A `T` call *passes* when the last 400 characters of its output hold a pytest or unittest summary with at least one pass and no failure or error.
+- Its exit status alone never makes a pass: agents pipe tests into `tail` or `grep`. A call that failed, or whose output starts with `[exit code <n>]`, never passes.
+- The phase is read from the classes: **Explore** before the first write, **Write**, **Verify**, and **Finishing** after the first pass. A *cycle* is a test after a write.
 
-The phase is read from the classes: **Explore** before the first write,
-**Write**, **Verify**, and **Finishing** after the first pass. A *cycle* is a
-test after a write.
+A call's label names it without its arguments' content:
 
-A call's label names it without its arguments' content: `Read parser.py`,
-`Edit parser.py`, the program and its first subcommand (`pytest`,
-`git status`, `npm test`), `Python`, or an MCP tool's name. Labels, like
-the query a routine keeps, pass a minimal redaction (see
-[Privacy](../guides/memory.md#privacy)) and are cut to 40 characters. A shell label is
-read from the command's first 2,000 characters, never from inside quotes.
-A `shell_exec` command sent as an argv array, a list of strings (the tool
-refuses it), is first joined into one command text with `shlex.join`, so
-its class and label come from its words too.
+- It reads `Read parser.py`, `Edit parser.py`, the program and its first subcommand (`pytest`, `git status`, `npm test`), `Python`, or an MCP tool's name.
+- Labels, like the query a routine keeps, pass a minimal redaction (see [Privacy](../guides/memory.md#privacy)) and are cut to 40 characters.
+- A shell label is read from the command's first 2,000 characters, never from inside quotes.
+- A `shell_exec` command sent as an argv array, a list of strings (the tool refuses it), is first joined into one command text with `shlex.join`, so its class and label come from its words too.
 
 ## The store
 
-`SqliteProcedures` keeps procedural memory in `procedures.db`, in the memory
-directory, with mode 0600; `MemoryProcedures` keeps it in RAM. Both live in
-`localmelo.melo.memory.procedures.store`. The file has three tables, in
-schema version 1 (`PRAGMA user_version`):
+`SqliteProcedures` keeps procedural memory in `procedures.db`, in the memory directory, with mode 0600; `MemoryProcedures` keeps it in RAM. Both live in `localmelo.melo.memory.procedures.store`. The file has three tables, in schema version 1 (`PRAGMA user_version`):
 
 | Table | One row per | Changes |
 |---|---|---|
@@ -141,20 +81,16 @@ schema version 1 (`PRAGMA user_version`):
 | `episodes` | Finished run: routine, template, model, build, match, level, status, steps, attempts, tool calls, duration, first pass, cycles, segments and shadow bar error | Never |
 | `templates` | Version of a template: statistics, named steps, parameters, the runs it came from, its parent version, status, source | Only `status`: `active` → `superseded`, `candidate` → `active` or `rejected`; a rejected candidate's `eval_json` may record why |
 
-Triggers in the file refuse any other change, and at most one version of a
-template is `active`. A run's end writes in one `BEGIN IMMEDIATE`
-transaction, so two processes that finish runs of one routine at once wait
-for each other (up to 500 ms). Rows leave the file only through
-`melo-procedures forget`.
+- Triggers in the file refuse any other change, and at most one version of a template is `active`.
+- A run's end writes in one `BEGIN IMMEDIATE` transaction, so two processes that finish runs of one routine at once wait for each other (up to 500 ms).
+- Rows leave the file only through `melo-procedures forget`.
 
-A later sleep job can propose a version: it appends a `candidate` with its
-replay on held-out runs (`heldout_task_ids`, `bar_error`,
-`parent_bar_error`, `cap_share`, `longer_rate`, `reason`). It becomes active
-only when its error is below its parent's, at most 5% of its steps sat at
-95%, and its parent is still the active version; otherwise it is
-`rejected`, with the reason `stale` when another version came first. Later
-online versions keep a sleep job's named steps and refresh only the
-statistics.
+A later sleep job can propose a version:
+
+- It appends a `candidate` with its replay on held-out runs (`heldout_task_ids`, `bar_error`, `parent_bar_error`, `cap_share`, `longer_rate`, `reason`).
+- It becomes active only when its error is below its parent's, at most 5% of its steps sat at 95%, and its parent is still the active version.
+- Otherwise it is `rejected`, with the reason `stale` when another version came first.
+- Later online versions keep a sleep job's named steps and refresh only the statistics.
 
 ## See also
 

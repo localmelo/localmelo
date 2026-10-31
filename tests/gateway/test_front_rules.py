@@ -95,10 +95,38 @@ def test_delegation_by_command_or_composer_action() -> None:
         # A word that only looks like a deadline is none.
         ("summarize today's news", 2),
         ("split the bill by 5 people", 2),
+        # The bare word for today, anywhere in the request, is Today.
+        ("make slides today", 1),
+        ("today, make slides from notes.md", 1),
+        ("clean up the inbox, today if you can", 1),
+        ("今天整理照片", 1),
+        ("帮我整理照片，今天", 1),
+        ("整理今天的照片", 1),
+        # Negated, it asks for nothing; a possessive only names a thing about today.
+        ("not today", 2),
+        ("make slides tomorrow, not today", 2),
+        ("no need to finish it today", 2),
+        ("今天不用整理照片", 2),
+        ("今天不用", 2),
+        ("不是今天要做，先记着", 2),
+        ("明天再做", 2),
+        ("what does today's news say", 2),
+        ("summarize today's and yesterday's news", 2),
+        # Ease still wins: "no rush" says whenever, whatever else the message holds.
+        ("make slides today, no rush", 3),
     ],
 )
 def test_triage_from_the_persons_words(typed: str, level: int) -> None:
     assert triage(typed)[0] == level
+
+
+def test_the_bare_today_is_the_reason_too() -> None:
+    assert triage("do it today")[1] == 'you said "today"'
+    assert triage("今天整理照片")[1] == 'you said "今天"'
+    assert triage("not today")[1] == "you asked for it"
+    # The person's own "today" raises a task they name; a negated one does not.
+    assert allows_level("the slides today please", True, SLIDES)
+    assert not allows_level("not the slides today", True, SLIDES)
 
 
 def test_levels_in_words() -> None:

@@ -29,6 +29,7 @@ from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
+from localmelo.support.gateway.task_policy import DEFAULT_WORKSPACE
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
     build_session_agent,
@@ -76,9 +77,6 @@ CLOSE_ALL_TIMEOUT_S: Final = 10.0
 EXIT_SAVE_RESERVE_S: Final = 1.0
 # Seconds between idle sweeps.
 SWEEP_INTERVAL_S: Final = 60.0
-# Where a session starts when neither the request nor [gateway] workspace
-# names a folder.
-DEFAULT_WORKSPACE: Final = "~/localmelo-workspace"
 
 SettingsSource = Callable[[], "Config"]
 # A builder gets the settings, the workspace, the MCP config and the

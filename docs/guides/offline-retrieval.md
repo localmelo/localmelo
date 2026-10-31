@@ -4,8 +4,7 @@ This guide shows how to evaluate memory retrievers offline: run a first evaluati
 
 ## Run a first evaluation
 
-`bm25` needs no server. Write a corpus of three documents and two labelled
-queries:
+`bm25` needs no server. Write a corpus of three documents and two labelled queries:
 
 ```bash
 mkdir retrieval-demo
@@ -21,9 +20,9 @@ cat > queries.jsonl <<'EOF'
 EOF
 ```
 
-The corpus holds a note, a code draft and a thought chunk of one task,
-`demo`. Each query lists the documents that answer it in `relevant`. `q1`
-can write `d2` for `demo:d2` because its `scope` names the task.
+- The corpus holds a note, a code draft and a thought chunk of one task, `demo`.
+- Each query lists the documents that answer it in `relevant`.
+- `q1` can write `d2` for `demo:d2` because its `scope` names the task.
 
 Evaluate `bm25` on them:
 
@@ -40,22 +39,15 @@ Example output (values vary):
 ```
 
 - stdout gets one line per query, then a summary line.
-- `q1` found its relevant document, `demo:d2`, at rank 1, so its `recall@1`
-  and `rr` (reciprocal rank) are 1.0. The note `demo:n1` matched too, at
-  rank 2.
-- Each query ran one cold call and three warm calls, 8 `calls` in all. Their
-  times, in milliseconds, are in the `ms_` keys.
-- The summary's `recall@<k>` and `mrr` (mean reciprocal rank) are the means
-  over the queries.
+- `q1` found its relevant document, `demo:d2`, at rank 1, so its `recall@1` and `rr` (reciprocal rank) are 1.0. The note `demo:n1` matched too, at rank 2.
+- Each query ran one cold call and three warm calls, 8 `calls` in all; their times, in milliseconds, are in the `ms_` keys.
+- The summary's `recall@<k>` and `mrr` (mean reciprocal rank) are the means over the queries.
 
 [Output](../reference/retrieval.md#output) describes every key.
 
 ## Compare retrievers on a model server
 
-`llm` and `embedding` need an OpenAI-compatible server. Run them on the same
-files and compare their summary lines with the one from `bm25`. These
-examples use vLLM for chat and Ollama for embeddings; use your own server's
-address and models.
+`llm` and `embedding` need an OpenAI-compatible server; run them on the same files and compare their summary lines with the one from `bm25`. The examples use vLLM for chat and Ollama for embeddings; use your own server's address and models.
 
 ```bash
 melo-retrieve --retriever llm --corpus corpus.jsonl --queries queries.jsonl \
@@ -65,23 +57,17 @@ melo-retrieve --retriever embedding --corpus corpus.jsonl --queries queries.json
   --embedding-base-url http://127.0.0.1:11434/v1 --embedding-model nomic-embed-text
 ```
 
-- `--retrieval-extra-body` adds fields to every retrieval request. On a
-  server that accepts `chat_template_kwargs`, such as vLLM, this one turns
-  thinking off for models like Qwen3, so the model answers without
-  reasoning first.
+- `--retrieval-extra-body` adds fields to every retrieval request. On a server that accepts `chat_template_kwargs`, such as vLLM, this one turns thinking off for models like Qwen3, so the model answers without reasoning first.
 - With Ollama, pull the embedding model first: `ollama pull nomic-embed-text`.
 - Read accuracy in `recall@<k>` and `mrr`, and speed in the `ms_` figures.
-  `fallbacks` counts the calls that `bm25` answered instead; see
-  [Warnings](../reference/retrieval.md#warnings).
+- `fallbacks` counts the calls that `bm25` answered instead; see [Warnings](../reference/retrieval.md#warnings).
 
 ### Measure latency between other requests
 
-A server that caches prompts answers a repeated request faster, so calls
-back to back can look faster than calls between other work. Each query runs
-one cold call, then `--repeat` warm calls back to back (default: `3`). With
-`--interleave`, each query then runs `--repeat` interleaved calls, and sends
-the request in a file to `--base-url` before each one, as an agent sends its
-own requests in between:
+A server that caches prompts answers a repeated request faster, so calls back to back can look faster than calls between other work.
+
+- Each query runs one cold call, then `--repeat` warm calls back to back (default: `3`).
+- With `--interleave`, each query then runs `--repeat` interleaved calls, and sends the request in a file to `--base-url` before each one, as an agent sends its own requests in between.
 
 ```bash
 cat > request.json <<'EOF'
@@ -93,20 +79,13 @@ melo-retrieve --retriever llm --corpus corpus.jsonl --queries queries.jsonl \
   --interleave request.json
 ```
 
-- The time of the interleave request is not counted. The interleaved calls'
-  times are in `ms_interleaved`, `ms_interleaved_p50` and
-  `ms_interleaved_p95`.
-- For figures close to an agent's, make the request look like its planning
-  requests: the same system prompt and tools, a similar length, and no
-  `max_tokens` (see [Interleave request](../reference/retrieval.md#interleave-request)).
-- A cold call runs on a new retriever, with nothing cached on the client: a
-  cold `embedding` call embeds every candidate document. The server may
-  still hold what earlier queries sent.
+- The time of the interleave request is not counted. The interleaved calls' times are in `ms_interleaved`, `ms_interleaved_p50` and `ms_interleaved_p95`.
+- For figures close to an agent's, make the request look like its planning requests: the same system prompt and tools, a similar length, and no `max_tokens` (see [Interleave request](../reference/retrieval.md#interleave-request)).
+- A cold call runs on a new retriever, with nothing cached on the client: a cold `embedding` call embeds every candidate document. The server may still hold what earlier queries sent.
 
 ## Export a run
 
-`--export-run` turns the model calls of a run into corpus lines on stdout,
-ready for `--corpus`. With the raw calls of a short task:
+`--export-run` turns the model calls of a run into corpus lines on stdout, ready for `--corpus`. With the raw calls of a short task:
 
 ```bash
 cat > calls.jsonl <<'EOF'
@@ -123,8 +102,7 @@ Output on stderr:
 melo-retrieve: exported 6 documents (2 notes, 1 reflections, 1 drafts, 2 thought chunks) from 1 tasks
 ```
 
-`run-corpus.jsonl` holds `demo:n0`, `demo:t0.1`, `demo:n1`, `demo:d1`,
-`demo:t1.1` and `demo:r2`, in this order. The note of the second call:
+`run-corpus.jsonl` holds `demo:n0`, `demo:t0.1`, `demo:n1`, `demo:d1`, `demo:t1.1` and `demo:r2`, in this order. The note of the second call:
 
 ```json
 {"doc_id": "demo:n1", "kind": "note", "title": "Now I'll write it to list_ops.py: → write list_ops.py", "text": "plan: Now I'll write it to list_ops.py: → write list_ops.py\nfound: append must return a new list, so concatenation is enough.\nobserved: wrote list_ops.py: 51 chars\noutcome: ok", "meta": {"task_id": "demo", "step": 2, "attempt": 1, "seq": 1, "created_at": 1761200010.0, "source": "heuristic", "note_kind": "step", "remember": true, "remember_by": "heuristic"}}
@@ -132,8 +110,7 @@ melo-retrieve: exported 6 documents (2 notes, 1 reflections, 1 drafts, 2 thought
 
 ### Documents of a run
 
-Tasks come in the order of their first call, and the calls of a task in
-`seq` order. Each call gives these documents:
+Tasks come in the order of their first call, and the calls of a task in `seq` order. Each call gives these documents:
 
 | Call `kind` | Documents |
 |---|---|
@@ -141,57 +118,35 @@ Tasks come in the order of their first call, and the calls of a task in
 | `reflect` | A reflection, `<task_id>:r<seq>`, when the reply holds one (a JSON object whose `recommended_action` is `continue`, `stop`, `decompose` or `done`, as the agent reads it), and thought chunks. A reply without a reflection gives only its thought chunks. |
 | `retrieve`, `estimate` | None. |
 
-- **Notes** say what a reply planned, found, decided, suspected and left
-  open, in the lines `plan:`, `found:`, `decided:`, `hypotheses:` and
-  `open:`, and what its tool calls returned, in `observed:` and `outcome:`.
-  When the reply's text holds a `<note>` block, the note takes those lines
-  from it (`meta.source` is `model`). Otherwise it picks sentences of the
-  reasoning and the reply by marker words, in English and Chinese
-  (`heuristic`).
-- **Reflections** are built from the reflection's own fields, as the agent
-  reads them, not from the reply's text: `plan:` is the recommended action
-  and the summary, `found:` the useful evidence, `decided:` the next
-  promising directions (`next: …`), and `hypotheses:` the failed hypotheses
-  (`refuted: …`) and what to avoid (`avoid: …`). `meta.source` is `model`.
-- **Drafts** hold the code blocks of the reasoning and of the reply.
-  `meta.target` is the last file named before the first block, or else the
-  file of the task's latest read or write. `meta.status` is `written` once a
-  write to that file holds at least 60% of the draft's lines, `superseded`
-  when a later draft has the same target, and `pending` otherwise.
-- **Thought chunks** hold the reasoning without its code blocks, in pieces
-  of up to 1,500 characters, split at paragraphs and sentences.
-- Every text and title is made safe to show to a model as plain text: role
-  tokens such as `<|im_start|>` and tags such as `<tool_call>` are escaped,
-  and `<think>` tags are removed. A document left without text is skipped.
-- `meta` holds `task_id`, `step`, `attempt`, `seq` and `created_at` (the
-  call's `timestamp`). The other keys depend on the kind:
-  - notes and reflections: `source` (`model` or `heuristic`; always `model`
-    for a reflection), `note_kind` (`step`, `answer` or `empty` from the
-    call's outcome, or `reflection`), and `remember` with `remember_by`.
-    `remember` says whether a note looks worth keeping: the block's
-    `remember:` line when it has one (`model`), or else `true` when the note
-    has a `found:` or `decided:` line (`heuristic`); a reflection has
-    `false` and `""`;
-  - drafts: `target`, `status`, `lines` (non-blank lines), `blocks`, and
-    `cut`, which is `true` when code was left out to keep the draft within
-    8,000 characters;
-  - thought chunks: `chunk`, the chunk's number.
+What each document holds:
 
-The ids follow `seq`, so you can write labelled queries from your own record
-of the calls before you export them.
+| Document | What it holds |
+|---|---|
+| Note | What a reply planned, found, decided, suspected and left open, in the lines `plan:`, `found:`, `decided:`, `hypotheses:` and `open:`, and what its tool calls returned, in `observed:` and `outcome:`. A `<note>` block in the reply gives those lines (`meta.source` is `model`); otherwise sentences of the reasoning and the reply are picked by marker words, in English and Chinese (`heuristic`). |
+| Reflection | Built from the reflection's own fields, as the agent reads them, not from the reply's text: `plan:` is the recommended action and the summary, `found:` the useful evidence, `decided:` the next promising directions (`next: …`), `hypotheses:` the failed hypotheses (`refuted: …`) and what to avoid (`avoid: …`). `meta.source` is `model`. |
+| Draft | The code blocks of the reasoning and of the reply. `meta.target` is the last file named before the first block, else the file of the task's latest read or write. `meta.status` is `written` once a write to that file holds at least 60% of the draft's lines, `superseded` when a later draft has the same target, and `pending` otherwise. |
+| Thought chunk | The reasoning without its code blocks, in pieces of up to 1,500 characters, split at paragraphs and sentences. |
+
+- Every text and title is made safe to show to a model as plain text: role tokens such as `<|im_start|>` and tags such as `<tool_call>` are escaped, and `<think>` tags are removed. A document left without text is skipped.
+- The ids follow `seq`, so you can write labelled queries from your own record of the calls before you export them.
+
+Every document's `meta` holds `task_id`, `step`, `attempt`, `seq` and `created_at` (the call's `timestamp`). The other keys depend on the kind:
+
+| Kind | Other `meta` keys |
+|---|---|
+| Notes and reflections | `source` (`model` or `heuristic`; always `model` for a reflection), `note_kind` (`step`, `answer` or `empty` from the call's outcome, or `reflection`), and `remember` with `remember_by`. |
+| Drafts | `target`, `status`, `lines` (non-blank lines), `blocks`, and `cut`, which is `true` when code was left out to keep the draft within 8,000 characters. |
+| Thought chunks | `chunk`, the chunk's number. |
+
+`remember` says whether a note looks worth keeping: the block's `remember:` line when it has one (`model`), or else `true` when the note has a `found:` or `decided:` line (`heuristic`). A reflection has `false` and `""`.
 
 ### Export a history database
 
-`--export-run` also reads the `history.db` of a run: give the memory
-directory that holds it (the `--memory-dir` or `LOCALMELO_MEMORY_DIR` of the
-run), or the file itself. `melo` keeps it in `~/.cache/localmelo/memory`
-when you [keep memory between runs](memory.md#keep-memory-between-runs). A
-file is read as a database when it starts with the SQLite header, and as raw
-calls otherwise.
+`--export-run` also reads the `history.db` of a run: give the memory directory that holds it (the `--memory-dir` or `LOCALMELO_MEMORY_DIR` of the run), or the file itself.
 
-The export reads the model calls from the database's `llm_calls` table,
-which `melo` writes whenever it keeps memory (see
-[Model calls](../reference/memory.md#model-calls)):
+- `melo` keeps it in `~/.cache/localmelo/memory` when you [keep memory between runs](memory.md#keep-memory-between-runs).
+- A file is read as a database when it starts with the SQLite header, and as raw calls otherwise.
+- The export reads the model calls from the database's `llm_calls` table, which `melo` writes whenever it keeps memory (see [Model calls](../reference/memory.md#model-calls)):
 
 ```bash
 LOCALMELO_PERSIST_MEMORY=1 melo "List the files"
@@ -202,47 +157,29 @@ melo-retrieve --export-run ~/.cache/localmelo/memory > run-corpus.jsonl
 melo-retrieve: exported 4 documents (2 notes, 0 reflections, 0 drafts, 2 thought chunks) from 1 tasks
 ```
 
-The numbers depend on the run. Here the model listed the directory and then
-answered, with reasoning in both replies, so each of the two calls gave a
-note and a thought chunk.
+The numbers depend on the run. Here the model listed the directory and then answered, with reasoning in both replies, so each of the two calls gave a note and a thought chunk.
 
-- A `history.db` that no version with model calls has opened has no such
-  table, and its export stops with exit code 2:
+What can go differently:
 
-  ```text
-  melo-retrieve: error: <path> has no llm_calls table: it was written before localmelo recorded model calls. Export the calls as raw-call JSONL instead (see docs/retrieval.md).
-  ```
+| Case | What happens |
+|---|---|
+| A `history.db` that no version with model calls has opened | It has no such table, and the export stops with exit code 2 (message below). To export such a run, write its model calls as [raw calls](../reference/retrieval.md#raw-calls) from a record made outside localmelo, such as a proxy's log of the requests and replies. |
+| A `history.db` from an earlier version that this version then opened | It has an empty table: its earlier tasks export nothing, and the closing line counts only the tasks with model calls. |
+| Rows older than `LOCALMELO_THINKING_RETENTION_DAYS` (30 days by default) | They have no `thinking`, so they give no thought chunks. |
+| `content`, `thinking` and tool-call arguments | `content` and `thinking` are stored redacted, the arguments are not. A draft whose code held a key may then no longer match its `file_write`, and a reflection whose JSON holds a bare 4-to-8-digit number near a code keyword may no longer parse. |
 
-  `<path>` is the path of the database. To export such a run, write its
-  model calls as [raw calls](../reference/retrieval.md#raw-calls) from a record made outside
-  localmelo, such as a proxy's log of the requests and replies.
-- A `history.db` from an earlier version that this version then opened gets
-  an empty table: its earlier tasks export nothing, and the closing line
-  counts only the tasks with model calls.
-- Rows older than `LOCALMELO_THINKING_RETENTION_DAYS` (30 days by default)
-  have no `thinking`, so they give no thought chunks.
-- `content` and `thinking` are stored redacted, the tool calls' arguments
-  are not. A draft whose code held a key may then no longer match its
-  `file_write`, and a reflection whose JSON holds a bare 4-to-8-digit
-  number near a code keyword may no longer parse.
+```text
+melo-retrieve: error: <path> has no llm_calls table: it was written before localmelo recorded model calls. Export the calls as raw-call JSONL instead (see docs/retrieval.md).
+```
+
+`<path>` is the path of the database.
 
 A database that has the table is read as follows:
 
-- The columns read are `task_id`, `seq`, `kind`, `step`, `attempt`,
-  `outcome`, `content`, `thinking`, `tool_calls_json`, `step_ids_json` and
-  `timestamp`, under the rules of raw calls. A `NULL` `step` or `attempt`
-  reads as 0 or 1. A missing column stops the export:
-  `melo-retrieve: error: <path>: llm_calls has no column <names>`.
-- When `thinking` is not empty and `content` starts with `<think>`, a
-  newline, the thinking, a newline, `</think>` and a blank line (the copy
-  Ollama's provider adds), the content is read without that copy, so the
-  reasoning is read once.
-- Tool results come from the `steps` rows that `step_ids_json` lists,
-  matched to the calls by their `id`. When a listed row is missing or
-  matches no call, one warning goes to stderr:
-  `melo-retrieve: warning: <n> step ids in llm_calls.step_ids_json had no matching steps row; their results are left out`.
-- Tasks come in the order of their earliest `timestamp`.
-- The export never writes to the database and creates no file next to it.
-  If a `history.db-wal` file exists, as it does while a run is writing, the
-  export reads through it, and SQLite may create `history.db-shm`. Export a
-  run that has ended.
+| What | How |
+|---|---|
+| Columns | `task_id`, `seq`, `kind`, `step`, `attempt`, `outcome`, `content`, `thinking`, `tool_calls_json`, `step_ids_json` and `timestamp`, under the rules of raw calls. A `NULL` `step` or `attempt` reads as 0 or 1. A missing column stops the export: `melo-retrieve: error: <path>: llm_calls has no column <names>`. |
+| Reasoning | When `thinking` is not empty and `content` starts with `<think>`, a newline, the thinking, a newline, `</think>` and a blank line (the copy Ollama's provider adds), the content is read without that copy, so the reasoning is read once. |
+| Tool results | They come from the `steps` rows that `step_ids_json` lists, matched to the calls by their `id`. When a listed row is missing or matches no call, one warning goes to stderr: `melo-retrieve: warning: <n> step ids in llm_calls.step_ids_json had no matching steps row; their results are left out`. |
+| Order | Tasks come in the order of their earliest `timestamp`. |
+| The file | The export never writes to the database and creates no file next to it. If a `history.db-wal` file exists, as it does while a run is writing, the export reads through it, and SQLite may create `history.db-shm`. Export a run that has ended. |

@@ -7,6 +7,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Changed
+
+- A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
+
 ### Security
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
@@ -341,6 +345,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
+
+- The macOS app shows what melo is doing while its window is put away. A small
+  pill takes Melo's place on the desktop and says in one plain line what runs
+  ("Reading example.com", "Running the tests"), with "+1" when more run. It
+  turns amber while an approval waits, shows "Done: …" for 6 seconds and
+  "Stopped: …" for 10, and says "Model server not reachable" while the model
+  server is down; then Melo comes back, wagging after a "Done". Click it to
+  open the chat or task it names, drag it like Melo, or press **×** to hide it
+  until the next task starts. **On the desktop**, in the menu-bar menu and in
+  Melo's menu, chooses the pill with Melo (the default), Melo only or nothing.
+  `GET /api/health` `status.recent` also says what the finished run was called
+  (`title`) ([#326]).
 
 - Chores that run on time, and a 30-minute check-in. Say `every weekday at 8:30,
   brief me on my calendar` (or `每天早上九点 …`) in the main chat and it asks
@@ -2620,6 +2636,7 @@ earlier milestones.
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
+[#326]: https://github.com/localmelo/localmelo/pull/326
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

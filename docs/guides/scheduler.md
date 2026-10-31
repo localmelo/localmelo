@@ -7,7 +7,7 @@ This guide explains how the scheduler decides when chat requests may reach a sha
 ![The main chat starts tasks at a level from your words](../assets/img/main-chat-tasks.webp)
 
 - **Who starts a task.** The main chat, when you ask it for work, owns the task (`front_id`); `/task …` or **Run as a task** starts one without a model call. The [web console guide](web-console.md#hand-work-to-the-main-chat) shows how it looks.
-- **Its level.** Code reads only your own message: urgency words or a deadline today give Today (P1), "no rush" gives Whenever (P3), anything else Normal (P2). The reason is kept with the task (`you said "urgent"`). A page, a file or a task's report never sets a level.
+- **Its level.** Code reads only your own message: urgency words, a deadline today or the word "today" itself (not "not today") give Today (P1), "no rush" gives Whenever (P3), anything else Normal (P2). The reason is kept with the task (`you said "urgent"`). A page, a file or a task's report never sets a level.
 - **Your level stays.** A level you set (the line's **Change**, the panel, `melo task level`) is yours: the scheduler leaves it alone.
 - **Changes need your words.** The main chat changes a task (stop, pause, resume, a level) only when your latest message asks for it and names the task; otherwise it shows a suggestion you apply with one tap.
 - **Words in default mode.** Levels read Now, Today, Normal, Whenever, If idle and Later everywhere a level shows; developer mode adds the P-codes. `melo task` takes a word wherever it takes a P-code (`melo task level ID today`).

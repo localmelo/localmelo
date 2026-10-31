@@ -71,10 +71,22 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo lies 
 | Asleep, a small "z" drifting up | Nothing has happened for a minute; touching Melo wakes it. |
 
 - Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
-- Right-click (or Control-click) for **Open localmelo**, **Hide Melo** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
+- Right-click (or Control-click) for **Open localmelo**, **Hide Melo**, **On the desktop** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
 - It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
 - Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
 - Under Reduce Motion, in Low Power Mode, when the Mac runs hot or while Melo is hidden, it stops moving and shows still pictures.
+
+## The activity pill
+
+![Melo's activity pill: working, several running, waiting for your approval, done, stopped and the model server not reachable.](../assets/img/pill.webp)
+
+While the window is put away and something runs or waits, a small pill takes Melo's place and says in one line what Melo is doing.
+
+- It says what runs in plain words ("Reading example.com", "Running the tests"); **+1** counts the others that run. While an approval waits it turns amber and says "Waiting for your approval".
+- It shows "Done: …" for 6 seconds and "Stopped: …" for 10, and "Model server not reachable" while the model server is down. Then Melo comes back, wagging after a "Done".
+- Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
+- **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
+- It breathes only while it works, and stands still under Reduce Motion, in Low Power Mode, when the Mac runs hot or while it is covered. VoiceOver reads one button: "Melo is reading example.com. Opens the chat."
 
 ## Quit and the gateway
 

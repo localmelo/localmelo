@@ -57,18 +57,40 @@ struct WaitingItem: Equatable {
 private let routeCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-")
 
+/// The console route of a chat or task, nil for any other kind and for an id the console would not open, so a
+/// route is always safe to hand to the page.
+func consoleRoute(kind: String, id: String) -> String? {
+    guard kind == "chat" || kind == "task", (1...128).contains(id.count),
+          id.unicodeScalars.allSatisfy(routeCharacters.contains) else { return nil }
+    return WaitingItem(kind: kind, id: id).route
+}
+
 /// The list is empty when it is missing or damaged. An entry whose kind or id the console would not
-/// open is left out, so a route is always safe to hand to the page.
+/// open is left out.
 func waitingItems(_ data: Data) -> [WaitingItem] {
     guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let status = body["status"] as? [String: Any],
           let list = status["waiting"] as? [[String: Any]] else { return [] }
     return list.compactMap { entry in
-        guard let kind = entry["kind"] as? String, kind == "chat" || kind == "task",
-              let id = entry["id"] as? String, (1...128).contains(id.count),
-              id.unicodeScalars.allSatisfy(routeCharacters.contains) else { return nil }
+        guard let kind = entry["kind"] as? String, let id = entry["id"] as? String,
+              consoleRoute(kind: kind, id: id) != nil else { return nil }
         return WaitingItem(kind: kind, id: id)
     }
+}
+
+/// `model_server.reachable` of `GET /api/health`: false when the settings' local model server did not answer, nil
+/// while it is not known or for a cloud model.
+func modelServerReachable(_ data: Data) -> Bool? {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let server = body["model_server"] as? [String: Any] else { return nil }
+    return server["reachable"] as? Bool
+}
+
+/// A line of the health reply's text on one line: runs of white space (and line breaks) become one space, the ends
+/// are trimmed and a long one is cut to `limit` characters.
+func plainLine(_ text: String?, limit: Int) -> String {
+    let words = (text ?? "").split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+    return String(words.joined(separator: " ").prefix(limit))
 }
 
 func waitingRoute(_ data: Data) -> String? { waitingItems(data).first?.route }

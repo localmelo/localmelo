@@ -81,10 +81,24 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 | 睡着了，头顶飘起一个小小的 “z” | 一分钟内什么都没发生；碰一下 Melo 就会醒。 |
 
 - 点击 Melo 会打开窗口，或打开在等你的那个对话或任务；可以把它拖到任何地方，它会为每块屏幕记住自己的位置。
-- 右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo** 和 **Quit localmelo**；菜单栏菜单里的 **Show Melo** 会把它请回来。
+- 右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo**、**On the desktop** 和 **Quit localmelo**；菜单栏菜单里的 **Show Melo** 会把它请回来。
 - 它停在其他窗口之上，出现在每一个空间里，不在程序坞和 Command-Tab 中，也从不抢走键盘。
 - 它的状态保存在 `~/Library/Application Support/LocalMelo/pet.json`。
 - 在“减弱动态效果”下、低电量模式下、Mac 发热时或 Melo 被隐藏时，它不再动，只显示静态图片。
+
+<a id="the-activity-pill"></a>
+
+## 活动胶囊
+
+![Melo 的活动胶囊：工作中、有多个在运行、在等你批准、完成、已停止、模型服务器连不上。](../../assets/img/pill.webp)
+
+窗口收起、而又有东西在运行或在等你时，一个小小的胶囊会取代 Melo，用一行话说 Melo 正在做什么。
+
+- 它用平实的话说正在运行的内容（“Reading example.com”“Running the tests”）；**+1** 表示还有几个在运行。有审批在等你时，它会变成琥珀色，并写着“Waiting for your approval”。
+- 它显示“Done: …” 6 秒、“Stopped: …” 10 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会摇尾巴。
+- 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
+- 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。
+- 它只在工作时呼吸；在“减弱动态效果”下、低电量模式下、Mac 发热时或被盖住时保持不动。VoiceOver 读出一个按钮：“Melo is reading example.com. Opens the chat.”
 
 <a id="quit-and-the-gateway"></a>
 

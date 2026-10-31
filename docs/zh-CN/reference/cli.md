@@ -21,13 +21,17 @@ melo serve install|uninstall|status          # macOS background service
 melo -h all                                  # every option, command and setting
 ```
 
-用引号括起任务，并把它放在 `--` 之后，这样形似选项的文字就不会产生歧义。不加引号的多个单词会以空格连接。既有的任务命令行、缩写以及 `melo ""` 循环，仍保持原有的解析方式。
+用引号括起任务，并把它放在 `--` 之后，这样形似选项的文字就不会产生歧义。不加引号的多个单词会以空格连接。
+
+既有的任务命令行、缩写以及 `melo ""` 循环，仍保持原有的解析方式。
 
 <a id="commands-and-short-options"></a>
 
 ## 命令与短选项
 
-八个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。跟在选项后面、单独成为任务的命令词（如 `melo -X gateway.port=9000 serve`）同样会被拒绝，提示会说明该词应放在哪里（`melo serve -X gateway.port=9000`）；`melo -- serve` 会把 serve 当作任务运行，而作为选项值出现的命令词（如 `melo -w serve "fix it"`）不受影响。
+八个命令词说明 `melo` 要做什么。命令词只在第一个参数位置、且完全匹配时才算数：`melo "setup the project"`（一个带引号的参数）和 `melo -- setup the project` 是任务，而 `melo setup a venv` 会打印提示并以退出码 2 结束，不会构建任何模型。
+
+跟在选项后面、单独成为任务的命令词（如 `melo -X gateway.port=9000 serve`）同样会被拒绝，提示会说明该词应放在哪里（`melo serve -X gateway.port=9000`）；`melo -- serve` 会把 serve 当作任务运行，而作为选项值出现的命令词（如 `melo -w serve "fix it"`）不受影响。
 
 | 命令 | 作用 | 选项 |
 |---|---|---|
@@ -149,17 +153,35 @@ Forgot note 3.
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
 | `melo --daemon …` | 管理在 macOS 上运行网关的后台服务；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。 |
 
-在 `melo ""` 循环中，各轮共享同一个智能体及其工作记忆，因此每个回答都会保留，后面的轮次能看到之前的内容。未完成的轮次会在 stderr 上打印状态行，然后循环等待下一个任务。`/exit`、`/quit`、`exit` 或 `quit`（不分大小写），或 Ctrl-D，都会以退出码 0 结束循环；Ctrl+C 立即结束它（shell 显示 130）。循环启动时会打印一行，说明直接模式下 `shell_exec` 处于关闭状态，并说明 `melo "" --builtins all` 可以重新打开启用了它的循环（若该工具已启用，则不打印此行）。循环接受 `--base-url`、`--chat-model` 和 `--builtins`；与它一起使用时，其他直接模式选项都是用法错误。它的对话与网页工作区的对话彼此独立。在终端中，提示符由 readline 编辑：退格键删除一个完整字符（包括中文等宽字符），上箭头可以调出本循环中更早的输入行。不是有效 UTF-8 的输入行会打印 `melo: that line was not valid UTF-8; type it again.`，然后循环再次询问。
+在 `melo ""` 循环中，各轮共享同一个智能体及其工作记忆，因此每个回答都会保留，后面的轮次能看到之前的内容。未完成的轮次会在 stderr 上打印状态行，然后循环等待下一个任务。
+
+`/exit`、`/quit`、`exit` 或 `quit`（不分大小写），或 Ctrl-D，都会以退出码 0 结束循环；Ctrl+C 立即结束它（shell 显示 130）。循环启动时会打印一行，说明直接模式下 `shell_exec` 处于关闭状态，并说明 `melo "" --builtins all` 可以重新打开启用了它的循环（若该工具已启用，则不打印此行）。
+
+循环接受 `--base-url`、`--chat-model` 和 `--builtins`；与它一起使用时，其他直接模式选项都是用法错误。它的对话与网页工作区的对话彼此独立。
+
+在终端中，提示符由 readline 编辑：退格键删除一个完整字符（包括中文等宽字符），上箭头可以调出本循环中更早的输入行。不是有效 UTF-8 的输入行会打印 `melo: that line was not valid UTF-8; type it again.`，然后循环再次询问。
 
 <a id="worker-histories"></a>
 
 ## Worker 历史记录
 
-每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。`-c`、`-r` 和对话选择器都不提供 worker 会话。提供了 `--workspace` 时，工作区和 git 元数据使用它；否则使用当前工作目录。
+每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。
 
-`--import-session dsh-jsonl FILE [--title TITLE]` 不需要任务，即可导入 dsh 的 JSONL 日志。重复导入内容相同的文件不产生任何变化；无法识别或无效的行会被计数。网关可以通过只读的 [worker API](api-v2.md#get-apisessions) 列出并读取 worker 历史，但不能继续或编辑它。
+把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
 
-worker 记录保存在本地、未加密，文件权限为 0600。保存的文本会经过现有的密钥脱敏器处理；可识别的敏感文件读取会被替换为带路径标签的占位符。脱敏基于模式匹配：命令打印的、模型复述的，或通过无法识别的工具加载的任意密钥，仍可能被保留。分享前请先检查这些数据。推理内容受会话保留策略约束。
+单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。
+
+`-c`、`-r` 和对话选择器都不提供 worker 会话。提供了 `--workspace` 时，工作区和 git 元数据使用它；否则使用当前工作目录。
+
+`--import-session dsh-jsonl FILE [--title TITLE]` 不需要任务，即可导入 dsh 的 JSONL 日志。重复导入内容相同的文件不产生任何变化；无法识别或无效的行会被计数。
+
+网关可以通过只读的 [worker API](api-v2.md#get-apisessions) 列出并读取 worker 历史，但不能继续或编辑它。
+
+worker 记录保存在本地、未加密，文件权限为 0600。保存的文本会经过现有的密钥脱敏器处理；可识别的敏感文件读取会被替换为带路径标签的占位符。
+
+脱敏基于模式匹配：命令打印的、模型复述的，或通过无法识别的工具加载的任意密钥，仍可能被保留。分享前请先检查这些数据。
+
+推理内容受会话保留策略约束。
 
 <a id="default-and-developer-mode"></a>
 
@@ -172,7 +194,9 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | 默认 | 不做任何设置，或在[配置文件](configuration.md#the-config-file)中写 `[ui] mode = "default"` | 简短帮助（23 行）：常用选项、三个各附一句说明的命令，最后指向其余内容的位置。 |
 | 开发者 | 在配置中写 `[ui] mode = "developer"`，或单次运行时加 `--developer` | `melo -h all` 的全部内容：所有选项、命令和设置；每个实验性设置都会注明决定它去留的 issue。 |
 
-每个选项在两种模式下都能解析和生效，无论来自命令行还是配置文件，因此脚本和基准测试不受影响：模式只是把选项从帮助中隐藏，而不是删除它。`--developer` 无论放在命令行的哪个位置都对帮助生效（`melo --help --developer` 也可以），且必须写全名。既不是 `"default"` 也不是 `"developer"` 的 `[ui] mode` 会在 stderr 上打印一行并显示默认帮助；它从不会使运行或网关停止。
+每个选项在两种模式下都能解析和生效，无论来自命令行还是配置文件，因此脚本和基准测试不受影响：模式只是把选项从帮助中隐藏，而不是删除它。`--developer` 无论放在命令行的哪个位置都对帮助生效（`melo --help --developer` 也可以），且必须写全名。
+
+既不是 `"default"` 也不是 `"developer"` 的 `[ui] mode` 会在 stderr 上打印一行并显示默认帮助；它从不会使运行或网关停止。
 
 <a id="option-tiers"></a>
 
@@ -465,40 +489,116 @@ melo: error: argument --max-steps: must be at least 1, got 0
 - 当 localmelo 从 git 检出中运行时，`localmelo_version` 是 `git describe --tags --always --dirty` 的输出（例如 `603f40d`）；否则为已安装的包版本（例如 `0.1.0`），或 `unknown`。
 - 在 `--reasoning legacy` 之外，记录还包含 `config.reasoning`、`config.replay_turns`、`config.note_writer`、`usage.reasoning_chars`（服务器报告时还有 `usage.reasoning_tokens` 或 `usage.cached_tokens`）以及 `memory_stats`；在不使用笔记计数器的模式中，这些笔记计数器为零。见[运行结果](run-results.md#fields)。`legacy` 的记录没有上述任何字段。
 
-**带 `--brief`**：JSON 是一个带版本的 worker 结果：`v`、`status`、`run_id`、`exit_code`、`head_sha`、`git_dirty`、`tests`、`run` 和 `error`。HEAD 和脏状态取自工作区，不可用时为 null。`run` 是去掉 `config` 的运行记录；启动或传输错误时为 null。如果简报中没有 `Check:` 行，`tests` 只有在最后一次运行中最后一个通过的、可识别的测试检查时才会被记录为 `recorded`，否则为 `not_recorded`。已记录的项目包含原始命令或 Python 代码，经过脱敏并限制在 2,000 个字符之内（超出时带 `command_truncated`），其可为 null 的退出码，以及 `tool_event` 来源。它只是工具输出的证据，并不保证任务正确。若有 `Check:` 行，则 `tests` 改为由工具自身的结果给出（见下文）：`passed` 或 `failed`，每个命令一项，取自门禁最后一次运行，每项包含 `command`、`command_truncated`、`exit_code`、`duration_s` 以及来源 `brief_check`；`output_tail`（检查输出的最后 20 行，经过脱敏，最多 4,000 个字符；旧版本的记录中没有该字段）；若策略不允许某个命令运行，则还包含 `refused`（原因）。
+**带 `--brief`**：JSON 是一个带版本的 worker 结果：`v`、`status`、`run_id`、`exit_code`、`head_sha`、`git_dirty`、`tests`、`run` 和 `error`。HEAD 和脏状态取自工作区，不可用时为 null。
 
-带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。不带 `--chat-model` 的 `--base-url` 简报，如果服务器有多个对话模型且没有说明哪个已加载，也会产生它，其 `exit_code` 为 2，`error` 中带有模型列表（见[通用](#general)）。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。直接运行（包括这一次）默认都会被记录（见上文）。
+`run` 是去掉 `config` 的运行记录；启动或传输错误时为 null。如果简报中没有 `Check:` 行，`tests` 只有在最后一次运行中最后一个通过的、可识别的测试检查时才会被记录为 `recorded`，否则为 `not_recorded`。
 
-带 `--brief` 的运行与普通任务在四个方面有所不同。查询内容是简报，后面附加一段固定的段落，每次请求都相同：一旦知道改动该放在哪里，就做出满足任务的最小改动；每次改动之后运行任务的检查命令；修复你破坏的内容（包括断言旧行为的测试）；先读取即将编辑的行，因为较早的工具输出大约在十个步骤之后会离开上下文；并在最终回答中说明运行了哪些检查以及结果。若反思的动作是 `continue`，那么只要还有步骤和尝试，就会开始下一次尝试，不论其三个标志如何（`reflection` 事件仍会记录它们）。当某次尝试边界发现工作区自运行开始以来没有变化时，下一次尝试的第一个请求会带上这样一行：“Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.”，并发出一条 `no_change` 通知；不是 git 工作树的工作区两者都不会得到。不带 `--brief` 的运行不变。
+已记录的项目包含原始命令或 Python 代码，经过脱敏并限制在 2,000 个字符之内（超出时带 `command_truncated`），其可为 null 的退出码，以及 `tool_event` 来源。它只是工具输出的证据，并不保证任务正确。
 
-另外三项辅助机制会让 brief 运行持续写作。自上一次看到的变化（或开始时）以来，连续 6 个步骤中工作区摘要没有变化后，会加入一条用户行：“You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue.”，并发出 detail 为 `{"scope": "step"}` 的 `no_change` 通知；计数在每次尝试开始时以及每次探测之后重置，因此这一行至多每 6 个步骤出现一次（边界行依然保留）。当窗口或适配丢弃了工具输出时，运行会为每个被丢弃的结果记住一行（工具、其关键参数缩短到 80 个字符、输出长度，以及最近的 8 条）；每个规划请求的末尾会附上“Earlier tool output no longer in your context: file_read support/sessions/runner.py (49,999 chars); shell_exec `grep -n ...` (2,310 chars). Read again what you need before you edit.”（若该步骤带有 inbox 行，则不附加）。反思请求的末尾附有一句话，要求在 `useful_evidence` 中给出带行号的确切文件路径，并要求把第一条要运行的命令或编辑作为 `next_promising_directions` 的第一项；当添加了上面的边界行时，它以“Start with: <that direction>”结尾（经过脱敏，最多 300 个字符）。
+若有 `Check:` 行，则 `tests` 改为由工具自身的结果给出（见下文）：`passed` 或 `failed`，每个命令一项，取自门禁最后一次运行，每项包含 `command`、`command_truncated`、`exit_code`、`duration_s` 以及来源 `brief_check`；`output_tail`（检查输出的最后 20 行，经过脱敏，最多 4,000 个字符；旧版本的记录中没有该字段）；若策略不允许某个命令运行，则还包含 `refused`（原因）。
 
-第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用，无论运行是否向模型提供 `shell_exec`（直接模式下不提供，除非指定 `--builtins all` 或 `--builtins shell_exec`；`--builtins none` 也不会阻止检查：要跳过检查，请删除该行）。只有工具自身的这次调用能越过这一过滤：模型的工具列表和它自己的 `shell_exec` 调用保持不变。检查器的 `pre_execute`、工作区根目录（`--workspace`）、shell 超时和脱敏与模型自己的调用一样适用。退出状态为 0 即通过。若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。若检查在最后仍然失败，运行仍以 `completed` 结束，但 `tests` 为 `failed`，会发出一条 `brief_check_failed` 通知，退出码为 4（见[退出码](#exit-codes)；stderr 会输出一行 `melo: the brief's check failed: <command> (exit N)`，被拒绝的检查显示 `not run`，超时显示 `no exit status`）；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。当运行处于最后一次尝试、总步数预算恰好还剩两步、工作区自检查上次运行（或运行开始）以来有变化，且门禁在该次尝试中尚未运行时，工具会在下一个规划请求之前运行一次检查，使模型仍有机会修复检查所示的问题。通过则不改变任何行为；失败则发送与门禁相同的消息，并消耗两次重试中的一次。`max_steps` 仍是硬性上限。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
+带 `--brief --output-format stream-json` 时，stdout 为 NDJSON：每个智能体事件都包装为 `{ "v": 1, "type": "event", "event": ... }`；运行正常结束时，随后输出 `{ "v": 1, "type": "result", "result": ... }` 的 worker 结果。输出管道损坏或未被读完是失败；信号、进程终止或管道损坏都可能导致没有结果记录。
+
+应读取完整的 stdout，并同时检查最后的记录和退出码。在有效简报之后发生的智能体构造失败（包括智能体会拒绝的配置文件值，以及无效的 TOML 文件）会产生 `run: null` 的 `startup_error`，并以退出码 1 退出。
+
+不带 `--chat-model` 的 `--base-url` 简报，如果服务器有多个对话模型且没有说明哪个已加载，也会产生它，其 `exit_code` 为 2，`error` 中带有模型列表（见[通用](#general)）。对于事件输出失败，worker 会尝试输出 `run: null` 的 `transport_error` 结果，并以退出码 1 退出；输出失败或被阻塞时，该记录可能无法送达。
+
+写入启动记录时若管道损坏，仍以退出码 1 退出。用法错误不产生结果记录。
+
+Worker 输出使用基于模式的脱敏，并省略部分可识别的敏感文件读取，包括简单的 shell 和 Python 读取。启动错误的文本同样会脱敏，用户的主目录显示为 `~`。
+
+任意命令、代码和模型输出仍可能暴露密钥：该流不是密钥边界。分享前请先检查。
+
+直接运行（包括这一次）默认都会被记录（见上文）。
+
+带 `--brief` 的运行与普通任务在四个方面有所不同。查询内容是简报，后面附加一段固定的段落，每次请求都相同：一旦知道改动该放在哪里，就做出满足任务的最小改动；每次改动之后运行任务的检查命令；修复你破坏的内容（包括断言旧行为的测试）；先读取即将编辑的行，因为较早的工具输出大约在十个步骤之后会离开上下文；并在最终回答中说明运行了哪些检查以及结果。
+
+若反思的动作是 `continue`，那么只要还有步骤和尝试，就会开始下一次尝试，不论其三个标志如何（`reflection` 事件仍会记录它们）。当某次尝试边界发现工作区自运行开始以来没有变化时，下一次尝试的第一个请求会带上这样一行：“Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.”，并发出一条 `no_change` 通知；不是 git 工作树的工作区两者都不会得到。
+
+不带 `--brief` 的运行不变。
+
+另外三项辅助机制会让 brief 运行持续写作。自上一次看到的变化（或开始时）以来，连续 6 个步骤中工作区摘要没有变化后，会加入一条用户行：“You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue.”，并发出 detail 为 `{"scope": "step"}` 的 `no_change` 通知；计数在每次尝试开始时以及每次探测之后重置，因此这一行至多每 6 个步骤出现一次（边界行依然保留）。
+
+当窗口或适配丢弃了工具输出时，运行会为每个被丢弃的结果记住一行（工具、其关键参数缩短到 80 个字符、输出长度，以及最近的 8 条）；每个规划请求的末尾会附上“Earlier tool output no longer in your context: file_read support/sessions/runner.py (49,999 chars); shell_exec `grep -n ...` (2,310 chars). Read again what you need before you edit.”（若该步骤带有 inbox 行，则不附加）。反思请求的末尾附有一句话，要求在 `useful_evidence` 中给出带行号的确切文件路径，并要求把第一条要运行的命令或编辑作为 `next_promising_directions` 的第一项；当添加了上面的边界行时，它以“Start with: <that direction>”结尾（经过脱敏，最多 300 个字符）。
+
+第四个差异是运行会自我检查。简报通过以 `Check:` 开头的行（行首没有空格）来指定其检查项；该行其余部分是一条 shell 命令，例如 `Check: uv run pytest tests/cli -q`。
+
+在运行可以结束为 `completed` 之前，工具会按顺序运行这些命令，每条都作为运行执行器的一次 `shell_exec` 调用，无论运行是否向模型提供 `shell_exec`（直接模式下不提供，除非指定 `--builtins all` 或 `--builtins shell_exec`；`--builtins none` 也不会阻止检查：要跳过检查，请删除该行）。只有工具自身的这次调用能越过这一过滤：模型的工具列表和它自己的 `shell_exec` 调用保持不变。
+
+检查器的 `pre_execute`、工作区根目录（`--workspace`）、shell 超时和脱敏与模型自己的调用一样适用。退出状态为 0 即通过。
+
+若某项失败，且该次尝试还有剩余步骤（或一个 `done` 反思可以开始另一次尝试），运行不会结束：下一个规划请求会带上一条用户消息，内容包括命令、其退出码以及输出的最后 60 行（经过脱敏），然后是“The task's check failed. Fix what it shows, run it again, then finish.”。每个失败的检查消耗一次重试，一次运行共有两次。
+
+一轮中的第一个失败会终止该轮。被拒绝的检查不会重试。
+
+若检查在最后仍然失败，运行仍以 `completed` 结束，但 `tests` 为 `failed`，会发出一条 `brief_check_failed` 通知，退出码为 4（见[退出码](#exit-codes)；stderr 会输出一行 `melo: the brief's check failed: <command> (exit N)`，被拒绝的检查显示 `not run`，超时显示 `no exit status`）；若最后一轮中所有检查都通过，则 `tests` 为 `passed`。每次运行检查都会发出一条 `brief_check` 通知，包含其命令、退出码和耗时。
+
+当运行处于最后一次尝试、总步数预算恰好还剩两步、工作区自检查上次运行（或运行开始）以来有变化，且门禁在该次尝试中尚未运行时，工具会在下一个规划请求之前运行一次检查，使模型仍有机会修复检查所示的问题。通过则不改变任何行为；失败则发送与门禁相同的消息，并消耗两次重试中的一次。
+
+`max_steps` 仍是硬性上限。没有 `Check:` 行的简报与以前的行为一致，模型对其自身检查的说明仍然只是说明。
 
 <a id="confined-writes"></a>
 
 **写入留在工作区内（macOS；`[agent] confine_writes`，默认开启）。**
-worker 的 `shell_exec` 和 `python_exec` 子进程（包括检查）在一个 `sandbox-exec` 配置文件下启动，它拒绝工作区（`--workspace`，否则为当前文件夹）之外的所有文件写入，无论命令做什么：`cd ..` 之后的写入、在另一个检出中执行 `uv run`、子进程 `git` 或 Python 都会被拒绝。允许写入的位置有：工作区本身；其中的 `.melo-tmp`（`TMPDIR`、`TMP` 和 `TEMP` 指向它；其中的 `.gitignore` 让它不出现在 `git status` 中，它随工作区一起保留）；你自己的临时文件夹（`/var/folders/.../T`，无论 `TMPDIR` 是什么，macOS 的 `mktemp` 和 `mktemp -d` 都写到这里；`/tmp` 仍被拒绝）；uv 的缓存（`UV_CACHE_DIR`，否则为 `~/.cache/uv`）、black 的缓存（`~/Library/Caches/black`）和 npm 的缓存（`~/.npm`）；`/dev/null`、`/dev/zero`、终端、标准流、`/dev/fd` 和伪终端；以及当工作区是一个链接的 git worktree 时，它自己的 git 目录和仓库的 `objects`：`git status`、`diff` 和 `add` 可用，提交到分支会被拒绝，主检出的文件保持不可写。经测量，`uv run`、`uv sync`、`pytest`、`ruff`、`black`、`mypy` 和 `npm` 不需要写入其他位置。读取和网络不受限制。被拒绝的写入保留其错误，并在开头（`[exit code N]` 之后）多出一行：
+worker 的 `shell_exec` 和 `python_exec` 子进程（包括检查）在一个 `sandbox-exec` 配置文件下启动，它拒绝工作区（`--workspace`，否则为当前文件夹）之外的所有文件写入，无论命令做什么：`cd ..` 之后的写入、在另一个检出中执行 `uv run`、子进程 `git` 或 Python 都会被拒绝。
+
+允许写入的位置有：工作区本身；其中的 `.melo-tmp`（`TMPDIR`、`TMP` 和 `TEMP` 指向它；其中的 `.gitignore` 让它不出现在 `git status` 中，它随工作区一起保留）；你自己的临时文件夹（`/var/folders/.../T`，无论 `TMPDIR` 是什么，macOS 的 `mktemp` 和 `mktemp -d` 都写到这里；`/tmp` 仍被拒绝）；uv 的缓存（`UV_CACHE_DIR`，否则为 `~/.cache/uv`）、black 的缓存（`~/Library/Caches/black`）和 npm 的缓存（`~/.npm`）；`/dev/null`、`/dev/zero`、终端、标准流、`/dev/fd` 和伪终端；以及当工作区是一个链接的 git worktree 时，它自己的 git 目录和仓库的 `objects`：`git status`、`diff` 和 `add` 可用，提交到分支会被拒绝，主检出的文件保持不可写。经测量，`uv run`、`uv sync`、`pytest`、`ruff`、`black`、`mypy` 和 `npm` 不需要写入其他位置。
+
+读取和网络不受限制。被拒绝的写入保留其错误，并在开头（`[exit code N]` 之后）多出一行：
 
 ```text
 melo: writing outside the workspace is not allowed in this run (refused: /Users/me/outside.txt); write in /Users/me/project, and put scratch files in $TMPDIR.
 ```
 
-结果中的 `run.confinement` 会统计这些写入：`{"writes": "confined", "refused_writes": 1}`。当配置文件无法应用时（缺少 `sandbox-exec`，或 melo 运行在一个拒绝再嵌套沙箱的沙箱中），worker 会在第一条命令之前以 `startup_error` 停止，并给出一行 `writes cannot be confined to the workspace: <why>; set agent.confine_writes to false to run without it (-X agent.confine_writes=false for one run)`。在其他系统上，运行会继续且不受限制，`run.confinement` 为 `{"writes": "not_confined", "reason": ...}`。`-X agent.confine_writes=false` 为一次运行关闭它；此时结果中没有 `confinement` 键。不带 `--brief` 的运行、交互式界面、网页控制台和应用都不受此限制，除非打开开发者设置 `[agent] confine_direct_runs = true`（`-X agent.confine_direct_runs=true` 为一次运行打开；默认关闭）：命令行给出的任务和 `melo ""` 循环随后受到同样的限制，工作区的确定方式也相同；无法限制的运行会在第一条命令之前停止，在 stderr 上给出一行 `melo: error: writes cannot be confined to the workspace: <why>; set agent.confine_direct_runs to false to run without it (-X agent.confine_direct_runs=false for one run)`，退出码为 1。
+结果中的 `run.confinement` 会统计这些写入：`{"writes": "confined", "refused_writes": 1}`。当配置文件无法应用时（缺少 `sandbox-exec`，或 melo 运行在一个拒绝再嵌套沙箱的沙箱中），worker 会在第一条命令之前以 `startup_error` 停止，并给出一行 `writes cannot be confined to the workspace: <why>; set agent.confine_writes to false to run without it (-X agent.confine_writes=false for one run)`。
+
+在其他系统上，运行会继续且不受限制，`run.confinement` 为 `{"writes": "not_confined", "reason": ...}`。`-X agent.confine_writes=false` 为一次运行关闭它；此时结果中没有 `confinement` 键。
+
+不带 `--brief` 的运行、交互式界面、网页控制台和应用都不受此限制，除非打开开发者设置 `[agent] confine_direct_runs = true`（`-X agent.confine_direct_runs=true` 为一次运行打开；默认关闭）：命令行给出的任务和 `melo ""` 循环随后受到同样的限制，工作区的确定方式也相同；无法限制的运行会在第一条命令之前停止，在 stderr 上给出一行 `melo: error: writes cannot be confined to the workspace: <why>; set agent.confine_direct_runs to false to run without it (-X agent.confine_direct_runs=false for one run)`，退出码为 1。
 
 <a id="brief-items"></a>
 
-**实验性：`--brief-items on`（`[agent] brief_items = true`，默认关闭）。** 一份有多个编号条目、检查又较弱的简报，可能在一个条目完全没动的情况下以 `completed passed` 结束。开启该选项后，工具会读取简报的顶层条目（代码块之外的 `1.`、`2)` 和 `- [ ]` 行；每条只取第一行，最多 12 条，缩短到约 120 个字符；少于两条的简报什么也不加），并根据 `git status` 列出的、自运行开始以来被改动的文件给每条打标记：条目中点名的文件（含 `/` 或带文件扩展名的词）被编辑过为 `changed`，点名了文件但都没被编辑为 `not yet`，其余为 `no file named`。标记只说明编辑情况，从不声称条目已完成。标记以同一个文本块的形式放入每个尝试边界的反思请求，以及最后一次尝试结束前两步的检查中：`Items in the brief with no edit yet: 2, 3`，后接这些条目的行，因此中间的规划请求保持其前缀。没有 `not yet` 条目时不加该块。每次使用都会发出一条 `brief_items` 通知，detail 为 `{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`。不是 git 树的工作区没有该块。没有 `--brief` 时该选项不起作用。
+**实验性：`--brief-items on`（`[agent] brief_items = true`，默认关闭）。** 一份有多个编号条目、检查又较弱的简报，可能在一个条目完全没动的情况下以 `completed passed` 结束。
 
-使用显式的 `--inbox FILE` 时，worker 会在每个规划步骤开始时读取完整的、以 LF 结尾的非空 UTF-8 行。未完成的最后一行会等待其换行符。该文件可以最初不存在，但除此之外必须是只追加的普通文件（不能是符号链接），总共不超过 1 MiB，每行不超过 16 KiB。写入者需要串行化，每次以一次写入追加完整的一行，并且每次运行使用新的收件箱。没有默认的收件箱：只使用 `--brief` 时不读取任何文件，收件箱路径也从不进入模型的上下文。
+开启该选项后，工具会读取简报的顶层条目（代码块之外的 `1.`、`2)` 和 `- [ ]` 行；每条只取第一行，最多 12 条，缩短到约 120 个字符；少于两条的简报什么也不加），并根据 `git status` 列出的、自运行开始以来被改动的文件给每条打标记：条目中点名的文件（含 `/` 或带文件扩展名的词）被编辑过为 `changed`，点名了文件但都没被编辑为 `not yet`，其余为 `no file named`。标记只说明编辑情况，从不声称条目已完成。
 
-使用 `--inbox-fd N` 时，同样的行、总量和每行限制以及确认机制，改由一个继承的、可读的管道文件描述符提供。父进程打开管道，传入读端（例如在 `subprocess.Popen` 中使用 `pass_fds=(read_fd,)`），并保持写端打开；它每次追加一条完整的行。worker 在第一次模型调用之前检查 `N` 是否为管道，并在那里把读端设置为 close-on-exec，因此 `python_exec`、`shell_exec` 和 MCP 服务器子进程都拿不到副本，也无法写入该通道。对于不可信的任务，推荐使用这种收件箱。已关闭的 fd 或不是管道的 fd，会在同一时间点以干净的 `setup_error`（退出码 2）被拒绝，且不进行模型调用。fd 没有路径，因此下面的工作区检查只适用于文件收件箱。`--inbox` 和 `--inbox-fd` 不能同时使用。
+标记以同一个文本块的形式放入每个尝试边界的反思请求，以及最后一次尝试结束前两步的检查中：`Items in the brief with no edit yet: 2, 3`，后接这些条目的行，因此中间的规划请求保持其前缀。没有 `not yet` 条目时不加该块。
 
-对于文件收件箱，路径在解析符号链接之后必须位于运行的工作区之外。位于工作区之内的路径会在任何模型调用之前被拒绝，因为默认的 `file_write` 和 `python_exec` 工具可能会改写它；符号链接、FIFO、目录、超过大小限制的文件和不可读的路径也一样，并在同一时间点检查。空的、非 UTF-8 的或超大的消息，或者在一行被接受之后文件被替换或截断，会在读取它的边界处结束运行。这些都是退出码为 2 的 `setup_error` 运行，只给出普通消息，没有堆栈跟踪，而不是 `crashed`。读取器要求已读取的字节仍是文件的前缀：保留这些字节的同一 inode 重写会被当作追加的内容接受，而更短的文件或更早的字节被改动则会失败。它无法检测保留了所有先前已读字节的截断并重写。
+每次使用都会发出一条 `brief_items` 通知，detail 为 `{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`。不是 git 树的工作区没有该块。
 
-文件收件箱是引导通道，而不是信任边界：同一用户的进程，以及以用户权限运行的 `python_exec`/`shell_exec` 代码，仍然可以写入它或任何其他文件。把它放在工作区之外，只是阻止了受限的文件工具改写它。fd 通道关闭了工具写入的这条路径，但它不是身份认证：已经持有写端的进程可以引导运行，因此父进程不得把写端传给 worker 的工具或其他不可信的进程。
+没有 `--brief` 时该选项不起作用。
 
-在 `stream-json` 中，`inbox.accepted` 会报告每条插入行的结束字节 `offset`、步骤和尝试，但不包含其文本。确认只表示指令进入了运行中的上下文，并不表示模型收到或遵循了它。确认从不会被丢弃：读取慢或停滞的读取者会让 worker 等待写入者，而不是跳过记录。最后一个规划边界之后追加的消息可能永远不会被接受。偏移量按每次实时运行提交一次，不跨崩溃或重启；应当核对确认记录，并为新的运行使用新的文件或管道。已保存的 worker 会把脱敏后的文本记录在其事件历史中。脱敏可能会改变该文本，而且会话恢复不会把收件箱事件重建为对话消息；不要把已保存的历史当作精确的回放。
+使用显式的 `--inbox FILE` 时，worker 会在每个规划步骤开始时读取完整的、以 LF 结尾的非空 UTF-8 行。未完成的最后一行会等待其换行符。
+
+该文件可以最初不存在，但除此之外必须是只追加的普通文件（不能是符号链接），总共不超过 1 MiB，每行不超过 16 KiB。写入者需要串行化，每次以一次写入追加完整的一行，并且每次运行使用新的收件箱。
+
+没有默认的收件箱：只使用 `--brief` 时不读取任何文件，收件箱路径也从不进入模型的上下文。
+
+使用 `--inbox-fd N` 时，同样的行、总量和每行限制以及确认机制，改由一个继承的、可读的管道文件描述符提供。父进程打开管道，传入读端（例如在 `subprocess.Popen` 中使用 `pass_fds=(read_fd,)`），并保持写端打开；它每次追加一条完整的行。
+
+worker 在第一次模型调用之前检查 `N` 是否为管道，并在那里把读端设置为 close-on-exec，因此 `python_exec`、`shell_exec` 和 MCP 服务器子进程都拿不到副本，也无法写入该通道。对于不可信的任务，推荐使用这种收件箱。
+
+已关闭的 fd 或不是管道的 fd，会在同一时间点以干净的 `setup_error`（退出码 2）被拒绝，且不进行模型调用。fd 没有路径，因此下面的工作区检查只适用于文件收件箱。
+
+`--inbox` 和 `--inbox-fd` 不能同时使用。
+
+对于文件收件箱，路径在解析符号链接之后必须位于运行的工作区之外。位于工作区之内的路径会在任何模型调用之前被拒绝，因为默认的 `file_write` 和 `python_exec` 工具可能会改写它；符号链接、FIFO、目录、超过大小限制的文件和不可读的路径也一样，并在同一时间点检查。
+
+空的、非 UTF-8 的或超大的消息，或者在一行被接受之后文件被替换或截断，会在读取它的边界处结束运行。这些都是退出码为 2 的 `setup_error` 运行，只给出普通消息，没有堆栈跟踪，而不是 `crashed`。
+
+读取器要求已读取的字节仍是文件的前缀：保留这些字节的同一 inode 重写会被当作追加的内容接受，而更短的文件或更早的字节被改动则会失败。它无法检测保留了所有先前已读字节的截断并重写。
+
+文件收件箱是引导通道，而不是信任边界：同一用户的进程，以及以用户权限运行的 `python_exec`/`shell_exec` 代码，仍然可以写入它或任何其他文件。把它放在工作区之外，只是阻止了受限的文件工具改写它。
+
+fd 通道关闭了工具写入的这条路径，但它不是身份认证：已经持有写端的进程可以引导运行，因此父进程不得把写端传给 worker 的工具或其他不可信的进程。
+
+在 `stream-json` 中，`inbox.accepted` 会报告每条插入行的结束字节 `offset`、步骤和尝试，但不包含其文本。确认只表示指令进入了运行中的上下文，并不表示模型收到或遵循了它。
+
+确认从不会被丢弃：读取慢或停滞的读取者会让 worker 等待写入者，而不是跳过记录。最后一个规划边界之后追加的消息可能永远不会被接受。
+
+偏移量按每次实时运行提交一次，不跨崩溃或重启；应当核对确认记录，并为新的运行使用新的文件或管道。已保存的 worker 会把脱敏后的文本记录在其事件历史中。
+
+脱敏可能会改变该文本，而且会话恢复不会把收件箱事件重建为对话消息；不要把已保存的历史当作精确的回放。
 
 **两种格式都适用：**
 
@@ -554,7 +654,9 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | 130 | Ctrl+C（SIGINT）结束了运行。 |
 | 143 | SIGTERM 结束了运行。 |
 
-129、130 和 143 是 shell 为被该信号结束的进程报告的值。取消设置向导，或者在首次运行的问题处输入 `q`，会以 0 退出。在交互式界面打开之前，在设置问题处按 Ctrl-D 会以 0 退出，按 Ctrl+C 则以 130 退出，两者都会在输出 `Setup cancelled.` 之后发生。使用 `/exit`、Ctrl+D 或连按两次 Ctrl+C 离开界面，无论其轮次如何结束，都以 0 退出。
+129、130 和 143 是 shell 为被该信号结束的进程报告的值。取消设置向导，或者在首次运行的问题处输入 `q`，会以 0 退出。
+
+在交互式界面打开之前，在设置问题处按 Ctrl-D 会以 0 退出，按 Ctrl+C 则以 130 退出，两者都会在输出 `Setup cancelled.` 之后发生。使用 `/exit`、Ctrl+D 或连按两次 Ctrl+C 离开界面，无论其轮次如何结束，都以 0 退出。
 
 <a id="signals"></a>
 

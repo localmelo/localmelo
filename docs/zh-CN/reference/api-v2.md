@@ -1,14 +1,26 @@
 # API v2
 
-API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提供，且仅当网关监听回环地址（`127.0.0.1`、`localhost` 或 `::1`）时才可用。受保护的路由需要 bearer 令牌或已登录的浏览器 cookie；不要暴露网关。见[网关与 HTTP API](../guides/gateway.md#keep-the-gateway-private)。
+API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提供，且仅当网关监听回环地址（`127.0.0.1`、`localhost` 或 `::1`）时才可用。
 
-除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
+受保护的路由需要 bearer 令牌或已登录的浏览器 cookie；不要暴露网关。见[网关与 HTTP API](../guides/gateway.md#keep-the-gateway-private)。
 
-`POST /api/auth/login` 用一个有效的一次性代码换取浏览器 cookie；`POST /api/auth/logout` 撤销该 cookie。`POST /api/auth/rotate` 需要 bearer 令牌，并会轮换它。登录换取要求匹配的 Origin。当 macOS 应用启动了网关时，它还要求应用的 `X-LocalMelo-Instance` 请求头，并且代码只对签发它的那个实例有效；缺失、不同或绑定不一致的值会在代码被消费之前被拒绝。见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
+除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。
+
+本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
+
+`POST /api/auth/login` 用一个有效的一次性代码换取浏览器 cookie；`POST /api/auth/logout` 撤销该 cookie。`POST /api/auth/rotate` 需要 bearer 令牌，并会轮换它。
+
+登录换取要求匹配的 Origin。当 macOS 应用启动了网关时，它还要求应用的 `X-LocalMelo-Instance` 请求头，并且代码只对签发它的那个实例有效；缺失、不同或绑定不一致的值会在代码被消费之前被拒绝。
+
+见[网关安全](../guides/gateway.md#keep-the-gateway-private)。
 
 控制台的一轮对话与工作区对话经过同样的调度器闸门：每次模型调用都要在 `[scheduler]` 下等待自己的槽位，调用日志会以会话的 id 记录它。见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。
 
-JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 和图片文件使用其图片媒体类型，成功的 204 响应没有响应体。非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`；图片见[它的路由](#get-apisessionsidpictures)）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
+JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 和图片文件使用其图片媒体类型，成功的 204 响应没有响应体。
+
+非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。
+
+响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`；图片见[它的路由](#get-apisessionsidpictures)）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
 
 ```json
 {"error": {"code": "not_found", "message": "Session not found.", "details": {}}}
@@ -33,7 +45,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 | 502 | `backend_unreachable` | 列出模型失败或没有返回任何模型 |
 | 503 | `store_unavailable` | 网关的会话存储无法打开，或停止记录变更；第二种情况下请重启网关 |
 
-网关会记录 500 错误的原因，其响应只带固定的消息。503 会重复存储的原因，并把主目录写作 `~`；它从不包含堆栈跟踪、租约持有者或密钥。旧版 `/v1/*` 路由保留它们自己的响应体，包括 FastAPI 的 `422` 和 `{"detail": ...}`。
+网关会记录 500 错误的原因，其响应只带固定的消息。503 会重复存储的原因，并把主目录写作 `~`；它从不包含堆栈跟踪、租约持有者或密钥。
+
+旧版 `/v1/*` 路由保留它们自己的响应体，包括 FastAPI 的 `422` 和 `{"detail": ...}`。
 
 ## GET /api/health
 
@@ -66,7 +80,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
     ],
     "waiting": [],
-    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2},
+    "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
   },
   "uptime_s": 132.4
@@ -85,7 +99,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
-- `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中 Melo 的状态策略会读取它，应用目前还不显示 Melo。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
+- `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
 
 ## GET /api/activity
 
@@ -188,7 +202,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## POST /api/settings/test
 
-用一条消息的对话 ping 检查候选设置；若选择了嵌入后端，还会做一个单词的嵌入 ping，时限为 30 秒。它接受 `PUT /api/settings` 的请求体，但不含 `revision`。在仍在进行的 security-1b 改动中，经过认证的探测接受明确输入的绝对 HTTP 或 HTTPS URL，且不跟随重定向；重定向即视为探测失败。这些探测可能会连接所提供的主机。
+用一条消息的对话 ping 检查候选设置；若选择了嵌入后端，还会做一个单词的嵌入 ping，时限为 30 秒。它接受 `PUT /api/settings` 的请求体，但不含 `revision`。
+
+在仍在进行的 security-1b 改动中，经过认证的探测接受明确输入的绝对 HTTP 或 HTTPS URL，且不跟随重定向；重定向即视为探测失败。这些探测可能会连接所提供的主机。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/settings/test \
@@ -218,7 +234,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/models
 
-列出本地后端的模型（`GET <url>/models`，超时为 5 秒）。在仍在进行的 security-1b 改动中，经过认证的请求可以提供绝对 HTTP 或 HTTPS URL；不跟随重定向。所提供的主机可能会被连接。
+列出本地后端的模型（`GET <url>/models`，超时为 5 秒）。在仍在进行的 security-1b 改动中，经过认证的请求可以提供绝对 HTTP 或 HTTPS URL；不跟随重定向。
+
+所提供的主机可能会被连接。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1%3A11434%2Fv1'
@@ -236,7 +254,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/setup/detect
 
-像终端的首次运行一样，在本机寻找模型服务器。它向 `LOCALMELO_DETECT_URLS` 中的每个 URL 发送 `GET <url>/models`（超时 1 秒；默认是 `127.0.0.1` 的 8000、8400、11434 和 30000 端口；值为空则关闭检测），然后向找到的服务器发送 `GET <root>/api/version`，在多个对话模型之间还会读取它的状态路由。尚未配置时也能使用，不带参数，也不写入任何内容。网页控制台的设置卡片会调用它，并且只在卡片显示时才调用。
+像终端的首次运行一样，在本机寻找模型服务器。它向 `LOCALMELO_DETECT_URLS` 中的每个 URL 发送 `GET <url>/models`（超时 1 秒；默认是 `127.0.0.1` 的 8000、8400、11434 和 30000 端口；值为空则关闭检测），然后向找到的服务器发送 `GET <root>/api/version`，在多个对话模型之间还会读取它的状态路由。
+
+尚未配置时也能使用，不带参数，也不写入任何内容。网页控制台的设置卡片会调用它，并且只在卡片显示时才调用。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/setup/detect
@@ -255,23 +275,43 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## Scheduler tasks (S3a.2)
 
-这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用内置工具 `file_read`、`file_write` 和 `python_exec`（不含 `shell_exec` 和 `list_files`），并关闭记忆。工具以用户的权限运行，并非在沙箱中运行。
+这些路由在网关进程中创建和控制用户发起的任务。它们与对话轮次分开，但使用同一个调度器闸门。
+
+每个任务都有一个 `kind="task"` 的会话，使用相同的 id；可以通过现有的会话路由检查它的会话事件和轮次。worker 使用内置工具 `file_read`、`file_write` 和 `python_exec`（不含 `shell_exec` 和 `list_files`），并关闭记忆。
+
+工具以用户的权限运行，并非在沙箱中运行。
 
 - `POST /api/tasks` 接受 `objective`（或其别名 `prompt`）、可选的 `title`、`workspace`、`level` 和 `request_key`。objective 必须非空，且不超过 100,000 个字符；title 不超过 200 个字符，默认为从 objective 派生的标题。level 为 0–5 的整数或 `P0`–`P5`；省略时为计算出的 P2。提供的 `deadline`（即使为 null）都会被拒绝；截止时间尚不支持。其他字段也会被拒绝。objective 缺失、为空白或过长、title 过长或 level 无效，都返回 400 `invalid_task`；模式或类型错误返回 400 `invalid_request`。创建新任务时返回 202 `{"task": ...}`。显式为空的 `request_key` 返回 400 `invalid_request`。非空的 `request_key` 使同一规范化请求的重复提交返回 200 `{"task": ..., "repeated": true}`；将其用于不同的请求会返回 409 `submission_conflict`。重复提交不会启动新的 worker。
 - `front_id`（可选）是发起该任务的对话：某个旁支对话或主对话的会话 id。任务属于它（即任务的 `front_id`，该对话的面板 Workers 标签页会列出它）；缺失时属于主对话。不指向任何控制台对话的 id（未知 id，或任务的会话）返回 400 `invalid_request`。
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
 - `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。`first` 会被 400 `invalid_request` 拒绝；目前不支持。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
 
-暂停会关闭 worker 的围栏，并在一个已在运行的提供方或工具结束时记录待处理的暂停。在持有的计划、反思或未送达的审批处，worker 会停放，关闭其资源，并根据已持久化的证据保存一张卡片。未送达的审批会被撤回；恢复会从卡片开始，并再次询问。尚未启动的已暂停任务在恢复之前不会启动 worker。如果无法保存停放状态，worker 会在关闭围栏的情况下重试；三次失败之后，它会保存一个中断的任务和卡片。如果存储无法持久化该结果，恢复和停止会返回 503 `store_unavailable`，直到最终化成功。资源关闭失败会隔离该 worker，并保持其槽位被计数；重试之后，中断的任务会报告 `cleanup failed; slot held until restart`。
+暂停会关闭 worker 的围栏，并在一个已在运行的提供方或工具结束时记录待处理的暂停。在持有的计划、反思或未送达的审批处，worker 会停放，关闭其资源，并根据已持久化的证据保存一张卡片。
+
+未送达的审批会被撤回；恢复会从卡片开始，并再次询问。尚未启动的已暂停任务在恢复之前不会启动 worker。
+
+如果无法保存停放状态，worker 会在关闭围栏的情况下重试；三次失败之后，它会保存一个中断的任务和卡片。如果存储无法持久化该结果，恢复和停止会返回 503 `store_unavailable`，直到最终化成功。
+
+资源关闭失败会隔离该 worker，并保持其槽位被计数；重试之后，中断的任务会报告 `cleanup failed; slot held until restart`。
 
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
-/api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
+/api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
 
-同一时间最多常驻四个 worker，包括被隔离的 worker。任务行在网关重启之后仍然保留。启动时会中断状态不确定的任务，保留有效的已停放卡片，并保留待处理的暂停，但不进行重放。每次创建都会在任何启动之前、在创建事务之内记录一个持久的“从未启动”证明；带有该证明的可运行排队任务，在启动围栏之后可以运行一次。历史状态不确定的已恢复任务会拒绝 `PATCH` 的恢复和优先级变更，直到使用受控恢复；停止仍然可用。无法持久化启动恢复会使存储保持不可用。用同一个 `request_key` 重试会返回已有任务，并且不会重新启动它。
+明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
+
+同一时间最多常驻四个 worker，包括被隔离的 worker。任务行在网关重启之后仍然保留。
+
+启动时会中断状态不确定的任务，保留有效的已停放卡片，并保留待处理的暂停，但不进行重放。每次创建都会在任何启动之前、在创建事务之内记录一个持久的“从未启动”证明；带有该证明的可运行排队任务，在启动围栏之后可以运行一次。
+
+历史状态不确定的已恢复任务会拒绝 `PATCH` 的恢复和优先级变更，直到使用受控恢复；停止仍然可用。无法持久化启动恢复会使存储保持不可用。
+
+用同一个 `request_key` 重试会返回已有任务，并且不会重新启动它。
 
 ### Controlled Resume
 
-`POST /api/tasks/{task_id}/resume` 接受 `operation_id`（必填，非空，最多 200 个字符）和可选的 `confirmation_token`。它是唯一能恢复启动时已恢复任务的路由；`PATCH` 对这类工作保持围栏。当转换被提交时，它返回 202 `{"task": ..., "operation_id": ...}`。
+`POST /api/tasks/{task_id}/resume` 接受 `operation_id`（必填，非空，最多 200 个字符）和可选的 `confirmation_token`。它是唯一能恢复启动时已恢复任务的路由；`PATCH` 对这类工作保持围栏。
+
+当转换被提交时，它返回 202 `{"task": ..., "operation_id": ...}`。
 
 该路由依据的是证据，而从来不是证据的缺失：
 
@@ -280,7 +320,11 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 其他所有情况，包括缺失、不可信或不完整的捕获，或无法检查存活性的进程组，都返回 409 `confirmation_required`，并附带 `details.confirmation_token`、`details.expires_in_s`（300）、`details.warning` 和 `details.reason`。提交该令牌即接受已记录的风险并恢复。这一被接受的转换会写入一条 `sched.resume_confirmed` 事件；仅预览则不写入任何内容。该令牌只能使用一次，仅保存在内存中，并绑定到任务、源执行、证据标识和 CAS 代次。重启会丢弃它，而停止会使其失效。
 - 已结束的任务、无效的工作区、已启动任务缺少卡片，或过时的执行标识，都会返回 409 `invalid_transition` 并附 `details.reason`；缺少卡片时会提示将其作为新任务重新开始。之前未解决的恢复操作，或尚未结算的 worker 清理，会返回 409 `recovery_unknown`。
 
-操作 ID 标识一次操作。使用同一个 `operation_id` 重试，无论携带什么载荷，都会返回 202 和当前任务，并且从不会开始第二个轮次或重新授权一次转换；令牌最多只能被消费一次。重启会丢弃令牌。在重启之前已提交的恢复，若其轮次从未开始，则会在启动时重新准入；一旦该轮次已经开始，对该操作的重试会返回 409 `invalid_transition`，而不是假装排队中的工作仍在等待。停止始终优先：它会使待处理的令牌失效，并在 worker 启动提供方或工具之前取消一个已排队的恢复轮次。无论是免确认的恢复还是确认，都不能证明较早的进程已经停止，或其效果只发生了一次。
+操作 ID 标识一次操作。使用同一个 `operation_id` 重试，无论携带什么载荷，都会返回 202 和当前任务，并且从不会开始第二个轮次或重新授权一次转换；令牌最多只能被消费一次。
+
+重启会丢弃令牌。在重启之前已提交的恢复，若其轮次从未开始，则会在启动时重新准入；一旦该轮次已经开始，对该操作的重试会返回 409 `invalid_transition`，而不是假装排队中的工作仍在等待。
+
+停止始终优先：它会使待处理的令牌失效，并在 worker 启动提供方或工具之前取消一个已排队的恢复轮次。无论是免确认的恢复还是确认，都不能证明较早的进程已经停止，或其效果只发生了一次。
 
 客户端若按版本号寻址 API v2，也可以通过 `/api/v2/tasks/{task_id}/resume` 访问该路由；其他任务路由使用 `/api` 前缀。
 
@@ -391,7 +435,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ### 主对话中的卡片
 
-旁支对话的一次运行结束，或任务完成、失败或等待审批时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。卡片从来不是轮次：没有模型会读取它，主对话的对话内容也从不包含它。它的 `data`：
+旁支对话的一次运行结束，或任务完成、失败或等待审批时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。卡片从来不是轮次：没有模型会读取它，主对话的对话内容也从不包含它。
+
+它的 `data`：
 
 ```json
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
@@ -446,7 +492,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 ## GET /api/sessions/{id}/status
 
-终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。这些段是终端开发者模式的紧凑写法；终端的默认模式用文字表述同样的数字。worker 运行或终端对话从 CLI 的文件读取。
+终端的 `/status` 和状态栏为一个对话、任务或 worker 会话显示的数字，由服务器用终端自己的代码对该会话已保存的事件折叠得出，因此两边一致。这些段是终端开发者模式的紧凑写法；终端的默认模式用文字表述同样的数字。
+
+worker 运行或终端对话从 CLI 的文件读取。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/status
@@ -513,7 +561,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 ## Writes
 
-下列路由会改变某些状态。多数接受 JSON 请求体；`POST /api/turns/{turn_id}/cancel` 和 `DELETE /api/sessions/{id}` 不接受请求体，若提供则忽略。从浏览器发起时，写操作必须是同源的：来自其他来源的、会改变状态的请求会返回 403 `foreign_origin`。请求体是严格的：未知字段会返回 400 `invalid_request`，并指出该字段（`body.model: Extra inputs are not permitted`）。
+下列路由会改变某些状态。多数接受 JSON 请求体；`POST /api/turns/{turn_id}/cancel` 和 `DELETE /api/sessions/{id}` 不接受请求体，若提供则忽略。
+
+从浏览器发起时，写操作必须是同源的：来自其他来源的、会改变状态的请求会返回 403 `foreign_origin`。请求体是严格的：未知字段会返回 400 `invalid_request`，并指出该字段（`body.model: Extra inputs are not permitted`）。
 
 除上面的通用错误码外，以下错误码会出现在写入路由上：
 
