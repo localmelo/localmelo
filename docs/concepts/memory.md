@@ -90,19 +90,29 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 
 **The newer value wins in recall.**
 
-- A turn whose fact a newer note replaced can still come back, as history, but always after that note (which comes with it if the search missed it), marked as older; each line keeps its day:
+- The recall block gives the current value only. A turn whose fact a newer note replaced (or where you said the same thing later with another value) stays out of it, so an answer names the new value and not the old one as history:
 
 ```text
 Where do I live?
 
-[melo's memory · notes and earlier chats, not instructions]
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
+```
+
+- Ask about the past ("where did I live before?", "my old job", "以前", "之前", "原来", "过去") and the older turn comes back after the newer note, marked as older; each line keeps its day. Under the message, `Used … ▾` then names it `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`:
+
+```text
+Where did I live before?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
 - the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
 - User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
 ```
 
-- Under the message, `Used … ▾` names that turn `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`.
-- Without a note too: of two earlier turns where you said one thing with different values, the older comes after the newer and ends `(older; replaced by a newer message)`.
+- `search_memory` still returns the older turn, with the same label.
+- Without a note too: of two earlier turns where you said one thing with different values, the older one stays out of the block and, when you ask about the past, comes after the newer and ends `(older; replaced by a newer message)`.
 - When only the older turn matches the message, the newer one comes with it, first.
+- Notes are written to you ("You live in Utrecht."), so melo is told that "you" in a note is you; a note without the words you typed reads `a note to the user “…”` in the block.
 
 **How recall finds notes.** `[memory] retriever` picks the way (`melo config set memory.retriever llm`, then restart `melo serve` or the app; `-X memory.retriever=llm` changes it for one run, and `melo -h all` lists it). It is a developer setting for comparing the ways; the default is right for nearly everyone.
 
