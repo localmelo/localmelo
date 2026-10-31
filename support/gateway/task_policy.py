@@ -102,6 +102,8 @@ class TaskSpec:
     ``user_words`` is what the person typed when another model wrote the
     objective (the main chat's ``task_create``); only trusted code sets it,
     and a step review reads it as the person's words.
+    ``context_pack`` is what the owner chat's notes said about the person and
+    the folder when the task was made; only trusted code sets it.
     """
 
     title: str
@@ -111,6 +113,7 @@ class TaskSpec:
     level_source: str = "computed"
     reason: str = ""
     user_words: str = ""
+    context_pack: str = ""
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
@@ -169,7 +172,7 @@ class TaskSpec:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """The JSON object ``tasks.spec`` holds (``user_words`` only when set)."""
+        """The JSON object ``tasks.spec`` holds (``user_words`` and ``context_pack`` only when set)."""
         out: dict[str, Any] = {
             "title": self.title,
             "objective": self.objective,
@@ -180,6 +183,8 @@ class TaskSpec:
         }
         if self.user_words:
             out["user_words"] = self.user_words
+        if self.context_pack:
+            out["context_pack"] = self.context_pack
         return out
 
 
@@ -232,6 +237,11 @@ def check_origin(origin: object) -> Origin:
             f"origin must be one of {', '.join(get_args(Origin))}, got {origin!r}"
         )
     return cast(Origin, origin)
+
+
+def is_persons_task(origin: str) -> bool:
+    """Whether the person made the task: asked for it, or saved the chore that starts it."""
+    return check_origin(origin) in _PRINCIPAL_ORIGINS
 
 
 def _configured_workspace(cfg: object) -> str:
@@ -453,6 +463,7 @@ __all__ = [
     "check_origin",
     "configured_root",
     "folder_problem",
+    "is_persons_task",
     "validate_task_workspace",
     "worker_tool_allowlist",
 ]
