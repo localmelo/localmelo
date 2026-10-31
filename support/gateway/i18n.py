@@ -129,6 +129,29 @@ def current() -> str:
     return _current.get()
 
 
+def said(key: str, /, **params: Any) -> dict[str, Any]:
+    """Words to store with a record (a card, an echo) so each reader reads them in their language.
+
+    ``{"key": key, "params": params}``; a parameter may itself be a :func:`said`.
+    The record keeps its English ``line`` too, for every client that reads only that.
+    """
+    return {"key": key, "params": params}
+
+
+def said_text(words: Mapping[str, Any], language: str | None = None) -> str:
+    """The words of a :func:`said` in *language* (the request's when omitted)."""
+    params = words.get("params")
+    filled = {
+        name: (
+            said_text(value, language)
+            if isinstance(value, Mapping) and "key" in value
+            else value
+        )
+        for name, value in (params.items() if isinstance(params, Mapping) else ())
+    }
+    return t_in(language or _current.get(), str(words.get("key")), **filled)
+
+
 @contextmanager
 def using(language: str) -> Iterator[None]:
     """Write in *language* inside the block, as a stored record that must read the same to every reader does."""
@@ -213,6 +236,8 @@ __all__ = [
     "page_language",
     "pick_language",
     "request_language",
+    "said",
+    "said_text",
     "t",
     "t_in",
     "using",

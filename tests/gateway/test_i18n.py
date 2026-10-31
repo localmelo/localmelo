@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -42,19 +43,30 @@ _PARAM = re.compile(r"\{(\w+)\}")
 CONVERTED_JS = (
     "drawer.mjs",
     "folder.mjs",
+    "levels.mjs",
+    "main-chat.mjs",
     "memory-tab.mjs",
     "memory.mjs",
+    "panel.mjs",
+    "pictures.mjs",
     "running.mjs",
+    "scheduled-tab.mjs",
+    "settings.mjs",
     "setup-card.mjs",
     "status-row.mjs",
     "task-live.mjs",
+    "tasks.mjs",
     "turns.mjs",
     "worker-history.mjs",
+    "workspace.js",
 )
 CONVERTED_PY = (
     "activity.py",
     "cards.py",
+    "chores.py",
+    "front.py",
     "registry.py",
+    "routes_chores.py",
     "routes_details.py",
     "routes_memory.py",
     "routes_page.py",
@@ -75,12 +87,34 @@ JS_ENGLISH = {
     "cannot reach the model server at",
     "melo: run ended with status X: X",
     "noopener noreferrer",
+    # A failed turn's details, copied into a bug report as the terminal prints them.
+    "Xrun X",
+    "Tool calls: X",
+    # Class lists of one word each.
+    "msg user",
+    "msg assistant",
+    "blinks face",
+    # How the gateway answers an approval, and how a card stored before it kept its words began.
+    "allowed once",
+    "allowed for this chat",
+    "allowed automatically",
+    "no answer",
+    "Allowed",
+    "Denied",
+    "Waiting for your approval",
 }
+# Names read the same in every language: a literal of names alone is not English.
+NAMES = {"localmelo", "melo", "Melo", "Python"}
 # Units beside a number stay as the terminal writes them: `9s`, `2-3 min`, `3.4k`.
 UNITS = {"s", "m", "h", "k", "M", "min", "KB", "MB", "GB", "TB"}
 # Python: API validation messages for clients that send a malformed request; the page
 # never sends one.
 PY_ENGLISH = {
+    "f'{do} does not apply to this line.'",
+    "level: P0 to P5",
+    "level: P1 to P4",
+    "front_id must name a console chat",
+    "Choose what to change.",
     "Worker filters require kind=worker or kind=terminal.",
     "as_task: tasks start from the main chat",
     "reason: only a denial takes a reason",
@@ -108,7 +142,9 @@ def test_both_catalogs_have_every_key_with_the_same_parameters() -> None:
     assert sorted(en) == sorted(zh)
     for key in en:
         assert params(en[key]) == params(zh[key]), key
-        assert all(text.strip() for text in forms(zh[key])), key
+        # Chinese joins its sentences with nothing; every other entry has words.
+        if key != "common.sentenceGap":
+            assert all(text.strip() for text in forms(zh[key])), key
 
 
 def test_a_count_has_one_and_other_in_english_and_one_form_in_chinese() -> None:
@@ -186,7 +222,10 @@ def test_the_page_guess_takes_the_setting_then_the_cookie_then_the_browser() -> 
 # ── Every key the code names is in the catalog, and every key is named ──
 
 _JS_KEY = re.compile(r"""\bt\(\s*(["'`])([A-Za-z0-9_.${}]+?)\1""")
-_PY_KEY = re.compile(r"""\b(?:t\(|t_in\("[\w-]+",\s*)f?"([A-Za-z0-9_.{}]+)\"""")
+_PY_KEY = re.compile(r"""\b(?:t\(|said\(|t_in\("[\w-]+",\s*)f?"([A-Za-z0-9_.{}]+)\"""")
+# A key built in a template or an f-string: the part before the first `${` or `{` is its stem.
+_JS_STEM = re.compile(r"`([a-z][A-Za-z0-9_]*\.[A-Za-z0-9_.]*)\$\{")
+_PY_STEM = re.compile(r"""\bf"([a-z][A-Za-z]*(?:\.[A-Za-z]+)*\.)\{\w+\}[A-Za-z]*\"""")
 _QUOTED_KEY = re.compile(r"""["']([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)["']""")
 _WORDS_KEY = re.compile(r"""_words\(\s*f?"([A-Za-z0-9_.{}]+)\"""")
 _HTML_KEY = re.compile(r"""data-i18n(?:-[a-z-]+)?="([^"]+)\"""")
@@ -199,12 +238,15 @@ _SWIFT_PLURAL = re.compile(
 def named_keys() -> tuple[set[str], set[str], set[str]]:
     """The keys the code names, the stems of the keys it builds (``turns.status.``), and every key-like string."""
     found: set[str] = set()
+    templates: set[str] = set()
     for path in [*STATIC.glob("*.mjs"), STATIC / "workspace.js"]:
         found |= {key for _, key in _JS_KEY.findall(path.read_text("utf-8"))}
+        templates |= set(_JS_STEM.findall(path.read_text("utf-8")))
     found |= set(_HTML_KEY.findall((STATIC / "index.html").read_text("utf-8")))
     for path in [*CONSOLE.glob("*.py"), *ROOT.glob("support/gateway/*.py")]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))
+        templates |= set(_PY_STEM.findall(text))
     for path in APP.glob("*.swift"):
         text = path.read_text("utf-8")
         found |= {key for key, _ in _SWIFT_T.findall(text)}
@@ -213,7 +255,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
     for path in [*STATIC.glob("*.mjs"), STATIC / "workspace.js", *CONSOLE.glob("*.py")]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
-    stems = {re.split(r"\$\{|\{", key)[0] for key in built}
+    stems = {re.split(r"\$\{|\{", key)[0] for key in built} | templates
     return found - built, stems, quoted
 
 
@@ -326,7 +368,10 @@ def english(text: str) -> bool:
         r"[a-z][\w-]*(\.[\w-]*)+", words
     ):
         return False  # a path, a selector, markup or a catalog key
-    tokens = words.split()
+    tokens = [token for token in words.split() if token not in NAMES]
+    if not tokens:
+        return False
+    words = " ".join(tokens)
     if all(re.fullmatch(r"[a-z0-9_-]+", token) for token in tokens) and any(
         "-" in token for token in tokens
     ):
@@ -398,3 +443,69 @@ def test_the_app_shows_no_english_outside_the_catalog() -> None:
                 ):
                     left.append(f"{path.name}: {text}")
     assert left == []
+
+
+def test_the_level_meanings_in_english_are_the_gateway_s() -> None:
+    from localmelo.support.gateway.front_rules import LEVEL_MEANINGS
+
+    english = catalog("en")
+    assert [english[f"levels.p{n}"] for n in range(6)] == list(LEVEL_MEANINGS)
+
+
+# ── The page's markup ──
+
+# Words that read the same in every language: names, codes and each language's own name.
+HTML_KEPT = {"localmelo", "Melo", "LOCAL", "P2", "English", "简体中文"}
+
+
+class _PageWords(HTMLParser):
+    """The words of the page that a person reads, without a catalog key."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, dict[str, str | None]]] = []
+        self.left: list[str] = []
+
+    def _attributes(self, attrs: dict[str, str | None]) -> None:
+        for name in ("aria-label", "placeholder", "title", "data-prompt"):
+            value = attrs.get(name) or ""
+            words = re.search(r"[A-Za-z]{2}", value) and value not in HTML_KEPT
+            # A path or an address in a placeholder is an example, the same in every language.
+            if (
+                words
+                and f"data-i18n-{name}" not in attrs
+                and not re.match(r"(~|https?:)/", value)
+            ):
+                self.left.append(f"{name}={value}")
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        found = dict(attrs)
+        self._attributes(found)
+        if tag not in ("img", "input", "meta", "link", "br"):
+            self.stack.append((tag, found))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._attributes(dict(attrs))
+
+    def handle_endtag(self, tag: str) -> None:
+        while self.stack and self.stack.pop()[0] != tag:
+            pass
+
+    def handle_data(self, data: str) -> None:
+        text = " ".join(data.split())
+        if not re.search(r"[A-Za-z]{2}", text) or text in HTML_KEPT:
+            return
+        tags = {tag for tag, _ in self.stack}
+        keyed = any("data-i18n" in attrs for _, attrs in self.stack)
+        # Code, a key and a setting's name stay as they are written.
+        code = tags & {"title", "script", "style", "code", "kbd"} or any(
+            "st-key" in (attrs.get("class") or "") for _, attrs in self.stack
+        )
+        if not keyed and not code:
+            self.left.append(text)
+
+
+def test_every_word_of_the_page_has_a_key() -> None:
+    page = _PageWords()
+    page.feed((STATIC / "index.html").read_text("utf-8"))
+    assert page.left == []

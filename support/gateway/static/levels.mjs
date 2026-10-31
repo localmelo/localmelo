@@ -4,16 +4,15 @@
  * One table for every place the console names a level (the panel's menu, the main chat's chips and
  * lists, the Scheduled tab, the task page, the chat's level menu), so a translation changes it once.
  * The gateway keeps the same table in `front_rules.py`; its words (Now, Today, …) are what a person may
- * type and what the API's `level_word` still answers, never what the console shows.
+ * type and what the API's `level_word` still answers, never what the console shows. The meanings are the
+ * catalog's `levels.p0` … `levels.p5`, in the page's language; the codes are never translated.
  */
-export const LEVELS = [
-  {code: 'P0', meaning: 'runs first; others wait'},
-  {code: 'P1', meaning: 'today'},
-  {code: 'P2', meaning: 'normal'},
-  {code: 'P3', meaning: 'when there is time'},
-  {code: 'P4', meaning: 'only when the computer is idle'},
-  {code: 'P5', meaning: 'on hold until you start it'},
-];
+import {t} from './i18n.mjs';
+
+export const LEVELS = [0, 1, 2, 3, 4, 5].map((n) => ({
+  code: `P${n}`,
+  get meaning() { return t(`levels.p${n}`); },
+}));
 
 const NORMAL = 2;
 

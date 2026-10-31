@@ -22,7 +22,7 @@
       </div>
     </main>
     <div class="app" id="app" hidden inert>
-      <aside class="sidebar" id="sidebar" aria-label="Chat navigation">
+      <aside class="sidebar" id="sidebar" aria-label="Chat navigation" data-i18n-aria-label="html.chatNavigation">
         <div class="brand">
           <img
             class="brand-icon"
@@ -32,33 +32,33 @@
             alt=""
           /><strong>localmelo</strong><span class="local-badge" id="local-badge" hidden>LOCAL</span>
         </div>
-        <nav class="worker-navigation" id="section-nav" aria-label="History sections">
-          <a href="#/workers" id="workers-link">Workers</a>
-          <a href="#/tasks" id="tasks-link">Tasks</a>
+        <nav class="worker-navigation" id="section-nav" aria-label="History sections" data-i18n-aria-label="html.historySections">
+          <a href="#/workers" id="workers-link" data-i18n="html.workersLink">Workers</a>
+          <a href="#/tasks" id="tasks-link" data-i18n="html.tasksLink">Tasks</a>
         </nav>
         <div class="main-chat-slot" id="main-chat-row" hidden></div>
         <button class="nav-button new-chat" id="new-btn">
-          <span aria-hidden="true">＋</span> <span class="nav-label" id="new-label">New chat</span> <kbd>⌘ K</kbd>
+          <span aria-hidden="true">＋</span> <span class="nav-label" id="new-label" data-i18n="html.newLabel">New chat</span> <kbd>⌘ K</kbd>
         </button>
         <label class="search"
           ><span aria-hidden="true">⌕</span
-          ><input id="search" type="search" placeholder="Search chats" aria-label="Search chats"
+          ><input id="search" type="search" placeholder="Search chats" data-i18n-placeholder="html.searchChats" aria-label="Search chats" data-i18n-aria-label="html.searchChats"
         /></label>
-        <div class="list-heading"><span id="list-label">Chats</span> <span id="session-count">0</span></div>
-        <nav class="session-list" id="session-list" aria-label="Chats"></nav>
+        <div class="list-heading"><span id="list-label" data-i18n="html.listLabel">Chats</span> <span id="session-count">0</span></div>
+        <nav class="session-list" id="session-list" aria-label="Chats" data-i18n-aria-label="html.chats"></nav>
         <div class="sidebar-bottom">
           <button class="nav-button" id="settings-btn">
-            <span aria-hidden="true">⚙</span> <span id="settings-label">Settings</span>
+            <span aria-hidden="true">⚙</span> <span id="settings-label" data-i18n="html.settingsLabel">Settings</span>
           </button>
           <div class="local-caption">
-            <span class="status-dot"></span> Your models. Your workspace.
+            <span class="status-dot"></span> <span data-i18n="html.yourModels">Your models. Your workspace.</span>
           </div>
         </div>
       </aside>
       <button
         id="sidebar-backdrop"
         class="sidebar-backdrop"
-        aria-label="Close chat navigation"
+        aria-label="Close chat navigation" data-i18n-aria-label="html.closeChatNavigation"
         hidden
       ></button>
       <main class="chat">
@@ -66,7 +66,7 @@
           <button
             class="icon-button"
             id="sidebar-toggle"
-            aria-label="Toggle chat navigation"
+            aria-label="Toggle chat navigation" data-i18n-aria-label="html.toggleChatNavigation"
             aria-expanded="false"
             aria-controls="sidebar"
           >
@@ -74,17 +74,16 @@
           </button>
           <div class="header-titles">
             <div class="header-trail">
-              <button type="button" class="header-parent" id="header-parent" hidden>Main chat</button
-              ><strong id="header-title">New chat</strong>
+              <button type="button" class="header-parent" id="header-parent" hidden data-i18n="html.headerParent">Main chat</button><strong id="header-title" data-i18n="html.headerTitle">New chat</strong>
             </div>
-            <span id="header-model">Connect your model to get started</span>
+            <span id="header-model" data-i18n="html.headerModel">Connect your model to get started</span>
           </div>
           <span
             class="machine-chip"
             id="machine-state"
             role="status"
             aria-live="polite"
-            aria-label="Machine status"
+            aria-label="Machine status" data-i18n-aria-label="html.machineStatus"
             hidden
           ></span>
           <div class="running-picker" id="running-root" hidden>
@@ -96,7 +95,7 @@
               aria-expanded="false"
               aria-controls="running-menu"
             ></button>
-            <div class="running-menu" id="running-menu" aria-label="Running now" hidden></div>
+            <div class="running-menu" id="running-menu" aria-label="Running now" data-i18n-aria-label="html.runningNow" hidden></div>
           </div>
           <div class="level-picker">
             <button
@@ -105,7 +104,7 @@
               type="button"
               aria-haspopup="menu"
               aria-expanded="false"
-              aria-label="Chat level"
+              aria-label="Chat level" data-i18n-aria-label="html.chatLevel"
             >
               P2
             </button>
@@ -113,32 +112,32 @@
               class="level-menu"
               id="level-menu"
               role="menu"
-              aria-label="Chat level"
+              aria-label="Chat level" data-i18n-aria-label="html.chatLevel"
               hidden
             ></div>
           </div>
-          <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled>Details</button>
+          <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled data-i18n="html.detailsTrigger">Details</button>
           <button type="button" class="panel-chip" id="panel-chip" aria-controls="panel" aria-expanded="false" hidden></button>
           <button class="connection-chip" id="connection-btn">
             <span class="status-dot" id="connection-dot"></span
-            ><span id="connection-label">Set up model</span>
+            ><span id="connection-label" data-i18n="html.connectionLabel">Set up model</span>
           </button>
         </header>
         <div class="banner" id="store-banner" role="status" hidden></div>
         <div class="banner" id="model-banner" role="status" hidden></div>
         <div class="banner" id="lock-banner" role="status" hidden></div>
         <div class="banner" id="offline-banner" role="status" hidden>
-          <span>Could not reach the gateway. Check that the gateway is running.</span>
-          <button type="button" class="link-button" id="offline-retry">Try again</button>
+          <span data-i18n="html.couldNotReachTheGateway">Could not reach the gateway. Check that the gateway is running.</span>
+          <button type="button" class="link-button" id="offline-retry" data-i18n="html.offlineRetry">Try again</button>
         </div>
         <div class="banner" id="stream-banner" role="status" hidden>
           <span id="stream-banner-text"></span>
-          <button type="button" class="link-button" id="reconnect-btn">Reconnect now</button>
+          <button type="button" class="link-button" id="reconnect-btn" data-i18n="html.reconnectBtn">Reconnect now</button>
         </div>
         <div class="notice" id="notice" role="status" hidden></div>
-        <section id="worker-panel" class="worker-panel" aria-label="Worker history" hidden></section>
-        <section id="task-panel" class="worker-panel task-panel" aria-label="Tasks" hidden></section>
-        <section class="scroll" id="scroll" aria-label="Conversation">
+        <section id="worker-panel" class="worker-panel" aria-label="Worker history" data-i18n-aria-label="html.workerHistory" hidden></section>
+        <section id="task-panel" class="worker-panel task-panel" aria-label="Tasks" data-i18n-aria-label="html.tasks" hidden></section>
+        <section class="scroll" id="scroll" aria-label="Conversation" data-i18n-aria-label="html.conversation">
           <div class="welcome" id="welcome">
             <span class="blinks portrait"
               ><img
@@ -148,285 +147,292 @@
                 height="140"
                 alt="Melo, the localmelo Akita mascot"
             /></span>
-            <h1>What would you like to work on?</h1>
-            <p id="welcome-description">
+            <h1 data-i18n="html.whatWouldYouLikeTo">What would you like to work on?</h1>
+            <p id="welcome-description" data-i18n="html.welcomeDescription">
               A quiet space to think, build, and explore with your own model.
             </p>
-            <p class="welcome-link" id="welcome-workers" hidden><a href="#/workers">See what worker runs did</a></p>
+            <p class="welcome-link" id="welcome-workers" hidden><a href="#/workers" data-i18n="html.seeWhatWorkerRunsDid">See what worker runs did</a></p>
             <section class="setup-card" id="setup-card" aria-labelledby="setup-title" aria-live="polite" tabindex="-1" hidden></section>
           </div>
           <div
             id="messages"
             role="log"
-            aria-label="Messages"
+            aria-label="Messages" data-i18n-aria-label="html.messages"
             aria-live="polite"
             aria-relevant="additions"
           ></div>
         </section>
         <div class="composer-area">
-          <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" hidden></div>
+          <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" data-i18n-aria-label="html.sessionStatus" hidden></div>
           <div id="approval-bar" class="approval-bar" role="status" hidden>
             <span class="approval-note"
-              ><img src="/assets/akita/face-waiting.png" width="24" height="24" alt="" /><span>melo is waiting for your answer</span></span
+              ><img src="/assets/akita/face-waiting.png" width="24" height="24" alt="" /><span data-i18n="html.meloIsWaitingForYour">melo is waiting for your answer</span></span
             >
-            <button type="button" id="approval-go" class="outline-button">Review</button>
+            <button type="button" id="approval-go" class="outline-button" data-i18n="html.approvalGo">Review</button>
           </div>
           <form class="composer" id="composer">
-            <label class="sr-only" for="input">Message</label>
+            <label class="sr-only" for="input" data-i18n="html.message">Message</label>
             <textarea
               id="input"
-              placeholder="Ask anything, or describe a task…"
+              placeholder="Ask anything, or describe a task…" data-i18n-placeholder="html.askAnythingOrDescribeA"
               rows="2"
               aria-describedby="composer-hint"
             ></textarea>
             <div class="composer-toolbar">
               <div class="folder-picker" id="folder-picker" hidden>
                 <button type="button" class="folder-chip" id="folder-btn" aria-expanded="false" aria-controls="folder-menu" aria-describedby="folder-full">
-                  <span id="folder-text">In folder</span><span aria-hidden="true">⌄</span>
+                  <span id="folder-text" data-i18n="html.folderText">In folder</span><span aria-hidden="true">⌄</span>
                 </button>
                 <span class="sr-only" id="folder-full"></span>
                 <div class="folder-menu" id="folder-menu" role="group" aria-labelledby="folder-menu-title" hidden>
-                  <p class="folder-menu-title" id="folder-menu-title">Where melo reads and writes files</p>
+                  <p class="folder-menu-title" id="folder-menu-title" data-i18n="html.folderMenuTitle">Where melo reads and writes files</p>
                   <div id="folder-list"></div>
-                  <button type="button" class="folder-action" id="folder-choose">Choose a folder…</button>
+                  <button type="button" class="folder-action" id="folder-choose" data-i18n="html.folderChoose">Choose a folder…</button>
                   <div class="folder-path" id="folder-path-row" hidden>
-                    <label class="sr-only" for="folder-path">Folder path</label>
+                    <label class="sr-only" for="folder-path" data-i18n="html.folderPath">Folder path</label>
                     <input id="folder-path" placeholder="~/Documents/notes" spellcheck="false" autocomplete="off" aria-describedby="folder-path-hint" />
-                    <button type="button" class="secondary-button" id="folder-use">Use folder</button>
-                    <p class="field-hint" id="folder-path-hint" role="status">Use an absolute path or a path beginning with ~/.</p>
+                    <button type="button" class="secondary-button" id="folder-use" data-i18n="html.folderUse">Use folder</button>
+                    <p class="field-hint" id="folder-path-hint" role="status" data-i18n="html.folderPathHint">Use an absolute path or a path beginning with ~/.</p>
                   </div>
-                  <button type="button" class="folder-action" id="folder-finder" hidden>Show in Finder</button>
+                  <button type="button" class="folder-action" id="folder-finder" hidden data-i18n="html.folderFinder">Show in Finder</button>
                 </div>
               </div>
               <button type="button" id="model-btn" class="model-button">
-                Choose a model <span aria-hidden="true">⌄</span></button
+                <span data-i18n="html.chooseModel">Choose a model</span> <span aria-hidden="true">⌄</span></button
               ><span class="composer-spacer"></span><span id="run-status" role="status"></span
               ><button
                 type="button"
                 class="stop-button"
                 id="stop-btn"
                 hidden
-                aria-label="Stop response"
+                aria-label="Stop response" data-i18n-aria-label="html.stopResponse"
               >
-                ■ <span>Stop</span></button
-              ><button type="button" class="task-button" id="task-btn" hidden>
-                Run as a task</button
-              ><button
+                ■ <span data-i18n="html.stop">Stop</span></button
+              ><button type="button" class="task-button" id="task-btn" hidden data-i18n="html.taskBtn">
+                Run as a task</button><button
                 type="submit"
                 class="send-button"
                 id="send-btn"
                 disabled
-                aria-label="Send message"
+                aria-label="Send message" data-i18n-aria-label="html.sendMessage"
               >
                 ↑
               </button>
             </div>
           </form>
-          <div class="starters" id="starters" role="group" aria-label="Ways to start" hidden>
-            <button type="button" data-prompt="Summarize the files in this folder. Tell me what is here and what each part is for.">Summarize the files in this folder</button>
-            <button type="button" data-prompt="Plan a small project with me. Ask me about the goal first.">Plan a small project with me</button>
-            <button type="button" data-prompt="Explain a piece of code. Ask me to paste the code first.">Explain a piece of code</button>
+          <div class="starters" id="starters" role="group" aria-label="Ways to start" data-i18n-aria-label="html.waysToStart" hidden>
+            <button type="button" data-prompt="Summarize the files in this folder. Tell me what is here and what each part is for." data-i18n-data-prompt="html.starter.summarize" data-i18n="html.summarizeTheFilesInThis">Summarize the files in this folder</button>
+            <button type="button" data-prompt="Plan a small project with me. Ask me about the goal first." data-i18n-data-prompt="html.starter.plan" data-i18n="html.planASmallProjectWith">Plan a small project with me</button>
+            <button type="button" data-prompt="Explain a piece of code. Ask me to paste the code first." data-i18n-data-prompt="html.starter.explain" data-i18n="html.explainAPieceOfCode">Explain a piece of code</button>
           </div>
           <p class="composer-hint" id="composer-hint">
-            Enter to send · Shift + Enter for a new line
-            <span id="composer-note">Runs through your configured backend</span>
+            <span data-i18n="html.enterToSend">Enter to send · Shift + Enter for a new line</span>
+            <span id="composer-note" data-i18n="html.composerNote">Runs through your configured backend</span>
           </p>
         </div>
       </main>
       <aside class="panel" id="panel" aria-label="Melo">
         <section class="details-drawer" id="details-drawer" hidden></section>
       </aside>
-      <button type="button" class="panel-backdrop" id="panel-backdrop" tabindex="-1" aria-label="Close activity" hidden></button>
+      <button type="button" class="panel-backdrop" id="panel-backdrop" tabindex="-1" aria-label="Close activity" data-i18n-aria-label="html.closeActivity" hidden></button>
     </div>
-    <dialog id="picture-box" class="picture-box" aria-label="Picture"></dialog>
+    <dialog id="picture-box" class="picture-box" aria-label="Picture" data-i18n-aria-label="html.picture"></dialog>
     <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
       <div class="st" id="settings-frame" data-view="section">
         <nav class="st-nav" aria-labelledby="settings-title">
-          <h2 id="settings-title">Settings</h2>
+          <h2 id="settings-title" data-i18n="html.settingsTitle">Settings</h2>
           <div class="st-tabs" id="settings-tabs" role="tablist" aria-orientation="vertical" aria-labelledby="settings-title">
-            <button type="button" class="st-tab" role="tab" id="settings-tab-model" aria-controls="settings-panel-model" aria-selected="true"><span class="st-glyph" aria-hidden="true">◉</span><span class="st-tab-text">Model server<span class="st-tab-note" id="settings-note-model"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
-            <button type="button" class="st-tab" role="tab" id="settings-tab-memory" aria-controls="settings-panel-memory" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◎</span><span class="st-tab-text">Memory<span class="st-tab-note" id="settings-note-memory"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
-            <button type="button" class="st-tab" role="tab" id="settings-tab-chats" aria-controls="settings-panel-chats" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">▤</span><span class="st-tab-text">Chats and folders<span class="st-tab-note" id="settings-note-chats"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
-            <button type="button" class="st-tab" role="tab" id="settings-tab-scheduled" aria-controls="settings-panel-scheduled" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◷</span><span class="st-tab-text">Scheduled<span class="st-tab-note" id="settings-note-scheduled"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
-            <button type="button" class="st-tab" role="tab" id="settings-tab-appearance" aria-controls="settings-panel-appearance" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◐</span><span class="st-tab-text">Appearance<span class="st-tab-note" id="settings-note-appearance"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
-            <button type="button" class="st-tab" role="tab" id="settings-tab-developer" aria-controls="settings-panel-developer" aria-selected="false" tabindex="-1" hidden><span class="st-glyph" aria-hidden="true">⌘</span><span class="st-tab-text">Developer<span class="st-tab-note" id="settings-note-developer"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-model" aria-controls="settings-panel-model" aria-selected="true"><span class="st-glyph" aria-hidden="true">◉</span><span class="st-tab-text"><span data-i18n="settings.section.model">Model server</span><span class="st-tab-note" id="settings-note-model"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-memory" aria-controls="settings-panel-memory" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◎</span><span class="st-tab-text"><span data-i18n="settings.section.memory">Memory</span><span class="st-tab-note" id="settings-note-memory"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-chats" aria-controls="settings-panel-chats" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">▤</span><span class="st-tab-text"><span data-i18n="settings.section.chats">Chats and folders</span><span class="st-tab-note" id="settings-note-chats"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-scheduled" aria-controls="settings-panel-scheduled" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◷</span><span class="st-tab-text"><span data-i18n="settings.section.scheduled">Scheduled</span><span class="st-tab-note" id="settings-note-scheduled"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-appearance" aria-controls="settings-panel-appearance" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◐</span><span class="st-tab-text"><span data-i18n="settings.section.appearance">Appearance</span><span class="st-tab-note" id="settings-note-appearance"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-developer" aria-controls="settings-panel-developer" aria-selected="false" tabindex="-1" hidden><span class="st-glyph" aria-hidden="true">⌘</span><span class="st-tab-text"><span data-i18n="settings.section.developer">Developer</span><span class="st-tab-note" id="settings-note-developer"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
           </div>
         </nav>
-        <button type="button" class="icon-button st-close" id="close-settings" aria-label="Close settings">×</button>
+        <button type="button" class="icon-button st-close" id="close-settings" aria-label="Close settings" data-i18n-aria-label="html.closeSettings">×</button>
         <div class="st-main">
-          <button type="button" class="st-back" id="settings-back">‹ Settings</button>
+          <button type="button" class="st-back" id="settings-back" data-i18n="html.settingsBack">‹ Settings</button>
           <div class="st-body" id="settings-body">
             <p id="settings-status" class="field-hint st-status" role="status" aria-live="polite"></p>
             <section class="st-section" id="settings-panel-model" role="tabpanel" aria-labelledby="settings-head-model">
-              <h3 id="settings-head-model">Model server</h3>
-              <p class="st-help" id="settings-description">The models Melo runs on, and the server that serves them. Changes apply to your next message.</p>
+              <h3 id="settings-head-model" data-i18n="settings.section.model">Model server</h3>
+              <p class="st-help" id="settings-description" data-i18n="html.settingsDescription">The models Melo runs on, and the server that serves them. Changes apply to your next message.</p>
               <ul class="st-group">
-                <li class="st-row"><div class="st-text"><span class="st-label">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
-                <li class="st-row"><div class="st-text"><span class="st-label">Embedding model</span><p class="st-state" id="s-embed-state"></p></div></li>
+                <li class="st-row"><div class="st-text"><span class="st-label" data-i18n="html.chatModel">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
+                <li class="st-row"><div class="st-text"><span class="st-label" data-i18n="html.embeddingModel">Embedding model</span><p class="st-state" id="s-embed-state"></p></div></li>
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label" id="s-server-label">Server</span><span class="st-mono" id="s-server-address"></span><p class="st-hint" id="s-server-kind"></p></div>
-                  <div class="st-actions"><button type="button" class="outline-button" id="s-change" aria-expanded="false" aria-controls="s-editor">Change…</button></div>
+                  <div class="st-text"><span class="st-label" id="s-server-label" data-i18n="html.sServerLabel">Server</span><span class="st-mono" id="s-server-address"></span><p class="st-hint" id="s-server-kind"></p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-change" aria-expanded="false" aria-controls="s-editor" data-i18n="html.sChange">Change…</button></div>
                 </li>
               </ul>
               <div class="st-test">
-                <button type="button" class="outline-button" id="settings-test" disabled>Test connection</button>
+                <button type="button" class="outline-button" id="settings-test" disabled data-i18n="html.settingsTest">Test connection</button>
                 <p id="settings-test-status" role="status" aria-live="polite"></p>
               </div>
               <div class="st-editor" id="s-editor" role="group" aria-labelledby="s-editor-title" hidden>
-                <h4 class="st-group-title" id="s-editor-title">Change the connection</h4>
+                <h4 class="st-group-title" id="s-editor-title" data-i18n="html.sEditorTitle">Change the connection</h4>
                 <div class="field">
-                  <label for="s-adapter" id="s-adapter-label">Model server</label>
+                  <label for="s-adapter" id="s-adapter-label" data-i18n="html.sAdapterLabel">Model server</label>
                   <select id="s-adapter" disabled></select>
                 </div>
                 <div class="field" id="s-chat-url-field">
-                  <label for="s-chat-url" id="s-chat-url-label">Server address</label>
+                  <label for="s-chat-url" id="s-chat-url-label" data-i18n="html.sChatUrlLabel">Server address</label>
                   <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" aria-describedby="s-chat-url-hint" />
-                  <p class="field-hint" id="s-chat-url-hint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
+                  <p class="field-hint" id="s-chat-url-hint" data-i18n="html.sChatUrlHint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
                 </div>
                 <div id="s-cloud-fields" hidden>
                   <div class="field">
-                    <label for="s-key-env">API key environment variable</label>
+                    <label for="s-key-env" data-i18n="html.apiKeyEnvironmentVariable">API key environment variable</label>
                     <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-status" />
                     <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
                   </div>
                   <div class="field">
-                    <label for="s-base-url">Base URL (optional)</label>
+                    <label for="s-base-url" data-i18n="html.baseUrlOptional">Base URL (optional)</label>
                     <input id="s-base-url" spellcheck="false" autocomplete="url" />
                   </div>
                 </div>
                 <datalist id="s-model-options"></datalist>
                 <div class="field">
-                  <label for="s-chat-model">Chat model</label>
+                  <label for="s-chat-model" data-i18n="html.chatModel">Chat model</label>
                   <div class="st-inline">
                     <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" aria-describedby="discover-status" />
-                    <button type="button" class="outline-button" id="discover-btn">Discover models</button>
+                    <button type="button" class="outline-button" id="discover-btn" data-i18n="html.discoverBtn">Discover models</button>
                   </div>
                   <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
                 </div>
                 <div class="field" id="s-embed-offer" hidden>
-                  <label class="st-check"><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label">Remember across chats with an embedding model?</span></label>
+                  <label class="st-check"><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label" data-i18n="html.sEmbedOfferLabel">Remember across chats with an embedding model?</span></label>
                 </div>
                 <p class="field-hint" id="s-memory-hint"></p>
                 <details class="advanced">
-                  <summary>Embedding model on another server <span>Optional</span></summary>
+                  <summary><span data-i18n="html.embeddingElsewhere">Embedding model on another server</span> <span class="advanced-optional" data-i18n="html.optional">Optional</span></summary>
                   <div class="advanced-body">
                     <div class="field">
-                      <label for="s-embed-backend">Embedding server</label>
+                      <label for="s-embed-backend" data-i18n="html.embeddingServer">Embedding server</label>
                       <select id="s-embed-backend" disabled></select>
                     </div>
                     <div id="s-embed-fields">
                       <div class="field">
-                        <label for="s-embed-url">Embedding server address</label>
+                        <label for="s-embed-url" data-i18n="html.embeddingServerAddress">Embedding server address</label>
                         <input id="s-embed-url" spellcheck="false" autocomplete="url" />
                       </div>
                       <div class="field">
-                        <label for="s-embed-model">Embedding model</label>
+                        <label for="s-embed-model" data-i18n="html.embeddingModel">Embedding model</label>
                         <input id="s-embed-model" spellcheck="false" autocomplete="off" />
                       </div>
                     </div>
                   </div>
                 </details>
                 <div class="st-editor-actions">
-                  <button type="button" class="quiet-button" id="s-editor-cancel">Cancel</button>
-                  <button type="button" class="primary-button" id="create-btn" disabled>Save connection</button>
+                  <button type="button" class="quiet-button" id="s-editor-cancel" data-i18n="html.sEditorCancel">Cancel</button>
+                  <button type="button" class="primary-button" id="create-btn" disabled data-i18n="html.createBtn">Save connection</button>
                 </div>
               </div>
             </section>
             <section class="st-section" id="settings-panel-memory" role="tabpanel" aria-labelledby="settings-head-memory" hidden>
-              <h3 id="settings-head-memory">Memory</h3>
-              <p class="st-help">What Melo keeps about you and your earlier chats, and how it finds it again.</p>
+              <h3 id="settings-head-memory" data-i18n="settings.section.memory">Memory</h3>
+              <p class="st-help" data-i18n="html.whatMeloKeepsAboutYou">What Melo keeps about you and your earlier chats, and how it finds it again.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><label class="st-label" for="s-across-chats">Remember across chats</label><p class="st-hint">Notes you ask Melo to keep, and earlier chats, come back when they matter.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-across-chats" data-i18n="html.rememberAcrossChats">Remember across chats</label><p class="st-hint" data-i18n="html.notesYouAskMeloTo">Notes you ask Melo to keep, and earlier chats, come back when they matter.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-across-chats" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" data-stack>
-                  <div class="st-text"><span class="st-label" id="s-recall-legend">How Melo finds notes</span><span class="st-key" id="s-recall-key" hidden>memory.retriever</span></div>
+                  <div class="st-text"><span class="st-label" id="s-recall-legend" data-i18n="html.sRecallLegend">How Melo finds notes</span><span class="st-key" id="s-recall-key" hidden>memory.retriever</span></div>
                   <div class="st-choices" role="radiogroup" aria-labelledby="s-recall-legend">
-                    <label class="st-choice" id="s-recall-row-auto"><input type="radio" name="s-recall" id="s-recall-auto" value="auto" disabled /><span class="st-label">By words and meaning <span class="st-key" data-developer hidden>auto</span></span><span class="st-hint">Uses the embedding model when one is set up; words alone until then.</span></label>
-                    <label class="st-choice" id="s-recall-row-bm25"><input type="radio" name="s-recall" id="s-recall-bm25" value="bm25" disabled /><span class="st-label">By words only <span class="st-key" data-developer hidden>bm25</span></span><span class="st-hint">Never calls an embedding model.</span></label>
-                    <label class="st-choice" id="s-recall-row-embedding" hidden><input type="radio" name="s-recall" id="s-recall-embedding" value="embedding" disabled /><span class="st-label">By meaning and words, always <span class="st-key" data-developer hidden>embedding</span></span><span class="st-hint">Needs an embedding model: saving it without one is refused.</span></label>
-                    <label class="st-choice" id="s-recall-row-llm" hidden><input type="radio" name="s-recall" id="s-recall-llm" value="llm" disabled /><span class="st-label">Words, then the chat model chooses <span class="st-key" data-developer hidden>llm</span></span><span class="st-hint">No embedding calls; the chat model picks among the notes words found.</span></label>
+                    <label class="st-choice" id="s-recall-row-auto"><input type="radio" name="s-recall" id="s-recall-auto" value="auto" disabled /><span class="st-label"><span data-i18n="html.recall.auto">By words and meaning</span> <span class="st-key" data-developer hidden>auto</span></span><span class="st-hint" data-i18n="html.usesTheEmbeddingModelWhen">Uses the embedding model when one is set up; words alone until then.</span></label>
+                    <label class="st-choice" id="s-recall-row-bm25"><input type="radio" name="s-recall" id="s-recall-bm25" value="bm25" disabled /><span class="st-label"><span data-i18n="html.recall.bm25">By words only</span> <span class="st-key" data-developer hidden>bm25</span></span><span class="st-hint" data-i18n="html.neverCallsAnEmbeddingModel">Never calls an embedding model.</span></label>
+                    <label class="st-choice" id="s-recall-row-embedding" hidden><input type="radio" name="s-recall" id="s-recall-embedding" value="embedding" disabled /><span class="st-label"><span data-i18n="html.recall.embedding">By meaning and words, always</span> <span class="st-key" data-developer hidden>embedding</span></span><span class="st-hint" data-i18n="html.needsAnEmbeddingModelSaving">Needs an embedding model: saving it without one is refused.</span></label>
+                    <label class="st-choice" id="s-recall-row-llm" hidden><input type="radio" name="s-recall" id="s-recall-llm" value="llm" disabled /><span class="st-label"><span data-i18n="html.recall.llm">Words, then the chat model chooses</span> <span class="st-key" data-developer hidden>llm</span></span><span class="st-hint" data-i18n="html.noEmbeddingCallsTheChat">No embedding calls; the chat model picks among the notes words found.</span></label>
                   </div>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label">Notes</span><p class="st-hint">See, change or forget what Melo keeps.</p></div>
-                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-memory">Open Memory</button></div>
+                  <div class="st-text"><span class="st-label" data-i18n="html.notes">Notes</span><p class="st-hint" data-i18n="html.seeChangeOrForgetWhat">See, change or forget what Melo keeps.</p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-memory" data-i18n="html.sOpenMemory">Open Memory</button></div>
                 </li>
               </ul>
             </section>
             <section class="st-section" id="settings-panel-chats" role="tabpanel" aria-labelledby="settings-head-chats" hidden>
-              <h3 id="settings-head-chats">Chats and folders</h3>
-              <p class="st-help">Where a new chat works. Each chat can pick another folder from the folder chip under the message box.</p>
+              <h3 id="settings-head-chats" data-i18n="settings.section.chats">Chats and folders</h3>
+              <p class="st-help" data-i18n="html.whereANewChatWorks">Where a new chat works. Each chat can pick another folder from the folder chip under the message box.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label">Default folder</span><span class="st-mono" id="s-folder"></span></div>
-                  <div class="st-actions"><button type="button" class="outline-button" id="s-folder-change" aria-expanded="false" aria-controls="s-folder-edit">Change…</button></div>
+                  <div class="st-text"><span class="st-label" data-i18n="html.defaultFolder">Default folder</span><span class="st-mono" id="s-folder"></span></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-folder-change" aria-expanded="false" aria-controls="s-folder-edit" data-i18n="html.sFolderChange">Change…</button></div>
                 </li>
                 <li class="st-row" id="s-folder-edit" data-stack hidden>
-                  <label class="st-label" for="s-workspace">Folder path</label>
+                  <label class="st-label" for="s-workspace" data-i18n="html.folderPath">Folder path</label>
                   <div class="st-inline">
                     <input class="st-input" id="s-workspace" spellcheck="false" autocomplete="off" aria-describedby="s-folder-hint" />
-                    <button type="button" class="outline-button" id="s-folder-use">Use</button>
-                    <button type="button" class="quiet-button" id="s-folder-cancel">Cancel</button>
+                    <button type="button" class="outline-button" id="s-folder-use" data-i18n="html.sFolderUse">Use</button>
+                    <button type="button" class="quiet-button" id="s-folder-cancel" data-i18n="html.sFolderCancel">Cancel</button>
                   </div>
-                  <p class="st-hint" id="s-folder-hint">Use an absolute path or a path beginning with ~/.</p>
+                  <p class="st-hint" id="s-folder-hint" data-i18n="html.sFolderHint">Use an absolute path or a path beginning with ~/.</p>
                 </li>
               </ul>
-              <h4 class="st-group-title" id="s-recent-title">Recent folders</h4>
+              <h4 class="st-group-title" id="s-recent-title" data-i18n="html.sRecentTitle">Recent folders</h4>
               <ul class="st-group" id="s-recent" aria-labelledby="s-recent-title"></ul>
             </section>
             <section class="st-section" id="settings-panel-scheduled" role="tabpanel" aria-labelledby="settings-head-scheduled" hidden>
-              <h3 id="settings-head-scheduled">Scheduled</h3>
-              <p class="st-help">Melo can look in on its own while localmelo runs, and do chores you asked for at set times.</p>
+              <h3 id="settings-head-scheduled" data-i18n="settings.section.scheduled">Scheduled</h3>
+              <p class="st-help" data-i18n="html.meloCanLookInOn">Melo can look in on its own while localmelo runs, and do chores you asked for at set times.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><label class="st-label" for="s-checkin">Check-in</label><p class="st-hint" id="s-checkin-hint"></p><p class="st-state" id="s-checkin-state"></p></div>
+                  <div class="st-text"><label class="st-label" for="s-checkin" data-i18n="html.checkIn">Check-in</label><p class="st-hint" id="s-checkin-hint"></p><p class="st-state" id="s-checkin-state"></p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-checkin" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label">Chores</span><p class="st-hint">Ask in the main chat, such as "every weekday at 8:30, brief me on my calendar".</p></div>
-                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-scheduled">Open Scheduled</button></div>
+                  <div class="st-text"><span class="st-label" data-i18n="html.chores">Chores</span><p class="st-hint" data-i18n="html.askInTheMainChat">Ask in the main chat, such as "every weekday at 8:30, brief me on my calendar".</p></div>
+                  <div class="st-actions"><button type="button" class="outline-button" id="s-open-scheduled" data-i18n="html.sOpenScheduled">Open Scheduled</button></div>
                 </li>
               </ul>
             </section>
             <section class="st-section" id="settings-panel-appearance" role="tabpanel" aria-labelledby="settings-head-appearance" hidden>
-              <h3 id="settings-head-appearance">Appearance</h3>
-              <p class="st-help">How this window looks, and what Melo shows on your desktop.</p>
+              <h3 id="settings-head-appearance" data-i18n="settings.section.appearance">Appearance</h3>
+              <p class="st-help" data-i18n="html.howThisWindowLooksAnd">How this window looks, and what Melo shows on your desktop.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label" id="settings-theme-legend">Theme</span><p class="st-hint">Remembered in this browser.</p></div>
+                  <div class="st-text"><span class="st-label" id="settings-theme-legend" data-i18n="html.settingsThemeLegend">Theme</span><p class="st-hint" data-i18n="html.rememberedInThisBrowser">Remembered in this browser.</p></div>
                   <div class="st-segments" role="radiogroup" aria-labelledby="settings-theme-legend">
-                    <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" />System</label>
-                    <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" />Light</label>
-                    <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" />Dark</label>
+                    <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" /><span data-i18n="settings.theme.system">System</span></label>
+                    <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /><span data-i18n="settings.theme.light">Light</span></label>
+                    <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" /><span data-i18n="settings.theme.dark">Dark</span></label>
+                  </div>
+                </li>
+                <li class="st-row" id="s-language-row">
+                  <div class="st-text"><span class="st-label" id="s-language-legend" data-i18n="settings.language.title">Language</span><p class="st-hint" data-i18n="settings.language.hint">Automatic follows your Mac or browser. The window reloads in the language you choose.</p></div>
+                  <div class="st-segments" role="radiogroup" aria-labelledby="s-language-legend">
+                    <label><input type="radio" name="s-language" id="s-language-auto" value="auto" disabled /><span data-i18n="settings.language.auto">Automatic</span></label>
+                    <label lang="en"><input type="radio" name="s-language" id="s-language-en" value="en" disabled />English</label>
+                    <label lang="zh-Hans"><input type="radio" name="s-language" id="s-language-zh-Hans" value="zh-Hans" disabled />简体中文</label>
                   </div>
                 </li>
                 <li class="st-row" id="s-desktop-row" data-stack hidden>
-                  <div class="st-text"><span class="st-label" id="s-desktop-legend">Melo on the desktop</span><p class="st-hint">While the window is put away. The same choice as the app's menu.</p></div>
+                  <div class="st-text"><span class="st-label" id="s-desktop-legend" data-i18n="html.sDesktopLegend">Melo on the desktop</span><p class="st-hint" data-i18n="html.whileTheWindowIsPut">While the window is put away. The same choice as the app's menu.</p></div>
                   <div class="st-choices" role="radiogroup" aria-labelledby="s-desktop-legend">
-                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pill" value="pill" /><span class="st-label">Melo and the activity pill</span><span class="st-hint">The pill takes Melo's place while work runs.</span></label>
-                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pet" value="pet" /><span class="st-label">Melo only</span></label>
-                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-nothing" value="nothing" /><span class="st-label">Nothing</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pill" value="pill" /><span class="st-label" data-i18n="html.meloAndTheActivityPill">Melo and the activity pill</span><span class="st-hint" data-i18n="html.thePillTakesMeloS">The pill takes Melo's place while work runs.</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pet" value="pet" /><span class="st-label" data-i18n="html.meloOnly">Melo only</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-nothing" value="nothing" /><span class="st-label" data-i18n="html.nothing">Nothing</span></label>
                   </div>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><label class="st-label" for="s-developer">Developer mode</label><p class="st-hint">Adds the Developer section, technical names and debug views. It changes what is shown, never what runs.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-developer" data-i18n="html.developerMode">Developer mode</label><p class="st-hint" data-i18n="html.addsTheDeveloperSectionTechnical">Adds the Developer section, technical names and debug views. It changes what is shown, never what runs.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-developer" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>
             </section>
             <section class="st-section" id="settings-panel-developer" role="tabpanel" aria-labelledby="settings-head-developer" hidden>
-              <h3 id="settings-head-developer">Developer</h3>
-              <p class="st-help">Every setting melo reads, grouped as <code>melo -h all</code> lists them, with the value in use. Change one with <code>melo config set KEY VALUE</code>, or for one run with <code>-X KEY=VALUE</code>.</p>
+              <h3 id="settings-head-developer" data-i18n="settings.section.developer">Developer</h3>
+              <p class="st-help" data-i18n="html.developerHelp">Every setting melo reads, grouped as <code>melo -h all</code> lists them, with the value in use. Change one with <code>melo config set KEY VALUE</code>, or for one run with <code>-X KEY=VALUE</code>.</p>
               <p class="st-meta" id="settings-meta"><span id="settings-file"></span> · <span id="settings-revision"></span></p>
               <div id="s-developer-options"></div>
             </section>
           </div>
           <div class="st-foot" id="settings-foot">
-            <p id="settings-saved" role="status" aria-live="polite"><span class="st-saved-mark" id="settings-saved-mark" aria-hidden="true" hidden>✓</span> <span id="settings-saved-text"></span> <button type="button" class="link-button" id="settings-undo" hidden>Undo</button></p>
+            <p id="settings-saved" role="status" aria-live="polite"><span class="st-saved-mark" id="settings-saved-mark" aria-hidden="true" hidden>✓</span> <span id="settings-saved-text"></span> <button type="button" class="link-button" id="settings-undo" hidden data-i18n="html.settingsUndo">Undo</button></p>
             <p id="create-error" class="error st-error" role="alert" hidden></p>
-            <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
+            <button type="button" class="secondary-button" id="settings-reload" hidden data-i18n="html.settingsReload">Reload settings</button>
           </div>
         </div>
       </div>

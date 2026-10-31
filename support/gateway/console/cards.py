@@ -15,8 +15,9 @@ its ``line`` follows it: the page shows the one card with the answer in place
 of its Review. An answer is no news, so it never counts as the newest card.
 
 A card is stored in English. One whose line is the console's own words also
-keeps them as ``words`` (a catalog key and its parameters), and is read in
-the language the console page asks for.
+keeps them as ``said`` (a catalog key and its parameters, see
+:func:`~localmelo.support.gateway.i18n.said`), and is read in the language
+the console page asks for.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.support.gateway.i18n import current, t, t_in, using
+from localmelo.support.gateway.i18n import current, said, said_text, t_in, using
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     clean_output,
@@ -80,7 +81,7 @@ _ANSWERS: Final = {
 
 def _words(key: str, **params: str) -> dict[str, Any]:
     """A card's line in English, with its words kept for the reader's language."""
-    return {"line": t_in("en", key, **params), "words": {"key": key, "params": params}}
+    return {"line": t_in("en", key, **params), "said": said(key, **params)}
 
 
 def card_json(event: StoredEvent) -> dict[str, Any]:
@@ -91,12 +92,9 @@ def card_json(event: StoredEvent) -> dict[str, Any]:
         "ts": event.event.get("ts"),
         **(data if isinstance(data, dict) else {}),
     }
-    words = card.get("words")
+    words = card.get("said")
     if current() != "en" and isinstance(words, dict):
-        params = words.get("params")
-        card["line"] = t(
-            str(words.get("key")), **(params if isinstance(params, dict) else {})
-        )
+        card["line"] = said_text(words)
     return card
 
 

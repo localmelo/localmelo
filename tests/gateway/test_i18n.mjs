@@ -9,6 +9,11 @@ import test from 'node:test';
 import {formatEntry, language, pickLanguage, t, translate, useLanguage} from '../../support/gateway/static/i18n.mjs';
 import {describe} from '../../support/gateway/static/running.mjs';
 import {statusText, toolState, workSummary} from '../../support/gateway/static/turns.mjs';
+import {levelLabel} from '../../support/gateway/static/levels.mjs';
+import {cardWords, dayLabel} from '../../support/gateway/static/main-chat.mjs';
+import {headline, stepWords} from '../../support/gateway/static/panel.mjs';
+import {rowLines} from '../../support/gateway/static/scheduled-tab.mjs';
+import {checkedWords} from '../../support/gateway/static/settings.mjs';
 
 const CASES = JSON.parse(readFileSync(new URL('../fixtures/i18n_cases.json', import.meta.url), 'utf8'));
 const MODULE = new URL('../../support/gateway/static/i18n.mjs', import.meta.url).href;
@@ -41,6 +46,28 @@ test('the page reads English until it switches, then Chinese, and an unknown key
   assert.equal(workSummary(turn), '工作中 · 1 次工具调用');
   assert.equal(await useLanguage('fr'), 'en');
   assert.equal(describe({tasks: 2, chats: 1}), '1 chat, 2 tasks');
+});
+
+test('the main chat, the panel, the Scheduled tab and Settings draw their words in Chinese', async () => {
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(levelLabel(4), 'P4 · 只在电脑空闲时');
+    const now = new Date(2026, 9, 31, 12).getTime() / 1000;
+    assert.equal(dayLabel(now - 86400, now), '昨天');
+    assert.equal(dayLabel(new Date(2026, 9, 28, 9).getTime() / 1000, now), '10月28日');
+    assert.equal(dayLabel(new Date(2025, 9, 28, 9).getTime() / 1000, now), '2025年10月28日');
+    const card = {state: 'waiting', sourceKind: 'task', title: '整理照片', line: ''};
+    assert.deepEqual(cardWords(card), {mark: '!', heading: '需要你批准：整理照片', action: '查看'});
+    assert.equal(stepWords('file_read', {path: '/tmp/notes.md'}), '正在读取 notes.md');
+    assert.equal(stepWords('shell_exec', {command: 'pytest -q'}, true), '运行了 测试');
+    assert.equal(headline({status: {running: {task: 2}}}).text, '正在做 2 件事');
+    assert.deepEqual(rowLines({enabled: false, last: {state: 'done', line: ''}}, now), ['关', '上次：完成']);
+    assert.equal(checkedWords(42), '42 秒前检查');
+  } finally {
+    await useLanguage('en');
+  }
+  assert.equal(levelLabel(4), 'P4 · only when the computer is idle');
+  assert.equal(stepWords('file_read', {path: '/tmp/notes.md'}), 'Reading notes.md');
 });
 
 function element(attributes = {}, children = []) {

@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -23,7 +24,7 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.activity import _row, result_line
 from localmelo.support.gateway.console.cards import card_json
 from localmelo.support.gateway.console.routes_memory import _from_words
-from localmelo.support.gateway.i18n import using
+from localmelo.support.gateway.i18n import said_text, using
 from localmelo.support.sessions.store import StoredEvent
 
 from .conftest import PORT
@@ -136,13 +137,13 @@ def test_a_card_is_stored_in_english_and_read_in_the_reader_s_language() -> None
     answered = {
         "state": "answered",
         "line": "Allowed for this task",
-        "words": {"key": "cards.answer.allowedForTask", "params": {}},
+        "said": {"key": "cards.answer.allowedForTask", "params": {}},
     }
     assert card_json(card(answered))["line"] == "Allowed for this task"
     folder = {
         "state": "failed",
         "line": "Could not use its folder: ~/gone does not exist",
-        "words": {
+        "said": {
             "key": "cards.folderRefused",
             "params": {"problem": "~/gone does not exist"},
         },
@@ -177,3 +178,38 @@ def test_a_note_s_source_reads_in_the_reader_s_language() -> None:
             == "来自主对话，10月30日"
         )
         assert _from_words(None, "", True, at, "web") == "来自已删除的对话，10月30日"
+
+
+async def test_an_echo_keeps_its_english_line_and_its_words_for_the_page(
+    tmp_path: Path,
+) -> None:
+    """Each echo's ``line`` (what the terminal and a model read) is its words in English.
+
+    A line that carries a level ends with it (``· P2``, ``→ P1``): the page shows it as a chip.
+    """
+    from .test_chores import chore_console, tap
+    from .test_front import _echoes, _say, _start
+
+    async with chore_console(tmp_path) as (console, client, _, _, _):
+        await _start(console, "Slides for the 15:00 meeting")
+        await _say(client, console, "/task tidy the photos")
+        for phrase in ("pause the slides", "先做 slides", "停止 slides"):
+            echo = (await _say(client, console, phrase)).json()["echo"]
+            assert (await tap(client, echo["id"], "undo")).status_code == 200
+        chore = (await _say(client, console, "every weekday at 8:30, brief me")).json()
+        saved = (await tap(client, chore["echo"]["id"], "save")).json()["echo"]
+        await tap(client, saved["id"], "undo")
+        echoes = await _echoes(console)
+    kinds = {echo["echo"] for echo in echoes}
+    assert {"started", "control", "level", "undone", "chore", "chore_saved"} <= kinds
+    for echo in echoes:
+        english = said_text(echo["said"], "en")
+        level = echo.get("level") is not None and echo["echo"] in ("started", "level")
+        assert echo["line"] == english or (
+            level and echo["line"].startswith(f"{english} ")
+        ), echo
+        # A level change is the title and an arrow in every language.
+        if echo["echo"] != "level":
+            assert said_text(echo["said"], "zh-Hans") != english, echo
+    proposal = next(echo for echo in echoes if echo["echo"] == "chore")
+    assert said_text(proposal["said"], "zh-Hans") == "每个工作日 8:30运行这个？"

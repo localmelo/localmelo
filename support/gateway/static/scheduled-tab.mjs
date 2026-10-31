@@ -7,14 +7,15 @@
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
+import {language, t} from './i18n.mjs';
 import {levelLabel} from './levels.mjs';
 
-export const EMPTY = "Nothing scheduled. Ask in the main chat: 'every weekday at 8:30, brief me on my calendar'.";
-export const CHECKIN = 'Every 30 min while localmelo runs · uses the model only if something is due';
-const KINDS = [['daily', 'Every day'], ['weekdays', 'Every weekday'], ['hours', 'Every N hours']];
-// How a chore's last run reads, by the state of its task.
-const RAN = {done: 'Done', failed: 'Did not finish', cancelled: 'Stopped', expired: 'Expired', queued: 'Starting', running: 'Running now',
-  held: 'Waiting for the model', waiting: 'Waiting for you', parked: 'Paused', interrupted: 'Stopped by a restart'};
+// Read once, in the page's language (a new language reloads the page).
+export const EMPTY = t('sched.empty');
+export const CHECKIN = t('sched.checkinLine', {n: 30});
+const KINDS = ['daily', 'weekdays', 'hours'];
+// How a chore's last run reads, by the state of its task (`sched.ran.<state>`).
+const RAN = new Set(['done', 'failed', 'cancelled', 'expired', 'queued', 'running', 'held', 'waiting', 'parked', 'interrupted']);
 
 /** ``today at 8:30 AM``, ``tomorrow at 8:30 AM``, ``Friday at 8:30 AM``, or ``Nov 2 at 8:30 AM``. */
 export function whenWords(at, now) {
@@ -23,16 +24,19 @@ export function whenWords(at, now) {
   const day = (stamp) => { const d = new Date(stamp * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
   const ahead = Math.round((day(at) - day(now)) / 86400);
   const clock = time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-  if (ahead <= 0) return `today at ${clock}`;
-  if (ahead === 1) return `tomorrow at ${clock}`;
-  const label = ahead < 7 ? time.toLocaleDateString([], {weekday: 'long'}) : time.toLocaleDateString([], {month: 'short', day: 'numeric'});
-  return `${label} at ${clock}`;
+  if (ahead <= 0) return t('sched.when.today', {clock});
+  if (ahead === 1) return t('sched.when.tomorrow', {clock});
+  // The day's name in the page's language (in English, as this computer writes it).
+  const names = language() === 'en' ? [] : 'zh-CN';
+  const label = ahead < 7 ? time.toLocaleDateString(names, {weekday: 'long'}) : time.toLocaleDateString(names, {month: 'short', day: 'numeric'});
+  return t('sched.when.day', {day: label, clock});
 }
 
 /** The lines under a row's title: when it runs next, then how the last run went. */
 export function rowLines(chore, now) {
-  const lines = [chore.enabled ? `Next ${whenWords(chore.next_run, now)}` : 'Off'];
-  if (chore.last) lines.push(`Last: ${[RAN[chore.last.state] ?? chore.last.state, chore.last.line].filter(Boolean).join(' · ')}`);
+  const lines = [chore.enabled ? t('sched.next', {when: whenWords(chore.next_run, now)}) : t('common.off')];
+  const ran = RAN.has(chore.last?.state) ? t(`sched.ran.${chore.last.state}`) : chore.last?.state;
+  if (chore.last) lines.push(t('sched.last', {what: [ran, chore.last.line].filter(Boolean).join(' · ')}));
   return lines;
 }
 
@@ -75,7 +79,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
       if (state.open && !state.chores.some((item) => item.id === state.open)) Object.assign(state, {open: null, edit: null, ask: null});
     } catch (error) {
       if (mine !== reads || quiet) return;
-      state.error = error?.message || 'Could not read the schedule.';
+      state.error = error?.message || t('sched.readFailed');
     }
     draw();
   }
@@ -88,14 +92,14 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
       return await api(path, options);
     } catch (error) {
       const stale = error?.code === 'stale_revision';
-      state.notice = stale ? 'This chore changed. The list is up to date again, try once more.' : error?.message || failure;
+      state.notice = stale ? t('sched.stale') : error?.message || failure;
       if (stale) await load({quiet: true});
       return null;
     } finally {
       state.busy = false;
     }
   }
-  const put = (chore, change) => call(`/chores/${encodeURIComponent(chore.id)}`, {method: 'PATCH', body: {revision: chore.revision, ...change}}, 'Could not change the chore. Try again.');
+  const put = (chore, change) => call(`/chores/${encodeURIComponent(chore.id)}`, {method: 'PATCH', body: {revision: chore.revision, ...change}}, t('sched.changeFailed'));
   const replace = (chore) => { state.chores = state.chores.map((item) => (item.id === chore.id ? chore : item)); };
 
   function drawCheckin() {
@@ -103,21 +107,21 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     if (!state.checkin) return box;
     const on = state.checkin.on !== false;
     const row = node('div', 'sched-switchrow');
-    row.append(node('strong', '', 'Check-in'), toggle('Check-in', on, async () => {
-      const done = await call('/checkin', {method: 'PUT', body: {on: !on}}, 'Could not change the check-in. Try again.');
+    row.append(node('strong', '', t('sched.checkin')), toggle(t('sched.checkin'), on, async () => {
+      const done = await call('/checkin', {method: 'PUT', body: {on: !on}}, t('sched.checkinFailed'));
       if (done) state.checkin = done.checkin;
       draw();
     }));
-    box.append(row, node('p', 'sched-line', CHECKIN), node('p', 'sched-line', on && state.checkin.next_at ? `Next check-in ${whenWords(state.checkin.next_at, now())}` : 'Off'));
+    box.append(row, node('p', 'sched-line', CHECKIN), node('p', 'sched-line', on && state.checkin.next_at ? t('sched.nextCheckin', {when: whenWords(state.checkin.next_at, now())}) : t('common.off')));
     return box;
   }
 
   function timeForm(chore) {
     const form = node('div', 'sched-form');
     const kind = node('select', 'sched-input');
-    kind.setAttribute('aria-label', 'How often');
-    for (const [value, label] of KINDS) {
-      const option = node('option', '', label);
+    kind.setAttribute('aria-label', t('sched.howOften'));
+    for (const value of KINDS) {
+      const option = node('option', '', t(`sched.kind.${value}`));
       option.value = value;
       option.selected = value === state.edit.kind;
       kind.append(option);
@@ -126,11 +130,11 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     const field = node('input', 'sched-input');
     if (state.edit.kind === 'hours') {
       Object.assign(field, {type: 'number', min: '1', max: '24', value: String(state.edit.every)});
-      field.setAttribute('aria-label', 'Hours between runs');
+      field.setAttribute('aria-label', t('sched.hoursBetween'));
       field.addEventListener('input', () => { state.edit.every = field.value; });
     } else {
       Object.assign(field, {type: 'time', value: state.edit.at});
-      field.setAttribute('aria-label', 'Time of day');
+      field.setAttribute('aria-label', t('sched.timeOfDay'));
       field.addEventListener('input', () => { state.edit.at = field.value; });
     }
     const save = async () => {
@@ -141,7 +145,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
       draw();
     };
     const actions = node('div', 'sched-actions');
-    actions.append(button('outline-button', 'Save', save), button('quiet-button', 'Cancel', () => { state.edit = null; draw(); }));
+    actions.append(button('outline-button', t('common.save'), save), button('quiet-button', t('common.cancel'), () => { state.edit = null; draw(); }));
     form.append(kind, field, actions);
     return form;
   }
@@ -149,21 +153,21 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
   function detail(chore) {
     const box = node('div', 'sched-detail');
     box.append(node('p', 'sched-request', chore.request));
-    box.append(node('p', 'sched-line', `Priority: ${levelLabel(chore.level)}`));
+    box.append(node('p', 'sched-line', t('sched.priority', {level: levelLabel(chore.level)})));
     if (state.edit?.id === chore.id) { box.append(timeForm(chore)); return box; }
     const actions = node('div', 'sched-actions');
     if (state.ask === chore.id) {
-      actions.append(node('span', 'sched-ask', 'Delete this chore?'), button('quiet-button', 'Keep it', () => { state.ask = null; draw(); }),
-        button('outline-button danger', 'Delete', () => remove(chore)));
+      actions.append(node('span', 'sched-ask', t('sched.askDelete')), button('quiet-button', t('sched.keep'), () => { state.ask = null; draw(); }),
+        button('outline-button danger', t('common.delete'), () => remove(chore)));
     } else {
       actions.append(
-        button('outline-button', 'Run now', () => runNow(chore), `Run now: ${chore.title}`),
-        button('quiet-button', 'Edit time', () => {
+        button('outline-button', t('sched.runNow'), () => runNow(chore), t('sched.runNowLabel', {title: chore.title})),
+        button('quiet-button', t('sched.editTime'), () => {
           const at = chore.schedule.at ?? '09:00';
           state.edit = {id: chore.id, kind: chore.schedule.kind, at, every: chore.schedule.every ?? 4};
           draw();
-        }, `Edit time: ${chore.title}`),
-        button('quiet-button', 'Delete', () => { state.ask = chore.id; draw(); }, `Delete: ${chore.title}`));
+        }, t('sched.editTimeLabel', {title: chore.title})),
+        button('quiet-button', t('common.delete'), () => { state.ask = chore.id; draw(); }, t('sched.deleteLabel', {title: chore.title})));
     }
     box.append(actions);
     return box;
@@ -180,7 +184,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', chore.when),
       ...rowLines(chore, now()).map((line) => node('span', 'sched-line', line)));
     text.append(words);
-    head.append(text, toggle(`${chore.title} on`, chore.enabled, async () => {
+    head.append(text, toggle(t('sched.switchLabel', {title: chore.title}), chore.enabled, async () => {
       const done = await put(chore, {enabled: !chore.enabled});
       if (done) replace(done.chore);
       draw();
@@ -190,21 +194,21 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     return item;
   }
   async function runNow(chore) {
-    const done = await call(`/chores/${encodeURIComponent(chore.id)}/run`, {method: 'POST', body: {}}, 'Could not start the chore. Try again.');
-    if (done) { replace(done.chore); state.notice = `Started: ${chore.title}. Its result shows in Activity and in the main chat.`; }
+    const done = await call(`/chores/${encodeURIComponent(chore.id)}/run`, {method: 'POST', body: {}}, t('sched.startFailed'));
+    if (done) { replace(done.chore); state.notice = t('sched.started', {title: chore.title}); }
     draw();
   }
   async function remove(chore) {
-    const done = await call(`/chores/${encodeURIComponent(chore.id)}?revision=${chore.revision}`, {method: 'DELETE'}, 'Could not delete the chore. Try again.');
+    const done = await call(`/chores/${encodeURIComponent(chore.id)}?revision=${chore.revision}`, {method: 'DELETE'}, t('sched.deleteFailed'));
     if (done) { state.chores = state.chores.filter((item) => item.id !== chore.id); state.open = null; }
     state.ask = null;
     draw();
   }
 
   function draw() {
-    if (!state.loaded) { root.replaceChildren(node('p', 'panel-note', state.error || 'Reading the schedule…')); return; }
+    if (!state.loaded) { root.replaceChildren(node('p', 'panel-note', state.error || t('sched.reading'))); return; }
     const nodes = [drawCheckin()];
-    if (state.scope === 'chat') nodes.push(node('p', 'panel-note', 'This chat’s own chores. The main chat lists all of them.'));
+    if (state.scope === 'chat') nodes.push(node('p', 'panel-note', t('sched.chatScope')));
     if (state.chores.length) {
       const list = node('ul', 'sched-list');
       list.append(...state.chores.map(rowNode));

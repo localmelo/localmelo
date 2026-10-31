@@ -1175,7 +1175,7 @@ dialog::backdrop {
   font-size: var(--text-small);
   font-weight: 500;
 }
-.advanced summary span {
+.advanced summary .advanced-optional {
   float: right;
   color: var(--muted);
   font-size: var(--text-caption);
@@ -1340,7 +1340,7 @@ dialog::backdrop {
   .folder-picker { position: static; }
   .folder-menu { right: 0; width: auto; }
   .starters { flex-direction: column; align-items: stretch; }
-  .composer-hint > span {
+  #composer-note {
     display: none;
   }
   .user-bubble {

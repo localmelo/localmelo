@@ -1,12 +1,14 @@
 import {taskLive} from './task-live.mjs';
 import {levelCode, levelLabel} from './levels.mjs';
+import {t} from './i18n.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
 // "Live" is for a task whose process is writing now; the work of any other task is its steps.
 const RUNNING = new Set(['running', 'held']);
-const MISSING = 'Resume unavailable: recovery information is missing.';
-const WARNING = 'A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once.';
+const STATES = new Set([...RESUMABLE, ...FINISHED, ...RUNNING, 'queued', 'waiting']);
+// A task's state in words (`tasks.state.<state>`); in English, the state itself.
+const stateWord = (state) => (STATES.has(state) ? t(`tasks.state.${state}`) : state);
 
 /**
  * Mount the read-and-control view of scheduler tasks. `api` takes paths
@@ -72,33 +74,33 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const date = value == null ? null : new Date(value * 1000);
     return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '—';
   };
-  const errorText = (error) => error?.message || 'Request failed. Please try again.';
+  const errorText = (error) => error?.message || t('tasks.requestFailed');
   const hasCard = (task) => typeof task.card === 'string' && task.card.trim() !== '';
   // A started task without a card cannot resume; the server refuses it too.
   const cardMissing = (task) => state.evidence === 'missing_card' || (task.started_at != null && !hasCard(task));
 
   const pendingOf = (task) => (Array.isArray(task.pending_approvals) ? task.pending_approvals : []);
-  const stateText = (task) => (pendingOf(task).length ? 'Waiting for your approval' : task.state);
+  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : stateWord(task.state));
 
   function evidenceText(task) {
-    if (state.evidence === 'unverified_processes') return 'Earlier processes could not be verified as stopped; confirmation is required to resume.';
-    if (state.evidence === 'missing_card') return 'Recovery information is missing.';
-    if (state.evidence) return `Resume was refused: ${state.evidence.replaceAll('_', ' ')}.`;
-    if (RESUMABLE.has(task.state)) return 'Checked when you press Resume.';
+    if (state.evidence === 'unverified_processes') return t('tasks.evidence.unverified');
+    if (state.evidence === 'missing_card') return t('tasks.evidence.missing');
+    if (state.evidence) return t('tasks.evidence.refused', {reason: state.evidence.replaceAll('_', ' ')});
+    if (RESUMABLE.has(task.state)) return t('tasks.evidence.checked');
     return '';
   }
 
   function list() {
     const rows = [...state.tasks].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-    const intro = developer() ? 'Scheduler tasks. Open one to see its recovery card and actions.' : 'Open a task to see what it did.';
+    const intro = t(developer() ? 'tasks.introDeveloper' : 'tasks.intro');
     const nodes = [node('p', intro, 'muted')];
-    nodes.push(button('Refresh', () => show('')));
-    if (!rows.length && !state.error) nodes.push(node('p', 'No tasks yet.'));
+    nodes.push(button(t('common.refresh'), () => show('')));
+    if (!rows.length && !state.error) nodes.push(node('p', t('tasks.none')));
     for (const task of rows) {
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', `updated ${when(task.updated_at)}`, task.workspace_label ? `in ${task.workspace_label}` : ''].filter(Boolean).join(' · '), 'muted'));
+        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : ''].filter(Boolean).join(' · '), 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -107,19 +109,19 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function card() {
     const task = state.task;
     if (!task) return [];
-    const back = node('a', 'Back to tasks');
+    const back = node('a', t('tasks.back'));
     back.href = '#/tasks';
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => meta.append(node('dt', label), node('dd', value));
-    row('State', stateText(task));
-    if (developer()) row('Priority', levelLabel(task.level_eff ?? task.level));
-    row('Updated', when(task.updated_at));
+    row(t('tasks.row.state'), stateText(task));
+    if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
+    row(t('tasks.row.updated'), when(task.updated_at));
     // A refused folder says why in its own box below, in words.
-    if (task.wait_reason && !task.folder_problem) row('Waiting', task.wait_reason);
-    if (task.workspace_label) row('Workspace', task.workspace_label);
+    if (task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), task.wait_reason);
+    if (task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);
     // Evidence is shown when there is some to show, never as "not needed".
     const evidence = evidenceText(task);
-    if (evidence) row('Evidence', evidence);
+    if (evidence) row(t('tasks.row.evidence'), evidence);
     const nodes = [back];
     if (live) { drawLive(); nodes.push(answerBox); }
     nodes.push(meta);
@@ -129,22 +131,22 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (live) nodes.push(liveBox);
-    nodes.push(node('h2', 'Recovery card'));
-    nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', 'No recovery card is saved.', 'muted'));
+    nodes.push(node('h2', t('tasks.recoveryCard')));
+    nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', t('tasks.noCard'), 'muted'));
     const actions = node('div', undefined, 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
-      actions.append(button(state.busy === 'resume' ? 'Resuming…' : 'Resume', () => resume(), Boolean(state.busy)));
+      actions.append(button(t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), Boolean(state.busy)));
     }
     if (!FINISHED.has(task.state)) {
-      actions.append(button(state.busy === 'stop' ? 'Stopping…' : 'Stop', () => stop(), state.busy === 'stop'));
+      actions.append(button(t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), state.busy === 'stop'));
     }
     nodes.push(actions);
     if (RESUMABLE.has(task.state) && cardMissing(task)) {
       const box = node('div', undefined, 'task-missing');
       box.setAttribute('role', 'alert');
-      box.append(node('p', MISSING),
-        node('p', 'Earlier effects of this task are unknown. A new task starts from the original objective alone and does not undo them.'),
-        button(state.busy === 'again' ? 'Starting…' : 'Start again as a new task', () => startAgain(), Boolean(state.busy)));
+      box.append(node('p', t('tasks.missing')),
+        node('p', t('tasks.unknownEffects')),
+        button(t(state.busy === 'again' ? 'common.starting' : 'tasks.startAgain'), () => startAgain(), Boolean(state.busy)));
       nodes.push(box);
     }
     return nodes;
@@ -164,7 +166,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       if (steps.length) shown.push(stepsFold(steps));
     } else if (open) {
       const turns = liveNodes(view, drawLive);
-      if (turns.length) shown = [node('h2', RUNNING.has(task?.state) ? 'Live' : 'Steps'), ...turns];
+      if (turns.length) shown = [node('h2', t(RUNNING.has(task?.state) ? 'tasks.live' : 'tasks.steps')), ...turns];
     }
     if (live.state.error && state.mode === 'card') shown.push(node('p', live.state.error, 'muted'));
     answerBox.hidden = !top.length;
@@ -177,7 +179,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const fold = node('details', undefined, 'task-steps');
     fold.open = state.stepsOpen;
     fold.addEventListener('toggle', () => { state.stepsOpen = fold.open; });
-    fold.append(node('summary', 'Steps'), ...steps);
+    fold.append(node('summary', t('tasks.steps')), ...steps);
     return fold;
   }
 
@@ -186,12 +188,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const element = node('dialog', undefined, 'task-dialog');
     element.setAttribute('aria-labelledby', 'task-dialog-title');
     element.setAttribute('aria-describedby', 'task-dialog-text');
-    const title = node('h2', 'Resume this task?');
+    const title = node('h2', t('tasks.resumeTitle'));
     title.id = 'task-dialog-title';
-    const text = node('p', open.warning || WARNING);
+    const text = node('p', open.warning || t('tasks.warning'));
     text.id = 'task-dialog-text';
-    const confirm = button(state.busy === 'resume' ? 'Resuming…' : 'Resume anyway', () => resume(open.token), Boolean(state.busy));
-    const cancel = button('Cancel', () => closeDialog(), state.busy === 'resume');
+    const confirm = button(t(state.busy === 'resume' ? 'tasks.resuming' : 'tasks.resumeAnyway'), () => resume(open.token), Boolean(state.busy));
+    const cancel = button(t('common.cancel'), () => closeDialog(), state.busy === 'resume');
     const actions = node('div', undefined, 'task-actions');
     actions.append(confirm, cancel);
     element.append(title, text, actions);
@@ -206,7 +208,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   function render() {
     if (!active) return;
-    const title = node('h1', state.mode === 'list' ? 'Tasks' : state.task?.title || 'Task');
+    const title = node('h1', state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'));
     title.tabIndex = -1;
     const nodes = [title];
     for (const [text, role] of [[state.error, 'alert'], [state.notice, 'status']]) {
@@ -336,7 +338,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
         {body: {choice, ...(choice === 'deny' ? {reason: card.reason} : {})}});
     } catch (error) {
       card.submitting = false;
-      if (epoch === state.epoch) state.error = `Could not answer approval: ${errorText(error)}`;
+      if (epoch === state.epoch) state.error = t('tasks.answerFailed', {problem: errorText(error)});
       render();
       return;
     }
@@ -351,7 +353,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       {method: 'POST', body: {operation_id: operation, ...(token ? {confirmation_token: token} : {})}}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Resume accepted. The task is ${outcome.data.task.state}.`});
+      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.resumeAccepted', {state: stateWord(outcome.data.task.state)})});
       live?.sync(outcome.data.task);
     } else {
       const error = outcome.error;
@@ -375,7 +377,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const outcome = await act('stop', (id) => api(path(id), {method: 'PATCH', body: {state: 'stop'}}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Stop accepted. The task is ${outcome.data.task.state}.`});
+      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.stopAccepted', {state: stateWord(outcome.data.task.state)})});
       live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
     render();
@@ -385,23 +387,23 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function folderBox(task) {
     const box = node('div', undefined, 'task-missing task-folder');
     box.setAttribute('role', 'alert');
-    const where = task.workspace_label || 'its folder';
-    box.append(node('p', `This task did not start: melo cannot work in ${where}. ${String(task.folder_problem).replace(/\.?$/, '.')}`),
-      node('p', 'It never runs in another folder instead. Choose a folder to start it there.', 'muted'));
+    const where = task.workspace_label || t('tasks.folder.its');
+    box.append(node('p', t('tasks.folder.notStarted', {where, problem: String(task.folder_problem).replace(/\.?$/, '.')})),
+      node('p', t('tasks.folder.never'), 'muted'));
     const busy = Boolean(state.busy);
     if (state.folderField) {
       const field = node('input', undefined, 'task-folder-path');
       field.type = 'text';
       field.value = state.folderText;
       field.placeholder = '~/projects/my-app';
-      field.setAttribute('aria-label', 'Folder path');
+      field.setAttribute('aria-label', t('tasks.folder.path'));
       field.addEventListener('input', () => { state.folderText = field.value; });
       field.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); startIn(field.value); }
       });
-      box.append(field, button(state.busy === 'folder' ? 'Starting…' : 'Start here', () => startIn(field.value), busy));
+      box.append(field, button(t(state.busy === 'folder' ? 'common.starting' : 'tasks.folder.startHere'), () => startIn(field.value), busy));
     } else {
-      box.append(button('Choose a folder', () => pickFolder(), busy));
+      box.append(button(t('tasks.folder.choose'), () => pickFolder(), busy));
     }
     return box;
   }
@@ -419,7 +421,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   async function startIn(path) {
     const text = String(path ?? '').trim();
     if (!/^(\/|~\/)\S/.test(text)) {
-      state.error = 'Type a full path, such as ~/projects/my-app.';
+      state.error = t('tasks.folder.fullPath');
       render();
       return;
     }

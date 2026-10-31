@@ -42,6 +42,7 @@ from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
 from localmelo.support.gateway.console.running import running_status
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
+from localmelo.support.gateway.i18n import t
 from localmelo.support.onboard_probe import ProbeError
 from localmelo.support.option_tiers import (
     ADVANCED,
@@ -109,6 +110,8 @@ class SettingsPutBody(_SettingsBaseBody):
     across_chats: StrictBool | None = None
     # ``[memory] retriever``, how a chat finds its notes; absent leaves it as it is.
     memory_retriever: StrictStr | None = None
+    # ``[console] language``: ``auto``, ``en`` or ``zh-Hans``; absent leaves it as it is.
+    language: StrictStr | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -359,6 +362,7 @@ def settings_json() -> dict[str, Any]:
         "mode": _ui_mode(cfg),
         "across_chats": cfg.memory.across_chats,
         "memory_retriever": cfg.memory.retriever,
+        "language": cfg.console.language,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -437,6 +441,13 @@ def _build_candidate(
             "invalid_request",
             f"memory_retriever: Must be one of {config.MEMORY_RETRIEVERS}.",
         )
+    language = getattr(body, "language", None)
+    if language is not None and language not in config.CONSOLE_LANGUAGES:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
+        )
 
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
@@ -456,6 +467,8 @@ def _build_candidate(
         candidate.memory.across_chats = across
     if retriever is not None:
         candidate.memory.retriever = retriever
+    if language is not None:
+        candidate.console.language = language
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -521,6 +534,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("across_chats")
     if before.memory.retriever != after.memory.retriever:
         changed.append("memory_retriever")
+    if before.console.language != after.console.language:
+        changed.append("language")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
@@ -635,7 +650,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 400,
                 "invalid_request",
-                "Listing models works for local backends only; type the model name.",
+                t("errors.listLocalOnly"),
             )
         if resolved_backend not in config._LOCAL_SECTIONS:
             raise ApiError(
@@ -653,7 +668,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 400,
                 "invalid_request",
-                "url: No chat URL is configured.",
+                t("errors.noChatUrl"),
             )
 
         _check_probe_url("url", resolved_url)
@@ -665,13 +680,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 502,
                 "backend_unreachable",
-                f"Could not list models at {shown_url}: {reason}",
+                t("errors.listFailed", url=shown_url, reason=reason),
             ) from exc
         if not models:
             raise ApiError(
                 502,
                 "backend_unreachable",
-                f"No models found at {shown_url}.",
+                t("errors.noModelsAt", url=shown_url),
             )
         embedding = discovery.embedding_models(models)
         return JSONResponse(

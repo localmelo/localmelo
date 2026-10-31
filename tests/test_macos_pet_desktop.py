@@ -622,7 +622,7 @@ def test_the_console_settings_may_read_and_choose_what_is_on_the_desktop(
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 precondition(desktopRequest(["action": "get"]) == .get)
 for mode in DesktopMode.allCases {

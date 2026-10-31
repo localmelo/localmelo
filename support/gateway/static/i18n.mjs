@@ -13,13 +13,19 @@
  * else `navigator.languages`). The page keeps it in a cookie, so the server
  * writes its own words in it too, and sets `<html lang>`. Elements with
  * `data-i18n="key"` get their text, and `data-i18n-placeholder`,
- * `data-i18n-title` or `data-i18n-aria-label` that attribute, from the catalog;
- * a `{code}` in the words stands for the element's own `<code>`, which stays.
+ * `data-i18n-title`, `data-i18n-aria-label` or `data-i18n-data-prompt` that
+ * attribute, from the catalog; each `{code}` in the words stands for the
+ * element's next own `<code>`, which stays.
+ *
+ * For another screen's code, the whole API is `t(key, params)` for words,
+ * `saidText(said)` for words the gateway stored with a record, and
+ * `language()`; a new key goes into both catalogs (see the Chinese style
+ * guide's interface terms for the words to use).
  */
 
 export const LANGUAGES = ["en", "zh-Hans"];
 const COOKIE = "localmelo_language";
-const ATTRIBUTES = ["placeholder", "title", "aria-label"];
+const ATTRIBUTES = ["placeholder", "title", "aria-label", "data-prompt"];
 const TRADITIONAL = new Set(["hant", "tw", "hk", "mo"]);
 const catalogs = {};
 let current = "en";
@@ -62,6 +68,19 @@ export function t(key, params = {}) {
   return english === undefined ? key : formatEntry(english, params, "en");
 }
 
+/**
+ * The words the gateway stored with a record (a card, an echo) as `said: {key, params}`, in the page's
+ * language; a parameter may itself be a `said`. Null when there is none, so the record's `line` reads.
+ */
+export function saidText(said) {
+  if (!said || typeof said !== "object" || typeof said.key !== "string") return null;
+  const params = {};
+  for (const [name, value] of Object.entries(said.params ?? {})) {
+    params[name] = value && typeof value === "object" && typeof value.key === "string" ? saidText(value) : value;
+  }
+  return t(said.key, params);
+}
+
 /** The page's language. */
 export function language() {
   return current;
@@ -98,10 +117,11 @@ export async function useLanguage(next) {
 export function translate(root) {
   for (const node of root.querySelectorAll?.("[data-i18n]") ?? []) {
     const text = t(node.dataset.i18n);
-    const code = node.querySelector?.("code");
-    if (code && text.includes("{code}")) {
-      const [before, ...after] = text.split("{code}");
-      node.replaceChildren(before, code, after.join("{code}"));
+    const codes = node.querySelectorAll ? [...node.querySelectorAll("code")] : [node.querySelector?.("code")].filter(Boolean);
+    if (codes.length && text.includes("{code}")) {
+      // Each {code} takes the element's next <code>; one past the last stays as written.
+      const parts = text.split("{code}");
+      node.replaceChildren(...parts.flatMap((part, index) => (index < parts.length - 1 ? [part, codes[index] ?? "{code}"] : [part])));
     } else {
       node.textContent = text;
     }
