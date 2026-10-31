@@ -267,6 +267,7 @@
   "chat.earlierFailed": "无法读取之前的轮次：{problem}",
   "chat.escToStop": "按 Esc 停止",
   "chat.expired": "这个对话已过期，或网关已重启。新建一个对话以继续。",
+  "chat.fromChat": "来自 {title}",
   "chat.levelFailed": "无法更改对话级别：{problem}",
   "chat.loadFailed": "无法读取对话：{problem}",
   "chat.loadingEarlier": "正在读取之前的轮次…",

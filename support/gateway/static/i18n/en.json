@@ -279,6 +279,7 @@
   "chat.earlierFailed": "Could not load earlier turns: {problem}",
   "chat.escToStop": "Esc to stop",
   "chat.expired": "This chat expired or the gateway restarted. Create a new chat to continue.",
+  "chat.fromChat": "From {title}",
   "chat.levelFailed": "Could not change the chat level: {problem}",
   "chat.loadFailed": "Could not load the chat: {problem}",
   "chat.loadingEarlier": "Loading earlier turns…",

@@ -19,13 +19,14 @@ import contextlib
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
@@ -124,6 +125,8 @@ async def default_builder(
     session_id: str,
     gate: ChatGate | None = None,
     memory: ChatMemory | None = None,
+    tools: Sequence[BaseToolProvider] = (),
+    agent_class: type[Agent] | None = None,
 ) -> Agent:
     """A started Agent for *workspace*, from the shared session builder.
 
@@ -132,7 +135,8 @@ async def default_builder(
     the providers are wrapped in :class:`GatedLLM` and
     :class:`GatedEmbedding` for *session_id*, so every call this Agent makes
     waits for its slot like a workspace chat's. *memory* gives the chat
-    memory across chats (see :func:`build_session_agent`).
+    memory across chats (see :func:`build_session_agent`); *tools* and
+    *agent_class* give a side chat its task tools and its Agent class.
     """
 
     llm = None if gate is None else gate.client(session_id)
@@ -149,6 +153,8 @@ async def default_builder(
         ),
         identify=True,
         memory=memory,
+        tools=tools,
+        agent_class=agent_class,
     )
 
 

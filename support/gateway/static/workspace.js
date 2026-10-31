@@ -165,6 +165,11 @@ function mainActive() {
   return !!S.activeId && (S.main?.id === S.activeId || isMain(S.view?.session));
 }
 
+/** Whether the open chat shows its cards and echoes: the main chat always, a side chat once it has started a task. */
+function showsItems(view = S.view) {
+  return mainActive() || (view?.cards?.length ?? 0) + (view?.echoes?.length ?? 0) > 0;
+}
+
 /** A chat not sent yet: under a main chat, it is a side chat. */
 function newTitle() {
   return t(S.main ? "chat.newSide" : "chat.new");
@@ -508,8 +513,8 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
-  // Run as a task: the main chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !mainActive() || !!turn;
+  // Run as a task: a chat starts the message as a task, without asking the model.
+  $("task-btn").hidden = !S.activeId || !!turn;
   $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
@@ -1026,8 +1031,8 @@ function viewSnapshot() {
     view?.hasEarlier ?? false,
     earlierLoading,
     turns,
-    mainActive() ? (view?.cards ?? []).map((card) => card.id) : null,
-    mainActive() ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
+    showsItems(view) ? (view?.cards ?? []).map((card) => card.id) : null,
+    showsItems(view) ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
     mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
@@ -1063,7 +1068,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
-  const nodes = mainActive() ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
+  const nodes = showsItems(view) ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);
     earlier.disabled = earlierLoading;
@@ -1136,7 +1141,7 @@ async function loadEarlier() {
   }
 }
 
-/** The main chat: its turns, the cards side chats and tasks sent back, and its echoes, under day dividers. */
+/** A chat's turns, the cards side chats and tasks sent back, and its echoes, under day dividers (the main chat; a side chat with tasks). */
 function mainNodes(view, turns) {
   const newest = turns[turns.length - 1];
   const echoes = view?.echoes ?? [];
@@ -1166,8 +1171,10 @@ async function actOnEcho(echo, does, level) {
     return;
   }
   try {
-    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}) } });
-    if (S.view && mainActive()) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    // A side chat's echo is found in that chat.
+    const chat = mainActive() ? {} : { session_id: S.activeId };
+    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}), ...chat } });
+    if (S.view) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
     // A saved or undone chore changes the Scheduled tab; a task the tap started, Activity.
     panel.refresh();
   } catch (error) {

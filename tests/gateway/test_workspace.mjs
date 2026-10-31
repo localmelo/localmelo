@@ -4531,6 +4531,83 @@ test('a task that came back finished offers no more changes on its echo lines', 
   assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Change'), null);
 });
 
+// ── Side chats are equals: their tasks report back to them ──
+
+/** A gateway whose side chat "a" started a task: its echo, and its card once the task is done. */
+function sideRoutes(extra = {}, {cards = [], echoes = []} = {}) {
+  return mainRoutes({
+    'GET /sessions/a': {session: session('a', {title: 'Plan the trip'}), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({started_at: NOW - 300, finished_at: NOW - 290})], has_earlier: false, replay_from: 0, cards, echoes},
+    ...extra,
+  });
+}
+
+const openSide = async (h, id = 'a') => {
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === id).children[0].click();
+  await settle();
+};
+
+test('a side chat shows the echoes and cards of the tasks it started, and Undo is sent with the chat', async () => {
+  const started = echoRow(90, {echo: 'started', task_id: 't1', title: 'Book a table', level: 2, line: 'Started: Book a table · P2'});
+  const paused = echoRow(91, {echo: 'control', action: 'pause', task_id: 't1', title: 'Book a table', undo: {state: 'resume'}, line: 'Paused: Book a table'});
+  const cards = [cardRow(92, {at: NOW - 1, source_id: 't0', source_kind: 'task', title: 'Find hotels', line: 'Three hotels.'})];
+  const h = harness(sideRoutes({
+    'POST /front/echoes/91': {status: 200, body: {echo: echoRow(93, {echo: 'undone', task_id: 't1', title: 'Book a table', of: 91, line: 'Undone: Book a table is going again'})}},
+  }, {cards, echoes: [started, paused]}));
+  await h.run('init()');
+  await openSide(h);
+  assert.equal(h.state().activeId, 'a');
+  assert.match(h.text('messages'), /Do the thing.*Started: Book a table.*Paused: Book a table.*Done: Find hotels.*Three hotels\./, 'Its tasks come back to it, among its turns');
+  assert.equal(h.element('task-btn').hidden, false, 'A side chat starts a task from the composer too');
+  findNode(h.element('messages'), (node) => node.textContent === 'Undo').click();
+  await settle();
+  assert.deepEqual(h.net.callsTo('/front/echoes/91')[0].body, {do: 'undo', session_id: 'a'}, 'The echo is found in the side chat');
+  assert.match(h.text('messages'), /Undone: Book a table is going again/);
+  // Echoes and cards arrive on the side chat's own stream.
+  h.stream().emit({id: 94, session_id: 'a', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'started', task_id: 't2', title: 'Book a flight', level: 1, line: 'Started: Book a flight · P1'}});
+  assert.match(h.text('messages'), /Started: Book a flight/);
+  h.stream().emit({id: 95, session_id: 'a', turn: null, type: 'attention.card', ts: NOW, data: {state: 'waiting', source_id: 't2', source_kind: 'task', title: 'Book a flight', line: 'Wants to run a command', at: NOW}});
+  assert.match(h.text('messages'), /Needs your approval: Book a flight/);
+});
+
+test('an echo about another chat\'s task says whose it is', async () => {
+  const [mine, main, side] = [
+    echoRow(97, {echo: 'control', action: 'stop', task_id: 't1', title: 'Slides', line: 'Stopped: Slides'}),
+    echoRow(98, {echo: 'control', action: 'stop', task_id: 't2', title: 'Slides', from_main: true, line: 'Stopped: Slides'}),
+    echoRow(99, {echo: 'control', action: 'stop', task_id: 't3', title: 'Slides', from_chat: 'Trip plan', line: 'Stopped: Slides'}),
+  ];
+  const h = harness(sideRoutes({}, {echoes: [mine, main, side]}));
+  await h.run('init()');
+  await openSide(h);
+  assert.deepEqual(findNodes(h.element('messages'), (node) => node.className === 'echo-sub').map((node) => node.textContent), ['From Main chat', 'From Trip plan']);
+});
+
+test('a side chat that started no task stays a plain list of turns', async () => {
+  const h = harness(sideRoutes());
+  await h.run('init()');
+  await openSide(h);
+  const kinds = h.element('messages').children.map((node) => node.className.split(' ')[0]);
+  assert.deepEqual(kinds, ['turn'], 'No day divider, no card');
+  assert.equal(h.element('task-btn').hidden, false);
+  // A new chat, not yet sent, has no chat to start a task in.
+  h.documentListeners.keydown.forEach((fn) => fn({key: 'k', metaKey: true, preventDefault() {}}));
+  assert.equal(h.state().activeId, null);
+  assert.equal(h.element('task-btn').hidden, true);
+});
+
+test('Run as a task in a side chat sends the message as a task, and its echo lands in that chat', async () => {
+  const started = echoRow(96, {echo: 'started', task_id: 't3', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: 'make slides'});
+  const h = harness(sideRoutes({'POST /sessions/a/turns': {status: 200, body: {echo: started}}}));
+  await h.run('init()');
+  await openSide(h);
+  h.element('input').value = 'make slides';
+  h.element('task-btn').listeners.click.forEach((fn) => fn({}));
+  await settle();
+  assert.equal(h.net.callsTo('/sessions/a/turns')[0].body.as_task, true);
+  assert.match(h.text('messages'), /make slides.*Started: make slides/);
+  assert.equal(h.state().view.turns.length, 1, 'An echo is no turn');
+});
+
 // ── Auto mode (#339): the chip, the blocked card and Allow once ──
 
 const AUTO_BLOCK = {

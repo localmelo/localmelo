@@ -63,9 +63,9 @@ from . import (
 from .cards import MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
-from .front import Front, FrontAgent, build_front_agent
+from .front import Front, FrontAgent, SideAgent, build_front_agent
 from .probe import ModelServerProbe, Probe
-from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
 from .worker_reader import WorkerReader
 
@@ -154,12 +154,14 @@ class Console:
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
         self.front = Front(self)
+        # The side chats' fronts, made when a chat first needs one.
+        self._side_fronts: dict[str, Front] = {}
         own_front = self.options.front_builder or not self.options.builder
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
-            builder=self.options.builder,
+            builder=self.options.builder or self._side_agent,
             front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
@@ -236,6 +238,40 @@ class Console:
             )
         if isinstance(agent, FrontAgent):
             agent.front = self.front
+        return agent
+
+    def front_for(self, chat_id: str | None) -> Front:
+        """The front of a chat: the main chat's (``None``), or the side chat *chat_id*'s."""
+        if chat_id is None or chat_id == self.main_id:
+            return self.front
+        front = self._side_fronts.get(chat_id)
+        if front is None:
+            front = self._side_fronts[chat_id] = Front(self, chat_id)
+        return front
+
+    async def forget_front(self, chat_id: str) -> None:
+        """Drop a deleted side chat's front."""
+        front = self._side_fronts.pop(chat_id, None)
+        if front is not None:
+            await front.aclose()
+
+    async def _side_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        """A side chat's Agent: the full agent loop with the task tools of its own front."""
+        front = self.front_for(session_id)
+        agent = await default_builder(
+            settings,
+            workspace,
+            mcp_config,
+            session_id,
+            gate=self.gate,
+            memory=self.memory,
+            tools=[front.tools],
+            agent_class=SideAgent,
+        )
+        if isinstance(agent, FrontAgent):
+            agent.front = front
         return agent
 
     # ── The gate ──
@@ -399,7 +435,8 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
-        await self.front.aclose()
+        for each in (self.front, *self._side_fronts.values()):
+            await each.aclose()
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()

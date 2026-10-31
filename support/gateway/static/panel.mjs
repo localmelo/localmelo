@@ -227,6 +227,8 @@ export function setupPanel({
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
     // A task names the folder it works in (its chat's, unless it was given one).
     if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
+    // A task a side chat started says so in the whole day's list.
+    if (row.from) text.append(node('span', 'activity-folder activity-from', t('chat.fromChat', {title: row.from})));
     headButton.append(icon(row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);

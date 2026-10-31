@@ -169,13 +169,21 @@ async def test_urgency_words_make_today_and_run_as_a_task_delegates(
         assert llm.requests == []
 
 
-async def test_run_as_a_task_belongs_to_the_main_chat(tmp_path: Path) -> None:
+async def test_run_as_a_task_is_for_chats_and_a_side_chat_owns_its_task(
+    tmp_path: Path,
+) -> None:
+    # Before T316 only the main chat took "Run as a task"; a side chat refused it.
     async with console_with(tmp_path, answer("hi")) as (console, client, _):
         side = (await _create(client, tmp_path, "Hello"))["session"]["id"]
         await _wait_turn(client, side)
-        refused = await _post_turn(client, side, "make slides", as_task=True)
+        started = await _post_turn(client, side, "make slides", as_task=True)
+        assert started.status_code == 200, started.text
+        echo = started.json()["echo"]
+        assert echo["echo"] == "started"
+        assert (await _task(console, echo["task_id"])).front_id == side
+        # A task's own session is not a chat: it takes no message at all.
+        refused = await _post_turn(client, echo["task_id"], "more", as_task=True)
         assert refused.status_code == 400
-        assert refused.json()["error"]["code"] == "invalid_request"
 
 
 async def test_a_control_phrase_changes_the_task_and_undo_puts_it_back(

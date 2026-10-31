@@ -384,6 +384,16 @@ test('a task names its folder in Activity and in Workers; a row without one adds
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
 });
 
+test('a task a side chat started says so in the whole day\'s list', async () => {
+  const h = harness({rows: [
+    task({id: 't1', title: 'Find hotels', state: 'running', at: 2000, from: 'Trip plan'}),
+    task({id: 't2', title: 'Book a table', state: 'done', result: 'Done.', at: 1000}),
+  ]});
+  await h.panel.update(health());
+  const chips = () => h.root.findAll((node) => node.className === 'activity-folder activity-from').map((node) => node.textContent);
+  assert.deepEqual(chips(), ['From Trip plan']);
+});
+
 test('a held worker says why in the server\'s words, a plain hold keeps the state words', async () => {
   const day = [
     task({id: 't1', title: 'Slides', state: 'held', activity: 'Waiting for a higher-priority task', icon: 'held', at: 4000}),

@@ -313,8 +313,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             has_earlier = bool(older)
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
-        if info.kind == "front":
-            await console.cards.flush()
+        if info.kind in ("front", "chat"):
+            if info.kind == "front":
+                await console.cards.flush()
             cards = await _page_cards(console, session_id, turns, before)
             echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
         body: dict[str, Any] = {
@@ -338,7 +339,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 # The stream replays from here: the cards and echoes already given.
                 first = min(event.id or 1 for event in cards + echoes)
                 body["replay_from"] = max(first - 1, 0)
-        if info.kind == "front":
+        if info.kind == "front" or cards or echoes:
+            # A side chat has them only once it started a task.
             body["cards"] = [card_json(event) for event in cards]
             body["echoes"] = [card_json(event) for event in echoes]
         return JSONResponse(content=body)
@@ -499,7 +501,7 @@ async def _page_cards(
     before: int | None,
     type_: str = CARD_EVENT,
 ) -> list[StoredEvent]:
-    """The main chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
+    """A chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
 
     From the page's oldest turn (or the start, when it is the oldest page)
     to the next page's first turn (or now).

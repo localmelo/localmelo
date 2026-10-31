@@ -67,7 +67,7 @@ class TurnRequest(Body):
     text: str
     attachments: list[_Attachment] = []
     client_request_id: str | None = None
-    # The composer's Run as a task: the main chat starts it as a task.
+    # The composer's Run as a task: the chat starts it as a task.
     as_task: bool = False
 
 
@@ -264,19 +264,21 @@ def add_routes(app: FastAPI, console: Console) -> None:
         composed = _turn_text(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
-        if info.kind == "front":
-            # Code's rules first: a task to start or to change takes no model call.
+        if info.kind in ("front", "chat"):
+            # Code's rules first: a task to start or to change takes no model
+            # call. A side chat has the same rules as the main chat, and its
+            # tasks are its own.
             echo = await _store_call(
                 console,
-                console.front.route(body.text, composed, as_task=body.as_task, key=key),
+                console.front_for(session_id).route(
+                    body.text, composed, as_task=body.as_task, key=key
+                ),
                 session_id,
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
-            raise ApiError(
-                400, "invalid_request", "as_task: tasks start from the main chat"
-            )
+            raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:
             turn, resumed = await _sessions_call(
                 console,
@@ -507,6 +509,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             console.sessions.delete(session_id, forget_notes=notes == "forget"),
             session_id,
         )
+        await console.forget_front(session_id)
         return Response(status_code=204)
 
 
