@@ -11,6 +11,7 @@ from localmelo.melo.checker.payloads import (
 )
 from localmelo.melo.checker.policy import (
     DEFAULT_BUILTINS,
+    TASK_BUILTINS,
     ToolMode,
     builtin_set_for,
     mode_requires_approval,
@@ -30,6 +31,7 @@ __all__ = [
     "GatewayIngressPayload",
     "MemoryWritePayload",
     "SessionTransition",
+    "TASK_BUILTINS",
     "ToolMode",
     "ToolResolutionResult",
     "ToolTier",

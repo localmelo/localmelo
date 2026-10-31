@@ -56,6 +56,8 @@ export function stepWords(name, args, done = false) {
   if (tool === 'file_read') return say('Reading', 'Read', base(a.path) || 'a file');
   if (tool === 'file_write') return say('Writing', 'Wrote', base(a.path) || 'a file');
   if (tool === 'list_files') return say('Looking through', 'Looked through', base(a.path) || 'the folder');
+  if (tool === 'file_edit') return say('Editing', 'Edited', base(a.path) || 'a file');
+  if (tool === 'git_status') return say('Reading', 'Read', 'the git state');
   if (tool === 'shell_exec') return TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? say('Running', 'Ran', 'the tests') : say('Running', 'Ran', 'a command');
   if (tool === 'python_exec') return say('Running', 'Ran', 'Python');
   if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('Remembering', 'Remembered');
@@ -222,6 +224,8 @@ export function setupPanel({
     headButton.setAttribute('aria-expanded', String(open));
     const text = node('span', 'activity-text');
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : row.activity || row.result || ''));
+    // A task names the folder it works in (its chat's, unless it was given one).
+    if (row.folder) text.append(node('span', 'activity-folder', `In ${row.folder}`));
     headButton.append(icon(row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
     item.append(headButton);

@@ -166,7 +166,7 @@ def display_path(path: str, root: str | None) -> str:
 
 
 def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
-    """A ``file_write`` request's target, or None for any other tool.
+    """A ``file_write`` or ``file_edit`` request's target, or None for any other tool.
 
     ``{"path_label": display_path(...), "exists": bool, "size_bytes": int}``.
     The facts come from ``os.open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)``
@@ -175,9 +175,11 @@ def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
     path; any other failure to open counts as existing, with size 0.
 
     A write of text over an existing file adds ``"diff"``, what it replaces,
-    from :func:`~localmelo.support.sessions.edits.approval_diff`.
+    from :func:`~localmelo.support.sessions.edits.approval_diff`; an edit's
+    diff is of the file as the edit would leave it.
     """
-    if request.get("tool_name") != "file_write":
+    tool = request.get("tool_name")
+    if tool not in ("file_write", "file_edit"):
         return None
     arguments = request.get("arguments")
     if not isinstance(arguments, Mapping):
@@ -191,11 +193,15 @@ def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
         "exists": exists,
         "size_bytes": size,
     }
-    content = arguments.get("content")
-    if exists and isinstance(content, str):
-        # Imported here: edits reads file_facts from this module.
-        from localmelo.support.sessions import edits
+    # Imported here: edits reads file_facts from this module.
+    from localmelo.support.sessions import edits
 
+    content = arguments.get("content")
+    if tool == "file_edit":
+        target["diff"] = edits.edit_diff(
+            path, arguments.get("old"), arguments.get("new")
+        )
+    elif exists and isinstance(content, str):
         target["diff"] = edits.approval_diff(path, content)
     return target
 
@@ -437,6 +443,10 @@ def activity_text(
         return ActivityText(f"Reading {_file_name(args) or 'a file'}", "read")
     if name == "file_write":
         return ActivityText(f"Writing {_file_name(args) or 'a file'}", "write")
+    if name == "file_edit":
+        return ActivityText(f"Editing {_file_name(args) or 'a file'}", "write")
+    if name == "git_status":
+        return ActivityText("Reading the git state", "read")
     if name == "list_files":
         path = str(args.get("path") or "")
         label = display_path(path, root) if path else "."
@@ -478,6 +488,7 @@ def activity_text(
 _ASKED: Final[Mapping[str, str]] = {
     "Reading": "Read",
     "Writing": "Write",
+    "Editing": "Edit",
     "Looking through": "Look through",
     "Looking at": "Look at",
     "Running": "Run",

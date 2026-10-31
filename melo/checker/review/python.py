@@ -76,9 +76,95 @@ _PASS = set(
 )
 
 
+# Commands a local helper may run while the call stays routine: they only
+# read (#324). A word or flag of _WRITE_WORDS makes one of them write.
+_READ_ONLY = set(
+    ["ls", "cat", "head", "tail", "wc", "grep", "egrep", "rg", "pwd", "file"]
+    + ["stat", "du", "tree", "which", "find", "echo", "diff"]
+)
+_GIT_READS = set(
+    ["status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame"]
+    + ["describe", "shortlog", "grep", "ls-tree", "remote"]
+)
+_WRITE_FLAGS = ("--output", "-delete", "-exec", "-execdir", "-ok", "-fprint", "-fls")
+_HELPER_KEYWORDS = set(
+    ["capture_output", "text", "check", "cwd", "timeout", "stdout", "stderr"]
+    + ["encoding", "errors", "universal_newlines"]
+)
+
+
+def read_only_argv(argv: tuple[str, ...]) -> bool:
+    """Whether the literal command *argv* only reads (git status, ls, grep…)."""
+    if not argv or any(a.startswith(_WRITE_FLAGS) for a in argv):
+        return False
+    prog, args = os.path.basename(argv[0]), list(argv[1:])
+    if prog != "git":
+        return prog in _READ_ONLY
+    while args[:1] in (["-C"], ["--no-pager"]):
+        args = args[2:] if args[0] == "-C" else args[1:]
+    if not args or args[0] not in _GIT_READS:
+        return False
+    words = [a for a in args[1:] if not a.startswith("-")]
+    # `git branch NAME` makes a branch and `git remote add` adds one.
+    return not (args[0] in ("branch", "remote") and words)
+
+
 # The nodes the first pass looks at; the rest are skipped fast.
 _BINDS = {ast.Call, ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign}
 _BINDS |= {ast.NamedExpr, ast.For, ast.AsyncFor, ast.comprehension, ast.withitem}
+
+
+def _helper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.Call | None:
+    """The process call of a local helper that passes its arguments on as argv.
+
+    ``def run(*a): subprocess.run(list(a), …)`` (also ``a``, ``[*a]`` or
+    ``tuple(a)``), or ``def run(cmd): subprocess.run(cmd, …)``, with nothing
+    but output and error keywords: no shell, no new session. ``None`` when
+    *node* is not such a helper.
+    """
+    args = node.args
+    name = args.vararg.arg if args.vararg else None
+    if name is None and len(args.args) - len(args.defaults) == 1:
+        name = args.args[0].arg
+    found = None
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        func = inner.func
+        dotted = func.attr if isinstance(func, ast.Attribute) else ""
+        module = getattr(func, "value", None)
+        if (
+            not isinstance(module, ast.Name)
+            or module.id != "subprocess"
+            or dotted not in _RUNS - {"getoutput", "getstatusoutput"}
+        ):
+            continue
+        first = inner.args[0] if inner.args else None
+        if (
+            isinstance(first, ast.Call)
+            and isinstance(first.func, ast.Name)
+            and first.func.id in ("list", "tuple")
+            and len(first.args) == 1
+            and not first.keywords
+        ):
+            first = first.args[0]
+        elif (
+            isinstance(first, ast.List)
+            and len(first.elts) == 1
+            and isinstance(first.elts[0], ast.Starred)
+        ):
+            first = first.elts[0].value
+        if (
+            found is not None
+            or name is None
+            or not isinstance(first, ast.Name)
+            or first.id != name
+            or len(inner.args) != 1
+            or any(k.arg not in _HELPER_KEYWORDS for k in inner.keywords)
+        ):
+            return None
+        found = inner
+    return found
 
 
 class _Review:
@@ -88,6 +174,31 @@ class _Review:
         self.alias: dict[str, str] = {}
         self.bound: dict[str, list[ast.expr]] = {}
         self.later: list[ast.AST] = []  # the calls and imports, once all is bound
+        # Local helpers that run their arguments as a command (see _helper),
+        # by name: the calls of one are reviewed at each call site instead.
+        self.helpers: dict[str, ast.Call] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = _helper(node)
+                if inner is not None and node.name not in self.helpers:
+                    self.helpers[node.name] = inner
+                elif node.name in self.helpers:  # defined twice: not followed
+                    self.helpers.pop(node.name)
+        self.forwarded = {id(inner) for inner in self.helpers.values()}
+        loads = [
+            n.id
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+        ]
+        called = [
+            n.func.id
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        ]
+        for name in list(self.helpers):
+            if loads.count(name) != called.count(name):
+                # Passed around (map(run, …)): its commands cannot be read.
+                self.forwarded.discard(id(self.helpers.pop(name)))
         for node in ast.walk(tree):
             if type(node) not in _BINDS:
                 continue
@@ -217,6 +328,10 @@ class _Review:
             self.f.add("install", "Runs pip's installer from Python.")
 
     def call(self, node: ast.Call) -> None:
+        if id(node) in self.forwarded:
+            return  # a helper's own call: its call sites are reviewed
+        if isinstance(node.func, ast.Name) and node.func.id in self.helpers:
+            return self.helper_call(node, self.helpers[node.func.id])
         ctx, f, name = self.ctx, self.f, self.name(node.func)
         attr, base = name.rsplit(".", 1)[-1], getattr(node.func, "value", None)
         kw = {k.arg: k.value for k in node.keywords if k.arg}
@@ -301,6 +416,29 @@ class _Review:
             for url in self.fold(first):
                 if "://" in str(url) and shell.LARGE.search(str(url).split("?")[0]):
                     shell.download(ctx, f, url, url.rsplit("/", 1)[-1], ctx.root)
+
+    def helper_call(self, node: ast.Call, inner: ast.Call) -> None:
+        """One call of a local helper: routine only for literal read-only commands."""
+        if node.keywords or any(isinstance(a, ast.Starred) for a in node.args):
+            return self.f.doubt("Runs a command melo could not read.")
+        varargs = not isinstance(inner.args[0], ast.Name) or len(node.args) != 1
+        if varargs:
+            argvs: list[Any] = list(product(*(self.fold(a) for a in node.args)))[:8]
+        else:
+            argvs = [
+                tuple(v) if isinstance(v, list) else v for v in self.fold(node.args[0])
+            ]
+        for argv in argvs:
+            if not isinstance(argv, tuple) or not all(isinstance(a, str) for a in argv):
+                self.f.doubt("Runs a command melo could not read.")
+                continue
+            if not read_only_argv(argv):
+                self.f.doubt(
+                    f"Runs {os.path.basename(argv[0]) if argv else 'a command'} "
+                    "through a helper, which melo allows unasked only for reads."
+                )
+            if argv:
+                shell.run_argv(self.ctx.deeper(), self.f, list(argv), self.ctx.root)
 
     def paths(self, node: ast.AST | None, doubt: bool, op: str) -> None:
         values = [v for v in self.fold(node) if isinstance(v, str)]

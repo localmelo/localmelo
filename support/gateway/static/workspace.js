@@ -2357,6 +2357,10 @@ const tasks = setupTasks({
   root: $("task-panel"),
   newId: newClientRequestId,
   navigate: (hash) => { globalThis.location.hash = hash; },
+  // The macOS app's folder panel; a browser has none, so the task asks for a path.
+  chooseFolder: globalThis.webkit?.messageHandlers?.localmeloFolder
+    ? () => globalThis.webkit.messageHandlers.localmeloFolder.postMessage({ action: "choose" })
+    : null,
   every: (fn, ms) => {
     const timer = setInterval(fn, ms);
     return () => globalThis.clearInterval?.(timer);

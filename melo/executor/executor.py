@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 _DEFAULT_TIMEOUT_MS = 60_000
 
 # The tools whose "path" argument the workspace policy resolves and fences.
-_FILE_TOOLS = ("file_read", "file_write", "list_files")
+_FILE_TOOLS = ("file_read", "file_write", "file_edit", "list_files")
 
 # The tools whose "path" may be left out or empty: the root stands for it.
 _ROOT_BY_DEFAULT = ("list_files",)

@@ -24,7 +24,7 @@ from localmelo.melo.agent.options import (
     ReasoningMode,
     reasoning_refusal,
 )
-from localmelo.melo.checker import builtin_set_for
+from localmelo.melo.checker import TASK_BUILTINS, builtin_set_for
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.executor.sandbox import ConfinementError
 from localmelo.melo.memory.recall import (
@@ -946,9 +946,9 @@ def _routine_name(text: str) -> str:
 
 
 def _parse_builtins(parser: argparse.ArgumentParser, text: str) -> frozenset[str]:
-    """``all`` (every built-in, named explicitly), ``none`` or a name list."""
+    """``all`` (every built-in but a task's own, named explicitly), ``none`` or names."""
     if text == "all":
-        return frozenset(builtin_names())
+        return frozenset(builtin_names() - TASK_BUILTINS)
     if text == "none":
         return frozenset()
     names = [name.strip() for name in text.split(",")]

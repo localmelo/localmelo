@@ -81,7 +81,10 @@ The developer setting ``[agent] answer_on_stop`` (no flag; ``-X agent.answer_on_
 adds a check of its config value and its application to the options in
 ``_build_direct_mode_agent``, which has a new hash; off, the default, leaves the options
 and so the requests, stdout and exit codes as they were, as
-``tests/agent/test_gate_patient.py`` checks. ``_check_args`` is not pinned.
+``tests/agent/test_gate_patient.py`` checks. A task's own built-ins (``git_status``,
+``file_edit``) are left out of ``--builtins all``, so ``_parse_builtins`` has a new hash
+and ``all`` still names the five built-ins it named, with the same requests.
+``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -109,7 +112,7 @@ PINNED = {
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
     "_direct_options": "4ca334b646b0410e488f768afbe1ae8864706641c81a81ff67df7c019f6379bf",
-    "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
+    "_parse_builtins": "93c1b46e6db728f4114df712300ae06fccffd830e5d6e5df49da47abaa3fc460",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
     "_enable_line_editing": "dbabe09864704ee4e435380ce32e19234ce0a3cafb072a7cc39cf053a9904b07",

@@ -6,6 +6,9 @@ import asyncio
 import builtins
 import contextvars
 import logging
+import os
+import shutil
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -22,6 +25,7 @@ from localmelo.melo.contracts.providers import (
 )
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
+from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import (
@@ -31,6 +35,7 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     SessionClient,
 )
+from localmelo.support.gateway.finishing import not_committed
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.process_identity import gone as process_gone
@@ -49,6 +54,8 @@ from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
     WorkspaceError,
+    configured_root,
+    folder_problem,
     validate_task_workspace,
     worker_tool_allowlist,
 )
@@ -79,6 +86,41 @@ from localmelo.support.sessions.store import SessionStore, SessionStoreError
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
 _CAPTURE_RETRY_SECONDS = 10.0
+# What a task's worker is told on every planning request (as its identity).
+WORKER_GUIDE = (
+    "You are melo's worker for one task, in its folder. Use git_status to "
+    "read the repository's state and list_files to look around: neither "
+    "asks for approval. Change an existing file with file_edit, so the "
+    "person sees a diff; use file_write for new files and python_exec for "
+    "everything else. Keep your last two steps for what the task asks you to "
+    "finish, such as the commit and your report. Tools run with HOME set to "
+    "a fresh folder of this task, so a test suite that refuses the real home "
+    "runs; your real home stays readable."
+)
+
+
+def task_home(task_id: str) -> tuple[str, dict[str, str]]:
+    """A fresh ``HOME`` for one task's tools, and their variables (#324).
+
+    The folder is in the user's temporary folder, which confinement leaves
+    writable. Git keeps the person's identity (``GIT_CONFIG_GLOBAL``) and uv
+    its cache and Pythons, as in the real home; anything else reads the real
+    home by its path as before.
+    """
+    base = user_temp_dir() or tempfile.gettempdir()
+    home = tempfile.mkdtemp(prefix=f"melo-task-{task_id}-", dir=base)
+    real = os.path.expanduser("~")
+    env = {"HOME": home}
+    for name in (".gitconfig", os.path.join(".config", "git", "config")):
+        if os.path.isfile(os.path.join(real, name)):
+            env["GIT_CONFIG_GLOBAL"] = os.path.join(real, name)
+            break
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(real, ".cache")
+    env["UV_CACHE_DIR"] = os.environ.get("UV_CACHE_DIR") or os.path.join(cache, "uv")
+    pythons = os.path.join(real, ".local", "share", "uv", "python")
+    if os.path.isdir(pythons):
+        env["UV_PYTHON_INSTALL_DIR"] = pythons
+    return home, env
 
 
 class _WorkerLLM(GatedLLM):
@@ -203,6 +245,8 @@ class TaskWorkers:
         self._opened = False
         # The main chat a task created here belongs to (its ``front_id``).
         self.front_id: str | None = None
+        # The HOME folders made for running tasks' tools (see task_home).
+        self._homes: set[str] = set()
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -312,6 +356,13 @@ class TaskWorkers:
         The spec's level and reason are kept as given: the main chat computes
         them from the person's own words. *front_id* is the owner chat, the
         main chat when ``None``.
+
+        The task works in the folder its request names, else in its chat's:
+        a side chat's own folder, the default folder for the main chat. A
+        named folder that is refused raises :class:`WorkspaceError`; an
+        inherited one that is refused (outside the allowed roots) still makes
+        the task, failed with ``invalid_workspace`` before it starts, so its
+        card says why: it never runs in another folder.
         """
         front, key = front_id, request_key
         task_id = uuid.uuid4().hex[:12]
@@ -323,9 +374,20 @@ class TaskWorkers:
             )
             if existing is not None:
                 return await self._body(existing), True
-            workspace = validate_task_workspace(
-                spec.workspace, self.settings(), origin="user", task_id=task_id
-            )
+            inherited = None if spec.workspace else await self._chat_folder(front)
+            refused = False
+            try:
+                workspace = validate_task_workspace(
+                    spec.workspace or inherited,
+                    self.settings(),
+                    origin="user",
+                    task_id=task_id,
+                )
+            except WorkspaceError:
+                if spec.workspace:
+                    raise
+                refused = True
+                workspace = inherited or configured_root(self.settings())
             record, repeated = await self.tasks.create_task(
                 spec,
                 origin="user",
@@ -335,7 +397,17 @@ class TaskWorkers:
                 front_id=front or self.front_id,
                 _recovery_proof=True,
             )
-            if not repeated:
+            if not repeated and refused:
+                self._register(record)
+                record = await self.tasks.change(
+                    record.task_id,
+                    state="failed",
+                    actor="scheduler",
+                    failure_reason="invalid_workspace",
+                )
+                self.gate.finish_task(record.task_id, "failed")
+                self._ready.pop(record.task_id, None)
+            elif not repeated:
                 self._register(record)
                 self._eligible.add(record.task_id)
                 if record.level == 5:
@@ -344,6 +416,25 @@ class TaskWorkers:
                     )
                 await self._schedule()
             return await self._body(record), repeated
+
+    async def _chat_folder(self, front_id: str | None) -> str | None:
+        """The folder a task of *front_id* inherits: a side chat's own, else None.
+
+        ``None`` stands for the default folder: the main chat's, and any
+        chat's that names none.
+        """
+        if front_id is None or front_id == self.front_id:
+            return None
+        info = await self.store.get_session(front_id)
+        if info is None or info.kind != "chat" or not info.workspace:
+            return None
+        return info.workspace
+
+    async def folder_problem(self, task_id: str) -> str:
+        """Why a task that failed with ``invalid_workspace`` could not use its folder."""
+        session = await self.store.get_session(task_id)
+        path = session.workspace if session is not None else None
+        return folder_problem(path, self.settings()) or "The folder cannot be used"
 
     async def list(
         self, state: str | None = None, level: int | None = None
@@ -357,7 +448,14 @@ class TaskWorkers:
         ]
 
     async def get(self, task_id: str) -> dict:
-        return await self._body(await self.tasks.get_task(task_id))
+        record = await self.tasks.get_task(task_id)
+        body = await self._body(record)
+        if record.state in TERMINAL_PHASES:
+            # Only here, not in the list: it reads the folder's git state.
+            turns = await self.store.list_turns(task_id, limit=1)
+            answer = turns[-1].answer if turns else ""
+            body["not_committed"] = await not_committed(answer, body["workspace"])
+        return body
 
     async def update(
         self, task_id: str, level: object = None, state: str | None = None
@@ -1162,6 +1260,11 @@ class TaskWorkers:
                 except Exception:
                     failed = True
                     log.exception("Worker resource close failed")
+        options = getattr(agent, "options", None)
+        home = (getattr(options, "tool_env", None) or {}).get("HOME")
+        if home in self._homes:
+            self._homes.discard(home)
+            shutil.rmtree(home, ignore_errors=True)
         if failed:
             raise RuntimeError("Worker cleanup failed")
 
@@ -1437,38 +1540,48 @@ class TaskWorkers:
             tool_token = TOOL_ENTRY.set(incomplete)
             process_token = PROCESS_RECORD.set(capture)
             client = self.gate.client(task_id)
-            agent = await build_session_agent(
-                cfg=self.settings(),
-                base_url=None,
-                model=None,
-                workspace=workspace,
-                options=configured_cache_options(
-                    self.settings(),
-                    AgentOptions(
-                        mode="gateway",
-                        memory=False,
-                        timeout_s=None,
-                        builtins=worker_tool_allowlist("user").builtins,
-                        confine_writes=self.settings().agent.confine_writes,
+            home, tool_env = task_home(task_id)
+            self._homes.add(home)
+            try:
+                agent = await build_session_agent(
+                    cfg=self.settings(),
+                    base_url=None,
+                    model=None,
+                    workspace=workspace,
+                    options=configured_cache_options(
+                        self.settings(),
+                        AgentOptions(
+                            mode="gateway",
+                            memory=False,
+                            timeout_s=None,
+                            builtins=worker_tool_allowlist("user").builtins,
+                            confine_writes=self.settings().agent.confine_writes,
+                            tool_env=tool_env,
+                            identity=WORKER_GUIDE,
+                            task_aids=True,
+                        ),
                     ),
-                ),
-                wrap_llm=lambda inner: _WorkerLLM(
-                    inner,
-                    client,
-                    self._ready[task_id],
-                    lambda: self._runners.get(task_id),
-                    lambda call, runner, turn, kind: self._hold_call(
-                        task_id, call, runner, turn, kind
+                    wrap_llm=lambda inner: _WorkerLLM(
+                        inner,
+                        client,
+                        self._ready[task_id],
+                        lambda: self._runners.get(task_id),
+                        lambda call, runner, turn, kind: self._hold_call(
+                            task_id, call, runner, turn, kind
+                        ),
+                        lambda call, runner, turn: self._release_call(
+                            task_id, call, runner, turn
+                        ),
+                        lambda call: self._call_started(task_id, call),
                     ),
-                    lambda call, runner, turn: self._release_call(
-                        task_id, call, runner, turn
+                    wrap_embedding=lambda inner: _WorkerEmbedding(
+                        inner, client, self._ready[task_id]
                     ),
-                    lambda call: self._call_started(task_id, call),
-                ),
-                wrap_embedding=lambda inner: _WorkerEmbedding(
-                    inner, client, self._ready[task_id]
-                ),
-            )
+                )
+            except BaseException:
+                self._homes.discard(home)
+                shutil.rmtree(home, ignore_errors=True)
+                raise
             runner = SessionRunner(
                 agent,
                 self.store,
@@ -1724,6 +1837,8 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
+        if record.state == "failed" and record.wait_reason == "invalid_workspace":
+            body["folder_problem"] = await self.folder_problem(record.task_id)
         return body
 
     async def _reconcile(self) -> int:

@@ -46,6 +46,12 @@ DEFAULT_BUILTINS: Mapping[ToolMode, frozenset[str]] = {
     "python": frozenset({"file_read", "file_write", "python_exec"}),
 }
 
+# Built-ins that only a caller who names them gets: a task's worker. They are
+# in no mode's default set, and ``--builtins all`` leaves them out too, so a
+# direct run's requests stay as they were. `git_status` reads a repository
+# and never asks; `file_edit` changes part of a file and asks as file_write.
+TASK_BUILTINS: frozenset[str] = frozenset({"file_edit", "git_status"})
+
 # The modes in which every run has an approver: the interactive UI always
 # builds a policy. A Python caller can pass `approval=...` to `run_task`,
 # but the library's default has none, so `python`'s default set matches
@@ -129,6 +135,7 @@ def validated_mode(mode: object) -> ToolMode:
 __all__ = [
     "APPROVING_MODES",
     "DEFAULT_BUILTINS",
+    "TASK_BUILTINS",
     "ToolMode",
     "builtin_set_for",
     "exec_refusal",

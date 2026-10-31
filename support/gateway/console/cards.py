@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.support.sessions.display import activity_text, status_text
 from localmelo.support.sessions.store import StoredEvent
 
-from .activity import result_line
+from ..finishing import not_committed
+from .activity import FOLDER_REFUSED, result_line
 
 if TYPE_CHECKING:
     from . import Console
@@ -143,6 +144,12 @@ class MainChatCards:
         else:
             record = await self._console.workers.tasks.get_task(info.id)
             line = record.wait_reason or "Stopped before it finished"
+            if record.wait_reason == "invalid_workspace":
+                problem = await self._console.workers.folder_problem(info.id)
+                line = f"{FOLDER_REFUSED}: {problem}"
+        if info.kind == "task" and last is not None:
+            # A task whose commit is all that is left says so, with the command.
+            line = await not_committed(last.answer, info.workspace) or line
         return {**card, "state": state, "line": line}
 
 

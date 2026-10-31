@@ -6,7 +6,7 @@ from collections.abc import Collection
 
 import pytest
 
-from localmelo.melo.checker import Checker
+from localmelo.melo.checker import TASK_BUILTINS, Checker
 from localmelo.melo.executor import (
     APPROVAL_BUILTINS,
     BUILTINS,
@@ -19,8 +19,12 @@ from localmelo.melo.memory.coordinator import Hippo
 ALL_NAMES = {tool_def.name for tool_def, _ in BUILTINS}
 
 
-def test_the_approval_set_still_names_the_same_three() -> None:
-    assert frozenset({"file_write", "python_exec", "shell_exec"}) == APPROVAL_BUILTINS
+def test_the_approval_set_names_the_tools_that_write_or_run() -> None:
+    # file_edit, a task's partial write, asks as file_write does.
+    assert (
+        frozenset({"file_write", "file_edit", "python_exec", "shell_exec"})
+        == APPROVAL_BUILTINS
+    )
 
 
 def _registered(
@@ -66,7 +70,9 @@ def test_a_mode_without_an_approver_leaves_shell_exec_out(
 
 
 def test_the_interactive_default_keeps_shell_exec() -> None:
-    assert _registered(None, mode="interactive") == (ALL_NAMES, ALL_NAMES)
+    # Every built-in but the task-only ones, which only a worker names.
+    expected = ALL_NAMES - TASK_BUILTINS
+    assert _registered(None, mode="interactive") == (expected, expected)
 
 
 def test_an_explicit_set_wins_over_the_mode() -> None:

@@ -57,9 +57,12 @@ _DEFERRED_FIELDS: Final = (
 # The built-ins a worker may register. The gateway's set already omits
 # `shell_exec` (P13a), and a worker never gains a tool by origin alone: the
 # origin only decides the MCP and session-grant flags below. It is its own
-# set, not the gateway chat's default: a chat also has `list_files`, and a
-# worker's tools do not change with it.
-_WORKER_BUILTINS: Final = frozenset({"file_read", "file_write", "python_exec"})
+# set, not the gateway chat's default, so a worker's tools do not change
+# with a chat's. `list_files` and `git_status` only read and never ask;
+# `file_edit` changes part of a file and asks as `file_write` does (#324).
+_WORKER_BUILTINS: Final = frozenset(
+    {"file_read", "file_write", "file_edit", "list_files", "git_status", "python_exec"}
+)
 
 
 class TaskPolicyError(ValueError):
@@ -291,7 +294,9 @@ def validate_task_workspace(
 ) -> str:
     """Resolve a worker folder or raise :class:`WorkspaceError`.
 
-    A missing user workspace uses the configured root or the default. A missing
+    A missing user workspace uses the configured root or the default, and is
+    refused like any other folder when that root is not a user's (never
+    replaced by another folder). A missing
     non-user workspace creates a child named by the trusted single-component
     task_id. Explicit paths must already exist. The configured root must be an
     absolute or ``~/`` path, and cannot resolve to / or the home directory.
@@ -317,11 +322,9 @@ def validate_task_workspace(
             if _relative_parts(path, home) == []:
                 raise WorkspaceError("A worker may not be rooted at your home folder")
             return path
+        # A configured root outside ~, under ~/Library or in a dot folder is
+        # refused below: the task never runs in another folder instead.
         path = root
-        if not _user_workspace(path, home):
-            # The configured root may be outside ~, under ~/Library or in a
-            # dot folder; a user's task then starts at the plain default.
-            path = os.path.realpath(os.path.expanduser(DEFAULT_WORKSPACE))
     else:
         if not isinstance(workspace, str):
             raise WorkspaceError("The workspace must be a string")
@@ -342,16 +345,7 @@ def validate_task_workspace(
         raise WorkspaceError("A worker may not be rooted at / or your home folder")
     if checked_origin == "user":
         if not _user_workspace(path, home):
-            if not _inside(path, home):
-                raise WorkspaceError(
-                    "A user task's workspace must be strictly inside your home folder"
-                )
-            parts = _relative_parts(path, home) or []
-            if any(part.startswith(".") for part in parts):
-                raise WorkspaceError(
-                    "A user task's workspace may not be in a hidden folder"
-                )
-            raise WorkspaceError("A user task's workspace may not be under ~/Library")
+            raise WorkspaceError(_user_refusal(path, home))
     elif not defaulted and not _inside(path, root):
         raise WorkspaceError(
             f"A {checked_origin} task's workspace must be strictly inside {root}"
@@ -364,6 +358,33 @@ def validate_task_workspace(
                 f"Could not create the default workspace {path}: {exc}"
             ) from exc
     return path
+
+
+def _user_refusal(path: str, home: str) -> str:
+    """Why *path*, which :func:`_user_workspace` refuses, is no user task's folder."""
+    if not _inside(path, home):
+        return "A user task's workspace must be strictly inside your home folder"
+    parts = _relative_parts(path, home) or []
+    if any(part.startswith(".") for part in parts):
+        return "A user task's workspace may not be in a hidden folder"
+    return "A user task's workspace may not be under ~/Library"
+
+
+def configured_root(cfg: object) -> str:
+    """The configured ``[gateway] workspace`` (or the default), as an absolute path."""
+    return os.path.abspath(os.path.expanduser(_configured_workspace(cfg)))
+
+
+def folder_problem(path: str | None, cfg: object) -> str:
+    """Why a user's task cannot work in *path* (the default when ``None``), or ``""``."""
+    try:
+        if path is None:
+            validate_task_workspace(None, cfg, origin="user", task_id="check")
+        else:
+            validate_task_workspace(path, cfg, origin="user")
+    except WorkspaceError as exc:
+        return str(exc)
+    return ""
 
 
 def _user_workspace(path: str, home: str) -> bool:
@@ -416,6 +437,8 @@ __all__ = [
     "WorkerToolPolicy",
     "WorkspaceError",
     "check_origin",
+    "configured_root",
+    "folder_problem",
     "validate_task_workspace",
     "worker_tool_allowlist",
 ]

@@ -19,6 +19,7 @@ from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
 from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED
 from localmelo.melo.executor.env import child_env
+from localmelo.melo.executor.git_status import GIT_STATUS_DEF, run_git_status
 from localmelo.melo.executor.process_gate import (
     PROCESS_RECORD,
     UnsupportedProcessGateError,
@@ -316,6 +317,53 @@ async def _file_write(path: str, content: str) -> str:
     return f"Written {len(content)} bytes to {path}"
 
 
+# Bytes of the file that a file_edit changes, at most: an edit reads it whole.
+MAX_EDIT_BYTES = 1_000_000
+
+
+@_builtin(
+    ToolDef(
+        name="file_edit",
+        description=(
+            "Change part of an existing file: replace the exact text old, which "
+            "must occur once in the file (take a few lines around the change), "
+            "with new. Use it for every change to an existing file, so the "
+            "change shows as a diff; file_write is for new files."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path"},
+                "old": {
+                    "type": "string",
+                    "description": "The exact text to replace; it must occur once",
+                },
+                "new": {"type": "string", "description": "The text to put there"},
+            },
+            "required": ["path", "old", "new"],
+        },
+        semantic_tags=["file", "edit", "change", "replace", "modify", "fix", "patch"],
+    )
+)
+async def _file_edit(path: str, old: str, new: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _edit_regular_file, path, old, new)
+
+
+@_builtin(GIT_STATUS_DEF)
+async def _git_status(
+    command: str,
+    paths: list[str] | None = None,
+    rev: str = "",
+    count: int = 10,
+    stat: bool = False,
+    staged: bool = False,
+) -> str:
+    return await _rooted_git_status(os.getcwd())(
+        command, paths=paths, rev=rev, count=count, stat=stat, staged=staged
+    )
+
+
 @_builtin(
     ToolDef(
         name="python_exec",
@@ -609,6 +657,8 @@ def rooted_builtins(
         "file_read": (_rooted_file_read(root), None),
         "list_files": (_rooted_list_files(root), None),
         "file_write": (_rooted_file_write(root), None),
+        "file_edit": (_rooted_file_edit(root), None),
+        "git_status": (_rooted_git_status(root), None),
         "shell_exec": (
             _rooted_shell_exec(root, tool_timeout_s, tool_env, confinement),
             shell_timeout_ms,
@@ -691,6 +741,73 @@ def _rooted_file_write(root: str) -> ToolFunction:
         return f"Written {len(content)} bytes to {target}"
 
     return file_write
+
+
+def _rooted_file_edit(root: str) -> ToolFunction:
+    async def file_edit(path: str, old: str, new: str) -> str:
+        target = os.path.join(root, path)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _edit_regular_file, target, old, new)
+
+    return file_edit
+
+
+def _rooted_git_status(root: str) -> ToolFunction:
+    async def git_status(
+        command: str,
+        paths: list[str] | None = None,
+        rev: str = "",
+        count: int = 10,
+        stat: bool = False,
+        staged: bool = False,
+    ) -> str:
+        return await run_git_status(
+            root,
+            command,
+            paths=paths,
+            rev=rev,
+            count=count,
+            stat=stat,
+            staged=staged,
+        )
+
+    return git_status
+
+
+def edited_text(text: str, old: str, new: str, path: str = "the file") -> str:
+    """*text* with its one occurrence of *old* replaced by *new*.
+
+    ``ValueError`` says why not: *old* is empty, missing or not unique.
+    """
+    if not old:
+        raise ValueError("old must not be empty; use file_write for a new file")
+    count = text.count(old)
+    if count == 0:
+        raise ValueError(f"The text to replace is not in {path}; read it again")
+    if count > 1:
+        raise ValueError(
+            f"The text to replace occurs {count} times in {path}; "
+            "take more lines around it so it occurs once"
+        )
+    return text.replace(old, new, 1)
+
+
+def _edit_regular_file(path: str, old: str, new: str) -> str:
+    """Replace the one *old* in the regular UTF-8 file *path* with *new*."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        _require_regular_file(fd, path)
+        if os.fstat(fd).st_size > MAX_EDIT_BYTES:
+            raise ValueError(f"{path} is over {MAX_EDIT_BYTES} bytes; not edited")
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    text = b"".join(chunks).decode("utf-8")
+    _write_regular_file(path, edited_text(text, old, new, path))
+    lines = (old.count("\n") + 1, new.count("\n") + 1)
+    return f"Edited {path}: {lines[0]} line(s) replaced with {lines[1]}"
 
 
 def _read_regular_file(path: str) -> str:
