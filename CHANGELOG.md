@@ -92,6 +92,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The newer value wins even when no note was kept, and a lasting fact you state is
+  kept. After the newer-wins change, a local model answered 2 of 5 updated facts right
+  with an embedding model and 3 of 5 by words only, and the chat where the old value
+  was said still came back as current for nearly every question: only 2 of 23 plain
+  statements such as "I live in Utrecht." had become notes, so the rule that a newer
+  note replaces an older one seldom fired. Now, after the model answers, a plain,
+  lasting fact about you that it did not keep ("I live in …", "my advisor is …", "call
+  me …", "我的…是…") is kept in your words, with the same `Remembered · Undo` line;
+  questions, to-dos, "if" sentences, negations, the past, other people's opinions,
+  passing states ("my build is failing") and secrets never are. And of two chat turns
+  where you said one thing with different values, the older now comes after the newer
+  and reads `(older; replaced by a newer message)`, even without a note; when only the
+  older turn matches, the newer one comes with it. Look-alikes such as "my flight to
+  Porto" and "my flight to Faro" stay apart ([#NN]).
+
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
   both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,
