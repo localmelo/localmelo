@@ -2241,7 +2241,10 @@ def _same_request(
     request_key: str,
     deadline: float | None,
 ) -> bool:
-    stored = {key: value for key, value in record.spec.items() if key != "task_id"}
+    # The context pack is made once, when the task is created: a repeat of the
+    # request does not make it again, so it is not part of what the key repeats.
+    skipped = ("task_id", "context_pack")
+    stored = {key: value for key, value in record.spec.items() if key not in skipped}
     stored.setdefault("deadline", None)
     expected = {
         **spec.to_dict(),

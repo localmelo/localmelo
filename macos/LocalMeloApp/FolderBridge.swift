@@ -82,3 +82,24 @@ final class DesktopBridge: NSObject, WKScriptMessageHandlerWithReply {
         replyHandler(current().rawValue, nil)
     }
 }
+
+/// `/exit` in the console: after the page's own question, the app quits as Command-Q does, and its quit still asks
+/// when something would stop. Only the gateway's own page is heard; there is no answer.
+final class QuitBridge: NSObject, WKScriptMessageHandler {
+    static let name = "localmeloQuit"
+    private let gatewayPort: () -> Int
+    private let quit: () -> Void
+
+    init(gatewayPort: @escaping () -> Int, quit: @escaping () -> Void) {
+        self.gatewayPort = gatewayPort
+        self.quit = quit
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard acceptsBridgeMessage(scheme: origin.protocol, host: origin.host, port: origin.port,
+                                   isMainFrame: message.frameInfo.isMainFrame, gatewayPort: gatewayPort()),
+              quitRequest(message.body) else { return }
+        quit()
+    }
+}
