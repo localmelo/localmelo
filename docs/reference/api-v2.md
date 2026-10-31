@@ -845,19 +845,32 @@ chat's conversation never holds it.
 Its `data`:
 
 ```json
-{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo, then Kyoto.", "at": 1793399544.339885}
+{"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` is `done`, `failed` or `waiting` (an approval waits for an answer).
-  `source_kind` is `chat` or `task`, and `source_id` is the side chat or the
-  task to open. `line` is one plain line: the answer's first sentence, the way
-  the run ended, or `Waiting for your approval`. `at` is when it happened.
+- `state` is `done`, `failed`, `waiting` (an approval waits for an answer) or
+  `answered` (that approval was answered). `source_kind` is `chat` or `task`,
+  and `source_id` is the side chat or the task to open. `title` is at most 48
+  columns: a title the person or the main chat gave stays, a longer one is cut
+  at a word. `at` is when it happened.
+- `line` is plain words: the first two lines of the answer on a `done` card
+  (an opening `Done.` is left out when more follows), why the run did not
+  finish on a `failed` one (its status in words, then the first line of its
+  error), what is asked on a `waiting` one (`Wants to run Python`, `Wants to
+  write notes.md`), and the answer on an `answered` one (`Allowed once`,
+  `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
+  `Denied`, `No answer in time`, `Not run: it stopped first`).
+- A `waiting` card has a `request_id`. When that approval is answered, a card
+  with state `answered`, the same `request_id` and the answer as its `line`
+  follows it, and a client shows the one card with the answer in place of
+  its Review. An answer is no news: it is never the list's `last_card`, and
+  none is written when the waiting card never was.
 - A side chat's run counts when its turn ends by its run (`cause` `run`); a
   stop by the person, a shutdown or a crash makes no card. A task counts when
   it ends `done`, `failed` or `expired`; a stop by the person makes none.
 - The gateway writes the cards when the main chat or the list is read, and
   once a minute; a waiting card whose approval was answered first is never
-  written. The main chat's stream carries new cards as `attention.card` frames.
+  written, and an approval answered later is followed by its `answered` card. The main chat's stream carries new cards as `attention.card` frames.
 - A task created through `POST /api/tasks` belongs to the chat its
   `front_id` names, else to the main chat; its cards still come to the main
   chat.

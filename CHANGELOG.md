@@ -1644,6 +1644,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Cards and task pages say what happened. In the main chat an approval card
+  follows its approval: once you answer, the same card says how ("Allowed
+  once", "Allowed for this task", "Denied") and offers no Review, live and
+  after a reload. A card's title is short (the one the main chat gave the
+  task, else the first clause of the request, cut at a word within 48
+  columns) and a waiting card reads "Needs your approval: ..." with what it
+  asks. A Done card carries the first two lines of the task's answer (what
+  changed, the tests, the commit), a Did not finish card why, with the
+  error's first line. A finished task's page opens with its answer set as in
+  a chat, its steps folded under "Steps" ("Live" only while it runs), no
+  "Evidence: Not needed in this state." and, in default mode, a header that
+  says "Tasks" alone. A `python_exec` step in the terminal and the console
+  names the command its code runs (`grep -rn DEFAULT_WORKSPACE .`) rather
+  than its first import. The `attention.card` event gains the state
+  `answered` and the key `request_id`; a task created without a title gets a
+  short derived one ([#331]).
+
 - melo remembers two ways, and never asks you to confirm a note. When you ask ("remember
   that Sam has the lab keys", "keep in mind that…", "记住…", "别忘了…", "帮我记一下…"), the
   note is kept at once, as before, even if the model does nothing. Otherwise the chat's
@@ -2713,3 +2730,4 @@ earlier milestones.
 [#330]: https://github.com/localmelo/localmelo/pull/330
 [#329]: https://github.com/localmelo/localmelo/pull/329
 [#328]: https://github.com/localmelo/localmelo/pull/328
+[#331]: https://github.com/localmelo/localmelo/pull/331

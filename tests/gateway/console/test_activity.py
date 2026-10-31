@@ -16,6 +16,7 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.activity import (
     MAX_ROWS,
     MAX_SPAN_S,
+    answer_lines,
     approvals_of,
     local_midnight,
     result_line,
@@ -457,6 +458,56 @@ def test_a_result_line_never_shows_a_marker_a_path_or_code(
 
 def test_a_digest_that_is_a_path_reads_as_its_name() -> None:
     assert result_line("/Users/me/out/slides.pdf", "ignored") == "slides.pdf"
+
+
+@pytest.mark.parametrize(
+    ("answer", "lines"),
+    [
+        # What changed, the tests and the commit: the first two lines, markup gone.
+        (
+            "Done.\n\nChanged `front_rules.py` and its tests.\nTests: 12 passed.\n"
+            "Committed abc1234.",
+            "Changed front_rules.py and its tests.\nTests: 12 passed.",
+        ),
+        (
+            "- **Changed** the deadline rule\n- Tests: 12 passed\n- Commit abc1234",
+            "Changed the deadline rule\nTests: 12 passed",
+        ),
+        # One paragraph gives its first two sentences, a lead "Done." left out.
+        (
+            "Done. Changed the rule. All 12 tests pass. Committed abc1234.",
+            "Changed the rule.\nAll 12 tests pass.",
+        ),
+        (
+            "已完成。修改了 front_rules.py。测试通过。",
+            "修改了 front_rules.py。\n测试通过。",
+        ),
+        # A single line stays one line.
+        ("Committed abc1234 on dogfood/1030.", "Committed abc1234 on dogfood/1030."),
+        # An answer that only says it is done says so.
+        ("Done.", "Done."),
+        ("All done!\n", "All done!"),
+        # Code is not shown; a marker reads as what happened.
+        ("```py\nprint(1)\n```", "Wrote some code"),
+        ("[interrupt: stopped by the user]", "Stopped before answering"),
+        ("", ""),
+        # A path reads as its file's name.
+        (
+            "Edited /Users/me/work/test_e2e_pty.py\nTests: 3 passed",
+            "Edited test_e2e_pty.py\nTests: 3 passed",
+        ),
+    ],
+)
+def test_a_done_card_carries_the_first_lines_of_the_answer(
+    answer: str, lines: str
+) -> None:
+    assert answer_lines(answer) == lines
+
+
+def test_a_long_line_of_an_answer_is_cut_at_a_word() -> None:
+    first, second = answer_lines("word " * 60 + "\nsecond line").split("\n")
+    assert first.endswith("word…") and len(first) <= 120
+    assert second == "second line"
 
 
 # ── GET /api/activity: the open chat, and approvals ──
