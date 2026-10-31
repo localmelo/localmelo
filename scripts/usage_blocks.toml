@@ -1,0 +1,278 @@
+# Every terminal block on the website and in the READMEs, and the steps built from them.
+#
+# Edit a block here, then run `uv run python scripts/usage_blocks.py sync`: it rewrites each
+# `<!-- usage:ID -->` region in docs/ and the READMEs and the pictures in docs/assets/usage/.
+# `mode = "console"` is a transcript (`$ ` lines are commands, the rest is output);
+# `mode = "shell"` (the default) is a script: every line is a command and `#` starts a comment.
+# `title` and `caption` are [English, Chinese]; `svg = true` also draws the block as light and dark pictures for the READMEs.
+
+[block.install]
+title = ["Install", "安装"]
+svg = true
+text = '''
+git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate
+'''
+
+[block.install-pip]
+title = ["Install with pip", "用 pip 安装"]
+text = '''
+git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[gateway]"
+'''
+
+[block.run-omlx]
+title = ["Run a task with oMLX", "用 oMLX 运行任务"]
+text = '''
+melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"
+'''
+
+[block.run-ollama]
+title = ["Run a task with Ollama", "用 Ollama 运行任务"]
+text = '''
+melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"
+'''
+
+[block.run-json]
+title = ["One JSON line", "一行 JSON"]
+text = '''
+melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"
+'''
+
+[block.first-run]
+title = ["First run", "首次运行"]
+mode = "console"
+caption = ["melo finds the server, asks once and saves the configuration.", "melo 找到服务器，只问一次，然后保存配置。"]
+text = '''
+$ melo
+melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
+Found a model server at http://127.0.0.1:11434/v1 (1 model).
+✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
+melo remembers across chats by words only; melo setup adds search by meaning.
+Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
+melo 0.1.0 · qwen3:8b (/model to change)
+~/demo-project
+Try: What is this project? · / commands · ctrl+d quit
+'''
+
+[block.setup-serve]
+title = ["Setup wizard and gateway", "配置向导和网关"]
+text = '''
+melo setup
+melo serve
+'''
+
+[block.embed-ollama]
+title = ["Embedding model with Ollama", "用 Ollama 设置嵌入模型"]
+text = '''
+ollama pull qwen3-embedding:0.6b
+curl -sS http://127.0.0.1:11434/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
+melo setup  # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b
+'''
+
+[block.embed-omlx]
+title = ["Embedding model with oMLX", "用 oMLX 设置嵌入模型"]
+text = '''
+curl -sS http://127.0.0.1:8000/v1/models
+curl -sS http://127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
+'''
+
+[block.gateway-check]
+title = ["Check the gateway and run a task", "检查网关并运行任务"]
+text = '''
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is 6*7?"}'
+'''
+
+[block.gateway-output]
+title = ["Example output", "示例输出"]
+mode = "console"
+text = '''
+{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
+{"result":"42","session_id":"a7e8f646ca2e"}
+'''
+
+[block.interactive]
+title = ["Chat", "对话"]
+text = '''
+melo
+# Or talk to an OpenAI-compatible server that is not saved. Without
+# -m it uses the server's only chat model or its one loaded model;
+# with several chat models and not exactly one loaded, it exits 2 and lists them:
+melo -u http://127.0.0.1:8000/v1
+melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID
+'''
+
+[block.omlx-install]
+title = ["Install oMLX", "安装 oMLX"]
+text = '''
+brew tap jundot/omlx https://github.com/jundot/omlx
+brew install jundot/omlx/omlx
+'''
+
+[block.omlx-download]
+title = ["Download a model", "下载模型"]
+text = '''
+hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit
+'''
+
+[block.omlx-serve]
+title = ["Start oMLX", "启动 oMLX"]
+text = '''
+omlx serve --model-dir ~/models --port 8000
+'''
+
+[block.omlx-models]
+title = ["List the models", "列出模型"]
+text = '''
+curl -sS http://127.0.0.1:8000/v1/models
+'''
+
+[block.chat]
+title = ["The main chat", "主对话"]
+text = '''
+melo
+'''
+
+[block.memory-list]
+title = ["What melo remembers", "melo 记得什么"]
+mode = "console"
+text = '''
+$ melo memory list
+   3  Preferences  You prefer short answers.
+      from chat “I prefer short answers”, Oct 30
+$ melo memory forget 3 -y
+Forgot note 3.
+'''
+
+[block.dev-setup]
+title = ["Development setup", "开发环境"]
+text = '''
+git clone https://github.com/localmelo/localmelo.git
+cd localmelo  # keep this name: the package is built from it
+uv sync --extra dev --extra gateway
+'''
+
+[block.dev-run]
+title = ["From the checkout", "在克隆目录中运行"]
+text = '''
+uv run melo "What is 6*7?"
+uv run melo serve
+'''
+
+[block.dev-test]
+title = ["While working", "开发时"]
+text = '''
+uv run pytest --testmon -q
+'''
+
+[block.dev-test-all]
+title = ["Before a pull request", "提交 pull request 之前"]
+text = '''
+uv run pytest -n auto -q
+'''
+
+[block.dev-node]
+title = ["JavaScript tests", "JavaScript 测试"]
+text = '''
+node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs
+'''
+
+[block.dev-smoke]
+title = ["Real-backend smoke tests", "真实后端的冒烟测试"]
+text = '''
+LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q
+'''
+
+[block.dev-checks]
+title = ["Checks", "检查"]
+text = '''
+uv run ruff check .
+uv run black --check .
+uv run mypy .
+'''
+
+[block.dev-preview]
+title = ["Preview", "预览"]
+text = '''
+python3 -m http.server 8080 --bind 127.0.0.1 --directory docs
+'''
+
+[block.app-install]
+title = ["Build the app", "构建 App"]
+svg = true
+text = '''
+uv run python scripts/build_macos_app.py --install
+'''
+
+[block.omlx-serve-readme]
+title = ["Serve the models", "提供模型"]
+svg = true
+text = '''
+brew tap jundot/omlx https://github.com/jundot/omlx
+brew install jundot/omlx/omlx
+omlx serve --model-dir ~/models --port 8000
+'''
+
+[block.readme-run-omlx]
+title = ["Run a task with oMLX", "用 oMLX 运行任务"]
+svg = true
+text = '''
+melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
+'''
+
+[block.readme-run-ollama]
+title = ["Run a task with Ollama", "用 Ollama 运行任务"]
+svg = true
+text = '''
+melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
+'''
+
+# The five steps on the home page and the Quickstart. `blocks` are shown in order;
+# `image` (a 1280 x 800 file in docs/assets/img/) stands in for a block where the step is in the app.
+[[step]]
+id = "install"
+href = "quickstart.html#install"
+title = ["Install", "安装"]
+line = ["Clone the repository and let uv set it up.", "克隆仓库，让 uv 完成安装。"]
+blocks = ["install"]
+
+[[step]]
+id = "first-run"
+href = "quickstart.html#run-your-first-task"
+title = ["Run a first task", "运行第一个任务"]
+line = ["Point melo at your model server and ask a question; the answer prints on stdout.", "让 melo 连接你的模型服务器并提一个问题，答案会打印在 stdout。"]
+blocks = ["run-omlx", "run-ollama"]
+
+[[step]]
+id = "main-chat"
+href = "quickstart.html#interactive-conversations"
+title = ["Open the main chat", "打开主对话"]
+line = ["Run melo with no task: the first run finds your server and saves the setup.", "不带任务运行 melo：首次运行会找到你的服务器并保存配置。"]
+blocks = ["chat"]
+
+[[step]]
+id = "task"
+href = "quickstart.html#interactive-conversations"
+title = ["Hand it a task", "交给它一个任务"]
+line = ["Ask for bigger work in the chat: it becomes a task and comes back as a card.", "在对话里提出更大的工作：它会成为任务，完成后以卡片回来。"]
+image = "cards.webp"
+alt = ["Three cards in the main chat: a finished task with what it changed and its tests, an approval that was answered, and one that waits for you.", "主对话中的三张卡片：一个已完成的任务（改了什么、跑了哪些测试）、一个已答复的批准请求和一个在等你的批准请求。"]
+
+[[step]]
+id = "memory"
+href = "quickstart.html#set-up-an-embedding-model"
+title = ["See what it remembers", "查看它记住了什么"]
+line = ["melo keeps notes across chats; list them, or forget one.", "melo 跨对话保存笔记；你可以列出它们，或忘掉某一条。"]
+blocks = ["memory-list"]

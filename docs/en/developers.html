@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/developers.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -104,12 +105,9 @@
       <section class="section" id="setup">
         <h2>Set up</h2>
         <p>You need Python 3.11 or later, Git and <a href="https://docs.astral.sh/uv/">uv</a>; Node (the version in <code>.nvmrc</code>) only for the console's JavaScript tests.</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Development setup</figcaption>
-          <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo                 # keep this name: the package is built from it
-uv sync --extra dev --extra gateway</code></pre>
-        </figure>
+        <!-- usage:dev-setup --><figure class="usage" aria-label="Development setup" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra dev --extra gateway"><div class="usage-bar"><span class="usage-title">Development setup</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span>  <span class="k"># keep this name: the package is built from it</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">dev</span> <span class="f">--extra</span> <span class="a">gateway</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li><code>uv</code> builds <code>.venv/</code> from <code>uv.lock</code>, with Python 3.13 from <code>.python-version</code>; localmelo supports 3.11 or later.</li>
           <li><code>--extra dev</code> adds pytest, ruff, black, mypy and pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn.</li>
@@ -120,11 +118,8 @@ uv sync --extra dev --extra gateway</code></pre>
       <section class="section" id="running">
         <h2>Run the CLI</h2>
         <p><code>melo</code> lands in <code>.venv/bin/</code>, not on your PATH. Inside the clone, run it through uv:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">From the checkout</figcaption>
-          <pre><code>uv run melo "What is 6*7?"
-uv run melo serve</code></pre>
-        </figure>
+        <!-- usage:dev-run --><figure class="usage" aria-label="From the checkout" data-copy="uv run melo &quot;What is 6*7?&quot;&#10;uv run melo serve"><div class="usage-bar"><span class="usage-title">From the checkout</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">melo</span> <span class="q">"What is 6*7?"</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">melo</span> <span class="s">serve</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>Elsewhere, name the checkout: <code>uv run --project DIR melo …</code>.</li>
           <li>A run needs a model server: pass <code class="wrap">-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>, or run <code>uv run melo setup</code> once.</li>
@@ -135,15 +130,9 @@ uv run melo serve</code></pre>
       <section class="section" id="tests">
         <h2>Tests</h2>
         <p>While you work, run only the tests your change affects; <code>pytest-testmon</code> picks them:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">While working</figcaption>
-          <pre><code>uv run pytest --testmon -q</code></pre>
-        </figure>
+        <!-- usage:dev-test --><figure class="usage" aria-label="While working" data-copy="uv run pytest --testmon -q"><div class="usage-bar"><span class="usage-title">While working</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">--testmon</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <p>Before you send a pull request, run the whole offline suite once, in parallel:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Before a pull request</figcaption>
-          <pre><code>uv run pytest -n auto -q</code></pre>
-        </figure>
+        <!-- usage:dev-test-all --><figure class="usage" aria-label="Before a pull request" data-copy="uv run pytest -n auto -q"><div class="usage-bar"><span class="usage-title">Before a pull request</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-n</span> <span class="a">auto</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>The suite needs no model server and sends no request to one; a few CLI tests serve a fake API on loopback.</li>
           <li>To run one folder, name it: <code class="wrap">uv run pytest tests/agent -q</code>.</li>
@@ -173,15 +162,9 @@ uv run melo serve</code></pre>
           </table>
         </div>
         <p>The console's JavaScript has its own tests; they need Node, and pytest does not run them:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">JavaScript tests</figcaption>
-          <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
-        </figure>
+        <!-- usage:dev-node --><figure class="usage" aria-label="JavaScript tests" data-copy="node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs"><div class="usage-bar"><span class="usage-title">JavaScript tests</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">node</span> <span class="f">--test</span> <span class="a">tests/<wbr>gateway/<wbr>test_markdown.mjs</span> <span class="a">tests/<wbr>gateway/<wbr>test_workspace.mjs</span></span></code></pre></figure><!-- /usage -->
         <p>Tests that talk to a real model server are opt-in; a plain run sends no chat request:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Real-backend smoke tests</figcaption>
-          <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
-        </figure>
+        <!-- usage:dev-smoke --><figure class="usage" aria-label="Real-backend smoke tests" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">Real-backend smoke tests</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>They ask Ollama on <code>127.0.0.1:11434</code> and MLC LLM on <code>127.0.0.1:8400</code>, and skip a server that does not answer.</li>
           <li><code class="wrap">tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
@@ -190,12 +173,9 @@ uv run melo serve</code></pre>
 
       <section class="section" id="lint">
         <h2>Lint and types</h2>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Checks</figcaption>
-          <pre><code>uv run ruff check .
-uv run black --check .
-uv run mypy .</code></pre>
-        </figure>
+        <!-- usage:dev-checks --><figure class="usage" aria-label="Checks" data-copy="uv run ruff check .&#10;uv run black --check .&#10;uv run mypy ."><div class="usage-bar"><span class="usage-title">Checks</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">ruff</span> <span class="s">check</span> <span class="a">.</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">black</span> <span class="f">--check</span> <span class="a">.</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">mypy</span> <span class="a">.</span></span></code></pre></figure><!-- /usage -->
         <p>
           Black formats at 88 columns. Ruff selects <code>E</code>,
           <code>W</code>, <code>F</code>, <code>I</code>, <code>N</code>,
@@ -396,10 +376,7 @@ uv run mypy .</code></pre>
         </ul>
         <p>A new Markdown page goes into the index in <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md</a>; <a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">Maintaining the docs</a> has the layout and the glossary.</p>
         <p>Preview the website locally:</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">Preview</figcaption>
-          <pre><code>python3 -m http.server 8080 --bind 127.0.0.1 --directory docs</code></pre>
-        </figure>
+        <!-- usage:dev-preview --><figure class="usage" aria-label="Preview" data-copy="python3 -m http.server 8080 --bind 127.0.0.1 --directory docs"><div class="usage-bar"><span class="usage-title">Preview</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">python3</span> <span class="f">-m</span> <span class="a">http.server</span> <span class="a">8080</span> <span class="f">--bind</span> <span class="a">127.0.0.1</span> <span class="f">--directory</span> <span class="a">docs</span></span></code></pre></figure><!-- /usage -->
         <p>Then open <code>http://127.0.0.1:8080/en/</code>.</p>
       </section>
 
