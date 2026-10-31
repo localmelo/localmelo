@@ -17,6 +17,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.running import MAX_ITEMS, task_counts
 from localmelo.support.gateway.console.worker_reader import WorkerReader
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -410,12 +411,14 @@ async def test_runs_and_terminal_chats_have_their_own_kinds_and_the_newest_wins(
 
 
 @pytest.mark.parametrize(
-    "state, outcome",
+    "state, reason, outcome",
     [
-        ("done", "done"),
-        ("failed", "failed"),
-        ("cancelled", "stopped"),
-        ("expired", "stopped"),
+        ("done", "", "done"),
+        ("failed", "it broke", "failed"),
+        # A run that used all its steps is a stop the person can continue (#341).
+        ("failed", OUT_OF_STEPS, "stopped"),
+        ("cancelled", "", "stopped"),
+        ("expired", "", "stopped"),
     ],
 )
 async def test_a_finished_task_is_a_recent_outcome(
@@ -423,10 +426,11 @@ async def test_a_finished_task_is_a_recent_outcome(
     console: Console,
     monkeypatch: pytest.MonkeyPatch,
     state: str,
+    reason: str,
     outcome: str,
 ) -> None:
-    async def latest() -> tuple[str, str, float]:
-        return ("t9", state, time.time() - 3)
+    async def latest() -> tuple[str, str, float, str]:
+        return ("t9", state, time.time() - 3, reason)
 
     monkeypatch.setattr(console.workers.tasks, "latest_finished", latest)
     found = status(client)["recent"]
@@ -453,8 +457,8 @@ async def test_a_finished_task_and_run_say_what_they_were_called(
     assert status(client)["recent"]["title"] == "Fix the build"
     set_turn(console, chat.session_id, finished_at=1.0)
 
-    async def latest() -> tuple[str, str, float]:
-        return ("t1", "done", time.time())
+    async def latest() -> tuple[str, str, float, str]:
+        return ("t1", "done", time.time(), "")
 
     class Record:
         title = "Slides for the 3 pm meeting"
