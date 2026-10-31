@@ -242,6 +242,7 @@ class OwnerAsks:
         echo = await self._echo(ask, "ask_end", "ask.replied", how="person",
                                 text=text, of=ask.person_row or ask.row)  # fmt: skip
         self._emit(ANSWER_EVENT, ask, by="person")
+        self._index(ask, text)
         return echo
 
     # ── The chat's tools ──
@@ -272,7 +273,7 @@ class OwnerAsks:
         self._settle(ask, framed, "owner")
         await self._echo(ask, "task_answered", "ask.answered", text=text, of=ask.row)
         self._emit(ANSWER_EVENT, ask, by="owner")
-        # TODO(memory lane): index the exchange with ChatMemory.index_exchange(task_session_id, request, answer).
+        self._index(ask, text)
         return (
             f"Answered task {task_id}; it goes on with your answer. Tell the user "
             "in one short sentence what you answered."
@@ -535,6 +536,19 @@ class OwnerAsks:
                 "ask_id": ask.ask_id, "line": t_in("en", key, title=ask.title),
                 "said": words, **{k: v for k, v in extra.items() if v is not None}}  # fmt: skip
         return await self.console.front_for(ask.chat_id).echo(data)
+
+    def _index(self, ask: Ask, answer: str) -> None:
+        """Keep an answered question recallable as the task's exchange, never as a note."""
+        asked = [ask.fields.get("problem", ""), ask.fields.get("help_needed", "")]
+        asked.append(ask.parts.get("question", ""))
+        question = " ".join(part for part in asked if part)
+        self._spawn(self._index_now(ask.task_id, question, answer))
+
+    async def _index_now(self, task_id: str, question: str, answer: str) -> None:
+        try:
+            await self.console.memory.index_exchange(task_id, question, answer)
+        except Exception:
+            logger.warning("Could not keep a task's exchange for recall", exc_info=True)
 
     def _emit(self, kind: str, ask: Ask, **more: str) -> None:
         data = {"task_id": ask.task_id, "ask_id": ask.ask_id, "chat_id": ask.chat_id}

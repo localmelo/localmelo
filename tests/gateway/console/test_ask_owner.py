@@ -1070,3 +1070,37 @@ async def test_a_restart_runs_the_queue_of_a_chat_behind_a_thousand_newer_ones(
             return turns[-1].user_text == "hello there"
 
         await until(ran)
+
+
+async def test_each_answered_question_is_kept_once_as_the_tasks_exchange(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        answers("Use option B."),
+        answer("Answered."),
+        asks_person,
+        answer("The task needs your answer."),
+    ]
+    workers: list[list[Reply]] = [[ASKS, answer("done")], [ASKS, answer("done")]]
+    kept: list[tuple[str, str, str]] = []
+    async with ask_console(tmp_path, monkeypatch, main=main, workers=workers) as (
+        console,
+        client,
+        _,
+    ):
+
+        async def index_exchange(task_id: str, request: str, answer: str) -> None:
+            kept.append((task_id, request, answer))
+
+        monkeypatch.setattr(console.memory, "index_exchange", index_exchange)
+        first = await start(console, "the first job")
+        await ended(console, first)
+        second = await start(console, "the second job")
+        await until(lambda: (console.asks.waiting(second) or {}).get("on") == "person")
+        await console.workers.message(second, "B, please")
+        await ended(console, second)
+        await console.asks.settle()
+    assert kept == [
+        (first, "the problem the help needed", "Use option B."),
+        (second, "the problem the help needed A or B?", "B, please"),
+    ]
