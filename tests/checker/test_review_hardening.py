@@ -514,3 +514,59 @@ def test_decoded_literal_code_written_to_a_file_is_judged(ws: Path) -> None:
         f"import base64\nopen('conftest.py', 'wb').write(base64.b64decode({encoded!r}))"
     )
     assert py(ws, code).categories == ("remote_code",)
+
+
+# ── Part 2 (#339): what an edit adds, counted by site; only the running localmelo ──
+
+
+def test_an_edit_that_adds_a_second_unreadable_call_counts(ws: Path) -> None:
+    (ws / "tool.py").write_text("import subprocess\nsubprocess.run(cmd)\nprint(1)\n")
+    # The same words for a reason as the call already there: before part 2,
+    # the doubt matched by text and the edit stayed routine.
+    twice = {"path": "tool.py", "old": "print(1)", "new": "subprocess.run(cmd)"}
+    review = rv(ws, "file_edit", twice)
+    assert review.verdict == "undecided"
+    assert review.reasons[0].endswith("code that runs a command melo could not read.")
+    # Another unreadable call, with the same reason words as the first.
+    other = {"path": "tool.py", "old": "print(1)", "new": "subprocess.run(other)"}
+    assert rv(ws, "file_edit", other).verdict == "undecided"
+    # A reflow or a moved call adds nothing.
+    blank = {"path": "tool.py", "old": "print(1)", "new": "\n\nprint(1)"}
+    assert rv(ws, "file_edit", blank).verdict == "routine"
+    moved = "print(1)\nimport subprocess\nsubprocess.run(cmd)\n"
+    assert rv(ws, "file_write", {"path": "tool.py", "content": moved}).verdict == (
+        "routine"
+    )
+
+
+def test_a_second_high_impact_command_added_to_a_script_counts(ws: Path) -> None:
+    (ws / "setup.sh").write_text("pip install --user evilpkg\necho done\n")
+    again = {
+        "path": "setup.sh",
+        "old": "echo done",
+        "new": "pip install --user evilpkg",
+    }
+    assert rv(ws, "file_edit", again).categories == ("install",)
+    same = {"path": "setup.sh", "old": "echo done", "new": "echo  done"}
+    assert rv(ws, "file_edit", same).verdict == "routine"
+
+
+def test_only_the_running_localmelo_is_itself(
+    ws: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A copy of localmelo's source elsewhere is a folder like any other.
+    copy = ws.parent / "clone" / "localmelo" / "melo" / "agent" / "agent.py"
+    review = rv(ws, "file_write", {"path": str(copy), "content": "x"})
+    assert "self" not in review.categories
+    # An app bundle counts only when localmelo runs from it.
+    app = "/Applications/LocalMelo.app/Contents/Info.plist"
+    assert "self" not in rv(ws, "file_write", {"path": app, "content": "x"}).categories
+    bundled = "/Applications/LocalMelo.app/Contents/Resources/app/localmelo"
+    monkeypatch.setattr(paths, "_SOURCE", bundled)
+    review = rv(ws, "file_write", {"path": app, "content": "x"})
+    assert review.categories == ("self",)
+    # Its settings and keys always do.
+    secrets = str(ws.parent / ".cache" / "localmelo" / "config.toml")
+    assert rv(ws, "file_write", {"path": secrets, "content": "x"}).categories == (
+        "self",
+    )

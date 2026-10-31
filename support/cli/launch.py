@@ -624,7 +624,12 @@ async def main_async(
             agent=agent,
             renderer=renderer,
             approver=approver,
-            mode="yolo" if args.yolo else "ask",
+            # [approvals] mode: the terminal's own chat starts as a new chat does.
+            mode=(
+                "yolo"
+                if args.yolo
+                else "auto" if session_config.approvals.mode == "auto" else "ask"
+            ),
             resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
             stream=session_config.cli.stream,
             reasoning_tags=session_config.cli.reasoning_tags,
