@@ -67,6 +67,8 @@ REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 # How memory across chats finds notes: see MemoryConfig.retriever.
 MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
+# How notes are tidied while melo is idle: see MemoryConfig.sleep.
+MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
@@ -309,13 +311,19 @@ class MemoryConfig:
     and the chat model chooses among them, with no embedding calls).
     ``keep_statements``, a developer setting for comparison and off by default,
     makes code keep after a chat turn the plain, lasting facts the user stated
-    that the model did not keep with ``remember``.
+    that the model did not keep with ``remember``. ``sleep``, another developer
+    setting, tidies the notes while melo is idle: ``off`` (the default) or
+    ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
+    ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
+    an optional path whose presence prevents model requests.
     """
 
     admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
+    sleep: str = "off"  # off | rules | model | model+tags
+    sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
 
 
 @dataclass
@@ -521,6 +529,16 @@ class Config:
                 f"[memory] retriever {self.memory.retriever!r} is not "
                 f"recognised. Must be one of {MEMORY_RETRIEVERS}."
             )
+        if self.memory.sleep not in MEMORY_SLEEP:
+            errors.append(
+                f"[memory] sleep {self.memory.sleep!r} is not recognised. "
+                f"Must be one of {MEMORY_SLEEP}."
+            )
+        if (
+            not isinstance(self.memory.sleep_lock, str)
+            or "\x00" in self.memory.sleep_lock
+        ):
+            errors.append("[memory] sleep_lock must be a path string without NUL")
         return errors
 
     def _validate_browser(self) -> list[str]:
@@ -1484,6 +1502,10 @@ def save(cfg: Config) -> None:
             lines.append(f"retriever = {_toml_string(cfg.memory.retriever)}")
         if cfg.memory.keep_statements:
             lines.append("keep_statements = true")
+        if cfg.memory.sleep != "off":
+            lines.append(f"sleep = {_toml_string(cfg.memory.sleep)}")
+        if cfg.memory.sleep_lock:
+            lines.append(f"sleep_lock = {_toml_string(cfg.memory.sleep_lock)}")
         lines.append("")
 
     if cfg.browser != BrowserConfig():

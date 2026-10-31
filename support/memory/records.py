@@ -706,6 +706,19 @@ def _flagged(note: str) -> set[str]:
     return {_stem(word) for word in words if word.isascii()}
 
 
+def value_terms(note: str) -> set[str]:
+    """The stemmed values whose exact presence grounding requires (not paraphrases)."""
+    flagged = _flagged(note)
+    return {
+        term
+        for term in note_terms(note)
+        if not term.isascii()
+        or term in flagged
+        or _VALUE_WORD.fullmatch(term) is not None
+        or any(char.isdigit() for char in term)
+    }
+
+
 def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     """The content words of *note* that the *evidence* texts lack, when that is
     too much: ``[]`` means grounded.
@@ -720,18 +733,9 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     gone = _missing(note, evidence)
     if not gone:
         return []
-    flagged = _flagged(note)
-
-    def is_value(term: str) -> bool:
-        return (
-            not term.isascii()
-            or term in flagged
-            or _VALUE_WORD.fullmatch(term) is not None
-            or any(char.isdigit() for char in term)
-        )
-
-    values = [term for term in gone if is_value(term)]
-    others = [term for term in note_terms(note) if not is_value(term)]
+    valued = value_terms(note)
+    values = [term for term in gone if term in valued]
+    others = [term for term in note_terms(note) if term not in valued]
     lost = [term for term in gone if term not in values]
     if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
         return []
@@ -1069,8 +1073,17 @@ async def write(
     *,
     source: dict[str, Any],
     embed_model: str,
+    origin: str = "user",
+    created_at: float | None = None,
 ) -> list[Written]:
-    """Write each candidate as a record of *source* (session, turn, chat, surface)."""
+    """Write each candidate as a record of *source* (session, turn, chat, surface).
+
+    A project note also keeps the chat's folder (``source["workspace"]``), as an
+    imported one does, so a task in that folder gets it. No other topic does.
+
+    *origin* and *created_at* are what the store keeps as the row's source and
+    time; sleep writes as ``sleep``, at the time of the turn it read.
+    """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
         active = await store.active_entries()
@@ -1080,23 +1093,25 @@ async def write(
         if action == "IGNORE":
             continue
         provenance = {
-            **source,
+            **{k: v for k, v in source.items() if k != "workspace"},
             "topic": cand.topic,
             "quote": cand.quote,
             "embed_model": embed_model if vector is not None else "",
         }
+        if cand.topic == "projects" and source.get("workspace"):
+            provenance["workspace"] = source["workspace"]
         old = next((e for e in active if e.id == target), None)
         if old is not None and (replaces := _replaces(old, source)):
             provenance["replaces"] = replaces
         entry_id, actual = await store.apply(
             text=cand.text,
             kind=cand.kind,
-            source="user",
+            source=origin,
             admitted_by=cand.admitted_by,
             provenance=provenance,
             task_id="",
             session_id=str(source.get("session_id", "")),
-            created_at=time.time(),
+            created_at=created_at or time.time(),
             embedding=vector,
             action=action,
             target_id=target,

@@ -15,6 +15,9 @@ kept, :meth:`ChatMemory.keep_changes` replaces an active note whose subject the
 user gave a new value ("My weekly sync is on Friday."). When the reply says it
 noted something and no note was kept, :meth:`ChatMemory.keep_claims` keeps what
 the reply named, by the same checks, or flags the turn ``unsaved_claim``.
+With the developer setting ``[memory] sleep`` (:mod:`.sleep`),
+:meth:`ChatMemory.sleep` tidies the notes while melo is idle;
+:meth:`ChatMemory.undo_sleep` puts a run back.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -48,6 +51,7 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
+from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.importer import (
     ImportPlan,
     build_plan,
@@ -87,7 +91,7 @@ from localmelo.support.memory.recall import (
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
-    from localmelo.support.sessions.store import SessionStore, TurnInfo
+    from localmelo.support.sessions.store import SessionStore, StoredEvent, TurnInfo
 
 logger = logging.getLogger(__name__)
 
@@ -254,12 +258,14 @@ def _pack_topics() -> tuple[str, ...]:
     )
 
 
+def _real_folder(path: object) -> str:
+    return os.path.realpath(os.path.expanduser(str(path)))
+
+
 def _same_folder(a: object, b: object) -> bool:
     if not a or not b:
         return False
-    return os.path.realpath(os.path.expanduser(str(a))) == os.path.realpath(
-        os.path.expanduser(str(b))
-    )
+    return _real_folder(a) == _real_folder(b)
 
 
 def _record_item(entry: StoredEntry) -> Item:
@@ -723,6 +729,7 @@ class ChatMemory:
         session = await store.get_session(info.session_id)
         kind = session.kind if session is not None else "chat"
         title = session.title if session is not None else ""
+        folder = session.workspace if session is not None else None
         return {
             "session_id": info.session_id,
             "turn": info.turn,
@@ -731,6 +738,8 @@ class ChatMemory:
             "title": title,
             "surface": self.surface,
             "chat": chat_label(kind, title, self.surface),
+            # The chat's folder, kept by ``records.write`` for project notes only.
+            "workspace": _real_folder(folder) if folder else "",
         }
 
     async def before_turn(
@@ -1083,10 +1092,14 @@ class ChatMemory:
                 await self.stores()[1].add(doc)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
-        """Delete what the index holds of a chat (of one turn, with *turn*)."""
+        """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
         await self.drain()
         async with self._lock:
-            return await self.stores()[1].delete(session_id, turn)
+            store, index = self.stores()
+            for note in await store.session_entries(session_id, undone_only=True):
+                if turn is None or note.provenance.get("turn") == turn:
+                    await store.delete_entry(note.id, versions=False)
+            return await index.delete(session_id, turn)
 
     async def forget_all(self) -> tuple[int, int]:
         """Forget every note and empty the chat index; the counts of each.
@@ -1104,15 +1117,13 @@ class ChatMemory:
         return notes, turns
 
     async def forget_chat_notes(self, session_id: str) -> int:
-        """Delete the notes that came from one chat; how many."""
+        """Delete a chat's note history; return how many active notes it held."""
         async with self._lock:
             store = self.stores()[0]
-            mine = [
-                e.id for e in await store.active_entries() if e.session_id == session_id
-            ]
-            for entry_id in mine:
-                await store.delete_entry(entry_id)
-        return len(mine)
+            mine = await store.session_entries(session_id)
+            for note in mine:
+                await store.delete_entry(note.id, versions=note.status == "active")
+        return sum(note.status == "active" for note in mine)
 
     async def reindex(self, chats: SessionStore | None) -> tuple[int, int]:
         """Rebuild the chat index from *chats* and give every note a vector of the
@@ -1361,6 +1372,99 @@ class ChatMemory:
                 (e for e in await store.active_entries() if e.id == record_id), None
             )
 
+    async def sleep(
+        self,
+        variant: str | None = None,
+        *,
+        now: float | None = None,
+        chats: SessionStore | None = None,
+        budget: int | None = None,
+    ) -> sleeping.SleepReport:
+        """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
+        what it changed. *chats* gives it the turns to replay (without them,
+        only duplicates are merged). Model variants share a twelve-call limit;
+        each call checks the optional sleep lock and new chat activity.
+        Nothing happens with memory off or ``off``.
+        """
+        cfg = self._settings()
+        began = time.time()
+        variant = variant or (cfg.memory.sleep if cfg is not None else "off")
+        store, index = self.stores()
+        variant = variant if self.enabled else "off"
+        if variant == "off" or variant not in sleeping.VARIANTS:
+            return await sleeping.run(store, index, [], variant=variant, now=now)
+        await self.drain()
+        until = await index.meta("sleep_until")
+        forgotten = await index.forgotten_at()
+        turns = (
+            await sleeping.sleep_turns(
+                chats,
+                (
+                    max(until, forgotten)
+                    if variant == "rules"
+                    else max(
+                        forgotten,
+                        (began if now is None else now) - sleeping.BACKLOG_SECONDS,
+                    )
+                ),
+            )
+            if chats is not None
+            else []
+        )
+
+        async def active() -> bool:
+            if not self.enabled:
+                return True
+            if chats is not None:
+                for session in await chats.list_sessions(
+                    limit=100_000, kinds=("chat", "front")
+                ):
+                    if session.updated_at > began and any(
+                        t.started_at > began for t in await chats.list_turns(session.id)
+                    ):
+                        return True
+            return False
+
+        async def notes_for(typed: str) -> list[int]:
+            embedded = await self._embed([typed], EMBED_TIMEOUT_S, query=True)
+            vector = unit(embedded.vectors[0]) if embedded.vectors else None
+            found = ranked(
+                await self._sync(),
+                typed,
+                vector,
+                embedded.model,
+                now=time.time(),
+                coverage=0.0,
+            )
+            return [int(item.key[2:]) for item in found if item.is_record][:6]
+
+        async def embed_note(text: str) -> tuple[Sequence[float] | None, str]:
+            embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
+            return (embedded.vectors[0] if embedded.vectors else None, embedded.model)
+
+        async with self._lock:
+            report = await sleeping.run(
+                store,
+                index,
+                turns,
+                variant=variant,
+                now=now,
+                until=max(until, forgotten),
+                provider=self.chat_provider() if variant.startswith("model") else None,
+                notes_for=notes_for,
+                is_active=active,
+                lock=cfg.memory.sleep_lock if cfg is not None else "",
+                budget=budget,
+                embed_note=embed_note if self.embedding()[0] is not None else None,
+            )
+        logger.info("memory.sleep %s", report.to_json())
+        return report
+
+    async def undo_sleep(self, run_id: str) -> dict[str, Any] | None:
+        """Put the sleep run *run_id* back (:func:`sleeping.undo`); ``None`` when unknown."""
+        async with self._lock:
+            return await sleeping.undo(*self.stores(), run_id)
+
     # ── Notes brought in from other assistants' files ──
 
     async def import_scan(
@@ -1512,6 +1616,27 @@ class ChatMemory:
         }
 
     # ── Lifecycle ──
+
+    def side_ended(self, event: StoredEvent) -> None:
+        """Index a ``side.summary`` event (``data``: ``chat_id``, ``title``,
+        ``summary``, ``source``) in the background with :meth:`side_summary`;
+        the console's main chat calls it when a side chat finishes work. A
+        ``chat`` source (the chat's own run) is indexed as its turn already."""
+        data = event.event.get("data") or {}
+        chat_id, summary = data.get("chat_id"), data.get("summary")
+        if not (self.enabled and isinstance(chat_id, str) and chat_id):
+            return
+        if data.get("source", "chat") == "chat":
+            return
+        if isinstance(summary, str) and summary.strip():
+            title = str(data.get("title") or "")
+            self._spawn(self._side_ended(chat_id, title, summary))
+
+    async def _side_ended(self, chat_id: str, title: str, summary: str) -> None:
+        try:
+            await self.side_summary(chat_id, title, summary)
+        except Exception:
+            logger.warning("Could not index a side chat's summary", exc_info=True)
 
     def _spawn(self, coro: Any) -> None:
         task = asyncio.ensure_future(coro)
