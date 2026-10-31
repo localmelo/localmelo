@@ -254,12 +254,14 @@ def _pack_topics() -> tuple[str, ...]:
     )
 
 
+def _real_folder(path: object) -> str:
+    return os.path.realpath(os.path.expanduser(str(path)))
+
+
 def _same_folder(a: object, b: object) -> bool:
     if not a or not b:
         return False
-    return os.path.realpath(os.path.expanduser(str(a))) == os.path.realpath(
-        os.path.expanduser(str(b))
-    )
+    return _real_folder(a) == _real_folder(b)
 
 
 def _record_item(entry: StoredEntry) -> Item:
@@ -723,6 +725,7 @@ class ChatMemory:
         session = await store.get_session(info.session_id)
         kind = session.kind if session is not None else "chat"
         title = session.title if session is not None else ""
+        folder = session.workspace if session is not None else None
         return {
             "session_id": info.session_id,
             "turn": info.turn,
@@ -731,6 +734,8 @@ class ChatMemory:
             "title": title,
             "surface": self.surface,
             "chat": chat_label(kind, title, self.surface),
+            # The chat's folder, kept by ``records.write`` for project notes only.
+            "workspace": _real_folder(folder) if folder else "",
         }
 
     async def before_turn(

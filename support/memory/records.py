@@ -1070,7 +1070,11 @@ async def write(
     source: dict[str, Any],
     embed_model: str,
 ) -> list[Written]:
-    """Write each candidate as a record of *source* (session, turn, chat, surface)."""
+    """Write each candidate as a record of *source* (session, turn, chat, surface).
+
+    A project note also keeps the chat's folder (``source["workspace"]``), as an
+    imported one does, so a task in that folder gets it. No other topic does.
+    """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
         active = await store.active_entries()
@@ -1080,11 +1084,13 @@ async def write(
         if action == "IGNORE":
             continue
         provenance = {
-            **source,
+            **{k: v for k, v in source.items() if k != "workspace"},
             "topic": cand.topic,
             "quote": cand.quote,
             "embed_model": embed_model if vector is not None else "",
         }
+        if cand.topic == "projects" and source.get("workspace"):
+            provenance["workspace"] = source["workspace"]
         old = next((e for e in active if e.id == target), None)
         if old is not None and (replaces := _replaces(old, source)):
             provenance["replaces"] = replaces

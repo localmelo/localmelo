@@ -481,3 +481,83 @@ async def test_keep_statements_skips_a_task_question(
         assert await memory.records() == []
     finally:
         await memory.aclose()
+
+
+async def chat_in(store: SessionStore, typed: str, folder: Path | None) -> TurnInfo:
+    """A first turn of a new chat whose folder is *folder* (None: it names none)."""
+    workspace = None if folder is None else str(folder)
+    return await store.begin_turn(
+        None,
+        typed,
+        holder=HOLDER,
+        title="Planning",
+        new_session=NewSession(workspace=workspace),
+    )
+
+
+PROJECT_FACT = "This project uses uv and pytest."
+
+
+async def test_a_project_note_made_in_a_chat_remembers_its_folder(
+    memory: ChatMemory, store: SessionStore, tmp_path: Path
+) -> None:
+    real = tmp_path / "demo-project"
+    real.mkdir()
+    link = tmp_path / "link"
+    os.symlink(real, link)
+    other = tmp_path / "other-project"
+    other.mkdir()
+    info = await chat_in(store, PROJECT_FACT, link)
+    await memory.before_turn(store, info, PROJECT_FACT)
+    reply = await memory.tools().remember(
+        text="Your project uses uv and pytest.", topic="projects"
+    )
+    assert reply.startswith("Remembered")
+    (entry,) = await memory.records()
+    assert entry.provenance["workspace"] == os.path.realpath(real)
+    objective = "check that the README and the tests folder are in order"
+    here = await memory.context_pack(objective, "c", workspace=str(real))
+    assert "uses uv and pytest" in here
+    away = await memory.context_pack(objective, "c", workspace=str(other))
+    assert "uv and pytest" not in away
+
+
+async def test_a_note_the_code_keeps_from_typed_words_stores_no_workspace(
+    memory: ChatMemory, store: SessionStore, tmp_path: Path
+) -> None:
+    # Typed requests are never project notes: only the model picks that topic.
+    typed = "Remember that my landlord is Dan."
+    info = await chat_in(store, typed, tmp_path)
+    said = await memory.before_turn(store, info, typed)
+    assert said.remembered
+    (entry,) = await memory.records()
+    assert entry.provenance["topic"] != "projects"
+    assert "workspace" not in entry.provenance
+
+
+async def test_a_chat_without_a_folder_stores_no_workspace(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    info = await chat_in(store, PROJECT_FACT, None)
+    await memory.before_turn(store, info, PROJECT_FACT)
+    await memory.tools().remember(
+        text="Your project uses uv and pytest.", topic="projects"
+    )
+    (entry,) = await memory.records()
+    assert entry.provenance["topic"] == "projects"
+    assert "workspace" not in entry.provenance
+
+
+@pytest.mark.parametrize("topic", ["about", "preferences", "people", "decisions"])
+async def test_only_a_project_note_stores_a_workspace(
+    memory: ChatMemory, store: SessionStore, tmp_path: Path, topic: str
+) -> None:
+    info = await chat_in(store, PROJECT_FACT, tmp_path)
+    await memory.before_turn(store, info, PROJECT_FACT)
+    reply = await memory.tools().remember(
+        text="Your project uses uv and pytest.", topic=topic
+    )
+    assert reply.startswith("Remembered"), reply
+    (entry,) = await memory.records()
+    assert entry.provenance["topic"] == topic
+    assert "workspace" not in entry.provenance
