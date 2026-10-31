@@ -512,13 +512,15 @@ async def test_a_task_card_keeps_how_code_found_it_ended(tmp_path: Path) -> None
         await console.workers.tasks.change(
             task_id, state="done", actor="scheduler", ending={**draft, "tests": []}
         )
-        await store.append_session_event(task_id, "sched.finished", {"state": "done"})
+        # Continued before the card is written: the card keeps the ending of its own end.
+        await console.workers.tasks.reopen(task_id, "Finish it: run the tests")
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         # The card stays done; its ending says what code found, its line drops the claim.
         assert (card["state"], card["ending"]) == ("done", draft)
         assert card["line"] == "Fixed the report."
-        task = (await client.get(f"/api/tasks/{task_id}")).json()["task"]
-        assert task["ending"]["state"] == "draft"
+        assert (await client.get(f"/api/tasks/{task_id}")).json()["task"][
+            "ending"
+        ] is None
 
 
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(

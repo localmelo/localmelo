@@ -1,30 +1,43 @@
-"""How a task ended, decided by code from what its own run did.
+"""How a task ended, decided by code from what its own run did; fail closed.
 
 A worker ends its report with a proposal (``Ending: ready``, ``Ending:
 blocked: <what it needs>``, ``Ending: failed``, ``Ending: dropped``). It is a
 claim, never evidence: :func:`decide` reads the run's own tool calls (each
 ``tool.started`` paired with its ``tool.finished`` by call id, in order) and
-the folder's git state. In a git repository, ``ready`` becomes ``draft``
-(done, not finished) when the run changed code and the last test after its
-latest change failed, has a result nobody checked, or never ran, or when a
-commit was asked and the run's changes are not committed; a question makes it
-``blocked``. A test is a runner the run started in ``python_exec``; a wrapper
-that exits 0 proves nothing unless it passes the runner's exit code on
-(``sys.exit(...returncode)``, ``check=True``): its result is ``unknown``.
-:func:`shown` gives a finished task's ending, or the one its state implies.
+the folder's git state against the :class:`Baseline` of the first run since
+the task last ended ready. Ready needs proof; any doubt leaves ``draft`` with
+its reason:
+
+- ``tests_failed`` / ``tests_unverified``: the run's last test failed, or its
+  result is unknown (in git or not);
+- ``tests_missing``: code changed since the baseline and no test started after
+  the latest call that could have changed it;
+- ``commit_missing``: a commit was asked and changes since the baseline are not
+  committed;
+- ``unchecked``: git could not be read, or the run grew ``git stash list``.
+
+A test is one shape only: a plain test-runner command (no shell operators) or a
+``python_exec`` that is imports plus one ``sys.exit(subprocess.run([...]).
+returncode)``, ``subprocess.run([...], check=True)`` or
+``subprocess.check_call([...])``. Its own exit code is the result; any other
+call that starts a runner is a test with an ``unknown`` result. A question
+makes it ``blocked``. :func:`shown` gives a finished task's ending.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import os
 import re
+import shlex
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import FileStamp, edited_files, workspace_stamps
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.support.sessions.store import SessionStore
 
 from .finishing import OUT_OF_STEPS
@@ -32,6 +45,10 @@ from .i18n import t
 from .task_store import TaskRecord
 
 STATES: Final = ("ready", "draft", "blocked", "failed", "dropped")
+# The reasons a Finish it can settle: work left untested, uncommitted or unread.
+OWED: Final = frozenset(
+    {"tests_failed", "tests_missing", "tests_unverified", "commit_missing", "unchecked"}
+)
 _KEPT: Final = 5
 _CHARS: Final = 200
 _LINE: Final = re.compile(
@@ -39,27 +56,33 @@ _LINE: Final = re.compile(
     r"\s*(?:[:：—–-]\s*(.*?))?\s*$",
     re.I | re.M,
 )
-_SEP: Final = r"['\",\s]+"  # between a command's words, in a string or a list
-_RUNNER: Final = re.compile(
-    rf"\b(?:pytest|py\.test|unittest|tox|nox|jest|vitest)\b|\bnode{_SEP}--test\b"
-    rf"|\b(?:npm|pnpm|yarn|bun|cargo|go|swift|deno){_SEP}(?:run{_SEP})?test\b"
-    rf"|\bmake{_SEP}(?:test|check)\b",
-    re.I,
+_OPERATORS: Final = re.compile(r"[|&;<>`]|\$\(")
+_NOT_A_RUN: Final = frozenset({"--version", "--collect-only", "--co", "-h", "--help"})
+_STARTS: Final = re.compile(
+    r"^(?:subprocess\.(?:run|call|check_call|check_output|Popen|getoutput|getstatusoutput)"
+    r"|os\.(?:system|popen|exec\w*|spawn\w*))$"
 )
-_RUNS: Final = re.compile(
-    r"^(?:\w+\.)?(?:run|call|check_call|check_output|Popen|main)$"
+_KEYWORDS: Final = frozenset(
+    {
+        "check",
+        "capture_output",
+        "text",
+        "timeout",
+        "encoding",
+        "errors",
+        "stdout",
+        "stderr",
+    }
 )
-_EXITS: Final = frozenset({"sys.exit", "exit", "quit", "os._exit", "SystemExit"})
-# Code that writes files: a call that has it may have changed code.
-_WRITES: Final = re.compile(
-    r"\.write_(?:text|bytes)\(|\bopen\([^)]*,\s*(?:mode\s*=\s*)?['\"][^'\"]*[wxa+]"
-    r"|\bshutil\.(?:copy|move|rmtree)|\bos\.(?:remove|unlink|rename|replace)\("
-    r"|\.(?:unlink|rename)\(|\b(?:black|isort)\b(?![^\n]*--(?:check|diff))"
-    r"|\b(?:prettier\b[^\n]*--write|ruff\b[^\n]*(?:format|--fix)|sed\b[^\n]*[\s'\"]-i)\b"
-    rf"|\bpatch\s+-p\d|\bgit{_SEP}(?:apply|checkout|restore|stash|reset|merge|rebase"
-    r"|cherry-pick|am|pull|mv|rm)\b"
+_READ_TOOLS: Final = frozenset(
+    {"file_read", "list_files", "git_status", "search_files", "ask_owner"}
 )
-_DOC: Final = re.compile(r"\.(?:md|markdown|rst|txt|adoc)$", re.I)
+# git subcommands that never change a file's content (add and commit change refs only).
+_GIT_READS: Final = frozenset(
+    {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame", "branch"}
+    | {"remote", "describe", "shortlog", "add", "commit"}
+)
+_DOC: Final = re.compile(r"\.(?:md|markdown|rst|adoc)$|(?:^|/)docs/", re.I)
 # What running code leaves behind is not work: never owed a commit.
 _CACHE: Final = re.compile(
     r"(?:^|/)(?:__pycache__|\.\w+_cache|node_modules|\.tox|\.nox)/|\.py[co]$"
@@ -69,6 +92,7 @@ _DEFAULTS: Final = {
     "cancelled": ("dropped", "stopped"),
     "expired": ("dropped", "stopped"),
 }
+_ENV: Final = {"LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
 
 
 def proposal(answer: str) -> tuple[str | None, str]:
@@ -91,53 +115,165 @@ def report_text(answer: str) -> str:
     return _LINE.sub("", answer or "").rstrip()
 
 
-def _src(node: ast.AST) -> str:
-    try:
-        return ast.unparse(node)
-    except (ValueError, TypeError, AttributeError):
-        return ""
+def _runner(argv: list[str]) -> tuple[bool, bool]:
+    """``(starts a test runner, on this folder only)`` for a command's words."""
+    words = argv[2:] if argv[:2] == ["uv", "run"] else argv
+    first = os.path.basename(words[0]) if words else ""
+    if re.fullmatch(r"python(?:3(?:\.\d+)?)?", first) and words[1:2] == ["-m"]:
+        runs, rest = words[2:3] in (["pytest"], ["unittest"]), words[3:]
+    elif first in ("pytest", "py.test"):
+        runs, rest = True, words[1:]
+    elif words[1:2] == ["test"] and first in ("npm", "pnpm", "yarn", "cargo", "go"):
+        runs, rest = True, words[2:]
+    elif first in ("npm", "pnpm", "yarn") and words[1:3] == ["run", "test"]:
+        runs, rest = True, words[3:]
+    else:
+        pair = {("node", "--test"), ("swift", "test")}
+        runs, rest = (first, words[1] if len(words) > 1 else "") in pair, words[2:]
+    if not runs or _NOT_A_RUN & set(rest):
+        return False, False
+    here = all(
+        not word.startswith(("/", "~")) and ".." not in word.split("/") for word in rest
+    )
+    return True, here
+
+
+def _words(node: ast.AST) -> list[str] | None:
+    """A literal command's words (``sys.executable`` reads as python), or None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return shlex.split(node.value)
+        except ValueError:
+            return node.value.split()
+    if not isinstance(node, ast.List | ast.Tuple):
+        return None
+    words = []
+    for item in node.elts:
+        if isinstance(item, ast.Constant) and isinstance(item.value, str):
+            words.append(item.value)
+        elif ast.unparse(item) == "sys.executable":
+            words.append("python")
+        else:
+            return None
+    return words
+
+
+def _plain_call(call: ast.Call, check: bool) -> list[str] | None:
+    """The words of ``subprocess.<fn>([literal argv], <plain keywords>)``, or None."""
+    given = {k.arg: k.value for k in call.keywords}
+    plain = all(
+        name in _KEYWORDS
+        and (
+            isinstance(value, ast.Constant)
+            or ast.unparse(value).startswith("subprocess.")
+        )
+        for name, value in given.items()
+    )
+    if not plain or len(call.args) != 1 or not isinstance(call.args[0], ast.List):
+        return None
+    if check and ("check" not in given or ast.unparse(given["check"]) != "True"):
+        return None
+    return _words(call.args[0])
+
+
+def _shaped(tree: ast.Module) -> list[str] | None:
+    """The command of the one statement a test's python_exec may be, or None."""
+    imports = [s for s in tree.body if isinstance(s, ast.Import)]
+    body = [s for s in tree.body if s not in imports]
+    names = {alias.name for s in imports for alias in s.names}
+    if names - {"subprocess", "sys"} or len(body) != 1:
+        return None
+    statement = body[0]
+    if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+        return None
+    call, name = statement.value, ast.unparse(statement.value.func)
+    if name == "sys.exit" and len(call.args) == 1 and not call.keywords:
+        inner = call.args[0]
+        if not (isinstance(inner, ast.Attribute) and inner.attr == "returncode"):
+            return None
+        run = inner.value
+        if isinstance(run, ast.Call) and ast.unparse(run.func) == "subprocess.run":
+            return _plain_call(run, check=False)
+        return None
+    if name in ("subprocess.run", "subprocess.check_call"):
+        return _plain_call(call, check=name == "subprocess.run")
+    return None
 
 
 def python_test(code: str) -> tuple[str, bool]:
     """``(command, passed on)``: the test runner python_exec *code* starts, or ``""``.
 
-    *passed on*: the runner's exit code becomes the call's, so it is the result.
+    *passed on*: the code is the one shape whose exit code is the runner's own.
     """
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError):
         return "", False
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    runs = [c for c in calls if _RUNS.match(_src(c.func)) and _RUNNER.search(_src(c))]
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = ast.unparse(node.func)
+        if name in ("pytest.main", "unittest.main"):
+            found.append(ast.unparse(node))
+        elif _STARTS.match(name) and node.args:
+            words = _words(node.args[0])
+            if words and _runner(words)[0]:
+                found.append(" ".join(words))
+    if not found:
+        return "", False
+    shaped = _shaped(tree)
+    passes = shaped is not None and _runner(shaped) == (True, True)
+    return " ".join(found[0].split())[:120], passes
+
+
+def _shell_test(command: str) -> tuple[str, bool]:
+    """``(command, passed on)`` of a shell command: one plain runner command passes on."""
+    first = _OPERATORS.split(command, maxsplit=1)[0]
+    try:
+        words = shlex.split(first)
+    except ValueError:
+        words = first.split()
+    runs, here = _runner(words)
     if not runs:
         return "", False
-    command = " ".join(_src(runs[0]).split())[:120]
-    for node in calls:
-        name, given = _src(node.func), {k.arg: _src(k.value) for k in node.keywords}
-        if (
-            name.endswith(("check_call", "check_output", "check_returncode"))
-            or (node in runs and given.get("check") == "True")
-            or (name == "unittest.main" and "exit" not in given)
-            or (
-                name in _EXITS
-                and node.args
-                and not isinstance(node.args[0], ast.Constant)
-            )
-        ):
-            return command, True
-    for item in ast.walk(tree):
-        if not isinstance(item, ast.Assert | ast.If):
+    return " ".join(command.split())[:120], here and not _OPERATORS.search(command)
+
+
+def _git_call(node: ast.AST) -> bool:
+    """A plain subprocess call of a git subcommand that changes no file."""
+    if not isinstance(node, ast.Call) or not _STARTS.match(ast.unparse(node.func)):
+        return False
+    words = _plain_call(node, check=False)
+    words = words[1:] if words and words[0] == "git" else None
+    while words and words[0] in ("-C", "-c"):
+        words = words[2:]
+    return words is not None and bool(words) and words[0] in _GIT_READS
+
+
+def _reads_only(code: str) -> bool:
+    """Code that can change no file: git reads, commits and prints, nothing else."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            if {a.name for a in stmt.names} - {"subprocess", "sys", "json"}:
+                return False
+        elif isinstance(stmt, ast.Assign | ast.Expr) and _git_call(stmt.value):
             continue
-        if "returncode" not in _src(item.test):
-            continue
-        if isinstance(item, ast.Assert) or any(
-            isinstance(n, ast.Raise)
-            or (isinstance(n, ast.Call) and _src(n.func) in _EXITS)
-            for stmt in item.body
-            for n in ast.walk(stmt)
-        ):
-            return command, True
-    return command, False
+        elif not isinstance(stmt, ast.Expr) or not _printed(stmt.value):
+            return False
+    return True
+
+
+def _printed(node: ast.AST) -> bool:
+    """``print(...)`` of values and git reads only."""
+    if not isinstance(node, ast.Call) or ast.unparse(node.func) != "print":
+        return False
+    inner = [n for arg in node.args for n in ast.walk(arg) if isinstance(n, ast.Call)]
+    return all(_git_call(n) for n in inner)
 
 
 @dataclass
@@ -151,56 +287,99 @@ class _Call:
 
     def test(self) -> tuple[str, str] | None:
         """``(command, outcome)`` of a test run: ``passed``, ``failed`` or ``unknown``."""
-        code = self.arguments.get("code")
-        if self.name != "python_exec" or not isinstance(code, str):
+        given = self.arguments.get("code" if self.name == "python_exec" else "command")
+        if self.status == "blocked" or not isinstance(given, str):
             return None
-        command, passes = python_test(code)
-        if not command or self.status == "blocked":
+        if self.name == "python_exec":
+            command, passes = python_test(given)
+        elif self.name == "shell_exec":
+            command, passes = _shell_test(given)
+        else:
+            return None
+        if not command:
             return None
         if self.finish is None:
             return command, "unknown"
         if self.status != "success" or self.exit_code not in (0, None):
             return command, "failed"
-        return command, "passed" if passes else "unknown"
+        return command, "passed" if passes and self.exit_code == 0 else "unknown"
 
-    def writes_code(self) -> bool:
+    def writes(self) -> bool:
+        """Whether this call could have changed code (fail closed: unknown tools could)."""
+        if self.status == "blocked" or self.name in _READ_TOOLS or self.test():
+            return False
         if self.name in ("file_write", "file_edit"):
             path = str(self.arguments.get("path") or "")
-            return self.status not in ("error", "blocked") and not _DOC.search(path)
-        code = self.arguments.get("code")
-        return self.status != "blocked" and bool(_WRITES.search(str(code or "")))
+            return self.status != "error" and not _DOC.search(path)
+        code = self.arguments.get("code" if self.name == "python_exec" else "command")
+        if self.name == "python_exec" and isinstance(code, str):
+            return not _reads_only(code)
+        return True
 
 
 @dataclass(frozen=True)
 class Baseline:
-    """The task folder before a run, and what the run before it left owed."""
+    """A task folder's git state before the first run since the task last ended ready."""
 
     stamps: Mapping[str, FileStamp] | None
     head: str = ""
-    owed: Mapping[str, Any] = field(default_factory=dict)
+    stash: int = 0
+    git: bool = False
+    error: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        stamps = {k: list(v) for k, v in (self.stamps or {}).items()}
+        return {
+            "git": self.git,
+            "error": self.error,
+            "head": self.head,
+            "stash": self.stash,
+            "stamps": stamps,
+        }
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> Baseline:
+        stamps = data.get("stamps")
+        files = {k: (int(v[0]), int(v[1])) for k, v in (stamps or {}).items()}
+        return cls(
+            files if data.get("git") else None,
+            str(data.get("head") or ""),
+            int(data.get("stash") or 0),
+            bool(data.get("git")),
+            bool(data.get("error")),
+        )
 
 
-def _git(folder: str, *args: str) -> str:
-    """A read-only git command's output in *folder*, or ``""``."""
+def _git(folder: str, *args: str) -> tuple[int, str, str] | None:
+    """A read-only git command's exit code, output and error, or None if it never ran."""
     argv = ["git", "-C", folder, "-c", "core.fsmonitor=false", *args]
     try:
-        done = subprocess.run(argv, capture_output=True, timeout=10, check=True)
+        done = subprocess.run(
+            argv, capture_output=True, timeout=10, env={**os.environ, **_ENV}
+        )
     except (OSError, subprocess.SubprocessError):
-        return ""
-    return done.stdout.decode("utf-8", "replace")
+        return None
+    out, err = (s.decode("utf-8", "replace") for s in (done.stdout, done.stderr))
+    return done.returncode, out, err
 
 
-def _head(folder: str) -> str:
-    return _git(folder, "rev-parse", "-q", "--verify", "HEAD").strip()
-
-
-async def baseline(folder: str | None, before: Mapping[str, Any] | None) -> Baseline:
-    """The folder's git state now; *before* is the task's last ending, owed unless ready."""
-    stamps = await asyncio.to_thread(workspace_stamps, folder) if folder else None
-    if stamps is None or folder is None:
+def _look(folder: str) -> Baseline:
+    """The folder's git state now; ``error`` when git could not say."""
+    inside = _git(folder, "rev-parse", "--is-inside-work-tree")
+    if inside is not None and inside[0] and "not a git repository" in inside[2]:
         return Baseline(None)
-    owed = before if before and before.get("state") in ("draft", "blocked") else {}
-    return Baseline(stamps, await asyncio.to_thread(_head, folder), dict(owed))
+    stamps = workspace_stamps(folder) if inside and inside[0] == 0 else None
+    head = _git(folder, "rev-parse", "-q", "--verify", "HEAD")
+    stash = _git(folder, "stash", "list")
+    if stamps is None or head is None or stash is None or stash[0]:
+        return Baseline(None, git=True, error=True)
+    lines = stash[1].splitlines()
+    return Baseline(stamps, head[1].strip(), len(lines), git=True)
+
+
+async def baseline(folder: str | None) -> Baseline:
+    """The folder's git state now, to judge the runs after it by."""
+    return await asyncio.to_thread(_look, folder) if folder else Baseline(None)
 
 
 async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
@@ -234,51 +413,43 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
 
 
 async def _evidence(
-    store: SessionStore,
-    task_id: str,
-    turn: Any,
-    folder: str,
-    base: Baseline,
-    commit: bool,
-) -> tuple[list[str], list[dict[str, Any]], list[str]]:
-    """Why the run's work is not finished, the tests it ran, its uncommitted files."""
-    assert base.stamps is not None
-    calls = await _calls(store, task_id, turn)
-    now = await asyncio.to_thread(workspace_stamps, folder) or {}
-    edited = {p for p in edited_files(base.stamps, now) if not _CACHE.search(p)}
-    own = edited | {p for p in base.owed.get("uncommitted", ()) if p in now}
-    head = await asyncio.to_thread(_head, folder)
+    store: SessionStore, task_id: str, turn: Any, folder: str | None, base: Baseline
+) -> tuple[list[str], list[tuple[_Call, tuple[str, str]]], list[str], list[str]]:
+    """Reasons about the run's tests and folder; its tests; changed code; own changes."""
+    calls = await _calls(store, task_id, turn) if turn is not None else []
+    tests = [(call, found) for call in calls if (found := call.test())]
+    last = tests[-1][1][1] if tests else "passed"
+    reasons = {"failed": ["tests_failed"], "unknown": ["tests_unverified"]}.get(
+        last, []
+    )
+    now = await baseline(folder)
+    if base.error or now.error or (base.git and not now.git):
+        return [*reasons, "unchecked"], tests, [], []
+    if not now.git:
+        return reasons, tests, [], []
+    before = base.stamps if base.git and base.stamps is not None else {}
+    edited = sorted(
+        p for p in edited_files(before, now.stamps or {}) if not _CACHE.search(p)
+    )
     committed: list[str] = []
-    if head and head != base.head:  # committed during the run: its changes count too
+    if now.head and now.head != base.head:
         since = base.head or "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # empty tree
         names = await asyncio.to_thread(
-            _git, folder, "diff", "--name-only", "-z", since, head
+            _git, folder or "", "diff", "--name-only", "-z", since, now.head
         )
-        committed = [name for name in names.split("\0") if name]
-    tests = [(call, found) for call in calls if (found := call.test())]
-    writes = [call.finish for call in calls if call.writes_code()]
-    last: float | None = None
-    if writes and any(not _DOC.search(p) for p in [*edited, *committed]):
-        last = max(float("inf") if at is None else at for at in writes)
-    elif any(not _DOC.search(p) for p in edited):
-        # Code changed and no call says how: the last call that may have done it.
-        maybe = [c for c in calls if c.name == "python_exec" and not c.test()]
-        last = float(maybe[-1].finish or maybe[-1].start) if maybe else None
-    if any(str(r).startswith("tests_") for r in base.owed.get("reasons", ())):
-        last = max(last or 0.0, 0.0)  # the run before changed code it did not test
-    reasons = []
-    if last is not None:
-        fresh = [found[1] for call, found in tests if call.start > last]
-        failed = {"failed": "tests_failed", "unknown": "tests_unverified"}
-        reasons += [failed[fresh[-1]]] if fresh and fresh[-1] in failed else []
-        reasons += [] if fresh else ["tests_missing"]
-    if commit and own:
-        reasons.append("commit_missing")
-    kept = [
-        {"command": command, "exit_code": call.exit_code, "outcome": outcome}
-        for call, (command, outcome) in tests[-_KEPT:]
-    ]
-    return reasons, kept, sorted(own)[:20]
+        if names is None or names[0]:
+            return [*reasons, "unchecked"], tests, [], edited
+        committed = [name for name in names[1].split("\0") if name]
+    if now.stash > base.stash:
+        return [*reasons, "unchecked"], tests, [], edited
+    code = [p for p in [*edited, *committed] if not _DOC.search(p)]
+    if code and not reasons:
+        # Code changed: a test must start after every call that could have changed it.
+        writers = [call.finish for call in calls if call.writes()]
+        latest = max((float("inf") if w is None else w for w in writers), default=0.0)
+        if not any(call.start > latest for call, _ in tests):
+            reasons.append("tests_missing")
+    return reasons, tests, code, edited
 
 
 async def decide(
@@ -298,12 +469,9 @@ async def decide(
     turns = await store.list_turns(task_id, limit=1)
     turn = turns[-1] if turns else None
     proposed, question = proposal(turn.answer if turn is not None else "")
-    reasons: list[str] = []
-    tests: list[dict[str, Any]] = []
-    uncommitted: list[str] = []
-    if turn is not None and folder and base.stamps is not None:
-        found = await _evidence(store, task_id, turn, folder, base, asks_commit)
-        reasons, tests, uncommitted = found
+    reasons, tests, _, own = await _evidence(store, task_id, turn, folder, base)
+    if asks_commit and own:
+        reasons.append("commit_missing")
     if out_of_steps:
         state, reasons = "draft", ["out_of_steps", *reasons]
     elif proposed in ("failed", "dropped"):
@@ -312,16 +480,32 @@ async def decide(
         state, reasons = "blocked", ["question", *reasons]
     else:
         state = "draft" if reasons else "ready"
+    kept = [
+        {
+            "command": redact_secrets(command)[0],
+            "exit_code": call.exit_code,
+            "outcome": outcome,
+        }
+        for call, (command, outcome) in tests[-_KEPT:]
+    ]
     return {
         "state": state,
         "proposed": proposed,
         "reasons": reasons,
         "question": question,
-        "tests": tests,
-        "uncommitted": uncommitted,
+        "tests": kept,
+        "uncommitted": own,
         "turn": turn.turn if turn is not None else None,
         "run_id": turn.run_id if turn is not None else "",
     }
+
+
+def can_finish(ending: Mapping[str, Any] | None) -> bool:
+    """Whether Finish it settles this ending: work owed, and not a run out of steps."""
+    reasons = set((ending or {}).get("reasons") or ())
+    state = (ending or {}).get("state")
+    owed = bool(reasons & OWED) and "out_of_steps" not in reasons
+    return owed and state in ("draft", "failed", "dropped")
 
 
 def finish_message(ending: Mapping[str, Any]) -> str:
@@ -331,13 +515,18 @@ def finish_message(ending: Mapping[str, Any]) -> str:
     return t("ending.finishMessage")
 
 
+def default_ending(state: str, wait_reason: str) -> dict[str, Any] | None:
+    """The ending a task's state implies when no run decided one."""
+    if state == "failed" and wait_reason == OUT_OF_STEPS:
+        return {"state": "draft", "reasons": ["out_of_steps"]}
+    found = _DEFAULTS.get(state)
+    return None if found is None else {"state": found[0], "reasons": [found[1]]}
+
+
 def shown(record: TaskRecord) -> dict[str, Any] | None:
     """A finished task's ending: decided at its last transition, else its state's."""
     ending = getattr(record, "ending", None)  # a stand-in record may have none
     ended = record.state == "done" or record.state in _DEFAULTS
     if ended and isinstance(ending, Mapping) and ending.get("at") == record.finished_at:
         return dict(ending)
-    if record.state == "failed" and record.wait_reason == OUT_OF_STEPS:
-        return {"state": "draft", "reasons": ["out_of_steps"]}
-    found = _DEFAULTS.get(record.state)
-    return None if found is None else {"state": found[0], "reasons": [found[1]]}
+    return default_ending(record.state, record.wait_reason)

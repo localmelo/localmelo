@@ -654,16 +654,26 @@ def _pipeline(text: str) -> bool:
     )
 
 
-def asks_commit(text: str) -> bool:
-    """Whether *text* asks for a commit: a commit cue that is not quoted or forbidden.
+# What asks for a commit beyond the word: a push, a pull request, checking it in.
+_ASKS_COMMIT: Final = re.compile(
+    r"提交|推送|\bpush\b|\bcommits?\b|\bpull request\b|\bPR\b|\bcheck(?:ed)? (?:\w+ )?in\b",
+    re.IGNORECASE,
+)
+_NO_PUSH: Final = re.compile(
+    r"(?:不要|不用|别|先不)\s*推送|\b(?:don['’]t|do\s+not|never)\s+push\w*",
+    re.IGNORECASE,
+)
 
-    "fix the router, run the tests and commit" and "改完提交" ask; "don't
-    commit yet", "先不要提交" and "the log says `git commit` failed" do not.
+
+def asks_commit(text: str) -> bool:
+    """Whether *text* asks for a commit, once quoted and forbidden spans are dropped.
+
+    "fix the router, run the tests and commit", "push it", "open a PR",
+    "check it in" and "don't push, just commit" ask; "don't commit yet",
+    "先不要提交" and "the log says `git commit` failed" do not.
     """
-    bare = _QUOTED.sub(" ", text or "")
-    return bool(_COMMIT_CUE.search(bare)) and not any(
-        _COMMIT_CUE.search(no.group(0)) for no in _PIPELINE_NO.finditer(bare)
-    )
+    bare = _NO_PUSH.sub(" ", _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or "")))
+    return bool(_ASKS_COMMIT.search(bare))
 
 
 def work_request(typed: str) -> bool:

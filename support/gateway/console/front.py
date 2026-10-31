@@ -118,6 +118,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
 )
+from localmelo.support.task_cli import ending_words
 
 from .asks import ASK_ORIGIN, ASK_STEPS, PERSON_PARTS
 from .bodies import Body
@@ -824,14 +825,8 @@ def _row(record: TaskRecord) -> str:
         state = "stopped (ran out of steps; it can continue)"
     elif ending is not None:
         # How it ended as code decided it, never as its report says.
-        name = ending["state"]
-        state = t_in("en", f"ending.state.{name}").lower()
-        why = [ending.get("question") or ""] + [
-            t_in("en", f"ending.reason.{code}")
-            for code in ending.get("reasons", ())
-            if code not in ("question", "run_failed", "stopped")
-        ]
-        state += f" ({'; '.join(w for w in why if w)})" if any(why) else ""
+        label, why = ending_words(ending)
+        state = label.lower() + (f" ({why})" if why else "")
     return f"{record.task_id} · {record.title} · {state} · {level_code(record.level)}"
 
 

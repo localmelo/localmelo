@@ -9,7 +9,7 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
-import {ENDING_MARKS, canFinish, endingWhy, finishLabel, readEnding} from "./endings.mjs";
+import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
@@ -166,7 +166,8 @@ export function cardWords(card) {
   // A done task says how code found it ended: ready, done but not finished (Finish it), or needs you.
   const ending = card.state === "done" ? card.ending : null;
   if (ending) {
-    const heading = t(`mainChat.card.${ending.state === "dropped" ? "stopped" : ending.state}`, {title});
+    const name = endingName(ending);
+    const heading = t(`mainChat.card.${name === "dropped" ? "stopped" : name}`, {title});
     return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
   }
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};

@@ -74,7 +74,7 @@ _SCHEMA: Final = (
   crashes INTEGER NOT NULL DEFAULT 0, pgids TEXT NOT NULL DEFAULT '[]',
   card TEXT NOT NULL DEFAULT '',
   created_at REAL NOT NULL, started_at REAL, finished_at REAL,
-  updated_at REAL NOT NULL, expires_at REAL, ending TEXT,
+  updated_at REAL NOT NULL, expires_at REAL, ending TEXT, work_base TEXT,
   UNIQUE (origin, request_key))""",
     """CREATE TABLE IF NOT EXISTS task_deps (
   task_id TEXT NOT NULL, waits_on TEXT NOT NULL,
@@ -172,6 +172,7 @@ _TASK_COLUMNS: Final = (
     "updated_at",
     "expires_at",
     "ending",
+    "work_base",
 )
 _SELECT_TASK: Final = "SELECT " + ", ".join(_TASK_COLUMNS) + " FROM tasks"
 
@@ -230,6 +231,8 @@ class TaskRecord:
     expires_at: float | None
     # How its last run ended, as code decided it (``task_endings``), or None.
     ending: Mapping[str, Any] | None = None
+    # The folder before the first run since it last ended ready: what is owed.
+    work_base: Mapping[str, Any] | None = None
 
     @classmethod
     def from_row(cls, row: Sequence[Any]) -> TaskRecord:
@@ -247,6 +250,7 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
         "pgids": tuple(json.loads(values["pgids"])),
         "level_pinned": bool(values["level_pinned"]),
         "ending": json.loads(values["ending"]) if values["ending"] else None,
+        "work_base": json.loads(values["work_base"]) if values["work_base"] else None,
     }
 
 
@@ -442,10 +446,11 @@ class TaskStore:
 
     @staticmethod
     async def _ensure_ending_column(conn: Any) -> None:
-        """Keep each task's ending beside it (idempotent; older rows read None)."""
+        """Keep each task's ending and owed baseline beside it (idempotent; older rows read None)."""
         columns = {row[1] for row in await _rows(conn, "PRAGMA table_info(tasks)")}
-        if "ending" not in columns:
-            await conn.execute("ALTER TABLE tasks ADD COLUMN ending TEXT")
+        for name in ("ending", "work_base"):
+            if name not in columns:
+                await conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT")
 
     @staticmethod
     async def _ensure_host_column(conn: Any) -> None:
@@ -553,6 +558,7 @@ class TaskStore:
         pending: bool = False,
         request: Mapping[str, Any] | None = None,
         state: str = "",
+        ending: Mapping[str, Any] | None = None,
     ) -> None:
         if not explicit:
             row = await _first(
@@ -614,6 +620,7 @@ class TaskStore:
                 "pause_pending": pending,
                 "task_request": request,
                 "state": state,
+                **({} if ending is None else {"ending": dict(ending)}),
             },
         )
 
@@ -1356,6 +1363,7 @@ class TaskStore:
                     "sched.stopped" if state == "cancelled" else "sched.finished",
                     bump=True,
                     state=state or "",
+                    ending=None if ending is None else {**ending, "at": now},
                     explicit=operation_id is not None,
                     expected_generation=expected_generation,
                     expected_operation_id=expected_operation_id,
@@ -1450,9 +1458,15 @@ class TaskStore:
                     (state, state, now, state, now, failure_reason or "", now, task_id),
                 )
                 if ending is not None:
+                    # A ready ending owes nothing: the next run starts a new baseline.
                     await conn.execute(
-                        "UPDATE tasks SET ending = ? WHERE task_id = ?",
-                        (json.dumps({**ending, "at": now}), task_id),
+                        "UPDATE tasks SET ending = ?, work_base = CASE WHEN ? "
+                        "THEN NULL ELSE work_base END WHERE task_id = ?",
+                        (
+                            json.dumps({**ending, "at": now}),
+                            ending.get("state") == "ready",
+                            task_id,
+                        ),
                     )
                 await self._log(
                     conn,
@@ -1465,6 +1479,22 @@ class TaskStore:
             result = await self._get(conn, task_id)
         assert result is not None
         return result
+
+    async def keep_work_base(
+        self, task_id: str, base: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """The task's owed baseline: *base* unless one is kept since its last ready ending."""
+        async with self._store.component_transaction("task_work_base") as conn:
+            await conn.execute(
+                "UPDATE tasks SET work_base = ? WHERE task_id = ? AND work_base IS NULL",
+                (json.dumps(base), task_id),
+            )
+            row = await _first(
+                conn, "SELECT work_base FROM tasks WHERE task_id = ?", (task_id,)
+            )
+        if row is None:
+            raise TaskNotFoundError(f"No task has id {task_id}")
+        return dict(json.loads(row[0]))
 
     async def request_pending_pause(
         self,

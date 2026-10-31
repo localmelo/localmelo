@@ -21,8 +21,9 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.task_endings import Baseline
 from localmelo.support.gateway.task_store import TaskStoreError
-from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.gateway.workers import TaskInbox, TaskWorkers
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
@@ -35,7 +36,8 @@ TEST = (
 )
 COMMIT = (
     "import subprocess\n"
-    f"subprocess.run(['git', *{IDENTITY!r}, '-c', 'commit.gpgsign=false', "
+    "subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', "
+    "'-c', 'commit.gpgsign=false', "
     "'commit', '-qam', 'Fix add'], check=True)\n"
 )
 
@@ -238,3 +240,76 @@ async def test_a_stopped_task_is_dropped(setup: Setup) -> None:
         "state": "dropped",
         "reasons": ["stopped"],
     }
+
+
+# A failing test whose wrapper swallows the failure with try/except around check=True.
+SWALLOWED = (
+    "import subprocess, sys\n"
+    "try:\n"
+    "    subprocess.run([sys.executable, '-m', 'unittest', '-q'], check=True)\n"
+    "except subprocess.CalledProcessError as e:\n"
+    "    print('FAILED', e.returncode)\n"
+)
+COMMIT_NAMING_TESTS = (
+    "import subprocess\n"
+    "subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', "
+    "'-c', 'commit.gpgsign=false', "
+    "'commit', '-qam', 'Fix add; unittest still red'], check=True)\n"
+)
+BAD_EDIT = call("file_edit", {"path": "calc.py", "old": "a - b", "new": "a * b"})
+
+
+async def test_a_swallowed_failure_is_not_ready(setup: Setup) -> None:
+    workers, llm, repo = setup
+    llm.replies = [
+        BAD_EDIT,
+        call("python_exec", {"code": SWALLOWED}),
+        says("Done.\nEnding: ready"),
+    ]
+    task = await ended(workers, await start(workers, repo, "Fix add in calc.py"))
+    assert (task["ending"]["state"], task["ending"]["reasons"]) == (
+        "draft",
+        ["tests_unverified"],
+    )
+
+
+async def test_a_commit_message_naming_the_tests_is_not_a_passing_test(
+    setup: Setup,
+) -> None:
+    workers, llm, repo = setup
+    llm.replies = [
+        BAD_EDIT,
+        RUN_TEST,
+        call("python_exec", {"code": COMMIT_NAMING_TESTS}),
+        says("Committed.\nEnding: ready"),
+    ]
+    task = await ended(
+        workers, await start(workers, repo, "Fix add in calc.py and commit")
+    )
+    assert (task["ending"]["state"], task["ending"]["reasons"]) == (
+        "draft",
+        ["tests_failed"],
+    )
+
+
+async def test_a_message_the_run_read_counts_as_asked(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers, _, repo = setup
+    record = await workers.tasks.get_task(
+        await start(workers, repo, "Fix add in calc.py")
+    )
+    seen: list[bool] = []
+
+    async def decide(*args: Any, asks_commit: bool, **kwargs: Any) -> None:
+        seen.append(asks_commit)
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.decide_ending", decide)
+    inbox = TaskInbox()
+    inbox.put("then commit it, please")
+    inbox.accept(inbox.poll()[0][0])
+    assert inbox.read == ["then commit it, please"]
+    workers._inboxes[record.task_id] = inbox
+    base = Baseline(None)
+    await workers._ending(record.task_id, "done", None, str(repo), base, record)
+    assert seen == [True]

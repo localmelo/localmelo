@@ -14,7 +14,7 @@ const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'co
 test('an ending is kept only when its state is one code decides', () => {
   assert.equal(readEnding(null), null);
   assert.equal(readEnding({state: 'done'}), null, 'a scheduler state is not an ending');
-  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', reasons: [], question: '', tests: []});
+  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], question: '', tests: []});
   const kept = readEnding({...DRAFT, tests: [...DRAFT.tests, {command: 'x', outcome: 'claimed'}, null]});
   assert.deepEqual(kept.tests, DRAFT.tests, 'a test without a known outcome is dropped');
 });
@@ -29,6 +29,16 @@ test('a draft says why and finishes with one tap; a run out of steps continues i
   assert.equal(canFinish(readEnding({state: 'draft', reasons: ['out_of_steps', 'tests_missing']})), false);
   assert.equal(canFinish(readEnding({state: 'ready'})), false);
   assert.equal(canFinish(null), false);
+});
+
+test('a task its worker gave up on reads apart from your Stop, and still finishes what it owes', () => {
+  const moot = readEnding({state: 'dropped', proposed: 'dropped', reasons: ['tests_missing']});
+  assert.equal(endingLabel(moot), 'Not needed');
+  assert.equal(canFinish(moot), true, 'it left code untested');
+  assert.equal(canFinish(readEnding({state: 'failed', proposed: 'failed', reasons: []})), false);
+  assert.equal(endingLabel(readEnding({state: 'dropped', reasons: ['stopped']})), 'Stopped');
+  assert.equal(canFinish(readEnding({state: 'dropped', reasons: ['stopped']})), false);
+  assert.equal(canFinish(readEnding({state: 'blocked', reasons: ['question', 'tests_missing']})), false, 'it needs your answer');
 });
 
 test('needs you says its question; failed and stopped need no reasons', () => {

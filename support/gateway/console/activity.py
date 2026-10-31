@@ -43,7 +43,7 @@ from localmelo.support.sessions.store import (
 )
 
 from ..finishing import NOT_CONTINUED, is_out_of_steps
-from ..task_endings import report_text, shown
+from ..task_endings import can_finish, report_text, shown
 from .errors import ApiError
 from .running import (
     TASK_OUTCOMES,
@@ -358,7 +358,7 @@ async def _task_rows(
             row.update(icon=ended[1] if state == "done" else state, result=result)
             # How it ended, decided by code; a draft finishes with one tap.
             row["ending"] = shown(record)
-            if (row["ending"] or {}).get("state") == "draft":
+            if can_finish(row["ending"]):
                 row["can_continue"] = True
         rows.append(row)
     return rows

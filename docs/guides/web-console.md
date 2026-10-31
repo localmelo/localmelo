@@ -497,11 +497,13 @@ run). Like Workers, the view replaces the chat while it is open. The header says
 - **Only the commit left.** A task that ran out of steps before its commit says
   `Not committed. Run: <command>` on its card and its page.
 - **How it ended.** A finished task's state is how code found it ended: **Ready**
-  (green), **Done, not finished** and **Needs you** (amber), **Failed** (red) or
-  **Stopped** (grey). **How it ended** says why, and **Tests it ran** lists the
-  tests the task's own run started, each passed, failed or result not checked; a
-  test its answer only mentions is not listed. **Finish it** continues a task not
-  finished with one tap. The panel's Activity and Workers rows say the same, and
+  (green), **Done, not finished** and **Needs you** (amber), **Failed** (red),
+  **Stopped** or **Not needed** (grey). **How it ended** says why, and **Tests it
+  ran** lists the tests the task's own run started, each passed, failed or result
+  not checked; a test its answer only mentions is not listed. **Ready** needs
+  proof: when a test's result or the folder could not be checked, the task is not
+  ready. **Finish it** continues, with one tap, a task that still owes its tests
+  or its commit. The panel's Activity and Workers rows say the same, and
   `GET /api/tasks/<id>` carries it as `ending`.
 
 A button is disabled while its request is in flight. A refusal (a stale

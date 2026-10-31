@@ -74,6 +74,7 @@ from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_endings import (
     Baseline,
     baseline,
+    can_finish,
     finish_message,
     shown,
 )
@@ -138,10 +139,11 @@ WORKER_GUIDE = (
     "to find where something is (not grep -r, which asks): none of them asks "
     "for approval. Change an existing file with file_edit, so the "
     "person sees a diff; use file_write for new files and python_exec for "
-    "everything else. Run the tests that cover the code you changed, with their "
-    "exit code as python_exec's (sys.exit(subprocess.run([...]).returncode)): "
-    "search the tests for the names you changed, not only the test files you "
-    "edited. Keep "
+    "everything else. Run the tests that cover the code you changed as a "
+    "python_exec of only `import subprocess, sys` and `sys.exit(subprocess.run("
+    '["pytest", ...]).returncode)`, so their exit code is its own (no other '
+    "statement, pipe or try counts as a test): search the tests for the names you "
+    "changed, not only the test files you edited. Keep "
     "your last two steps for what the task asks you to "
     "finish, such as the commit and your report. Tools run with HOME set to "
     "a fresh folder of this task, so a test suite that refuses the real home "
@@ -325,6 +327,8 @@ class TaskInbox:
     def __init__(self) -> None:
         self._items: list[tuple[int, str]] = []
         self._next = 0
+        # What the run read, in order: the person's words, asked of the task too.
+        self.read: list[str] = []
 
     def validate(self, workspace: str | None = None) -> None:
         return None
@@ -337,6 +341,7 @@ class TaskInbox:
         return list(self._items)
 
     def accept(self, offset: int) -> None:
+        self.read += [text for at, text in self._items if at == offset]
         self._items = [item for item in self._items if item[0] != offset]
 
     def drain(self) -> list[str]:
@@ -820,7 +825,7 @@ class TaskWorkers:
         if is_out_of_steps(record.state, record.wait_reason):
             return await self.message(task_id, words("failure.continueMessage"))
         ending = shown(record)
-        if ending is None or ending.get("state") != "draft":
+        if ending is None or not can_finish(ending):
             raise TaskStoreError(
                 "only a task that ran out of steps or is not finished continues here"
             )
@@ -1922,7 +1927,7 @@ class TaskWorkers:
         # How the run ended, decided by code for the phase it was decided at.
         ending: dict[str, Any] | None = None
         ending_phase = ""
-        base = Baseline(None)
+        base = Baseline(None, git=True, error=True)  # until read: never ready
         deferred = False
         launch_uncertain = False
         execution_id: str | None = self._pending_execution.get(task_id)
@@ -2429,12 +2434,14 @@ class TaskWorkers:
         return body
 
     async def _baseline(self, workspace: str | None, record: TaskRecord) -> Baseline:
-        """The task folder's git state before a run, and what the last run left owed."""
+        """The folder before the first run since the task last ended ready (kept, so owed)."""
         try:
-            return await baseline(workspace, record.ending)
+            now = await baseline(workspace)
+            kept = await self.tasks.keep_work_base(record.task_id, now.to_json())
+            return Baseline.from_json(kept)
         except Exception:
             log.exception("Could not read the folder of task %s", record.task_id)
-            return Baseline(None)
+            return Baseline(None, git=True, error=True)  # unchecked, never ready
 
     async def _ending(
         self,
@@ -2450,6 +2457,8 @@ class TaskWorkers:
         asked = [str(record.spec.get("objective") or ""), typed]
         if record.card and not record.card.startswith(CARD_START):
             asked.append(record.card)  # a continued task's message is asked too
+        inbox = self._inboxes.get(task_id)
+        asked += inbox.read if inbox is not None else []
         try:
             return await decide_ending(
                 self.store,

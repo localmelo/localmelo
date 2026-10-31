@@ -220,11 +220,14 @@ def ending_words(ending: Any) -> tuple[str, str]:
     """
     if not isinstance(ending, dict) or ending.get("state") not in ENDINGS:
         return "", ""
+    # A worker that dropped its task made it moot: not the person's Stop.
+    moot = ending["state"] == "dropped" and ending.get("proposed") == "dropped"
+    name = "moot" if moot else ending["state"]
     reasons = ending.get("reasons")
     reasons = reasons if isinstance(reasons, list) else []
     why = [str(ending.get("question") or "")]
     why += [t_in("en", f"ending.reason.{code}") for code in reasons if code in _WHY]
-    return t_in("en", f"ending.state.{ending['state']}"), "; ".join(w for w in why if w)
+    return t_in("en", f"ending.state.{name}"), "; ".join(w for w in why if w)
 
 
 def execute(
