@@ -21,6 +21,8 @@ const recallWords = (name) => t(`settings.recall.${RECALL.includes(name) ? name 
 const DESKTOP = ["pill", "pet", "nothing"];
 // The console's language: automatic, or one the console has. Each language is named in itself.
 const LANGUAGE_SETTINGS = ["auto", "en", "zh-Hans"];
+// How a new chat starts (#339): `[approvals] mode`.
+const APPROVAL_MODES = ["ask", "auto"];
 // `melo -h all` lists the settings by section; `settings.group.<section>` are the names people read.
 const GROUPS = new Set(["agent", "retrieval", "memory", "endpoint", "sessions", "cli", "ui", "scheduler", "browser", "gateway", "console"]);
 const groupName = (section) => (section === "" ? t("settings.group.general") : GROUPS.has(section) ? t(`settings.group.${section}`) : section);
@@ -95,7 +97,7 @@ export function setupSettings({
     "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
   const switchIds = ["s-across-chats", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
-    ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`)];
+    ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
   let settings = null;
   let sections = {};
   let generation = 0;
@@ -404,6 +406,9 @@ export function setupSettings({
     });
     if (!rows.length) rows.push(Object.assign(document.createElement("li"), {className: "st-empty", textContent: t("settings.folder.recentEmpty")}));
     $("s-recent").replaceChildren(...rows);
+    // A gateway that does not report it has no mode for new chats to change.
+    $("s-approvals-row").hidden = settings.approvals === undefined;
+    for (const name of APPROVAL_MODES) $(`s-approvals-${name}`).checked = name === (settings.approvals || "ask");
     notes();
   }
 
@@ -718,6 +723,16 @@ export function setupSettings({
     const answer = handler ? await handler.postMessage({action: "get"}).catch(() => null) : null;
     place = DESKTOP.includes(answer) ? answer : null;
     appearance();
+  }
+
+  for (const name of APPROVAL_MODES) {
+    $(`s-approvals-${name}`).addEventListener("change", (event) => {
+      if (!event.target.checked || !settings) return;
+      const before = settings.approvals || "ask";
+      if (saving || settings.approvals === undefined) { folder(); return; }
+      const words = (mode) => t("settings.approvals.saved", {mode: t(`auto.mode.${mode}`)});
+      settingCommit("approvals", name, words(name), before, words(before));
+    });
   }
 
   // A new language is saved like any setting, then the page loads again in it.

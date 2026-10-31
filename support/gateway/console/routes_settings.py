@@ -112,6 +112,8 @@ class SettingsPutBody(_SettingsBaseBody):
     memory_retriever: StrictStr | None = None
     # ``[console] language``: ``auto``, ``en`` or ``zh-Hans``; absent leaves it as it is.
     language: StrictStr | None = None
+    # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
+    approvals: StrictStr | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -363,6 +365,9 @@ def settings_json() -> dict[str, Any]:
         "across_chats": cfg.memory.across_chats,
         "memory_retriever": cfg.memory.retriever,
         "language": cfg.console.language,
+        "approvals": (
+            cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
+        ),
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -449,6 +454,14 @@ def _build_candidate(
             f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
         )
 
+    approvals = getattr(body, "approvals", None)
+    if approvals is not None and approvals not in config.APPROVAL_MODES:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"approvals: Must be one of {config.APPROVAL_MODES}.",
+        )
+
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
             409,
@@ -469,6 +482,8 @@ def _build_candidate(
         candidate.memory.retriever = retriever
     if language is not None:
         candidate.console.language = language
+    if approvals is not None:
+        candidate.approvals.mode = approvals
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -536,6 +551,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("memory_retriever")
     if before.console.language != after.console.language:
         changed.append("language")
+    if before.approvals.mode != after.approvals.mode:
+        changed.append("approvals")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

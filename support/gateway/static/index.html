@@ -199,6 +199,12 @@
               </div>
               <button type="button" id="model-btn" class="model-button">
                 <span data-i18n="html.chooseModel">Choose a model</span> <span aria-hidden="true">⌄</span></button
+              ><div class="mode-picker" id="mode-picker" hidden>
+                <button type="button" class="mode-chip" id="mode-btn" data-mode="ask" aria-haspopup="menu" aria-expanded="false" aria-controls="mode-menu">
+                  <span class="mode-glyph" aria-hidden="true"></span><span id="mode-text" data-i18n="auto.mode.ask">Ask</span><span aria-hidden="true">⌄</span>
+                </button>
+                <div class="mode-menu" id="mode-menu" role="menu" hidden></div>
+              </div
               ><span class="composer-spacer"></span><span id="run-status" role="status"></span
               ><button
                 type="button"
@@ -369,6 +375,13 @@
                     <button type="button" class="quiet-button" id="s-folder-cancel" data-i18n="html.sFolderCancel">Cancel</button>
                   </div>
                   <p class="st-hint" id="s-folder-hint" data-i18n="html.sFolderHint">Use an absolute path or a path beginning with ~/.</p>
+                </li>
+                <li class="st-row" id="s-approvals-row" hidden>
+                  <div class="st-text"><span class="st-label" id="s-approvals-legend" data-i18n="settings.approvals.title">New chats start in</span><span class="st-key" data-developer hidden>approvals.mode</span><p class="st-hint" data-i18n="settings.approvals.hint">Ask: melo asks before it runs commands or changes files. Auto: it works without asking and blocks risky steps. Each chat can switch under the message box.</p></div>
+                  <div class="st-segments" role="radiogroup" aria-labelledby="s-approvals-legend">
+                    <label><input type="radio" name="s-approvals" id="s-approvals-ask" value="ask" disabled /><span data-i18n="auto.mode.ask">Ask</span></label>
+                    <label><input type="radio" name="s-approvals" id="s-approvals-auto" value="auto" disabled /><span data-i18n="auto.mode.auto">Auto</span></label>
+                  </div>
                 </li>
               </ul>
               <h4 class="st-group-title" id="s-recent-title" data-i18n="html.sRecentTitle">Recent folders</h4>

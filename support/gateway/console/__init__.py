@@ -192,12 +192,16 @@ class Console:
 
     def session_body(self, info: SessionInfo) -> dict[str, Any]:
         """One session as API v2 gives it, with this console's live fields."""
-        return session_json(
+        body = session_json(
             info,
             pending_approvals=len(self.broker.pending(info.id)),
             level=self.gate.level(info.id),
             held=self.gate.held(info.id),
+            mode=self.sessions.mode_of(info),
         )
+        # Steps allowed once in this chat since the gateway started (#339).
+        body["allowances"] = self.sessions.allowances(info.id)
+        return body
 
     async def main_body(self) -> dict[str, Any] | None:
         """The main chat as the list gives it, with its newest card; ``None`` before the store opens."""

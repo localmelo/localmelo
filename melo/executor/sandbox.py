@@ -21,10 +21,18 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
+
+from localmelo.melo.contracts.own_gateway import OwnGateway, current
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+# The sockets of container engines (Docker, Podman, Colima, OrbStack, Lima…),
+# as a pattern over a socket's path.
+ENGINE_SOCKET = (
+    r"(docker|podman|colima|orbstack|lima|containerd|nerdctl|finch)[^/]*\.sock$"
+)
 TMP_DIR = ".melo-tmp"
 OFF_HINT = (
     "set agent.confine_writes to false to run without it "
@@ -176,18 +184,37 @@ def quote(path: str) -> str:
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def profile(paths: Sequence[str]) -> str:
-    """The ``sandbox-exec`` profile that allows writes only in *paths*."""
+def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
+    """The ``sandbox-exec`` profile that allows writes only in *paths*.
+
+    With *guard* (auto mode, #339) it also denies reading and writing the
+    gateway's files, connecting to its port on this computer, and asking
+    macOS to open a file, an app or a URL (``lsopen``: LaunchServices then
+    answers ``permErr``); these rules come last, so they win over the
+    folders allowed before them. It also denies connecting to a container
+    engine's socket (:data:`ENGINE_SOCKET`). Apple Events are not denied: no harmless
+    check shows a rule for them taking effect, so the review judges them.
+    """
     rules = [
         *(f"(literal {quote(device)})" for device in DEVICES),
         *_DEVICE_RULES,
         *(f"(subpath {quote(path)})" for path in paths),
     ]
-    return (
+    text = (
         "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  "
         + "\n  ".join(rules)
         + ")\n"
     )
+    if guard is not None and guard.files:
+        closed = "\n  ".join(f"(subpath {quote(path)})" for path in guard.files)
+        text += f"(deny file-read* file-write*\n  {closed})\n"
+    if guard is not None:
+        text += "(deny lsopen)\n"
+        # A container engine's socket: its containers reach every file.
+        text += f'(deny network-outbound (remote unix-socket (path-regex #"{ENGINE_SOCKET}")))\n'
+    for port in guard.ports if guard is not None else ():
+        text += f'(deny network-outbound (remote ip "localhost:{int(port)}"))\n'
+    return text
 
 
 @dataclass
@@ -199,6 +226,8 @@ class WriteConfinement:
     paths: tuple[str, ...]
     profile: str
     refused: int = 0
+    # The gateway's files the profile closes (auto mode); none otherwise.
+    guarded: tuple[str, ...] = ()
 
     def argv(self, argv: Sequence[str]) -> list[str]:
         """*argv* started under the profile."""
@@ -219,20 +248,27 @@ class WriteConfinement:
         profile's. Each refused write adds to :attr:`refused`.
         """
         paths: list[str] = []
-        count = 0
+        count = closed = 0
         for line in text.splitlines():
             found = _REFUSED.search(line)
             if found is None:
                 continue
             path = _refused_path(line, found.start())
-            if path and any(_inside(os.path.realpath(path), p) for p in self.paths):
+            real = os.path.realpath(path) if path else ""
+            if real and any(_inside(real, g) for g in self.guarded):
+                closed += 1
+                continue
+            if real and any(_inside(real, p) for p in self.paths):
                 continue
             count += 1
             if path and path not in paths:
                 paths.append(path)
+        self.refused += count + closed
+        out = ""
+        if closed:
+            out += "melo: this step may not read or change melo's own sign-in and chat files.\n"
         if not count:
-            return ""
-        self.refused += count
+            return out
         named = ", ".join(paths[:_NOTE_PATHS])
         if len(paths) > _NOTE_PATHS:
             named += f" and {len(paths) - _NOTE_PATHS} more"
@@ -241,7 +277,83 @@ class WriteConfinement:
             + (f" (refused: {named})" if named else "")
             + f"; write in {self.root}, and put scratch files in $TMPDIR."
         )
-        return f"{line}\n"
+        return f"{out}{line}\n"
+
+
+class Confinement(Protocol):
+    """What a shell or Python child's start asks of a confinement."""
+
+    def argv(self, argv: Sequence[str]) -> list[str]: ...
+
+    def env(self) -> dict[str, str]: ...
+
+    def note(self, text: str) -> str: ...
+
+
+class AutoConfinement:
+    """The confinement of the calls auto mode decides (#339); the Agent's own for the rest.
+
+    Nobody approves an auto-mode call, so its profile is the floor under the
+    review: its writes stay in the workspace even when the Agent confines
+    nothing of its own, and it can neither read nor change the gateway's
+    sign-in and chat files nor connect to the gateway's port
+    (:func:`~localmelo.melo.contracts.own_gateway.current`). The Agent sets
+    :attr:`on` for each call from the decision that let it run and calls
+    :meth:`ready` (blocking: run it in a thread) before one runs with it on;
+    the profile is made once, by :func:`confine`. While :attr:`on` is false
+    a child starts under *base*, the Agent's own confinement, or as it
+    would without one. When the profile cannot be made, a call with it on
+    fails with why, never unconfined.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        env: Callable[[], Mapping[str, str]],
+        base: WriteConfinement | None = None,
+    ) -> None:
+        self.root = root
+        self.on = False
+        self.base = base
+        self._env = env
+        self._made: WriteConfinement | None = None
+        self._error = ""
+        self._tried = False
+
+    def ready(self) -> None:
+        """Make the profile, the first time only (off macOS there is none)."""
+        if self._tried:
+            return
+        self._tried = True
+        try:
+            self._made = confine(self.root, self._env(), guard=current())
+        except ConfinementError as exc:
+            self._error = str(exc)
+
+    @property
+    def refused(self) -> int:
+        return 0 if self._made is None else self._made.refused
+
+    def argv(self, argv: Sequence[str]) -> list[str]:
+        if not self.on:
+            return list(argv) if self.base is None else self.base.argv(argv)
+        if self._error or not self._tried:
+            raise ConfinementError(
+                self._error or "auto mode's confinement is not ready"
+            )
+        return list(argv) if self._made is None else self._made.argv(argv)
+
+    def env(self) -> dict[str, str]:
+        if not self.on:
+            return {} if self.base is None else self.base.env()
+        return self._made.env() if self._made is not None else {}
+
+    def note(self, text: str) -> str:
+        if not self.on:
+            return "" if self.base is None else self.base.note(text)
+        if self._made is None:
+            return ""
+        return self._made.note(text).replace("in this run", "in auto mode")
 
 
 def _refused_path(line: str, at: int) -> str | None:
@@ -258,10 +370,13 @@ def platform_note() -> str:
     return f"writes are confined only on macOS, not {sys.platform}"
 
 
-def confine(root: str, env: Mapping[str, str]) -> WriteConfinement | None:
+def confine(
+    root: str, env: Mapping[str, str], *, guard: OwnGateway | None = None
+) -> WriteConfinement | None:
     """The confinement of a run in the workspace *root*, or ``None`` off macOS.
 
-    *env* is the environment the run's children get. It makes the run's
+    *env* is the environment the run's children get; *guard* closes the
+    gateway's files and port too (see :func:`profile`). It makes the run's
     temporary folder and checks, by starting ``/usr/bin/true`` under the
     profile, that the profile applies here. Raises
     :class:`ConfinementError`, one line that says why and how to turn
@@ -272,14 +387,16 @@ def confine(root: str, env: Mapping[str, str]) -> WriteConfinement | None:
     if sys.platform != "darwin":
         return None
     try:
-        return _confine(root, env)
+        return _confine(root, env, guard)
     except ConfinementError as exc:
         raise ConfinementError(
             f"writes cannot be confined to the workspace: {exc}; {OFF_HINT}"
         ) from None
 
 
-def _confine(root: str, env: Mapping[str, str]) -> WriteConfinement:
+def _confine(
+    root: str, env: Mapping[str, str], guard: OwnGateway | None = None
+) -> WriteConfinement:
     if not os.access(SANDBOX_EXEC, os.X_OK):
         raise ConfinementError(f"{SANDBOX_EXEC} is missing")
     root = os.path.realpath(root)
@@ -293,7 +410,7 @@ def _confine(root: str, env: Mapping[str, str]) -> WriteConfinement:
     except OSError as exc:
         raise ConfinementError(f"cannot make {tmp}: {exc.strerror}") from None
     paths = tuple(allowed_paths(root, env))
-    text = profile(paths)
+    text = profile(paths, guard)
     try:
         probe = subprocess.run(
             [SANDBOX_EXEC, "-p", text, "/usr/bin/true"],
@@ -306,4 +423,7 @@ def _confine(root: str, env: Mapping[str, str]) -> WriteConfinement:
     if probe.returncode:
         why = (probe.stderr.strip().splitlines() or [f"exit {probe.returncode}"])[0]
         raise ConfinementError(f"sandbox-exec refused the profile: {why}")
-    return WriteConfinement(root=root, tmp=tmp, paths=paths, profile=text)
+    guarded = guard.files if guard is not None else ()
+    return WriteConfinement(
+        root=root, tmp=tmp, paths=paths, profile=text, guarded=guarded
+    )

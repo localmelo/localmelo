@@ -616,6 +616,54 @@ title is `melo did not finish an answer`, the hint `The model's reply held only
 its thinking. Try again, or rephrase the request.`, and the filled button
 **Try again**.
 
+## Auto mode
+
+In **Auto**, melo works without asking: routine steps run, and a risky step
+or a step you did not ask for is blocked and explained. **Ask**, the default,
+asks before commands and file changes.
+
+- **Switch.** The chip beside the model under the message box reads **Ask**
+  or **Auto**; its menu, "How melo works in this chat", switches the chat
+  from melo's next step (a card already waiting stays). A new chat starts in
+  the mode of Settings → Chats and folders → **New chats start in**
+  (`[approvals] mode`); the main chat follows that setting until you pick
+  its mode.
+- **What runs.** Steps inside the chat's folder that install, download, send
+  or delete nothing. A step melo cannot judge goes to your model first and
+  runs only when it is routine and part of what you asked. A write outside
+  the folder fails in Auto even when no rule caught it: its output says
+  `writing outside the workspace is not allowed in auto mode`. A step in
+  Auto can neither read melo's sign-in token nor reach melo's own API.
+- **A reviewer, not a wall.** Auto blocks risky steps and steps that stray
+  from what you asked. Its sandbox keeps a step's files in the folder and
+  away from melo's sign-in, but a step that hands work to another app or
+  program (opening an app or a script, scripting another app, code for
+  another language, a package fetched and run, a background job) is judged
+  by the review, not walled off: such steps are blocked or checked by your
+  model, never run as routine. The sandbox also keeps a step from talking to
+  a container engine.
+- **What is blocked.** Installs, downloads, changes outside the folder,
+  deletes, passwords and keys, system settings, code from the internet and
+  the like, unless your own words ask for them; a change to localmelo itself
+  never runs; in a folder that holds the copy of localmelo that is running,
+  a write under that copy is refused. The step's row reads
+  `blocked: installs software`, a card under
+  the work says what and why and shows the step, and melo's answer gives the
+  other ways.
+- **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
+  and sends "Go ahead with the step melo blocked: install software." as your
+  message; or reply "go ahead". Steps that use passwords or keys, change
+  system settings, set up something that runs later, or run code from the
+  internet or code melo cannot check need the button. While melo works the
+  button waits; afterwards the card reads `Allowed once · ran at 14:02` or
+  `Allowance expired`.
+- **Tasks.** A task keeps the mode its chat had when it was made. Its page
+  shows **Mode** and lists **Blocked steps**, each opening the same card; the
+  task goes on without them, and **Allow once** there sends the message to the
+  task. A scheduled chore takes its chat's mode each time it runs.
+- Allowances live in memory: restarting localmelo forgets them, and one the
+  retried turn did not use goes when that turn ends.
+
 ## Persistence and limits
 
 The page's chats are sessions in the gateway's own session file,

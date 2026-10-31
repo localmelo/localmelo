@@ -1,6 +1,7 @@
 import {taskLive} from './task-live.mjs';
 import {levelCode, levelLabel} from './levels.mjs';
 import {t} from './i18n.mjs';
+import {allowState, blockCard, blockFacts} from './blocked.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -46,7 +47,8 @@ function defaultEvery(fn, ms) {
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
-    busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: ''};
+    busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: '',
+    openBlock: '', blockError: {}};
   let active = false;
   let stopPolling = null;
   const liveBox = doc.createElement('section');
@@ -80,6 +82,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const cardMissing = (task) => state.evidence === 'missing_card' || (task.started_at != null && !hasCard(task));
 
   const pendingOf = (task) => (Array.isArray(task.pending_approvals) ? task.pending_approvals : []);
+  // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
+  const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
+  const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
   const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : stateWord(task.state));
 
   function evidenceText(task) {
@@ -100,7 +105,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : ''].filter(Boolean).join(' · '), 'muted'));
+        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : '',
+          openBlocks(task).length ? t('tasks.blocked.count', {n: openBlocks(task).length}) : ''].filter(Boolean).join(' · '), 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -114,6 +120,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => meta.append(node('dt', label), node('dd', value));
     row(t('tasks.row.state'), stateText(task));
+    // Fixed when the task was made: the mode of its chat then.
+    row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
     if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
     row(t('tasks.row.updated'), when(task.updated_at));
     // A refused folder says why in its own box below, in words.
@@ -130,6 +138,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
+    if (blockedOf(task).length) nodes.push(blockedBox(task));
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {
@@ -383,6 +392,45 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.stopAccepted', {state: stateWord(outcome.data.task.state)})});
       live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
+    render();
+  }
+
+  // What auto mode blocked: each opens the chat's card, with Allow once; the task went on without them.
+  function blockedBox(task) {
+    const box = node('section', undefined, 'task-blocked');
+    box.append(node('h2', t('tasks.blocked.title')), node('p', t('tasks.blocked.note'), 'muted'));
+    const now = Date.now() / 1000;
+    for (const block of blockedOf(task)) {
+      const facts = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
+        review: block.review, reason: block.reason}, name: block.name, preview: block.preview});
+      if (!facts || !facts.category) continue;
+      const allowing = allowState({until: task.allowances?.[block.step_key] ?? null, used: block.used_at, now});
+      const fold = node('details', undefined, 'task-block');
+      fold.open = state.openBlock === block.request_id;
+      fold.addEventListener('toggle', () => { if (fold.open) state.openBlock = block.request_id; else if (state.openBlock === block.request_id) state.openBlock = ''; });
+      const action = facts.allow && allowing.state === 'open' ? t('auto.blocked.allow') : '';
+      fold.append(node('summary', [facts.title, action].filter(Boolean).join(' · ')), blockCard(doc, facts, {
+        allowing,
+        busy: state.busy === `allow:${block.request_id}` ? 'allowing' : Boolean(state.busy),
+        developer: developer(),
+        error: state.blockError[block.request_id] || '',
+        onAllow: () => allow(block.request_id),
+      }));
+      box.append(fold);
+    }
+    return box;
+  }
+
+  async function allow(requestId) {
+    const epoch = state.epoch;
+    const outcome = await act(`allow:${requestId}`, (id) => api(`${path(id)}/blocks/${encodeURIComponent(requestId)}/allow`, {method: 'POST'}));
+    if (!outcome || epoch !== state.epoch) return;
+    if (outcome.data) {
+      delete state.blockError[requestId];
+      state.task = outcome.data.task;
+      state.notice = t('tasks.blocked.allowed');
+      live?.sync(outcome.data.task);
+    } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
   }
 

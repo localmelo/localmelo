@@ -249,6 +249,8 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("PATCH", "/api/tasks/{task_id}"): {"level": 2},
     ("POST", "/api/tasks/{task_id}/resume"): {"operation_id": "op"},
     ("POST", "/api/v2/tasks/{task_id}/resume"): {"operation_id": "op"},
+    ("POST", "/api/sessions/{session_id}/blocks/{request_id}/allow"): None,
+    ("POST", "/api/tasks/{task_id}/blocks/{request_id}/allow"): None,
 }
 
 
@@ -274,6 +276,7 @@ async def test_every_write_route_refuses_a_worker_run(
             "turn_id": info.id,
             "tool": "file_write",
             "client_request_id": "k",
+            "request_id": "r",
         }
         for (method, path), body in WRITES.items():
             payload = (

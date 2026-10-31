@@ -16,6 +16,7 @@ from localmelo.melo.contracts.events import json_safe_payload
 from localmelo.melo.contracts.review import ActionReview, review_title
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions import display
+from localmelo.support.sessions.approvals import chat_mode
 from localmelo.support.sessions.store import (
     SessionInfo,
     StoredEvent,
@@ -36,11 +37,14 @@ def session_json(
     running_here: bool | None = None,
     level: int = 2,
     held: str = "",
+    mode: str | None = None,
 ) -> dict[str, Any]:
     """One session as ``GET /api/sessions`` and ``GET /api/sessions/{id}`` give it.
 
     *level* and *held* are the scheduler's view of the chat (S2): the chip's
     P1-P4 and why a model call waits, from the one gate both surfaces use.
+    *mode* is the chat's Ask or Auto when the caller knows it (the main
+    chat's follows the settings until it is picked), else its ``meta``'s.
     ``main`` is true for the main chat (kind ``front``); every console chat
     of kind ``chat`` is one of its side chats.
     """
@@ -60,6 +64,8 @@ def session_json(
         "pending_approvals": pending_approvals,
         "level": level,
         "held": held,
+        # Ask or Auto (#339): a chat's own, a task's fixed when it was made.
+        "approvals": mode or chat_mode(info.meta),
     }
 
 

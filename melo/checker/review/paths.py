@@ -5,10 +5,14 @@ from __future__ import annotations
 import fnmatch
 import functools
 import hashlib
+import ipaddress
 import os
 import re
+import socket
 from dataclasses import dataclass, field, replace
+from urllib.parse import unquote, urlparse
 
+from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
 # Under the home folder. Reads count too: passwords, keys and cookies. An
@@ -81,8 +85,8 @@ _HARMLESS = [
     "/dev/fd",
 ]
 _CACHES = [".cache/uv", "Library/Caches/black", ".npm"]
-_APP = ("/Applications/LocalMelo.app",)
-# localmelo's own source: an editable install runs from here.
+# Where the running localmelo is imported from: an editable install's
+# source, or the package inside the app bundle (see _running).
 _SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), *[".."] * 3))
 # Local files the review reads for one call, at most: those it runs, and
 # the changed files a runner (pytest…) runs.
@@ -126,7 +130,13 @@ class Context:
 
 @dataclass
 class Findings:
-    """High-impact categories with their reasons; the undecided reasons."""
+    """High-impact categories with their reasons; the undecided reasons.
+
+    ``hits`` has one ``(category, site, reason)`` for each finding as the
+    rules met it, ``?`` for a doubt, repeats kept; ``site`` is the call or
+    command the rules were reading (``Findings.site``), else the reason. An
+    edit is judged by the hits it adds (see ``files.written``).
+    """
 
     high: dict[str, list[str]] = field(default_factory=dict)
     unsure: list[str] = field(default_factory=list)
@@ -139,6 +149,8 @@ class Findings:
     # Changed files a runner runs that melo did not read, as they are now.
     changed: list[str] = field(default_factory=list)
     ran_runner: bool = False
+    site: str = ""
+    hits: list[tuple[str, str, str]] = field(default_factory=list)
 
     def take(self, path: str, *, key: bool = True) -> str | None:
         """*path*'s text when the review may read it (once, at most
@@ -169,11 +181,13 @@ class Findings:
         return text
 
     def add(self, category: str, reason: str) -> None:
+        self.hits.append((category, self.site or reason, reason))
         self.high.setdefault(category, [])
         if reason not in self.high[category]:
             self.high[category].append(reason)
 
     def doubt(self, reason: str) -> None:
+        self.hits.append(("?", self.site or reason, reason))
         if reason not in self.unsure:
             self.unsure.append(reason)
 
@@ -218,17 +232,29 @@ def resolve(ctx: Context, raw: str, cwd: str | None = None) -> str | None:
     return os.path.realpath(os.path.join(cwd or ctx.root, text))
 
 
-@functools.lru_cache(maxsize=32)
-def _places(home: str, root: str) -> dict[str, tuple[str, ...]]:
-    """The folders of :func:`where` for one home and workspace.
+def _running(source: str) -> str:
+    """The folder of the running localmelo: the app bundle around *source*, else *source*."""
+    parts = source.split(os.sep)
+    for i in range(len(parts) - 1, 0, -1):
+        if parts[i].endswith(".app"):
+            return os.sep.join(parts[: i + 1])
+    return source
 
-    localmelo's source counts as itself, unless the workspace is that
-    source or inside it: then the person works on localmelo.
+
+@functools.lru_cache(maxsize=32)
+def _places(home: str, root: str, source: str) -> dict[str, tuple[str, ...]]:
+    """The folders of :func:`where` for one home, workspace and running localmelo.
+
+    Only the running localmelo counts as itself (*source*, the folder it is
+    imported from, or the app bundle around it), with its settings: another
+    copy of the source or another app is a folder like any other. It does
+    not count when the workspace is inside it: the person works on it.
     """
     later = [*(os.path.join(home, p) for p in _PERSISTENCE), f"{root}/.git/hooks"]
-    source = () if under(root, _SOURCE) else (_SOURCE,)
+    running = _running(source)
+    own = () if under(root, running) else (running,)
     return {
-        "self": (f"{home}/.cache/localmelo", *_APP, f"{home}{_APP[0]}", *source),
+        "self": (f"{home}/.cache/localmelo", *own),
         "persistence": (*later, f"{root}/.envrc", f"{root}/.git/config", *_LAUNCHD),
         "credentials": tuple(
             os.path.join(home, p) for p in _CREDENTIALS if not p.startswith(_ANYWHERE)
@@ -252,7 +278,7 @@ def secret_name(text: str) -> bool:
 def where(ctx: Context, path: str, *, write: bool) -> str:
     """self, credentials, persistence, system, harmless, root, inside or outside."""
     home, root = ctx.home.rstrip("/"), ctx.root
-    places = _places(home, root)
+    places = _places(home, root, _SOURCE)
     if write and any(under(path, p) for p in (ctx.prefix, *places["self"])):
         return "self"
     if write and any(under(path, p) for p in places["persistence"]):
@@ -270,6 +296,138 @@ def where(ctx: Context, path: str, *, write: bool) -> str:
     if any(under(path, p) for p in _SYSTEM) and not under(path, "/usr/local"):
         return "system"
     return "outside"
+
+
+_LOOPBACK = re.compile(r"localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0|0")
+# An address with a port, perhaps with a path: localhost:8401/api/x.
+_ADDRESS = re.compile(r"^(\[[0-9a-fA-F:.]+\]|[\w.-]+):\d+(/\S*)?$")
+# A request line's method in a literal sent over a socket, or a method named.
+SENDING = ("POST", "PUT", "PATCH", "DELETE")
+
+
+# A container engine's socket (Docker, Podman, Colima…): its containers reach every file.
+_ENGINE_SOCKET = re.compile(
+    r"(docker|podman|colima|orbstack|lima|containerd|nerdctl|finch)[^/]*\.sock\b",
+    re.IGNORECASE,
+)
+
+
+def engine_socket(f: Findings, text: str) -> bool:
+    """A connection to a container engine's socket in *text* (a path or a URL): high."""
+    if not _ENGINE_SOCKET.search(unquote(text)):
+        return False
+    f.add(
+        "system", "Talks to a container engine, whose containers can reach every file."
+    )
+    return True
+
+
+def loopback(host: str) -> bool:
+    """Whether *host* names this computer: ``localhost``, ``127.x`` in any spelling, ``::1``."""
+    name = host.strip("[]").lower().rstrip(".")
+    if _LOOPBACK.fullmatch(name) or name.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        try:  # the short and numeric spellings the C library takes: 127.1, 0x7f000001
+            address = ipaddress.ip_address(socket.inet_aton(name))
+        except (OSError, ValueError):
+            return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    return (
+        address.is_loopback
+        or address.is_unspecified
+        or bool(mapped and mapped.is_loopback)
+    )
+
+
+def own_port(host: str, port: object) -> bool:
+    """Whether *host* and *port* are this computer's gateway.
+
+    Its ports are the running gateway's, else those the settings and the
+    live gateway's endpoint file give (see
+    :func:`~localmelo.melo.contracts.own_gateway.current`).
+    """
+    ports = own_gateway.current().ports
+    return loopback(host) and str(port) in {str(p) for p in ports}
+
+
+def own_api(text: str, *, sending: bool = True) -> bool:
+    """Whether the URL or address *text* reaches melo's own gateway.
+
+    That is this computer on the gateway's port (see :func:`own_port`);
+    other local servers, a model server's ``/v1/`` included, are not. A
+    request that sends nothing (*sending* false) to ``/api/health`` is
+    fine: it only asks whether melo runs.
+    """
+    if "://" not in text and not _ADDRESS.match(text):
+        return False
+    try:
+        url = urlparse(text if "://" in text else "http://" + text)
+        port = url.port
+    except ValueError:
+        return False
+    if not own_port(url.hostname or "", port):
+        return False
+    return sending or (url.path or "/").rstrip("/") != "/api/health"
+
+
+def reach_own(f: Findings, text: str) -> None:
+    """A request to melo's own gateway changes localmelo itself (it acts as you)."""
+    f.add("self", f"Sends a request to melo's own gateway ({text[:80]}).")
+
+
+def secret_places(ctx: Context) -> tuple[str, ...]:
+    """The folders that hold sign-ins, passwords or keys: melo's own, ``~/.ssh``, keychains…"""
+    places = _places(ctx.home.rstrip("/"), ctx.root, _SOURCE)["credentials"]
+    return (*places, *own_gateway.current().files)
+
+
+def reaches_secrets(ctx: Context, path: str, pattern: str = "**") -> bool:
+    """Whether a search from *path* reaches a folder of :func:`secret_places`.
+
+    It does when *path* is in one, or holds one that *pattern* (the rest of
+    a glob below *path*; ``**`` for a search that walks every folder) can
+    go into: each of its parts must match the folders on the way, a hidden
+    one only by a part that starts with a dot.
+    """
+    parts = [p for p in pattern.split("/") if p]
+    for place in secret_places(ctx):
+        if under(path, place):
+            return True
+        if not under(place, path) or place == path:
+            continue
+        steps = os.path.relpath(place, path).split("/")
+        for k, step in enumerate(steps):
+            if k >= len(parts):
+                break  # the pattern ends above it: it names, it does not read
+            if parts[k] == "**":
+                return True
+            hidden = step.startswith(".") and not parts[k].startswith(".")
+            if hidden or not fnmatch.fnmatchcase(step, parts[k]):
+                break
+        else:
+            return True
+    return False
+
+
+def search(
+    ctx: Context, f: Findings, raw: str, cwd: str | None = None, pattern: str = "**"
+) -> None:
+    """A search through the folder *raw* (find, grep -r, os.walk, a glob's *pattern* below it).
+
+    Credentials when it reaches a folder that holds sign-ins or keys
+    (:func:`reaches_secrets`); a folder melo cannot resolve is a doubt.
+    """
+    path = resolve(ctx, raw, cwd)
+    if path is None:
+        f.doubt(f"Searches a folder melo cannot resolve: {raw}")
+    elif reaches_secrets(ctx, path, pattern):
+        f.add(
+            "credentials",
+            f"Searches {shown(ctx, path)}, which holds sign-ins, passwords or keys.",
+        )
 
 
 def shown(ctx: Context, path: str) -> str:

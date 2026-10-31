@@ -41,12 +41,14 @@ _PARAM = re.compile(r"\{(\w+)\}")
 
 # The files whose words come from the catalog: a new English literal in one fails the scan.
 CONVERTED_JS = (
+    "blocked.mjs",
     "drawer.mjs",
     "folder.mjs",
     "levels.mjs",
     "main-chat.mjs",
     "memory-tab.mjs",
     "memory.mjs",
+    "mode.mjs",
     "panel.mjs",
     "pictures.mjs",
     "running.mjs",
@@ -102,6 +104,8 @@ JS_ENGLISH = {
     "Allowed",
     "Denied",
     "Waiting for your approval",
+    # The reason auto mode records for a later call of a turn it stopped (#339).
+    "the turn stopped",
 }
 # Names read the same in every language: a literal of names alone is not English.
 NAMES = {"localmelo", "melo", "Melo", "Python"}

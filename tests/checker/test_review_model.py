@@ -133,13 +133,23 @@ def test_a_comment_or_a_docstring_names_nothing(
     assert not shares_a_name(step_names(tool, arguments), ["chart the capex"])
 
 
-def test_a_step_s_names_come_from_its_argv_literals_imports_or_path() -> None:
+def test_a_step_s_names_come_from_its_argv_code_names_or_path() -> None:
     assert step_names("shell_exec", {"command": "brew install ffmpeg"}) == {
         "brew",
         "ffmpeg",
     }
+    # A string literal is no name of the step (#339 part 2): only what the
+    # code uses and the words of a command it runs.
     code = "import matplotlib\nopen('capex.csv')"
-    assert step_names("python_exec", {"code": code}) == {"matplotlib", "capex", "csv"}
+    assert step_names("python_exec", {"code": code}) == {"matplotlib"}
+    code = "import subprocess\nsubprocess.run(['.venv/bin/pip', 'install', 'seaborn'])"
+    assert "seaborn" in step_names("python_exec", {"code": code})
+    code = "import os\nos.system('brew install ffmpeg')"
+    assert "ffmpeg" in step_names("python_exec", {"code": code})
+    decoy = "import subprocess\nwanted = 'matplotlib'\nsubprocess.run(cmd)"
+    assert not shares_a_name(
+        step_names("python_exec", {"code": decoy}), ["install matplotlib"]
+    )
     assert step_names("file_write", {"path": "~/notes/chart.md", "content": "x"}) == {
         "notes",
         "chart",

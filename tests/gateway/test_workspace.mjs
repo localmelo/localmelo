@@ -21,6 +21,8 @@ import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictur
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
+import * as modeChip from '../../support/gateway/static/mode.mjs';
+import * as blocked from '../../support/gateway/static/blocked.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -527,6 +529,8 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -729,6 +733,8 @@ function harness(routes, {mobile = false} = {}) {
     memoryNodes,
     ...mainChat,
     ...levels,
+    ...modeChip,
+    ...blocked,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
@@ -4482,4 +4488,78 @@ test('a task that came back finished offers no more changes on its echo lines', 
   await h.run('init()');
   assert.match(h.text('messages'), /Started: Find jobs.*Done: Find jobs/);
   assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Change'), null);
+});
+
+// ── Auto mode (#339): the chip, the blocked card and Allow once ──
+
+const AUTO_BLOCK = {
+  request_id: 'req-9', allowed: false, origin: 'auto', mode: 'auto', reason: 'installs software', remember: false, step_key: 'key-9',
+  review: {verdict: 'high', categories: ['install'], reasons: ['Installs matplotlib with pip.'], paths: [], by: 'rules', rules_version: 1},
+};
+
+function blockedTurn(h) {
+  h.stream().emit({id: 40, turn: 2, ts: 100, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Chart it'}});
+  h.stream().emit({id: 41, turn: 2, ts: 101, type: 'tool.started', data: {step: 1, call_id: 'c9', name: 'python_exec', arguments: {code: "import subprocess\nsubprocess.run(['pip', 'install', 'matplotlib'])"}, preview: 'import subprocess (+1 more line)'}});
+  h.stream().emit({id: 42, turn: 2, ts: 102, type: 'tool.finished', data: {step: 1, call_id: 'c9', name: 'python_exec', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: 'Auto mode blocked this step, so it did not run.', duration_s: 0, images: [], approval: AUTO_BLOCK, exit_code: null}});
+  h.stream().emit({id: 43, turn: 2, ts: 103, type: 'turn.finished', data: {turn: 2, status: 'completed', cause: 'run'}});
+}
+
+test('a step Auto blocked shows its card, and Allow once asks the server and says it is allowed', async () => {
+  const h = harness(baseRoutes({
+    'POST /sessions/a/blocks/req-9/allow': {status: 202, body: {step_key: 'key-9', until: Date.now() / 1000 + 1800, turn_id: 'turn-3', turn: turnRow({id: 'turn-3', turn: 3, status: 'running', finished_at: 0, user_text: 'Go ahead with the step melo blocked: install software.'})}},
+  }));
+  await h.run('init()');
+  blockedTurn(h);
+  const messages = h.text('messages');
+  assert.match(messages, /blocked: installs software/);
+  assert.match(messages, /Blocked: Install software/);
+  assert.match(messages, /Runs this exact step once, within 30 minutes\./);
+  const allow = findNode(h.element('messages'), (node) => node.classList?.contains('block-allow'));
+  assert.ok(allow, 'the card offers Allow once');
+  await allow.click();
+  await settle();
+  const [call] = h.net.callsTo('/sessions/a/blocks/req-9/allow');
+  assert.equal(call.method, 'POST');
+  assert.match(h.text('messages'), /Allowed once · melo can run it until/);
+  assert.equal(findNode(h.element('messages'), (node) => node.classList?.contains('block-allow')), null);
+});
+
+test('the Ask/Auto chip switches the open chat from its menu', async () => {
+  const h = harness(baseRoutes({
+    'GET /settings': {mode: 'default', approvals: 'ask'},
+    'PATCH /sessions/a': (body) => ({session: session('a', {approvals: body.approvals})}),
+  }));
+  await h.run('init()');
+  assert.equal(h.element('mode-picker').hidden, false);
+  assert.equal(h.element('mode-btn').dataset.mode, 'ask');
+  h.element('mode-btn').click();
+  const auto = h.element('mode-menu').children.find((node) => node.dataset.mode === 'auto');
+  assert.ok(auto, 'the menu offers Auto');
+  await auto.click();
+  await settle();
+  const patch = h.net.callsTo('/sessions/a').find((call) => call.method === 'PATCH');
+  assert.deepEqual(patch.body, {approvals: 'auto'});
+  assert.equal(h.element('mode-btn').dataset.mode, 'auto');
+  assert.match(h.text('notice'), /This chat is in Auto now, from melo’s next step\./);
+});
+
+test('a new chat takes the chip\'s choice with its first turn', async () => {
+  const created = session('b', {title: 'Do the thing', approvals: 'auto'});
+  const h = harness({
+    ...baseRoutes({'GET /sessions': {sessions: [], machine: null, has_more: false}, 'GET /settings': {mode: 'default', approvals: 'ask'}}),
+    'POST /sessions': {status: 201, body: {session: created, turn_id: 'turn-1', turn: turnRow()}},
+    'GET /sessions/b': {session: created, pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0},
+    'GET /sessions/b/turns?limit=10': {turns: [turnRow({client_request_id: 'first'})], has_earlier: false, replay_from: 0},
+  });
+  await h.run('init()');
+  h.element('mode-btn').click();
+  await h.element('mode-menu').children.find((node) => node.dataset.mode === 'auto').click();
+  await settle();
+  assert.equal(h.net.callsTo('/sessions').filter((call) => call.method === 'PATCH').length, 0);
+  h.element('input').value = 'Do the thing';
+  await h.run('send()');
+  const call = h.net.callsTo('/sessions').find((entry) => entry.method === 'POST');
+  assert.equal(call.body.approvals, 'auto');
+  assert.equal(h.state().newMode, null);
+  assert.equal(h.element('mode-btn').dataset.mode, 'auto');
 });

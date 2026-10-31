@@ -237,7 +237,7 @@ asyncio.run(main())
 - `output_chars`：`output` 的长度，即使事件中的副本被截断也如此（见[载荷规则](#payload-rules)）。
 - `duration_s`：工具运行的时间：未运行时为 `0`；对于被取消或崩溃的调用，则为自 `tool.started` 起算的时间。
 - `images`：工具返回的图片，每张都是 `{sha256, mime_type, size_bytes}`。`AgentEvent.images` 保存图片本身。
-- `approval`：未询问审批策略时为 `null`：对于不需要审批的工具、没有策略的运行，以及在策略会被询问之前就被拒绝的调用。否则为 `{request_id, allowed, reason, remember, origin}`，其中 `origin` 是决定的来源（`user`、`session`、`policy`、`timeout` 或 `auto`）；策略失败时为 `error`；运行在策略做决定期间被取消时为 `withdrawn`。在自动模式下，以及对审查结果不是明确常规的调用，它还带有 `mode`（`"auto"`）、`review`（审查结果：`verdict`、`categories`、`reasons`、`paths`、`by`（`rules` 或 `model`）、`rules_version`，以及询问过模型时的 `model`：`{verdict, category, fits_request, user_asked, reason, ms}` 或 `{error, ms}`）和 `step_key`（32 个十六进制字符：同一文件夹中的同一步骤）；被允许一次的步骤带有 `allowance: "once"`。来源为 `auto` 且 `allowed: false` 表示自动模式拦下的步骤；此时 `reason` 用几个词说明它（`installs software`）。见[审批工具调用](../guides/python.md#approve-tool-calls)。
+- `approval`：未询问审批策略时为 `null`：对于不需要审批的工具、没有策略的运行，以及在策略会被询问之前就被拒绝的调用。否则为 `{request_id, allowed, reason, remember, origin}`，其中 `origin` 是决定的来源（`user`、`session`、`policy`、`timeout` 或 `auto`）；策略失败时为 `error`；运行在策略做决定期间被取消时为 `withdrawn`。在自动模式下，以及对审查结果不是明确常规的调用，它还带有 `mode`（`"auto"`）、`review`（审查结果：`verdict`、`categories`、`reasons`、`paths`、`by`（`rules` 或 `model`）、`rules_version`，以及询问过模型时的 `model`：`{verdict, category, fits_request, user_asked, reason, ms}` 或 `{error, ms}`）和 `step_key`（32 个十六进制字符：同一文件夹中的同一步骤）；被允许一次的步骤带有 `allowance: "once"`。来源为 `auto` 且 `allowed: false` 表示自动模式拦下的步骤；此时 `reason` 用几个词说明它（`installs software`）；控制台的[允许一次](api-v2.md#ask-and-auto)按 `request_id` 找到它。见[审批工具调用](../guides/python.md#approve-tool-calls)。
 - `exit_code`：`shell_exec` 或 `python_exec` 所运行的子进程的退出状态；负值 `-N` 表示被信号 `N` 结束。对于其他工具、子进程从未启动的调用，以及工具因超时或取消而杀死子进程的情况，它为 `null`。非零退出不会改变 `status`：`shell_exec` 仍然成功，其文本以 `[exit code <n>]` 开头；`python_exec` 则以 `Python exited with code <n>` 失败。
 
 <a id="note"></a>
@@ -441,7 +441,7 @@ asyncio.run(main())
 | `turn.pictures` | 控制台的一轮产生了图片：在其运行的最后一个事件之后、`turn.finished` 之前。没有图片时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `pictures` |
 | `turn.memory` | [跨对话记忆](../concepts/memory.md#memory-across-chats)为控制台的一轮做了什么，在其运行的第一个事件之前；开启记忆的每一轮都有；对话的模型每用 `remember` 记一条笔记或试图保存密钥时，会以同样的形状完整地再发送一次（以最新的一条为准）：`used`（`[{kind: record\|chat, id, text, source, session_id, turn, at}]`，召回到消息中的内容）、`remembered`（`[{id, text, topic}]`，这一轮记下的笔记：先是输入的文字请求记住的，然后是模型记的）、`refused`（某些内容没有被保存的原因，或 `""`）和 `recall`（搜索的过程：`{retriever: bm25\|embedding\|llm, fallback: none\|timeout\|error\|unreadable\|no-embedding, embed_ms, search_ms, select_ms, select_tokens: {prompt, completion}, candidates, used, block_chars}`（`block_chars`：记忆加到消息里的块的长度，没有时为 0），即比较 `[memory] retriever` 所用的数字；该轮已保存的 `result` 里以 `memory_recall` 重复一份）。记忆关闭时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `used`, `remembered`, `refused`, `recall` |
 | `session.title` | 第一轮设置会话标题，或标题被重命名。 | `title` |
-| `session.updated` | 会话的模型、工作区或 `meta` 发生变化。 | `model`, `workspace`, `workspace_label`, `meta` |
+| `session.updated` | 会话的模型、工作区或 `meta` 发生变化（控制台对话的模式是 `meta.approvals`，`ask` 或 `auto`）。 | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | 向用户询问某个工具调用（`SessionRunner.observe`）。 | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
 | `approval.resolved` | 该请求得到答复或被撤回。 | `request_id`, `call_id`, `tool_name`, `outcome`, `origin`, `reason`, `remember` |
 

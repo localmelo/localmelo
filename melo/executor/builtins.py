@@ -26,7 +26,7 @@ from localmelo.melo.executor.process_gate import (
     gate_supported,
     gated_exec,
 )
-from localmelo.melo.executor.sandbox import WriteConfinement
+from localmelo.melo.executor.sandbox import Confinement
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -164,7 +164,7 @@ async def _run_shell(
     stdin: int | None = None,
     timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> tuple[str, int]:
     """Run *command* in a shell; return its output and its exit status.
 
@@ -177,7 +177,7 @@ async def _run_shell(
     :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
     never this process's own. With *confinement*, the shell starts under its
     profile with its temporary folder, and the output starts with its line
-    for refused writes (see :meth:`WriteConfinement.note`).
+    for refused writes (see :meth:`~localmelo.melo.executor.sandbox.WriteConfinement.note`).
     """
     limit = SHELL_TIMEOUT_S if timeout_s is None else timeout_s
     argv = ["/bin/sh", "-c", command]
@@ -392,7 +392,7 @@ async def _python_exec(code: str) -> str:
 
 def builtins_with_env(
     tool_env: Mapping[str, str],
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> dict[str, ToolFunction]:
     """The unrooted ``shell_exec`` and ``python_exec``, with *tool_env* added.
 
@@ -513,7 +513,7 @@ async def _run_python(
     *,
     cwd: str | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> str:
     """Run *code* in a child Python, in *cwd* (``None``: this directory).
 
@@ -591,7 +591,7 @@ def rooted_builtins(
     *,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> dict[str, tuple[ToolFunction, float | None]]:
     """The built-ins that work in the workspace *root*, by tool name.
 
@@ -674,7 +674,7 @@ def _rooted_shell_exec(
     root: str,
     tool_timeout_s: float | None,
     tool_env: Mapping[str, str] | None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> ToolFunction:
     async def shell_exec(command: str) -> str:
         text, returncode = await _run_shell(
@@ -697,7 +697,7 @@ def _rooted_shell_exec(
 def _rooted_python_exec(
     root: str,
     tool_env: Mapping[str, str] | None,
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> ToolFunction:
     async def python_exec(code: str) -> str:
         return await _run_python(

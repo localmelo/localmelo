@@ -20,6 +20,11 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.review import offers_grant
+from localmelo.support.gateway.auto_blocks import (
+    BlockError,
+    block_to_allow,
+    go_ahead_text,
+)
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -69,6 +74,8 @@ class TurnRequest(Body):
 class CreateRequest(Body):
     workspace: str | None = None
     turn: TurnRequest | None = None
+    # Ask or Auto (#339); absent: the settings' mode for new chats.
+    approvals: Literal["ask", "auto"] | None = None
 
 
 class RetryRequest(Body):
@@ -78,6 +85,8 @@ class RetryRequest(Body):
 class PatchRequest(Body):
     title: str | None = None
     workspace: str | None = None
+    # The chat's mode (#339): from its next step.
+    approvals: Literal["ask", "auto"] | None = None
 
 
 class CancelRequest(Body):
@@ -224,7 +233,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
         try:
             entry, turn = await _sessions_call(
                 console,
-                console.sessions.create(body.workspace, first, client_request_id=key),
+                console.sessions.create(
+                    body.workspace, first, client_request_id=key, mode=body.approvals
+                ),
             )
         except SubmissionRepeated as exc:
             info = await _require_session(console, exc.turn.session_id)
@@ -411,8 +422,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "task_session_read_only",
                 t("errors.taskChange"),
             )
-        # Both changes are judged before either is written, so a refused
-        # title or workspace leaves the session as it was.
+        # The changes are judged before any is written, so a refused title,
+        # workspace or mode leaves the session as it was.
+        if body.approvals is not None and info.kind not in ("chat", "front"):
+            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         title: str | None = None
         if body.title is not None:
             try:
@@ -423,6 +436,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
             await _sessions_call(
                 console,
                 console.sessions.change_workspace(session_id, body.workspace),
+                session_id,
+            )
+        if body.approvals is not None:
+            await _sessions_call(
+                console,
+                console.sessions.set_mode(session_id, body.approvals),
                 session_id,
             )
         if title is not None:
@@ -443,6 +462,39 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         info = await _require_session(console, session_id)
         return JSONResponse(content={"session": console.session_body(info)})
+
+    @app.post("/api/sessions/{session_id}/blocks/{request_id}/allow")
+    async def allow_block(session_id: str, request_id: str) -> JSONResponse:
+        """Allow once a step auto mode blocked, and ask melo to go ahead (#339)."""
+        console.require_store()
+        info = await _require_session(console, session_id)
+        if info.kind == "task":
+            raise ApiError(409, "task_session_read_only", t("errors.taskChange"))
+        if info.kind not in ("chat", "front"):
+            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
+        try:
+            key, categories, tool = await _store_call(
+                console,
+                block_to_allow(
+                    console.store,
+                    session_id,
+                    request_id,
+                    lambda key: console.sessions.allowance_live(session_id, key),
+                ),
+                session_id,
+            )
+            text = _check_text(console, go_ahead_text(categories), session_id)
+            turn, until = await _sessions_call(
+                console,
+                console.sessions.allow_once(session_id, key, categories, text, tool),
+                session_id,
+            )
+        except BlockError as exc:
+            raise ApiError(exc.status, exc.code, exc.message) from exc
+        return JSONResponse(
+            status_code=202,
+            content={"step_key": key, "until": until, **_turn_body(turn, None)},
+        )
 
     @app.delete("/api/sessions/{session_id}")
     async def delete_session(

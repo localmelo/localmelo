@@ -166,7 +166,8 @@ def test_read_only_argv(argv: tuple[str, ...], reads: bool) -> None:
     [
         # Reads outside the workspace ask, as before helpers were followed.
         ('run("cat", "/etc/passwd")', "undecided"),
-        ('run("grep", "-r", "token", "/Users")', "undecided"),
+        # (A folder that holds a home folder's sign-ins, as /Users does, is high.)
+        ('run("grep", "-r", "token", "/opt/data")', "undecided"),
         ('run("cat", "../../outside.txt")', "undecided"),
         ('run("git", "-C", "..", "status")', "undecided"),
         ('run("grep", "--file=/etc/hosts", "src")', "undecided"),

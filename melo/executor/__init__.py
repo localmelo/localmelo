@@ -27,6 +27,8 @@ from localmelo.melo.executor.models import (
 from localmelo.melo.executor.policy import WorkspacePolicy
 from localmelo.melo.executor.preview import call_preview
 from localmelo.melo.executor.sandbox import (
+    AutoConfinement,
+    Confinement,
     ConfinementError,
     WriteConfinement,
     confine,
@@ -44,7 +46,7 @@ def register_builtins(
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
     harness_only: Collection[str] = (),
-    confinement: WriteConfinement | None = None,
+    confinement: Confinement | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -152,6 +154,8 @@ __all__ = [
     "BUILTINS",
     "ConfinementError",
     "ErrorCategory",
+    "AutoConfinement",
+    "Confinement",
     "ExecutionOutcome",
     "ExecutionRequest",
     "ExecutionStatus",

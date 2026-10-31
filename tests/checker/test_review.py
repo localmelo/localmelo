@@ -166,9 +166,11 @@ ROUTINE = {
         PY,
         "import asyncio, queue\nq = queue.Queue()\nq.put(1)\nasyncio.run(main())",
     ),
-    "other: npm scripts, npx, make, mkdir": (
+    # (npx fetches and runs a package melo does not read: it asks, see
+    # test_review_hardening.)
+    "other: npm scripts, make, mkdir": (
         SH,
-        "npm test && npm run build && npx prettier --write . && make test && "
+        "npm test && npm run build && make test && "
         "mkdir -p out && echo hi > out/a.txt && ls -la ~",
     ),
     "other: a comment and a heredoc to a file in the workspace": (
