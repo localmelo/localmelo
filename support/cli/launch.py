@@ -28,7 +28,7 @@ from typing import Any, Final, cast
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.melo.contracts import own_gateway
-from localmelo.support import config, onboard
+from localmelo.support import config, gateway_endpoint, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
@@ -74,15 +74,20 @@ class Choice:
     models: tuple[str, ...] = ()
 
 
-def expect_gateway(cfg: config.Config) -> None:
-    """Tell auto mode the port the settings give the gateway (#339).
+def expect_gateway(cfg: config.Config, endpoint_path: str | None = None) -> None:
+    """Tell auto mode the ports melo's gateway may listen on (#339).
 
     The terminal's own chat runs no gateway, so its Auto steps are kept off
-    the one the app or ``melo --serve`` runs on that port, in the review and
-    in the sandbox.
+    the one the app or ``melo --serve`` runs, in the review and in the
+    sandbox: the port the settings give it, and the running gateway's own
+    (its endpoint file), when that differs.
     """
     port = getattr(getattr(cfg, "gateway", None), "port", None)
-    own_gateway.expect(port if isinstance(port, int) else None)
+    live = gateway_endpoint.read(endpoint_path)
+    own_gateway.expect(
+        port if isinstance(port, int) else None,
+        live.port if live is not None else None,
+    )
 
 
 def ui_terminal() -> bool:

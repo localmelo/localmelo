@@ -172,13 +172,18 @@ class GatewayServer:
         starter = getattr(playground, "start", None)
         if starter is not None:
             await starter()
-        if self.console is not None:
-            await self.console.start()
-        # Auto mode's calls may not read its sign-in or chats, nor call it (#339).
+        # Auto mode's calls may not read its sign-in or chats, nor call it
+        # (#339): known before the console starts a chat or a task.
         guarded = [str(self.auth.path)]
         if self.console is not None:
             guarded.append(self.console.store.path)
         own_gateway.register(self.port or None, guarded)
+        if self.console is not None:
+            try:
+                await self.console.start()
+            except BaseException:
+                own_gateway.unregister(self.port or None)
+                raise
         logger.info("gateway ready on %s:%d", self.host, self.port)
         try:
             yield

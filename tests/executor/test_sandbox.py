@@ -498,13 +498,16 @@ class TestReal:
 
 
 def test_the_auto_profile_closes_the_gateway_s_files_and_port() -> None:
-    guard = OwnGateway(port=8401, files=("/h/.cache/localmelo/gateway/auth",))
+    guard = OwnGateway(ports=(8401, 8402), files=("/h/.cache/localmelo/gateway/auth",))
     text = profile(["/ws"], guard)
     # The denials come after the folders allowed, so they win.
     assert text.index("(allow file-write*") < text.index("(deny file-read* file-write*")
     assert '(subpath "/h/.cache/localmelo/gateway/auth")' in text
-    assert text.endswith('(deny network-outbound (remote ip "localhost:8401"))\n')
-    assert "network" not in profile(["/ws"], OwnGateway(port=None, files=()))
+    assert text.endswith(
+        '(deny network-outbound (remote ip "localhost:8401"))\n'
+        '(deny network-outbound (remote ip "localhost:8402"))\n'
+    )
+    assert "network" not in profile(["/ws"], OwnGateway(ports=(), files=()))
     assert "file-read" not in profile(["/ws"])
 
 
@@ -558,7 +561,7 @@ class TestRealGuard:
         if sys.platform != "darwin":
             pytest.skip("writes are confined only on macOS")
         try:
-            guard = OwnGateway(port=gateway_port, files=(str(auth.resolve()),))
+            guard = OwnGateway(ports=(gateway_port,), files=(str(auth.resolve()),))
             try:
                 c = confine(str(ws), child_env({"HOME": str(home)}), guard=guard)
             except ConfinementError as exc:

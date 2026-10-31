@@ -6,7 +6,9 @@ import fnmatch
 import functools
 import hashlib
 import os
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass, field, replace
 from urllib.parse import urlparse
 
@@ -304,25 +306,43 @@ SENDING = ("POST", "PUT", "PATCH", "DELETE")
 
 
 def loopback(host: str) -> bool:
-    """Whether *host* names this computer (``localhost``, ``127.x``, ``::1``)."""
-    return bool(_LOOPBACK.fullmatch(host.strip("[]").lower()))
+    """Whether *host* names this computer: ``localhost``, ``127.x`` in any spelling, ``::1``."""
+    name = host.strip("[]").lower().rstrip(".")
+    if _LOOPBACK.fullmatch(name) or name.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        try:  # the short and numeric spellings the C library takes: 127.1, 0x7f000001
+            address = ipaddress.ip_address(socket.inet_aton(name))
+        except (OSError, ValueError):
+            return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    return (
+        address.is_loopback
+        or address.is_unspecified
+        or bool(mapped and mapped.is_loopback)
+    )
 
 
 def own_port(host: str, port: object) -> bool:
     """Whether *host* and *port* are this computer's gateway.
 
-    Its port is the registered gateway's, else the settings' (see
+    Its ports are the running gateway's, else those the settings and the
+    live gateway's endpoint file give (see
     :func:`~localmelo.melo.contracts.own_gateway.current`).
     """
-    gateway = own_gateway.current().port
-    return gateway is not None and loopback(host) and str(port) == str(gateway)
+    ports = own_gateway.current().ports
+    return loopback(host) and str(port) in {str(p) for p in ports}
 
 
-def own_api(text: str) -> bool:
+def own_api(text: str, *, sending: bool = True) -> bool:
     """Whether the URL or address *text* reaches melo's own gateway.
 
     That is this computer on the gateway's port (see :func:`own_port`);
-    other local servers, a model server's ``/v1/`` included, are not.
+    other local servers, a model server's ``/v1/`` included, are not. A
+    request that sends nothing (*sending* false) to ``/api/health`` is
+    fine: it only asks whether melo runs.
     """
     if "://" not in text and not _ADDRESS.match(text):
         return False
@@ -331,10 +351,9 @@ def own_api(text: str) -> bool:
         port = url.port
     except ValueError:
         return False
-    host = url.hostname or ""
-    if not loopback(host):
+    if not own_port(url.hostname or "", port):
         return False
-    return own_port(host, port)
+    return sending or (url.path or "/").rstrip("/") != "/api/health"
 
 
 def reach_own(f: Findings, text: str) -> None:
@@ -342,21 +361,55 @@ def reach_own(f: Findings, text: str) -> None:
     f.add("self", f"Sends a request to melo's own gateway ({text[:80]}).")
 
 
-def searches_cache(ctx: Context, path: str) -> bool:
-    """Whether a search from *path* goes through ``~/.cache``, where apps keep sign-ins."""
-    cache = os.path.join(ctx.home.rstrip("/"), ".cache")
-    return under(path, cache) or under(cache, path)
+def secret_places(ctx: Context) -> tuple[str, ...]:
+    """The folders that hold sign-ins, passwords or keys: melo's own, ``~/.ssh``, keychains…"""
+    places = _places(ctx.home.rstrip("/"), ctx.root, _SOURCE)["credentials"]
+    return (*places, *own_gateway.current().files)
 
 
-def search(ctx: Context, f: Findings, raw: str, cwd: str | None = None) -> None:
-    """A search through the folder *raw* (find, grep -r, os.walk): credentials when it covers ``~/.cache``."""
+def reaches_secrets(ctx: Context, path: str, pattern: str = "**") -> bool:
+    """Whether a search from *path* reaches a folder of :func:`secret_places`.
+
+    It does when *path* is in one, or holds one that *pattern* (the rest of
+    a glob below *path*; ``**`` for a search that walks every folder) can
+    go into: each of its parts must match the folders on the way, a hidden
+    one only by a part that starts with a dot.
+    """
+    parts = [p for p in pattern.split("/") if p]
+    for place in secret_places(ctx):
+        if under(path, place):
+            return True
+        if not under(place, path) or place == path:
+            continue
+        steps = os.path.relpath(place, path).split("/")
+        for k, step in enumerate(steps):
+            if k >= len(parts):
+                break  # the pattern ends above it: it names, it does not read
+            if parts[k] == "**":
+                return True
+            hidden = step.startswith(".") and not parts[k].startswith(".")
+            if hidden or not fnmatch.fnmatchcase(step, parts[k]):
+                break
+        else:
+            return True
+    return False
+
+
+def search(
+    ctx: Context, f: Findings, raw: str, cwd: str | None = None, pattern: str = "**"
+) -> None:
+    """A search through the folder *raw* (find, grep -r, os.walk, a glob's *pattern* below it).
+
+    Credentials when it reaches a folder that holds sign-ins or keys
+    (:func:`reaches_secrets`); a folder melo cannot resolve is a doubt.
+    """
     path = resolve(ctx, raw, cwd)
     if path is None:
         f.doubt(f"Searches a folder melo cannot resolve: {raw}")
-    elif searches_cache(ctx, path):
+    elif reaches_secrets(ctx, path, pattern):
         f.add(
             "credentials",
-            f"Searches {shown(ctx, path)}, where apps keep sign-in tokens.",
+            f"Searches {shown(ctx, path)}, which holds sign-ins, passwords or keys.",
         )
 
 

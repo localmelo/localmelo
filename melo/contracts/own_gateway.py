@@ -27,14 +27,19 @@ _SQLITE_PARTS: Final = ("-wal", "-shm", "-journal")
 
 @dataclass(frozen=True)
 class OwnGateway:
-    """The port a gateway in this process listens on (``None``: none) and its files."""
+    """The ports melo's gateway may listen on (none known: empty) and its files."""
 
-    port: int | None
+    ports: tuple[int, ...]
     files: tuple[str, ...]
+
+    @property
+    def port(self) -> int | None:
+        """The first of :attr:`ports`, or ``None``."""
+        return self.ports[0] if self.ports else None
 
 
 _registered: list[tuple[int | None, tuple[str, ...]]] = []
-# The port the settings give the gateway, for a process that runs none.
+# The ports a process that runs no gateway knows of: the settings', the live one's.
 _expected: list[int] = []
 
 
@@ -70,14 +75,17 @@ def register(port: int | None, files: Sequence[str] = ()) -> None:
     _registered.append((port, tuple(str(f) for f in files)))
 
 
-def expect(port: int | None) -> None:
-    """The port the settings give the gateway (``[gateway] port``); ``None`` forgets it.
+def expect(*ports: int | None) -> None:
+    """The ports a gateway of this setup listens on, for a process that runs none.
 
-    It counts while no gateway is registered in this process.
+    The terminal passes ``[gateway] port`` and the running gateway's (its
+    endpoint file); no port forgets them. Any port out of range is left out.
     """
     _expected.clear()
-    if port is not None and not isinstance(port, bool) and 0 < port < 65536:
-        _expected.append(port)
+    for port in ports:
+        if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
+            if port not in _expected:
+                _expected.append(port)
 
 
 def unregister(port: int | None) -> None:
@@ -89,9 +97,9 @@ def unregister(port: int | None) -> None:
 
 
 def current() -> OwnGateway:
-    """The port to close and every file to guard, as real paths.
+    """The ports to close and every file to guard, as real paths.
 
-    The port is the newest registered gateway's, else the expected one.
+    The ports are the registered gateways' (newest first) and the expected ones.
     """
     found: list[str] = []
     named = [f for home in _homes() for f in default_files(home)]
@@ -102,5 +110,6 @@ def current() -> OwnGateway:
         real = os.path.realpath(path)
         if real not in found:
             found.append(real)
-    ports = [port for port, _ in _registered if port is not None] or _expected
-    return OwnGateway(port=ports[-1] if ports else None, files=tuple(found))
+    ports = [port for port, _ in reversed(_registered) if port is not None]
+    ports += [port for port in _expected if port not in ports]
+    return OwnGateway(ports=tuple(ports), files=tuple(found))

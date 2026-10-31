@@ -629,6 +629,23 @@ def test_a_search_of_the_workspace_stays_routine(ws: Path) -> None:
     assert py(ws, code).verdict == "routine"
     # A folder melo cannot name is a doubt, not a pass.
     assert py(ws, "import os\nprint(list(os.walk(where)))").verdict == "undecided"
+    # Caches that hold no sign-ins: a model cache is searched as before.
+    hub = "grep -r config ~/.cache/huggingface/hub"
+    assert sh(ws, hub).verdict == "routine"
+    assert sh(ws, "find ~/.cache/uv -name '*.whl' -exec ls {} +").verdict == "routine"
+    code = "import os\nprint(list(os.walk(os.path.expanduser('~/.cache/huggingface'))))"
+    assert py(ws, code).verdict == "routine"
+    code = "import glob, os\nprint(glob.glob(os.path.expanduser('~/*/notes.txt')))"
+    assert py(ws, code).verdict == "routine"
+    # One that holds them, or a folder above one, is not.
+    assert "credentials" in sh(ws, "grep -r key ~/.ssh").categories
+    assert (
+        "credentials" in sh(ws, "find ~/Library -name '*.db' -exec cat {} +").categories
+    )
+    code = (
+        "import glob, os\nprint(glob.glob(os.path.expanduser('~') + '/.c*/*/g*/a*/t*'))"
+    )
+    assert "credentials" in py(ws, code).categories
 
 
 @pytest.mark.parametrize(
@@ -757,3 +774,135 @@ def test_an_edit_that_retargets_a_download_and_run_is_new(ws: Path) -> None:
     # The same line left as it is adds nothing.
     same = {"path": "install.sh", "old": "#!/bin/sh", "new": "#!/bin/sh\n# setup"}
     assert rv(ws, "file_edit", same).verdict == "routine"
+
+
+# ── Steps another program runs for melo (round 3) ──
+
+
+@pytest.mark.parametrize(
+    ("command", "category"),
+    [
+        ("open -a Terminal ./x.command", "system"),
+        ("open ./x.command", "system"),
+        ("open -b com.apple.Terminal", "system"),
+        ("open -g x.app", "system"),
+        ("open run.sh", "system"),
+        ('osascript -e \'tell application "Terminal" to do script "ls"\'', "system"),
+        ("osascript -e 'do shell script \"echo hi\"'", "system"),
+        ("osascript ./drive.scpt", "system"),
+        (
+            'osascript -l JavaScript -e \'Application("Terminal").doScript("ls")\'',
+            "system",
+        ),
+        ("launchctl asuser 501 /bin/sh -c id", "persistence"),
+        ("launchctl start com.example.job", "persistence"),
+        ("tmux new -d 'sleep 1'", "persistence"),
+        ("tmux send-keys -t main 'ls' Enter", "persistence"),
+        ("tmux run-shell 'ls'", "persistence"),
+        ("screen -dmS x sh -c 'sleep 1'", "persistence"),
+        ("screen -S x -X stuff 'ls\\n'", "persistence"),
+        ("echo ls | at now", "persistence"),
+        ("nohup python3 serve.py &", "persistence"),
+    ],
+)
+def test_a_command_another_program_runs_is_high(
+    ws: Path, command: str, category: str
+) -> None:
+    assert category in sh(ws, command).categories, command
+    # The same command from Python, as a process's argv.
+    import shlex
+
+    argv = shlex.split(command.split(" | ")[-1].removesuffix(" &"))
+    code = f"import subprocess\nsubprocess.run({argv!r})"
+    if not command.startswith(("echo", "nohup")):
+        assert category in py(ws, code).categories, code
+
+
+def test_opening_a_document_or_a_page_stays_routine(ws: Path) -> None:
+    (ws / "report.pdf").write_bytes(b"%PDF")
+    assert sh(ws, "open report.pdf").verdict == "routine"
+    assert sh(ws, "open https://example.com").verdict == "routine"
+    assert sh(ws, "osascript -e 'display notification \"done\"'").verdict == "routine"
+    assert sh(ws, "tmux ls").verdict == "routine"
+    assert sh(ws, "launchctl list").verdict == "routine"
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "from Foundation import NSAppleScript\nNSAppleScript.alloc()",
+        "import appscript\nappscript.app('Terminal')",
+        "from AppKit import NSWorkspace\nNSWorkspace.sharedWorkspace()",
+    ],
+)
+def test_python_that_drives_another_app_is_high(ws: Path, code: str) -> None:
+    assert "system" in py(ws, code).categories
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import os\nos.link(os.path.expanduser('~/.cache/localmelo/gateway/auth/token'), 't')",
+        "import os\nos.symlink(os.path.expanduser('~/.ssh/id_ed25519'), 'k')",
+        "import pathlib\npathlib.Path('t').hardlink_to("
+        "pathlib.Path.home() / '.cache/localmelo/gateway/auth/token')",
+        "import pathlib\npathlib.Path('k').symlink_to(pathlib.Path.home() / '.ssh/id_rsa')",
+        "import shutil, os\nshutil.copy(os.path.expanduser('~/.aws/credentials'), 'c')",
+    ],
+)
+def test_a_link_or_copy_of_a_secret_reads_it(ws: Path, code: str) -> None:
+    assert "credentials" in py(ws, code).categories, code
+    # The same from the shell.
+    assert (
+        "credentials" in sh(ws, "ln ~/.cache/localmelo/gateway/auth/token t").categories
+    )
+
+
+def test_a_health_check_of_the_gateway_is_fine(ws: Path, gateway_port: int) -> None:
+    health = "http://127.0.0.1:8765/api/health"
+    assert sh(ws, f"curl -s {health}").verdict == "routine"
+    assert py(
+        ws, f"import urllib.request\nurllib.request.urlopen({health!r})"
+    ).verdict == ("routine")
+    assert "self" in sh(ws, f"curl -s -X POST {health}").categories
+    assert "self" in sh(ws, "curl -s http://127.0.0.1:8765/api/settings").categories
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.1",
+        "2130706433",
+        "0x7f000001",
+        "localhost.",
+        "[::ffff:127.0.0.1]",
+        "0.0.0.0",
+    ],
+)
+def test_every_spelling_of_this_computer_is_the_gateway(
+    ws: Path, gateway_port: int, host: str
+) -> None:
+    assert "self" in sh(ws, f"curl -s http://{host}:8765/api/settings").categories
+
+
+def test_the_terminal_knows_the_live_gateway_too(ws: Path, tmp_path: Path) -> None:
+    from localmelo.support import config, gateway_endpoint
+    from localmelo.support.cli.launch import expect_gateway
+
+    endpoint = tmp_path / "endpoint.json"
+    gateway_endpoint.write(
+        gateway_endpoint.Endpoint(
+            pid=os.getpid(), host="127.0.0.1", port=8777, instance="", id="x", started=0
+        ),
+        str(endpoint),
+    )
+    cfg = config.Config()
+    cfg.gateway.port = 8766
+    expect_gateway(cfg, str(endpoint))
+    try:
+        assert own_gateway.current().ports == (8766, 8777)
+        for port in (8766, 8777):
+            post = f"curl -s -X POST http://127.0.0.1:{port}/api/settings"
+            assert "self" in sh(ws, post).categories
+    finally:
+        own_gateway.expect()

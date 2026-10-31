@@ -44,6 +44,10 @@ _SHELL_RUNS = set(
     ["system", "popen", "getoutput", "getstatusoutput", "create_subprocess_shell"]
 )
 _SPAWNS = ("os.exec", "os.spawn", "os.posix_spawn", "asyncio.create_subprocess")
+# Modules and names that have another program run commands for melo:
+# AppleScript and Apple Events, and Cocoa's app launcher and task runner.
+_DRIVERS = set(["appscript", "applescript", "py_applescript", "ScriptingBridge"])
+_DRIVER_NAMES = set(["NSAppleScript", "NSWorkspace", "NSTask", "SBApplication"])
 # An HTTP request line written to a socket: b'POST /path HTTP/1.1…'.
 _REQUEST_LINE = re.compile(r"^b?['\"]?([A-Z]+) ")
 _PATH_OPS = {
@@ -65,6 +69,7 @@ _OS_OPS = {
 _MOVES = set(["os.rename", "os.replace", "shutil.move"])
 _COPIES = set(
     ["shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree", "os.symlink"]
+    + ["os.link", "shutil.copymode", "shutil.copystat"]
 )
 _SAVES = set(
     [
@@ -691,6 +696,12 @@ class _Review:
             self.f.add("credentials", "Reads your browser's cookies.")
         if any(n.startswith("pip._internal") for n in names):
             self.f.add("install", "Runs pip's installer from Python.")
+        if any(
+            n.split(".")[0] in _DRIVERS or n.rsplit(".", 1)[-1] in _DRIVER_NAMES
+            for n in names
+        ):
+            # Another program runs what it is told, outside melo's limits.
+            self.f.add("system", "Drives another app or a shell through macOS.")
         # An import runs the workspace module it names (design rule 8).
         if isinstance(node, ast.Import):
             for a in node.names:
@@ -742,6 +753,13 @@ class _Review:
             mode = self.fold(node.args[at] if len(node.args) > at else kw.get("mode"))
             write = any(set(str(m)) & set("wax+") for m in mode if m)
             self.paths(base if method else first, write, "write" if write else "read")
+        elif attr in ("hardlink_to", "symlink_to") and base is not None:
+            # The new link is the receiver; what it points at is read through it.
+            self.paths(first, False, "read")
+            self.paths(base, True, "write")
+        elif attr == "link_to" and base is not None:
+            self.paths(base, False, "read")
+            self.paths(first, True, "write")
         elif attr in _PATH_OPS and base is not None:
             self.paths(base, _PATH_OPS[attr] != "read", _PATH_OPS[attr])
         elif attr in ("rename", "replace") and len(node.args) == 1 and method:
@@ -834,8 +852,15 @@ class _Review:
                     continue
                 self.globbed(f"{folder}/{pattern}" if folder else pattern)
         values = [*node.args, *kw.values()]
+        # A fetch that sends nothing: a GET of /api/health only asks whether melo runs.
+        methods = {str(m).upper() for m in self.fold(kw.get("method"))} - {"NONE"}
+        sending = not (
+            attr in ("get", "urlopen", "head", "Request", "stream")
+            and not {"data", "json", "files"} & set(kw)
+            and methods <= {"GET", "HEAD"}
+        )
         for value in (v for a in values for v in self.fold(a)):
-            if isinstance(value, str) and shell_own_api(value):
+            if isinstance(value, str) and shell_own_api(value, sending=sending):
                 return reach_own(f, value)
             if (
                 isinstance(value, tuple)
@@ -866,20 +891,13 @@ class _Review:
             return f.add("send_out", f"Sends a {verb} request {how}.")
 
     def globbed(self, pattern: str) -> None:
-        """A ``glob`` of *pattern*: a search through ``~/.cache`` when it can reach there."""
+        """A ``glob`` of *pattern*: credentials when it can reach a folder of sign-ins or keys."""
         cut = re.split(r"[*?[]", pattern, maxsplit=1)[0]
         folder = cut if cut.endswith("/") or cut == pattern else os.path.dirname(cut)
         path = resolve(self.ctx, folder or ".")
         if path is None:
             return self.f.doubt(f"Searches a folder melo cannot resolve: {pattern}")
-        rest = pattern[len(folder) :]
-        cache = os.path.join(self.ctx.home.rstrip("/"), ".cache")
-        if (
-            under(path, cache)
-            or under(cache, path)
-            and re.search(r"\*\*|(^|/)\.|\.cache", rest)
-        ):
-            search(self.ctx, self.f, path)
+        search(self.ctx, self.f, path, pattern=pattern[len(folder) :] or "*")
 
     def helper_call(self, node: ast.Call, inner: ast.Call, fn: _Def) -> None:
         """One call of a local helper: routine only for literal read-only commands.

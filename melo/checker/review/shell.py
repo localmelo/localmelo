@@ -32,6 +32,41 @@ _NETWORK = (
     set(["curl", "wget", "nc", "ncat", "netcat", "telnet", "socat", "websocat"])
     | _HTTPIE
 )
+# What another program runs for melo (see _elsewhere): files macOS opens
+# by starting them, AppleScript that drives an app or a shell, launchd's
+# and tmux's commands that start something.
+_LAUNCHABLE = (
+    ".app",
+    ".command",
+    ".tool",
+    ".terminal",
+    ".workflow",
+    ".action",
+    ".scpt",
+    ".scptd",
+    ".applescript",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".py",
+    ".rb",
+    ".pl",
+    ".pkg",
+    ".mpkg",
+    ".prefpane",
+    ".jar",
+)
+_DRIVES = re.compile(
+    r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
+    r"|\bdo script\b",
+    re.IGNORECASE,
+)
+_LAUNCHD_RUNS = set(["asuser", "submit", "start", "kickstart", "bootstrap", "load"])
+_TMUX_RUNS = set(
+    ["new", "new-session", "send-keys", "send", "run-shell", "run", "new-window"]
+    + ["neww", "split-window", "splitw", "respawn-pane", "respawnp", "respawn-window"]
+    + ["respawnw", "pipe-pane", "pipep", "source-file", "source", "if-shell", "if"]
+)
 # Searches that walk folders on their own, and the options of searches that take a value.
 _RECURSIVE = set(["rg", "ag", "ack", "fd", "fdfind"])
 _SEARCH_VALUED = set(
@@ -475,7 +510,12 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
         for arg in _searched(args):
             search(ctx, f, arg, cwd)
     if prog in _NETWORK:
-        _reaches(f, args)
+        sending = prog not in ("curl", "wget", *_HTTPIE) or _method(argv) in SENDING
+        sending = sending or (prog in ("curl", "wget") and _output(argv)[1])
+        sending = sending or (prog in _HTTPIE and any("=" in w for w in words[1:]))
+        _reaches(f, args, sending)
+    if prog in ("open", "osascript", "launchctl", "tmux", "screen"):
+        _elsewhere(ctx, f, prog, args, cwd)
     if _runs_project(prog, words):
         file_rules.runner(ctx, f, prog)
     if prog == "git" and set(plain[:1]) & _HOOKED:
@@ -511,15 +551,66 @@ def _recursive(args: list[str]) -> bool:
     )
 
 
-def _reaches(f: Findings, args: list[str]) -> None:
+def _reaches(f: Findings, args: list[str], sending: bool = True) -> None:
     """A request to melo's own gateway: a URL or ``host:port`` to it, or ``nc host port``."""
     words = [a for a in args if not a.startswith("-") or "://" in a]
     for i, word in enumerate(words):
-        if own_api(word):
+        if own_api(word, sending=sending):
             return reach_own(f, word)
         nxt = words[i + 1] if i + 1 < len(words) else ""
         if loopback(word) and own_port(word, nxt):
             return reach_own(f, f"{word} {nxt}")
+
+
+def _elsewhere(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -> None:
+    """A command another program runs for melo, outside the folder's sandbox.
+
+    macOS opens an app or a script (``open``), AppleScript drives an app or
+    a shell (``osascript``), launchd starts a job (``launchctl``), and a
+    terminal multiplexer's server runs what it is sent (``tmux``,
+    ``screen``): none of these runs under the call's own limits.
+    """
+    words = [a for a in args if not a.startswith("-")]
+    if prog == "open":
+        if {"-a", "-b"} & set(args) or any(
+            re.fullmatch(r"-\w*[ab]\w*", a) for a in args
+        ):
+            return f.add(
+                "system", "Opens a program through macOS, outside melo's limits."
+            )
+        for word in words:
+            if "://" in word:
+                if own_api(word, sending=False):
+                    reach_own(f, word)
+                continue
+            path = resolve(ctx, word, cwd)
+            if path is not None and _starts_program(path):
+                return f.add(
+                    "system",
+                    f"Opens {shown(ctx, path)}, which runs outside melo's limits.",
+                )
+    elif prog == "osascript":
+        code = " ".join(args)
+        given = "-e" in args
+        if not given and words or _DRIVES.search(code):
+            f.add("system", "Drives another app or a shell through AppleScript.")
+    elif prog == "launchctl" and words[:1] and words[0] in _LAUNCHD_RUNS:
+        f.add("persistence", f"Starts a job through launchd ({words[0]}).")
+    elif prog == "tmux" and words[:1] and words[0] in _TMUX_RUNS:
+        f.add("persistence", f"Runs a command in a tmux server ({words[0]}).")
+    elif prog == "screen" and (
+        "-X" in args
+        or any(re.fullmatch(r"-\w*[dD]\w*m\w*|-\w*m\w*[dD]\w*", a) for a in args)
+    ):
+        f.add("persistence", "Runs a command in a detached screen session.")
+
+
+def _starts_program(path: str) -> bool:
+    """Whether opening *path* starts a program: an app, a script or an executable."""
+    name = path.lower().rstrip("/")
+    if name.endswith(_LAUNCHABLE):
+        return True
+    return os.path.isfile(path) and os.access(path, os.X_OK)
 
 
 def _runs_project(prog: str, words: list[str]) -> bool:

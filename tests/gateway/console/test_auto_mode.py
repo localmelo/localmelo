@@ -476,3 +476,40 @@ async def test_a_task_made_in_ask_keeps_ask(
             {"prompt": "tidy the notes", "workspace": str(folder), "level": 5}
         )
         assert task["approvals"] == "ask" and task["blocked"] == []
+
+
+# ── The gateway is closed to Auto before its first chat (round 3) ──
+
+
+@pytest.mark.asyncio
+async def test_the_gateway_is_registered_before_the_console_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.melo.contracts import own_gateway
+    from localmelo.support.gateway import GatewayServer
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    server = GatewayServer(
+        make_cfg(),
+        console_options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    console = server.console
+    assert console is not None
+    seen: list[own_gateway.OwnGateway] = []
+    start = console.start
+
+    async def starting() -> None:
+        seen.append(own_gateway.current())
+        await start()
+
+    monkeypatch.setattr(console, "start", starting)
+    async with server.app.router.lifespan_context(server.app):
+        pass
+    [guard] = seen
+    assert server.port in guard.ports
+    assert str((tmp_path / "sessions.db").resolve()) in guard.files
+    assert server.port not in own_gateway.current().ports

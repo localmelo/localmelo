@@ -199,8 +199,8 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
     if guard is not None and guard.files:
         closed = "\n  ".join(f"(subpath {quote(path)})" for path in guard.files)
         text += f"(deny file-read* file-write*\n  {closed})\n"
-    if guard is not None and guard.port is not None:
-        text += f'(deny network-outbound (remote ip "localhost:{int(guard.port)}"))\n'
+    for port in guard.ports if guard is not None else ():
+        text += f'(deny network-outbound (remote ip "localhost:{int(port)}"))\n'
     return text
 
 
