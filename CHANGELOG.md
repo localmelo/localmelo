@@ -108,7 +108,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   comparison, `[memory] keep_statements` (off by default, `-X
   memory.keep_statements=on`), makes code keep such a fact after the turn when the
   model did not, never a question, a to-do, an "if", a "not", the past, what others
-  think, a passing state ("my build is failing") or a secret ([#NN]).
+  think, a passing state ("my build is failing") or a secret ([#329]).
 
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
@@ -2665,3 +2665,4 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#329]: https://github.com/localmelo/localmelo/pull/329
