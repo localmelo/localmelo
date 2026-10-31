@@ -452,6 +452,10 @@ class ChatGate:
     ``fcfs`` or ``class`` it keeps S1's ``State`` and runs one synchronous
     transition (``advance``, ``dispatch``, ``apply_dispatch``) per submit,
     end, focus and level change. It creates no asyncio task and no timer.
+
+    A chat is focused while one of its calls is in flight and for *focus_s*
+    seconds after its last call ended or a key was pressed in it (``None``
+    keeps the policy's own window). Opening a chat is not focus.
     """
 
     def __init__(
@@ -461,6 +465,7 @@ class ChatGate:
         n_srv: int = 8,
         r_f: int = 1,
         n_fg: int = 1,
+        focus_s: float | None = None,
         call_log_dir: Path | str | None = None,
         clock: Callable[[], Clock] | None = None,
         retention_days: float | None = None,
@@ -487,6 +492,7 @@ class ChatGate:
                 n_srv=n_srv,
                 r_f=r_f,
                 n_fg=n_fg,
+                **({} if focus_s is None else {"tau_focus_s": focus_s}),
                 aging=False,
                 inheritance=False,
                 idle_gate=False,
