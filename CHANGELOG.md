@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A short, read-only setup preview when terminal first run finds no model
+  server: the recommendation, download/cache amounts and free space.
+  `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
+  usable manual guide. Already saved a backend? With no server found, setup
+  keeps the full backend menu. The summary is printed once; the list then offers
+  **Check again**, **Show how to set one up** (at most six plain numbered steps:
+  download oMLX, move it to Applications, download the model, start the server,
+  then enter its address in melo), **Enter an address** and **Quit**. Automatic
+  setup is coming soon. Nothing installs, downloads, starts or saves, and direct
+  runs and existing connections are unchanged. Developer mode keeps the review
+  menu with **Details**. [#383]
+
 - A task starts with what its chat knows about you and the project. When the
   task is made, the notes about you and your preferences, the notes of its
   folder and those that match its request are kept with the task and given to
@@ -3210,3 +3222,4 @@ earlier milestones.
 [#379]: https://github.com/localmelo/localmelo/pull/379
 [#381]: https://github.com/localmelo/localmelo/pull/381
 [#382]: https://github.com/localmelo/localmelo/pull/382
+[#383]: https://github.com/localmelo/localmelo/pull/383
