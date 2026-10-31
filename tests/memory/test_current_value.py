@@ -194,3 +194,9 @@ def test_a_change_is_a_statement_to_keep_in_that_turn() -> None:
     # The note the tool is told to write replaces the one it names.
     old, new = "You work at Spruce Labs.", "You work at Acme."
     assert records.subject(old) == records.subject(new) != ""
+
+
+def test_the_notes_text_says_reminders_are_scheduled_not_noted() -> None:
+    """A "remind me … at <time>" goes to the scheduler; the chat never keeps it as a note."""
+    assert "Reminders are scheduled, not noted" in NOTES_TEXT
+    assert "do not save it as a note" in NOTES_TEXT
