@@ -217,3 +217,15 @@ async def test_a_clean_folder_says_nothing(repo: Path) -> None:
         check=True,
     )
     assert await not_committed(LEFT, str(repo)) == ""
+
+
+def test_a_folder_outside_the_roots_says_so_before_whether_it_exists(
+    setup: Setup,
+) -> None:
+    from localmelo.support.gateway.task_policy import folder_problem
+
+    _, cfg, _, _, home = setup
+    assert "inside your home folder" in folder_problem("/Volumes/Missing", cfg)
+    assert "Not a directory" in folder_problem(str(home / "missing"), cfg)
+    (home / "here").mkdir()
+    assert folder_problem(str(home / "here"), cfg) == ""

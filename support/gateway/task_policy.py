@@ -376,12 +376,19 @@ def configured_root(cfg: object) -> str:
 
 
 def folder_problem(path: str | None, cfg: object) -> str:
-    """Why a user's task cannot work in *path* (the default when ``None``), or ``""``."""
+    """Why a user's task cannot work in *path* (the default when ``None``), or ``""``.
+
+    A folder outside the allowed roots says so before whether it exists.
+    """
     try:
         if path is None:
             validate_task_workspace(None, cfg, origin="user", task_id="check")
-        else:
-            validate_task_workspace(path, cfg, origin="user")
+            return ""
+        home = os.path.realpath(os.path.expanduser("~"))
+        real = os.path.realpath(os.path.expanduser(path))
+        if os.path.isabs(real) and not _user_workspace(real, home):
+            return _user_refusal(real, home)
+        validate_task_workspace(path, cfg, origin="user")
     except WorkspaceError as exc:
         return str(exc)
     return ""

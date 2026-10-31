@@ -13,6 +13,10 @@
 - **任务的级别。** 代码只读你自己的消息：紧急用词、今天的截止时间或请求里的“today”“今天”本身（“not today”“今天不用”除外）为 Today（P1），"no rush"、"不急" 为 Whenever（P3），其余为 Normal（P2）。理由与任务一起保存（`you said "urgent"`）。网页、文件或任务报告从不设定级别。
 - **你设定的级别保持不变。** 你设定的级别（那一行的 **Change**、面板、`melo task level`）属于你：调度器不会改动它。
 - **改变任务需要你的话。** 只有当你最新的消息要求并点名某个任务时，主对话才会改变它（停止、暂停、继续、级别）；否则显示一条建议，点一下才会生效。
+- **任务的文件夹。** 任务在开始它的对话所在的文件夹里工作：主对话用默认文件夹，旁支对话用它自己的文件夹，或者用你的请求指定的文件夹。melo 不能使用的文件夹（主目录之外、隐藏文件夹、`~/Library` 下）会让任务在开始前就停下；它绝不会改到别的文件夹运行。
+- **worker 不用询问就能做的事。** 读取 git 状态（`git_status`：status、branch、log、diff、show）和列出文件夹（`list_files`）；用 `file_edit` 修改文件，它会询问并把改动显示为 diff。它的 Python 通过一个小辅助函数运行的只读命令（`run("git", "status")`）算作常规操作，因此 **Allow for this task** 能覆盖它们；写入、提交或切换分支仍会询问。
+- **收尾。** 只剩两步时，worker 会被告知把它们用在任务要求完成的事情上，例如提交和报告。
+- **任务里的测试。** worker 的工具运行时 `HOME` 指向这个任务专用的新文件夹（保留你的 git 身份和 uv 的缓存），因此拒绝真实主目录的测试套件也能运行。大多数错误出自同一个这类原因时，worker 会先读到 `The test environment refused: <cause>`。
 - **默认模式用词。** 凡显示级别的地方都写作 Now、Today、Normal、Whenever、If idle 和 Later；开发者模式另外显示 P 代码。`melo task` 在接受 P 代码的地方也接受这些词（`melo task level ID today`）。
 
 <a id="the-gate-on-chats-s2"></a>

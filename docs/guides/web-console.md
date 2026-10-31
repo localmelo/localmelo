@@ -135,7 +135,12 @@ the time of its last message, and a dot while something new has come back to it 
 when it waits for you). It cannot be closed. The page opens on it, and a tab that had a
 side chat open goes back to that one.
 
-**New side chat** (`⌘ K`) starts a focused conversation with its own folder; it is listed
+The main chat always works in the default folder: `[gateway] workspace`, else
+`~/localmelo-workspace`, made on first start. Change the default in Settings and its next
+turn works there; it has no folder chip of its own.
+
+**New side chat** (`⌘ K`) starts a focused conversation with its own folder: the chip offers
+the default, your recent folders and **Choose a folder…**, and the chat keeps its pick. It is listed
 under the main chat. A side chat's header begins with **Main chat ›**, which goes back,
 and closing the open side chat goes back to the main chat too. Chats made before the main
 chat existed are its side chats, as they were.
@@ -384,6 +389,18 @@ run). Like Workers, the view replaces the chat while it is open.
   information is missing." and **Start again as a new task**, which creates a
   separate task from the original objective. The effects of the earlier task are
   unknown and are not undone.
+
+- **Its folder.** A task works in the folder of the chat that started it (the
+  default for the main chat, a side chat's own) unless your request names one.
+  The list, the panel and the Workers tab name it (`In ~/notes`).
+- **A folder melo may not use.** Outside your home folder, hidden or under
+  `~/Library`: the task does not start and never runs somewhere else. Its card
+  says why, and **Choose a folder** starts it again in the folder you pick.
+
+![A task that could not use its folder offers Choose a folder](../assets/img/task-folder-refused.webp)
+
+- **Only the commit left.** A task that ran out of steps before its commit says
+  `Not committed. Run: <command>` on its card and its page.
 
 A button is disabled while its request is in flight. A refusal (a stale
 confirmation, a finished task, Stop winning the race) shows the server's text.

@@ -15,6 +15,10 @@
 | `file_read` | 读取文本文件。 | 你的账户能读取的任何文件。 |
 | `list_files` | 列出一个文件夹：先是文件夹（以 `/` 结尾），然后是带大小的文件；符号链接以 `@` 结尾。接受 `path`（默认：工作区文件夹）和 `depth`（1 到 3，默认 1）。从不读取文件，从不跟随符号链接，并跳过 `.git`。 | 显示 200 个条目，之后是 `... and N more`。只读，因此从不请求审批。交互式界面以及网关和控制台会话默认提供它；直接运行和 Python API 的默认模式不提供（`--builtins list_files` 或 `all` 可指定它）。 |
 | `file_write` | 把文本写入文件，创建或替换它。 | 你的账户能写入的任何文件。 |
+| `file_edit` | 把文件里一段确切的文本（`old`，必须只出现一次）替换为 `new`。 | 文件最大 1 MB。像 `file_write` 一样会询问；批准卡片把改动显示为 diff。只有任务的 worker 提供它（其他地方需在 `builtins` 中写明）。 |
+| `git_status` | 读取工作区的 git 状态：`status`、`branch`、`log`（`count` 最多 50）、`diff`（`stat`、`staged`、`paths`）或 `show`（`rev`）。 | 只读：由 melo 自己组装 git 参数，不经过 shell，不运行钩子、分页器或外部 diff，也不刷新索引。路径必须在工作区内。从不询问。超过 20,000 个字符的输出会被截断。只有任务的 worker 提供它。 |
+
+`--builtins all` 指前五个；`file_edit` 和 `git_status` 属于任务，需要逐个写明。
 
 一次 `file_read`、`file_write` 或 `list_files` 调用最长可能用 60 秒，一次 MCP 工具调用最长用其服务器的 `timeout`。超过 50,000 个字符的输出会被截断。
 

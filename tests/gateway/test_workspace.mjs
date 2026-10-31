@@ -3401,6 +3401,38 @@ test('a missing recovery card offers a new task, and a retry reuses its request 
   assert.equal(h.context.location.hash, '#/tasks/t2');
 });
 
+test('a task refused its folder says why and starts again in the folder chosen', async () => {
+  const posts = [];
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', started_at: null, wait_reason: 'invalid_workspace',
+      folder_problem: "A user task's workspace must be strictly inside your home folder", workspace_label: '/Volumes/Photos',
+      front_id: 'side1'})},
+    'POST /tasks': (body) => { posts.push(body); return {status: 202, body: {task: taskRow('t2', {state: 'queued'})}}; },
+  });
+  const panel = h.element('task-panel');
+  assert.match(flatten(panel), /This task did not start: melo cannot work in \/Volumes\/Photos\. A user task's workspace must be strictly inside your home folder\./);
+  assert.match(flatten(panel), /It never runs in another folder instead/);
+  assert.doesNotMatch(flatten(panel), /invalid_workspace/, 'the code is not shown');
+  labelled(h, 'Choose a folder').click(); await settle();
+  const field = findNode(panel, (node) => node.className === 'task-folder-path');
+  field.value = 'photos';
+  field.listeners.input[0]();
+  labelled(h, 'Start here').click(); await settle();
+  assert.equal(posts.length, 0, 'a path that is not full is refused in the page');
+  assert.match(flatten(panel), /Type a full path/);
+  const again = findNode(panel, (node) => node.className === 'task-folder-path');
+  again.value = '~/Pictures';
+  again.listeners.input[0]();
+  labelled(h, 'Start here').click(); await settle();
+  assert.deepEqual([posts[0].objective, posts[0].workspace, posts[0].front_id], ['Objective of t1', '~/Pictures', 'side1']);
+  assert.equal(h.context.location.hash, '#/tasks/t2');
+});
+
+test('a task whose commit is all that is left says so with the command', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', not_committed: 'Not committed. Run: git commit -am "Fix"'})}});
+  assert.match(flatten(h.element('task-panel')), /Not committed\. Run: git commit -am "Fix"/);
+});
+
 test('a task that never started and has no card can still be resumed', async () => {
   const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {card: '', started_at: null})}});
   assert.ok(labelled(h, 'Resume'));

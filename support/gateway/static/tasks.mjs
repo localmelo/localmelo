@@ -104,7 +104,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     row('State', stateText(task));
     if (developer()) row('Priority', `P${task.level_eff ?? task.level}`);
     row('Updated', when(task.updated_at));
-    if (task.wait_reason) row('Waiting', task.wait_reason);
+    // A refused folder says why in its own box below, in words.
+    if (task.wait_reason && !task.folder_problem) row('Waiting', task.wait_reason);
     if (task.workspace_label) row('Workspace', task.workspace_label);
     row('Evidence', evidenceText(task));
     const nodes = [back, meta];

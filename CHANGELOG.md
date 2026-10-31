@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The main chat always works in the default folder (`[gateway] workspace`,
+  else `~/localmelo-workspace`): a changed default applies at its next turn,
+  where before it kept the folder of its first turn. A task works in the
+  folder of the chat that started it (a side chat's own, the default for the
+  main chat) unless the request names one. When melo may not use that folder
+  (outside your home folder, hidden or under `~/Library`), the task does not
+  start and never runs in another folder: its card says why, and the task page
+  offers **Choose a folder**. The panel, the Workers tab and the task list name
+  each task's folder. Workers read git state with `git_status` and list files
+  without asking, change files with `file_edit` (asks, shows a diff), keep their
+  last two steps for the commit and the report, run their tools with a fresh
+  `HOME` so a test suite that refuses the real home runs, and name an error
+  most tests share as "The test environment refused". Read-only commands that
+  Python runs through a small helper are routine for a session's grant. A task
+  that ends with only its commit left says `Not committed. Run: <command>`
+  ([#NN]).
+
 - A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
 
 ### Security

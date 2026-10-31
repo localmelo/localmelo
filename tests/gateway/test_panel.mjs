@@ -367,6 +367,19 @@ test('Workers lists the tasks and runs of the scope, running first, each with it
   assert.equal(h.sources[0].closed, true);
 });
 
+test('a task names its folder in Activity and in Workers; a row without one adds nothing', async () => {
+  const h = harness({rows: [
+    task({id: 't1', title: 'Sort photos', state: 'failed', result: 'Could not use its folder', icon: 'failed', at: 2000, folder: '/Volumes/Photos'}),
+    task({id: 't2', title: 'Notes', state: 'done', result: 'Done.', at: 1000, folder: '~/notes'}),
+    row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.', at: 500}),
+  ]});
+  await h.panel.update(health());
+  const folders = () => h.root.findAll((node) => node.className === 'activity-folder').map((node) => node.textContent);
+  assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
+  h.tabs()[1].click();
+  assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
+});
+
 test('Workers says when workers appear: for a side chat and for the main chat, and keeps its links in developer mode', async () => {
   const chats = [row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.'})];
   const side = harness({rows: chats, openChat: 'c1'});
