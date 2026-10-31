@@ -34,6 +34,7 @@ import os
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
@@ -47,6 +48,7 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
+from localmelo.support.memory.importer import ImportPlan, build_plan, select, write
 from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
@@ -362,6 +364,7 @@ class ChatMemory:
         self._llm: BaseLLMProvider | None = None
         self._llm_key: tuple[str, ...] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
+        self._plans: dict[str, ImportPlan] = {}
         self.last_error = ""
         self._warned = False
 
@@ -1152,6 +1155,90 @@ class ChatMemory:
                 (e for e in await store.active_entries() if e.id == record_id), None
             )
 
+    # ── Notes brought in from other assistants' files ──
+
+    async def import_scan(
+        self, *, home: Path | None = None, timeout_s: float = 2.0
+    ) -> ImportPlan:
+        """Scan *home* (default: the user's) for what other assistants remember.
+
+        Writes nothing and uses no network; at *timeout_s* it returns what it
+        has, ``partial``. The plan is kept by its ``batch_id`` for
+        :meth:`import_apply`.
+        """
+        async with self._lock:
+            active = await self.stores()[0].active_entries()
+        plan = await asyncio.to_thread(
+            build_plan, home or Path.home(), active, timeout_s=timeout_s
+        )
+        self._plans[plan.batch_id] = plan
+        while len(self._plans) > 4:
+            self._plans.pop(next(iter(self._plans)))
+        return plan
+
+    def import_plan(self, batch_id: str) -> ImportPlan | None:
+        return self._plans.get(batch_id)
+
+    async def import_apply(
+        self, plan: ImportPlan, source_ids: Sequence[str]
+    ) -> dict[str, Any]:
+        """Write the notes of the chosen sources of *plan* (``ValueError`` for an
+        unknown source, or with memory off); ``memory.import`` is in ``event``
+        because there is no session channel for it."""
+        if not self.enabled:
+            raise ValueError("Memory across chats is off.")
+        chosen = select(plan, source_ids)
+        texts = [note.text for _, note in chosen]
+        vectors: list[list[float] | None] = []
+        model = ""
+        for start in range(0, len(texts), _BATCH):
+            got, model, _ = await self._embed(
+                texts[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S, query=False
+            )
+            if not got:
+                break
+            vectors += got
+        vectors += [None] * (len(texts) - len(vectors))
+        async with self._lock:
+            ids = await write(self.stores()[0], chosen, vectors, model)
+        written: dict[str, list[int]] = {}
+        for (source_id, _), entry_id in zip(chosen, ids, strict=True):
+            if entry_id is not None:
+                written.setdefault(source_id, []).append(entry_id)
+        wanted = list(dict.fromkeys(source_ids))
+        plan.applied.update(wanted)
+        harness = {s["id"]: s["harness"] for s in plan.sources}
+        flat = [i for found in written.values() for i in found]
+        data = {
+            "batch_id": plan.batch_id,
+            "sources": [
+                {"id": i, "harness": harness[i], "written": len(written.get(i, []))}
+                for i in wanted
+            ],
+        }
+        return {
+            "batch_id": plan.batch_id,
+            "written_ids": flat,
+            "skipped": sum(len(plan.notes[i]) for i in wanted) - len(flat),
+            "event": {"type": "memory.import", "data": data},
+        }
+
+    async def undo_import(self, batch_id: str) -> int:
+        """Delete the notes of a batch and make what they superseded current; how many."""
+        async with self._lock:
+            store = self.stores()[0]
+            mine = [
+                e.id
+                for e in await store.active_entries()
+                if e.provenance.get("source") == "import"
+                and e.provenance.get("batch_id") == batch_id
+            ]
+            for entry_id in mine:
+                await store.delete_entry(entry_id, restore=True)
+        if plan := self._plans.get(batch_id):
+            plan.applied.clear()
+        return len(mine)
+
     async def pinned_quotes(self) -> str:
         """About you and Preferences in the user's words, newest first, bounded."""
         if not self.enabled:
@@ -1162,6 +1249,7 @@ class ChatMemory:
             quote = str(entry.provenance.get("quote") or "")
             if (
                 entry.provenance.get("topic") not in ("about", "preferences")
+                or entry.provenance.get("source") == "import"  # recall only
                 or not quote
             ):
                 continue
