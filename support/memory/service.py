@@ -1575,16 +1575,23 @@ class ChatMemory:
             )
 
     async def pinned_quotes(self) -> str:
-        """About you and Preferences in the user's words, newest first, bounded."""
+        """About you and Preferences in the user's words, newest first, bounded.
+
+        Notes brought in from other assistants and notes sleep wrote are recall
+        only: they never ride in every prompt.
+        """
         if not self.enabled:
             return ""
         lines: list[str] = []
         size = 0
         for entry in await self.records():
             quote = str(entry.provenance.get("quote") or "")
+            origin = str(entry.provenance.get("source") or "")
             if (
                 entry.provenance.get("topic") not in ("about", "preferences")
-                or entry.provenance.get("source") == "import"  # recall only
+                or origin == "import"
+                or entry.admitted_by == "sleep"
+                or origin.split(":")[0] == "sleep"
                 or not quote
             ):
                 continue
