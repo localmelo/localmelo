@@ -232,9 +232,10 @@ class SessionRunner:
     names, as one ``turn.pictures`` event (:mod:`~.pictures`). With *memory*,
     each turn of a chat recalls what matches its typed text and keeps what it
     asks to remember (a ``turn.memory`` event, queued again whole when the
-    model keeps a note with ``remember``, or when, after a completed run, code
-    keeps a lasting fact the user stated that no note kept), and a completed
-    turn is indexed; *index_only* (a task's runner) only indexes.
+    model keeps a note with ``remember``, or when, after a completed run with
+    ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
+    that no note kept), and a completed turn is indexed; *index_only* (a
+    task's runner) only indexes.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it

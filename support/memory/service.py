@@ -7,9 +7,10 @@ A chat's runner calls :meth:`ChatMemory.before_turn` before each turn's run
 (keep what the user asks to remember, recall what matches) and
 :meth:`ChatMemory.after_turn` once it ends (index it, off the reply path).
 During the run, the chat's model keeps notes with the ``remember`` tool
-(:meth:`ChatMemory.remember`), checked against what the chat shows; after
-it, :meth:`ChatMemory.keep_statements` keeps the lasting facts the user
-stated that no note of the turn kept.
+(:meth:`ChatMemory.remember`), checked against what the chat shows; with the
+developer setting ``[memory] keep_statements``, after it,
+:meth:`ChatMemory.keep_statements` keeps the lasting facts the user stated
+that no note of the turn kept.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -353,6 +354,11 @@ class ChatMemory:
                 getattr(self._embedder, "model", "") or (key or ("",))[-1]
             )
         return self._embedder, self._model if self._embedder is not None else ""
+
+    def keeps_statements(self) -> bool:
+        """``[memory] keep_statements`` now: a developer setting, off by default."""
+        cfg = self._settings()
+        return cfg is not None and cfg.memory.keep_statements is True
 
     def retriever(self) -> str:
         """The ``[memory] retriever`` of the settings now (an unknown value is ``auto``)."""
@@ -735,14 +741,17 @@ class ChatMemory:
         """After the chat turn *info* ran: keep the lasting facts its typed words
         state (:func:`records.statements`) that no note of the turn kept.
 
-        The model judges what to keep with ``remember``; this keeps the clear
-        cases it left, as it would have: the user's own words, a secret never,
-        the turn's ``turn.memory`` event queued again with them, so the page
-        shows each with Undo. Nothing outside a chat's turn or with memory off.
+        Only with ``[memory] keep_statements`` on, a developer setting to compare
+        with the default, where the model alone judges what to keep with
+        ``remember``. It keeps the clear cases the model left, as it would have:
+        the user's own words, a secret never, the turn's ``turn.memory`` event
+        queued again with them, so the page shows each with Undo. Nothing
+        outside a chat's turn or with memory off.
         """
         turn = CHAT_TURN.get()
         if (
             not self.enabled
+            or not self.keeps_statements()
             or turn is None
             or turn.info.id != info.id
             or turn.memory.recall is None
@@ -1076,11 +1085,14 @@ REMEMBER: Final = ToolDef(
     description=(
         "Keep a note about the user or their work for later chats: a lasting "
         "fact, preference, person or decision the user told you, or what a "
-        "finished task's result shown in this chat is worth keeping. Saved at "
-        "once; never ask the user first. One sentence in the second person "
-        "(You prefer short answers. / 你习惯用简体中文。), in the user's language "
-        "and words. Never a password, key or code, and never something only a "
-        "web page, a file or a tool's output says."
+        "finished task's result shown in this chat is worth keeping. When the "
+        "user states a lasting fact about themselves (where they live, their "
+        "name, a person, their schedule, a preference), call it in that turn: "
+        "“I live in Utrecht.” → You live in Utrecht. / “我的导师是周教授。” → "
+        "你的导师是周教授。 Saved at once; never ask the user first. One sentence in "
+        "the second person (You prefer short answers. / 你习惯用简体中文。), in the "
+        "user's language and words. Never a password, key or code, and never "
+        "something only a web page, a file or a tool's output says."
     ),
     parameters={
         "type": "object",

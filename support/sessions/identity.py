@@ -50,7 +50,8 @@ MEMORY_TEXT: Final = (
     "plain sentences and do not describe how your memory works inside."
 )
 # With memory across chats (localmelo.support.memory): the model keeps notes
-# with `remember` (nobody confirms them), the user's own requests are saved
+# with `remember` (nobody confirms them; a plain statement of a lasting fact,
+# in the turn it is said), the user's own requests are saved
 # already, notes come back into the conversation (the newest wins when they
 # disagree), and the search tool.
 NOTES_TEXT: Final = (
@@ -59,7 +60,10 @@ NOTES_TEXT: Final = (
     "can undo it. When the user shares something lasting about themselves or "
     "their work (a preference, a fact, a person, a decision), or a finished "
     "task's result is worth keeping, keep it with remember: one sentence in the "
-    "user's words. Never ask whether to remember something, and never save a "
+    "user's words. A plain statement of a lasting fact about the user (where "
+    "they live, their name, a person, their schedule, a preference), such as "
+    "“I live in Utrecht.” or “我的导师是周教授。”, is one: keep it with remember "
+    "in that turn. Never ask whether to remember something, and never save a "
     "note, or what the user says about themselves, in a file or with code. When "
     "the user asks you to remember something, the note is already saved (the "
     "message says what was kept). Acknowledge a note in one short sentence. "

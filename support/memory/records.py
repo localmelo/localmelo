@@ -8,11 +8,13 @@ prefer short answers."). Otherwise the chat's model keeps a note with the
 ``remember`` tool when it judges something worth keeping; the note's content
 words must come from what the user typed in that chat or from a finished
 task's result shown there (:func:`unsupported`), never from a page or tool
-output alone. The clear cases of that judgement are kept by code too: after
-the turn, a plain first-person statement of a lasting fact that names a
-subject ("I live in …", "my advisor is …", "call me …", "我的…是…") and that no
-note of the turn kept becomes one (:func:`statements`); a question, a to-do,
-a hypothetical, a negation or someone else's opinion never does. Each record
+output alone. With the developer setting ``[memory] keep_statements`` (off
+by default, for comparison), code also keeps the clear cases of that
+judgement: after the turn, a plain first-person statement of a lasting fact
+that names a subject ("I live in …", "my advisor is …", "call me …",
+"我的…是…") and that no note of the turn kept becomes one (:func:`statements`);
+a question, a to-do, a hypothetical, a negation or someone else's opinion
+never does. Each record
 has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
 and where it was said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
@@ -440,8 +442,8 @@ def statements(typed: str) -> list[Candidate]:
     ("I live in …", "my advisor is …", "call me …", "我的…是…") with a lasting
     value, reads as a statement to the signal lexicon (a meta sentence such as
     "my task is …" does not) and asks nothing to be remembered
-    (:func:`candidates` keeps those). After a turn, code keeps the ones no note
-    of the turn kept.
+    (:func:`candidates` keeps those). With ``[memory] keep_statements``, code
+    keeps after a turn the ones no note of the turn kept.
     """
     out: list[Candidate] = []
     for sentence in _sentences(typed):

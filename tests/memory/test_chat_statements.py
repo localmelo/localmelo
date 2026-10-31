@@ -1,18 +1,23 @@
-"""Lasting statements become notes, and the newer turn wins even without a note.
+"""The newer turn wins even without a note; lasting statements and the model.
 
-After a chat turn, a plain first-person statement of a lasting fact that names
-a subject ("I live in …", "my weekly sync is on …", "call me …", "我的…是…") and
-that the model kept no note of is kept by code, with the same Undo; a question,
-a to-do, a hypothetical, a negation, the past, someone else's opinion or a
-secret never is. Of two chat turns that state one subject with different
-values, the older reads ``(older; replaced by a newer message)`` and comes
-after the newer one, which recall brings in when only the older matched. End
-to end on the stub model, whose chats never call ``remember`` here, with words
-only and with a fake embedding server. Look-alikes stay apart.
+Of two chat turns that state one subject with different values, the older
+reads ``(older; replaced by a newer message)`` and comes after the newer one,
+which recall brings in when only the older matched; this is the default and
+writes no memory. By default only the model keeps a note of a plain statement,
+with ``remember``, and its instructions and the tool say to keep a lasting fact
+in that turn. With the developer setting ``[memory] keep_statements`` (off by
+default, for comparison), code keeps after the turn a plain first-person
+statement of a lasting fact that names a subject ("I live in …", "my weekly
+sync is on …", "call me …", "我的…是…") that the model kept no note of, with
+the same Undo; a question, a to-do, a hypothetical, a negation, the past,
+someone else's opinion or a secret never. End to end on the stub model, whose
+chats never call ``remember`` here, with words only and with a fake embedding
+server. Look-alikes stay apart.
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
@@ -20,8 +25,11 @@ from typing import Any
 import numpy as np
 import pytest
 
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, records
 from localmelo.support.memory.recall import OLDER, OLDER_TURN, Item, newer_first
+from localmelo.support.memory.service import REMEMBER
+from localmelo.support.sessions.identity import NOTES_TEXT
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.fixtures.stub_llm import StubServer
 from localmelo.tests.memory.chat_memory_helpers import EmbeddingServer
@@ -52,12 +60,23 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
         await store.aclose()
 
 
-@pytest.fixture(params=["words", "vectors"])
-async def memory(request: Any, tmp_path: Path) -> AsyncIterator[ChatMemory]:
+def settings(*, keep: bool) -> Config:
+    """The settings of a chat without an embedding backend, and the developer
+    setting that keeps statements by code on or off."""
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.memory.keep_statements = keep
+    return cfg
+
+
+@contextlib.asynccontextmanager
+async def chat_memory(
+    kind: str, tmp_path: Path, *, keep: bool
+) -> AsyncIterator[ChatMemory]:
     """Memory across chats with words only, or with a fake embedding server."""
-    server = EmbeddingServer().start() if request.param == "vectors" else None
+    server = EmbeddingServer().start() if kind == "vectors" else None
+    cfg = settings(keep=keep)
     memory = ChatMemory(
-        lambda: None,
+        lambda: cfg,
         directory=str(tmp_path / "memory"),
         embedding_url=server.base_url if server else "",
         embedding_model="Qwen3-Embedding-0.6B" if server else "",
@@ -68,6 +87,20 @@ async def memory(request: Any, tmp_path: Path) -> AsyncIterator[ChatMemory]:
         await memory.aclose()
         if server is not None:
             server.close()
+
+
+@pytest.fixture(params=["words", "vectors"])
+async def memory(request: Any, tmp_path: Path) -> AsyncIterator[ChatMemory]:
+    """With ``[memory] keep_statements`` on."""
+    async with chat_memory(request.param, tmp_path, keep=True) as memory:
+        yield memory
+
+
+@pytest.fixture(params=["words", "vectors"])
+async def default_memory(request: Any, tmp_path: Path) -> AsyncIterator[ChatMemory]:
+    """As shipped: ``[memory] keep_statements`` off."""
+    async with chat_memory(request.param, tmp_path, keep=False) as memory:
+        yield memory
 
 
 def lines_ok(lines: list[str], old: str, new: str) -> None:
@@ -126,7 +159,7 @@ async def test_plain_statements_become_notes_and_the_newer_value_wins(
     ("old_typed", "_", "new_typed", "__", "asks", "old", "new"), PAIRS
 )
 async def test_without_notes_the_newer_turn_wins(
-    memory: ChatMemory,
+    default_memory: ChatMemory,
     store: SessionStore,
     stub: Any,
     tmp_path: Path,
@@ -138,12 +171,11 @@ async def test_without_notes_the_newer_turn_wins(
     old: str,
     new: str,
 ) -> None:
+    memory = default_memory
     chat = Chat(memory, store, stub, tmp_path)
     await chat(old_typed)
     await chat(new_typed)
-    # The user deletes the notes: only the two chat turns are left.
-    for entry in await memory.records():
-        assert await memory.delete_record(entry.id)
+    # The model kept no note and code keeps none by default: two chat turns.
     assert await memory.records() == []
 
     stub.requests.clear()
@@ -262,7 +294,8 @@ async def test_workers_and_task_runners_keep_no_statement(
 ) -> None:
     server = StubServer(scenarios={"answer": {"replies": [{"content": "OK."}]}})
     server.start()
-    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    cfg = settings(keep=True)
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         await runner_chat(
             memory, store, server, tmp_path / "w", "I live in Lisbon.", kind="worker"
@@ -359,3 +392,45 @@ def test_newer_first_marks_a_turn_a_newer_turn_replaced_and_brings_it_in() -> No
     note = Item("r:9", "You live in Berlin.", "chat c", "c", 1, 3.0)
     chain = newer_first([old], {("a", 1): new, ("b", 1): note})
     assert [(i.key, i.older) for i in chain] == [("r:9", ""), ("d:1", OLDER)]
+
+
+async def test_by_default_code_keeps_no_statement(
+    default_memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    memory = default_memory
+    (only,) = await Chat(memory, store, stub, tmp_path)("I live in Lisbon.")
+    assert only["remembered"] == [] and await memory.records() == []
+    typed = "My name is Juno."
+    turn = await store.begin_turn(
+        None, typed, holder="test:1:statements", title=typed, new_session=NewSession()
+    )
+    await memory.before_turn(store, turn, typed)
+    assert await memory.keep_statements(turn) == []
+    assert await memory.records() == []
+
+
+async def test_the_model_is_told_to_keep_a_lasting_statement_in_that_turn(
+    default_memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    await Chat(default_memory, store, stub, tmp_path)("I live in Lisbon.")
+    (request,) = stub.requests
+    system = request["messages"][0]["content"]
+    assert NOTES_TEXT in system
+    rule = (
+        "A plain statement of a lasting fact about the user (where they live, "
+        "their name, a person, their schedule, a preference), such as “I live in "
+        "Utrecht.” or “我的导师是周教授。”, is one: keep it with remember in that turn."
+    )
+    assert rule in system
+    (tool,) = [
+        t["function"] for t in request["tools"] if t["function"]["name"] == "remember"
+    ]
+    assert tool["description"] == REMEMBER.description
+    for words in (
+        "When the user states a lasting fact about themselves",
+        "call it in that turn",
+        "“I live in Utrecht.” → You live in Utrecht.",
+        "“我的导师是周教授。” → 你的导师是周教授。",
+        "never ask the user first",
+    ):
+        assert words in tool["description"]
