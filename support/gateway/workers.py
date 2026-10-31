@@ -24,8 +24,10 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
 )
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
+from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import (
@@ -100,14 +102,28 @@ _CAPTURE_RETRY_SECONDS = 10.0
 # What a task's worker is told on every planning request (as its identity).
 WORKER_GUIDE = (
     "You are melo's worker for one task, in its folder. Use git_status to "
-    "read the repository's state and list_files to look around: neither "
-    "asks for approval. Change an existing file with file_edit, so the "
+    "read the repository's state, list_files to look around and search_files "
+    "to find where something is: none of them asks for approval. Change an existing file with file_edit, so the "
     "person sees a diff; use file_write for new files and python_exec for "
     "everything else. Keep your last two steps for what the task asks you to "
     "finish, such as the commit and your report. Tools run with HOME set to "
     "a fresh folder of this task, so a test suite that refuses the real home "
     "runs; your real home stays readable."
 )
+
+
+class WorkerSearch(BaseToolProvider):
+    """``search_files`` for a task's worker, in the task's folder (read-only)."""
+
+    def __init__(self, folder: str) -> None:
+        self._folder = folder
+
+    async def start(self) -> list[ProvidedTool]:
+        search = rooted_search_files(self._folder)
+        return [ProvidedTool(definition=SEARCH_FILES_TOOL, function=search)]
+
+    async def close(self) -> None:
+        return None
 
 
 def task_home(task_id: str) -> tuple[str, dict[str, str]]:
@@ -132,6 +148,42 @@ def task_home(task_id: str) -> tuple[str, dict[str, str]]:
     if os.path.isdir(pythons):
         env["UV_PYTHON_INSTALL_DIR"] = pythons
     return home, env
+
+
+# The longest message the person can send a task.
+MAX_MESSAGE_CHARS = 8_000
+# A finished task a message continues; an expired one does not.
+_CONTINUABLE = frozenset({"done", "failed", "cancelled"})
+
+
+class TaskInbox:
+    """The person's messages to one task, read at the task's next step.
+
+    The Agent's run polls it at each step and accepts a message once the
+    request that carries it is built (``inbox.accepted`` in the task's
+    steps). What a run never read is taken back when the run ends.
+    """
+
+    def __init__(self) -> None:
+        self._items: list[tuple[int, str]] = []
+        self._next = 0
+
+    def validate(self, workspace: str | None = None) -> None:
+        return None
+
+    def put(self, text: str) -> None:
+        self._next += 1
+        self._items.append((self._next, text))
+
+    def poll(self) -> list[tuple[int, str]]:
+        return list(self._items)
+
+    def accept(self, offset: int) -> None:
+        self._items = [item for item in self._items if item[0] != offset]
+
+    def drain(self) -> list[str]:
+        items, self._items = self._items, []
+        return [text for _, text in items]
 
 
 class _WorkerLLM(GatedLLM):
@@ -261,6 +313,8 @@ class TaskWorkers:
         self.front_id: str | None = None
         # The HOME folders made for running tasks' tools (see task_home).
         self._homes: set[str] = set()
+        # Messages each task reads at its next step.
+        self._inboxes: dict[str, TaskInbox] = {}
 
     def is_active(self, task_id: str) -> bool:
         """Whether this process may still run or start this worker."""
@@ -474,6 +528,63 @@ class TaskWorkers:
             answer = turns[-1].answer if turns else ""
             body["not_committed"] = await not_committed(answer, body["workspace"])
         return body
+
+    async def message(
+        self, task_id: str, text: str, *, level: int | None = None, reason: str = ""
+    ) -> tuple[dict, str]:
+        """Give *task_id* the person's message; the task's body and what happened.
+
+        ``queued``: a task that has not finished reads it at its next step
+        (a paused one when it resumes). ``continued``: a done, failed or
+        stopped task runs again in its own session, the message as its next
+        turn after the earlier ones; *level* (from the person's words)
+        replaces its old level. A message the run never read continues the
+        task once the run ends.
+        """
+        text = text.strip()
+        if not text:
+            raise ValueError("the message is empty")
+        if len(text) > MAX_MESSAGE_CHARS:
+            raise ValueError(f"a message has at most {MAX_MESSAGE_CHARS} characters")
+        if task_id in self._unavailable:
+            raise SessionStoreError("store unavailable")
+        if task_id in self._quarantined:
+            raise TaskStoreError("worker cleanup failed; slot held until restart")
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("workers are closed")
+            current = await self.tasks.get_task(task_id)
+            if current.state in _CONTINUABLE:
+                record = await self._continue(current, text, level=level, reason=reason)
+                await self._schedule()
+                return await self._body(record), "continued"
+            if current.state in TERMINAL_PHASES:
+                raise TaskStoreError("it expired")
+            if current.state == "interrupted" or task_id in self._restart_fenced:
+                raise TaskStoreError(
+                    "it was stopped by a restart; resume it from its page first"
+                )
+            self._inboxes.setdefault(task_id, TaskInbox()).put(text)
+            return await self._body(current), "queued"
+
+    async def _continue(
+        self, current: TaskRecord, text: str, *, level: int | None, reason: str
+    ) -> TaskRecord:
+        """Queue the finished *current* again with *text* as its next turn; under the lock."""
+        task_id = current.task_id
+        if task_id in self._runs or (
+            any(t.task_id == task_id for t in self.gate.registered_tasks)
+            and not self.gate.discard_task(task_id)
+        ):
+            raise TaskStoreError("it is still finishing; try again in a moment")
+        self._inboxes.pop(task_id, None)
+        if not await self.store.list_turns(task_id, limit=1):
+            # Stopped before it ever ran: the new turn carries the request too.
+            text = f"{current.spec.get('objective') or current.title}\n\n{text}"
+        record = await self.tasks.reopen(task_id, text, level=level, reason=reason)
+        self._register(record)
+        self._eligible.add(task_id)
+        return record
 
     async def update(
         self, task_id: str, level: object = None, state: str | None = None
@@ -759,6 +870,7 @@ class TaskWorkers:
                 if task_id not in self._runs:
                     self.gate.finish_task(task_id, "cancelled")
                     self._ready.pop(task_id, None)
+                    self._inboxes.pop(task_id, None)
             elif parked:
                 self._ready[task_id].clear()
                 self.gate.update_task(task_id, paused=True)
@@ -1546,6 +1658,7 @@ class TaskWorkers:
         launch_committed = execution_id is not None
         turn_started = False
         post_fence_failure = False
+        unread: list[str] = []
         tool_token: contextvars.Token[Any] | None = None
         process_token: contextvars.Token[Any] | None = None
         try:
@@ -1682,6 +1795,7 @@ class TaskWorkers:
                     wrap_embedding=lambda inner: _WorkerEmbedding(
                         inner, client, self._ready[task_id]
                     ),
+                    tools=[WorkerSearch(workspace)],
                 )
             except BaseException:
                 self._homes.discard(home)
@@ -1694,6 +1808,7 @@ class TaskWorkers:
                 progress=True,
                 memory=self.memory,
                 index_only=True,
+                inbox=self._inboxes.setdefault(task_id, TaskInbox()),
             )
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -1898,6 +2013,13 @@ class TaskWorkers:
                         phase = "failed"
                     elif task_id in self._stopping:
                         phase = "cancelled"
+                    inbox = self._inboxes.pop(task_id, None)
+                    if (
+                        inbox is not None
+                        and phase in ("done", "failed")
+                        and task_id not in self._invalid_workspace
+                    ):
+                        unread = inbox.drain()
                     try:
                         if (
                             task_id not in self._invalid_workspace
@@ -1929,6 +2051,19 @@ class TaskWorkers:
                 self._approval_points.pop(task_id, None)
                 self._runners.pop(task_id, None)
                 self._runs.pop(task_id, None)
+                if unread and not self._closed:
+                    # Messages that came after the run's last step: the task
+                    # goes on with them as its next turn.
+                    try:
+                        current = await self.tasks.get_task(task_id)
+                        if current.state in _CONTINUABLE:
+                            await self._continue(
+                                current, "\n\n".join(unread), level=None, reason=""
+                            )
+                    except Exception:
+                        log.exception(
+                            "Task %s could not go on with its messages", task_id
+                        )
                 await self._schedule()
 
     async def _body(self, record: TaskRecord) -> dict:

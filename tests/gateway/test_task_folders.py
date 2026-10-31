@@ -229,3 +229,20 @@ def test_a_folder_outside_the_roots_says_so_before_whether_it_exists(
     assert "Not a directory" in folder_problem(str(home / "missing"), cfg)
     (home / "here").mkdir()
     assert folder_problem(str(home / "here"), cfg) == ""
+
+
+async def test_a_worker_searches_its_task_folder_without_asking(setup: Setup) -> None:
+    workers, cfg, _, built, home = setup
+    project = home / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "src" / "parser.py").write_text("def parse_header(line):\n    pass\n")
+    await workers.create({"objective": "find it", "workspace": str(project)})
+    await eventually(lambda: len(built) == 1)
+    [provider] = built[0]["tools"]
+    [tool] = await provider.start()
+    assert tool.definition.name == "search_files"
+    assert tool.requires_approval is False
+    assert tool.definition.annotations.get("readOnlyHint") is True
+    found = await tool.function(pattern="def parse_header")
+    assert "src/parser.py:1" in found
+    assert "search_files" in built[0]["options"].identity

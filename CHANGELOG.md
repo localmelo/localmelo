@@ -17,12 +17,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (outside your home folder, hidden or under `~/Library`), the task does not
   start and never runs in another folder: its card says why, and the task page
   offers **Choose a folder**. The panel, the Workers tab and the task list name
-  each task's folder. Workers read git state with `git_status` and list files
-  without asking, change files with `file_edit` (asks, shows a diff), keep their
+  each task's folder. Workers read git state with `git_status`, list files and
+  search them (`search_files`) without asking, change files with `file_edit` (asks, shows a diff), keep their
   last two steps for the commit and the report, run their tools with a fresh
   `HOME` so a test suite that refuses the real home runs, and name an error
   most tests share as "The test environment refused". Read-only commands that
-  Python runs through a small helper are routine for a session's grant. A task
+  Python runs through a small helper are routine for a session's grant when
+  every path they name is inside the folder and none may hold keys. A task
   that ends with only its commit left says `Not committed. Run: <command>`
   ([#NN]).
 
@@ -110,6 +111,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The main chat does what it is asked, or hands it off with its context. A
+  reply that only says what it will do ("I'll start by looking at the test
+  file…") no longer ends the turn: the work starts as a task, or a question asks
+  "Start this as a task?". A request to change files it names starts as a task
+  at once, under a short title, with no model call. `search_files` lets the
+  main chat answer "which file defines X?" in a step or two (read-only, at most
+  50 hits as `path:line`, inside its folder). A question is a `?` anywhere or
+  "quick question". The main chat answers in the language of your message, and
+  so does the hand-off sentence. A follow-up on a task ("finish it", "commit
+  it", "继续那个任务") goes to that task: a running task reads it at its next
+  step, and a done or stopped one continues in its own session with what it did
+  before, instead of a new task without that context; the line says
+  `Sent to: …` or `Continued: …`. The main chat reads each task's state and the
+  first lines of its answer, so "what got done?" names the commits tasks
+  reported. For API clients: echoes add `sent` (with `how`), a `suggest` with
+  `action` `send` sends the message on Apply, and `task_message` takes only
+  `task_id`. See
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#333]).
 - The newer value wins even when no note was kept, and melo is told to keep a
   lasting fact you state. After the newer-wins change, a local model answered 2 of 5
   updated facts right with an embedding model and 3 of 5 by words only, and the chat
@@ -2750,3 +2769,4 @@ earlier milestones.
 [#328]: https://github.com/localmelo/localmelo/pull/328
 [#332]: https://github.com/localmelo/localmelo/pull/332
 [#331]: https://github.com/localmelo/localmelo/pull/331
+[#333]: https://github.com/localmelo/localmelo/pull/333
