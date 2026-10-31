@@ -31,6 +31,8 @@ def call_preview(tool_name: str, arguments: Mapping[str, Any]) -> str:
     - ``list_files``: the path (``.`` without one), then `` (<n> levels)``
       for a depth above one;
     - ``file_write``: ``<path> (<n> chars)``, where ``n`` counts the content;
+    - ``file_edit``: ``<path> (edit)``;
+    - ``git_status``: ``git <command>``, then the revision when there is one;
     - any other tool, or an argument above that is missing or not a ``str``:
       the arguments as compact JSON, keys sorted.
 
@@ -68,6 +70,14 @@ def _summary(tool_name: str, arguments: Mapping[str, Any]) -> str:
         path, content = arguments.get("path"), arguments.get("content")
         if isinstance(path, str) and isinstance(content, str):
             return f"{path} ({len(content)} chars)"
+    elif tool_name == "file_edit":
+        path = arguments.get("path")
+        if isinstance(path, str):
+            return f"{path} (edit)"
+    elif tool_name == "git_status":
+        command, rev = arguments.get("command"), arguments.get("rev") or ""
+        if isinstance(command, str) and isinstance(rev, str):
+            return " ".join(["git", command, rev]).strip()
     return _as_json(arguments)
 
 

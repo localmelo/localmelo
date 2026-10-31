@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.executor.builtins import edited_text
 from localmelo.support.sessions.display import file_facts
 
 # A larger file gets no diff: the panel would not show it whole either.
@@ -215,6 +216,24 @@ def approval_diff(path: str, content: str) -> dict[str, Any]:
             {"kind": _ROW_KINDS[row.kind], "line": number, "text": lines[number - 1]}
         )
     return {"added": added, "removed": removed, "rows": shown, "note": ""}
+
+
+def edit_diff(path: str, old: object, new: object) -> dict[str, Any]:
+    """What a ``file_edit`` of *path* would change, as :func:`approval_diff` shows it.
+
+    The edit is applied to the file's text as it is now; when it cannot be
+    (the text to replace is missing or not unique), *note* says so.
+    """
+    target = read_target(path)
+    if target.text is None:
+        return _not_shown(_why(target.problem))
+    if not isinstance(old, str) or not isinstance(new, str):
+        return _not_shown("the edit has no text to replace")
+    try:
+        content = edited_text(target.text, old, new, "the file")
+    except ValueError as exc:
+        return _not_shown(str(exc).split(";")[0].lower())
+    return approval_diff(path, content)
 
 
 def _not_shown(why: str) -> dict[str, Any]:

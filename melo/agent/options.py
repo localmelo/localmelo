@@ -267,8 +267,16 @@ class AgentOptions:
       gateway's sessions build it per Agent, from the backend the Agent
       talks to). The fixed system section carries it right after the base
       text, in planning and reflection requests. ``None`` (the default)
-      adds nothing: direct runs, workers and the benchmark send the base
-      text alone.
+      adds nothing: direct runs and the benchmark send the base text alone
+      (the gateway's task workers give their guide here).
+    - ``task_aids``: set by the gateway's task workers. With two steps left
+      in the run's last attempt, the next planning request ends with
+      :data:`~localmelo.melo.agent._task_aids.FINISH_NOTE`, which asks the model to
+      use them for what the task asks to finish (a commit, the report); and a
+      tool's text whose error lines mostly share one cause (a test run that
+      the environment refused) starts with a line that names that cause (see
+      :func:`~localmelo.melo.agent._task_aids.refusal_note`). Default false:
+      nothing changes.
     - ``answer_on_stop``: when true, a run that ends ``gate_stopped`` or
       ``budget_exhausted`` with no answer makes one more request, without
       tools, for the final answer from the evidence gathered (the working
@@ -379,6 +387,7 @@ class AgentOptions:
     tool_images_retire: int = 2
     answer_on_stop: bool = False
     max_calls: int | None = None
+    task_aids: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -508,6 +517,7 @@ class AgentOptions:
             "lean_output",
             "answer_on_stop",
             "confine_writes",
+            "task_aids",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

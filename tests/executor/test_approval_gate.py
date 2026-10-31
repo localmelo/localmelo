@@ -88,6 +88,10 @@ class StandIns:
         self.calls.append(("file_write", {"path": path, "content": content}))
         return "written"
 
+    async def file_edit(self, path: str, old: str, new: str) -> str:
+        self.calls.append(("file_edit", {"path": path, "old": old, "new": new}))
+        return "edited"
+
 
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
@@ -106,7 +110,9 @@ def _executor(
         Checker(mode="interactive"),
         workspace_root=None if root is None else str(root),
     )
-    register_builtins(executor, hippo, mode="interactive")
+    # Every built-in by name: the interactive default leaves out the
+    # task-only ones (git_status, file_edit).
+    register_builtins(executor, hippo, names=builtin_names(), mode="interactive")
     if stand_ins is not None:
         for name in APPROVAL_BUILTINS:
             executor.register(name, getattr(stand_ins, name), requires_approval=True)
@@ -641,7 +647,7 @@ async def test_a_signature_that_cannot_be_read_is_not_checked() -> None:
 
 def test_register_builtins_marks_the_approval_builtins() -> None:
     executor, _ = _executor()
-    assert {"shell_exec", "python_exec", "file_write"} == APPROVAL_BUILTINS
+    assert {"shell_exec", "python_exec", "file_write", "file_edit"} == APPROVAL_BUILTINS
     assert {
         name for name in builtin_names() if executor.requires_approval(name)
     } == APPROVAL_BUILTINS

@@ -1898,6 +1898,17 @@ dialog[data-layout="plain"] .settings-footer { position: sticky; bottom: calc(-1
 .task-missing p {
   margin: 0 0 8px;
 }
+.task-folder-path {
+  width: 100%;
+  margin: 0 0 8px;
+}
+.task-note {
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+}
+.activity-folder { color: var(--ink-3); font-size: var(--text-small); }
 .task-dialog p {
   margin: 12px 0;
 }

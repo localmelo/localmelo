@@ -169,6 +169,8 @@ class OpenSession:
     resumed: ResumeInfo | None = None
     lock: SessionLock = field(default_factory=SessionLock)
     last_used: float = 0.0
+    # The main chat, which works in the default folder as it is now.
+    main: bool = False
 
 
 class ConsoleSessions:
@@ -301,13 +303,18 @@ class ConsoleSessions:
             raise RuntimeError("The console's sessions are closed")
         entry = self._sessions.get(session_id)
         if entry is not None and entry.agent is not None:
-            # A folder deleted while the Agent was open is still the 400 a
-            # closed Agent's session gets: the turn must not start.
             root = entry.agent.workspace_root
             assert root is not None
-            self.check_workspace(root)
-            entry.last_used = self._clock()
-            return entry
+            if entry.main and not entry.runner.busy and root != self._main_folder():
+                # The default folder changed: the main chat follows it with
+                # a new Agent on the same conversation (after a running turn).
+                await self._keep_locked(entry)
+            else:
+                # A folder deleted while the Agent was open is still the 400
+                # a closed Agent's session gets: the turn must not start.
+                self.check_workspace(root)
+                entry.last_used = self._clock()
+                return entry
 
         try:
             info = await self._store.get_session(session_id)
@@ -322,7 +329,17 @@ class ConsoleSessions:
                 409, "task_session_read_only", "A task session cannot run as a chat."
             )
         workspace = info.workspace
-        if workspace is None:
+        if info.kind == "front":
+            # The main chat keeps no folder of its own: it works in the
+            # default folder as the settings name it now (#321). Its row
+            # only mirrors that folder for the page.
+            workspace = self._main_folder()
+            if info.workspace != workspace:
+                try:
+                    await self._store.update_session(session_id, workspace=workspace)
+                except SessionStoreError as exc:
+                    raise ApiError(503, "store_unavailable", str(exc)) from exc
+        elif workspace is None:
             workspace = self._default_workspace()
             try:
                 os.makedirs(workspace, mode=0o700, exist_ok=True)
@@ -382,6 +399,7 @@ class ConsoleSessions:
                 built_with_mcp=False,
                 lock=self.lock(session_id),
                 last_used=self._clock(),
+                main=info.kind == "front",
             )
             self._sessions[session_id] = entry
         else:
@@ -598,6 +616,20 @@ class ConsoleSessions:
         if gateway_workspace_problem(raw, allow_empty=False) is None:
             return os.path.expanduser(raw)
         return os.path.expanduser(DEFAULT_WORKSPACE)
+
+    def _main_folder(self) -> str:
+        """The default folder's real path, made when it is missing (the main chat's)."""
+        path = self._default_workspace()
+        try:
+            os.makedirs(path, mode=0o700, exist_ok=True)
+        except OSError as exc:
+            raise ApiError(
+                400,
+                "invalid_workspace",
+                f"Could not create the default workspace "
+                f"{display.home_label(path)}: {exc}",
+            ) from exc
+        return os.path.realpath(path)
 
     def _resolve_workspace(self, workspace: str | None) -> str:
         """The folder a new session gets: the default, or a checked path.
@@ -908,6 +940,13 @@ class ConsoleSessions:
                     409,
                     "task_session_read_only",
                     "A task workspace cannot be changed as a chat.",
+                )
+            if current is not None and current.kind == "front":
+                raise ApiError(
+                    409,
+                    "main_chat_folder",
+                    "The main chat works in the default folder. Change the "
+                    "default in Settings, or start a side chat in another folder.",
                 )
             entry = self._sessions.get(session_id)
             if entry is None or entry.agent is None:
