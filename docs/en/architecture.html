@@ -82,7 +82,7 @@
             </a>
             <a class="checker-zone" id="n-checker" href="#c-checker" style="left:200px;top:170px;width:370px;height:230px">
               <span class="cz-label">Checker</span>
-              <span class="cz-sub">a refused tool call returns an error the model sees</span>
+              <span class="cz-sub">a refused tool call returns an error the model sees<br>Auto: a review of each step, in a write sandbox</span>
             </a>
             <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">Executor</span>
@@ -252,6 +252,7 @@
               <li>Say <code class="wrap">every weekday at 8:30, brief me on my calendar</code> in the main chat; nothing is saved until you tap Save chore.</li>
               <li>A tick every 30 seconds starts due chores as tasks, never early; a run missed while the computer slept happens once at wake.</li>
               <li>Every 30 minutes the check-in tells the main chat what finished or waits, and makes no model call when there is nothing to say.</li>
+              <li>A reminder is a chore that runs once: <code class="wrap">remind me to send the report on Friday at 9</code> shows the date it understood, and nothing is saved until you tap Remind me.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">Chores that repeat</a>
           </div>
@@ -282,6 +283,7 @@
               <li>Checks each plan, tool call and tool result.</li>
               <li>A refused call does not run; the model sees why.</li>
               <li>Calls that send, delete or publish always ask, and say why.</li>
+              <li>In Auto, a review decides each step instead of a click; a blocked step is explained, and Allow once lets that exact step run once.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">What the checks do</a>
           </div>
@@ -291,7 +293,7 @@
             <ul>
               <li>Built-in tools: <code>shell_exec</code>, <code>python_exec</code>, <code>file_read</code>, <code>file_write</code> and <code>list_files</code>.</li>
               <li>Asks for approval by permission tier.</li>
-              <li>On macOS, worker runs and saved tasks write only in their workspace.</li>
+              <li>On macOS, worker runs, saved tasks and steps in Auto write only in their folder, and an Auto step cannot reach melo's own sign-in.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">Tools reference</a>
           </div>
@@ -356,7 +358,7 @@
             </thead>
             <tbody>
               <tr><td><code>melo/</code> and <code>support/</code></td><td><code>melo/</code> never imports <code>support/</code> at module level; <code>Agent(config=…)</code> is the one bridge.</td><td>The agent runs with providers you build, and a new backend changes only <code>support/</code>.</td></tr>
-              <tr><td>Agent and executor</td><td>A step runs only the tools it offered, and every call passes the checks first.</td><td>A refused call never runs. The checks are guardrails, not a sandbox.</td></tr>
+              <tr><td>Agent and executor</td><td>A step runs only the tools it offered, and every call passes the checks first.</td><td>A refused call never runs. In Ask, the checks are guardrails, not a sandbox; in Auto on macOS, steps also run in a write sandbox.</td></tr>
               <tr><td>Agent and memory</td><td>Memory writes pass the checker's size limits.</td><td>The prompt and the stores stay bounded.</td></tr>
               <tr><td>Backends and model servers</td><td>Backends only connect to a URL.</td><td>You keep control of your model servers.</td></tr>
             </tbody>
@@ -373,11 +375,11 @@
             </thead>
             <tbody>
               <tr><td>Terminal</td><td>The main chat the app shows, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers, the activity pill</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers, the activity pill, in English or Chinese</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Main chat and side chats</td><td>One main chat that answers, or hands bigger work to tasks by priority</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, the newer value wins, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Scheduled chores</td><td>Chores that run on time, and a check-in every 30 minutes</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Scheduled chores</td><td>Chores and one-time reminders that run on time, and a check-in every 30 minutes</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls, Ask or Auto for each chat</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Browsing</td><td>Read and follow pages in Safari windows you can watch</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Scheduler and workers</td><td>Task queue, levels, workers, fair turns, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
               <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>

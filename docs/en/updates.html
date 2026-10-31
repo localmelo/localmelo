@@ -61,15 +61,16 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>Next <small>7</small></h3>
+            <h3>Next <small>8</small></h3>
             <ul>
-              <li class="board-card"><strong>Dogfood round 2 on the new build</strong><span>Real work on this repository through the main chat, to find and fix what still trips people up.</span></li>
               <li class="board-card"><strong>Computer use in the browser</strong><span>melo acts on pages in a window you can watch, and asks before anything that matters.</span></li>
               <li class="board-card"><strong>Art for Melo's working poses</strong><span>The pill and the pet get drawn poses for the moments when melo works.</span></li>
               <li class="board-card"><strong>Set up a model server from melo</strong><span>With nothing installed, reach a first answer with one confirmation.</span></li>
               <li class="board-card"><strong>Other agents hand work to melo</strong><span>Workers on the task API, and an MCP server for coding agents.</span></li>
               <li class="board-card"><strong>Workers that share a project</strong><span>Parallel workers share one cached start; each task stays separate.</span></li>
               <li class="board-card"><strong>melo helps build melo</strong><span>Real development tasks on a hosted model, graded against other workers.</span></li>
+              <li class="board-card"><strong>Bring in what other assistants remember</strong><span>Planned: on first setup, melo reads the notes other coding assistants keep in your home folder and brings them in, with Undo.</span></li>
+              <li class="board-card"><strong>Tidy notes while the computer is idle</strong><span>Planned: melo goes over recent chats offline, merges duplicate notes and keeps the newer value, with Undo.</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -84,7 +85,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>Done <small>8</small></h3>
+          <h3>Done <small>13</small></h3>
           <ul>
             <li class="board-card"><strong>Main chat and side chats</strong><span>One chat that answers, or hands bigger work to a task by priority; the terminal opens the same chat.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Memory you can see</strong><span>Notes across chats, the newer value wins, and a Memory tab to edit or forget.</span><span class="chip done">done</span></li>
@@ -94,6 +95,11 @@
             <li class="board-card"><strong>Browsing the web</strong><span>melo reads and follows pages in a window you can watch.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Melo the Akita and the pill</strong><span>A pet in the app, the console and on your desktop, and a pill that says what runs.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Calls that matter ask</strong><span>Installing, downloading and changes outside the folder always ask, with the reason.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Auto mode</strong><span>Ask or Auto for each chat: routine steps run, risky ones are blocked with the reason, and Allow once lets one through.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Chinese console and app</strong><span>The console and the app speak 简体中文, with times and dates written the Chinese way.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Reminders</strong><span>Say it once, like “remind me to send the report on Friday at 9”, and melo tells you at that time.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Stop and continue</strong><span>A task that runs out of steps reads Stopped, and Continue picks it up where it left off.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Self-runs on this repository</strong><span>Three runs are done; in the third, in Auto, melo fixed two things in its own code without asking.</span><span class="chip done">done</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">The full plan on GitHub</a>; the parts of the memory design not built yet are on the <a href="./memory-design.html">memory design</a> page.</p>
@@ -102,6 +108,18 @@
       <section class="section" id="updates">
         <h2>Updates</h2>
         <p class="more-link">Each change in detail is in the <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>.</p>
+        <section class="day" id="day-2026-10-31">
+          <h3><time datetime="2026-10-31">October 31</time></h3>
+          <figure class="shot"><a href="../assets/img/auto-menu.webp"><img src="../assets/img/auto-menu.webp" alt="The Ask and Auto menu beside the model under the message box, with Auto chosen, above a card for a blocked install step with its Allow once button." width="1280" height="800" loading="lazy"></a></figure>
+          <ul class="day-points">
+            <li>Auto mode: choose Ask or Auto for each chat. In Auto, routine steps run, risky ones are blocked with the reason, and Allow once lets one through.</li>
+            <li>Say <code class="wrap">remind me to send the report on Friday at 9</code>: melo shows the date it understood and tells you at that time.</li>
+            <li>The console and the app speak 简体中文, and priorities read P0 to P5.</li>
+            <li>A task that runs out of steps reads Stopped, and Continue picks it up where it left off; <code class="wrap">continue the recovery card task</code> works in the main chat.</li>
+            <li>Settings is organized by subject, and every command on this site is a coloured terminal block.</li>
+            <li>Also: runs end with a usable answer more often, broken replies are hidden, and melo fixed two small things in its own code in Auto without asking once.</li>
+          </ul>
+        </section>
         <section class="day" id="day-2026-10-30">
           <h3><time datetime="2026-10-30">October 30</time></h3>
           <span class="anchors"><span id="u-pet-smooth"></span><span id="u-chats-remember"></span><span id="u-clear"></span><span id="u-browsing"></span><span id="u-melo-ear"></span><span id="u-tool-images"></span><span id="u-approval-why"></span><span id="u-status-bar-cost"></span><span id="u-melo-moves"></span><span id="u-turn-pictures"></span><span id="u-high-impact"></span><span id="u-one-thinking-row"></span><span id="u-unfinished-thinking"></span><span id="u-identity"></span><span id="u-completion-delete"></span><span id="u-confine-direct-runs"></span><span id="u-akita-portrait"></span><span id="u-worker-writes"></span><span id="u-look-2"></span><span id="u-akita-pet"></span><span id="u-akita-pictures"></span><span id="u-look-1"></span><span id="u-question-lists"></span><span id="u-write-diff"></span><span id="u-console-opens"></span><span id="u-app-logo"></span><span id="u-getting-started-2"></span><span id="u-list-files"></span><span id="u-coming-back"></span><span id="u-plain-words"></span><span id="u-lean-output"></span><span id="u-app-command-line-tools"></span><span id="u-smaller-app"></span><span id="u-status-help"></span><span id="u-reflection-repair-2"></span><span id="u-first-task-folder"></span><span id="u-model-picker"></span><span id="u-console-defaults"></span><span id="u-reading-a-turn"></span><span id="u-console-first-run"></span><span id="u-short-commands"></span><span id="u-menu-bar"></span><span id="u-getting-started"></span><span id="u-reflection-repair"></span><span id="u-app-first-minute"></span><span id="u-omlx-first-class"></span><span id="u-direct-model-choice"></span><span id="u-shell-tail-test"></span><span id="u-brief-items"></span><span id="u-model-choice"></span><span id="u-console-connect"></span></span>

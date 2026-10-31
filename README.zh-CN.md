@@ -30,8 +30,12 @@
 
 - 在终端（`melo`）、网页控制台（`melo serve`）或 Mac App 里和同一个主对话交谈：它自己回答，或按优先级把更大的工作交给任务，并用卡片说明发生了什么。
 - 让 melo 跨对话记忆：新的事实取代旧的，在“记忆”标签页里可以查看、编辑或删除每一条笔记。
-- 定时事项说一次就行，比如 `every weekday at 8:30, brief me on my calendar`：它按时运行，check-in 告诉你什么做完了。也可以要一个提醒，比如 `remind me to send the report on Friday at 9`：它会先显示理解的日期，到时间再通知你。
+- 定时事项说一次就行，比如 `every weekday at 8:30, brief me on my calendar`：它按时运行，check-in 告诉你什么做完了。
+- 也可以要一个提醒，比如 `remind me to send the report on Friday at 9`：melo 会先显示理解的日期，到时间再通知你。
 - 重要操作由你批准：melo 运行命令和写文件之前会先问你，并展示改动。
+- 给一个对话选“自动”，melo 就不问直接做：常规步骤直接运行，有风险的步骤被拦下并说明原因，“允许一次”可以放行一步。
+- 任务步数用完时显示“已停止”，点“继续”就从停下的地方接着做。
+- 控制台和 App 支持英文和简体中文。
 - 使用你电脑上的 oMLX、Ollama、vLLM、SGLang 或 MLC LLM，或者云端 API；也可以在脚本里运行一个任务，得到一行 JSON。
 
 ## 安装
@@ -121,6 +125,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 
 - 模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。
 - 在 macOS 上，worker 运行（`melo worker`）和保存的任务只能在自己的工作区内写文件。
+- 在 macOS 的“自动”模式下，一个步骤还会在写入沙箱里运行：它的文件只留在文件夹里，碰不到 melo 自己的登录信息。
 - 网关要求身份验证并拒绝非回环监听。
 - 令牌无法防御同一操作系统用户下的恶意进程。
 - 详见 [SECURITY.md（英文）](SECURITY.md)和[检查的作用](docs/zh-CN/guides/tools-mcp.md#what-the-checks-do)。

@@ -70,6 +70,13 @@ those tools can do.
   its first command. On other systems a worker runs unconfined, and its
   record says so. `-X agent.confine_writes=false` (or `[agent]
   confine_writes = false`) turns confinement off.
+- **Auto mode confines writes (macOS).** In a chat set to Auto,
+  `shell_exec` and `python_exec` start under the same kind of profile: a step
+  cannot write outside the chat's folder, and it cannot read or change melo's
+  own sign-in token and session store. Other reads and the network are not
+  confined. Auto is a reviewer, not a wall: a step that hands work to another
+  app or program is judged by the review (blocked, or checked by your model),
+  not walled off by the sandbox.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;

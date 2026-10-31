@@ -40,6 +40,9 @@
       <p class="sidebar-label">On this page</p>
       <a href="#quickstart">Quick start</a>
       <a href="#features">What you can do</a>
+      <a href="#auto">Auto mode</a>
+      <a href="#reminders">Reminders</a>
+      <a href="#stopped">Stopped tasks</a>
       <a href="#roadmap">Roadmap</a>
       <a href="#security">Security</a>
     </nav>
@@ -107,7 +110,7 @@
         <div class="show-grid">
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#hand-work-to-the-main-chat">
             <img src="../assets/img/main-chat-search.webp" alt="The main chat answers a question by searching the folder, then starts a task, and a follow-up asks to commit it." width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>One main chat, with side chats</strong><span>Ask, or ask for work: bigger work becomes a task by priority and comes back as a card.</span></span>
+            <span class="show-text"><strong>One main chat, with side chats</strong><span>Ask, or ask for work: bigger work becomes a task by priority, from P0 to P5, and comes back as a card.</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#memory-across-chats">
             <img src="../assets/img/memory-tab.webp" alt="The Memory tab: notes melo keeps about you, each with its source chat and Edit and Delete buttons." width="1280" height="800" loading="lazy">
@@ -137,8 +140,63 @@
             <img src="../assets/img/browser.webp" alt="A terminal chat in which melo opens a web page and says what it contains." width="1280" height="552" loading="lazy">
             <span class="show-text"><strong>Read the web</strong><span>Turn browsing on and melo reads pages in Safari windows you can watch.</span></span>
           </a>
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#language">
+            <img src="../assets/img/console-zh.webp" alt="The web console in Simplified Chinese: the main chat, a saved chore at 8:30, and the panel's tabs, with times written the Chinese way." width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>In English or 简体中文</strong><span>The console and the app speak Chinese. Pick it in Settings, or let Automatic follow your browser.</span></span>
+          </a>
         </div>
         <p class="more-link">Also: <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">model servers</a>, <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">the HTTP API</a>, <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">worker runs</a>, <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">the Python API</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">scripts</a>.</p>
+      </section>
+
+      <section class="section" id="auto">
+        <h2>Auto mode</h2>
+        <figure class="shot">
+          <img src="../assets/img/auto-blocked.webp" alt="A chat in Auto. A step that installs a charting package is blocked: its card says why, shows the step and offers Allow once, and melo's answer explains the other ways." width="1280" height="800" loading="lazy">
+          <figcaption>In Auto, a step that installs software is blocked. The card says why and offers Allow once.</figcaption>
+        </figure>
+        <ul>
+          <li>Pick <strong>Auto</strong> with the chip beside the model, or start every new chat in it from Settings.</li>
+          <li>Routine steps run without asking; risky steps and steps you did not ask for are blocked, and melo says why.</li>
+          <li>Click <strong>Allow once</strong>, or reply “go ahead”, and that exact step runs once.</li>
+          <li>A step stays in the chat's folder and away from melo's own sign-in: Auto is a reviewer, not a wall.</li>
+          <li>A task keeps the mode of the chat that started it.</li>
+        </ul>
+        <!-- usage:auto-switch --><figure class="usage" aria-label="Switch a chat to Auto" data-copy="/approvals auto"><div class="usage-bar"><span class="usage-title">Switch a chat to Auto</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="c">/approvals</span> <span class="a">auto</span></span></code></pre><figcaption>Type it in the terminal chat; /approvals ask goes back.</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#auto-mode">Auto mode in the guide</a></p>
+      </section>
+
+      <section class="section" id="reminders">
+        <h2>Reminders</h2>
+        <figure class="shot">
+          <img src="../assets/img/reminder-proposal.webp" alt="The main chat after “remind me to send the report on Friday at 9”: melo asks “Remind you on Fri Nov 6 at 9:00?” with the words “send the report”, a Remind me button and Cancel." width="1280" height="800" loading="lazy">
+          <figcaption>melo shows the date and time it understood. Nothing is saved until you tap Remind me.</figcaption>
+        </figure>
+        <ul>
+          <li>Say it in plain words, in English or Chinese: <code class="wrap">remind me in 2 hours to drink water</code>.</li>
+          <li>With no time, melo asks when instead of guessing.</li>
+          <li>At that time a card in the main chat tells you, and the Scheduled tab keeps the done ones.</li>
+          <li>If the computer was asleep, melo reminds you when it wakes and says how late it is.</li>
+        </ul>
+        <!-- usage:reminder --><figure class="usage" aria-label="Ask for a reminder" data-copy="remind me to send the report on Friday at 9&#10;提醒我明天九点给导师发邮件"><div class="usage-bar"><span class="usage-title">Ask for a reminder</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">remind me to send the report on Friday at 9</span></span>
+<span class="ln cmd"><span class="p">›</span> <span class="q">提醒我明天九点给导师发邮件</span></span></code></pre><figcaption>Type it in the main chat. melo shows the date and time it understood and waits for you to tap Remind me.</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">Reminders in the guide</a></p>
+      </section>
+
+      <section class="section" id="stopped">
+        <h2>Stopped tasks continue</h2>
+        <figure class="shot">
+          <img src="../assets/img/task-stopped.webp" alt="The main chat: a card reading Stopped, with what remains (run the two changed test files and commit) and the buttons Continue and Open task." width="1280" height="800" loading="lazy">
+          <figcaption>A task that used all its steps reads Stopped, says what is left and offers Continue.</figcaption>
+        </figure>
+        <ul>
+          <li>A task that runs out of steps reads <strong>Stopped</strong>, not Failed.</li>
+          <li><strong>Continue</strong> picks it up where it stopped, with what it did before.</li>
+          <li>Or name the task in the main chat, and melo continues it at once.</li>
+          <li>Ask “briefly” or “in one line” and the main chat answers in a sentence or two; tasks it starts get short names.</li>
+        </ul>
+        <!-- usage:continue-task --><figure class="usage" aria-label="Continue a stopped task" data-copy="continue the recovery card task&#10;继续恢复卡片任务"><div class="usage-bar"><span class="usage-title">Continue a stopped task</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">continue the recovery card task</span></span>
+<span class="ln cmd"><span class="p">›</span> <span class="q">继续恢复卡片任务</span></span></code></pre><figcaption>Type it in the main chat; the words between “continue” and “task” name the task.</figcaption></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#the-main-chat-and-side-chats">Tasks in the guide</a></p>
       </section>
 
       <section class="section" id="roadmap">
@@ -155,15 +213,16 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>Next <small>7</small></h3>
+            <h3>Next <small>8</small></h3>
             <ul>
-              <li class="board-card"><strong>Dogfood round 2 on the new build</strong><span>Real work on this repository through the main chat, to find and fix what still trips people up.</span></li>
               <li class="board-card"><strong>Computer use in the browser</strong><span>melo acts on pages in a window you can watch, and asks before anything that matters.</span></li>
               <li class="board-card"><strong>Art for Melo's working poses</strong><span>The pill and the pet get drawn poses for the moments when melo works.</span></li>
               <li class="board-card"><strong>Set up a model server from melo</strong><span>With nothing installed, reach a first answer with one confirmation.</span></li>
               <li class="board-card"><strong>Other agents hand work to melo</strong><span>Workers on the task API, and an MCP server for coding agents.</span></li>
               <li class="board-card"><strong>Workers that share a project</strong><span>Parallel workers share one cached start; each task stays separate.</span></li>
               <li class="board-card"><strong>melo helps build melo</strong><span>Real development tasks on a hosted model, graded against other workers.</span></li>
+              <li class="board-card"><strong>Bring in what other assistants remember</strong><span>Planned: on first setup, melo reads the notes other coding assistants keep in your home folder and brings them in, with Undo.</span></li>
+              <li class="board-card"><strong>Tidy notes while the computer is idle</strong><span>Planned: melo goes over recent chats offline, merges duplicate notes and keeps the newer value, with Undo.</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -178,7 +237,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>Done <small>8</small></h3>
+          <h3>Done <small>13</small></h3>
           <ul>
             <li class="board-card"><strong>Main chat and side chats</strong><span>One chat that answers, or hands bigger work to a task by priority; the terminal opens the same chat.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Memory you can see</strong><span>Notes across chats, the newer value wins, and a Memory tab to edit or forget.</span><span class="chip done">done</span></li>
@@ -188,6 +247,11 @@
             <li class="board-card"><strong>Browsing the web</strong><span>melo reads and follows pages in a window you can watch.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Melo the Akita and the pill</strong><span>A pet in the app, the console and on your desktop, and a pill that says what runs.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Calls that matter ask</strong><span>Installing, downloading and changes outside the folder always ask, with the reason.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Auto mode</strong><span>Ask or Auto for each chat: routine steps run, risky ones are blocked with the reason, and Allow once lets one through.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Chinese console and app</strong><span>The console and the app speak 简体中文, with times and dates written the Chinese way.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Reminders</strong><span>Say it once, like “remind me to send the report on Friday at 9”, and melo tells you at that time.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Stop and continue</strong><span>A task that runs out of steps reads Stopped, and Continue picks it up where it left off.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Self-runs on this repository</strong><span>Three runs are done; in the third, in Auto, melo fixed two things in its own code without asking.</span><span class="chip done">done</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="./updates.html#updates">What's new</a> and <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">what changed</a>.</p>
@@ -201,6 +265,7 @@
         <ul>
           <li>The model can run shell commands and Python, and read or write any file you can.</li>
           <li>On macOS, a worker run (<code>melo worker</code>) and a saved task can write only in their workspace.</li>
+          <li>In Auto mode on macOS, a step also runs in a write sandbox: its files stay in the folder and away from melo's own sign-in.</li>
           <li>New memory files are readable only by you (mode 0600).</li>
           <li>The gateway requires a bearer token or browser session and refuses non-loopback binds; <code>melo console</code> prints a one-use link.</li>
           <li>A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.</li>

@@ -38,6 +38,7 @@ Token = tuple[str, str]  # (role, text); the role "" is plain text
 # Roles: p prompt, c command, s subcommand, f flag, a argument or value, q quoted
 # string, k comment, o output, y check mark, e cross, x punctuation.
 BOLD, ITALIC, TEXT_ROLES = "cs", "k", "pcsfaqkoyex"
+CHAT_PROMPT = "›"  # melo's own chat marks what you typed with this (support/cli)
 HUE_ROLES = "csfaqo"  # told apart by colour, weight and shape together
 # The terminal's roles (support/cli/theme.py) on a light and on a dark ground.
 _COLOURS = {
@@ -90,6 +91,7 @@ class Line:
     kind: str
     tokens: tuple[Token, ...]
     prompt: bool = False
+    glyph: str = "$"  # the prompt: `$` for a shell, `›` for melo's own chat
 
 
 @dataclass(frozen=True)
@@ -160,11 +162,27 @@ def _command_tokens(body: str, state: _Command) -> tuple[list[Token], bool]:
     return tokens, body.rstrip().endswith("\\")
 
 
+def _chat_line(row: str) -> Line:
+    """A message typed into melo's chat: a `/command` with its words, or plain words."""
+    if row.startswith("/"):
+        tokens, _ = _command_tokens(row, _Command())
+    else:
+        tokens = [("q", row)]
+    return Line("cmd", tuple(tokens), prompt=True, glyph=CHAT_PROMPT)
+
+
 def parse(text: str, mode: str = "shell") -> list[Line]:
-    """Split *text* into rows. In `console` mode only `$ ` rows are commands."""
+    """Split *text* into rows.
+
+    In `console` mode only `$ ` rows are commands; in `chat` mode every row is a
+    message typed into melo's own chat (`/approvals auto`, or a sentence).
+    """
     lines: list[Line] = []
     state, continued = _Command(), False
     for row in text.strip("\n").split("\n"):
+        if mode == "chat":
+            lines.append(_chat_line(row) if row else Line("out", ()))
+            continue
         if mode == "console" and not continued and not row.startswith("$ "):
             mark = {"✓": "y", "✗": "e"}.get(row[:1])
             tokens = ((mark, row[0]), ("o", row[1:])) if mark else (("o", row),)
@@ -233,7 +251,7 @@ def render_html(
     rows = "\n".join(
         '<span class="ln {}">{}{}</span>'.format(
             ln.kind,
-            '<span class="p">$</span> ' if ln.prompt else "",
+            f'<span class="p">{ln.glyph}</span> ' if ln.prompt else "",
             "".join(_span(r, t) for r, t in ln.tokens),
         )
         for ln in lines
@@ -298,7 +316,7 @@ def render_svg(block: Block, scheme: str, lang: str = "en") -> str:
     for i, line in enumerate(lines):
         column, spans = 0, []
         for role, text in (
-            (("p", "$"), ("", " "), *line.tokens) if line.prompt else line.tokens
+            (("p", line.glyph), ("", " "), *line.tokens) if line.prompt else line.tokens
         ):
             if text.strip():  # textLength keeps the width the same in any font
                 cls = f' class="{role}"' if role else ""
