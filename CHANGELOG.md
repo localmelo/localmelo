@@ -346,6 +346,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A run that knows its call budget stops itself and answers from what it has. The
+  developer setting `[agent] max_calls = N` (`-X agent.max_calls=N`; a whole number of
+  2 or more, unset by default, listed by `melo config keys` and `melo -h all`) makes a
+  direct run count its model requests, planning, reflection and the rest, each attempt
+  of a retried request once, and stop before the one that would pass the limit. With
+  `answer_on_stop` on, the last call is kept for the final answer: the run sends `N - 1`
+  requests, then that one. The run ends `budget_exhausted` with the error `Call budget
+  reached: ...`; `result` is the answer (`"answered_on_stop": true`), else the latest text
+  the model wrote, and `config.max_calls` is in the JSON record. With `answer_on_stop` on,
+  a request the server refuses for a budget or rate limit (HTTP 429, or an error that says
+  a budget is used) now gets the answer request as well: the status stays `provider_error`,
+  and `result` is the answer, or the latest text the model wrote when that fails. Unset,
+  every request, output and exit code is unchanged ([#NN]).
+
 - The macOS app shows what melo is doing while its window is put away. A small
   pill takes Melo's place on the desktop and says in one plain line what runs
   ("Reading example.com", "Running the tests"), with "+1" when more run. It

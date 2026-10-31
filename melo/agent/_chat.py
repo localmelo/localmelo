@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from localmelo.melo.agent._call_budget import CallBudgetError
 from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
@@ -578,6 +579,11 @@ class Chat:
     again after each delay in *retry_delays* (default
     :data:`RETRY_DELAYS_S`), waited out with *sleep*, so tests can pass a
     *sleep* that returns at once.
+
+    *max_calls*, when given, limits the requests a run sends, retried
+    attempts included (``stats.n_llm + stats.llm_errors``): a request that
+    would pass it is not sent and :class:`CallBudgetError` is raised. With
+    *reserve_answer* the last of them is kept for :meth:`final_answer`.
     """
 
     def __init__(
@@ -597,7 +603,11 @@ class Chat:
         system_prompt: str = SYSTEM_PROMPT,
         reflection_prompt: str = REFLECTION_PROMPT,
         identity: str = "",
+        max_calls: int | None = None,
+        reserve_answer: bool = False,
     ) -> None:
+        self.max_calls = max_calls
+        self.reserve_answer = reserve_answer
         self.system_prompt = system_prompt
         self.identity = identity
         self.reflection_prompt = reflection_prompt
@@ -704,6 +714,26 @@ class Chat:
             except (Exception, asyncio.CancelledError):
                 logger.warning("Context budget callback failed", exc_info=True)
 
+    def check_call_budget(self, closing: bool = False) -> None:
+        """Raise :class:`CallBudgetError` when one more request passes ``max_calls``.
+
+        The request that closes a stopped run (*closing*) may use the call that
+        ``reserve_answer`` keeps; no other request may.
+        """
+        if self.max_calls is None:
+            return
+        limit = (
+            self.max_calls - 1
+            if self.reserve_answer and not closing
+            else self.max_calls
+        )
+        sent = self.stats.n_llm + self.stats.llm_errors
+        if sent >= limit:
+            raise CallBudgetError(
+                f"Call budget reached: {sent} model requests sent "
+                f"(max_calls {self.max_calls})"
+            )
+
     async def _request(
         self,
         messages: list[Message],
@@ -713,6 +743,7 @@ class Chat:
         retry: bool = True,
         recall: Sequence[Any] = (),
         on_ready: Callable[[list[Message]], None] | None = None,
+        closing: bool = False,
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -729,6 +760,11 @@ class Chat:
         error of the last attempt, and any other exception at once,
         propagates.
 
+        With ``max_calls`` set, the check comes before the first attempt and
+        before each retry's delay: a request that would pass the limit is not
+        sent (see :meth:`check_call_budget`; *closing* is for the request
+        that answers a stopped run).
+
         Once the response is counted, :data:`CALL_RECORDER`, when set, is
         awaited with it: its *kind*, the provider's ``last_reasoning_key``
         and ``last_usage`` (the response's own usage when the provider has
@@ -736,6 +772,7 @@ class Chat:
         A cancellation during that await propagates with the response
         counted.
         """
+        self.check_call_budget(closing)
         if self.fixed_prefix and kind == "plan":
             schema = json.dumps(
                 [
@@ -844,6 +881,7 @@ class Chat:
                     or retry_attempt > len(self.retry_delays)
                 ):
                     raise
+                self.check_call_budget(closing)
                 delay = self.retry_delays[retry_attempt - 1]
                 logger.info(
                     "LLM request attempt %d failed, retrying in %g s: %s",
@@ -1209,7 +1247,7 @@ class Chat:
         (:func:`render_transcript`; only the newest
         :data:`ANSWER_EVIDENCE_CHARS` characters), the block of *reflections*
         and :data:`ANSWER_ON_STOP_NOTE`. The call is of kind ``reflect`` and
-        counts as auxiliary.
+        counts as auxiliary; it may use the call that ``max_calls`` keeps for it.
         """
         evidence = render_transcript(short)
         start = len(evidence) - ANSWER_EVIDENCE_CHARS
@@ -1231,7 +1269,7 @@ class Chat:
             Message(role="system", content=system),
             Message(role="user", content="\n\n".join(parts)),
         ]
-        return await self._request(messages, tools=None, kind="reflect")
+        return await self._request(messages, tools=None, kind="reflect", closing=True)
 
     async def _retry_on_prefix(
         self,
