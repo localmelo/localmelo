@@ -7,7 +7,7 @@
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
-import {formatTime, t} from './i18n.mjs';
+import {formatTime, saidText, t} from './i18n.mjs';
 import {levelLabel} from './levels.mjs';
 
 // Read once, in the page's language (a new language reloads the page).
@@ -193,7 +193,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     const text = button('sched-head', '', () => { state.open = open ? null : chore.id; state.edit = state.ask = null; draw(); });
     text.setAttribute('aria-expanded', String(open));
     const words = node('span', 'sched-text');
-    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', chore.when),
+    words.append(node('strong', 'sched-title', chore.title), node('span', 'sched-when', saidText(chore.when_said) ?? chore.when),
       ...rowLines(chore, now()).map((line) => node('span', 'sched-line', line)));
     text.append(words);
     head.append(text, toggle(t('sched.switchLabel', {title: chore.title}), chore.enabled, async () => {

@@ -124,6 +124,10 @@ async def test_a_running_chat_is_counted_and_listed_by_title(
     item = {"kind": "chat", "id": turn.session_id, "title": "Fix the build"}
     assert found["items"] == [{**item, "activity": "Thinking", "icon": "think"}]
     assert client.get("/api/health").json()["sessions"]["running"] == 1
+    # The app's pill reads these words: in the language it asks for, English for a client that asks for none.
+    asked = client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
+    assert asked.json()["status"]["items"][0]["activity"] == "正在思考"
+    assert asked.json()["status"]["focus"]["activity"] == "正在思考"
     monkeypatch.undo()
 
 

@@ -52,7 +52,7 @@
 |---|---|
 | main chat, side chat | 主对话，旁支对话 |
 | chat, task, terminal chat | 对话，任务，终端对话 |
-| worker run, Workers | 助手运行，助手 |
+| worker run, Workers | 后台任务，后台 |
 | panel, tab, sidebar | 面板，标签页，侧边栏 |
 | Details | 详情 |
 | Memory (tab), note | 记忆，笔记 |

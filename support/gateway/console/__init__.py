@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
-from localmelo.support.gateway.i18n import LanguageMiddleware, t
+from localmelo.support.gateway.i18n import LANGUAGES, LanguageMiddleware, t
 from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.memory import ChatMemory
@@ -137,6 +137,7 @@ class Console:
         options: ConsoleOptions | None = None,
     ) -> None:
         self.cfg = cfg
+        self._asked_language = "en"
         self.port = port
         self.options = options or ConsoleOptions()
         self.store = SessionStore(self.options.store_path, writer="gateway")
@@ -267,13 +268,24 @@ class Console:
 
     # ── Mounting ──
 
+    def _remember_language(self, language: str) -> None:
+        self._asked_language = language
+
+    def language(self) -> str:
+        """The language the console speaks now: the setting, else the one a page asked for last, else English.
+
+        For the words nobody asks for, such as a check-in's note.
+        """
+        setting = getattr(getattr(self.cfg, "console", None), "language", "auto")
+        return setting if setting in LANGUAGES else self._asked_language
+
     def mount(self, app: FastAPI) -> None:
         """Register the error handlers and the ``/api`` routes on *app*."""
         self.app = app
         app.state.console = self
         errors.install(app)
         # The words the server writes follow the language the console page asks for.
-        app.add_middleware(LanguageMiddleware)
+        app.add_middleware(LanguageMiddleware, remember=self._remember_language)
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
         routes_status.add_routes(app, self)

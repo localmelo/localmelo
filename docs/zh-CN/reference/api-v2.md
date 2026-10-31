@@ -95,7 +95,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。
 - `sessions.resume_mode` 是当前使用的恢复方式；目前为 `pairs`。
 - `status.running` 按类别统计当前正在运行的内容：`chats`（控制台中有轮次在进行的对话，与 `sessions.running` 相同）、`tasks`（状态为 `running` 的调度任务）、`runs`（直接运行和 `--brief` worker）和 `terminal`（交互式 `melo` 对话）。后两项来自命令行文件，只在租约有效时才计入一个轮次，因此进程已终止的运行不会被计入。`status.tasks` 是状态行所显示的调度队列：`running`、`queued`、`held` 和 `top_level`（其中最高的级别，没有则为 `null`）。`status.items` 列出正在运行的内容，先是对话，然后是任务、运行和终端对话，最多 20 项，每项为 `{"kind", "id", "title", "activity", "icon"}`（`kind` 为 `chat`、`task`、`run` 或 `terminal`；终端对话的标题已脱敏）。计数没有上限。无法读取的存储按没有运行任何内容计；一次调用通过索引读取任务状态，并通过索引读取命令行文件中正在运行的轮次。
-- `activity` 用平实的话说明该项正在做什么，`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
+- `activity` 用平实的话说明该项正在做什么（请求带 `X-LocalMelo-Language` 时用那种语言，macOS 的活动胶囊就是这样；否则是英文），`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
@@ -354,7 +354,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，在工作区下属于它自己的文件夹中运行，归定时事项所属的对话（`front_id`：主对话或某个旁支对话）。每个定时事项带有 `revision`，每次更改都会使它加一。
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - 定时事项的 `level`（1 到 4）就是它的优先级：控制台把它显示为 `P` 加数字。`level_word`（`Today`、`Normal` 等）为兼容现有客户端而保留，控制台从不显示它。
@@ -364,6 +364,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
 - `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
 - `PUT /api/checkin` 配合 `{"on": false}` 切换 check-in（保存在文件中），返回 `{"checkin": {...}}`；关闭期间 `next_at` 为 null。
+- `when_said` 是 `when` 的词形式：一个词库键和它的参数，其中一天里的时刻写成 `{"clock": minutes after midnight}`（午夜后的分钟数）。页面用自己的语言和钟点写它（`8:30 AM`、`上午 8:30`）；`when` 始终用 24 小时制（`8:30`），语言随请求。
+- check-in 的提示用控制台的语言写：先看 `[console] language` 设置，其次是页面最近一次请求的语言，否则是英文。
 
 一次性事项（`"kind": "once"`）只运行一次。它的 `when` 写作 `once, Fri Oct 30 at 9:00`（控制台里按页面的语言），第一次 `next_run` 是它的时间再加抖动；运行之后网关把它关掉：`enabled` 为 false，`next_run` 为 null，`last_run` 和 `last` 保留。到期时电脑在睡眠或网关没有运行的，会在下一次检查时运行，此时 `late_min` 给出它比约定时间晚了多少分钟开始（晚不到五分钟时为 null）。它不会等上一次运行结束。
 

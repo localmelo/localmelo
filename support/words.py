@@ -60,3 +60,31 @@ def t_in(language: str, key: str, /, **params: Any) -> str:
     if entry is None:
         language, entry = "en", catalog("en").get(key)
     return key if entry is None else format_entry(entry, params, language)
+
+
+def said(key: str, /, **params: Any) -> dict[str, Any]:
+    """Words to store with a record (a card, an echo) so each reader reads them in their language.
+
+    ``{"key": key, "params": params}``; a parameter may itself be a :func:`said`,
+    or a time of day, ``{"clock": minutes after midnight}``, which a reader
+    writes as its language writes a clock (here, as ``8:30``).
+    """
+    return {"key": key, "params": params}
+
+
+def clock_words(minute: int) -> str:
+    """``8:30`` for 510 minutes after midnight."""
+    return f"{minute // 60}:{minute % 60:02d}"
+
+
+def said_in(language: str, words: Mapping[str, Any]) -> str:
+    """The words of a :func:`said` in *language*."""
+    params = words.get("params")
+    filled: dict[str, Any] = {}
+    for name, value in params.items() if isinstance(params, Mapping) else ():
+        if isinstance(value, Mapping) and "key" in value:
+            value = said_in(language, value)
+        elif isinstance(value, Mapping) and "clock" in value:
+            value = clock_words(int(value["clock"]))
+        filled[name] = value
+    return t_in(language, str(words.get("key")), **filled)

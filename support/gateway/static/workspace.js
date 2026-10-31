@@ -25,7 +25,7 @@ import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
-import { allowState, blockCard, blockFacts } from "./blocked.mjs";
+import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
@@ -1694,16 +1694,17 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny.
   const review = request.review;
   const high = review?.verdict === "high";
+  const reviewed = high ? reviewWords(review, folder) : { title: "", reasons: [] };
   if (high) {
     card.dataset.impact = "high";
-    title = review.title || title;
+    title = reviewed.title || title;
     caption = t("approval.asksEveryTime", { tool });
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
-  if (high && review.reasons?.length) {
+  if (high && reviewed.reasons.length) {
     card.append(el("p", "approval-why", t("approval.why")));
     const reasons = el("ul", "approval-reasons");
-    for (const reason of review.reasons) reasons.append(el("li", "", reason));
+    for (const reason of reviewed.reasons) reasons.append(el("li", "", reason));
     card.append(reasons);
   }
   if (high && asked) {

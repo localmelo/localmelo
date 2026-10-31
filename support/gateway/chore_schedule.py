@@ -19,6 +19,7 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Final, Literal
 
 from localmelo.support.gateway.i18n import said, said_text
+from localmelo.support.words import clock_words
 
 Kind = Literal["daily", "weekdays", "hours", "once"]
 KINDS: Final = ("daily", "weekdays", "hours", "once")
@@ -43,9 +44,7 @@ class ScheduleError(ValueError):
         self.words = words
 
 
-def clock_text(minute: int) -> str:
-    """``8:30`` for 510 minutes after midnight."""
-    return f"{minute // 60}:{minute % 60:02d}"
+clock_text = clock_words
 
 
 @dataclass(frozen=True)
@@ -142,7 +141,7 @@ class Schedule:
             return said("schedule.hours", n=self.hours)
         if self.on is not None:
             return said("schedule.once", at=self.said_at())
-        return said(f"schedule.{self.kind}", time=clock_text(self.minute))
+        return said(f"schedule.{self.kind}", time={"clock": self.minute})
 
     def said_at(self) -> dict[str, Any]:
         """A one-time schedule's date and time without "once": ``Fri Oct 30 at 9:00``."""
@@ -154,7 +153,7 @@ class Schedule:
             weekday=said(f"time.weekday.{weekday}"),
             month=said(f"time.month.{month}"),
             day=self.on.day,
-            time=clock_text(self.minute),
+            time={"clock": self.minute},
         )
 
     def next_after(self, after: float, tz: tzinfo | None = None) -> float:

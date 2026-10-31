@@ -24,7 +24,7 @@ handled, :func:`t` uses its language.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from http.cookies import CookieError, SimpleCookie
@@ -39,6 +39,8 @@ from localmelo.support.words import (
     catalog,
     format_entry,
     plural_form,
+    said,
+    said_in,
     t_in,
 )
 
@@ -99,27 +101,9 @@ def current() -> str:
     return _current.get()
 
 
-def said(key: str, /, **params: Any) -> dict[str, Any]:
-    """Words to store with a record (a card, an echo) so each reader reads them in their language.
-
-    ``{"key": key, "params": params}``; a parameter may itself be a :func:`said`.
-    The record keeps its English ``line`` too, for every client that reads only that.
-    """
-    return {"key": key, "params": params}
-
-
 def said_text(words: Mapping[str, Any], language: str | None = None) -> str:
     """The words of a :func:`said` in *language* (the request's when omitted)."""
-    params = words.get("params")
-    filled = {
-        name: (
-            said_text(value, language)
-            if isinstance(value, Mapping) and "key" in value
-            else value
-        )
-        for name, value in (params.items() if isinstance(params, Mapping) else ())
-    }
-    return t_in(language or _current.get(), str(words.get("key")), **filled)
+    return said_in(language or _current.get(), words)
 
 
 @contextmanager
@@ -146,15 +130,20 @@ def _cookie(headers: Iterable[tuple[bytes, bytes]]) -> str:
     return ""
 
 
-def request_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
-    """What the console page asked for, by header or cookie; English for any other client."""
+def asked_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
+    """The language a request asks for, by header or cookie; ``""`` for any other client."""
     pairs = list(headers)
     asked = next(
         (value.decode("latin-1") for name, value in pairs if name.lower() == HEADER),
         "",
     )
     asked = asked.strip() or _cookie(pairs)
-    return asked if asked in LANGUAGES else "en"
+    return asked if asked in LANGUAGES else ""
+
+
+def request_language(headers: Iterable[tuple[bytes, bytes]]) -> str:
+    """What the console page asked for, by header or cookie; English for any other client."""
+    return asked_language(headers) or "en"
 
 
 def page_language(setting: str, headers: Iterable[tuple[bytes, bytes]]) -> str:
@@ -178,16 +167,27 @@ def page_language(setting: str, headers: Iterable[tuple[bytes, bytes]]) -> str:
 
 
 class LanguageMiddleware:
-    """Sets the language of each HTTP request for :func:`t`."""
+    """Sets the language of each HTTP request for :func:`t`.
 
-    def __init__(self, app: ASGIApp) -> None:
+    *remember*, when given, hears each language a request asks for: the console
+    keeps the last one, to write in it what nobody asked for (a check-in).
+    """
+
+    def __init__(
+        self, app: ASGIApp, remember: Callable[[str], None] | None = None
+    ) -> None:
         self.app = app
+        self.remember = remember
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        token = _current.set(request_language(scope.get("headers", ())))
+        headers = scope.get("headers", ())
+        asked = asked_language(headers)
+        if asked and self.remember is not None:
+            self.remember(asked)
+        token = _current.set(asked or "en")
         try:
             await self.app(scope, receive, send)
         finally:
@@ -202,6 +202,7 @@ __all__ = [
     "LanguageMiddleware",
     "Entry",
     "accept_languages",
+    "asked_language",
     "catalog",
     "current",
     "format_entry",

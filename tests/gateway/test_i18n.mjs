@@ -14,7 +14,7 @@ import {cardWords, dayLabel} from '../../support/gateway/static/main-chat.mjs';
 import {headline, stepWords} from '../../support/gateway/static/panel.mjs';
 import {rowLines, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
-import {blockFacts} from '../../support/gateway/static/blocked.mjs';
+import {blockFacts, reviewWords} from '../../support/gateway/static/blocked.mjs';
 import {checkedWords} from '../../support/gateway/static/settings.mjs';
 
 // Times are read in one zone, so the strings below hold on any machine.
@@ -262,7 +262,7 @@ test('the copied failure line reads in the page\'s language, and keeps the statu
     assert.equal(statusLine('failed', ''), 'melo：运行结束，状态 failed：没有错误信息');
     assert.equal(t('failure.field.tools', {value: 3}), '工具调用：3');
     assert.equal(t('failure.copyRun', {id: 'run-9'}), '运行 run-9');
-    assert.equal(t('panel.tab.workers'), '助手');
+    assert.equal(t('panel.tab.workers'), '后台');
     assert.equal(t('model.server.openaiCompatible'), '兼容 OpenAI 的服务器');
   } finally {
     await useLanguage('en');
@@ -281,4 +281,36 @@ test('the page tells the macOS app which language it chose', async () => {
   assert.deepEqual(heard, [{language: 'zh-Hans'}, {language: 'en'}]);
   // Outside the app there is no handler, and the page starts all the same.
   assert.equal((await boot('en', [], 'no-app')).page.language(), 'en');
+});
+
+// ── The Ask card's question and reasons, and the words the server stores with a time ──
+
+test('the Ask card asks and gives its reasons in the page\'s language, and English keeps the checker\'s own words', async () => {
+  const review = {verdict: 'high', title: 'Change files outside notes?', categories: ['outside_write', 'delete'],
+    reasons: ['Writes ~/Desktop/a.txt, outside the folder.', 'Deletes the folder build.']};
+  assert.deepEqual(reviewWords(review, 'notes'), {title: 'Change files outside notes?', reasons: review.reasons});
+  // A review with no title of its own is asked by its category.
+  assert.equal(reviewWords({...review, title: ''}, 'notes').title, 'Change files outside notes?');
+  await useLanguage('zh-Hans');
+  try {
+    assert.deepEqual(reviewWords(review, 'notes'), {title: '更改 notes 之外的文件？', reasons: ['这一步会更改文件夹外的文件。', '这一步会删除无法恢复的文件。']});
+    assert.deepEqual(reviewWords({verdict: 'routine'}), {title: '', reasons: []});
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a time of day the server stores is written as the page writes a clock', async () => {
+  const daily = {key: 'schedule.weekdays', params: {time: {clock: 8 * 60 + 30}}};
+  const once = {key: 'schedule.once', params: {at: {key: 'schedule.at', params: {weekday: {key: 'time.weekday.4', params: {}},
+    month: {key: 'time.month.10', params: {}}, day: 30, time: {clock: 21 * 60 + 5}}}}};
+  assert.equal(saidText(daily), 'every weekday at 8:30 AM');
+  assert.equal(saidText(once), 'once, Fri Oct 30 at 9:05 PM');
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(saidText(daily), '每个工作日 上午 8:30');
+    assert.equal(saidText(once), '仅一次，10月30日 周五 下午 9:05');
+  } finally {
+    await useLanguage('en');
+  }
 });

@@ -29,6 +29,18 @@ export function blockWords(approval) {
 }
 
 /**
+ * The reasons an Ask-mode card gives for a high-impact call, in the page's language (see `reasonLines`),
+ * and its question: English keeps the checker's own title, another language asks by the first category.
+ */
+export function reviewWords(review, folder = '') {
+  const found = isObject(review) ? review : {};
+  const categories = categoriesOf({review: found});
+  const own = typeof found.title === 'string' ? found.title : '';
+  const title = categories.length && (language() !== 'en' || !own) ? t(`approval.title.${categories[0]}`, {folder}) : own;
+  return {title, reasons: reasonLines(found, categories)};
+}
+
+/**
  * The sentences under a blocked step's title, in the page's language. English keeps the rules' own
  * sentences, which name the package, the file or the host; another language names the kind of step
  * in its own words (the step itself is on the card, as written). A review the model settled says what

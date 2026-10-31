@@ -73,13 +73,17 @@ export function t(key, params = {}) {
 
 /**
  * The words the gateway stored with a record (a card, an echo) as `said: {key, params}`, in the page's
- * language; a parameter may itself be a `said`. Null when there is none, so the record's `line` reads.
+ * language; a parameter may itself be a `said`, or a time of day `{clock: minutes after midnight}`, which
+ * is written as this page writes a clock. Null when there is none, so the record's `line` reads.
  */
 export function saidText(said) {
   if (!said || typeof said !== "object" || typeof said.key !== "string") return null;
   const params = {};
   for (const [name, value] of Object.entries(said.params ?? {})) {
-    params[name] = value && typeof value === "object" && typeof value.key === "string" ? saidText(value) : value;
+    if (value && typeof value === "object" && typeof value.key === "string") params[name] = saidText(value);
+    else if (value && typeof value === "object" && Number.isFinite(value.clock)) {
+      params[name] = formatTime(new Date(2000, 0, 1, Math.floor(value.clock / 60), value.clock % 60), "clock");
+    } else params[name] = value;
   }
   return t(said.key, params);
 }

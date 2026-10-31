@@ -35,8 +35,9 @@ from localmelo.support.gateway.i18n import (  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "support/gateway/static"
 CONSOLE = ROOT / "support/gateway/console"
-# The status row's words are written in the terminal's module, which runs without the gateway.
+# Words written by modules the terminal runs too, which need no gateway.
 USAGE = ROOT / "support/usage_snapshot.py"
+DISPLAY = ROOT / "support/sessions/display.py"
 APP = ROOT / "macos/LocalMeloApp"
 CASES = json.loads((ROOT / "tests/fixtures/i18n_cases.json").read_text("utf-8"))
 _PARAM = re.compile(r"\{(\w+)\}")
@@ -244,7 +245,12 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         found |= {key for _, key in _JS_KEY.findall(path.read_text("utf-8"))}
         templates |= set(_JS_STEM.findall(path.read_text("utf-8")))
     found |= set(_HTML_KEY.findall((STATIC / "index.html").read_text("utf-8")))
-    for path in [*CONSOLE.glob("*.py"), *ROOT.glob("support/gateway/*.py"), USAGE]:
+    for path in [
+        *CONSOLE.glob("*.py"),
+        *ROOT.glob("support/gateway/*.py"),
+        USAGE,
+        DISPLAY,
+    ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))
         templates |= set(_PY_STEM.findall(text))
@@ -258,6 +264,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         STATIC / "workspace.js",
         *CONSOLE.glob("*.py"),
         USAGE,
+        DISPLAY,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,10 @@ from typing import Any
 import httpx
 import pytest
 
+from localmelo.support.config import ConsoleConfig
 from localmelo.support.gateway.chore_schedule import Schedule
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
 from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
@@ -1206,3 +1209,63 @@ async def test_a_refused_chore_change_says_why_in_the_page_s_language(
         )
         plain = await client.delete(f"/api/chores/{chore['id']}")
         assert plain.json()["error"]["message"] == f"No chore has id {chore['id']}"
+
+
+async def test_the_checkin_is_written_in_the_console_s_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary("你的日程简报好了。")) as (
+        console, client, clock, summary, _
+    ):  # fmt: skip
+        task, _ = await console.workers.create(
+            {"objective": "Make slides", "title": "Slides"}
+        )
+        await set_state(console, task["task_id"], "waiting", clock.now)
+        clock.now += CHECKIN_S + 1
+        # The setting wins; with the setting on auto, the language a page asked for last.
+        assert console.language() == "en"
+        await client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
+        assert console.language() == "zh-Hans"
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["line"] == "你的日程简报好了。"
+        assert summary.facts == [["Slides：在等你"]]
+        # The model is asked for the note in that language too.
+        assert "Simplified Chinese" in chores_module._NOTE_LANGUAGE["zh-Hans"]
+        console.cfg = replace(console.cfg, console=ConsoleConfig(language="en"))
+        assert console.language() == "en"
+
+
+async def test_the_checkin_the_code_writes_is_in_the_console_s_language(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary(fail=True)) as (
+        console, client, clock, _, _
+    ):  # fmt: skip
+        console.cfg = replace(console.cfg, console=ConsoleConfig(language="zh-Hans"))
+        for title in ("Slides", "Photos"):
+            task, _ = await console.workers.create(
+                {"objective": "Do it", "title": title}
+            )
+            await set_state(console, task["task_id"], "waiting", clock.now)
+        clock.now += CHECKIN_S + 1
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["line"] in (
+            "Slides：在等你；Photos：在等你",
+            "Photos：在等你；Slides：在等你",
+        )
+
+
+async def test_a_chore_carries_its_schedule_as_words_for_the_page(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        assert chore["when"] == "every weekday at 8:30"
+        assert chore["when_said"] == {
+            "key": "schedule.weekdays",
+            "params": {"time": {"clock": 8 * 60 + 30}},
+        }
+        listed = (
+            await client.get("/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"})
+        ).json()
+        assert listed["chores"][0]["when"] == "每个工作日 8:30"

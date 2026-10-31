@@ -164,7 +164,7 @@ output or log the header; same-user processes can still read the token file.
   redacted). The counts are not capped. A store that cannot be read counts as
   nothing running; one call reads the task states by their index and the
   running turns of the CLI file by theirs.
-- `activity` says what the item is doing in plain words, and `icon` its kind:
+- `activity` says what the item is doing in plain words (in the language of the request when it sends `X-LocalMelo-Language`, as the macOS pill does; English otherwise), and `icon` its kind:
   `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
   scheduler holds its model call; when the reason is known it says why:
   `Waiting for a higher-priority task`, `Waiting for a free model slot`,
@@ -671,7 +671,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
@@ -681,6 +681,8 @@ Saved requests that run on a schedule (see [Chores that repeat](../guides/web-co
 - `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+- `when_said` is `when` as words: a catalog key and its parameters, where a time of day is `{"clock": minutes after midnight}`. The page writes it in its own language and clock (`8:30 AM`, `上午 8:30`); `when` always writes the 24-hour clock (`8:30`), in the language of the request.
+- The check-in's note is written in the console's language: the `[console] language` setting, else the language the page asked for last, else English.
 
 A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 30 at 9:00` (in the page's language for the console), its first `next_run` is its time plus the jitter, and after its run the gateway switches it off: `enabled` false, `next_run` null, `last_run` and `last` kept. One due while the computer slept or the gateway was down runs at the next tick, and `late_min` then says how many minutes after its time it started (null when it started less than five minutes after it). It never waits for an earlier run to end.
 
