@@ -56,14 +56,20 @@
   - 一条笔记会替换同一主题的旧笔记，不论主题分类：`I live in Lisbon` 之后的 `I live in Utrecht`、`call me R.` 之后的 `call me Ray`、`…是阿凯` 之后的 `我的健身教练是小宇`。
   - 配置了嵌入模型时，只差一个简短值的句子也会替换旧笔记：`… on Mondays` 之后的 `I go to the gym on Fridays`。
   - 另一个主题的相似句子互不替换：`my flight to Porto` 旁边的 `my flight to Faro`、`我的书法课` 旁边的 `我的游泳课`；另一类值也不替换：`my cat is called Biscuit` 旁边的 `my cat is grey`。
+  - 关于同一个人的另一件事也会保留：`Tom Briggs's office is in room 9C` 不会替换 `your manager is Tom Briggs`，`马可的生日是三月九号` 不会替换 `马可的工作室在中山路88号`。同一件事的新值则会替换：`…is in room 12A` 替换 `…is in room 9C`。
+  - 你明确说出的改动会替换旧笔记，即使聊天只是反问而没有保存：已有笔记 `Your weekly sync is on Wednesday.` 时，你输入 `My weekly sync is on Friday.`，只要这一轮聊天没有保存任何笔记，新的值就会被记下（带 Undo），哪怕聊天只回答了 “Would you like me to change it?”。只有对已有笔记的改动才算：还没有笔记的新主题仍由聊天自己判断是否记下，问题（`Is my sync on Friday?`）也不算。
   - 被替换的笔记会保留，但不再被召回或列出；新笔记下的 Undo 会把它恢复。
+- 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。单纯的 "Noted, thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
 
 笔记被记下之前，代码会检查：
 
 - 它的词必须来自你在这个对话中输入的内容（任何一轮，撤销的轮次除外），或来自对话展示给你的一个已完成任务的结果（在你某条消息下召回的任务结果）。
+- 措辞可以不同，值不可以。每个数字或带数字的词、星期、句中大写的名字或词、引号里的短语，都必须出现在你的话里；其余的实词至少要有五分之四出现，所以 "your replies" 能对上你说的 "reply"，用 "then" 代替 "followed by" 也没关系，而把 `C14` 写成 `C15`、把 Wednesday 写成 Thursday 会被拒绝。用中文为英文消息写的笔记会被拒绝，模型会被告知要用你用的语言来写。
 - 只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。
+- 关于别人的笔记不会被写成关于你：你输入了 "马可的工作室在中山路88号。"，笔记 "你的工作室在中山路88号。" 会被拒绝，模型会被告知改成写他们（"马可的…"）；反过来，你在那句话里没有提到的人，笔记也不能写成关于他。"我的姐姐的车" 和 "你的姐姐的车" 都是你的。
+- 笔记旁引用的句子（`you said it`）是你输入的、包含笔记最多词的那一句；`Mr.`、`Dr.`、`Prof.`、`vs.` 这样的称谓或缩写，以及 `J.` 这样的首字母，不会结束一句话。
 - 看起来像密码、密钥、一次性验证码、卡号或证件号的文字从不被保存，那一行会写 `Not remembered: it looked like a password or key`。
 - 模型被告知，绝不要把笔记或你说的关于你自己的事存进文件或用代码保存。
 
@@ -92,7 +98,14 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - 页面在你的消息下方显示 `Used 1 memory ▾`；展开即可看到每一项及其出处，例如 `you said it · chat “Planning”, Oct 30`。
 - 大多数消息什么也不召回：一项内容必须包含消息中大部分实词（英文单词的复数、`-ing`、`-ed` 词尾不影响匹配："meet" 能找到 "meets"），或按嵌入模型在语义上足够接近。
 - 嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。
-- 对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+- 对话自己的早先轮次，一旦离开模型的近期消息窗口（见[工作记忆窗口](../reference/memory.md#working-memory-window)），就像其他对话的轮次一样被召回，并显示为 `this chat, Oct 30`；窗口里仍有的轮次不会被召回，因为模型已经有了。一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+
+```text
+when is my dentist appointment?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
+```
 
 **召回时新的值优先。**
 
@@ -144,12 +157,14 @@ Where did I live before?
 
 对话被告知的关于记忆的内容：
 
+- 它只看到这个对话的近期消息：对话更早的部分、以前的对话和笔记，在匹配你的消息时会随消息一起回来，`search_memory` 可以查更多。
 - 当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你。
 - 你请它记住的事实已经保存；它绝不把笔记存进文件或用代码保存；它用一句简短的话确认一条笔记。
+- 笔记用你这条消息的语言来写；记忆带回来的内容，不管有没有存成笔记，都可以用来回答你的问题：这个对话或别的对话里更早的消息，和笔记一样算数。
 - 笔记或早先的对话互相矛盾时，以最新的为准。
 - 你的 About you 和 Preferences 笔记，用你的原话列出（最多 600 个字符，在对话启动模型时读取；被替换的笔记不列出）。
 - 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。
-- 模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。
+- 模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。回答说它记下了某件事而没有记下任何笔记时，该事件里的 `unsaved_claim` 为 `true`。
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。
 

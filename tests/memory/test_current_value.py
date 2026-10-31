@@ -155,6 +155,32 @@ def test_every_text_that_shows_notes_names_the_same_form() -> None:
     assert records.second_person("我的导师是周教授。") == "你的导师是周教授。"
 
 
+def test_the_tool_text_and_the_notes_text_agree_on_language_and_say_nothing_of_claims() -> (
+    None
+):
+    """A note is in the language of this turn's message. Neither text tells the
+    model when it may say a fact is noted: quoting the tool's output made it
+    imitate the output ("Remembered: ..." with no call), and a rule about
+    claiming saves made it refuse recalled facts that were never kept as notes.
+    Code makes a claimed save real instead (``ChatMemory.keep_claims``)."""
+    for text in (NOTES_TEXT, REMEMBER.description):
+        assert "in the language of the user's message in this turn" in text
+        assert "noted only after" not in text
+        assert "say plainly that it was not kept" not in text
+        assert "“Remembered”" not in text and "“Not remembered”" not in text
+    assert "in the user's language" not in REMEMBER.description
+
+
+def test_the_notes_text_says_recalled_items_answer_whether_or_not_kept_as_notes() -> (
+    None
+):
+    """A recalled earlier message is as good as a note for answering."""
+    assert "Use them to answer whether or not they were kept as notes" in NOTES_TEXT
+    assert "an earlier message of this chat or another counts as much as a note" in (
+        NOTES_TEXT
+    )
+
+
 def test_the_memory_rule_asks_for_the_current_value_and_for_what_was_asked() -> None:
     for rule in (
         "Answer with the newest value only, and mention an older value only when "
@@ -178,3 +204,9 @@ def test_a_change_is_a_statement_to_keep_in_that_turn() -> None:
     # The note the tool is told to write replaces the one it names.
     old, new = "You work at Spruce Labs.", "You work at Acme."
     assert records.subject(old) == records.subject(new) != ""
+
+
+def test_the_notes_text_says_reminders_are_scheduled_not_noted() -> None:
+    """A "remind me … at <time>" goes to the scheduler; the chat never keeps it as a note."""
+    assert "Reminders are scheduled, not noted" in NOTES_TEXT
+    assert "do not save it as a note" in NOTES_TEXT

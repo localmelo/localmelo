@@ -13,6 +13,8 @@ A turn whose fact a newer note or a newer turn replaced comes after the rest,
 below the newer one, and reads as older (:func:`newer_first`); the recall block
 leaves such a turn out unless the message asks about the past
 (:func:`current_only`), so the model is given the current value only.
+A chat's own turns are recalled like another chat's once the model's window no
+longer holds them (:func:`in_view`), and read as ``this chat`` (:func:`this_chat`).
 """
 
 from __future__ import annotations
@@ -175,6 +177,26 @@ def day(at: float) -> str:
     return f"{time.strftime('%b', local)} {local.tm_mday}"
 
 
+def in_view(item: Item, session_id: str, keep_from_turn: int | None) -> bool:
+    """Whether *item* is a turn of chat *session_id* that the chat's model still
+    sees: its turn is *keep_from_turn* or later, or any turn when that is ``None``.
+
+    Such a turn is not recalled: the chat has it already.
+    """
+    return (
+        not item.is_record
+        and item.session_id == session_id
+        and (keep_from_turn is None or item.turn >= keep_from_turn)
+    )
+
+
+def this_chat(item: Item, session_id: str) -> Item:
+    """*item* worded as the earlier talk of chat *session_id*, when it is a turn of it."""
+    if item.is_record or item.session_id != session_id:
+        return item
+    return dataclasses.replace(item, where=f"this chat, {day(item.created_at)}")
+
+
 def origin(chat: str, gone: bool, at: float) -> str:
     """Where a note came from: ``from chat “Plans”, Oct 30``, or ``from a deleted chat, Oct 30``."""
     return f"from {'a deleted chat' if gone else chat}, {day(at)}"
@@ -185,16 +207,38 @@ def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+def _undoubled(base: str) -> str:
+    """*base* (a word without ``-ing`` or ``-ed``) with a doubled last consonant
+    reduced to one: "runn" gives "run"; "fall", "miss", "buzz", "stuff" and "add"
+    are words as they are."""
+    if (
+        len(base) >= 4
+        and base[-1] == base[-2]
+        and base[-1].isalpha()
+        and base[-1] not in "aeiouylszfd"
+    ):
+        return base[:-1]
+    return base
+
+
 def stem(word: str) -> str:
     """A lowercase ASCII word without a plural, ``-ing`` or ``-ed`` ending.
 
     So "meets" and "meeting" find "meet" and "Tuesdays" finds "tuesday"; both
-    sides of a match are stemmed, so a stem need not be a word.
+    sides of a match are stemmed, so a stem need not be a word. ``-ies`` and a
+    long ``-ie`` end in ``y`` ("replies" and "reply", "movies" and "movie"). A
+    doubled consonant the ending brought drops one ("running" and "run",
+    "stopped" and "stop"), unless the word keeps it bare: ``l``, ``s``, ``z``,
+    ``f`` and ``d`` stay ("falling", "missing", "buzzing", "stuffed", "adding").
     """
+    if len(word) >= 5 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) >= 5 and word.endswith("ie"):
+        return word[:-2] + "y"
     if len(word) >= 6 and word.endswith("ing"):
-        return word[:-3]
+        return _undoubled(word[:-3])
     if len(word) >= 5 and word.endswith("ed"):
-        return word[:-2]
+        return _undoubled(word[:-2])
     if len(word) >= 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
         return word[:-1]
     return word
@@ -255,12 +299,15 @@ def ranked(
     *,
     now: float,
     exclude_session: str = "",
+    keep_from_turn: int | None = None,
     coverage: float = MIN_COVERAGE,
 ) -> list[Item]:
     """The items that pass the bars for *query*, best first.
 
     *coverage* is the share of the question's content words an item must hold
-    to join the BM25 list; a small one lets loose candidates through.
+    to join the BM25 list; a small one lets loose candidates through. The
+    turns of *exclude_session* from *keep_from_turn* on (all of them without
+    one) are left out (:func:`in_view`).
     """
     wanted = gate_terms(query)
     lists: list[list[str]] = []
@@ -285,7 +332,7 @@ def ranked(
     for key, score in fused.items():
         item = corpus.items[key]
         if not item.is_record:
-            if item.session_id == exclude_session:
+            if in_view(item, exclude_session, keep_from_turn):
                 continue
             age_days = max(0.0, now - item.created_at) / 86_400
             score *= 0.5 ** (age_days / HALF_LIFE_DAYS)
@@ -309,11 +356,12 @@ def newer_first(
     replaced: Mapping[tuple[str, int], Item],
     *,
     exclude_session: str = "",
+    keep_from_turn: int | None = None,
 ) -> list[Item]:
     """*items* with each turn whose fact a newer note or turn *replaced* moved
     after the rest and marked older; the newer one comes in ahead of it if it
-    was not found (a turn of *exclude_session*, the chat under way, never: the
-    chat has it already).
+    was not found (a turn the chat under way still shows, never: the chat has
+    it already, :func:`in_view`).
 
     The old fact stays as history, as people keep it, but the newer one wins.
     """
@@ -330,7 +378,7 @@ def newer_first(
             if newer.is_record or (newer.session_id, newer.turn) not in replaced:
                 break
             newer = replaced[(newer.session_id, newer.turn)]
-        here = not newer.is_record and newer.session_id == exclude_session
+        here = in_view(newer, exclude_session, keep_from_turn)
         if newer.key not in keys and not here:
             keys.add(newer.key)
             fresh.append(newer)

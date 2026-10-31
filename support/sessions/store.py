@@ -174,7 +174,15 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.undone": frozenset({"turn", "turn_id"}),
         "turn.pictures": frozenset({"turn", "turn_id", "pictures"}),
         "turn.memory": frozenset(
-            {"turn", "turn_id", "used", "remembered", "refused", "recall"}
+            {
+                "turn",
+                "turn_id",
+                "used",
+                "remembered",
+                "refused",
+                "recall",
+                "unsaved_claim",
+            }
         ),
         "session.title": frozenset({"title"}),
         "session.updated": frozenset({"model", "workspace", "workspace_label", "meta"}),

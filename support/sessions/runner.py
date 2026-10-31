@@ -236,7 +236,8 @@ class SessionRunner:
     asks to remember (a ``turn.memory`` event, queued again whole when the
     model keeps a note with ``remember``, or when, after a completed run with
     ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
-    that no note kept), and a completed turn is indexed; *index_only* (a
+    that no note kept, or, whatever that says, a new value the user gave a
+    subject an active note holds), and a completed turn is indexed; *index_only* (a
     task's runner) only indexes.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
@@ -715,6 +716,8 @@ class SessionRunner:
             await self._note_pictures(turn, before, returned)
         if returned is not None and returned.status == "completed":
             await self._keep_statements(turn)
+            await self._keep_changes(turn)
+            await self._keep_claims(turn, split_thinking(returned.result)[1])
         cancelled = (
             isinstance(run_exc, asyncio.CancelledError) and task.cancelling() > 0
         )
@@ -741,7 +744,11 @@ class SessionRunner:
 
         try:
             found = await self._memory.before_turn(
-                self._store, info, turn.typed, emit=emit
+                self._store,
+                info,
+                turn.typed,
+                emit=emit,
+                window=turn.agent.conversation(),
             )
         except Exception:
             logger.warning("Memory across chats failed for this turn", exc_info=True)
@@ -771,6 +778,34 @@ class SessionRunner:
             return  # the turn's own cancel counter still ends the run as cancelled
         except Exception:
             logger.warning("Could not keep what the user stated", exc_info=True)
+
+    async def _keep_changes(self, turn: _Turn) -> None:
+        """Replace an old note by the new value the user stated when the model
+        kept no note (a question back, say). A cancel does not stop a write
+        under way."""
+        if self._memory is None or self._index_only:
+            return
+        try:
+            await asyncio.shield(self._memory.keep_changes(turn.turn))
+        except asyncio.CancelledError:
+            return  # the turn's own cancel counter still ends the run as cancelled
+        except Exception:
+            logger.warning("Could not keep the value the user changed", exc_info=True)
+
+    async def _keep_claims(self, turn: _Turn, answer: str) -> None:
+        """Keep the fact the answer says it noted when no note was kept, or
+        queue ``turn.memory`` again with ``unsaved_claim``. A cancel does not
+        stop a write under way."""
+        if self._memory is None or self._index_only:
+            return
+        try:
+            await asyncio.shield(self._memory.keep_claims(turn.turn, answer))
+        except asyncio.CancelledError:
+            return  # the turn's own cancel counter still ends the run as cancelled
+        except Exception:
+            logger.warning(
+                "Could not keep what the answer said it noted", exc_info=True
+            )
 
     async def _scan_folder(self, turn: _Turn) -> turn_pictures.Snapshot | None:
         """The picture files in the Agent's folder, or ``None`` when pictures are off."""
