@@ -445,7 +445,8 @@ def test_the_notes_text_says_the_model_keeps_notes_with_remember_and_never_files
     for promise in (
         "When the user shares something lasting about themselves or their work "
         "(a preference, a fact, a person, a decision), or a finished task's result "
-        "is worth keeping, keep it with remember: one sentence in the user's words.",
+        "is worth keeping, keep it with remember: one sentence written to the user "
+        "in the second person (“You live in Utrecht.”).",
         "Never ask whether to remember something",
         "never save a note, or what the user says about themselves, in a file or "
         "with code",

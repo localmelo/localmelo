@@ -76,6 +76,18 @@ PAIRS = [
         "小宇",
     ),
 ]
+# A change said as a change: the model keeps it in that turn, and it replaces the
+# old note. Not a plain statement, so code never keeps it (test_chat_statements).
+CHANGE = (
+    "I work at Spruce Labs.",
+    "You work at Spruce Labs.",
+    "I changed jobs; I work at Acme now.",
+    "You work at Acme.",
+    "Where do I work?",
+    "Spruce",
+    "Acme",
+)
+WITH_CHANGE = [*PAIRS, CHANGE]
 # Two facts that look alike and are not one subject; ``None``: kept by request.
 LOOKALIKES = [
     (
@@ -118,7 +130,7 @@ def remember(text: str) -> dict[str, Any]:
 
 @pytest.fixture()
 def stub() -> Iterator[StubServer]:
-    notes = [note for pair in PAIRS for note in (pair[1], pair[3])]
+    notes = [note for pair in WITH_CHANGE for note in (pair[1], pair[3])]
     notes += [note for pair in LOOKALIKES for note in (pair[1], pair[3]) if note]
     scenarios: dict[str, dict[str, Any]] = {
         "answer": {"replies": [{"content": "Noted."}]},
@@ -222,7 +234,8 @@ class Chat:
 
 
 @pytest.mark.parametrize(
-    ("old_typed", "old_note", "new_typed", "new_note", "asks", "old", "new"), PAIRS
+    ("old_typed", "old_note", "new_typed", "new_note", "asks", "old", "new"),
+    WITH_CHANGE,
 )
 async def test_the_newer_value_wins_and_undo_brings_the_old_back(
     memory: ChatMemory,
@@ -250,15 +263,14 @@ async def test_the_newer_value_wins_and_undo_brings_the_old_back(
     asked = await chat(asks)
     system, lines = chat.request()
     assert lines and new in lines[0]
-    for line in lines:
-        # The old value only in a turn that reads as older, after the new one.
-        assert old not in line or line.endswith(f"({OLDER})")
-    for used in asked[-1]["used"]:
-        assert (old in used["text"]) == used["source"].endswith(OLDER)
+    # The old value is history: no line of the block gives it.
+    assert not any(old in line for line in lines)
+    assert not any(old in used["text"] for used in asked[-1]["used"])
     # The chat is told the newest wins; the pinned quotes skip the old note.
     assert NOTES_TEXT in system and "the newest one is true" in system
     pinned = system.split(PINNED_TEXT, 1)[1]
-    assert new_typed in pinned and old_typed not in pinned
+    stated = new_typed.rsplit("; ", 1)[-1]  # the sentence that states the value
+    assert stated in pinned and old_typed not in pinned
 
     # Undo of the replacement: the old note is current again, nothing older.
     assert await memory.delete_record(kept["id"], undo=True)
@@ -268,6 +280,40 @@ async def test_the_newer_value_wins_and_undo_brings_the_old_back(
     _, lines = chat.request()
     assert any(old in line for line in lines)
     assert not any(line.endswith(f"({OLDER})") for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("old_typed", "old_note", "new_typed", "new_note", "asks", "old", "new"),
+    [pair for pair in WITH_CHANGE if pair[4].isascii()],
+)
+async def test_asked_about_the_past_the_older_chat_comes_back_marked_older(
+    memory: ChatMemory,
+    store: SessionStore,
+    stub: Any,
+    tmp_path: Path,
+    old_typed: str,
+    old_note: str,
+    new_typed: str,
+    new_note: str,
+    asks: str,
+    old: str,
+    new: str,
+) -> None:
+    chat = Chat(memory, store, stub, tmp_path)
+    await chat(old_typed, old_note)
+    await chat(new_typed, new_note)
+
+    stub.requests.clear()
+    await chat(asks)
+    _, lines = chat.request()
+    assert lines and not any(old in line for line in lines)
+
+    stub.requests.clear()
+    asked = await chat(f"{asks} What was it before?")
+    _, lines = chat.request()
+    assert any(new in line for line in lines)
+    assert any(old in line and line.endswith(f"({OLDER})") for line in lines)
+    assert any(old in used["text"] for used in asked[-1]["used"])
 
 
 @pytest.mark.parametrize(("first", "first_note", "second", "second_note"), LOOKALIKES)

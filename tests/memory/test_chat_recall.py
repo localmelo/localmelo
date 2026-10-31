@@ -231,6 +231,7 @@ async def test_the_block_names_each_source_and_stays_in_bounds(
         assert used["text"] == "Your group meeting is on Thursdays."
         assert used["source"] == f"you said it · chat “About meeting”, {day}"
         assert len(block) <= BLOCK_CHARS + 2
+        assert found.recall is not None and found.recall.block_chars == len(block)
     finally:
         await memory.aclose()
 
