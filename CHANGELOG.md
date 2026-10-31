@@ -184,6 +184,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   panel's activity list ("Could not continue: …") instead of repeating the
   earlier run's reason ([#344]).
 
+- The main chat remembers its own past. The chat keeps only its newest messages
+  in view (64 on a local server), so what you said thirty turns ago in the same
+  chat was gone, while a turn from another chat could come back, and the chat's
+  instructions said it remembered the whole conversation, which invited it to
+  make things up. Now the turns of the chat that have left that window are
+  recalled like turns of other chats, marked `this chat, Oct 30`, and the ones
+  still in view are not; `search_memory` finds them too. The instructions say what
+  is true: the chat sees the recent messages, and older parts of the conversation,
+  earlier chats and notes come back with your message when they match. A developer
+  setting for comparison, `[memory] context_query` (off by default, `-X
+  memory.context_query=on`), also searches a message together with the one before
+  it (not undone, at most 30 minutes old), so a follow-up such as "and where is
+  her office?" after "who is my advisor?" finds what it asks about; it adds
+  candidates only and makes no extra embedding request. The `recall` object of a
+  turn reports `context` (`off`, `used` or `none`) ([#NN]).
+
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
   file…") no longer ends the turn: the work starts as a task, or a question asks

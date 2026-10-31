@@ -508,3 +508,21 @@ async def test_a_session_agent_with_memory_pins_notes_and_offers_search(
             await agent.close()
             await memory.aclose()
     await store.aclose()
+
+
+def test_the_notes_text_says_the_model_sees_only_the_recent_messages_of_the_conversation() -> (
+    None
+):
+    from localmelo.support.sessions.identity import NOTES_TEXT
+
+    assert NOTES_TEXT.startswith(
+        "You remember the recent messages of this conversation, not all of it. "
+        "Older parts of it, earlier chats and notes about the user that localmelo "
+        "keeps on this computer come back with the user's message when they "
+        "match, as melo's memory;"
+    )
+    # It no longer claims the whole conversation, which invites making it up.
+    assert "You remember this conversation" not in NOTES_TEXT
+    assert "search_memory looks up more" in NOTES_TEXT
+    # The chat without notes says the same of the window: recent messages.
+    assert ALONE.startswith("You remember the recent messages of this chat")

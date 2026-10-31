@@ -725,7 +725,11 @@ class SessionRunner:
 
         try:
             found = await self._memory.before_turn(
-                self._store, info, turn.typed, emit=emit
+                self._store,
+                info,
+                turn.typed,
+                emit=emit,
+                window=turn.agent.conversation(),
             )
         except Exception:
             logger.warning("Memory across chats failed for this turn", exc_info=True)

@@ -92,7 +92,16 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - 页面在你的消息下方显示 `Used 1 memory ▾`；展开即可看到每一项及其出处，例如 `you said it · chat “Planning”, Oct 30`。
 - 大多数消息什么也不召回：一项内容必须包含消息中大部分实词（英文单词的复数、`-ing`、`-ed` 词尾不影响匹配："meet" 能找到 "meets"），或按嵌入模型在语义上足够接近。
 - 嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。
-- 对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+- 对话自己的早先轮次，一旦离开模型的近期消息窗口（见[工作记忆窗口](../reference/memory.md#working-memory-window)），就像其他对话的轮次一样被召回，并显示为 `this chat, Oct 30`；窗口里仍有的轮次不会被召回，因为模型已经有了。一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
+
+```text
+when is my dentist appointment?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
+```
+
+- `[memory] context_query = true`（默认关闭；`-X memory.context_query=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：一条消息还会和你在它之前发的那条消息（不超过 30 分钟、没有被撤销）一起搜索，所以在 "who is my advisor?" 之后问 "and where is her office?"，也能找到关于导师办公室的笔记。它只增加候选项；窗口里的召回块已经显示过的内容不会再加一次。
 
 **召回时新的值优先。**
 
@@ -139,11 +148,13 @@ Where did I live before?
 | `select_tokens` | 选择用掉的 token（`prompt`、`completion`）。 |
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
 | `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
+| `context` | 你的上一条消息有没有参与搜索（`[memory] context_query`）：`off`、`used`，没有可用的上一条消息时为 `none`。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 
 对话被告知的关于记忆的内容：
 
+- 它只看到这个对话的近期消息：对话更早的部分、以前的对话和笔记，在匹配你的消息时会随消息一起回来，`search_memory` 可以查更多。
 - 当你分享关于你自己或你的工作的长期信息，或一个已完成任务的结果值得保留时，它用 `remember` 记一条笔记，不先问你。
 - 你请它记住的事实已经保存；它绝不把笔记存进文件或用代码保存；它用一句简短的话确认一条笔记。
 - 笔记或早先的对话互相矛盾时，以最新的为准。

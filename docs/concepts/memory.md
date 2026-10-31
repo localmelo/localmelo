@@ -86,7 +86,16 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - Under your message the page shows `Used 1 memory ▾`; open it to see each item and its source, such as `you said it · chat “Planning”, Oct 30`.
 - Most messages recall nothing: an item must share most of the message's content words (a plural, `-ing` or `-ed` ending does not matter: "meet" finds "meets"), or be close in meaning by the embedding model.
 - When the embedding model takes over 1.5 seconds or fails, that message is searched by words alone, and the log says so once.
-- The chat's own earlier turns are not recalled (the chat has them), a note is not recalled again as the turn it came from, and older turns count for less (a 30-day half-life).
+- The chat's own earlier turns are recalled once they have left the model's window of recent messages (see [Working-memory window](../reference/memory.md#working-memory-window)), like turns of other chats, and read `this chat, Oct 30`; a turn the window still shows is not recalled, because the model has it. A note is not recalled again as the turn it came from, and older turns count for less (a 30-day half-life).
+
+```text
+when is my dentist appointment?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
+```
+
+- `[memory] context_query = true` (off by default; `-X memory.context_query=on` for one run, listed by `melo -h all`) is a developer setting for comparison: a message is also searched together with the one you sent before it (not older than 30 minutes, not undone), so "and where is her office?" after "who is my advisor?" finds the note about the advisor's office. It only adds candidates; an item a recall block still in the window shows is not added again.
 
 **The newer value wins in recall.**
 
@@ -133,6 +142,7 @@ Every recall is timed. The page shows nothing new, but the `turn.memory` event o
 | `select_tokens` | The tokens the choice used (`prompt`, `completion`). |
 | `candidates`, `used` | How many items there were and how many were used. |
 | `block_chars` | How many characters memory added to your message (0 when it added nothing). |
+| `context` | Whether the message before yours joined the search (`[memory] context_query`): `off`, `used`, or `none` when there was no earlier message to use. |
 
 The same object is in the turn's `result` as `memory_recall`, so a client of the HTTP API reads it with the turn.
 
@@ -140,6 +150,7 @@ What a chat is told about memory:
 
 - That it keeps a note with `remember` when you share something lasting about yourself or your work, or a finished task's result is worth keeping, without asking you first.
 - That a fact you asked it to remember is saved already; that it never saves notes in a file or with code; and that it acknowledges a note in one short sentence.
+- That it sees only the recent messages of the conversation: older parts of it, earlier chats and notes come back with your message when they match, and `search_memory` looks up more.
 - That when notes or earlier chats disagree, the newest one is true.
 - Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).
 - Two memory tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or `chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`, `preferences`, `people`, `projects` or `decisions`), which asks no approval.

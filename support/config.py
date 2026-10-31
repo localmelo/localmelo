@@ -294,13 +294,16 @@ class MemoryConfig:
     and the chat model chooses among them, with no embedding calls).
     ``keep_statements``, a developer setting for comparison and off by default,
     makes code keep after a chat turn the plain, lasting facts the user stated
-    that the model did not keep with ``remember``.
+    that the model did not keep with ``remember``. ``context_query``, another
+    developer setting, off by default, lets a follow-up find what the message
+    before it was about.
     """
 
     admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
+    context_query: bool = False
 
 
 @dataclass
@@ -497,7 +500,12 @@ class Config:
         """``[memory]`` holds bools and a known retriever."""
         errors = [
             f"[memory] {name} must be a bool, got {value!r}"
-            for name in ("admit_on_outcome", "across_chats", "keep_statements")
+            for name in (
+                "admit_on_outcome",
+                "across_chats",
+                "keep_statements",
+                "context_query",
+            )
             if not isinstance(value := getattr(self.memory, name), bool)
         ]
         if self.memory.retriever not in MEMORY_RETRIEVERS:
@@ -1457,6 +1465,8 @@ def save(cfg: Config) -> None:
             lines.append(f"retriever = {_toml_string(cfg.memory.retriever)}")
         if cfg.memory.keep_statements:
             lines.append("keep_statements = true")
+        if cfg.memory.context_query:
+            lines.append("context_query = true")
         lines.append("")
 
     if cfg.browser != BrowserConfig():
