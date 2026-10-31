@@ -7,6 +7,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Changed
+
+- A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
+
 ### Security
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
