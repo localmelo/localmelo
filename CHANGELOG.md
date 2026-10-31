@@ -365,6 +365,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   adds `categories`. See [The main chat](docs/guides/terminal.md#the-main-chat)
   ([#NN]).
 
+- The terminal and the app share one gateway. Every gateway writes
+  `~/.cache/localmelo/gateway/endpoint.json` as it starts and removes it as it
+  stops; the terminal and the app read it first, so whichever starts second
+  uses the running gateway instead of failing on the main chat's store. The
+  app signs in to it as to its own, and Quit leaves a gateway it did not
+  start running (the menu says so). `melo serve stop` stops the gateway that
+  is running, and the line that says the terminal started one names it
+  ([#NN]).
+
 - The terminal's work zone and Ctrl+T say task levels in words in default mode
   (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
   ([#NN]).
