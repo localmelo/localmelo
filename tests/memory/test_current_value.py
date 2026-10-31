@@ -159,15 +159,18 @@ def test_the_tool_text_and_the_notes_text_agree_on_language_and_on_claiming_a_sa
     None
 ):
     """A note is in the language of this turn's message; a save is claimed only
-    after ``remember`` answered ``Remembered``, and a refusal is retried once."""
+    after the tool confirmed it, and a refusal is retried once. The tool's
+    literal outputs are not quoted: the model imitated the quoted token
+    (answers started "Remembered: ..." with no call)."""
     for text in (NOTES_TEXT, REMEMBER.description):
         assert "in the language of the user's message in this turn" in text
-        assert "noted or remembered only after" in text
-        assert "answered “Remembered”" in text
+        assert "a fact is noted only after" in text
+        assert "confirmed it in this turn" in text
         assert (
-            "“Not remembered”, call it once more with the user's own sentence" in text
-        )
-        assert "or say plainly that it was not kept" in text
+            "if it refused, call it once more with the user's own sentence written "
+            "to them, or say plainly that it was not kept"
+        ) in text
+        assert "“Remembered”" not in text and "“Not remembered”" not in text
     assert "in the user's language" not in REMEMBER.description
 
 

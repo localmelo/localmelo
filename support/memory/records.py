@@ -359,6 +359,43 @@ def topic_of(sentence: str, *, request: bool) -> str:
     return "people" if request else "about"
 
 
+# How a reply says it kept a note (:func:`claimed`); group ``x`` starts the fact.
+_AT = r"(?:^|(?<=[.!?。！？\n]))\s*"
+_LEAD = r"\s*(?:[—–:：,]|--?)\s*"
+_CLAIMS: Final = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        _AT + r"Remembered[:：]\s*(?P<x>.+)",
+        _AT + r"Noted" + _LEAD + r"(?P<x>.+)",
+        _AT + r"Got it" + _LEAD + r"(?P<x>(?=[\s\S]*\bnoted\b).+)",
+        r"\bI(?:'ve| have) noted(?: that)?\s+(?P<x>.+)",
+        r"\bI(?:'ll| will) remember(?: that)?\s+(?!to\b)(?P<x>.+)",
+        r"(?:记下了|记住了)[：:，,]\s*(?P<x>.+)",
+        r"已记住[：:]\s*(?P<x>.+)",
+    )
+)
+_CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
+_NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
+
+
+def claimed(answer: str) -> str | None:
+    """The fact *answer* says it noted, as a note sentence: ``None`` when it does
+    not claim a save, ``""`` when it does and names nothing usable.
+
+    The first claim counts: ``Remembered: X``, ``Noted — X`` (or ``:``/``,``),
+    ``I've noted (that) X``, ``I'll remember (that) X``, ``Got it — X`` with a
+    ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``. X ends where its
+    sentence does, or at a ``(``.
+    """
+    text = answer.replace("**", "").replace("__", "")
+    found = [m for pattern in _CLAIMS if (m := pattern.search(text))]
+    if not found:
+        return None
+    rest = text[min(found, key=lambda m: m.start()).start("x") :]
+    fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
+    return finished(_NOTED_TAIL.sub("", fact))
+
+
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
     """The records the user's *typed* text asks for, and whether one was refused.
 

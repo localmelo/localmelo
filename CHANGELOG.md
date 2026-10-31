@@ -211,8 +211,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in another language than your message (the refusal says to write it in the
   language you used). The chat is told to say a fact is noted only after the
   note was kept, and after a refusal to try once more with your own sentence or
-  say plainly that it was not kept. A request to be reminded at a time is
-  scheduled, never kept as a note ([#NN]).
+  say plainly that it was not kept; the instructions no longer quote the tool's
+  own answers, which the model had copied into replies instead of calling the
+  tool. When a reply says it noted a fact and no note was kept, melo keeps what
+  the reply named after the same checks (your words, no secret, the newer value
+  replaces the old one) and shows it with Undo; when it cannot, nothing is kept
+  and the turn's `turn.memory` event has `unsaved_claim: true`. A request to be
+  reminded at a time is scheduled, never kept as a note ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

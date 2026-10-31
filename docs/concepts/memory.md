@@ -51,6 +51,7 @@ In the web console and the app, melo remembers across chats.
   - With an embedding model, so does a sentence that differs only in one short value: `I go to the gym on Fridays` after `… on Mondays`.
   - Look-alikes of another subject stay apart: `my flight to Faro` beside `my flight to Porto`, `我的游泳课` beside `我的书法课`; so does a value of another kind: `my cat is grey` beside `my cat is called Biscuit`.
   - The replaced note is kept but never recalled or listed; Undo under the new note brings it back.
+- When the reply says it noted something ("Remembered: …", "Noted — …", "I've noted that …", "记下了：…") and no note was kept, melo keeps what the reply named, after the same checks below. If it cannot (the words are not yours, or it looks like a secret), nothing is kept and the turn's `turn.memory` event has `unsaved_claim: true`.
 - A note kept already is not written twice. Questions and to-dos ("remember to buy milk") are not notes.
 - `[memory] keep_statements = true` (off by default; `-X memory.keep_statements=on` for one run, listed by `melo -h all`) is a developer setting for comparison: after the model answers, code also keeps a plain, lasting fact you stated that the model did not keep ("I live in …", "my advisor is …", "我的…是…"), never a question, an "if", a "not", the past, what others think or a passing state ("my build is failing").
 
@@ -151,12 +152,12 @@ What a chat is told about memory:
 
 - That it keeps a note with `remember` when you share something lasting about yourself or your work, or a finished task's result is worth keeping, without asking you first.
 - That a fact you asked it to remember is saved already; that it never saves notes in a file or with code; and that it acknowledges a note in one short sentence.
-- That it says a fact is noted only after `remember` answered `Remembered`; after `Not remembered` it tries once more with your own sentence written to you, or says plainly that the note was not kept. A note is written in the language of your message.
+- That it says a fact is noted only after the `remember` tool confirmed it in this turn; if the tool refused, it tries once more with your own sentence written to you, or says plainly that the note was not kept. A note is written in the language of your message.
 - That it sees only the recent messages of the conversation: older parts of it, earlier chats and notes come back with your message when they match, and `search_memory` looks up more.
 - That when notes or earlier chats disagree, the newest one is true.
 - Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).
 - Two memory tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or `chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`, `preferences`, `people`, `projects` or `decisions`), which asks no approval.
-- Each note the model keeps adds it to the turn's `turn.memory` event, sent again whole.
+- Each note the model keeps adds it to the turn's `turn.memory` event, sent again whole. `unsaved_claim` in that event is `true` when the reply said it noted something and no note was kept.
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 

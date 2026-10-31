@@ -724,6 +724,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "remembered",
             "refused",
             "recall",
+            "unsaved_claim",
         },
         "session.title": {"title"},
         "session.updated": {"model", "workspace", "workspace_label", "meta"},

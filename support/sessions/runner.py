@@ -699,6 +699,7 @@ class SessionRunner:
             await self._note_pictures(turn, before, returned)
         if returned is not None and returned.status == "completed":
             await self._keep_statements(turn)
+            await self._keep_claims(turn, split_thinking(returned.result)[1])
         cancelled = (
             isinstance(run_exc, asyncio.CancelledError) and task.cancelling() > 0
         )
@@ -759,6 +760,21 @@ class SessionRunner:
             return  # the turn's own cancel counter still ends the run as cancelled
         except Exception:
             logger.warning("Could not keep what the user stated", exc_info=True)
+
+    async def _keep_claims(self, turn: _Turn, answer: str) -> None:
+        """Keep the fact the answer says it noted when no note was kept, or
+        queue ``turn.memory`` again with ``unsaved_claim``. A cancel does not
+        stop a write under way."""
+        if self._memory is None or self._index_only:
+            return
+        try:
+            await asyncio.shield(self._memory.keep_claims(turn.turn, answer))
+        except asyncio.CancelledError:
+            return  # the turn's own cancel counter still ends the run as cancelled
+        except Exception:
+            logger.warning(
+                "Could not keep what the answer said it noted", exc_info=True
+            )
 
     async def _scan_folder(self, turn: _Turn) -> turn_pictures.Snapshot | None:
         """The picture files in the Agent's folder, or ``None`` when pictures are off."""

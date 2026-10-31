@@ -205,6 +205,7 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
             }
         ],
         "refused": "it looked like a password or key",
+        "unsaved_claim": False,
     }
     (entry,) = await memory.records()
     assert entry.session_id == sid and entry.source == "user"
