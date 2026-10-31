@@ -296,7 +296,61 @@ def _bytes(value: int | None) -> str:
     )
 
 
+def _size(value: int | None) -> str:
+    if value is None:
+        return "unknown"
+    if 0 < value < 100_000_000:
+        return "<0.1 GB"
+    return f"{value / 1_000_000_000:.1f} GB" if value else "0 GB"
+
+
 def preview(setup: SetupPlan) -> tuple[str, ...]:
+    """A human summary; technical metadata requires Details or developer mode."""
+    d = setup.detection
+    total = sum(size for _, size in setup.recipe.files)
+    download = d.missing_model_bytes + d.asset.bytes if d.asset else None
+    free = " / ".join(_size(disk.free_bytes) for disk in d.disks) or "unknown"
+    space = "Free/volume" if len(d.disks) > 1 else "Free"
+    lines = [
+        "No model server is running yet.",
+        (
+            "Recommended: oMLX with Qwen3 4B Instruct."
+            if d.asset
+            else "Manual only: use a compatible model server."
+        ),
+        f"Download: {_size(download)} · Cached: {_size(total - d.missing_model_bytes)} · {space}: {free}",
+        (
+            "Planned lifetime: keep running after melo closes."
+            if setup.keep_running
+            else "Planned lifetime: stop when melo closes."
+        ),
+        "Automatic setup is coming soon: Show manual steps to do it now.",
+    ]
+    warnings = []
+    if d.asset is None:
+        warnings.append("Manual only: no supported installer for this computer.")
+    if d.ram_bytes is None:
+        warnings.append("RAM unknown; check the 16 GB recommendation in Details.")
+    elif d.ram_bytes < 16 * 1024**3:
+        warnings.append("Under 16 GB RAM: this model may be slow; check Details.")
+    if any(disk.free_bytes is None for disk in d.disks):
+        warnings.append("Free space unknown; check Details before manual setup.")
+    if any(
+        disk.free_bytes is not None and disk.free_bytes < disk.payload_bytes
+        for disk in d.disks
+    ):
+        warnings.append("Not enough disk space for the download; check Details.")
+    if warnings:
+        lines.append(
+            warnings[0]
+            if len(warnings) == 1
+            else "Several setup checks need attention; see Details before manual setup."
+        )
+    return tuple(lines)
+
+
+def details(setup: SetupPlan) -> tuple[str, ...]:
+    """The full read-only manifest, including unmeasured overhead and sources."""
     d, r = setup.detection, setup.recipe
     lines = [
         "No model server is running yet. Setup preview only; nothing installed or started.",
@@ -338,10 +392,12 @@ def preview(setup: SetupPlan) -> tuple[str, ...]:
 
 def manual_steps(setup: SetupPlan) -> tuple[str, ...]:
     d, r = setup.detection, setup.recipe
+    lifetime = "Manual commands run independently; stop them yourself with Ctrl+C."
     if d.asset is None:
         how = how_to_start()
         return (
             "Manual fallback: use an existing compatible model server, then melo setup.",
+            lifetime,
             f"Existing platform guide for {how.name} (copy only; check compatibility on this machine):",
             *how.commands,
             how.note,
@@ -350,6 +406,7 @@ def manual_steps(setup: SetupPlan) -> tuple[str, ...]:
         )
     return (
         "Manual steps (copy only; melo does not run these):",
+        lifetime,
         f"Download: {r.download_base}{d.asset.name}",
         f"Verify SHA256 {d.asset.sha256}; install through normal macOS controls. Make the bundled Contents/MacOS/omlx-cli available as omlx; do not bypass Gatekeeper.",
         f"HF_HUB_CACHE={shlex.quote(d.cache_root)} hf download {shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",

@@ -8,23 +8,26 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 
 ## Setup preview
 
-- With no server found, terminal first run and `melo setup` preview
-  oMLX 0.7.3 with Qwen3 4B Instruct (4-bit) on a supported Apple-silicon Mac.
-  The pinned model is about 2.28 GB; the official runtime DMG is about 0.84 GB
-  on macOS 15 or 0.88 GB on macOS 26/27. Cached model files reduce the amount
-  still to download. Disk payload is a lower bound; expansion and staging
-  overhead is unmeasured. These readings do not guarantee a fit or runtime memory use.
-- The preview shows the cache location, available disk space and the proposed
-  lifetime (stop with the session by default). It writes no settings and
-  reserves no port. In `Review setup plan`, `Set up and start` explains that automatic setup
-  is not available and displays the manual steps; it does not install,
-  download, start a server or accept a persistent approval.
+- With no server found, terminal first run and `melo setup` show a short,
+  read-only preview: the recommendation, remaining download, cached amount,
+  free space and planned lifetime. It adds one warning when needed. Supported
+  Apple-silicon Macs get oMLX with Qwen3 4B Instruct (4-bit).
+- `Review setup plan` offers lifetime choices, manual steps and `Details`.
+  Exact versions, checksums, cache paths, per-volume disk readings, plan digest
+  and the proposed port are in `Details` or developer mode, not the default
+  summary. The pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB
+  on macOS 15 or 0.88 GB on macOS 26/27. The remaining download includes both.
+  Expansion/staging overhead is unmeasured; disk payload is only a lower bound.
+  `Set up and start` explains automatic setup is unavailable and shows manual
+  steps. Nothing installs, downloads, starts, saves settings or records approval.
 - Manual steps come from the same pinned recipe. They keep the model in the
   standard Hugging Face cache, use a separate server settings directory, and
   disable oMLX's additional cache scan so this instance serves only the chosen
   snapshot. Install the official app yourself and copy the shown commands only
   when ready. The suggested high port is an example, not a reserved port;
-  select a free one before starting and enter its address in melo.
+  select a free one before starting and enter its address in melo. These commands
+  run independently; stop the manual server yourself with Ctrl+C. The planned
+  lifetime does not manage it.
 - A direct snapshot's served model ID can be its revision hash, not the
   repository name. Use the ID the server lists. Rechecking an address only
   lists models; it does not load one. The web/app setup card and already

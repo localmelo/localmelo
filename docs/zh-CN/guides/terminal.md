@@ -442,12 +442,12 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo 通过 `GET /v1/models` 在 `127.0.0.1` 的端口 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）上查找本机服务器，并提供第一个列出模型的服务器（有对话模型的排在最前）；不会发送任何对话请求，所以服务器不会加载任何东西。
 - 在第二行和第三行之间，melo 以列表询问 `Use this model server?`；有多个模型时会显示选择器，有嵌入模型时还会有一个列表询问 `Remember across chats with nomic-embed-text?`（`Yes, with it`、`No, by words only`）。
-- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：推荐服务器/模型、固定下载量、缺少的缓存文件、可用磁盘空间和生命周期预览。选择 `Review setup plan` 可查看生命周期选项、手动步骤和 `Set up and start`；后者只说明自动设置尚未开放并显示手动步骤，不会安装、下载、启动或保存。仍可重新检查、输入地址或退出；管道输入保留原有提示。其他系统保留对应平台的手动命令。
+- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：用简短摘要显示推荐项、下载量、已缓存量、可用空间和计划生命周期，仅在需要时添加警告。选择 `Review setup plan` 可查看生命周期选项、手动步骤、`Details` 和 `Set up and start`；后者只说明自动设置尚未开放并显示手动步骤，不会安装、下载、启动或保存。仍可重新检查、输入地址或退出；管道输入保留原有提示。其他系统保留对应平台的手动命令。
 - 无法使用的服务器会连同原因一起指出（`connection refused`、`no answer in 5 s`、`HTTP 401` 或 `HTTP 403` 并附 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`、`it lists no models`），你可以重试、不保存直接启动或退出。
 - Ollama 服务器保存为 `chat_backend = "ollama"`，oMLX 服务器保存为 `chat_backend = "omlx"`，其他保存为 `"vllm"`；嵌入模型的选择见[配置嵌入模型](embedding.md)。
 - `LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL；空值会关闭查找。
 
-预览将固定版本的模型保留在 Hugging Face 缓存中，并建议使用独立的服务器设置目录。生命周期选择和计划摘要只描述未来可能执行的设置，不代表同意执行。准备好后再复制手动步骤，选择空闲端口并在 melo 中重新检查该地址。没有对应固定 Mac 配方的系统保留现有手动启动说明。
+模型保留在 Hugging Face 缓存中。版本、校验和、缓存/设置路径、端口规则和计划摘要放在 `Details` 或开发者模式中，不占默认摘要。生命周期选择只描述未来可能执行的设置，不代表同意执行；手动命令独立运行，服务器须自行按 Ctrl+C 停止。选择空闲端口并在 melo 中输入该地址；没有对应固定 Mac 配方的系统保留现有手动说明。
 
 <a id="questions-are-lists"></a>
 

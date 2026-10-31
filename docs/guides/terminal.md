@@ -399,16 +399,17 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
 - Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
-- With no server running, a supported Apple-silicon Mac shows the [read-only setup preview](model-servers.md#setup-preview): recommended server/model, pinned download sizes, missing cached files, free disk space and a lifetime preview. Choose `Review setup plan` for its lifetime option, manual steps and `Set up and start`, which only explains that automatic setup is not available and shows manual steps; nothing installs, downloads, starts or saves. Check again, enter an address and quit remain available; piped answers retain their original prompt. Other systems keep their platform's manual commands.
+- With no server running, a supported Apple-silicon Mac shows the [read-only setup preview](model-servers.md#setup-preview): a short recommendation/download/cache/free-space/lifetime summary, with a warning only when needed. Choose `Review setup plan` for its lifetime option, manual steps, `Details` and `Set up and start`, which only explains that automatic setup is not available and shows manual steps; nothing installs, downloads, starts or saves. Check again, enter an address and quit remain available; piped answers retain their original prompt. Other systems keep their platform's manual commands.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
 - `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated list; an empty value turns the search off.
 
-The preview keeps the pinned model in the Hugging Face cache and proposes a
-separate server settings directory. The lifetime choice and plan digest describe
-a possible future setup, not permission to run anything. Copy the manual steps
-only when ready, choose a free port and recheck that address in melo. On systems
-without the pinned Mac recipe, the existing manual-server guidance remains.
+The model stays in the Hugging Face cache. Versions, checksums, cache/state paths,
+port policy and plan digest are in `Details` or developer mode, not the default
+summary. Lifetime choices describe a possible future setup, not permission to run
+anything. Manual commands run independently: stop the server yourself with Ctrl+C.
+Choose a free port and enter that address in melo; systems without the pinned Mac
+recipe keep their existing manual-server guidance.
 
 #### Questions are lists
 

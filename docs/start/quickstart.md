@@ -204,21 +204,19 @@ Try: What is this project? · / commands · ctrl+d quit
 
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
-With no model server running, first-run `melo` and `melo setup` show a
-read-only setup preview on a supported Apple-silicon Mac: oMLX 0.7.3,
-Qwen3 4B Instruct (4-bit, about 2.28 GB), the model files still missing from
-your Hugging Face cache, the runtime download and free disk space. The
-stop-with-session lifetime is a preview only; changing it saves nothing.
-Choose `Review setup plan` to adjust the lifetime or see manual steps.
-Automatic setup is not available yet: `Set up and start` in that review explains
-this and shows the manual steps, without installing, downloading or starting anything.
-Use the arrow-key list to check again, enter an address or quit. Piped input
-keeps `Press Enter to check again, type an address, or q to quit:` and never
-approves setup. Other systems keep their platform's manual-server guidance.
-Start the server yourself, then enter its address: the preview's suggested
-high port is outside the usual discovery ports. `Check again` rechecks the usual
-ports. The [model servers guide](../guides/model-servers.md#setup-preview)
-explains the cache-preserving manual path. Existing connections and direct tasks are unchanged.
+With no model server running, first-run `melo` and `melo setup` show a short,
+read-only preview: the recommendation, remaining download, cached amount,
+free disk space and planned lifetime. On supported Apple-silicon Macs the
+recommendation is oMLX with Qwen3 4B Instruct. Choose `Review setup plan` for
+lifetime choices and manual steps, or `Details` inside that review for exact
+versions, paths and checksums; developer mode keeps the detailed view.
+Automatic setup is not available yet: `Set up and start` only explains this
+and shows manual steps. Nothing installs, downloads, starts or saves.
+Pipes retain `Press Enter to check again, type an address, or q to quit:`;
+other systems keep their platform's manual-server guidance. Start the server
+yourself and enter its address: the suggested high port is outside default
+discovery. [Model servers](../guides/model-servers.md#setup-preview) explains
+the manual path. Existing connections and direct tasks are unchanged.
 
 If the server also lists an embedding model, the first run adds one question,
 `Remember across chats with <model>?`, and `Yes, with it` (selected first) saves it

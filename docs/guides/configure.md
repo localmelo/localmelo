@@ -72,7 +72,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 
 When no server is ready:
 
-- With none running, supported Apple-silicon Macs show the terminal's [read-only setup preview](model-servers.md#setup-preview): the recommendation, pinned download sizes, cache/disk readings and lifetime. `Set up and start` currently shows an unavailable notice and manual steps, never an install. The list also lets you check again, enter an address or quit; pipes retain their existing typed answers. Other platforms and the web/app setup card keep manual-server guidance.
+- With none running, supported Apple-silicon Macs show the terminal's [read-only setup preview](model-servers.md#setup-preview): the recommendation, remaining download/cached amount, free space and planned lifetime. `Review setup plan` offers `Details` for versions, paths and checksums. `Set up and start` currently shows an unavailable notice and manual steps, never an install. The list also lets you check again, enter an address or quit; pipes retain their existing typed answers. Other platforms and the web/app setup card keep manual-server guidance.
 - A server that does not answer, needs an API key or lists no models is named with the reason, and you can try again, start without saving or quit.
 - localmelo never asks for an API key for a local server.
 - [The terminal guide](terminal.md#first-run) lists every prompt and reason.

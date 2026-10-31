@@ -9,12 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
-- A read-only local-server setup preview when terminal first run finds no
-  model server on a supported Apple-silicon Mac: the recommended server and
-  model, pinned download sizes, cached files, free disk space and a lifetime
-  preview. Automatic setup is not available yet; **Set up and start** explains
-  that and shows manual steps without installing, downloading, starting or
-  saving anything. Direct runs and existing connections are unchanged. [#NN]
+- A short, read-only setup preview when terminal first run finds no model
+  server: the recommendation, download/cache amounts, free space and planned
+  lifetime. `Details` keeps versions, paths and checksums out of the default
+  view. Automatic setup is not available yet; **Set up and start** only shows
+  manual steps. Nothing installs, downloads, starts or saves, and direct runs
+  and existing connections are unchanged. [#NN]
 
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that

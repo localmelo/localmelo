@@ -588,25 +588,30 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _review_setup(setup: server_setup.SetupPlan) -> None:
+def _review_setup(setup: server_setup.SetupPlan, *, developer: bool = False) -> None:
     """Preview choices only: even Set up and start cannot authorize execution."""
+    render = server_setup.details if developer else server_setup.preview
     while True:
-        for line in server_setup.preview(setup):
+        for line in render(setup):
             _say(line)
         choice = _choose_from(
             "Review setup (nothing will run)",
             [
                 "Set up and start",
-                f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'} (preview)",
+                f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
                 "Show manual steps",
+                "Details",
                 "Back",
             ],
             0,
-            3,
+            4,
         )
-        if choice == 3:
+        if choice == 4:
             return
-        if choice == 1:
+        if choice == 3:
+            for line in server_setup.details(setup):
+                _say(line)
+        elif choice == 1:
             setup = replace(setup, keep_running=not setup.keep_running)
         else:
             _say("Automatic setup is not available yet. No approval is recorded.")
@@ -614,7 +619,9 @@ def _review_setup(setup: server_setup.SetupPlan) -> None:
                 print(line)  # Keep copy-only shell commands on one logical line.
 
 
-def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
+def _wait_for_a_server(
+    urls: Sequence[str], *, developer: bool = False, saved_connection: bool = False
+) -> discovery.FoundServer | str | None:
     """Preview setup, then reuse discovery on Enter; return a server/address or quit.
 
     EOFError and KeyboardInterrupt reach the caller. Piped input never enters
@@ -623,9 +630,16 @@ def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | Non
     setup = server_setup.plan(
         server_setup.detect()
     )  # Reuse the caller's no-server result.
-    for line in server_setup.preview(setup):
+    render = server_setup.details if developer else server_setup.preview
+    lines = render(setup)
+    if saved_connection:
+        lines = (
+            "No model server found; your saved connection is unchanged.",
+            *lines[1:],
+        )
+    for line in lines:
         _say(line)
-    if not _arrow_keys():
+    if developer and not _arrow_keys():
         for line in server_setup.manual_steps(setup):
             print(line)
     while True:
@@ -639,7 +653,7 @@ def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | Non
             if choice == 3:
                 return None
             if choice == 1:
-                _review_setup(setup)
+                _review_setup(setup, developer=developer)
                 continue
             answer = _question("Server URL", _FIRST_RUN_URL) if choice == 2 else ""
         else:
@@ -897,7 +911,9 @@ def _offer_embedding(
     return candidate, ollama
 
 
-def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
+def run_first_setup(
+    *, ask_keep: bool = False, developer: bool = False
+) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     The first line says what the first run needs: a model server. A server
@@ -918,16 +934,14 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     # A reconfigure knows what melo needs; a first run says it, also when it
     # reaches this question through `melo serve`.
     first = not ask_keep or not config.load().is_configured
-    if first:
-        _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
+    if first and (found is not None or not urls):
+        _say(f"melo uses a model server on this computer ({_servers_named()}).")
     typed = ""
     if found is None and urls:
-        if not first:
-            _say(
-                "Your saved server connection was not changed. Retry, review a separate setup, or enter an address."
-            )
-        waited = _wait_for_a_server(urls)
+        waited = _wait_for_a_server(
+            urls, developer=developer, saved_connection=not first
+        )
         if waited is None:
             return None
         if isinstance(waited, str):

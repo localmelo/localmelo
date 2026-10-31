@@ -191,7 +191,10 @@ def test_partial_snapshot_counts_only_complete_expected_size_files_and_shared_bl
     assert detected.completed_files == (".gitattributes", "config.json")
     assert detected.missing_model_bytes == 2278972236 - 1570 - 938
     assert sorted(str(path) for path in cache.rglob("*")) == before
-    assert "not integrity-verified" in "\n".join(setup.preview(setup.plan(detected)))
+    assert "not integrity-verified" in "\n".join(setup.details(setup.plan(detected)))
+    assert (
+        "Download: 3.2 GB · Cached: <0.1 GB" in setup.preview(setup.plan(detected))[2]
+    )
 
 
 @pytest.mark.parametrize("escape", ["store", "snapshot"])
@@ -265,7 +268,7 @@ def test_probe_errors_conservatively_leave_cache_missing_and_disk_unknown(
     planned = setup.plan(setup.detect())
     assert planned.detection.completed_files == ()
     monkeypatch.setattr(setup, "_disk", lambda path: (str(path), None))
-    text = "\n".join(setup.preview(setup.plan(setup.detect())))
+    text = "\n".join(setup.details(setup.plan(setup.detect())))
     assert "unknown free" in text and "not a guaranteed fit" in text
 
 
@@ -282,7 +285,7 @@ def test_disk_payload_is_grouped_by_volume_and_never_guarantees_fit(
     assert len(disks) == (1 if same_volume else 2)
     assert sum(d.payload_bytes for d in disks) == 2278972236 + 881239063
     assert all(d.free_bytes == 100 and d.overhead_bytes is None for d in disks)
-    text = "\n".join(setup.preview(planned))
+    text = "\n".join(setup.details(planned))
     assert text.count("Not enough space for payload alone") == len(disks)
     assert "unknown (unmeasured)" in text and "lower bound" in text
 
@@ -336,6 +339,100 @@ def test_all_reserved_ports_and_out_of_range_values_are_denied_without_binding()
     assert setup.port_allowed(49152) and setup.port_allowed(65535)
     assert setup.choose_port() == 49152
     assert setup.choose_port([49152, 49153]) == 49154
+
+
+def test_default_preview_is_short_human_readable_and_counts_runtime_download() -> None:
+    planned = setup.plan(setup.detect())
+    lines = setup.preview(planned)
+    assert len(lines) == 5 and all(len(line) < 80 for line in lines)
+    assert lines[0] == "No model server is running yet."
+    assert lines[2] == "Download: 3.2 GB · Cached: 0 GB · Free: 10.0 GB"
+    assert lines[3] == "Planned lifetime: stop when melo closes."
+    assert "Ctrl+C" in "\n".join(setup.manual_steps(planned))
+    assert lines[4] == "Automatic setup is coming soon: Show manual steps to do it now."
+    text = "\n".join(lines)
+    for internal in (
+        planned.digest,
+        planned.recipe.runtime_commit,
+        planned.recipe.model_revision,
+        planned.detection.cache_root,
+        planned.detection.state_path,
+        str(planned.port),
+        "SHA256",
+        "bytes",
+        "staging",
+        "Platform:",
+    ):
+        assert internal not in text
+    detailed = "\n".join(setup.details(planned))
+    assert planned.digest in detailed and planned.detection.snapshot in detailed
+    assert "2,278,972,236 bytes" in detailed and "881,239,063 bytes" in detailed
+    assert "unknown (unmeasured)" in detailed and "not a guaranteed fit" in detailed
+
+
+@pytest.mark.parametrize(
+    ("missing", "download", "cached"),
+    [(2278972236 - 2508, "3.2 GB", "<0.1 GB"), (0, "0.9 GB", "2.3 GB")],
+)
+def test_concise_download_includes_runtime_even_when_model_is_cached(
+    missing: int, download: str, cached: str
+) -> None:
+    detection = replace(setup.detect(), missing_model_bytes=missing)
+    line = setup.preview(setup.plan(detection))[2]
+    assert f"Download: {download}" in line and f"Cached: {cached}" in line
+
+
+@pytest.mark.parametrize(
+    ("problem", "expected"),
+    [
+        ("platform", "no supported installer"),
+        ("ram-low", "may be slow"),
+        ("ram-unknown", "RAM unknown"),
+        ("disk-low", "not enough disk space"),
+        ("disk-unknown", "free space unknown"),
+    ],
+)
+def test_preview_adds_only_one_warning_line(problem: str, expected: str) -> None:
+    detected = setup.detect()
+    if problem == "platform":
+        detected = replace(detected, asset=None)
+    elif problem.startswith("ram"):
+        detected = replace(
+            detected, ram_bytes=8 * 1024**3 if problem == "ram-low" else None
+        )
+    else:
+        detected = replace(
+            detected,
+            disks=(
+                replace(
+                    detected.disks[0], free_bytes=1 if problem == "disk-low" else None
+                ),
+            ),
+        )
+    lines = setup.preview(setup.plan(detected))
+    assert len(lines) == 6 and expected.lower() in lines[-1].lower()
+    assert all(len(line) < 80 for line in lines)
+    if problem == "platform":
+        assert "Manual only" in lines[1] and "Download: unknown" in lines[2]
+
+
+def test_preview_combines_warnings_and_shows_multiple_volume_free_space() -> None:
+    detected = setup.detect()
+    detected = replace(
+        detected,
+        asset=None,
+        ram_bytes=None,
+        disks=(
+            replace(detected.disks[0], free_bytes=1),
+            setup.DiskSpace("/other", ("/other/cache",), 10, None),
+        ),
+    )
+    lines = setup.preview(setup.plan(detected, keep_running=True))
+    assert len(lines) == 6
+    assert "Free/volume: <0.1 GB / unknown" in lines[2]
+    assert "keep running after melo closes" in lines[3]
+    assert "Several setup checks need attention" in lines[-1]
+    assert all(len(line) < 80 for line in lines)
 
 
 def test_manual_commands_are_pinned_shell_quoted_and_do_not_copy_models(
@@ -399,5 +496,9 @@ def test_detect_plan_preview_and_manual_have_no_network_writes_processes_or_bind
     monkeypatch.setattr(httpx.Client, "request", forbidden)
     monkeypatch.setattr(httpx.AsyncClient, "request", forbidden)
     planned = setup.plan(setup.detect())
-    assert setup.preview(planned) and setup.manual_steps(planned)
+    assert (
+        setup.preview(planned)
+        and setup.details(planned)
+        and setup.manual_steps(planned)
+    )
     assert planned.allowed_operations == ()
