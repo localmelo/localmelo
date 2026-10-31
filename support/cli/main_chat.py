@@ -736,9 +736,9 @@ class MainChat:
                     return
                 self._seen.add(event_id)
             draw = card_line if kind == CARD_EVENT else echo_line
-            self.host.out.print(
-                draw(data, self.host.renderer.symbols, self.host.out.width)
-            )
+            line = draw(data, self.host.renderer.symbols, self.host.out.width)
+            # A card stands apart from the turns around it.
+            self.host.out.print(*([line, Text("")] if kind == CARD_EVENT else [line]))
             return
         turn, number = self._turn, event.get("turn")
         if kind == "turn.started":
