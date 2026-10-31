@@ -57,7 +57,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   title drops a level word that opens its request and is followed by a colon or
   comma (`no rush:`, `today,`, `今天：`) when more text follows it. A task worker
   is told to run the tests that cover the code it changed, found by searching
-  the tests for the names it changed, not only the test files it edited. [#NN]
+  the tests for the names it changed, not only the test files it edited. [#367]
 - A `file_edit` that cannot apply fails at once and asks no one: the text to
   replace must occur exactly once, and a missing text, several matches, an
   empty text or a missing file return a plain error that says what to do
@@ -3018,3 +3018,4 @@ earlier milestones.
 [#361]: https://github.com/localmelo/localmelo/pull/361
 [#362]: https://github.com/localmelo/localmelo/pull/362
 [#365]: https://github.com/localmelo/localmelo/pull/365
+[#367]: https://github.com/localmelo/localmelo/pull/367
