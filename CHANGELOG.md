@@ -15,7 +15,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   errors keep their colour. One helper draws it for commands, `!` shell
   results and tool-call details, so all three share one shape; pickers stay
   as they are, and what they print when they close hangs under the command.
-  `/new` keeps its full-width rule. [#NN]
+  `/new` keeps its full-width rule. [#387]
 - A task's approvals go through the chat that started it, and the same
   approved step is not asked twice. A task's step that needs you shows in its
   chat's card with the whole approval card, and, for your own tasks and
@@ -3249,3 +3249,4 @@ earlier milestones.
 [#383]: https://github.com/localmelo/localmelo/pull/383
 [#384]: https://github.com/localmelo/localmelo/pull/384
 [#385]: https://github.com/localmelo/localmelo/pull/385
+[#387]: https://github.com/localmelo/localmelo/pull/387
