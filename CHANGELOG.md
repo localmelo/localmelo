@@ -344,7 +344,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `as_task`, a code-handled message answers 200 `{"echo"}`, the main chat's turns
   carry `echoes` (`attention.echo` events), and `POST /api/front/echoes/{id}`
   answers an echo's Undo, Apply, Start or level. See
-  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#NN]).
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#320]).
 
 - One main chat, with side chats under it. The console and the app open on the
   **Main chat**, which is always there and cannot be closed; the chats you start
@@ -2583,6 +2583,7 @@ earlier milestones.
 [#314]: https://github.com/localmelo/localmelo/pull/314
 [#316]: https://github.com/localmelo/localmelo/pull/316
 [#317]: https://github.com/localmelo/localmelo/pull/317
+[#320]: https://github.com/localmelo/localmelo/pull/320
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
