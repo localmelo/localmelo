@@ -323,22 +323,70 @@ def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]
     return [s for s in [*out, (op, argv, redirs)] if s[1] or s[2]]
 
 
-def review_shell(ctx: Context, f: Findings, command: str) -> None:
+def review_shell(
+    ctx: Context, f: Findings, command: str, status_read: bool = False
+) -> None:
+    """Review *command*; *status_read* says the caller goes by its exit status."""
     if ctx.depth > MAX_DEPTH:
         return f.doubt("Nests commands too deeply for melo to check.")
     site = f.site
     try:
-        _review_shell(ctx, f, command)
+        _review_shell(ctx, f, command, status_read)
     finally:
         f.site = site
 
 
-def _review_shell(ctx: Context, f: Findings, command: str) -> None:
+def _is_runner(argv: list[str]) -> bool:
+    """Whether the command runs tests or a build (a program of ``_RUNNERS``)."""
+    return _runs_project(os.path.basename(argv[0]), argv[1:]) or any(
+        os.path.basename(word) in _RUNNERS for word in argv
+    )
+
+
+def _pipe_status(
+    f: Findings,
+    text: str,
+    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    status_read: bool,
+) -> None:
+    """Note a pipeline whose exit status something goes by, without ``pipefail``.
+
+    The status of ``pytest | tail`` is tail's, so ``pytest | tail && git
+    commit`` commits after failed tests. That is so when the command goes on
+    with ``&&`` or ``||`` after a pipeline that runs tests or a build, or,
+    with *status_read* (the code reads the status), when the command ends
+    with a pipeline.
+    """
+    if "pipefail" in text or "PIPESTATUS" in text:
+        return
+    for i, (op, argv, _) in enumerate(segments):
+        after = segments[i + 1][0] if i + 1 < len(segments) else None
+        if op not in ("|", "|&") or after in ("|", "|&"):
+            continue  # not the last command of a pipeline
+        first = i
+        while first > 0 and segments[first][0] in ("|", "|&"):
+            first -= 1
+        if after in ("&&", "||"):
+            gated = any(_is_runner(c[1]) for c in segments[first:i] if c[1])
+        else:
+            gated = status_read and after is None
+        if gated:
+            tail = os.path.basename(argv[0]) if argv else "the last command"
+            f.doubt(
+                "Relies on the exit status of a pipeline: it is the last command's "
+                f"({tail}), not the earlier one's. Use set -o pipefail."
+            )
+
+
+def _review_shell(
+    ctx: Context, f: Findings, command: str, status_read: bool = False
+) -> None:
     text, bodies = _heredocs(_uncomment(command))
     try:
         segments = _segments(text)
     except ValueError:
         return f.doubt("Has a quote that does not close.")
+    _pipe_status(f, text, segments, status_read)
     cwd, before, url, bare_before = ctx.root, "", "", False
     said: str | None = None  # what the last command printed, when literal
     # The last command's site, and the folders it searched when it was a find.

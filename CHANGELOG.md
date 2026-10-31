@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
+  file is read in parts instead of being sliced through Python. A read that
+  shows only part of a file now ends with how many lines the file has and the
+  `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400;
+  read more with start_line=401]`); a start past the end is an error that
+  counts the lines. [#361]
 - Auto mode in the console and the app: an **Ask / Auto** chip beside the
   model switches a chat from melo's next step, and Settings → Chats and
   folders → **New chats start in** (`[approvals] mode`) picks how new chats
@@ -46,6 +52,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A `file_edit` that cannot apply fails at once and asks no one: the text to
+  replace must occur exactly once, and a missing text, several matches, an
+  empty text or a missing file return a plain error that says what to do
+  (read the file again; take more lines around it) before the approval is
+  asked. [#361]
+- A commit made from a step is refused when its message credits melo or an AI
+  (a `Co-Authored-By` trailer naming melo or an AI, a `Generated with` line, a
+  session link); a trailer that names a person is fine. [#361]
+- A step that goes by the exit status of a pipeline without `pipefail` (Python
+  that reads the `.returncode` of `pytest | tail`, or `pytest | tail && git
+  commit`) is now undecided, and its reason says the status is the last
+  command's, not the test's. [#361]
 - Tasks that stop, and continue. A task that uses all its steps is **Stopped**,
   not Failed: its card in the main chat, its page, its Activity and Workers
   rows and `melo task list|show` say so, show the sentence of its answer that
@@ -2985,3 +3003,4 @@ earlier milestones.
 [#358]: https://github.com/localmelo/localmelo/pull/358
 [#359]: https://github.com/localmelo/localmelo/pull/359
 [#360]: https://github.com/localmelo/localmelo/pull/360
+[#361]: https://github.com/localmelo/localmelo/pull/361

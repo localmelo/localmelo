@@ -36,16 +36,18 @@ DEFAULTS = {
 # The sha256 of the run's three request bodies (plan, reflection, plan) as main sends
 # them, and with the option. Recorded at 139992b5; re-recorded when the fixed system
 # section lost its ``Prefix: fixed-prefix-v2`` line: with that line put back,
-# the digests of 139992b5 come out again.
+# the digests of 139992b5 come out again. Re-recorded again when file_read gained
+# start_line and end_line: with its earlier description and parameters put back
+# in the tool list, the digests before this change come out.
 OFF = (
-    "7a62a3faecb8bebd8fe83467700b62269bf67a8b97fb9039c91fa82b0ad900c6",
-    "8e10ad929b5a90fd3319ca0f46f22674776277f2005fcaf9eabe579abdcf5596",
-    "4519c79dde01bffe07d7a87e4fcbaf9b2b492ddf47ea977094a2ddad38e85e16",
+    "e2494bc9076754585383caeb7c38e9a44c44e58ca594307405c5d3daba25c660",
+    "87e6a20e821aed81a210b0cd191f85dbb8676b2b0ff00d70841836bd7a9b51a8",
+    "7df9238803ac5730f08f70d58e65a59cf636d827958798ad3ffb0e6c44b05255",
 )
 ON = (
-    "0f373344545d2350e7e089f2052f194d4395830f23aefa65c812dd60ff77fe0b",
-    "43cda7aadf2711965ac4037138334bfcf5de44926d29bc2fff59159b7ffb2ac9",
-    "18334f3b33486153d93e5306a008d63a930186b950f323dda9d3b4da97197505",
+    "d467130bd3b93739da67550f021f41d7fb0dc99e90d7fc52597d883b8ebe8050",
+    "1405dc19ec94a164689bde35b8a8b6a66bba830849e5d417b555fd9a95d4189a",
+    "229e4791ac17cefec0fd1eb4948504f66e64defb8bba2f85c9d05ed7f256fa73",
 )
 GATE = {
     "recommended_action",
