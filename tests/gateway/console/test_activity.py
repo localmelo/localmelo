@@ -323,6 +323,28 @@ async def test_the_list_is_capped_and_says_so(
     assert len(body["rows"]) == MAX_ROWS and body["more"] is True
 
 
+def test_a_held_task_says_why_it_waits(
+    client: TestClient, console: Console, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks(
+        monkeypatch,
+        console,
+        Task("t-priority", "held", "Behind a higher one"),
+        Task("t-slot", "held", "No slot"),
+        Task("t-plain", "held", "Unknown reason"),
+    )
+    reasons = {"t-priority": "Priority", "t-slot": "Resources"}
+    monkeypatch.setattr(console.gate, "held", lambda task_id: reasons.get(task_id, ""))
+    rows = {row["title"]: row for row in activity(client)["rows"]}
+    assert rows["Behind a higher one"]["activity"] == (
+        "Waiting for a higher-priority task"
+    )
+    assert rows["No slot"]["activity"] == "Waiting for a free model slot"
+    assert rows["Unknown reason"]["activity"] == "Waiting for the model"
+    assert {row["state"] for row in rows.values()} == {"held"}
+    assert {row["icon"] for row in rows.values()} == {"held"}
+
+
 @pytest.mark.parametrize("broken", ["day_turns", "tasks_since", "worker_day_turns"])
 async def test_an_unreadable_store_counts_as_empty(
     client: TestClient,
