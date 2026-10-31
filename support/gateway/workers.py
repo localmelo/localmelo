@@ -1599,7 +1599,13 @@ class TaskWorkers:
                 while True:
                     try:
                         async with self._lock:
-                            if self._closed or task_id in self._stopping:
+                            if (
+                                self._closed
+                                or task_id in self._stopping
+                                or task_id in self._invalid_workspace
+                            ):
+                                # The run is being cancelled: stand down rather
+                                # than start providers without evidence.
                                 raise asyncio.CancelledError()
                             generation, previous = await self.tasks.park_identity(
                                 task_id

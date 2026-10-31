@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -202,3 +203,42 @@ async def test_a_continued_run_that_cannot_start_says_so_and_the_next_one_can(
     await pool.message(task_id, "try again")
     await _settled(pool, task_id, 2, "done")
     assert (await pool.tasks.get_task(task_id)).wait_reason == ""
+
+
+async def test_a_stop_before_a_continued_run_starts_ends_it_cancelled(
+    workers: Setup, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    pool, llm, workspace = workers
+    llm.replies = [says("Fixed; not committed.")]
+    row, _ = await pool.create({"prompt": "Fix it", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await _settled(pool, task_id, 1, "done")
+    # Hold the continued run just before its start, as a Stop would find it.
+    reached, go = asyncio.Event(), asyncio.Event()
+    original = RecoveryStore.provenance
+
+    async def held(self: RecoveryStore, task: str) -> Any:
+        reached.set()
+        await go.wait()
+        return await original(self, task)
+
+    monkeypatch.setattr(RecoveryStore, "provenance", held)
+    await pool.message(task_id, "commit it")
+    await asyncio.wait_for(reached.wait(), 3)
+    assert (await pool.tasks.get_task(task_id)).state == "queued"
+    await pool.update(task_id, state="stop")
+    go.set()
+    with caplog.at_level(logging.ERROR, logger="localmelo.support.gateway.workers"):
+        await _settled(pool, task_id, 1, "cancelled")
+    # Cancelled, not failed: no turn began, no model call, no failure to show.
+    record = await pool.tasks.get_task(task_id)
+    assert not record.wait_reason.startswith("Could not continue")
+    events = await pool.store.list_events(task_id)
+    ended = [
+        e.event["data"]["state"]
+        for e in events
+        if e.event["type"].startswith("sched.f")
+    ]
+    assert ended == ["done"]
+    assert len(llm.requests) == 1
+    assert not caplog.records
