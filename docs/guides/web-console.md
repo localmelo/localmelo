@@ -162,6 +162,18 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
 - **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question asks **Start this as a task?** first. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
 
+## Chores that repeat
+
+![The main chat asks "Run this every weekday at 8:30?" with Save chore, Just once and Cancel](../assets/img/chore-proposal.webp)
+
+![The Scheduled tab: the check-in with its switch, two chores with their next run and how the last run went, and one chore open to Run now, Edit time and Delete](../assets/img/scheduled-tab.webp)
+
+- **Say it once.** A message such as `every weekday at 8:30, brief me on my calendar` or `每天早上九点 总结我的邮件` makes a card, `Run this every weekday at 8:30?`, with **Save chore**, **Just once** and **Cancel**. Nothing is saved or started until you tap, and no model reads the schedule.
+- **Three schedules.** Every day at a time, every weekday at a time, or every 1 to 24 hours. With no time, a day part sets it (`every morning` is 8:00, `every evening` 18:00), else 9:00. `every Monday` or `every 30 minutes` is not read: it goes to the main chat as any message does.
+- **Runs on time.** While the gateway runs, a chore starts as a task in its own folder of your workspace, up to two minutes after its time and never before. A run missed while the computer slept happens once when it wakes, and a chore whose last run has not ended skips its next turn.
+- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
+- **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task that has waited for you a whole beat. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
+
 ## Pictures in the answer
 
 When a turn makes a picture it shows under the answer, in the browser and in the
@@ -197,8 +209,7 @@ On the right of the chat is Melo's panel. At the top is Melo's portrait, with a 
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
 settings**. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
-End move between them, and the panel opens the tab you used last. Scheduled says what it will list; Activity,
-Workers and Memory work today.
+End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
 workers it started; the main chat's panel, and the panel with no chat open, list everything of the day. Melo's status
