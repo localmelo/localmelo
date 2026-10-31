@@ -136,6 +136,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 常用命令排在最前：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。
 - 以 `/` 和小写名称开头的消息是命令；未知名称会输出 `Unknown command /NAME. /help lists the commands.` 并保留草稿，而 `/etc/hosts is broken` 是一条消息。
 - 要发送以命令样式开头的消息，请在开头加一个空格。
+- [网页控制台和应用](web-console.md#slash-commands)理解同样的命令，名字相同，以命令样式开头的消息也是同一条规则。
 
 | 命令 | 作用 |
 |---|---|

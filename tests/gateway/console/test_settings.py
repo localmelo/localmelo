@@ -1077,6 +1077,30 @@ def test_the_settings_carry_how_new_chats_start_and_save_it_only_when_sent(
     assert config.load().approvals.mode == "auto"
 
 
+def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    """``/browser on`` and ``/browser off`` in the console save ``[browser] driver``."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["browser"] is False
+    on = client.put("/api/settings", json=_put_body(loaded["revision"], browser=True))
+    assert on.status_code == 200 and on.json()["browser"] is True
+    assert config.load().browser.driver == "safari-automation"
+    assert 'driver = "safari-automation"' in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(on.json()["revision"]))
+    assert kept.json()["browser"] is True, "absent leaves it as it is"
+    off = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], browser=False)
+    )
+    assert off.status_code == 200 and off.json()["browser"] is False
+    assert config.load().browser.driver == "off"
+    word = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], browser="on")
+    )
+    assert word.status_code == 400, "only true or false"
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

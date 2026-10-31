@@ -122,6 +122,7 @@ When the model is not the saved default, a row after the folder gives the server
 - The everyday commands come first: `/model`, `/new`, `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`.
 - A message that starts with `/` and a lowercase name is a command; an unknown name prints `Unknown command /NAME. /help lists the commands.` and keeps the draft, and `/etc/hosts is broken` is a message.
 - To send a message that starts like a command, start it with a space.
+- The [web console and the app](web-console.md#slash-commands) understand the same commands, with the same names and the same rule for a message that starts like one.
 
 | Command | What it does |
 |---|---|

@@ -103,6 +103,7 @@ While the window is put away and something runs or waits, a small pill takes Mel
 - When a gateway already runs (one `melo` started in a terminal, say), the app uses it instead, signed in the same way; it finds it through `~/.cache/localmelo/gateway/endpoint.json`.
 - Quitting leaves a gateway the app did not start running, and the menu says so: **Quit localmelo (the gateway keeps running)**. `melo serve stop` stops it.
 - Closing the window leaves the gateway running; quitting asks only when something would stop, for example `Quitting stops what is running: 2 tasks and 1 chat.`
+- `/exit` (or `/quit`) in the console asks `Quit melo?` in the page first, then quits as **Quit localmelo** does, with the same question when something would stop. In a browser tab it says to close the tab instead.
 - Direct runs and terminal chats belong to other processes and go on: `Not affected: 1 run and 1 terminal chat.`
 - If another gateway holds the console's store, stop it first; a background service is checked with `melo serve status` and removed with `melo serve uninstall`.
 - Quit the app before removing its bundle; for isolated manual tests, use a temporary `HOME`.

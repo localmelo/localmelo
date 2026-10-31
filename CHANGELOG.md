@@ -21,6 +21,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runs and existing connections are unchanged. Developer mode keeps the review
   menu with **Details**. [#NN]
 
+- A task starts with what its chat knows about you and the project. When the
+  task is made, the notes about you and your preferences, the notes of its
+  folder and those that match its request are kept with the task and given to
+  its first request, under a heading that says they are information, not
+  instructions. A continue or a restart uses the same lines; memory off, or
+  nothing matching, starts the task without them. The task page folds them
+  under "What melo told the task". Part of #369. [#382]
+- Every slash command of the terminal works in the web console and the app.
+  Typing `/` at the start of the message box opens a menu above it that
+  narrows as you type (arrows and Enter or Tab, Esc, or a click; a command
+  without arguments runs on Enter), in English or Chinese. A command is never
+  sent to the model: `/model NAME` and `/backend URL` save through the
+  settings, `/new`, `/clear` and `/side TITLE` open a new chat, `/chats`,
+  `/sessions` and `/resume` pick one, `/main` goes back, `/status`, `/usage`,
+  `/progress`, `/help`, `/approvals` and `/browser` answer in a row under the
+  conversation, `/undo`, `/retry`, `/copy`, `/title`, `/memory` and `/expand`
+  act on the chat, `/verbose`, `/thinking` and `/stream` change how the page
+  shows it, and `/exit` asks, then quits the app (in a browser tab it says to
+  close the tab). `/task` and `/answer` go to the open chat as before. An
+  unknown command says so; `//text` and a message that starts with a space are
+  messages, as in the terminal. `/attach`, `/attachments`, `/detach` and `/mcp`
+  say the console does not have files or MCP yet. New for clients:
+  `GET /api/commands` (the terminal's table, so the two never drift),
+  `POST /api/sessions/{id}/undo` and `browser` on `PUT /api/settings`.
+  [#381]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the
@@ -63,7 +88,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   apart from your notes: the pack holds your About you and Preferences notes,
   the project's notes and the notes that match the objective (never People or
   Decisions); a question from a task is agent data that no note is written
-  from. Nothing calls the pack or the summaries yet. Part of #369. [#374]
+  from. The summaries are not called yet. Part of #369. [#374]
 - Bring in what other coding assistants on this computer remember. A scan
   (`GET /api/memory/import/scan`) reads the instruction and memory files they
   keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -3178,3 +3203,5 @@ earlier milestones.
 [#374]: https://github.com/localmelo/localmelo/pull/374
 [#378]: https://github.com/localmelo/localmelo/pull/378
 [#379]: https://github.com/localmelo/localmelo/pull/379
+[#381]: https://github.com/localmelo/localmelo/pull/381
+[#382]: https://github.com/localmelo/localmelo/pull/382

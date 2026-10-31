@@ -51,6 +51,7 @@ from . import (
     errors,
     front,
     routes_chores,
+    routes_commands,
     routes_details,
     routes_memory,
     routes_page,
@@ -404,6 +405,7 @@ class Console:
         routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
         routes_chores.add_routes(app, self)
+        routes_commands.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
