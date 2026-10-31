@@ -20,11 +20,33 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   passes on its result; tests a report claims do not count, and work that was
   in the folder before the task is not blamed on it. Work owed stays owed until
   the task ends ready, outside git too. Tests that still fail when nothing was
-  changed say so, with nothing to finish. The card, the task page, Activity and the terminal say it
-  in plain words and colour, the task page lists the tests the run ran, and
-  **Finish it: run the tests and commit** continues a task that still owes them
-  with one tap. Part of #377. [#NN]
-
+  changed say so, with nothing to finish. The card, the task page, Activity
+  and the terminal say it in plain words and colour, the task page lists the
+  tests the run ran, and **Finish it: run the tests and commit** continues a
+  task that still owes them with one tap. Part of #377. [#NN]
+- In the terminal, what a `/` command prints hangs under the command behind a
+  quiet `└` (`|` with ASCII symbols), indented one step: later lines line up
+  under the first, a wrapped line continues under itself, and warnings and
+  errors keep their colour. One helper draws it for commands, `!` shell
+  results and tool-call details, so all three share one shape; pickers stay
+  as they are, and what they print when they close hangs under the command.
+  `/new` keeps its full-width rule. [#387]
+- A task's approvals go through the chat that started it, and the same
+  approved step is not asked twice. A task's step that needs you shows in its
+  chat's card with the whole approval card, and, for your own tasks and
+  chores, **melo's explanation** under the step says what the task is doing,
+  why it needs the step, what could go wrong and what each answer does; it
+  decides nothing. Once you allowed a step in a chat or one of its tasks,
+  that chat's later tasks run the exact same Python code, shell command or
+  file write (same folder, nothing melo read for it changed) without asking,
+  when melo's rules read the whole step and found it routine; the card says
+  so, and the chat shows `Used your approval from 2:02 PM` with **Revoke**.
+  "Allow for this chat" covers the chat's tasks too. High-impact steps, steps
+  melo could not see all of, tools its rules do not read (web or MCP tools),
+  chores and tasks you did not start always ask, and Auto's Allow once is
+  never remembered. A step Auto blocked in a task shows in its chat with
+  **Allow once**. The task's page and the chat's Details list what ran this
+  way, with Revoke. Part of #369. [#385]
 - A short, read-only setup preview when terminal first run finds no model
   server: the recommendation, download/cache amounts and free space.
   `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
@@ -3241,3 +3263,5 @@ earlier milestones.
 [#382]: https://github.com/localmelo/localmelo/pull/382
 [#383]: https://github.com/localmelo/localmelo/pull/383
 [#384]: https://github.com/localmelo/localmelo/pull/384
+[#385]: https://github.com/localmelo/localmelo/pull/385
+[#387]: https://github.com/localmelo/localmelo/pull/387

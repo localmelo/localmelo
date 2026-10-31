@@ -244,6 +244,7 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("DELETE", "/api/sessions/{session_id}"): None,
     ("DELETE", "/api/sessions/{session_id}/grants/{tool}"): None,
     ("DELETE", "/api/sessions/{session_id}/grants"): None,
+    ("DELETE", "/api/sessions/{session_id}/approvals/{entry_id}"): None,
     ("POST", "/api/sessions/{session_id}/level"): {"level": 2},
     ("POST", "/api/presence"): {"session_id": "{session_id}"},
     ("POST", "/api/turns/{turn_id}/cancel"): None,
@@ -279,6 +280,7 @@ async def test_every_write_route_refuses_a_worker_run(
             "tool": "file_write",
             "client_request_id": "k",
             "request_id": "r",
+            "entry_id": "e",
         }
         for (method, path), body in WRITES.items():
             payload = (

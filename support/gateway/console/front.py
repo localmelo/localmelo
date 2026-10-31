@@ -1802,6 +1802,14 @@ class Front:
             return replied
         if do == "undo" and kind == "answer_sent":
             return await self._take_back(echo_id, echo)
+        if do == "revoke" and kind == "earlier":
+            # The person takes back the approval a task's step ran on (#369).
+            self.console.approvals.revoke(self.chat_id or "", str(echo.get("entry_id")))
+            return await self.echo(
+                {"echo": "revoked", "of": echo_id, "task_id": echo.get("task_id"),
+                 "title": echo.get("title", ""), "line": t_in("en", "approvals.revoked"),
+                 "said": said("approvals.revoked")}
+            )  # fmt: skip
         if do == "start" and kind == "ask":
             words = str(echo.get("words", ""))
             return await self.delegate(
@@ -1943,7 +1951,9 @@ def _plain(exc: Exception) -> str:
 
 
 class EchoAction(Body):
-    do: Literal["undo", "apply", "start", "level", "save", "once", "cancel", "reply"]
+    do: Literal[
+        "undo", "apply", "start", "level", "save", "once", "cancel", "reply", "revoke"
+    ]
     level: str | int | None = None
     # A reply's words (``do: reply``, a task's question to the person).
     text: str = Field(default="", max_length=8_000)

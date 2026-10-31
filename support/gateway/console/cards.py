@@ -37,6 +37,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Final
 
+from localmelo.melo.contracts.review import TITLES
 from localmelo.support.gateway.i18n import (
     current,
     said,
@@ -55,6 +56,7 @@ from localmelo.support.sessions.display import (
 )
 from localmelo.support.sessions.store import SessionInfo, StoredEvent
 
+from ..auto_blocks import blocked_steps
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, is_out_of_steps, not_committed
 from ..task_endings import default_ending
@@ -165,7 +167,25 @@ class MainChatCards:
             if kind == CARD_EVENT and _is_news(stored.event.get("data")):
                 self._last = stored
             return
-        if kind in (
+        if kind == "tool.finished":
+            # A step auto mode blocked in a task: its chat shows it, with Allow once (#369).
+            approval = (stored.event.get("data") or {}).get("approval")
+            if not (
+                isinstance(approval, dict)
+                and approval.get("origin") == "auto"
+                and approval.get("allowed") is False
+            ):
+                return
+            event = {
+                "type": kind,
+                "ts": stored.event.get("ts"),
+                "data": {"request_id": approval.get("request_id")},
+            }
+            self._heard_events.append(
+                StoredEvent(stored.id, stored.session_id, stored.turn, event)
+            )
+            del self._heard_events[:-_HEARD_MAX]
+        elif kind in (
             "turn.finished",
             "approval.requested",
             "approval.resolved",
@@ -296,6 +316,8 @@ class MainChatCards:
             }
         if kind == "approval.resolved":
             return await self._answer_card(owner, card, data)
+        if kind == "tool.finished":
+            return await self._blocked_card(info, card, str(data.get("request_id")))
         if kind == "turn.finished":
             # A side chat's own run; a task's turns end in its sched event.
             if info.kind != "chat" or data.get("cause") != "run":
@@ -359,6 +381,28 @@ class MainChatCards:
                 ended = _words("cards.reminderFailed", words=words)
         return {**card, "state": state, **ended}
 
+    async def _blocked_card(
+        self, info: SessionInfo, card: dict[str, Any], request_id: str
+    ) -> dict[str, Any] | None:
+        """A task's step auto mode blocked: the block as the task's page has it."""
+        if info.kind != "task":
+            return None  # a chat's own block is a card in its own turn
+        found = await blocked_steps(self._console.store, info.id)
+        block = next((b for b in found if b["request_id"] == request_id), None)
+        if block is None:
+            return None
+        review = block["review"] or {}
+        words = said("cards.blocked", what=said(f"auto.words.{_first(review)}"))
+        return {
+            **card,
+            "state": "blocked",
+            "line": said_in("en", words),
+            "said": words,
+            **{k: block[k] for k in ("request_id", "step_key", "name", "preview")},
+            "review": review,
+            "can_allow": block["can_allow"],
+        }
+
     async def _reminder_words(self, task_id: str) -> str | None:
         """The person's words of a reminder's task, or ``None`` for any other task."""
         try:
@@ -417,6 +461,13 @@ class MainChatCards:
     async def _read_unanswered(self, owner: str) -> set[str]:
         """The request ids of the newest waiting cards of *owner* that no answer follows."""
         return {str(card["request_id"]) for card in await self.waiting_in(owner)}
+
+
+def _first(review: dict[str, Any]) -> str:
+    """The review's first category, or ``beyond_request`` when it named none."""
+    found = review.get("categories")
+    first = found[0] if isinstance(found, list) and found else ""
+    return str(first) if first in TITLES else "beyond_request"
 
 
 def _is_news(data: object) -> bool:

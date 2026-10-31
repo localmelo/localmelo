@@ -37,6 +37,7 @@ from rich.text import Text
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support import console_link, gateway_endpoint, task_cli
+from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
 from localmelo.support.sessions.display import clean_output, home_label
 from localmelo.support.sessions.store import (
@@ -770,24 +771,32 @@ class MainChat:
         finished = [t for t in turns if not t.get("undone")]
         if not finished:
             return
+        # Under a command's echo the connector and the hang indent already
+        # set the rows in; at the start they are indented by two.
+        lead = "" if hanging.active() else "  "
         for turn in finished:
             typed = " ".join(str(turn.get("user_text") or "").split())
             answer = " ".join(str(turn.get("answer") or "").split())
             asked = task_question(str(turn.get("user_text") or ""))
             if asked is not None:
-                line = asked_line(*asked, symbols, width - 2)
-                line.pad_left(2)
+                line = asked_line(*asked, symbols, width - len(lead))
+                line.pad_left(len(lead))
                 out.print(line)
             else:
                 out.print(
                     Text(
-                        cut_cells(f"  {symbols.prompt} {clean_output(typed)}", width),
+                        cut_cells(
+                            f"{lead}{symbols.prompt} {clean_output(typed)}", width
+                        ),
                         style="muted",
                     )
                 )
             if answer:
                 out.print(
-                    Text(cut_cells(f"    {clean_output(answer)}", width), style="muted")
+                    Text(
+                        cut_cells(f"{lead}  {clean_output(answer)}", width),
+                        style="muted",
+                    )
                 )
         since = float(finished[-1].get("started_at") or 0)
         newer = [

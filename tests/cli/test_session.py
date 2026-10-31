@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import io
 import re
 import time
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from typing import Any
 
 import pytest
 from prompt_toolkit.buffer import Buffer
+from rich.text import Text
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.schema import Message
@@ -175,6 +177,11 @@ class Setup:
         if not sessions:
             return []
         return await self.store.list_turns(sessions[0].id)
+
+
+def _plain(text: str) -> str:
+    """*text* with the connector and the indent a command's output hangs by taken off."""
+    return re.sub(r"(?m)^(?:  └ |    )", "", text)
 
 
 async def _until(check: Callable[[], bool], timeout_s: float = 5.0) -> None:
@@ -1240,9 +1247,9 @@ async def test_a_command_that_runs_is_echoed_before_its_output(setup: Setup) -> 
     await _until(lambda: "Saved as the default." in setup.out.text())
     await setup.idle()
     text = setup.out.text()
-    assert "› /model\nCancelled. Still using m1.\n\n› /model m2\n" in text
+    assert "› /model\n  └ Cancelled. Still using m1.\n\n› /model m2\n" in text
     assert (
-        "› /model m2\nModel: m2 (OpenAI-compatible server). Saved as the default.\n\n"
+        "› /model m2\n  └ Model: m2 (OpenAI-compatible server). Saved as the default.\n\n"
         in text
     )
 
@@ -1432,7 +1439,7 @@ async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
     text = out.text()
     assert "phase Verify (cycle 1) · tests 7/8" in text
     assert "past 2 runs · 6-8 steps · 2-3 min · last 8 steps, 2m50s" in text
-    assert "items\n  Read a · done\n  Edit b (×2) · current" in text
+    assert "items\n  Read a · done\n  Edit b (×2) · current" in _plain(text)
     assert "basis routine-1 · v3 · match routine · model stub-model" in text
 
 
@@ -1639,12 +1646,12 @@ async def test_status_answers_first_in_five_rows(
     session, out = setup.session, setup.out
     session.enter("/status")
     await _until(lambda: "context    " in out.text())
-    assert "\nchat       new\n" in out.text()
+    assert "\nchat       new\n" in _plain(out.text())
     session.enter("hello")
     await setup.idle()
     session.enter("/status")
     await _until(lambda: out.text().count("context    ") == 2)
-    assert out.text().strip().splitlines()[-5:] == [
+    assert _plain(out.text()).strip().splitlines()[-5:] == [
         f"model      m1 · OpenAI-compatible server · {URL} · ✓ answers",
         "folder     ~/work",
         'chat       "hello" · 1 turn',
@@ -1674,7 +1681,8 @@ async def test_status_says_when_the_server_does_not_answer(
     await _listing(monkeypatch, error)
     setup.session.enter("/status")
     await _until(lambda: "context    " in setup.out.text())
-    rows = setup.out.text().split("model      ")[1].split("\nfolder ")[0].split("\n")
+    shown = _plain(setup.out.text())
+    rows = shown.split("model      ")[1].split("\nfolder ")[0].split("\n")
     # Longer than a row at 80 columns: it continues under itself, not at column 0.
     assert len(rows) > 1 and all(row.startswith(" " * 11) for row in rows[1:])
     assert " ".join(map(str.strip, rows)) == (
@@ -1689,7 +1697,7 @@ async def test_status_has_no_state_for_a_server_it_cannot_list(setup: Setup) -> 
     setup.factory.backend = replace(cloud, key="openai", label="OpenAI")
     setup.session.enter("/status")
     await _until(lambda: "context    " in setup.out.text())
-    assert "\nmodel      gpt-4o · OpenAI\n" in setup.out.text()
+    assert "\nmodel      gpt-4o · OpenAI\n" in _plain(setup.out.text())
 
 
 async def test_status_draws_ascii_only_in_ascii_mode(
@@ -1710,7 +1718,8 @@ async def test_status_all_wraps_its_rows_under_their_labels(
     session.out = narrow = RecordingOut(40)
     session.enter("/status all")
     await _until(lambda: "version    melo " in narrow.text())
-    rows = narrow.text().strip().splitlines()
+    assert all(len(row) <= 40 for row in narrow.text().splitlines())
+    rows = _plain(narrow.text()).strip().splitlines()
     labels = ["model", "workspace", "fence", "session", "approvals", "tools"]
     labels += ["memory", "limits", "files", "version"]
     assert all(len(row) <= 40 for row in rows)
@@ -1780,6 +1789,145 @@ async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
     session.enter("/mcp")
     await _until(lambda: "MCP is off for this chat: the server exited." in out.text())
     assert "Fix the config, then restart melo." in " ".join(out.text().split())
+
+
+# ── What a command prints hangs under its echo ──
+
+
+async def test_a_commands_output_hangs_under_its_echo(setup: Setup) -> None:
+    setup.session.enter("/approvals auto")
+    await _until(lambda: "grants: none" in setup.out.text())
+    await setup.idle()
+    assert setup.out.text().endswith(
+        "› /approvals auto\n  └ Approvals: auto · grants: none\n\n"
+    )
+
+
+async def test_the_rows_of_a_command_line_up_under_the_first(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _listing(monkeypatch, None)
+    setup.session.enter("/status")
+    await _until(lambda: "context    " in setup.out.text())
+    rows = setup.out.text().strip().splitlines()[1:]
+    labels = ["model", "folder", "chat", "approvals", "context"]
+    assert [row[:4] for row in rows] == ["  └ ", *["    "] * 4]
+    assert [row[4:].split()[0] for row in rows] == labels
+    assert len({row[4:].index(row[4:].split()[1]) for row in rows}) == 1  # one column
+
+
+async def test_an_error_hangs_under_its_command_and_keeps_the_draft(
+    setup: Setup,
+) -> None:
+    setup.session.enter("/status nope")
+    await _until(lambda: "✗ Use /status or /status all." in setup.out.text())
+    assert "› /status nope\n  └ ✗ Use /status or /status all.\n" in setup.out.text()
+
+
+async def test_a_wrapped_line_of_a_command_continues_under_itself(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    session.out = narrow = RecordingOut(30)
+    session.enter("/mcp")
+    await _until(lambda: "start melo with" in " ".join(narrow.text().split()))
+    rows = narrow.text().rstrip().splitlines()
+    assert rows[0].startswith("  └ No MCP servers.")
+    assert all(row.startswith("    ") for row in rows[1:])
+    assert all(len(row) <= 30 for row in rows)
+
+
+async def test_a_warning_keeps_its_colour_and_the_connector_is_quiet(
+    setup: Setup,
+) -> None:
+    from rich.console import Console
+
+    from localmelo.support.cli.theme import active
+    from localmelo.support.mcp import McpServerConfig
+
+    session, out = setup.session, setup.out
+    out.console = Console(
+        file=io.StringIO(),
+        record=True,
+        width=80,
+        color_system="standard",
+        force_terminal=True,
+        markup=False,
+        highlight=False,
+        theme=active().rich_theme,
+    )
+    factory = session.factory
+    factory.mcp_config = "~/mcp.json"
+    factory.mcp_source = "mcp_config"
+    factory.mcp_servers = [McpServerConfig(name="notes", command="notes-mcp")]
+    factory.mcp_error = "the server exited"
+    session.enter("/mcp")
+    await _until(lambda: "MCP is off for this chat" in out.text())
+
+    def code(role: str) -> str:
+        """The escape code that starts *role* (what a Text of that role begins with)."""
+        probe = Console(
+            file=io.StringIO(),
+            width=10,
+            color_system="standard",
+            force_terminal=True,
+            theme=active().rich_theme,
+        )
+        with probe.capture() as captured:
+            probe.print(Text("x", style=role))
+        return captured.get().split("x")[0]
+
+    drawn = out.console.export_text(styles=True, clear=False)
+    assert code("muted") != code("warn")
+    assert code("muted") + "  └ " in drawn  # the connector is quiet
+    assert code("warn") + "MCP is off for this chat" in drawn  # the warning is not
+    assert code("warn") + "  └" not in drawn
+    assert "  └ MCP servers from ~/mcp.json" in out.text()
+
+
+async def test_a_hung_command_in_ascii_draws_the_ascii_connector(setup: Setup) -> None:
+    setup.session.renderer.symbols = ASCII
+    setup.session.enter("/approvals auto")
+    await _until(lambda: "grants: none" in setup.out.text())
+    assert "> /approvals auto\n  | Approvals: auto - grants: none\n" in setup.out.text()
+
+
+async def test_what_a_picker_prints_when_it_closes_hangs_under_the_command(
+    setup: Setup,
+) -> None:
+    setup.app.picks = ["m2"]
+    setup.session.enter("/model")
+    await _until(lambda: "Saved as the default." in setup.out.text())
+    assert (
+        "› /model\n  └ Model: m2 (OpenAI-compatible server). Saved as the default.\n"
+        in setup.out.text()
+    )
+
+
+async def test_the_new_chat_rule_is_a_divider_and_stays_full_width(
+    setup: Setup,
+) -> None:
+    setup.session.enter("/new")
+    await _until(lambda: "New chat" in setup.out.text())
+    await setup.idle()
+    rows = setup.out.text().strip().splitlines()
+    assert rows[0] == "› /new"
+    assert rows[1].startswith("─") and " New chat " in rows[1] and len(rows[1]) == 80
+
+
+async def test_what_a_command_starts_prints_at_the_left_edge(setup: Setup) -> None:
+    session = setup.session
+    session.enter("hello")
+    await setup.idle()
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.append(answer("Again."))
+    session.enter("/retry")
+    await _until(lambda: "● Again." in setup.out.text())
+    await setup.idle()
+    rows = setup.out.text().splitlines()
+    assert "  └ ↻ Retrying turn 1: hello" in rows  # the command's own line hangs
+    assert "● Again." in rows  # the turn it started does not
 
 
 async def test_deny_mode_refuses_a_file_write(setup: Setup) -> None:

@@ -26,7 +26,7 @@ import httpx
 import pytest
 
 from localmelo.support import config, gateway_endpoint
-from localmelo.support.cli import main_chat
+from localmelo.support.cli import hanging, main_chat
 from localmelo.support.cli.main_chat import (
     GatewayClient,
     Link,
@@ -578,6 +578,26 @@ async def test_a_chats_turn_on_a_tasks_question_shows_its_row_not_its_frame(
     assert session.enter("/retry") is None
     await _until(lambda: "Nothing to retry" in setup.out.text())
     assert not [r for r in gateway.requests if r[1].endswith("/retry")]
+
+
+async def test_a_recap_under_a_command_hangs_instead_of_indenting_twice(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    gateway.turns.setdefault(MAIN, []).append(
+        {"id": f"{MAIN}-t1", "turn": 1, "user_text": "hello there", "status": "completed",
+         "answer": "Hi.", "started_at": 1000.0}  # fmt: skip
+    )
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    remote._cursors.clear()
+    await remote.open(remote.chat)  # at the start: rows indented by two
+    with hanging.under_command(UNICODE):  # under a command: the connector sets them in
+        remote._cursors.clear()
+        await remote.open(remote.chat)
+    rows = setup.out.text().splitlines()
+    assert "  › hello there" in rows and "    Hi." in rows
+    assert "  └ › hello there" in rows and "      Hi." in rows
 
 
 async def test_chats_lists_the_main_chat_first_and_opens_the_one_picked(

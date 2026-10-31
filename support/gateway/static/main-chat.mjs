@@ -10,6 +10,7 @@
  */
 
 import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
+import {blockCard, blockFacts, stepLine} from "./blocked.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
@@ -52,7 +53,7 @@ export function readCard(row) {
   const data = row?.data && typeof row.data === "object" ? {...row.data, id: row.id, ts: row.ts} : row;
   const id = Number(data?.id);
   if (!Number.isFinite(id) || !data?.source_id) return null;
-  const state = ["done", "failed", "stopped", "waiting", "answered"].includes(data.state) ? data.state : "done";
+  const state = ["done", "failed", "stopped", "waiting", "answered", "blocked"].includes(data.state) ? data.state : "done";
   return {
     id,
     at: Number(data.at) || Number(data.ts) || 0,
@@ -70,7 +71,27 @@ export function readCard(row) {
     ...(data.reminder === true ? {reminder: true} : {}),
     // A task's card: how it ended, as code decided it.
     ...(readEnding(data.ending) ? {ending: readEnding(data.ending)} : {}),
+    // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
+    ...(state === "blocked" ? {
+      stepKey: String(data.step_key ?? ""),
+      name: String(data.name ?? ""),
+      preview: String(data.preview ?? ""),
+      review: data.review && typeof data.review === "object" ? data.review : {},
+      canAllow: data.can_allow === true,
+    } : {}),
   };
+}
+
+/** What a blocked card's block says (`blocked.mjs`), or null; Allow once only where the server offers it. */
+export function cardBlock(card) {
+  if (card?.state !== "blocked") return null;
+  const facts = blockFacts({
+    approval: {origin: "auto", allowed: false, request_id: card.requestId, step_key: card.stepKey, review: card.review},
+    name: card.name,
+    preview: card.preview,
+  });
+  if (!facts || !facts.category) return null;
+  return card.canAllow ? facts : {...facts, allow: false};
 }
 
 /**
@@ -104,7 +125,7 @@ export function mergeCards(cards, more) {
 /**
  * The main chat's conversation: its turns, cards and echoes by time, with a divider at each new day.
  * Between two turns, a source shows only its newest card, so a busy side chat is one card; every
- * echo stays. Items: `{kind: "day", label}`, `{kind: "turn", turn}`, `{kind: "card", card}`,
+ * echo stays, and so does every blocked step (each has its own Allow once). Items: `{kind: "day", label}`, `{kind: "turn", turn}`, `{kind: "card", card}`,
  * `{kind: "echo", echo}`.
  */
 export function timeline(turns, cards, now, echoes = []) {
@@ -117,7 +138,7 @@ export function timeline(turns, cards, now, echoes = []) {
   const kept = [];
   let since = new Map();
   for (const item of items) {
-    if (item.kind !== "card") {
+    if (item.kind !== "card" || item.card.state === "blocked") {
       if (item.kind === "turn") since = new Map();
       kept.push(item);
       continue;
@@ -155,6 +176,7 @@ export function cardWords(card) {
   const open = t(card.sourceKind === "task" ? "mainChat.openTask" : "mainChat.openSideChat");
   const title = card.title;
   if (card.state === "waiting") return {mark: "!", heading: t("mainChat.card.waiting", {title}), action: t("common.review")};
+  if (card.state === "blocked") return {mark: "⊘", heading: t("mainChat.card.blocked", {title}), action: open};
   // An answered approval has nothing left to review: it says how it was answered (cards stored before
   // they kept their words say it in English).
   if (card.state === "answered") {
@@ -167,7 +189,9 @@ export function cardWords(card) {
   const ending = card.state === "done" ? card.ending : null;
   if (ending) {
     const name = endingName(ending);
-    const heading = t(`mainChat.card.${name === "dropped" ? "stopped" : name}`, {title});
+    // Its own keys: "blocked" cards are steps Auto blocked, a dropped task reads as stopped.
+    const key = {blocked: "needsYou", dropped: "stopped"}[name] ?? name;
+    const heading = t(`mainChat.card.${key}`, {title});
     return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
   }
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
@@ -177,10 +201,13 @@ export function cardWords(card) {
 }
 
 /**
- * One card's node: `{doc, card, open, resume}`; `open` gets the card, and `resume(card, button)` is the
- * Continue of a stopped task's card. Its day is the divider above it.
+ * One card's node: `{doc, card, open, resume, approval, block}`; `open` gets the card, and
+ * `resume(card, button)` is the Continue of a stopped task's card. `approval` is a waiting task's
+ * approval card, drawn inside it (its Open then only opens the task). `block` is what a blocked
+ * card's Allow once needs (`blockCard`'s options: `allowing`, `busy`, `onAllow`, `error`,
+ * `developer`). Its day is the divider above it.
  */
-export function cardNode({doc, card, open, resume = null}) {
+export function cardNode({doc, card, open, resume = null, approval = null, block = null}) {
   const el = (tag, className, text) => {
     const node = doc.createElement(tag);
     if (className) node.className = className;
@@ -201,12 +228,17 @@ export function cardNode({doc, card, open, resume = null}) {
   // Cards written before a card said what it asks kept a line that repeats the heading (in English, when
   // they were stored before cards kept their words).
   const repeats = [t("turns.activity.approval"), "Waiting for your approval"].includes(card.line);
-  const line = card.state === "waiting" && repeats ? "" : card.line;
+  const facts = cardBlock(card);
+  // A blocked step says what and why in its block; its line is for the list and the terminal.
+  const line = (card.state === "waiting" && repeats) || facts ? "" : card.line;
   if (line) text.append(el("p", "main-card-line", line));
   // Why it is not ready: what code found missing, or its question.
   const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending) : "";
   if (why) text.append(el("p", "main-card-why", why));
-  const action = el("button", card.state === "waiting" ? "outline-button" : "link-button", words.action);
+  if (facts) text.append(blockCard(doc, facts, block ?? {}));
+  const inline = card.state === "waiting" && approval;
+  if (inline) text.append(approval);
+  const action = el("button", card.state === "waiting" && !inline ? "outline-button" : "link-button", inline ? t("mainChat.openTask") : words.action);
   action.type = "button";
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
@@ -224,9 +256,10 @@ export function cardNode({doc, card, open, resume = null}) {
 // ── Echoes: what the main chat did with a task ──
 
 const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin",
-  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered"]);
+  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷",
-  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩"};
+  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
+  earlier: "✓", revoked: "↺"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
 const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
 const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];
@@ -259,15 +292,26 @@ export function mergeEchoes(echoes, more) {
   return [...byId.values()].sort((left, right) => left.id - right.id);
 }
 
-/** The ids of echoes a later one answered (an Undo, an Apply, a Start): their buttons go. */
+/** The ids of echoes a later one answered (an Undo, an Apply, a Start, a Revoke): their buttons go. */
 export function answered(echoes) {
   return new Set(echoes.map((echo) => Number(echo.of)).filter(Number.isFinite));
+}
+
+/**
+ * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
+ * *ended*). A step that ran on the person's earlier approval keeps Revoke after its task ends: the
+ * approval is the chat's, and later tasks could use it.
+ */
+export function echoDone(echo, done, ended) {
+  return done.has(echo.id) || (echo.kind !== "earlier" && ended.has(echo.task_id));
 }
 
 /** An echo's buttons: `[label, do]`; a level change opens the level list. */
 export function echoActions(echo, done) {
   if (done || !echo.task_id && !["ask", "chore", "chore_saved"].includes(echo.kind)) return [];
   const undo = [t("mainChat.echo.undo"), "undo"];
+  // A step ran on the person's earlier approval (#369): Revoke takes the approval back.
+  if (echo.kind === "earlier") return [[t("approvals.revoke"), "revoke"]];
   // A reminder runs once, at its time: there is no "just once" for it.
   if (echo.kind === "chore" && echo.reminder) return [[t("mainChat.echo.remind"), "save"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
@@ -314,7 +358,9 @@ export function echoNodes({doc, echo, done = false, act}) {
   mark.setAttribute("aria-hidden", "true");
   const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
   // An echo the gateway worded keeps its words for the page's language; the level is the chip.
-  const own = saidText(echo.said);
+  // A step that ran on an earlier approval says its time as the page writes a time.
+  const approvedAt = echo.kind === "earlier" ? Number(echo.approved_at) : 0;
+  const own = approvedAt ? t("approvals.used", {time: clock(approvedAt)}) : saidText(echo.said);
   const words = level === null || own !== null ? own ?? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
   // The words, the level and the buttons wrap together, under the words.
   const body = el("div", "echo-body");
@@ -330,6 +376,8 @@ export function echoNodes({doc, echo, done = false, act}) {
   }
   // A chore's proposal names the work it would repeat (a reminder, its words), under the question.
   if (echo.kind === "chore" && (echo.work || echo.text)) body.append(el("p", "echo-sub", echo.work || echo.text));
+  // The step that ran on an earlier approval, and the task that ran it.
+  if (echo.kind === "earlier" && echo.preview) body.append(el("p", "echo-sub", t("approvals.ran", {title: echo.title ?? "", step: stepLine(echo.preview)})));
   // A task of another chat says whose it is (a side chat's title, or the main chat).
   const owner = echo.from_main ? t("chat.main") : echo.from_chat;
   if (owner) body.append(el("p", "echo-sub", t("chat.fromChat", {title: owner})));

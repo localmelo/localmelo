@@ -272,6 +272,7 @@ class SessionRunner:
         memory: ChatMemory | None = None,
         index_only: bool = False,
         context: str = "",
+        review_since: Callable[[], Awaitable[float | None]] | None = None,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -297,6 +298,8 @@ class SessionRunner:
         self._memory = None if self._worker else memory
         self._index_only = index_only
         self._context = context
+        # An earlier start for a turn's review window (a task that uses its chat's approvals).
+        self._review_since = review_since
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -729,6 +732,14 @@ class SessionRunner:
                 session = await self._store.get_session(turn.turn.session_id)
                 if session is not None:
                     kwargs["chat_started"] = session.created_at
+            if self._review_since is not None:
+                since: float | None = None
+                with contextlib.suppress(Exception):
+                    since = await self._review_since()
+                if since is not None:
+                    kwargs["chat_started"] = min(
+                        since, kwargs.get("chat_started", since)
+                    )
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)
