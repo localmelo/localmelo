@@ -804,6 +804,7 @@ class ConsoleSessions:
         *,
         client_request_id: str | None = None,
         mode: ChatMode | None = None,
+        admit: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Create a session, usually with its first turn (``POST /api/sessions``).
 
@@ -819,7 +820,11 @@ class ConsoleSessions:
         try:
             async with lock or contextlib.nullcontext():
                 return await self._create_locked(
-                    workspace, first, client_request_id, mode or self.new_chat_mode()
+                    workspace,
+                    first,
+                    client_request_id,
+                    mode or self.new_chat_mode(),
+                    admit,
                 )
         finally:
             # Outside the block: the lock this task took is free again, so
@@ -832,6 +837,7 @@ class ConsoleSessions:
         first: tuple[str, str] | None,
         client_request_id: str | None,
         mode: ChatMode = "ask",
+        admit: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
@@ -841,6 +847,8 @@ class ConsoleSessions:
             # costs neither, and a rejected key writes no row.
             found = await self._store.get_submission(None, client_request_id)
             check_submission(found, composed or "")
+            if admit is not None:
+                await admit()
         path = self._resolve_workspace(workspace)
         settings = self._settings()
         model = self._settings_model()

@@ -72,17 +72,10 @@ async def waiting_by_chat(console: Console) -> dict[str, int]:
     A task of a chat that is gone counts for the main chat, which holds its card.
     """
     waiting: dict[str, int] = {}
-    main = console.main_id
     for record in await live_tasks(console) or []:
         if record.state != "held" or record.wait_reason not in WAITS_FOR_YOU:
             continue
-        owner = record.front_id or main or ""
-        if owner != main:
-            try:
-                gone = await console.store.get_session(owner) is None
-            except SessionStoreError:
-                gone = True
-            owner = main or "" if gone else owner
+        owner = await console.effective_owner(record.front_id) or ""
         waiting[owner] = waiting.get(owner, 0) + 1
     return waiting
 

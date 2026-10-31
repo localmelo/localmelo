@@ -558,9 +558,13 @@ class TaskWorkers:
         *,
         front_id: str | None = None,
         request_key: str | None = None,
+        create_key: str | None = None,
         origin: Origin = "user",
     ) -> tuple[dict, bool]:
         """Create a task from a spec trusted code made (the main chat's, or a chore's).
+
+        *create_key* is the key of a chat made for the task (``POST /api/sessions``
+        with ``as_task``): a repeat of it returns the task already made.
 
         The spec's level and reason are kept as given: the main chat computes
         them from the person's own words. *front_id* is the owner chat, the
@@ -579,7 +583,9 @@ class TaskWorkers:
         async with self._lock:
             if self._closed:
                 raise RuntimeError("workers are closed")
-            existing = await self.tasks.find_existing_request(
+            existing = (
+                await self.tasks.by_create_key(create_key) if create_key else None
+            ) or await self.tasks.find_existing_request(
                 spec, origin=origin, front_id=front or self.front_id, request_key=key
             )
             if existing is not None:
@@ -611,6 +617,7 @@ class TaskWorkers:
                 origin=origin,
                 workspace=workspace,
                 request_key=key,
+                create_key=create_key,
                 task_id=task_id,
                 front_id=front or self.front_id,
                 meta={"approvals": mode},

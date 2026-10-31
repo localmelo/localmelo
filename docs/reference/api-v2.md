@@ -1008,10 +1008,11 @@ with the echo.
   made first, empty, titled by the message, and the answer is 201 with the
   `session` and the task's `echo`, no turn; with a `client_request_id` it is a
   submission of the create scope: a cancelled key is 409 `submission_withdrawn`, a
-  key accepted for another message 409 `submission_conflict`, a repeat answers 200
+  key accepted for another message 409 `submission_conflict` (and a message created under a key a chat was made for a task under is 409 too: the two kinds of key are kept apart in the store), a repeat answers 200
   with the chat and echo the first made and `repeated: true` (the echo written again
   if the gateway stopped between the task and it), `GET /api/submissions/{key}`
-  reads `accepted` with the chat's `session_id` and a `task_id`, and the key's cancel
+  reads `accepted` with the chat's `session_id` (the main chat's, once its chat was
+  deleted and the task handed over) and a `task_id`, and the key's cancel
   stops the task (202, `cancelling`) instead of storing a withdrawal; a task that
   cannot start is 400 and leaves no chat, one that is admitted keeps its chat), and a side chat's code rules (`/task`, control phrases,
   follow-ups, chores and reminders) apply from its second message, the task

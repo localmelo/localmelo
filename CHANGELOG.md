@@ -24,9 +24,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Deleting a chat moves its open questions to the main chat. The terminal
   shows the same rows: `Task “Fix tests” asks: …`, melo's answer, then `melo
   answered` or `needs your answer`. melo's answer is kept as the task's
-  exchange, which later chats can recall, never as a note. When only one task waits for
-  you in a chat, you can just send your answer as a message (`Sent to “Fix
-  tests” as your answer`, with Undo for 10 seconds); with several,
+  exchange, which later chats can recall, never as a note. When only one task
+  waits for you in a chat, you can just send your answer as a message (`Sent
+  to “Fix tests” as your answer`, with Undo for 10 seconds); with several,
   `/answer Fix tests: B`, in the console and the terminal. The chat's
   `task_get` now reads a running task live. [#NN]
 - Side chats start tasks too. A side chat has the main chat's task tools and
@@ -116,7 +116,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   this as a task?` with your own message, in the main chat and in side chats.
   The news a chat reads with its next message is told once per task ending and
   per side chat, five at a time with the rest on the following message, and
-  survives a gateway restart. [#NN]
+  survives a gateway restart. A request you forbid or only quote (`don't delete
+  a.md`, `不要删除 a.md`) is never read as work, in the main chat's routing too. [#NN]
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
   title drops a level word that opens its request and is followed by a colon or

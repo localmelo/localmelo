@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -75,6 +76,7 @@ if TYPE_CHECKING:
 
     from localmelo.melo.agent import Agent
     from localmelo.support.config import Config
+    from localmelo.support.gateway.task_store import TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +260,37 @@ class Console:
         front = self._side_fronts.pop(chat_id, None)
         if front is not None:
             await front.aclose()
+
+    async def effective_owner(self, front_id: str | None) -> str | None:
+        """The chat that owns work *front_id* started, as things stand: that chat while it exists, else the main chat.
+
+        The one answer cards, news and the selection of a task all use, so a
+        task whose chat went (and not yet rehomed, or ended while it went)
+        belongs to the main chat everywhere.
+        """
+        main = self.main_id
+        if not front_id or front_id == main:
+            return main
+        try:
+            info = await self.store.get_session(front_id)
+        except SessionStoreError:
+            return front_id  # unreadable: leave it where it was
+        return front_id if info is not None and info.kind == "chat" else main
+
+    async def effective(self, records: list[TaskRecord]) -> list[TaskRecord]:
+        """*records* with each task's ``front_id`` its :meth:`effective_owner`."""
+        owners: dict[str | None, str | None] = {}
+        found = []
+        for record in records:
+            if record.front_id not in owners:
+                owners[record.front_id] = await self.effective_owner(record.front_id)
+            owner = owners[record.front_id]
+            found.append(
+                record
+                if owner == record.front_id or not record.front_id
+                else dataclasses.replace(record, front_id=owner)
+            )
+        return found
 
     async def delete_chat(self, chat_id: str, *, forget_notes: bool = False) -> None:
         """Delete side chat *chat_id*; its unfinished work and waiting cards are the main chat's.

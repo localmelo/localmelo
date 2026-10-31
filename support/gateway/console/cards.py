@@ -252,9 +252,7 @@ class MainChatCards:
             front = (await self._console.workers.tasks.get_task(info.id)).front_id
         except TaskStoreError:
             return main
-        if not front or front == main:
-            return main
-        return front if await self._console.store.get_session(front) else main
+        return await self._console.effective_owner(front) or main
 
     async def _build(
         self, main: str, stored: StoredEvent

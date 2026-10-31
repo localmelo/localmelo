@@ -942,13 +942,17 @@ class Front:
         return entry.runner.current_turn if entry is not None else None
 
     async def records(self) -> list[TaskRecord]:
-        return await self.console.workers.tasks.list_tasks()
+        """Every task, each with the chat that owns it as things stand (a task of a chat that is gone is the main chat's)."""
+        return await self.console.effective(
+            await self.console.workers.tasks.list_tasks()
+        )
 
     async def record(self, task_id: str) -> TaskRecord | None:
         try:
-            return await self.console.workers.tasks.get_task(task_id)
+            found = await self.console.workers.tasks.get_task(task_id)
         except TaskStoreError:
             return None
+        return (await self.console.effective([found]))[0]
 
     def folder(self) -> str | None:
         """This chat's folder, where ``search_files`` looks."""
@@ -1111,11 +1115,9 @@ class Front:
                 )
                 if not page:
                     break
-                oldest = float("inf")
-                for stored in page:  # newest first
+                for stored in page:  # newest first, by when it was stored
                     data = stored.event.get("data") or {}
                     at = float(data.get("at") or stored.event.get("ts") or 0)
-                    oldest = min(oldest, at)
                     if (
                         data.get("state") != "done"
                         or data.get("reminder")
@@ -1138,7 +1140,9 @@ class Front:
                     text = _summary(str(data.get("line") or ""))
                     if info is not None and text and (held is None or held[0] < at):
                         self._side_news[chat] = (at, card_title(info.title), text)
-                if oldest <= floor or page[-1].id is None:
+                # Not stopped at an old `at`: a card copied to the main chat keeps the
+                # time it had, so the order they were stored in is not the order of `at`.
+                if page[-1].id is None:
                     break
                 before = page[-1].id
         except Exception:
@@ -1196,9 +1200,18 @@ class Front:
     # ── Code's rules, before any model call ──
 
     async def route(
-        self, typed: str, composed: str, *, as_task: bool, key: str | None
+        self,
+        typed: str,
+        composed: str,
+        *,
+        as_task: bool,
+        key: str | None,
+        create_key: str | None = None,
     ) -> dict[str, Any] | None:
-        """The echo of a message that code handled, or ``None`` for the model."""
+        """The echo of a message that code handled, or ``None`` for the model.
+
+        *create_key* is the key of the create that made this chat for a task.
+        """
         asks, chat = self.console.asks, self.chat_id
         command = re.match(r"^/answer(?:\s+|$)", typed.strip())
         if command is not None and chat is not None:
@@ -1227,7 +1240,9 @@ class Front:
             work = route(composed, as_task=as_task).text
             if not work:
                 raise ApiError(400, "invalid_request", t("errors.blankTask"))
-            return await self.delegate(work, typed=typed, key=key, show=typed)
+            return await self.delegate(
+                work, typed=typed, key=key, show=typed, create_key=create_key
+            )
         if routed.route == "work":
             return await self.delegate(composed, typed=typed, key=key, show=typed)
         if routed.route == "control" and routed.task and routed.action:
@@ -1403,6 +1418,7 @@ class Front:
         show: str | None = None,
         turn: TurnInfo | None = None,
         of: int | None = None,
+        create_key: str | None = None,
     ) -> dict[str, Any]:
         """Start *work* as a task this chat owns, at the level the person's words give."""
         level, reason = triage(typed)
@@ -1420,7 +1436,13 @@ class Front:
         # The task starts at once, under the request's first words; the model's
         # task_create brings a title of its own, any other long request is named later.
         echo = await self._start(
-            spec, self.chat_id, show=show, key=key, turn=turn, of=of
+            spec,
+            self.chat_id,
+            show=show,
+            key=key,
+            turn=turn,
+            of=of,
+            create_key=create_key,
         )
         if not title and echo.get("echo") == "started" and wants_title(work):
             self._name_later(str(echo["task_id"]), spec.title, work)
@@ -1436,10 +1458,11 @@ class Front:
         turn: TurnInfo | None = None,
         of: int | None = None,
         word: str = "Started",
+        create_key: str | None = None,
     ) -> dict[str, Any]:
         try:
             task, repeated = await self.console.workers.create_spec(
-                spec, front_id=front_id, request_key=key
+                spec, front_id=front_id, request_key=key, create_key=create_key
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))

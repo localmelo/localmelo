@@ -48,7 +48,13 @@ from .bodies import Body
 from .errors import ApiError
 from .registry import STOP_REASON
 from .shapes import submission_json, turn_json
-from .task_submissions import created, started_echo, submission_of, task_key
+from .task_submissions import (
+    conflict,
+    created,
+    lock_name,
+    started_echo,
+    submission_of,
+)
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -235,17 +241,16 @@ async def _create_for_task(
     key go one at a time, with its cancel.
     """
     assert body.turn is not None
-    text, request = body.turn.text, task_key(key)
-    # Apart from the creates of a message, which a cancel may overtake while they build.
-    async with console.sessions.keyed(request):
+    text = body.turn.text
+    # After the creates of a message under the key, and with the cancel of the key;
+    # a cancel may still overtake a create of a message while it builds.
+    async with console.sessions.keyed(key), console.sessions.keyed(lock_name(key)):
         if key is not None:
             found = await _store_call(console, console.store.get_submission(None, key))
             try:
                 check_submission(found, composed)
             except SubmissionRepeated:
-                raise ApiError(
-                    409, "submission_conflict", t("errors.messageIdUsed")
-                ) from None
+                raise conflict() from None
             except SubmissionError as exc:
                 raise _submission_error(exc) from exc
             made = await created(console, key, composed)
@@ -268,7 +273,7 @@ async def _create_for_task(
             echo = await _store_call(
                 console,
                 console.front_for(chat).route(
-                    text, composed, as_task=True, key=request
+                    text, composed, as_task=True, key=None, create_key=key
                 ),
                 chat,
             )
@@ -283,7 +288,7 @@ async def _create_for_task(
                 chat,
             )
         except BaseException:
-            if not await _admitted(console, chat, request):
+            if not await _admitted(console, chat, key):
                 with contextlib.suppress(Exception):
                     await console.sessions.delete(chat)
             raise
@@ -294,12 +299,18 @@ async def _create_for_task(
         )
 
 
-async def _admitted(console: Console, chat: str, request: str | None) -> bool:
+async def _refuse_task_key(console: Console, key: str | None) -> None:
+    """A create of a message under a key a chat was made for a task under: 409 ``submission_conflict``."""
+    if key is not None and await console.workers.tasks.by_create_key(key) is not None:
+        raise conflict()
+
+
+async def _admitted(console: Console, chat: str, key: str | None) -> bool:
     """Whether the create already made its task: then its chat stays, and a retry finds both."""
     tasks = console.workers.tasks
     try:
-        if request is not None:
-            return await tasks.by_request_key(request) is not None
+        if key is not None:
+            return await tasks.by_create_key(key) is not None
         return any(record.front_id == chat for record in await tasks.list_tasks())
     except Exception:
         return True  # unknown: a chat kept is better than a task with no owner
@@ -326,7 +337,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
             entry, turn = await _sessions_call(
                 console,
                 console.sessions.create(
-                    body.workspace, first, client_request_id=key, mode=body.approvals
+                    body.workspace,
+                    first,
+                    client_request_id=key,
+                    mode=body.approvals,
+                    admit=lambda: _refuse_task_key(console, key),
                 ),
             )
         except SubmissionRepeated as exc:
@@ -438,7 +453,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             await _require_session(console, scope)
         # A key that made a chat for a task is stopped with the task, and a cancel
         # waits for a create of the same key that is under way.
-        async with console.sessions.keyed(task_key(key) if scope is None else None):
+        async with console.sessions.keyed(lock_name(key) if scope is None else None):
             made = await created(console, key, composed) if scope is None else None
             if made is not None:
                 return await _stop_created(console, made, key)

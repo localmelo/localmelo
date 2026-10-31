@@ -571,11 +571,63 @@ _TEST_CUE: Final = re.compile(r"测试|运行测试|tests?\b|pytest", re.IGNOREC
 _COMMIT_CUE: Final = re.compile(r"提交|push|commits?\b", re.IGNORECASE)
 # The ask negated is not an ask: "今天不用改，跑测试再提交".
 _PIPELINE_NO: Final = re.compile(
-    r"(?:不用|不需要|无需|不必|不要|先不|暂时不|别)\s*(?:再|去|用)?\s*(?:改|修|测|提交|动手)"
+    r"(?:不用|不需要|无需|不必|不要|先不|暂时不|别|勿|禁止|不许|不得|不准|请勿|切勿)\s*(?:再|去|用)?\s*(?:改|修|测|提交|动手)"
     r"|\b(?:don['’]t|do\s+not|no\s+need\s+to|never|not\s+worth)\s+(?:even\s+)?(?:re-?)?"
     r"(?:fix|change|edit|update|refactor|rename|replace|remove|delete|add|test|commit|push)\w*",
     re.IGNORECASE,
 )
+
+
+# What is said in quotation marks is mentioned, not asked: "the log says “删除 a.md”".
+# An ASCII single quote opens a span only after a non-letter and closes before one, so the
+# apostrophes of "don't", "it's" and "users'" open nothing.
+_QUOTED: Final = re.compile(
+    r'"[^"]*"|“[^”]*”|`[^`]*`|「[^」]*」|『[^』]*』|«[^»]*»|‘[^’]*’(?=\W|$)'
+    r"|(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
+)
+# A prohibition before a Chinese change verb in the same clause: do not, stop, no, never.
+_NO_ZH: Final = re.compile(
+    r"(?<![分区特告辨差])别|不要|不用|不必|不需要|无需|勿|禁止|不许|不得|不准|不能|不可|不想|"
+    r"先不|暂不|暂时不|不再|没有|没"
+)
+_CLAUSE_ZH: Final = re.compile(r"[，,、；;：:]")
+
+
+def _forbidden_zh(first: str, at: int) -> bool:
+    """Whether a prohibition governs the change verb at *at* in *first*.
+
+    One in its own clause does. So does one earlier in an enumeration it
+    belongs to: after 、 whatever follows, and after a comma a clause that
+    opens with a verb when the clause before it holds one
+    ("不要删除 a.md、修改 b.md", "不要删除 a.md，修改 b.md"); a clause with words of
+    its own ("，请修复 b.md") or a ；/： ends it.
+    """
+    marks = [(found.start(), found.group()) for found in _CLAUSE_ZH.finditer(first)]
+    end = at
+    while True:
+        before = [mark for mark in marks if mark[0] < end]
+        start = before[-1][0] + 1 if before else 0
+        clause = first[start:end]
+        if _NO_ZH.search(clause):
+            return True
+        if not before:
+            return False
+        where, mark = before[-1]
+        earlier = [m for m in marks if m[0] < where]
+        previous = first[(earlier[-1][0] + 1 if earlier else 0) : where]
+        if mark == "、" or (
+            mark in "，," and not clause.strip() and _CHANGE_ZH.search(previous)
+        ):
+            end = where
+            continue
+        return False
+
+
+def _asked_zh(first: str) -> bool:
+    """Whether a change verb of *first* (one Chinese sentence) is asked for: one no prohibition governs."""
+    return any(
+        not _forbidden_zh(first, verb.start()) for verb in _CHANGE_ZH.finditer(first)
+    )
 
 
 def names_files(text: str) -> bool:
@@ -614,15 +666,18 @@ def work_request(typed: str) -> bool:
     text = norm(typed)
     if not text or is_question(typed):
         return False
+    # The verb counts only outside quotation marks and when nothing forbids it:
+    # "不要删除 a.md，只解释它", "never delete a.md", "the log says “删除 a.md”".
+    bare = _QUOTED.sub(" ", text).strip()
     if names_files(text):
-        if _has_cjk(text[:24]):
-            lead = text[_LEAD_ZH.match(text).end() :]  # type: ignore[union-attr]
+        if _has_cjk(bare[:24]):
+            lead = bare[_LEAD_ZH.match(bare).end() :]  # type: ignore[union-attr]
             first = re.split(r"[。！？；\n]", lead, maxsplit=1)[0]
-            return bool(_CHANGE_ZH.search(first))
+            return _asked_zh(first)
         return bool(
-            _LEAD_EN.match(text) or _LEAD_EN.match(_LOCATION.sub("", text, count=1))
+            _LEAD_EN.match(bare) or _LEAD_EN.match(_LOCATION.sub("", bare, count=1))
         )
-    return _pipeline(text)
+    return _pipeline(bare)
 
 
 _TITLE_LEAD: Final = re.compile(
