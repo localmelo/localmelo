@@ -793,6 +793,11 @@ button:hover:not(:disabled) {
 .blinks.portrait .welcome-mascot { margin: 0 auto; }
 .blinks.portrait::after { background-image: url(/assets/akita/sit-idle-blink.png); }
 .blinks.face::after { background-image: url(/assets/akita/face-idle-blink.png); }
+/* While the import card is offered (import-card.mjs), the hero shrinks to the portrait alone, so the card and its buttons fit above the composer. */
+.welcome.compact { padding: var(--space-5) 0 0; }
+.welcome.compact .blinks.portrait { margin-bottom: 0; }
+.welcome.compact .welcome-mascot { width: 54px; height: 70px; margin-bottom: 0; }
+.welcome.compact > h1, .welcome.compact > p { display: none; }
 /* Blinks at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing). */
 @keyframes melo-blink {
   0%, 38.18% { opacity: 0; }

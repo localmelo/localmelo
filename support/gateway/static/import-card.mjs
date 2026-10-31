@@ -9,7 +9,8 @@
  * (`DELETE /api/memory/import/{batch_id}`); "Not now" records the offer as made (`DELETE
  * /api/memory/import/offer`). Nothing is brought in until the person presses the button, and nothing of a
  * file is shown but the backend's `sample`. A scan that finds nothing shows no card. The page shows or hides
- * the card with `show(visible)`; a hidden card asks nothing.
+ * the card with `show(visible)`; a hidden card asks nothing. While the card shows, `hero` (the empty chat's
+ * welcome) gets the class `compact`, which shrinks it to its portrait so the card's buttons stay above the composer.
  */
 import {formatTime, t} from "./i18n.mjs";
 
@@ -92,7 +93,7 @@ export function sourceList({doc, scan, chosen, busy, toggle}) {
 
 const failure = (error, fallback) => error?.message || t(fallback);
 
-export function setupImportCard({root, api}) {
+export function setupImportCard({root, api, hero = null}) {
   const doc = root.ownerDocument;
   root.hidden = true;
   let shown = false;
@@ -111,6 +112,7 @@ export function setupImportCard({root, api}) {
 
   function render() {
     root.hidden = !shown || ["idle", "checking", "gone"].includes(phase);
+    hero?.classList?.toggle("compact", !root.hidden); // the empty chat's hero gives the card room
     if (root.hidden) return;
     const refocus = root.contains?.(doc.activeElement);
     const parts = [];

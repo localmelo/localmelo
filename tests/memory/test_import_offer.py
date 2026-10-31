@@ -7,7 +7,9 @@ offer is open only while memory is on and the file is missing.
 from __future__ import annotations
 
 import json
+import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,45 @@ def test_the_first_answer_is_kept_in_a_private_file(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["answer"] == "declined"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(Path(folder).stat().st_mode) == 0o700
+
+
+def test_only_the_two_answers_are_recorded(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        offer.mark(str(tmp_path / "memory"), "maybe")
+    assert not offer.offered(str(tmp_path / "memory"))
+
+
+def test_two_answers_at_once_leave_one_whole_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record is created exclusively: of eight answers sent together, one is written, whole."""
+    folder = str(tmp_path / "memory")
+    created = []
+    real_open = os.open
+
+    def counting(path: str, flags: int, mode: int = 0o777) -> int:
+        fd = real_open(path, flags, mode)
+        created.append(path)
+        return fd
+
+    monkeypatch.setattr(offer.os, "open", counting)
+    gate = threading.Barrier(8)
+
+    def answer(which: str) -> None:
+        gate.wait()
+        offer.mark(folder, which)
+
+    threads = [
+        threading.Thread(target=answer, args=(("brought", "declined")[n % 2],))
+        for n in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(created) == 1, "only the first answer created the file"
+    record = json.loads((Path(folder) / offer.NAME).read_text())
+    assert record["answer"] in offer.ANSWERS and isinstance(record["at"], float)
 
 
 def test_the_offer_is_open_only_while_memory_is_on_and_it_was_never_made(

@@ -2869,7 +2869,7 @@ const modeChip = setupModeChip({
   openSettings: () => openSettings("chats"),
 });
 // The main chat's one-time offer to bring in what other assistants on this Mac know (import-card.mjs).
-const importCard = setupImportCard({ root: $("import-card"), api });
+const importCard = setupImportCard({ root: $("import-card"), hero: $("welcome"), api });
 const setupCard = setupModelCard({
   root: $("setup-card"),
   api,

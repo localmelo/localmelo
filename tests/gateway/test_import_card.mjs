@@ -53,7 +53,8 @@ function harness({pending = true, scanned = scan(), fail = {}, written = [1, 2, 
     return {};
   };
   h.root = new Element('section');
-  h.card = setupImportCard({root: h.root, api: h.api});
+  h.hero = {classList: {classes: [], toggle(name, on) { this.classes = on ? [name] : []; }}};
+  h.card = setupImportCard({root: h.root, hero: h.hero, api: h.api});
   h.text = () => h.root.text();
   h.paths = () => h.calls.map(([method, path]) => `${method} ${path}`);
   return h;
@@ -124,6 +125,28 @@ test('the page asks to show the card on every change and the card does not redra
   assert.equal(h.root.boxes()[0].checked, false, 'a box the person unchecked stays unchecked');
 });
 
+test('while the card shows, the empty chat’s hero is compact, so the card and its buttons fit above the composer', async () => {
+  const h = harness();
+  assert.deepEqual(h.hero.classList.classes, [], 'not before the card shows');
+  h.card.show(true);
+  assert.deepEqual(h.hero.classList.classes, [], 'not while the offer is being looked up');
+  await settle();
+  assert.deepEqual(h.hero.classList.classes, ['compact']);
+  h.card.show(false);
+  assert.deepEqual(h.hero.classList.classes, [], 'another chat has the full hero');
+  h.card.show(true);
+  assert.deepEqual(h.hero.classList.classes, ['compact']);
+  h.root.button('Not now').click();
+  assert.deepEqual(h.hero.classList.classes, [], 'the hero is back once the card is gone');
+  // No card, no compact hero: an offer already made, and a scan with no note to bring in.
+  for (const options of [{pending: false}, {scanned: scan([])}, {scanned: scan([{...CLAUDE, items_kept: 0, sample: []}])}]) {
+    const quiet = harness(options);
+    quiet.card.show(true);
+    await settle();
+    assert.deepEqual(quiet.hero.classList.classes, []);
+  }
+});
+
 test('"Bring them in" sends only the checked files, shows the work, then "Brought in N notes · Undo"', async () => {
   const h = harness({written: [1, 2]});
   let release;
@@ -191,6 +214,7 @@ test('no card when the offer was made, when the scan finds nothing, or when aski
   nothing.card.show(true);
   await settle();
   assert.equal(nothing.root.hidden, true, 'files with no note to bring in are no offer');
+  assert.ok(!nothing.paths().some((call) => call.startsWith('DELETE') || call.startsWith('POST')), 'and the offer stays open for a tool installed later');
 
   const broken = harness({fail: {'GET /memory/import/scan': {message: 'boom'}}});
   broken.card.show(true);

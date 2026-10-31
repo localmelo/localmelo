@@ -208,6 +208,21 @@ def test_the_first_run_says_nothing_when_there_is_nothing_to_offer_or_memory_is_
     ask.assert_not_called()
 
 
+def test_a_first_run_whose_files_hold_nothing_new_shows_no_list_and_leaves_the_offer_open(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every line is a note already: no list, and a tool installed later can still be offered."""
+    typed(monkeypatch, "1\n")
+    memory_import.offer()
+    (Path(ChatMemory(config.load).directory) / "import_offer.json").unlink()
+    capsys.readouterr()
+    ask = mock.MagicMock(side_effect=AssertionError("asked"))
+    monkeypatch.setattr(onboard, "_ask_choice", ask)
+    memory_import.first_run()
+    ask.assert_not_called()
+    assert capsys.readouterr().out == "" and pending()
+
+
 def test_a_failing_offer_never_stops_melo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         memory_import, "offer", mock.MagicMock(side_effect=OSError("disk"))

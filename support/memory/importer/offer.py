@@ -15,6 +15,7 @@ import time
 from localmelo.melo.memory._sqlite import make_private_dir
 
 NAME = "import_offer.json"
+ANSWERS = ("brought", "declined")
 log = logging.getLogger(__name__)
 
 
@@ -26,16 +27,22 @@ def offered(directory: str) -> bool:
 def mark(directory: str, answer: str) -> None:
     """Record the offer as made, with the *answer* (``brought`` or ``declined``); the first stays.
 
-    A folder that cannot be written is logged, not raised: the notes just written must not turn into an error.
+    The file is created exclusively, so two answers at once leave one whole record, the first. A folder that
+    cannot be written is logged, not raised: the notes just written must not turn into an error.
     """
-    if offered(directory):
-        return
+    if answer not in ANSWERS:
+        raise ValueError(f"The answer is one of {ANSWERS}, not {answer!r}.")
     try:
         make_private_dir(directory)
-        fd = os.open(os.path.join(directory, NAME), os.O_WRONLY | os.O_CREAT, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump({"answer": answer, "at": time.time()}, file)
+        fd = os.open(
+            os.path.join(directory, NAME), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+    except FileExistsError:
+        return  # the first answer stays
     except OSError:
         log.warning(
             "Could not record the import offer in %s.", directory, exc_info=True
         )
+        return
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        json.dump({"answer": answer, "at": time.time()}, file)
