@@ -124,6 +124,20 @@ def _front_turns(home: Path) -> list[tuple[str, str]]:
     return [(str(kind), str(text)) for kind, text in rows]
 
 
+def _command(term: Melo, text: str, shows: str) -> None:
+    """Type a command and wait for what it *shows*.
+
+    Right after an answer the turn still wraps up and a command is refused
+    (its draft stays), so Enter is pressed again, a bounded number of times.
+    """
+    term.type(text + "\r")
+    for _ in range(10):
+        if term.read_until(lambda out: shows.encode() in out, 3.0):
+            return
+        term.type("\r")
+    term.see(shows)
+
+
 def test_bare_melo_starts_the_gateway_and_talks_in_the_main_chat(
     main_melo: tuple[Callable[..., Melo], _Main],
 ) -> None:
@@ -156,12 +170,11 @@ def test_a_side_chat_comes_back_to_the_main_chat_as_a_card(
     term.see("New side chat in")
     term.type("hello\r")
     term.see("Hello! I am melo, running on a stub model.")
-    term.type("/main\r")
-    term.see("◆ Main chat")
+    _command(term, "/main", "◆ Main chat")
     # The card is written when the list is next read (every few seconds).
     term.see("Done: hello", 30)
     term.see("/chats opens it")
-    term.type("/chats\r")
+    _command(term, "/chats", "Main chat (open)")
     term.see("Chats")
     term.see("Main chat (open)")
     term.see("New side chat")
