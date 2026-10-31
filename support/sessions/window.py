@@ -40,6 +40,7 @@ from localmelo.melo.schema import (
     Message,
     ToolCall,
     ToolResult,
+    split_leading_thinking,
     split_thinking,
 )
 
@@ -50,14 +51,19 @@ WINDOW_CODEC_VERSION: Final = 1
 WINDOW_MAX_CHARS: Final = 2_000_000
 
 # A text holds a <think> block by split_thinking's rule exactly when it has
-# a closing tag, or opens with an unclosed one after leading whitespace.
+# a closing tag, opens with an unclosed one after leading whitespace, or
+# starts with a closed <thinking> block.
 _CLOSING_TAG = re.compile(r"</think>", re.IGNORECASE)
 _OPENING_TAG = re.compile(r"\s*<think>", re.IGNORECASE)
 
 
 def has_think_block(text: str) -> bool:
     """Whether :func:`~localmelo.melo.schema.split_thinking` finds a block in *text*."""
-    return bool(_CLOSING_TAG.search(text) or _OPENING_TAG.match(text))
+    return bool(
+        _CLOSING_TAG.search(text)
+        or _OPENING_TAG.match(text)
+        or split_leading_thinking(text) is not None
+    )
 
 
 def without_think_block(text: str) -> str:

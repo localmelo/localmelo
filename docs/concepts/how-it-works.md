@@ -28,7 +28,7 @@ The run has a budget:
 
 Two kinds of reply are not answers:
 
-- A reply with neither text nor a tool call is an empty reply: localmelo asks the model to continue, the step still counts, and two in a row end the run as `failed`.
+- A reply with neither text nor a tool call is an empty reply, and so is one with only dots, dashes or emoji (no letter or digit): localmelo asks the model to continue, the step still counts, and two in a row end the run as `failed`.
 - A reply that is only the model's unfinished thinking is never the answer. localmelo tells it by facts, never by wording: a `<think>` that is never closed, no answer once the thinking is set aside, a streamed reply that repeats the server's reasoning, or, for a model whose thinking ends with a mark (`</think>`), no thinking and no mark. The model's format is the one `[cli.reasoning_tags]` declares (in the terminal), else the one its earlier replies showed.
 - Such a reply becomes its thinking and goes on as an empty reply: localmelo asks once more, and a second reply without an answer ends the run as `failed` with the error `melo did not finish an answer`.
 
