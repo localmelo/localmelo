@@ -161,6 +161,7 @@
             aria-live="polite"
             aria-relevant="additions"
           ></div>
+          <div id="local-rows" class="local-rows" role="log" aria-live="polite" aria-label="Command output" data-i18n-aria-label="slash.rowsLabel" hidden></div>
         </section>
         <div class="composer-area">
           <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" data-i18n-aria-label="html.sessionStatus" hidden></div>
@@ -172,11 +173,13 @@
           </div>
           <form class="composer" id="composer">
             <label class="sr-only" for="input" data-i18n="html.message">Message</label>
+            <div class="slash-menu" id="slash-menu" role="listbox" aria-label="Commands" data-i18n-aria-label="slash.menuLabel" hidden></div>
             <textarea
               id="input"
               placeholder="Ask anything, or describe a task…" data-i18n-placeholder="html.askAnythingOrDescribeA"
               rows="2"
               aria-describedby="composer-hint"
+              aria-autocomplete="list"
             ></textarea>
             <div class="composer-toolbar">
               <div class="folder-picker" id="folder-picker" hidden>
@@ -232,7 +235,7 @@
             <button type="button" data-prompt="Explain a piece of code. Ask me to paste the code first." data-i18n-data-prompt="html.starter.explain" data-i18n="html.explainAPieceOfCode">Explain a piece of code</button>
           </div>
           <p class="composer-hint" id="composer-hint">
-            <span data-i18n="html.enterToSend">Enter to send · Shift + Enter for a new line</span>
+            <span data-i18n="html.enterToSend">Enter to send · Shift + Enter for a new line · / for commands</span>
             <span id="composer-note" data-i18n="html.composerNote">Runs through your configured backend</span>
           </p>
         </div>

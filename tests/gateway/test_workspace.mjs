@@ -23,6 +23,7 @@ import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
+import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -531,6 +532,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -736,6 +738,8 @@ function harness(routes, {mobile = false} = {}) {
     ...levels,
     ...modeChip,
     ...blocked,
+    parseCommand,
+    setupSlash,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
@@ -4445,6 +4449,8 @@ test('a message the main chat started as a task shows as the person\'s words and
   const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: '/task make slides'});
   const h = harness(defaultMode({...mainRoutes({
     'POST /sessions/m/turns': {status: 200, body: {echo: started}},
+    // /task is a slash command, so the page asks which commands there are before it sends the line.
+    'GET /commands': {commands: [{name: 'task', aliases: [], args: 'TEXT', help: {en: 'Start a task', 'zh-Hans': '开始任务'}, during_turn: false, keys: '', action: 'send'}], everyday: ['task']},
     'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → P1', undo: {level: 'auto'}})}},
   }), 'GET /settings': {mode: 'default'}}));
   await h.run('init()');

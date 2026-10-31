@@ -1,0 +1,380 @@
+{
+  "commands": [
+    {
+      "name": "model",
+      "aliases": [],
+      "args": "[name]",
+      "help": {
+        "en": "Pick a model, or /model NAME (saved)",
+        "zh-Hans": "选择模型，或用 /model 名称 切换（会保存）"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "model"
+    },
+    {
+      "name": "new",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Start a new chat; /clear also clears the screen",
+        "zh-Hans": "开始新对话；/clear 还会清空屏幕"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "new-chat"
+    },
+    {
+      "name": "status",
+      "aliases": [],
+      "args": "[all]",
+      "help": {
+        "en": "Check the model; /status all shows more",
+        "zh-Hans": "检查模型；/status all 显示更多"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "status"
+    },
+    {
+      "name": "help",
+      "aliases": [],
+      "args": "[command]",
+      "help": {
+        "en": "Show commands; /help all lists every one",
+        "zh-Hans": "显示命令；/help all 列出全部"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "help"
+    },
+    {
+      "name": "exit",
+      "aliases": [
+        "quit"
+      ],
+      "args": "",
+      "help": {
+        "en": "Quit",
+        "zh-Hans": "退出"
+      },
+      "during_turn": true,
+      "keys": "ctrl+d",
+      "action": "exit"
+    },
+    {
+      "name": "undo",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Forget the last turn (files stay changed)",
+        "zh-Hans": "忘掉最近一轮（文件改动保留）"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "undo"
+    },
+    {
+      "name": "copy",
+      "aliases": [],
+      "args": "[turn]",
+      "help": {
+        "en": "Copy a stored answer to the clipboard",
+        "zh-Hans": "把已保存的回答拷贝到剪贴板"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "copy"
+    },
+    {
+      "name": "retry",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Run the last turn again",
+        "zh-Hans": "把最近一轮再跑一次"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "retry"
+    },
+    {
+      "name": "clear",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Start a new chat and clear the screen",
+        "zh-Hans": "开始新对话并清空屏幕"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "new-chat"
+    },
+    {
+      "name": "backend",
+      "aliases": [],
+      "args": "[url]",
+      "help": {
+        "en": "Switch to another model server (saved)",
+        "zh-Hans": "换一个模型服务器（会保存）"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "backend"
+    },
+    {
+      "name": "attach",
+      "aliases": [],
+      "args": "PATH",
+      "help": {
+        "en": "Stage a text file: /attach PATH",
+        "zh-Hans": "附加文本文件：/attach 路径"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "attach"
+    },
+    {
+      "name": "attachments",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "List staged text files",
+        "zh-Hans": "列出已附加的文本文件"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "attachments"
+    },
+    {
+      "name": "detach",
+      "aliases": [],
+      "args": "N|all",
+      "help": {
+        "en": "Remove a staged file: /detach N or all",
+        "zh-Hans": "移除已附加的文件：/detach N 或 all"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "detach"
+    },
+    {
+      "name": "sessions",
+      "aliases": [],
+      "args": "[filter]",
+      "help": {
+        "en": "Pick a chat to resume",
+        "zh-Hans": "选一个对话继续"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "chats"
+    },
+    {
+      "name": "resume",
+      "aliases": [],
+      "args": "[id|title]",
+      "help": {
+        "en": "Resume a chat",
+        "zh-Hans": "继续一个对话"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "resume"
+    },
+    {
+      "name": "title",
+      "aliases": [],
+      "args": "[text]",
+      "help": {
+        "en": "Show or set the chat title",
+        "zh-Hans": "查看或设置对话标题"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "title"
+    },
+    {
+      "name": "usage",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Show recorded tokens, tools and time",
+        "zh-Hans": "显示已记录的 token、工具和用时"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "usage"
+    },
+    {
+      "name": "memory",
+      "aliases": [],
+      "args": "[window]",
+      "help": {
+        "en": "See and change the notes melo keeps",
+        "zh-Hans": "查看并修改 melo 保存的笔记"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "memory"
+    },
+    {
+      "name": "verbose",
+      "aliases": [],
+      "args": "[on|off]",
+      "help": {
+        "en": "Toggle verbose rendering",
+        "zh-Hans": "切换详细显示"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "view"
+    },
+    {
+      "name": "thinking",
+      "aliases": [],
+      "args": "[on|off]",
+      "help": {
+        "en": "Toggle thinking excerpts",
+        "zh-Hans": "切换思考摘录"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "view"
+    },
+    {
+      "name": "stream",
+      "aliases": [],
+      "args": "[on|off]",
+      "help": {
+        "en": "Toggle live streamed replies",
+        "zh-Hans": "切换实时流式回复"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "view"
+    },
+    {
+      "name": "expand",
+      "aliases": [],
+      "args": "[turn.call]",
+      "help": {
+        "en": "Show a tool call's full output",
+        "zh-Hans": "显示一次工具调用的完整输出"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "expand"
+    },
+    {
+      "name": "approvals",
+      "aliases": [],
+      "args": "[ask|auto|deny|forget [tool]]",
+      "help": {
+        "en": "Show or switch approvals: ask, auto, deny, forget",
+        "zh-Hans": "查看或切换审批：ask、auto、deny、forget"
+      },
+      "during_turn": "show",
+      "keys": "",
+      "action": "approvals"
+    },
+    {
+      "name": "progress",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Show this turn's progress facts",
+        "zh-Hans": "显示这一轮的进度"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "progress"
+    },
+    {
+      "name": "browser",
+      "aliases": [],
+      "args": "[on|off]",
+      "help": {
+        "en": "Show or switch web browsing in Safari",
+        "zh-Hans": "查看或切换在 Safari 中浏览网页"
+      },
+      "during_turn": "show",
+      "keys": "",
+      "action": "browser"
+    },
+    {
+      "name": "chats",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Pick the main chat or a side chat",
+        "zh-Hans": "选主对话或一个旁支对话"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "chats"
+    },
+    {
+      "name": "side",
+      "aliases": [],
+      "args": "[title]",
+      "help": {
+        "en": "Start a side chat in this folder",
+        "zh-Hans": "在这个文件夹里开始一个旁支对话"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "new-chat"
+    },
+    {
+      "name": "main",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Go back to the main chat",
+        "zh-Hans": "回到主对话"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "main"
+    },
+    {
+      "name": "task",
+      "aliases": [],
+      "args": "TEXT",
+      "help": {
+        "en": "Start a task from the main chat: /task TEXT",
+        "zh-Hans": "从主对话开始一个任务：/task 内容"
+      },
+      "during_turn": false,
+      "keys": "",
+      "action": "send"
+    },
+    {
+      "name": "mcp",
+      "aliases": [],
+      "args": "",
+      "help": {
+        "en": "Show the MCP servers",
+        "zh-Hans": "显示 MCP 服务器"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "mcp"
+    }
+  ],
+  "everyday": [
+    "chats",
+    "side",
+    "main",
+    "task",
+    "retry",
+    "status",
+    "help",
+    "exit",
+    "new",
+    "undo",
+    "copy",
+    "model"
+  ]
+}
