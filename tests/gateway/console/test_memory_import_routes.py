@@ -6,18 +6,32 @@ it, so the routes (which scan the user's home) never read the real one.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import httpx
 import pytest
 
+from localmelo.support import config
 from localmelo.support.gateway.console import Console
 from localmelo.tests.memory.import_home import build
 
 from .test_memory_routes import ScriptedLLM, setup  # noqa: F401  (fixture)
 
 Setup = tuple[Console, httpx.AsyncClient, list[ScriptedLLM]]
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path: Path) -> Iterator[Path]:
+    """The config file the memory switch writes is the test's own."""
+    path = tmp_path / "cfg" / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_DIR", str(path.parent)),
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+    ):
+        yield path
 
 
 @pytest.fixture(autouse=True)
@@ -30,10 +44,14 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
-async def test_scan_apply_list_and_undo(setup: Setup) -> None:  # noqa: F811
+async def test_scan_apply_list_and_undo(
+    setup: Setup,  # noqa: F811
+    fake_home: Path,
+) -> None:
     _, client, _ = setup
     scan = (await client.get("/api/memory/import/scan")).json()
-    assert set(scan) == {"batch_id", "sources", "partial"} and scan["partial"] is False
+    assert set(scan) == {"batch_id", "sources", "partial", "home"}
+    assert scan["partial"] is False and scan["home"] == str(fake_home)
     assert {
         "id",
         "harness",
@@ -98,3 +116,60 @@ async def test_an_unknown_scan_or_source_is_refused(setup: Setup) -> None:  # no
         json={"batch_id": scan["batch_id"], "source_ids": [], "x": 1},
     )
     assert extra.status_code == 400
+
+
+async def test_the_offer_is_open_until_it_is_answered_or_the_notes_are_brought_in(
+    setup: Setup,  # noqa: F811
+) -> None:
+    console, client, _ = setup
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": True}
+    # A scan only looks: the offer stays open.
+    scan = (await client.get("/api/memory/import/scan")).json()
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": True}
+    # "Not now" is the one answer, and it is not the undo of a batch called "offer".
+    declined = await client.delete("/api/memory/import/offer")
+    assert (declined.status_code, declined.json()) == (200, {"pending": False})
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": False}
+    assert (await client.get("/api/memory/records")).json()["records"] == []
+    # Writing notes later still works and the offer stays answered.
+    gemini = next(s["id"] for s in scan["sources"] if s["harness"] == "gemini")
+    body = {"batch_id": scan["batch_id"], "source_ids": [gemini]}
+    assert (await client.post("/api/memory/import", json=body)).status_code == 200
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": False}
+    assert console.memory.import_pending() is False
+
+
+async def test_bringing_notes_in_by_hand_counts_as_the_offer_made(
+    setup: Setup,  # noqa: F811
+) -> None:
+    _, client, _ = setup
+    scan = (await client.get("/api/memory/import/scan")).json()
+    gemini = next(s["id"] for s in scan["sources"] if s["harness"] == "gemini")
+    body = {"batch_id": scan["batch_id"], "source_ids": [gemini]}
+    assert (await client.post("/api/memory/import", json=body)).status_code == 200
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": False}
+
+
+async def test_no_offer_while_memory_is_off(setup: Setup) -> None:  # noqa: F811
+    _, client, _ = setup
+    assert (await client.put("/api/memory", json={"on": False})).status_code == 200
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": False}
+    assert (await client.put("/api/memory", json={"on": True})).status_code == 200
+    assert (await client.get("/api/memory/import/offer")).json() == {"pending": True}
+
+
+async def test_an_imported_note_says_which_file_it_came_from_in_the_readers_language(
+    setup: Setup,  # noqa: F811
+) -> None:
+    _, client, _ = setup
+    scan = (await client.get("/api/memory/import/scan")).json()
+    gemini = next(s["id"] for s in scan["sources"] if s["harness"] == "gemini")
+    body = {"batch_id": scan["batch_id"], "source_ids": [gemini]}
+    await client.post("/api/memory/import", json=body)
+    row = (await client.get("/api/memory/records")).json()["records"][0]
+    assert row["from"].startswith("from the file GEMINI.md, ")
+    assert row["source"].startswith("imported from the file GEMINI.md, ")
+    zh = await client.get(
+        "/api/memory/records", headers={"X-LocalMelo-Language": "zh-Hans"}
+    )
+    assert zh.json()["records"][0]["from"].startswith("来自文件 GEMINI.md，")

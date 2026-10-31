@@ -48,7 +48,13 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
-from localmelo.support.memory.importer import ImportPlan, build_plan, select, write
+from localmelo.support.memory.importer import (
+    ImportPlan,
+    build_plan,
+    offer,
+    select,
+    write,
+)
 from localmelo.support.memory.index import (
     DOC_CHARS,
     SUMMARY_TURN,
@@ -1376,6 +1382,14 @@ class ChatMemory:
     def import_plan(self, batch_id: str) -> ImportPlan | None:
         return self._plans.get(batch_id)
 
+    def import_pending(self) -> bool:
+        """Whether memory is on and bringing in other assistants' notes was never offered."""
+        return self.enabled and not offer.offered(self.directory)
+
+    def import_offered(self, answer: str) -> None:
+        """Record the offer as made (``declined``; a write of notes records ``brought``)."""
+        offer.mark(self.directory, answer)
+
     async def import_apply(
         self, plan: ImportPlan, source_ids: Sequence[str]
     ) -> dict[str, Any]:
@@ -1402,6 +1416,7 @@ class ChatMemory:
         for (source_id, _), entry_id in zip(chosen, ids, strict=True):
             if entry_id is not None:
                 written.setdefault(source_id, []).append(entry_id)
+        offer.mark(self.directory, "brought")
         wanted = list(dict.fromkeys(source_ids))
         plan.applied.update(wanted)
         harness = {s["id"]: s["harness"] for s in plan.sources}

@@ -524,6 +524,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
+  .replace(/^import \{ setupImportCard \} from "\.\/import-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
@@ -727,6 +728,8 @@ function harness(routes, {mobile = false} = {}) {
     setupStatusRow,
     setupRunning,
     setupModelCard,
+    // The first-run import card has its own tests (test_import_card.mjs); here it only hears when it may show.
+    setupImportCard: ({root}) => ({show(visible) { root.shown = visible; }}),
     folderName,
     setupFolderPicker,
     picturesNode,

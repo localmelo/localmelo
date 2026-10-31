@@ -11,7 +11,9 @@ every note and the index of every chat. ``GET /api/memory/import/scan`` lists
 what other assistants' files hold (no writes), ``POST /api/memory/import`` writes
 the chosen sources of a scan as notes (the ``memory.import`` event is in the
 response: memory has no session channel) and ``DELETE /api/memory/import/{batch_id}``
-takes the batch back. ``PUT /api/memory`` switches
+takes the batch back; ``GET /api/memory/import/offer`` says whether the offer to do it
+was never made (the first run's card) and ``DELETE`` on it records "Not now".
+``PUT /api/memory`` switches
 ``[memory] across_chats`` and ``POST /api/memory/reindex`` rebuilds the index
 from the chats.
 """
@@ -19,6 +21,7 @@ from the chats.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
@@ -73,11 +76,16 @@ async def _chats(console: Console, ids: set[str]) -> dict[str, Any]:
     return found
 
 
-def _from_words(info: Any, label: str, gone: bool, at: float, surface: str) -> str:
-    """Where a note came from, in the reader's language; in English, :func:`origin`'s words."""
+def _on(at: float) -> str:
+    """The day of *at* in the reader's language."""
     when = time.localtime(at)
     month = time.strftime("%b", when) if current() == "en" else when.tm_mon
-    on = t("memoryRows.day", month=month, day=when.tm_mday)
+    return t("memoryRows.day", month=month, day=when.tm_mday)
+
+
+def _from_words(info: Any, label: str, gone: bool, at: float, surface: str) -> str:
+    """Where a note came from, in the reader's language; in English, :func:`origin`'s words."""
+    on = _on(at)
     if gone:
         return t("memoryRows.fromDeleted", day=on)
     if info is None:
@@ -96,6 +104,12 @@ def _from_words(info: Any, label: str, gone: bool, at: float, surface: str) -> s
         )
     )
     return t("memoryRows.from", chat=chat, day=on)
+
+
+def _from_file(prov: dict[str, Any], at: float) -> str:
+    """Where an imported note came from: its file's name and the day."""
+    name = Path(str(prov.get("path") or "")).name or str(prov.get("chat") or "")
+    return t("memoryRows.fromFile", name=name, day=_on(at))
 
 
 def _row(
@@ -121,7 +135,11 @@ def _row(
         f"{day(entry.created_at)}",
         "imported": imported,
         "batch_id": str(prov.get("batch_id") or ""),
-        "from": _from_words(info, label, gone, entry.created_at, surface),
+        "from": (
+            _from_file(prov, entry.created_at)
+            if imported
+            else _from_words(info, label, gone, entry.created_at, surface)
+        ),
         "chat_gone": gone,
         "edited": bool(prov.get("edited")),
         "session_id": entry.session_id,
@@ -201,7 +219,20 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/memory/import/scan")
     async def memory_import_scan() -> dict[str, Any]:
-        return (await console.memory.import_scan()).to_json()
+        # The home folder lets the page write a path as `~/…`.
+        return {
+            **(await console.memory.import_scan()).to_json(),
+            "home": str(Path.home()),
+        }
+
+    @app.get("/api/memory/import/offer")
+    async def memory_import_offer() -> dict[str, bool]:
+        return {"pending": console.memory.import_pending()}
+
+    @app.delete("/api/memory/import/offer")
+    async def memory_import_decline() -> dict[str, bool]:
+        console.memory.import_offered("declined")
+        return {"pending": False}
 
     @app.post("/api/memory/import")
     async def memory_import(body: ImportBody) -> dict[str, Any]:
