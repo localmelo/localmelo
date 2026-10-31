@@ -418,8 +418,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "task_session_read_only",
                 t("errors.taskChange"),
             )
-        # Both changes are judged before either is written, so a refused
-        # title or workspace leaves the session as it was.
+        # The changes are judged before any is written, so a refused title,
+        # workspace or mode leaves the session as it was.
+        if body.approvals is not None and info.kind not in ("chat", "front"):
+            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         title: str | None = None
         if body.title is not None:
             try:
@@ -432,8 +434,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 console.sessions.change_workspace(session_id, body.workspace),
                 session_id,
             )
-        if body.approvals is not None and info.kind not in ("chat", "front"):
-            raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         if body.approvals is not None:
             await _sessions_call(
                 console,

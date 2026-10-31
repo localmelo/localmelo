@@ -233,6 +233,23 @@ async def test_a_new_chat_starts_in_the_settings_mode_and_switches_by_patch(
         third = await create(client, tmp_path, "x", approvals="auto")
         body = (await client.get(f"/api/sessions/{third}")).json()["session"]
         assert body["approvals"] == "auto"
+        # Only a chat has a mode; a refused one changes nothing else either.
+        worker = await console.store.create_session(
+            kind="worker", workspace=str(tmp_path / "ws")
+        )
+        other = tmp_path / "other"
+        other.mkdir()
+        refused = await client.patch(
+            f"/api/sessions/{worker.id}",
+            json={"approvals": "auto", "title": "x", "workspace": str(other)},
+        )
+        assert (refused.status_code, refused.json()["error"]["code"]) == (
+            409,
+            "not_a_chat",
+        )
+        kept = await console.store.get_session(worker.id)
+        assert kept is not None and kept.title != "x" and "approvals" not in kept.meta
+        assert kept.workspace == str(tmp_path / "ws")
 
 
 # ── Allow once, end to end ──
