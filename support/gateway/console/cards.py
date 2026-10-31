@@ -30,7 +30,7 @@ from localmelo.support.sessions.display import (
 )
 from localmelo.support.sessions.store import StoredEvent
 
-from ..finishing import not_committed
+from ..finishing import NOT_CONTINUED, not_committed
 from .activity import FOLDER_REFUSED, answer_lines, answer_word
 
 if TYPE_CHECKING:
@@ -203,8 +203,14 @@ class MainChatCards:
             info.id, limit=1, before=turn + 1 if turn else None
         )
         last = turns[-1] if turns else None
+        note = ""
+        if state == "failed" and info.kind == "task":
+            note = (await self._console.workers.tasks.get_task(info.id)).wait_reason
         if state == "done":
             line = answer_lines(last.answer) if last is not None else ""
+        elif note.startswith(NOT_CONTINUED):
+            # A continued run that never began: its last turn is an older one.
+            line = note
         elif last is not None and last.status != "completed":
             line = _reason(last.status, last.cause, last.result)
         else:

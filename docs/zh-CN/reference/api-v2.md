@@ -169,10 +169,18 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
     "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
   },
   "mode": "default",
+  "across_chats": true,
+  "memory_retriever": "auto",
   "advanced_options": [
     {"option": "--host", "tier": "advanced", "issue": ""},
     {"option": "--retriever", "tier": "experimental", "issue": "#4"}
   ],
+  "developer_settings": [
+    {"section": "agent", "keys": [
+      {"key": "agent.reasoning", "value": "legacy", "default": "legacy", "flag": "--reasoning", "issue": "#183", "file": true}
+    ]}
+  ],
+  "run_options": [{"option": "--mcp PATH", "text": "MCP servers to use (mcpServers JSON file)"}],
   "file_label": "~/.cache/localmelo/config.toml",
   "revision": "5d41402abc4b2a76"
 }
@@ -182,7 +190,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `workspace` 是 `[gateway] workspace`；未设置时为 `~/localmelo-workspace`。
 - `revision` 是文件 SHA-256 的前 16 个十六进制字符；文件尚不存在时为 `""`。
 - `across_chats` 是 `[memory] across_chats`，即[跨对话记忆](#memory-across-chats)的开关。
-- `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）；控制台在开发者模式下以只读方式显示它们。
+- `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）。
+- `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
+- `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
 
@@ -197,6 +207,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 每个字符串都必须是不含控制字符的单行，`workspace` 为必填项，必须是绝对路径或以 `~/` 开头，并且不能解析为 `/` 或主目录（包括经由符号链接）；否则返回 400 `invalid_request`。`sections` 中不接受 `api_key_set`。
 - `mode` 可选：`default` 或 `developer` 会设置 `[ui] mode`（其他值返回 400 `invalid_request`）；省略时保留已保存的模式。模式只改变控制台和 `melo --help` 显示的内容。
 - `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
+- `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
+- 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
 
@@ -216,7 +228,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"ok": true}
 ```
 
-- 字段或校验错误会先返回 400。探测失败或超时会返回 HTTP 200，并附 `{"ok": false, "error": "..."}`。
+- 字段或校验错误会先返回 400。探测失败会返回 HTTP 200，并附 `{"ok": false, "error": "...", "failed": "chat"}`（嵌入探测失败时 `failed` 为 `embedding`）；超时没有 `failed`。
 
 ## GET /api/settings/key-status
 
@@ -336,8 +348,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0}}
 ```
 
+- 定时事项的 `level`（1 到 4）就是它的优先级：控制台把它显示为 `P` 加数字。`level_word`（`Today`、`Normal` 等）为兼容现有客户端而保留，控制台从不显示它。
 - `GET /api/chores` 返回 `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`，最早的在前。传旁支对话的 `?session_id=ID` 只保留该对话自己的，并给出 `"scope": "chat"`；主对话的 id、空值或不传 `session_id` 则列出全部。未知或不是对话的 id 返回 404 `not_found`。
-- `POST /api/chores` 接受 `request`（必填，不超过 100,000 个字符）、`schedule`，以及可选的 `title`（不超过 200 个字符；默认从请求派生）、`level`（`Today`、`Normal`、`Whenever`、`If idle`，或 1 到 4；默认按请求中的用词，与任务相同）和 `front_id`（某个对话；默认主对话）。`schedule` 是 `{"kind": "daily" | "weekdays", "at": "HH:MM"}`（本地时间）或 `{"kind": "hours", "every": 1..24}`；其他键会被拒绝。无效的请求体返回 400 `invalid_request`；最多保存 50 个（409 `chore_limit`）。返回 201 `{"chore"}`；第一次 `next_run` 是该时间表的下一个时间再加最多 120 秒的抖动。
+- `POST /api/chores` 接受 `request`（必填，不超过 100,000 个字符）、`schedule`，以及可选的 `title`（不超过 200 个字符；默认从请求派生）、`level`（`P1` 到 `P4`、1 到 4，或旧的词 `Today`、`Normal`、`Whenever`、`If idle`；默认按请求中的用词，与任务相同）和 `front_id`（某个对话；默认主对话）。`schedule` 是 `{"kind": "daily" | "weekdays", "at": "HH:MM"}`（本地时间）或 `{"kind": "hours", "every": 1..24}`；其他键会被拒绝。无效的请求体返回 400 `invalid_request`；最多保存 50 个（409 `chore_limit`）。返回 201 `{"chore"}`；第一次 `next_run` 是该时间表的下一个时间再加最多 120 秒的抖动。
 - `PATCH /api/chores/{id}` 接受读到的 `revision`，以及 `title`、`request`、`schedule`、`level` 和 `enabled`（至少一个）。过期的 revision 返回 409 `stale_revision`，未知的定时事项返回 404 `not_found`。新的 `schedule` 或 `enabled: true` 会从现在起重新计划 `next_run`（错过的日子不补跑）；`enabled: false` 把它置为 null。
 - `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
 - `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
@@ -459,13 +472,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 主对话对任务做了什么，是主对话里一个不属于任何轮次的 `attention.echo` 会话事件。由代码处理的消息（`/task TEXT`、带 `"as_task": true` 的轮次请求体、要求修改它点名的文件的祈使句、点名一个未结束任务的简短控制短语，或带任务名的简短跟进词）不开始轮次：`POST /api/sessions/{main}/turns` 以 200 返回该回执。
 
 ```json
-{"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
+{"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · P2", "typed": "/task summarize the readme"}}
 ```
 
-- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
 - 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
-- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "Today" | "P1" | 1}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复），`once` 把它的工作作为一个任务开始，`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复），`once` 把它的工作作为一个任务开始，`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。
 
 ## GET /api/sessions/{id}/events
 

@@ -38,6 +38,7 @@ async def setup(tmp_path: Path) -> AsyncIterator[CaptureSetup]:
     worker._lock = asyncio.Lock()
     worker._closed = False
     worker._stopping = set()
+    worker._invalid_workspace = set()
     try:
         yield store, tasks, worker
     finally:
@@ -580,3 +581,14 @@ async def test_worker_crash_keeps_capture_before_release(
             pytest.fail("an unreleased child survived its crashed parent")
     finally:
         await store.aclose()
+
+
+async def test_the_hook_stands_down_when_the_folder_was_refused(
+    setup: CaptureSetup, tmp_path: Path
+) -> None:
+    """A run whose folder was refused is cancelled; its tools never start."""
+    _, tasks, worker = setup
+    task = await create(tasks, tmp_path, proof=False)
+    worker._invalid_workspace.add(task)
+    with pytest.raises(asyncio.CancelledError):
+        await worker._capture_incomplete(task, "no-capture-yet")

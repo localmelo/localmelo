@@ -107,7 +107,7 @@ def _text(value: object, name: str, limit: int) -> str:
 
 def _level(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4:
-        raise ValueError("level: Today, Normal, Whenever or If idle")
+        raise ValueError("level: P1 to P4")
     return value
 
 

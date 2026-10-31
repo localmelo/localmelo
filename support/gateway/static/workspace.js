@@ -20,6 +20,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
@@ -189,7 +190,7 @@ function unreadCard() {
 }
 
 function levelName(level) {
-  return `P${level || 2}`;
+  return levelCode(level);
 }
 
 function notify(message, { sticky = false, kind = "" } = {}) {
@@ -414,7 +415,6 @@ function applyChrome() {
   $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
   $("composer-note").hidden = !developerMode;
   $("local-badge").hidden = !developerMode;
-  setTextIfChanged($("settings-label"), developerMode ? "Connection settings" : "Settings");
 }
 
 /** Under a chat's title: its folder in default mode, its model and its folder in developer mode. */
@@ -1139,7 +1139,7 @@ function mainNodes(view, turns) {
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
-      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho, developer: developerMode });
+      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
     }
     return [el("div", "day-divider", item.label)];
   });
@@ -2228,7 +2228,7 @@ function renderLevelMenu() {
   const menu = $("level-menu");
   menu.replaceChildren();
   for (const number of [1, 2, 3, 4]) {
-    const item = el("button", "level-item", levelName(number) + (number === 1 ? " · urgent" : number === 4 ? " · background" : ""));
+    const item = el("button", "level-item", levelLabel(number));
     item.type = "button";
     item.setAttribute("role", "menuitemradio");
     item.setAttribute("aria-checked", String(number === level));
@@ -2676,6 +2676,17 @@ const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-
 const showSettings = setupSettings({
   api,
   developer: () => developerMode,
+  health: () => S.health,
+  sessions: () => S.sessions,
+  // Memory and Scheduled have their own tabs in the panel: Settings closes and the tab opens.
+  openTab: (id) => {
+    $("settings-dialog").close?.();
+    panel.select(id, { focus: true });
+    if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+  },
+  // Only the macOS app registers these handlers; a browser has none.
+  desktop: () => globalThis.webkit?.messageHandlers?.localmeloDesktop,
+  folders: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
   onSaved: async (saved) => {
     await refreshMode(saved);
     drawer.modeChanged();
@@ -2883,7 +2894,7 @@ for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn"]) {
   if (id === "new-btn") node.addEventListener("click", () => newChat());
   else node.addEventListener("click", openSettings);
 }
-for (const id of ["close-settings", "cancel-settings"]) $(id).addEventListener("click", () => {
+$("close-settings").addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
 });

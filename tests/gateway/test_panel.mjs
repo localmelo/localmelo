@@ -435,10 +435,12 @@ test('a running task opens to its live steps, which follow the task stream until
   h.timers.at(-1).fn();
   assert.deepEqual(steps(), [['done', '✓ Read notes.md 0.2s'], ['running', '● Writing slides.md now']]);
   assert.match(h.root.find((node) => node.className === 'activity-output').textContent, /- one\n- two\n- three/);
-  // The actions are the terminal's: Pause, Stop and the priority in words, and the link to the task.
+  // The actions are the terminal's: Pause, Stop and the priority as P-codes with their meaning, and the link to the task.
   const actions = h.root.find((node) => node.className === 'activity-actions');
   assert.deepEqual(actions.children.map((node) => node.tagName), ['BUTTON', 'BUTTON', 'SELECT', 'A']);
-  assert.deepEqual(actions.children[2].children.map((option) => option.textContent), ['Now', 'Today', 'Normal', 'Whenever', 'If idle']);
+  assert.deepEqual(actions.children[2].children.map((option) => option.textContent), [
+    'P0 · runs first; others wait', 'P1 · today', 'P2 · normal', 'P3 · when there is time', 'P4 · only when the computer is idle',
+  ]);
   assert.equal(actions.children[3].href, '#/tasks/t1');
   actions.children[0].click();
   await settle();

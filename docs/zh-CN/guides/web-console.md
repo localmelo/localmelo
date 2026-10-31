@@ -18,7 +18,7 @@
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
-1. 使用 **Settings**（开发者模式下叫 **Connection settings**）选择模型服务器、它的地址、模型和工作区（开发者模式下叫 **Chat backend** 和 **Chat API URL**）。更改会在你的下一条消息生效。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Appearance**（开发者模式下叫 **Theme**）会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。默认模式把 Model（含它的测试）、Appearance 和 **Developer mode** 开关叠在同一个对话框里；开发者模式保留 Model、Test、Theme 和 Developer 标签页，并显示设置文件及其修订版本。你也可以使用 `melo setup`。
+1. 打开 **Settings** 连接模型服务器。左边列出各个分区，右边显示选中的那个；在手机上先显示列表，点开一个分区会以面板形式滑入（**‹ Settings** 返回）。尚未保存任何设置时，它停在 **Model server**，表单展开，停在空白的 **Choose a server…** 上。你也可以使用 `melo setup`。[更多关于 Settings](#settings)。
 2. 输入并发送消息。页面打开在始终存在的[主对话](#the-main-chat-and-side-chats)上；在新的旁支对话里，第一条消息会创建对话：页面以该对话的第一轮回答你的草稿，绝不会自行创建对话。回答以 Markdown 渲染，包含代码块。
 3. 一轮的呈现方式与终端类似：你的消息、包含已运行工具卡片的工作组、推理、通知和反思、运行时的实时行，以及带有 `Copy response` 的最终回答。工具输出中的转义序列会被清除，其图片（PNG、JPEG、GIF、WebP）会在页面内显示，这一轮产生的图片会显示在回答下面（见[回答里的图片](#pictures-in-the-answer)）。没有工具调用的一轮，其时间只在回答下方的一行里显示一次；它的推理（如果有）在 `Thought` 一行下展开。对话会告诉模型它是 localmelo 的 melo、它运行在哪个模型和服务器上，以及它记得什么，所以问“你是谁？”或“你记得什么？”时会得到直接的回答（见[melo 如何介绍自己](terminal.md#what-melo-says-about-itself)）。
 4. 输入框上方有一行状态行：与终端开发者模式状态栏相同的段（终端的默认模式用文字表述这些数字），`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。默认模式只显示上下文段。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。
@@ -50,11 +50,11 @@
 <a id="hand-work-to-the-main-chat"></a>
 ## 把工作交给主对话
 
-![主对话：回答了一个问题；以 Normal 开始的任务已完成回来；以 Today 开始的任务打开了级别列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
+![主对话：回答了一个问题；一个任务已完成回来；一个任务打开了优先级列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
 
-- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · Normal`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
 - **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样，并配一个简短的标题。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
-- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
+- **优先级写作 P0 到 P5。** 一行里显示代码（`P1`），悬停可看含义。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 P1（今天），"no rush"、"不急" 为 P3（有空时），其余为 P2（正常）。那一行的 **Change** 会打开列表（`P0 · runs first; others wait`、`P1 · today`、`P2 · normal`、`P3 · when there is time`、`P4 · only when the computer is idle`、`P5 · on hold until you start it`；含义依次是：最先运行，其他任务等待；今天；正常；有空时；仅在电脑空闲时；暂停，等你启动），设定你自己的优先级，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
@@ -70,7 +70,7 @@
 - **说一次就行。** 一条消息，如 `every weekday at 8:30, brief me on my calendar` 或 `每天早上九点 总结我的邮件`，会出现一张卡片 `Run this every weekday at 8:30?`，带 **Save chore**、**Just once** 和 **Cancel**。你点按之前不会保存或开始任何东西，也没有模型读取这个时间安排。
 - **三种安排。** 每天某个时间、每个工作日某个时间，或每 1 到 24 小时。没有说时间时，由一天中的时段决定（`every morning` 是 8:00，`every evening` 是 18:00），否则是 9:00。`every Monday` 或 `every 30 minutes` 不会被读取：它像普通消息一样交给主对话。
 - **准时运行。** 网关运行期间，定时事项会作为任务在工作区里自己的文件夹中开始，比约定时间晚不超过三分钟，绝不提前。电脑睡眠期间错过的一次，会在唤醒时只运行一次；上一次运行还没结束的事项会跳过下一次。
-- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
+- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行会看到它的优先级（`Priority: P2 · normal`），并可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
 - **Check-in。** 每 30 分钟它会看有没有要告诉你的事：某个事项刚结束的运行，或一个等了你整整一个周期的任务。没有就什么也不做，也不用模型；有的话，调用一次模型写一条简短的说明，作为一张卡片发到主对话。它的开关可以把它关掉。
 
 <a id="pictures-in-the-answer"></a>
@@ -99,7 +99,7 @@
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
-选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用文字表示的优先级（**Now**、**Today**、**Normal**、**Whenever**、**If idle**；开发者模式加上 P0 到 P4），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
+选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用代码表示的优先级（`P0` 到 `P4`，各带含义；P5 就是 Pause），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
 
 **Workers** 列出上述范围内的 worker：当前对话启动的任务，运行中的在前，然后是今天完成的。每一行有标题、用文字表示的状态（`Working`、`Waiting for your approval`、`Waiting to start`、`Paused`、`Done`、`Failed`、`Stopped`）、时间，已完成的 worker 还有一行结果。选中一个 worker，会展开它实时的步骤，完成后展开它的历史，并提供 **Pause** 或 **Resume**、**Stop** 和优先级，与 Activity 相同。主对话的 Workers 还会列出记录为会话的 worker 运行，例如 `melo worker`。没有 worker 时，标签页会说明它们何时出现（`This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.`）。底部的 **All tasks** 和 **All worker runs** 打开对应的视图。
 
@@ -171,18 +171,31 @@
 
 在开发者模式下，**Details** 在[面板](#the-panel-beside-a-chat)里代替标签页打开会话详情，显示工具和会话授权、工作记忆及长期记忆状态，以及已完成的运行；当页面提供轮次游标时，还可分页查看运行记录。你可以在那里撤销已授权的工具；工具视图可能会打开一个暂停的会话。**Close details** 或 Esc 回到标签页。在窄屏上，面板会随之弹出。
 
+<a id="settings"></a>
+
+## 设置
+
+侧边栏的 **Settings**（或 macOS app 菜单里的 **Settings…**）按主题分成几个分区。每项更改立即保存，并在底部显示 `Saved: …` 和 **Undo**；保存时带上读取时的修订版本，所以如果文件在此期间被别处改过，会提示你重新加载。
+
+- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。
+- **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
+- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框），以及最近用过的文件夹，每个都有 **Make default**。
+- **Scheduled**：check-in 开关及下一次的时间，以及打开定时事项的 **Open Scheduled**。
+- **Appearance**：主题（System、Light、Dark，记在当前浏览器里）、macOS app 中的 **Melo on the desktop**（与 app 菜单是同一个选择），以及 **Developer mode**。
+- **Developer**（仅开发者模式）：`melo -h all` 列出的每个设置，按分区分组，显示当前值、小字的 `config.toml` 键、设置它的旧选项，对比实验还标明决定它的 issue；最后是只作用于一次运行的选项。这里只读，用 `melo config set KEY VALUE` 修改。该分区也显示设置文件及其修订版本。
+
 <a id="developer-mode"></a>
 
 ## 开发者模式
 
-**Connection settings → Developer**（默认模式下是 **Settings**，开关在最后）里有一个开关，“Developer mode: show advanced settings and debug views”。它保存为 `config.toml` 中的 `[ui] mode`，也就是 `melo --help` 读取的设置，并与其他设置一样做修订版本检查；手工写进文件的模式会在页面下次读取时生效。它只改变显示的内容，不改变任何运行行为。开启后：
+**Settings → Appearance → Developer mode** 保存为 `config.toml` 中的 `[ui] mode`，也就是 `melo --help` 读取的设置，并与其他设置一样做修订版本检查；手工写进文件的模式会在页面下次读取时生效。它只改变显示的内容，不改变任何运行行为。开启后：
 
-- Developer 标签页以只读方式列出高级和实验性的 `melo` 选项，标明各自的层级；实验性选项还标明决定它的 issue（用命令行参数或在 `config.toml` 中设置）；
+- Settings 列出 **Developer** 分区（每个设置及其键和值）；
 - **Details** 增加 **Events** 标签页，显示最近一轮保存的原始事件；**Memory** 标签页增加智能体状态和长期记忆后端；
 - **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字；
 - 页眉显示对话的级别标签、**Details**、GPU 锁状态行、**N running** 标签，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers** 和 **Tasks**；
 - 状态行增加缓存、步骤、阶段和队列段，Tasks 显示每个任务的优先级；
-- 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，设置保留它们的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
+- 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，连接表单保留它的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
 
 关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 和 Tasks 视图，以及设置所保存的内容，在两种模式下的行为相同。
 
@@ -196,7 +209,7 @@
 
 ## 调度与停止
 
-在开发者模式下，对话标题栏有一个级别标签（P1 至 P4，默认 P2），用于设置调度器如何相对于其他对话排列该对话的调用；级别只保存在内存中，不会持久化。标题和级别标签旁边的机器状态行会显示其他持有者的 GPU 锁（`GPU lock: <holder> · <purpose>`，附带 `(recorded)` 或 `(chats wait)`）、`GPU lock: yours`、`GPU lock unreadable`、`· ETA passed`，以及电池状态（`Battery 55% · discharging`）。使用交流电且没有锁时不显示任何内容。级别标签是菜单按钮：按 Enter 或向下箭头会打开菜单，焦点落在对话当前的级别上，方向键、Home 和 End 在各级别之间移动，Escape 关闭菜单并回到按钮。调用等待时（等待可用槽位、后台上限或其他持有者的锁），标题栏的状态标签和状态文字会显示 `Waiting: <reason>`，侧边栏显示 `● Waiting`，实时行也显示相同的等待状态；原因使用调度器自身的代码（`Resources`、`Priority` 等），只有等待其他持有者的 GPU 锁（`Reservation`）时显示 "Waiting for this Mac's GPU"，与横幅的说法一致。这些与终端显示的是同一组信息，通过网关共享的同一个门控机制读写：会话上的 `level` 和 `held`、列表上的 `machine`，以及用于设置它们的 `POST /api/sessions/{id}/level` 和 `POST /api/presence`。
+在开发者模式下，对话标题栏有一个级别标签（P1 至 P4，默认 P2，菜单里写出各自的含义），用于设置调度器如何相对于其他对话排列该对话的调用；级别只保存在内存中，不会持久化。标题和级别标签旁边的机器状态行会显示其他持有者的 GPU 锁（`GPU lock: <holder> · <purpose>`，附带 `(recorded)` 或 `(chats wait)`）、`GPU lock: yours`、`GPU lock unreadable`、`· ETA passed`，以及电池状态（`Battery 55% · discharging`）。使用交流电且没有锁时不显示任何内容。级别标签是菜单按钮：按 Enter 或向下箭头会打开菜单，焦点落在对话当前的级别上，方向键、Home 和 End 在各级别之间移动，Escape 关闭菜单并回到按钮。调用等待时（等待可用槽位、后台上限或其他持有者的锁），标题栏的状态标签和状态文字会显示 `Waiting: <reason>`，侧边栏显示 `● Waiting`，实时行也显示相同的等待状态；原因使用调度器自身的代码（`Resources`、`Priority` 等），只有等待其他持有者的 GPU 锁（`Reservation`）时显示 "Waiting for this Mac's GPU"，与横幅的说法一致。这些与终端显示的是同一组信息，通过网关共享的同一个门控机制读写：会话上的 `level` 和 `held`、列表上的 `machine`，以及用于设置它们的 `POST /api/sessions/{id}/level` 和 `POST /api/presence`。
 
 停止操作会取消运行；光标在消息输入框内时按 Escape 也会停止，在其他位置按 Escape 只会关闭已打开的内容，在 Tasks 和 Workers 里与在对话中一样。正在进行的模型请求会被放弃，但模型服务器可能仍会完成计算；正在运行的 `python_exec` 子进程会连同其进程组被终止。`python_exec` 代码在子进程中运行，因此网关在其运行期间仍能响应其他请求。工具的限制参见[工具与 MCP](../reference/tools.md)。该轮次以 `cancelled` 状态保存，保存完成后对话即可接收下一条消息。每条消息都能看到该对话先前的回答，与[会话](gateway.md#sessions)相同。
 

@@ -273,7 +273,7 @@ from-the-child
 | `idle 2m` | 距最近一次请求的时间，一分钟起显示。 |
 | `$0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m` | 在云端 API 上：按你配置的价格（见 [`[pricing]`](../reference/configuration.md#pricing)）算出的本会话费用，以及最近一次响应报告的最紧的速率限制和重置前的时间。melo 不内置价格。 |
 | `2/~4 · ctrl+o steps` | 轮次运行期间：第 2 步，共约 4 步（该任务之前用了 4 步；`~` 表示估计值），以及列出这些步骤的按键。 |
-| `2 running · 1 queued · Today · ctrl+t tasks` | 网关有未完成的任务时：按状态统计的数量、最高的级别，以及列出它们的按键。级别用文字表示（Now、Today、Normal、Whenever、If idle、Later）；开发者模式显示 P0-P5。 |
+| `2 running · 1 queued · P1 · ctrl+t tasks` | 网关有未完成的任务时：按状态统计的数量、最高的优先级（P0 最先运行，P1 是今天，P2 正常，直到 P5 暂停），以及列出它们的按键。 |
 
 - Ctrl+T 列出任务；在某个任务上按 Enter 会提供 Pause 或 Resume、Raise to、Lower to 和 Stop（会先询问），效果与 `melo task pause|resume|level|stop` 完全相同。
 - melo 每 5 秒向网关询问一次任务，并且只在存在网关令牌（`~/.cache/localmelo/gateway/auth`）时才询问。

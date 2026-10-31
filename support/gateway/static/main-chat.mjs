@@ -8,8 +8,7 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
-/** Levels in words, P0 to P5; P-codes are for developer mode. */
-export const LEVELS = ["Now", "Today", "Normal", "Whenever", "If idle", "Later"];
+import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
 const DAY_S = 86400;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -222,7 +221,7 @@ export function echoActions(echo, done) {
   }
   if (echo.kind === "control") return [["Undo", "undo"]];
   if (echo.kind === "suggest") {
-    const word = echo.action === "level" ? `Set to ${LEVELS[echo.level] ?? "Normal"}` : echo.action;
+    const word = echo.action === "level" ? `Set to ${levelCode(echo.level)}` : echo.action;
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
   if (echo.kind === "ask") return [["Start as a task", "start"], ["Not now", "dismiss"]];
@@ -231,9 +230,9 @@ export function echoActions(echo, done) {
 
 /**
  * One echo's nodes: the person's own message when it answers one, then the line with its buttons.
- * `{doc, echo, done, act, developer}`: `act(echo, do, level)` runs a button; `done` hides them.
+ * `{doc, echo, done, act}`: `act(echo, do, level)` runs a button; `done` hides them.
  */
-export function echoNodes({doc, echo, done = false, act, developer = false}) {
+export function echoNodes({doc, echo, done = false, act}) {
   const el = (tag, className, text) => {
     const node = doc.createElement(tag);
     if (className) node.className = className;
@@ -258,8 +257,11 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
   body.append(el("p", "echo-text", words));
   line.append(mark, body);
   if (level !== null) {
-    const chip = el("span", "echo-level", developer ? `P${level} · ${LEVELS[level]}` : LEVELS[level]);
+    // The chip is the code; its meaning is the tooltip and, hidden, part of its accessible name.
+    const chip = el("span", "echo-level", levelCode(level));
     chip.dataset.level = String(level);
+    chip.title = levelMeaning(level);
+    chip.append(el("span", "sr-only", `, ${levelMeaning(level)}`));
     body.append(chip);
   }
   // A chore's proposal names the work it would repeat, under the question.
@@ -270,7 +272,7 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
     button.type = "button";
     button.addEventListener("click", () => {
       if (does !== "level") return act(echo, does);
-      const list = levelList({el, echo, act, developer});
+      const list = levelList({el, echo, act});
       buttons.replaceChildren(list);
       list.children[echo.level ?? 2]?.focus();
     });
@@ -282,18 +284,18 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
 }
 
 /** The six levels as an option list; arrows move, Enter or a click chooses. */
-function levelList({el, echo, act, developer}) {
+function levelList({el, echo, act}) {
   const list = el("span", "echo-levels");
   list.setAttribute("role", "radiogroup");
-  list.setAttribute("aria-label", "Level");
-  LEVELS.forEach((word, level) => {
-    const item = el("button", "echo-level-item", developer ? `P${level} · ${word}` : word);
+  list.setAttribute("aria-label", "Priority");
+  LEVELS.forEach((_, level) => {
+    const item = el("button", "echo-level-item", levelLabel(level));
     item.type = "button";
     item.dataset.level = String(level);
     item.setAttribute("role", "radio");
     item.setAttribute("aria-checked", String(level === echo.level));
     item.tabIndex = level === echo.level ? 0 : -1;
-    item.addEventListener("click", () => act(echo, "level", word));
+    item.addEventListener("click", () => act(echo, "level", levelCode(level)));
     item.addEventListener("keydown", (event) => {
       const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
       if (!step) return;

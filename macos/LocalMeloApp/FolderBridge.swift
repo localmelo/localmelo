@@ -31,3 +31,32 @@ final class FolderBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 }
+
+/// The console's Settings reads and changes what is on the desktop, the same choice as the menus' "On the desktop".
+/// Only the gateway's own page is heard; the answer is always the choice in force afterwards.
+final class DesktopBridge: NSObject, WKScriptMessageHandlerWithReply {
+    static let name = "localmeloDesktop"
+    private let gatewayPort: () -> Int
+    private let current: () -> DesktopMode
+    private let choose: (DesktopMode) -> Void
+
+    init(gatewayPort: @escaping () -> Int, current: @escaping () -> DesktopMode,
+         choose: @escaping (DesktopMode) -> Void) {
+        self.gatewayPort = gatewayPort
+        self.current = current
+        self.choose = choose
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping (Any?, String?) -> Void) {
+        let origin = message.frameInfo.securityOrigin
+        guard acceptsBridgeMessage(scheme: origin.protocol, host: origin.host, port: origin.port,
+                                   isMainFrame: message.frameInfo.isMainFrame, gatewayPort: gatewayPort()),
+              let request = desktopRequest(message.body) else {
+            replyHandler(nil, "refused")
+            return
+        }
+        if case .set(let mode) = request { choose(mode) }
+        replyHandler(current().rawValue, nil)
+    }
+}

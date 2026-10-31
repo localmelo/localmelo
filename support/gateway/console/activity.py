@@ -38,6 +38,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
 )
 
+from ..finishing import NOT_CONTINUED
 from .errors import ApiError
 from .running import TASK_OUTCOMES, TITLE_CHARS, _turn_outcome, item_activity
 
@@ -293,6 +294,8 @@ async def _task_rows(
             result = ended[2] or (record.wait_reason if state == "failed" else "")
             if record.wait_reason == "invalid_workspace" and state == "failed":
                 result = FOLDER_REFUSED
+            elif state == "failed" and record.wait_reason.startswith(NOT_CONTINUED):
+                result = record.wait_reason
             row.update(icon=ended[1] if state == "done" else state, result=result)
         rows.append(row)
     return rows
