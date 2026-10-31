@@ -189,8 +189,19 @@ async def test_a_side_chat_starts_a_task_with_the_task_tools_and_owns_it(
         side = created["session"]["id"]
         turn = await _wait_turn(client, side)
         assert turn["status"] == "completed"
-        [started] = await _events(console, side, ECHO_EVENT)
-        assert (started["echo"], started["line"]) == ("started", "Started: Slides · P1")
+        # The message is no work request code reads, so the model's task is offered,
+        # and the person's tap starts it.
+        [offer] = await _events(console, side, ECHO_EVENT)
+        assert (offer["echo"], offer["line"]) == ("ask", "Start this as a task?")
+        tapped = await client.post(
+            f"/api/front/echoes/{offer['id']}", json={"do": "start", "session_id": side}
+        )
+        assert tapped.status_code == 200, tapped.text
+        started = tapped.json()["echo"]
+        assert (started["echo"], started["line"]) == (
+            "started",
+            "Started: make slides from my notes today, urgent · P1",
+        )
         record = await _task(console, started["task_id"])
         # The side chat owns it, in the folder it works in; the main chat holds no echo of it.
         assert (record.front_id, record.level) == (side, 1)
@@ -205,8 +216,7 @@ async def test_a_side_chat_starts_a_task_with_the_task_tools_and_owns_it(
         assert "search_files" not in offered, "that one is the main chat's"
         assert SIDE_TEXT in models[side].requests[0][0].content
         result = str(models[side].requests[1][-1].content)
-        assert result.startswith(f"Started task {record.task_id}: Slides (P1).")
-        assert "comes back to this chat as a card" in result
+        assert result.startswith("Not done: the user's words did not ask for this task")
 
 
 async def test_code_runs_the_same_rules_in_a_side_chat_without_a_model_call(

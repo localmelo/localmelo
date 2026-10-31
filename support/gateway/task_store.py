@@ -31,7 +31,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, get_args
 
@@ -1054,21 +1054,38 @@ class TaskStore:
             )
             return bool(cursor.rowcount)
 
-    async def rehome(self, front_id: str, to: str | None) -> list[str]:
-        """Hand the unfinished tasks of chat *front_id* to chat *to*; their ids.
-
-        A finished task keeps its record, its owner included.
-        """
+    async def unfinished(self, front_id: str) -> list[str]:
+        """The ids of chat *front_id*'s tasks that have not ended."""
         ended = ", ".join("?" * len(_TERMINAL_STATES))
-        async with self._store.component_transaction("task_rehome") as conn:
+        async with self._store.component_transaction("task_unfinished") as conn:
             rows = await _rows(
                 conn,
                 f"SELECT task_id FROM tasks WHERE front_id = ? AND state NOT IN ({ended})",
                 (front_id, *_TERMINAL_STATES),
             )
+        return [row[0] for row in rows]
+
+    async def rehome(
+        self, front_id: str, to: str | None, *, also: Collection[str] = ()
+    ) -> list[str]:
+        """Hand chat *front_id*'s unfinished tasks, and those of *also* whatever state they are in now, to chat *to*; their ids.
+
+        A task that ended before the hand-over and is not in *also* keeps its
+        record, its owner included; one that ended while the chat was going
+        (it was unfinished when *also* was read) follows the rest.
+        """
+        ended = ", ".join("?" * len(_TERMINAL_STATES))
+        marks = ", ".join("?" * len(also))
+        where = (
+            f"front_id = ? AND (state NOT IN ({ended})"
+            + (f" OR task_id IN ({marks})" if also else "")
+            + ")"
+        )
+        args = (front_id, *_TERMINAL_STATES, *also)
+        async with self._store.component_transaction("task_rehome") as conn:
+            rows = await _rows(conn, f"SELECT task_id FROM tasks WHERE {where}", args)
             await conn.execute(
-                f"UPDATE tasks SET front_id = ? WHERE front_id = ? AND state NOT IN ({ended})",
-                (to, front_id, *_TERMINAL_STATES),
+                f"UPDATE tasks SET front_id = ? WHERE {where}", (to, *args)
             )
         return [row[0] for row in rows]
 

@@ -1006,13 +1006,19 @@ with the echo.
 - `as_task` on a task session is 400 `invalid_request`; the main chat and a
   side chat take it (so does `POST /api/sessions` with `turn.as_task`: the chat is
   made first, empty, titled by the message, and the answer is 201 with the
-  `session` and the task's `echo`, no turn; a repeated `client_request_id` answers
-  200 with the chat and echo the first made and `repeated: true`, the key of another
-  message is 409 `submission_conflict`, and a task that cannot start is 400 and
-  leaves no chat), and a side chat's code rules (`/task`, control phrases,
+  `session` and the task's `echo`, no turn; with a `client_request_id` it is a
+  submission of the create scope: a cancelled key is 409 `submission_withdrawn`, a
+  key accepted for another message 409 `submission_conflict`, a repeat answers 200
+  with the chat and echo the first made and `repeated: true` (the echo written again
+  if the gateway stopped between the task and it), `GET /api/submissions/{key}`
+  reads `accepted` with the chat's `session_id` and a `task_id`, and the key's cancel
+  stops the task (202, `cancelling`) instead of storing a withdrawal; a task that
+  cannot start is 400 and leaves no chat, one that is admitted keeps its chat), and a side chat's code rules (`/task`, control phrases,
   follow-ups, chores and reminders) apply from its second message, the task
   belonging to that side chat. A repeated `client_request_id` of a delegation
   answers the same echo.
+- A chat keeps a note of the news it has told as an `attention.news` event (turn
+  `null`; `floor`, `tasks`, `sides`); a client ignores it.
 - A turn's echoes are stored in the chat that was spoken to. An echo about a
   task of another chat carries `from_main: true` or `from_chat`, that chat's
   title.

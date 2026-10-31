@@ -277,22 +277,36 @@ async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -
 # ── The front's own step, with task tools ──
 
 
-async def test_the_front_starts_a_task_with_its_tool(tmp_path: Path) -> None:
+async def test_the_front_offers_a_task_the_words_did_not_ask_for_and_starts_it_on_a_tap(
+    tmp_path: Path,
+) -> None:
+    # The model's task_create starts a task only for a work request code reads; a
+    # request it reads otherwise is offered, and the person's tap starts their own words.
     replies = (
         tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
-        answer("Started the slides; I'll tell you when they're done."),
+        answer("I offered to start it; tap to confirm."),
     )
+    typed = "can you make slides from my notes today, urgent"
     async with front_console(tmp_path, *replies) as (console, client, llm):
-        response = await _say(
-            client, console, "can you make slides from my notes today, urgent"
-        )
+        response = await _say(client, console, typed)
         assert response.status_code == 202, response.text
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["status"] == "completed"
-        echoes = await _echoes(console)
-        assert [e["line"] for e in echoes] == ["Started: Slides · P1"]
-        record = await _task(console, echoes[0]["task_id"])
+        [offer] = await _echoes(console)
+        assert (offer["echo"], offer["line"], offer["text"]) == (
+            "ask",
+            "Start this as a task?",
+            typed,
+        )
+        assert await console.workers.tasks.list_tasks() == []
+        tapped = await client.post(
+            f"/api/front/echoes/{offer['id']}", json={"do": "start"}
+        )
+        assert tapped.status_code == 200, tapped.text
+        started = tapped.json()["echo"]
+        record = await _task(console, started["task_id"])
         assert (record.level, record.front_id) == (1, console.main_id)
+        assert record.spec["objective"] == typed, "the person's words, not the model's"
         # The tools the front offers: the task tools and two read-only file tools.
         offered = {tool.name for tool in llm_tools(console)}
         assert {

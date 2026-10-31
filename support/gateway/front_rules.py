@@ -271,27 +271,6 @@ def named_task(
     return found[0] if len(found) == 1 else None
 
 
-def _job_tokens(text: str) -> set[str]:
-    """The stems of the words that say what a job is (3 letters or more, no filler; Chinese by pairs)."""
-    text = norm(text)
-    words = {w[:5] for w in re.findall(r"[^\W\d_]{3,}", text) if w not in _FILLER}
-    runs = re.findall(r"[\u3400-\u9fff]{2,}", text)
-    return words | {run[i : i + 2] for run in runs for i in range(len(run) - 1)}
-
-
-def names_job(typed: str, title: str, objective: str) -> bool:
-    """Whether the job a model proposes (*title*, *objective*) is what the person's words *typed* name.
-
-    At least half of the word stems of the job's name (its title; else the
-    objective's first words) are in *typed*. A task the model makes up from a
-    file or a page names work the person never wrote. The objective may say
-    more than the person did (paths, steps), so it is not compared.
-    """
-    want = _job_tokens(typed)
-    name = _job_tokens(title) or _job_tokens(" ".join(objective.split()[:8]))
-    return bool(want and name) and len(want & name) / len(name) >= 0.5
-
-
 def allows(typed: str, action: Action, task: TaskRef) -> bool:
     """The principal rule: *typed* (the person's latest message) asks for *action* on *task*."""
     found = control_action(typed)
@@ -847,7 +826,6 @@ __all__ = [
     "level_word",
     "named_task",
     "named_tasks",
-    "names_job",
     "names_files",
     "reply_language",
     "route",

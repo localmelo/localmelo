@@ -28,9 +28,10 @@ from localmelo.support.sessions.submissions import check_client_request_id
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
 from .front import ECHO_EVENT
-from .running import live_tasks, waiting_by_chat
+from .running import waiting_by_chat
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
+from .task_submissions import created, submission_of
 from .worker_reader import WorkerRecord, _total_tokens, decode_cursor, encode_cursor
 
 if TYPE_CHECKING:
@@ -327,21 +328,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
         if info.kind in ("front", "chat"):
-            echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
+            # Every console chat's page is as new as what has come back to it.
+            await console.cards.flush()
             cards = await _page_cards(console, session_id, turns, before)
-            if (
-                info.kind == "front"
-                or echoes
-                or cards
-                or any(
-                    record.front_id == session_id
-                    for record in await live_tasks(console) or []
-                )
-            ):
-                # A side chat that started a task has cards to write: what its
-                # page shows is as new as the main chat's.
-                await console.cards.flush()
-                cards = await _page_cards(console, session_id, turns, before)
+            echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
         body: dict[str, Any] = {
             "turns": [
                 turn_json(
@@ -462,6 +452,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
             console.store.get_submission(session_id, client_request_id),
             session_id,
         )
+        if submission is None and session_id is None:
+            # A create that made a chat for a task is accepted, with the chat and the task.
+            made = await created(console, client_request_id)
+            if made is not None:
+                return submission_of(made[0], made[1], client_request_id)
         return submission_json(submission, client_request_id)
 
     @app.get("/api/sessions/{session_id}/submissions/{client_request_id}")
