@@ -32,17 +32,18 @@ const chore = (id, extra = {}) => ({id, title: `Chore ${id}`, request: `Do ${id}
   level: 2, level_word: 'Normal', enabled: true, revision: 1, front_id: 'main', next_run: at(28, 8, 30), last_run: null, last: null, ...extra});
 const checkin = (extra = {}) => ({on: true, every_min: 30, next_at: at(28, 7, 30), last_at: null, ...extra});
 
-function harness({chores = [], checkinState = checkin(), chat = '', developer = false, fail = {}, scope = 'all'} = {}) {
-  const h = {calls: [], chores, checkin: checkinState, chat, scope};
+function harness({chores = [], checkinState = checkin(), chat = '', developer = false, fail = {}, scope = 'all', hold = {}} = {}) {
+  const h = {calls: [], chores, known: null, checkin: checkinState, chat, scope};
   const api = async (path, options = {}) => {
     const method = options.method ?? 'GET';
     h.calls.push([method, path, options.body]);
+    await hold[`${method} ${path}`];
     const failure = fail[`${method} ${path}`];
     if (failure) throw Object.assign(new Error(failure.message ?? failure), failure.code ? {code: failure.code, status: 409} : {status: 500});
     if (method === 'GET') return {chores: h.chores, checkin: h.checkin, scope: h.scope};
     if (path === '/checkin') { h.checkin = {...h.checkin, on: options.body.on, next_at: options.body.on ? at(28, 7, 30) : null}; return {checkin: h.checkin}; }
     const id = path.split('/')[2].split('?')[0];
-    const found = h.chores.find((item) => item.id === id);
+    const found = (h.known ?? h.chores).find((item) => item.id === id);
     if (method === 'DELETE') return {deleted: id};
     if (path.endsWith('/run')) return {chore: {...found, last_run: NOW / 1000, last: {state: 'queued', line: '', task_id: 't1'}}, task: {}};
     const change = {...options.body};
@@ -228,6 +229,62 @@ test("a side chat lists its own chores and says so; the main chat's list is unsc
   await side.tab.show();
   assert.deepEqual(side.calls[0], ['GET', '/chores?session_id=side%20one', undefined]);
   assert.ok(side.text().includes('This chat’s own chores. The main chat lists all of them.'));
+});
+
+test("a new chat takes the tab: the old chat's list, open row and edit go, and a read still out is dropped", async () => {
+  const h = harness({chores: [chore('a')], chat: 'chat-a'});
+  await h.tab.show();
+  await h.open();
+  h.button('Edit time: Chore a').click();
+  assert.notEqual(h.tab.state.edit, null);
+  h.chat = 'chat-b';
+  h.chores = [chore('b', {front_id: 'chat-b'})];
+  h.tab.rescope();
+  assert.deepEqual([h.tab.state.edit, h.tab.state.open, h.tab.state.chores.length, h.tab.state.loaded], [null, null, 0, false]);
+  assert.equal(h.button('Save'), null, "the old chat's editor is gone");
+  // Edits were open when the chat changed: the quiet reload (which refuses to interrupt one) now loads the new chat.
+  await h.tab.reload();
+  assert.deepEqual(h.calls.at(-1), ['GET', '/chores?session_id=chat-b', undefined]);
+  assert.ok(h.text().includes('Chore b') && !h.text().includes('Chore a'));
+  // A read the old chat started and that comes back late is not the new chat's list.
+  h.chat = 'chat-c';
+  h.chores = [chore('c', {front_id: 'chat-c'})];
+  const late = h.tab.show();
+  h.tab.rescope();
+  await late;
+  assert.equal(h.tab.state.loaded, false);
+  assert.ok(!h.text().includes('Chore c'));
+});
+
+test("a write still out when the panel follows another chat changes nothing in the new chat", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const a = chore('a');
+  const b = chore('b', {front_id: 'chat-b'});
+  const h = harness({chores: [a], chat: 'chat-a', hold: {'PATCH /chores/a': gate}});
+  h.known = [a, b];
+  await h.tab.show();
+  await h.open();
+  h.button('Edit time: Chore a').click();
+  h.button('Save').click(); // chat A's save is out
+  await settle();
+  // The panel follows chat B, whose chore is being edited, and A's answer comes back.
+  h.chat = 'chat-b';
+  h.chores = [b];
+  h.tab.rescope();
+  await h.tab.show();
+  await h.open();
+  h.button('Edit time: Chore b').click();
+  assert.equal(h.tab.state.edit?.id, 'b');
+  release();
+  await settle();
+  assert.equal(h.tab.state.edit?.id, 'b', "A's save did not close B's editor");
+  assert.equal(h.tab.state.notice, '');
+  assert.ok(h.text().includes('Chore b') && !h.text().includes('Chore a'));
+  // A write of B's own still works, and a late failure of A's would not have shown here either.
+  h.button('Save').click();
+  await settle();
+  assert.deepEqual(h.calls.at(-1)?.slice(0, 2), ['PATCH', '/chores/b']);
 });
 
 test('an unreadable schedule says so; a quiet reload keeps what is shown and never interrupts an edit', async () => {

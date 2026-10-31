@@ -50,6 +50,7 @@ export function rowLines(chore, now) {
 export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now}) {
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
+  let scope = 0; // which chat the panel follows: rescope() moves it on
   function node(tag, className, text) {
     const element = doc.createElement(tag);
     if (className) element.className = className;
@@ -91,19 +92,24 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     draw();
   }
   // One write at a time; a chore that changed meanwhile (409) is read again, and the person is told.
+  // A write belongs to the chat it was made in (`scope`): the gateway finishes it, but what comes
+  // back changes nothing once the panel follows another chat.
   async function call(path, options, failure) {
     if (state.busy) return null;
+    const mine = scope;
     state.busy = true;
     state.notice = '';
     try {
-      return await api(path, options);
+      const done = await api(path, options);
+      return mine === scope ? done : null;
     } catch (error) {
+      if (mine !== scope) return null;
       const stale = error?.code === 'stale_revision';
       state.notice = stale ? t('sched.stale') : error?.message || failure;
       if (stale) await load({quiet: true});
       return null;
     } finally {
-      state.busy = false;
+      if (mine === scope) state.busy = false;
     }
   }
   const put = (chore, change) => call(`/chores/${encodeURIComponent(chore.id)}`, {method: 'PATCH', body: {revision: chore.revision, ...change}}, t('sched.changeFailed'));
@@ -115,7 +121,9 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     const on = state.checkin.on !== false;
     const row = node('div', 'sched-switchrow');
     row.append(node('strong', '', t('sched.checkin')), toggle(t('sched.checkin'), on, async () => {
+      const mine = scope;
       const done = await call('/checkin', {method: 'PUT', body: {on: !on}}, t('sched.checkinFailed'));
+      if (mine !== scope) return;
       if (done) state.checkin = done.checkin;
       draw();
     }));
@@ -150,9 +158,11 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
       field.addEventListener('input', () => { state.edit.at = field.value; });
     }
     const save = async () => {
+      const mine = scope;
       const {kind: how, at, every} = state.edit;
       const schedule = how === 'hours' ? {kind: how, every: Number(every)} : {kind: how, at};  // `once` and the daily kinds both send `at`
       const done = await put(chore, {schedule});
+      if (mine !== scope) return;
       if (done) { replace(done.chore); state.edit = null; }
       draw();
     };
@@ -197,7 +207,9 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
       ...rowLines(chore, now()).map((line) => node('span', 'sched-line', line)));
     text.append(words);
     head.append(text, toggle(t('sched.switchLabel', {title: chore.title}), chore.enabled, async () => {
+      const mine = scope;
       const done = await put(chore, {enabled: !chore.enabled});
+      if (mine !== scope) return;
       if (done) replace(done.chore);
       draw();
     }));
@@ -206,12 +218,16 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     return item;
   }
   async function runNow(chore) {
+    const mine = scope;
     const done = await call(`/chores/${encodeURIComponent(chore.id)}/run`, {method: 'POST', body: {}}, t('sched.startFailed'));
+    if (mine !== scope) return;
     if (done) { replace(done.chore); state.notice = t('sched.started', {title: chore.title}); }
     draw();
   }
   async function remove(chore) {
+    const mine = scope;
     const done = await call(`/chores/${encodeURIComponent(chore.id)}?revision=${chore.revision}`, {method: 'DELETE'}, t('sched.deleteFailed'));
+    if (mine !== scope) return;
     if (done) { state.chores = state.chores.filter((item) => item.id !== chore.id); state.open = null; }
     state.ask = null;
     draw();
@@ -232,6 +248,14 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
     root.replaceChildren(...nodes);
   }
 
+  // The panel follows another chat: what was listed, opened or being edited belongs to the old one.
+  function rescope() {
+    reads += 1; // a read the old chat started is not the new chat's list
+    scope += 1; // nor is the answer to a write it made
+    Object.assign(state, {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false});
+    draw();
+  }
+
   draw();
-  return {root, state, show: () => load(), reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
+  return {root, state, show: () => load(), rescope, reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
 }

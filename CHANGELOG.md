@@ -18,6 +18,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   **Set up and start** only shows manual steps. Nothing installs, downloads, starts or saves, and direct runs
   and existing connections are unchanged. [#NN]
 
+- Side chats start tasks too. A side chat has the main chat's task tools and
+  code words (`/task …`, **Run as a task**, `pause the slides`, chores and
+  reminders), the same priorities and the same scheduler. A task belongs to the
+  chat that started it: its line, card, approvals, result and news come back to
+  that chat, and a chat acts on its own tasks first, then on the other chats'
+  (the line says whose). The main chat's Activity still lists every task and
+  names the side chat on the ones it did not start (`From Trip plan`), and its
+  next message reads one line when a side chat finished work. A side chat whose
+  task waits for you gets the dot on its row, and the main chat's row counts
+  them (`1 waiting in a side chat`). The terminal's `/task` works in a side
+  chat too. A chat's words reach its own tasks first and another chat's only
+  when they fit none of its own; words that fit several ask which with a
+  one-tap suggestion for each. Deleting a side chat hands its unfinished tasks,
+  chores and waiting approvals to the main chat. Starting a chat with **Run as
+  a task** through the API is a submission like any other: the same
+  `client_request_id` returns the same chat and task, a cancelled key makes
+  none, and its cancel stops the task. [#378]
+- A task can start with a short memory pack, a side chat's summary can be
+  recalled from other chats, and a task's questions to its owner chat are kept
+  apart from your notes: the pack holds your About you and Preferences notes,
+  the project's notes and the notes that match the objective (never People or
+  Decisions); a question from a task is agent data that no note is written
+  from. Nothing calls these yet. Part of #369. [#374]
 - Bring in what other coding assistants on this computer remember. A scan
   (`GET /api/memory/import/scan`) reads the instruction and memory files they
   keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -77,6 +100,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A task the model proposes starts only when your message is a request for
+  work, and then your own message is the task; otherwise the chat shows `Start
+  this as a task?` with your own message, in the main chat and in side chats.
+  The news a chat reads with its next message is told once per task ending and
+  per side chat, five at a time with the rest on the following message, and
+  survives a gateway restart. A request you forbid or only quote (`don't delete
+  a.md`, `不要删除 a.md`) is never read as work, in the main chat's routing too. [#378]
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
   title drops a level word that opens its request and is followed by a colon or
@@ -3122,3 +3152,5 @@ earlier milestones.
 [#370]: https://github.com/localmelo/localmelo/pull/370
 [#371]: https://github.com/localmelo/localmelo/pull/371
 [#372]: https://github.com/localmelo/localmelo/pull/372
+[#374]: https://github.com/localmelo/localmelo/pull/374
+[#378]: https://github.com/localmelo/localmelo/pull/378

@@ -267,6 +267,7 @@
   "chat.earlierFailed": "无法读取之前的轮次：{problem}",
   "chat.escToStop": "按 Esc 停止",
   "chat.expired": "这个对话已过期，或网关已重启。新建一个对话以继续。",
+  "chat.fromChat": "来自 {title}",
   "chat.levelFailed": "无法更改对话级别：{problem}",
   "chat.loadFailed": "无法读取对话：{problem}",
   "chat.loadingEarlier": "正在读取之前的轮次…",
@@ -288,8 +289,14 @@
   "chat.showEarlier": "显示之前的轮次",
   "chat.sideChats": "旁支对话",
   "chat.stopFailed": "无法停止回答：{problem}",
+  "chat.tasksWait": {
+    "other": "有 {n} 个任务在等你"
+  },
   "chat.tokens": "{n} 个 token",
   "chat.waiting": "等待中",
+  "chat.waitingInSide": {
+    "other": "旁支对话里有 {n} 个在等"
+  },
   "chat.welcome": "一个安静的地方，用你自己的模型思考、构建和探索。",
   "chat.welcomeMain": "这是你的主对话。旁支对话和任务会在这里汇报。",
   "chat.welcomeReady": "{model} 已就绪。在下面开始对话。",

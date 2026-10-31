@@ -246,7 +246,11 @@ class ChoreRunner:
     ) -> tuple[list[tuple[Chore, str, str]], list[tuple[str, str]]]:
         """Finished runs not yet reported, and tasks that have waited a whole beat for the person."""
         results: list[tuple[Chore, str, str]] = []
+        main = self.console.main_id
         for chore in await self.store.list_chores():
+            # A side chat's chore reports in that chat, with a card of its own.
+            if chore.front_id not in (None, main):
+                continue
             if not chore.last_task_id or chore.last_task_id == chore.reported_task_id:
                 continue
             last = await self.last(chore)
@@ -259,6 +263,7 @@ class ChoreRunner:
             (r.task_id, r.title)
             for r in records
             if r.task_id not in self._mentioned
+            and r.front_id in (None, main)
             and r.updated_at <= now - self.options.checkin_s
         ]
         return results, waiting

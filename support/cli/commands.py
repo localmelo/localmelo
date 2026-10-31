@@ -81,7 +81,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("chats", (), "", "Pick the main chat or a side chat", False),
     Command("side", (), "[title]", "Start a side chat in this folder", False),
     Command("main", (), "", "Go back to the main chat", False),
-    Command("task", (), "TEXT", "Start a task from the main chat: /task TEXT", False),
+    Command("task", (), "TEXT", "Start a task in this chat: /task TEXT", False),
     Command("mcp", (), "", "Show the MCP servers", True),
 )
 

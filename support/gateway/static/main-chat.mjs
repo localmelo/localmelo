@@ -2,9 +2,10 @@
  * The main chat and its side chats: the words and nodes `workspace.js` draws.
  *
  * The gateway keeps one main chat (`kind: "front"`, `main: true`). Every other console chat is one of
- * its side chats. When a side chat's run ends, or a task finishes, fails or waits for an approval, the
- * main chat gets a card (an `attention.card` event, never a turn). What the main chat did with a task
- * (started, paused, a suggestion, "Start this as a task?") is an echo line (an `attention.echo` event).
+ * its side chats. When a side chat's run ends, the main chat gets a card (an `attention.card` event,
+ * never a turn); when a task finishes, fails or waits for an approval, the chat that started it (the
+ * main chat or a side chat) does. What a chat did with a task (started, paused, a suggestion, "Start
+ * this as a task?") is an echo line (an `attention.echo` event) in that chat.
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
@@ -297,6 +298,9 @@ export function echoNodes({doc, echo, done = false, act}) {
   }
   // A chore's proposal names the work it would repeat (a reminder, its words), under the question.
   if (echo.kind === "chore" && (echo.work || echo.text)) body.append(el("p", "echo-sub", echo.work || echo.text));
+  // A task of another chat says whose it is (a side chat's title, or the main chat).
+  const owner = echo.from_main ? t("chat.main") : echo.from_chat;
+  if (owner) body.append(el("p", "echo-sub", t("chat.fromChat", {title: owner})));
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done)) {
     const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);

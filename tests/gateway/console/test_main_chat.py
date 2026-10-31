@@ -264,8 +264,10 @@ async def test_a_waiting_approval_gets_a_card_unless_answered_first(
         )
         await _wait_turn(client, side)
         assert console.main_id is not None
+        # Reading a chat's page writes the cards, as reading the list does: the side
+        # chat's run is one, and the approval, answered first, is none.
         cards = await console.store.events_of_type(console.main_id, CARD_EVENT)
-        assert cards == []
+        assert [c.event["data"]["state"] for c in cards] == ["done"]
         await client.get("/api/sessions")
         cards = await console.store.events_of_type(console.main_id, CARD_EVENT)
         assert [c.event["data"]["state"] for c in cards] == ["done"]
