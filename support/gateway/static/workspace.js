@@ -25,7 +25,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { byDay, cardNode, isMain, mergeCards, shortTime, timeline } from "./main-chat.mjs";
+import { answered, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
 import {
   activity,
   applyEvent,
@@ -500,6 +500,9 @@ function syncUI() {
     !!turn ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
+  // Run as a task: the main chat starts the message as a task, without asking the model.
+  $("task-btn").hidden = !mainActive() || !!turn;
+  $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : developerMode ? "Running on your backend" : "Working…") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
@@ -721,6 +724,7 @@ async function loadSession(id) {
   view.lastEventId = view.replayFrom;
   view.turns = (turns.turns ?? []).map((row) => newTurn(row));
   view.cards = mergeCards([], turns.cards ?? []);
+  view.echoes = mergeEchoes([], turns.echoes ?? []);
   S.view = view;
   renderSessions();
   renderMessages(true);
@@ -833,7 +837,8 @@ function startStream(id) {
       return;
     }
     applyOutcome(applyEvent(S.view, frame));
-    if (frame.type === "attention.card") S.view.cards = mergeCards(S.view.cards ?? [], [frame]);
+    if (frame.type === "attention.card") holdOrShow(S.view, frame);
+    if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
     if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
@@ -1015,6 +1020,7 @@ function viewSnapshot() {
     earlierLoading,
     turns,
     mainActive() ? (view?.cards ?? []).map((card) => card.id) : null,
+    mainActive() ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
     mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
   ]);
@@ -1095,6 +1101,7 @@ async function loadEarlier() {
     const existing = new Set(view.turns.map((turn) => turn.turn));
     view.turns = [...history.turns.filter((turn) => !existing.has(turn.turn)), ...view.turns];
     view.cards = mergeCards(view.cards ?? [], page.cards ?? []);
+    view.echoes = mergeEchoes(view.echoes ?? [], page.echoes ?? []);
     view.hasEarlier = page.has_earlier === true;
     const top = scroller.scrollTop;
     const height = scroller.scrollHeight;
@@ -1118,14 +1125,72 @@ async function loadEarlier() {
   }
 }
 
-/** The main chat: its turns and the cards side chats and tasks sent back, under day dividers. */
+/** The main chat: its turns, the cards side chats and tasks sent back, and its echoes, under day dividers. */
 function mainNodes(view, turns) {
   const newest = turns[turns.length - 1];
-  return timeline(turns, view?.cards ?? [], nowSeconds()).map((item) => {
-    if (item.kind === "turn") return turnNode(item.turn, item.turn === newest);
-    if (item.kind === "card") return cardNode({ doc: document, card: item.card, open: openCard });
-    return el("div", "day-divider", item.label);
+  const echoes = view?.echoes ?? [];
+  const done = answered(echoes);
+  // A task that came back finished takes no more changes: its lines lose their buttons.
+  const ended = new Set((view?.cards ?? []).filter((card) => card.state !== "waiting").map((card) => card.sourceId));
+  return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
+    if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
+    if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard })];
+    if (item.kind === "echo") {
+      const echo = item.echo;
+      const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
+      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho, developer: developerMode });
+    }
+    return [el("div", "day-divider", item.label)];
   });
+}
+
+// Echoes whose "Not now" was chosen on this page.
+const dismissed = new Set();
+
+/** A tap on an echo's button: Undo, Apply, Start as a task, or a level from Change. */
+async function actOnEcho(echo, does, level) {
+  if (does === "dismiss") {
+    dismissed.add(echo.id);
+    renderMessages(false);
+    return;
+  }
+  try {
+    const body = await api(`/front/echoes/${encodeURIComponent(echo.id)}`, { body: { do: does, ...(level ? { level } : {}) } });
+    if (S.view && mainActive()) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+  } catch (error) {
+    notify(error.message || "Could not change the task. Try again.");
+  }
+  renderMessages(false);
+  syncUI();
+}
+
+// Results wait while the person types (design 2.7): a waiting card shows at once; a done or
+// failed one shows at the next send, or once the composer has been still for 10 s.
+const TYPING_HOLD_MS = 10_000;
+let lastKey = 0;
+let heldCards = [];
+let heldTimer = null;
+
+function holdOrShow(view, frame) {
+  const typing = document.activeElement === input && input.value.trim() && Date.now() - lastKey < TYPING_HOLD_MS;
+  if (frame.data?.state === "waiting" || !typing) {
+    view.cards = mergeCards(view.cards ?? [], [frame]);
+    return;
+  }
+  heldCards.push(frame);
+  clearTimeout(heldTimer);
+  heldTimer = setTimeout(showHeld, TYPING_HOLD_MS);
+}
+
+function showHeld() {
+  clearTimeout(heldTimer);
+  if (Date.now() - lastKey < TYPING_HOLD_MS && document.activeElement === input) {
+    heldTimer = setTimeout(showHeld, TYPING_HOLD_MS - (Date.now() - lastKey));
+    return;
+  }
+  if (S.view && heldCards.length) S.view.cards = mergeCards(S.view.cards ?? [], heldCards);
+  heldCards = [];
+  renderMessages(false);
 }
 
 /** A card's Open: the side chat, or the task. */
@@ -1909,12 +1974,14 @@ function outboxNode(entry, slot) {
 
 // ── Sending, stopping, deleting ──
 
-async function send() {
+async function send({ asTask = false } = {}) {
   if (workerMode) return;
-  return queueMessage(input.value.trim(), {clearInput: true});
+  lastKey = 0;
+  showHeld();
+  return queueMessage(input.value.trim(), { clearInput: true, asTask });
 }
 
-async function queueMessage(text, {clearInput = false} = {}) {
+async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
@@ -1924,7 +1991,7 @@ async function queueMessage(text, {clearInput = false} = {}) {
   // the store answers `repeated` instead of running it twice.
   const again = previous && previous.state === "failed" && previous.text === text;
   const key = again ? previous.clientRequestId : newClientRequestId();
-  S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "" };
+  S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "", ...(asTask ? { asTask } : {}) };
   if (clearInput) {
     input.value = "";
     saveDraft();
@@ -1970,12 +2037,21 @@ async function submit(slot, key, text) {
       input.focus();
       return;
     }
+    const asTask = S.outbox[slot]?.asTask === true;
     const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
-      body: { text, client_request_id: key },
+      body: { text, client_request_id: key, ...(asTask ? { as_task: true } : {}) },
     });
     // A repeat is accepted too, so either way the text is not a draft now.
     if (S.outbox[slot]?.clientRequestId !== key) return;
     forgetDraft(sessionId, text);
+    if (body.echo) {
+      // The main chat started or changed a task in code: no turn, an echo line.
+      delete S.outbox[slot];
+      if (S.view?.id === sessionId) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+      renderMessages(true);
+      syncUI();
+      return;
+    }
     if (body.repeated === true) {
       // The key was accepted already: this is the turn it started, not a
       // second one, and no new event will say so.
@@ -2743,6 +2819,7 @@ $("composer").addEventListener("submit", (event) => {
   event.preventDefault();
   send();
 });
+$("task-btn").addEventListener("click", () => send({ asTask: true }));
 input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
@@ -2750,6 +2827,7 @@ input.addEventListener("keydown", (event) => {
   }
 });
 input.addEventListener("input", () => {
+  lastKey = Date.now();
   presence();
   saveDraft();
   resizeInput();

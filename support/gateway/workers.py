@@ -298,6 +298,22 @@ class TaskWorkers:
         ):
             clean["level"] = int(level[1])
         spec = TaskSpec.from_user_payload(clean)
+        return await self.create_spec(spec, front_id=front, request_key=key)
+
+    async def create_spec(
+        self,
+        spec: TaskSpec,
+        *,
+        front_id: str | None = None,
+        request_key: str | None = None,
+    ) -> tuple[dict, bool]:
+        """Create a user's task from a spec trusted code made (the main chat's).
+
+        The spec's level and reason are kept as given: the main chat computes
+        them from the person's own words. *front_id* is the owner chat, the
+        main chat when ``None``.
+        """
+        front, key = front_id, request_key
         task_id = uuid.uuid4().hex[:12]
         async with self._lock:
             if self._closed:

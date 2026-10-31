@@ -93,6 +93,16 @@ Three limits apply at different levels:
 - `shell_exec` and `python_exec` run in a child process with a process group, which a timeout or a cancellation kills.
 - Direct runs, workers and the gateway do not stream replies, so a server that sends nothing until the whole reply is written must finish within the timeout; a slow thinking model may need more.
 
+## The main chat and tasks
+
+![The main chat starts tasks and shows their levels](../assets/img/main-chat-tasks.webp)
+
+- The main chat is a short run: at most 4 steps, no reflection, thinking off, and tools to start, list and change tasks, read files and search memory.
+- Code reads your message first. `/task` and control phrases ("pause the slides") need no model call; a greeting or a short question is answered at once, never started as a task.
+- Bigger work becomes a task: a worker runs it beside the conversation at a level from your words, and its result comes back as a card.
+- A run that does not settle in 4 steps ends with "This needs more than a quick answer, so I started it as a task", or asks first when you asked a question.
+- Side chats, direct runs and workers run the full loop above, as before.
+
 ## Code layout
 
 - `melo/` holds the agent itself: the run loop, the checks, the tool executor, memory, and the interfaces that model providers implement.

@@ -4236,3 +4236,89 @@ test('a card from the open side chat is seen there, unless an earlier one is sti
   await h.run('refreshList()');
   assert.ok(dot(), 'The unread one keeps the dot');
 });
+
+// ── The front: echoes in the main chat ──
+
+const echoRow = (id, data) => ({id, ts: NOW - 100 + id, ...data});
+
+test('a message the main chat started as a task shows as the person\'s words and an echo line with its level', async () => {
+  const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · Normal', typed: '/task make slides'});
+  const h = harness(defaultMode({...mainRoutes({
+    'POST /sessions/m/turns': {status: 200, body: {echo: started}},
+    'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → Today', undo: {level: 'auto'}})}},
+  }), 'GET /settings': {mode: 'default'}}));
+  await h.run('init()');
+  assert.equal(h.element('task-btn').hidden, false, 'Run as a task is offered in the main chat');
+  h.element('input').value = '/task make slides';
+  await h.run('send()');
+  assert.equal(Object.keys(h.state().outbox).length, 0, 'No turn: the echo answers the send');
+  assert.match(h.text('messages'), /\/task make slides.*Started: make slides.*Normal.*Change/);
+  const line = findNode(h.element('messages'), (node) => node.dataset?.echoId === '40');
+  assert.equal(line.dataset.kind, 'started');
+  findNode(line, (node) => node.textContent === 'Change').click();
+  const today = findNode(line, (node) => node.textContent === 'Today');
+  assert.equal(today.getAttribute('role'), 'radio');
+  today.click();
+  await settle();
+  assert.deepEqual(h.net.callsTo('/front/echoes/40')[0].body, {do: 'level', level: 'Today'});
+  assert.match(h.text('messages'), /make slides →.*Today.*Undo/);
+});
+
+test('Run as a task sends the message as a task; a control echo\'s Undo goes once', async () => {
+  const paused = echoRow(50, {echo: 'control', action: 'pause', task_id: 't1', title: 'Slides', undo: {state: 'resume'}, line: 'Paused: Slides', typed: 'pause the slides'});
+  const h = harness(mainRoutes({
+    'POST /sessions/m/turns': {status: 200, body: {echo: paused}},
+    'POST /front/echoes/50': {status: 200, body: {echo: echoRow(51, {echo: 'undone', task_id: 't1', title: 'Slides', of: 50, line: 'Undone: Slides is going again'})}},
+  }));
+  await h.run('init()');
+  h.element('input').value = 'pause the slides';
+  h.element('task-btn').listeners.click.forEach((fn) => fn({}));
+  await settle();
+  assert.equal(h.net.callsTo('/sessions/m/turns')[0].body.as_task, true);
+  const undo = findNode(h.element('messages'), (node) => node.textContent === 'Undo');
+  undo.click();
+  await settle();
+  assert.deepEqual(h.net.callsTo('/front/echoes/50')[0].body, {do: 'undo'});
+  assert.match(h.text('messages'), /Undone: Slides is going again/);
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Undo'), null, 'An undone line offers no second Undo');
+});
+
+test('a suggestion and "Start this as a task?" are one tap; echoes arrive on the stream; levels show P-codes in developer mode', async () => {
+  const echoes = [
+    echoRow(60, {echo: 'suggest', action: 'stop', task_id: 't1', title: 'Slides', line: 'Suggested: stop Slides'}),
+    echoRow(61, {echo: 'ask', text: 'which laptop?', turn_id: 'turn-1', line: 'Start this as a task?'}),
+  ];
+  const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards: [], echoes}}));
+  await h.run('init()');
+  assert.match(h.text('messages'), /Suggested: stop Slides.*Stop.*Start this as a task\?.*Start as a task.*Not now/);
+  findNode(h.element('messages'), (node) => node.textContent === 'Not now').click();
+  await settle();
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Start as a task'), null);
+  h.stream().emit({id: 62, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'started', task_id: 't2', title: 'Fix CI', level: 1, line: 'Started: Fix CI · Today'}});
+  assert.match(h.text('messages'), /Started: Fix CI.*P1 · Today/);
+  assert.equal(h.state().view.turns.length, 0, 'An echo is no turn');
+});
+
+test('while the person types, a result card waits; a waiting card shows at once', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  const input = h.element('input');
+  input.focus();
+  input.value = 'half a thought';
+  input.listeners.input.forEach((fn) => fn({}));
+  h.stream().emit({id: 70, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'done', source_id: 'b', source_kind: 'chat', title: 'Fix CI', line: 'Fixed.', at: NOW}});
+  assert.doesNotMatch(h.text('messages'), /Done: Fix CI/);
+  h.stream().emit({id: 71, session_id: 'm', turn: null, type: 'attention.card', ts: NOW, data: {state: 'waiting', source_id: 'a', source_kind: 'chat', title: 'Plan the trip', line: '', at: NOW}});
+  assert.match(h.text('messages'), /Plan the trip needs your approval/);
+  await h.run('send()');
+  assert.match(h.text('messages'), /Done: Fix CI/, 'The next send shows what waited');
+});
+
+test('a task that came back finished offers no more changes on its echo lines', async () => {
+  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · Normal'})];
+  const cards = [cardRow(81, {at: NOW - 10, ts: NOW - 10, source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Two new roles.'})];
+  const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes}}));
+  await h.run('init()');
+  assert.match(h.text('messages'), /Started: Find jobs.*Done: Find jobs/);
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Change'), null);
+});

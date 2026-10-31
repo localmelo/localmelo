@@ -711,6 +711,10 @@ and `"run_id": ""`.
   card (`source_id`, `source_kind`, `title`, `state`, `line`, `at`), stored in
   the main chat with no turn when a side chat's run or a task comes back; see
   [Cards in the main chat](api-v2.md#cards-in-the-main-chat).
+- **`attention.echo`** is the main chat's line about a task it started or
+  changed (`echo`, `line`, and `task_id`, `title`, `level`, `action`, `undo`,
+  `of`, `typed`, `text`, `turn_id` as the kind needs), with no turn; see
+  [Echoes in the main chat](api-v2.md#echoes-in-the-main-chat).
 - **A stored `run.finished` holds the answer redacted.** Before it is
   stored, the `result` of its `RunResult` passes the same redaction as
   `assistant.message`'s text, and so do the turn's stored answer and result.

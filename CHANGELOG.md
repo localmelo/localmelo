@@ -342,6 +342,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The main chat answers, or hands bigger work to a task by level. It answers a
+  quick question itself and starts bigger work as a task it owns, with one line
+  such as `Started: Plan the trip · Normal`; the result comes back as a card.
+  `/task …` or **Run as a task** starts a task without a model call, and a short
+  phrase that names a task (`pause the slides`, `暂停 Fix CI`, `先做 slides`)
+  changes it at once, with **Undo**. The level comes from your own words: urgency
+  or a deadline today is Today, "no rush" is Whenever, else Normal; **Change** on
+  the line sets your own level. A message it cannot settle in 4 steps becomes a
+  task (a question asks "Start this as a task?" first). Only your own message
+  changes a task: a file, page or task report that says "stop" makes a one-tap
+  suggestion. Levels read as words in default mode, in the console and in
+  `melo task`, which also takes them as input. For API clients: turn bodies take
+  `as_task`, a code-handled message answers 200 `{"echo"}`, the main chat's turns
+  carry `echoes` (`attention.echo` events), and `POST /api/front/echoes/{id}`
+  answers an echo's Undo, Apply, Start or level. See
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#320]).
+
 - One main chat, with side chats under it. The console and the app open on the
   **Main chat**, which is always there and cannot be closed; the chats you start
   with **New side chat** (`⌘ K`) are listed under it, newest first under a line
@@ -2579,6 +2596,7 @@ earlier milestones.
 [#314]: https://github.com/localmelo/localmelo/pull/314
 [#316]: https://github.com/localmelo/localmelo/pull/316
 [#317]: https://github.com/localmelo/localmelo/pull/317
+[#320]: https://github.com/localmelo/localmelo/pull/320
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

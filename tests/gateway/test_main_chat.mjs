@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   byDay, cardNode, cardWords, dayLabel, isMain, mergeCards, readCard, shortTime, timeline,
 } from '../../support/gateway/static/main-chat.mjs';
+import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 
 // Noon on a fixed day, on this computer's clock, so the day maths never crosses midnight.
 const NOON = new Date(2026, 9, 30, 12, 0, 0).getTime() / 1000;
@@ -95,4 +96,23 @@ test('a card node opens its source', () => {
   assert.deepEqual(opened, [card]);
   const noon = new Date(NOON * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   assert.equal(made.find((item) => item.className === 'main-card-time').textContent, noon);
+});
+
+test('echoes stay in the timeline, never folded like cards, and a later echo answers an earlier one', () => {
+  const now = 1_800_000_000;
+  const echoes = mainChat.mergeEchoes([], [
+    {id: 2, ts: now - 50, data: {echo: 'started', task_id: 't', title: 'Slides', level: 2, line: 'Started: Slides · Normal'}},
+    {id: 3, ts: now - 40, data: {echo: 'control', action: 'pause', task_id: 't', line: 'Paused: Slides'}},
+    {id: 4, ts: now - 30, data: {echo: 'undone', task_id: 't', of: 3, line: 'Undone: Slides is going again'}},
+    {id: 5, ts: now - 20, data: {echo: 'nonsense'}},
+  ]);
+  assert.deepEqual(echoes.map((echo) => echo.id), [2, 3, 4]);
+  const card = mainChat.readCard({id: 9, ts: now - 10, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Slides', at: now - 10}});
+  const items = mainChat.timeline([], [card], now, echoes);
+  assert.deepEqual(items.map((item) => item.kind), ['day', 'echo', 'echo', 'echo', 'card']);
+  assert.deepEqual([...mainChat.answered(echoes)], [3]);
+  assert.deepEqual(mainChat.echoActions(echoes[1], false), [['Undo', 'undo']]);
+  assert.deepEqual(mainChat.echoActions(echoes[1], true), []);
+  assert.deepEqual(mainChat.echoActions({kind: 'suggest', action: 'level', level: 1, task_id: 't'}, false), [['Set to Today', 'apply']]);
+  assert.deepEqual(mainChat.LEVELS, ['Now', 'Today', 'Normal', 'Whenever', 'If idle', 'Later']);
 });

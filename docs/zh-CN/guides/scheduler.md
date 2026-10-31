@@ -4,6 +4,17 @@
 
 本指南说明调度器如何决定对话请求何时可以到达共享的模型服务器，以及如何运行一次模拟。修改调度设置之前请阅读本指南；策略、存储和模拟器见[调度器参考](../reference/scheduler.md)。
 
+<a id="tasks-from-the-main-chat"></a>
+## 来自主对话的任务
+
+![主对话按你的话给任务定级别](../../assets/img/main-chat-tasks.webp)
+
+- **谁开始任务。** 你向主对话交代工作时，任务归主对话所有（`front_id`）；`/task …` 或 **Run as a task** 不调用模型就开始一个任务。外观见[网页控制台指南](web-console.md#hand-work-to-the-main-chat)。
+- **任务的级别。** 代码只读你自己的消息：紧急用词或今天的截止时间为 Today（P1），"no rush"、"不急" 为 Whenever（P3），其余为 Normal（P2）。理由与任务一起保存（`you said "urgent"`）。网页、文件或任务报告从不设定级别。
+- **你设定的级别保持不变。** 你设定的级别（那一行的 **Change**、面板、`melo task level`）属于你：调度器不会改动它。
+- **改变任务需要你的话。** 只有当你最新的消息要求并点名某个任务时，主对话才会改变它（停止、暂停、继续、级别）；否则显示一条建议，点一下才会生效。
+- **默认模式用词。** 凡显示级别的地方都写作 Now、Today、Normal、Whenever、If idle 和 Later；开发者模式另外显示 P 代码。`melo task` 在接受 P 代码的地方也接受这些词（`melo task level ID today`）。
+
 <a id="the-gate-on-chats-s2"></a>
 
 ## 聊天的门（S2）
