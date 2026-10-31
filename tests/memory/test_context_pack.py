@@ -411,6 +411,16 @@ async def test_a_task_question_is_recalled_for_by_its_request_and_keeps_nothing(
     assert [e.text for e in await memory.records()] == ["You drink tea."]
 
 
+@pytest.mark.parametrize("origin", [ASK_OWNER, "user_rule"])
+async def test_any_turn_the_person_did_not_begin_keeps_nothing(
+    memory: ChatMemory, store: SessionStore, origin: str
+) -> None:
+    ask = as_owner(await turn(store, "I live in Porto."), origin)
+    found = await memory.before_turn(store, ask, "Remember that I live in Porto.")
+    assert found.remembered == ()
+    assert await memory.records() == []
+
+
 async def test_a_task_question_is_not_indexed_and_not_evidence(
     memory: ChatMemory, store: SessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

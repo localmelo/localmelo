@@ -233,9 +233,10 @@ _TASK_KINDS: Final = ("task", "front_bg")
 
 
 def is_owner_question(info: object) -> bool:
-    """Whether turn *info* is a task's question to its owner chat: agent data,
-    never the user's words (``origin`` is ``ask_owner``; ``""`` for a person's turn)."""
-    return getattr(info, "origin", "") == ASK_OWNER
+    """Whether turn *info* is a turn the person did not begin, such as a task's
+    question to its owner chat (``origin`` is ``ask_owner``): agent data, never
+    the user's words. Any non-empty ``origin`` counts; ``""`` is a person's turn."""
+    return bool(getattr(info, "origin", ""))
 
 
 def _pack_topics() -> tuple[str, ...]:
