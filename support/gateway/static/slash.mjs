@@ -277,7 +277,9 @@ export function setupSlash(host) {
     if (parsed === null) return false;
     close();
     const text = String(draft).trim();
-    const say = (lines) => addRow(host.slot(), {command: text, lines});
+    // The answer belongs to the chat the command was typed in, wherever the person has gone by then.
+    const slot = host.slot();
+    const say = (lines) => addRow(slot, {command: text, lines});
     let catalog;
     try {
       catalog = await load();

@@ -326,6 +326,22 @@ test('a command that is not for a turn in progress says so and keeps the draft',
   assert.match(lastRow(p), /Approvals: Ask · grants: none/);
 });
 
+test('an answer that arrives after the person moved on lands in the chat the command was typed in', async () => {
+  let release;
+  const slow = new Promise((resolve) => { release = resolve; });
+  const p = page({routes: {...ROUTES, 'PUT /settings': () => slow}});
+  const running = p.slash.handle('/model qwen3');
+  await new Promise((resolve) => setImmediate(resolve));
+  p.state.id = 'chat-2';
+  release({});
+  await running;
+  p.slash.draw();
+  assert.equal(p.rows.hidden, true, 'The chat open now has no row');
+  p.state.id = 'chat-1';
+  p.slash.draw();
+  assert.match(lastRow(p), /Model set to qwen3 \(saved\)\./);
+});
+
 test('the rows of a chat go when the conversation moves on, and a chat keeps its own', async () => {
   const p = page();
   await p.slash.handle('/help');
@@ -349,7 +365,7 @@ test('the rows of a chat go when the conversation moves on, and a chat keeps its
 const ROUTES = {
   'GET /settings': {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws', revision: 'r1', browser: false, sections: {mlc: {chat_url: 'http://127.0.0.1:9/v1', chat_model: 'm'}}},
   'PUT /settings': (body) => ({...body, browser: body.browser ?? false}),
-  'GET /sessions/chat-1/status': {parts: [{key: 'status.ctx', params: {used: '1.2k', limit: '8.0k'}}], steps: {active: true, step: 3, attempt: 1, phase: 'acting'}, context: {measured: 1200, limit: 8000}},
+  'GET /sessions/chat-1/status': {parts: [{key: 'status.ctx', params: {used: '1.2k', limit: '8.0k'}}, {key: 'status.tasks', params: {running: 1, queued: 0}}], steps: {active: true, step: 3, attempt: 1, phase: 'acting'}, context: {measured: 1200, limit: 8000}},
   'GET /sessions/chat-1': {grants: ['file_write']},
   'GET /sessions/chat-1/memory': {working: [{}, {}], working_max: 20, long_term: {enabled: true, backend: 'ollama'}},
   'POST /sessions/chat-1/retry': {},
@@ -384,13 +400,16 @@ test('commands that only look answer in a local row', async () => {
   await p.slash.handle('/status');
   assert.match(lastRow(p), /model qwen · oMLX\s+✓ answers/);
   assert.match(lastRow(p), /context ctx 1\.2k\/8\.0k/);
+  assert.doesNotMatch(lastRow(p), /activity/, 'The queue and cache are for status all');
   assert.match(lastRow(p), /folder ~\/notes/);
   assert.match(lastRow(p), /chat “Trip” · 1 turn/);
-  assert.match(lastRow(p), /approvals Approvals: Ask · grants: file_write/);
+  assert.match(lastRow(p), /approvals Ask · grants: file_write/);
+  assert.doesNotMatch(lastRow(p), /Approvals: Ask/, 'The row\'s label is not said twice');
   assert.doesNotMatch(lastRow(p), /version/, 'The short status leaves the gateway rows out');
   await p.slash.handle('/status all');
   assert.match(lastRow(p), /version melo 1\.0/);
   assert.match(lastRow(p), /gateway 2 chats open, 1 running · up 1m/);
+  assert.match(lastRow(p), /activity tasks 1 running/);
   await p.slash.handle('/usage');
   assert.match(lastRow(p), /1 turns · 1 tool calls · 1\.5k tokens written/);
   await p.slash.handle('/progress');

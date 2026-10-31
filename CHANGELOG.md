@@ -9,6 +9,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Every slash command of the terminal works in the web console and the app.
+  Typing `/` at the start of the message box opens a menu above it that
+  narrows as you type (arrows and Enter or Tab, Esc, or a click; a command
+  without arguments runs on Enter), in English or Chinese. A command is never
+  sent to the model: `/model NAME` and `/backend URL` save through the
+  settings, `/new`, `/clear` and `/side TITLE` open a new chat, `/chats`,
+  `/sessions` and `/resume` pick one, `/main` goes back, `/status`, `/usage`,
+  `/progress`, `/help`, `/approvals` and `/browser` answer in a row under the
+  conversation, `/undo`, `/retry`, `/copy`, `/title`, `/memory` and `/expand`
+  act on the chat, `/verbose`, `/thinking` and `/stream` change how the page
+  shows it, and `/exit` asks, then quits the app (in a browser tab it says to
+  close the tab). `/task` and `/answer` go to the open chat as before. An
+  unknown command says so; `//text` and a message that starts with a space are
+  messages, as in the terminal. `/attach`, `/attachments`, `/detach` and `/mcp`
+  say the console does not have files or MCP yet. New for clients:
+  `GET /api/commands` (the terminal's table, so the two never drift),
+  `POST /api/sessions/{id}/undo` and `browser` on `PUT /api/settings`.
+  [#NN]
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
   problem, the options and the help it needs), and melo answers it when the

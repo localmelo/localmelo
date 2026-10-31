@@ -123,13 +123,16 @@ export function createActions(host) {
       if (session?.workspace_label) lines.push(row('folder', {text: session.workspace_label}));
       const count = turns.filter((turn) => !turn.undone).length;
       lines.push(row('chat', {text: `${main ? t('chat.main') : `“${title}”`} · ${count ? t('slash.turns', {n: count}) : t('slash.new')}`}));
-      lines.push(row('approvals', {text: await approvalsText()}));
+      lines.push(row('approvals', {text: await approvalsText(true)}));
+      const everything = args === 'all' || developer;
       if (id) {
-        const body = await sessionStatus().catch(() => null);
-        const words = (body?.parts ?? []).map(saidText).filter(Boolean).join(' · ');
-        if (words) lines.push(row('context', {text: words}));
+        // The context is the status row's own; the cache, step and queue are for `all` and developer mode.
+        const parts = (await sessionStatus().catch(() => null))?.parts ?? [];
+        const words = (own) => parts.filter((part) => /^status\.(ctx|context)/.test(part.key) === own).map(saidText).filter(Boolean).join(' · ');
+        if (words(true)) lines.push(row('context', {text: words(true)}));
+        if (everything && words(false)) lines.push(row('activity', {text: words(false)}));
       }
-      if (args === 'all' || developer) {
+      if (everything) {
         const up = Math.round(health?.uptime_s ?? 0);
         lines.push(row('version', {text: `melo ${health?.version ?? ''}`.trim()}));
         lines.push(row('gateway', {text: t('slash.gateway', {open: health?.sessions?.open ?? 0, running: health?.sessions?.running ?? 0, up: formatDuration(up)})}));
@@ -306,12 +309,12 @@ export function createActions(host) {
   actions.attachments = actions.attach;
   actions.detach = actions.attach;
 
-  async function approvalsText() {
+  async function approvalsText(short = false) {
     const {id, session} = state();
     const mode = session?.approvals === 'auto' ? 'auto' : 'ask';
     const body = id ? await api(`/sessions/${enc(id)}`).catch(() => null) : null;
     const grants = (body?.grants ?? []).join(t('common.listSeparator')) || t('slash.none');
-    return t('slash.approvals', {mode: t(`auto.mode.${mode}`), grants});
+    return t(short ? 'slash.approvalsValue' : 'slash.approvals', {mode: t(`auto.mode.${mode}`), grants});
   }
 
   async function memoryWindow() {

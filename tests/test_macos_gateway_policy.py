@@ -340,7 +340,9 @@ def test_the_menu_bar_dot_has_three_to_one_against_its_ring_and_either_bar() -> 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_the_quit_bridge_takes_one_message_from_the_gateway_page(tmp_path: Path) -> None:
+def test_the_quit_bridge_takes_one_message_from_the_gateway_page(
+    tmp_path: Path,
+) -> None:
     run_policy(
         tmp_path,
         r"""

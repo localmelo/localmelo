@@ -2947,7 +2947,8 @@ const slash = setupSlash({
       title: session ? title(session) : newTitle(),
       main: mainActive(),
       turns: S.view?.turns ?? [],
-      busy: runningTurn() !== null || pendingOutbox() !== null,
+      // A message that failed to send is the person's to resend or edit; it does not hold the commands back.
+      busy: runningTurn() !== null || (pendingOutbox() !== null && pendingOutbox().state !== "failed"),
       developer: developerMode,
       health: S.health,
     };

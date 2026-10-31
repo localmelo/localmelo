@@ -348,6 +348,8 @@ file's revision.
   or `zh-Hans`.
 - `approvals` is `[approvals] mode`, the mode a new chat starts in: `ask` or
   `auto` (another value in the file reads `ask`).
+- `browser` is true when `[browser] driver` is not `off`: melo may read web
+  pages in Safari ([browsing](../guides/browsing.md)).
 - `developer_settings` is every key `melo -h all` lists, grouped by section
   in its order (`""` is the top level): `value` is the one in use and
   `default` the default, both as the help prints them; `flag` is the old
@@ -387,6 +389,9 @@ sessions.
 - `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
   new chats start in (other values are 400 `invalid_request`); omitted, the
   saved value is kept. Chats made before keep their own mode.
+- `browser` is optional: `true` sets `[browser] driver` to `safari-automation`,
+  `false` to `off` (anything else is 400 `invalid_request`); omitted, the saved
+  value is kept. It is what `/browser on` and `/browser off` save.
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
@@ -1130,6 +1135,31 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   of its turns runs under the terminal's lease, so the stream ends when that
   turn ends; read the session object again to see whether another turn runs.
 
+## GET /api/commands
+
+The terminal's slash commands, for the console's `/` menu and its command
+rows.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/commands
+```
+
+```json
+{"commands": [{"name": "exit", "aliases": ["quit"], "args": "", "help": {"en": "Quit", "zh-Hans": "退出"},
+               "during_turn": true, "keys": "ctrl+d", "action": "exit"}, "..."],
+ "everyday": ["chats", "side", "main", "task", "answer", "retry", "..."]}
+```
+
+- The list is the terminal's own table in its order, so a command added there
+  appears here. `help` holds the one-line words in `en` and `zh-Hans`; `args`
+  is the usage text (`[name]`, `PATH`); `keys` is a key that does the same.
+- `during_turn` is `true` (runs while a turn runs), `false` (refused then) or
+  `"show"` (runs then only without arguments). `action` is what the page does
+  with the command; `everyday` names the commands `/help` lists first.
+- A message is a command only when it starts with `/` and a lowercase name
+  followed by whitespace or its end. The page runs a command itself and never
+  sends it to a chat.
+
 ## GET /api/sessions/{id}/status
 
 The numbers the terminal's `/status` and status bar show for one chat, task or
@@ -1277,7 +1307,7 @@ These codes answer on the write routes besides the shared ones above:
 | 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
 | 409 | `session_busy` | a turn is already running in the session |
-| 409 | `not_latest_turn` | retry named a turn that is not the newest finished one |
+| 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
@@ -1388,6 +1418,23 @@ Run the newest finished turn's text again.
   `session_busy` while a turn runs.
 - 409 `not_retryable` for a turn that answered a task's question
   (`origin` `ask_owner`): its words are not the person's.
+
+## POST /api/sessions/{id}/undo
+
+Forget the newest finished turn (`/undo`). Its file changes stay.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/undo \
+  -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
+```
+
+- The answer is 200 `{"turn_id": "…", "undone": true}`. The turn is marked
+  undone (an event `turn.undone`), the Agent's conversation loses it, and
+  nothing runs: no model call follows.
+- The errors are the retry route's, with the undo wording: a task session is
+  409 `task_session_read_only`, an id that is not the newest finished, not
+  undone turn is 409 `not_latest_turn`, and a running turn is 409
+  `session_busy`.
 
 ## POST /api/turns/{turn_id}/cancel
 

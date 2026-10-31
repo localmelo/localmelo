@@ -4839,6 +4839,22 @@ test('a command refused during a turn keeps its draft in the composer', async ()
   assert.equal(h.state().activeId, 'a', 'The chat did not change');
 });
 
+test('a message that failed to send does not hold the commands back, a message being sent does', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.state().outbox.a = {clientRequestId: 'k1', text: 'unsent', state: 'failed', error: 'boom'};
+  h.element('input').value = '/new';
+  await h.run('send()');
+  assert.equal(h.state().activeId, null, 'The failed message waits in its chat; /new runs');
+  const busy = harness(withCommands());
+  await busy.run('init()');
+  busy.state().outbox.a = {clientRequestId: 'k2', text: 'sending', state: 'sending', error: ''};
+  busy.element('input').value = '/new';
+  await busy.run('send()');
+  assert.equal(busy.state().activeId, 'a');
+  assert.equal(busy.element('input').value, '/new', 'The draft stays');
+});
+
 test('the menu opens under a typed slash, takes the arrow keys, and Enter runs a command without arguments', async () => {
   const h = harness(withCommands());
   await h.run('init()');

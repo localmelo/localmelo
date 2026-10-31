@@ -1095,7 +1095,9 @@ def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
     )
     assert off.status_code == 200 and off.json()["browser"] is False
     assert config.load().browser.driver == "off"
-    word = client.put("/api/settings", json=_put_body(off.json()["revision"], browser="on"))
+    word = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], browser="on")
+    )
     assert word.status_code == 400, "only true or false"
 
 
