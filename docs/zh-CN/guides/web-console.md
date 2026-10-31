@@ -18,10 +18,10 @@
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
-1. 使用 **Settings**（开发者模式下叫 **Connection settings**）选择模型服务器、它的地址、模型和工作区（开发者模式下叫 **Chat backend** 和 **Chat API URL**）。更改会在你的下一条消息生效。尚未保存任何设置时，对话框停在空白的 **Choose a server…** 上，在你选择之前，其中的字段、**Discover models**、**Test connection** 和 **Save** 都不可用。本地模型发现功能会列出模型，但不会启动模型。云端后端会指定 API 密钥的环境变量，界面只显示该变量是否已设置，绝不显示密钥。保存时使用加载的设置修订版本；如果文件已更改，请重新加载对话框后重试。**Test connection** 会探测尚未保存的模型设置；**Appearance**（开发者模式下叫 **Theme**）会立即应用 System、Light 或 Dark 主题，并在当前浏览器中记住选择。默认模式把 Model（含它的测试）、Appearance 和 **Developer mode** 开关叠在同一个对话框里；开发者模式保留 Model、Test、Theme 和 Developer 标签页，并显示设置文件及其修订版本。你也可以使用 `melo setup`。
+1. 打开 **Settings** 连接模型服务器。左边列出各个分区，右边显示选中的那个；在手机上先显示列表，点开一个分区会以面板形式滑入（**‹ Settings** 返回）。尚未保存任何设置时，它停在 **Model server**，表单展开，停在空白的 **Choose a server…** 上。你也可以使用 `melo setup`。[更多关于 Settings](#settings)。
 2. 输入并发送消息。页面打开在始终存在的[主对话](#the-main-chat-and-side-chats)上；在新的旁支对话里，第一条消息会创建对话：页面以该对话的第一轮回答你的草稿，绝不会自行创建对话。回答以 Markdown 渲染，包含代码块。
 3. 一轮的呈现方式与终端类似：你的消息、包含已运行工具卡片的工作组、推理、通知和反思、运行时的实时行，以及带有 `Copy response` 的最终回答。工具输出中的转义序列会被清除，其图片（PNG、JPEG、GIF、WebP）会在页面内显示，这一轮产生的图片会显示在回答下面（见[回答里的图片](#pictures-in-the-answer)）。没有工具调用的一轮，其时间只在回答下方的一行里显示一次；它的推理（如果有）在 `Thought` 一行下展开。对话会告诉模型它是 localmelo 的 melo、它运行在哪个模型和服务器上，以及它记得什么，所以问“你是谁？”或“你记得什么？”时会得到直接的回答（见[melo 如何介绍自己](terminal.md#what-melo-says-about-itself)）。
-4. 输入框上方有一行状态行：与终端开发者模式状态栏相同的段（终端的默认模式用文字表述这些数字），`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。默认模式只显示上下文段。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。
+4. 输入框上方有一行状态行：与终端开发者模式状态栏相同的段（终端的默认模式用文字表述这些数字），`cache 67% idle 3m`、`ctx 1.0k/8.0k`、`step 3`、`tasks 1 running 2 queued`，读取自 `GET /api/sessions/{id}/status`，因此两边一致。默认模式只显示上下文段；有任务在等你批准时，还会显示 `1 task waits for you` 这样的一句话。模型服务器没有报告缓存 token 时，缓存占比显示 `cache --`，绝不会显示 0%；本地服务器显示空闲时间，而不是倒计时。有事件到达时最多每秒读取一次，页面的轮询时也会读取；屏幕较窄时从右侧开始省略段。打开的 worker 运行显示同样的一行。
 5. 开发者模式下，页眉中的 **N running** 标签统计当前正在运行的内容：本控制台中有轮次在进行的对话、任务、直接运行和终端对话（运行或终端对话只在其进程持有有效租约时才计入）。数量为 0 时隐藏，屏幕较窄时仍然保留。点按它会显示一个简短的列表，每一行写明类别和标题，并打开该对话、该任务的卡片或 Workers 详情；按 Esc 或点按别处即可关闭。数字来自 `GET /api/health` 的 `status`，随页面每 4 秒的轮询读取；列表最多显示 20 行，并说明还有多少在运行。
 
 侧边栏把主对话固定在最上面，把它的旁支对话列在下面，按从新到旧排列，每天一条分隔（`Today`、`Yesterday`、`Oct 28`），支持搜索、切换和关闭旁支对话。每个标题下写出对话的文件夹（开发者模式把模型放在前面），标题前的强调色圆点表示这个对话在等你批准。上、下方向键在列表中移动（主对话在最前），Home 和 End 跳到两端。草稿在当前浏览器标签页中按对话保留。打开的对话通过事件流（SSE）接收轮次；页面重新加载后会恢复对话，读取最近十轮，并从那里重放已保存的事件，因此不会丢失内容或重复显示。**Show earlier turns** 加载更早的轮次，不会移动当前视图。浏览器放弃连接的事件流会在 1、2、4、8、16 秒后以及之后每 30 秒，从页面自己的游标处重新打开，但只会在重新读取对话之后进行：如果对话已不存在，页面会进入新对话，而不是无限重试。标签页可见时，对话列表每 4 秒重新读取一次，以获取其他浏览器的更改。**Reconnect now** 会先检查对话，再重新打开事件流。独立的横幅分别显示存储、模型和连接问题，不会替换其他通知。
@@ -171,18 +171,31 @@
 
 在开发者模式下，**Details** 在[面板](#the-panel-beside-a-chat)里代替标签页打开会话详情，显示工具和会话授权、工作记忆及长期记忆状态，以及已完成的运行；当页面提供轮次游标时，还可分页查看运行记录。你可以在那里撤销已授权的工具；工具视图可能会打开一个暂停的会话。**Close details** 或 Esc 回到标签页。在窄屏上，面板会随之弹出。
 
+<a id="settings"></a>
+
+## 设置
+
+侧边栏的 **Settings**（或 macOS app 菜单里的 **Settings…**）按主题分成几个分区。每项更改立即保存，并在底部显示 `Saved: …` 和 **Undo**；保存时带上读取时的修订版本，所以如果文件在此期间被别处改过，会提示你重新加载。
+
+- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。
+- **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
+- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框），以及最近用过的文件夹，每个都有 **Make default**。
+- **Scheduled**：check-in 开关及下一次的时间，以及打开定时事项的 **Open Scheduled**。
+- **Appearance**：主题（System、Light、Dark，记在当前浏览器里）、macOS app 中的 **Melo on the desktop**（与 app 菜单是同一个选择），以及 **Developer mode**。
+- **Developer**（仅开发者模式）：`melo -h all` 列出的每个设置，按分区分组，显示当前值、小字的 `config.toml` 键、设置它的旧选项，对比实验还标明决定它的 issue；最后是只作用于一次运行的选项。这里只读，用 `melo config set KEY VALUE` 修改。该分区也显示设置文件及其修订版本。
+
 <a id="developer-mode"></a>
 
 ## 开发者模式
 
-**Connection settings → Developer**（默认模式下是 **Settings**，开关在最后）里有一个开关，“Developer mode: show advanced settings and debug views”。它保存为 `config.toml` 中的 `[ui] mode`，也就是 `melo --help` 读取的设置，并与其他设置一样做修订版本检查；手工写进文件的模式会在页面下次读取时生效。它只改变显示的内容，不改变任何运行行为。开启后：
+**Settings → Appearance → Developer mode** 保存为 `config.toml` 中的 `[ui] mode`，也就是 `melo --help` 读取的设置，并与其他设置一样做修订版本检查；手工写进文件的模式会在页面下次读取时生效。它只改变显示的内容，不改变任何运行行为。开启后：
 
-- Developer 标签页以只读方式列出高级和实验性的 `melo` 选项，标明各自的层级；实验性选项还标明决定它的 issue（用命令行参数或在 `config.toml` 中设置）；
+- Settings 列出 **Developer** 分区（每个设置及其键和值）；
 - **Details** 增加 **Events** 标签页，显示最近一轮保存的原始事件；**Memory** 标签页增加智能体状态和长期记忆后端；
 - **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字；
 - 页眉显示对话的级别标签、**Details**、GPU 锁状态行、**N running** 标签，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers** 和 **Tasks**；
 - 状态行增加缓存、步骤、阶段和队列段，Tasks 显示每个任务的优先级；
-- 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，设置保留它们的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
+- 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，连接表单保留它的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
 
 关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 和 Tasks 视图，以及设置所保存的内容，在两种模式下的行为相同。
 

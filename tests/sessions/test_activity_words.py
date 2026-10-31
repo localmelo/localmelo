@@ -10,9 +10,30 @@ import pytest
 from localmelo.support.sessions.display import (
     ActivityText,
     activity_text,
+    drop_leading_ack,
     event_activity,
     request_words,
 )
+
+
+@pytest.mark.parametrize(
+    "rows, kept",
+    [
+        # A row that only says it is done goes when anything follows it.
+        (["Done.", "Fixed the parser."], ["Fixed the parser."]),
+        (["Done. Fixed the parser. Tests pass."], ["Fixed the parser. Tests pass."]),
+        (["已完成。", "修改了规则。"], ["修改了规则。"]),
+        (["- Done.", "- Tests: 12 passed"], ["- Tests: 12 passed"]),
+        # Nothing but the ack is the whole answer, and a word inside a
+        # sentence is no ack.
+        (["Done."], None),
+        (["Done by Friday for the report."], ["Done by Friday for the report."]),
+    ],
+)
+def test_a_leading_done_gives_way_to_what_followed_it(
+    rows: list[str], kept: Any
+) -> None:
+    assert drop_leading_ack(rows) == kept
 
 
 @pytest.mark.parametrize(

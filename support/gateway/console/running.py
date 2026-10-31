@@ -35,6 +35,9 @@ if TYPE_CHECKING:
     from . import Console
 
 COUNTED = ("running", "queued", "held")
+# A held task waits for the person when it holds on an approval or an answer;
+# any other hold (a free model slot, a higher-priority task) is the scheduler's.
+WAITS_FOR_YOU = ("approval", "input")
 # Rows of the header's list; the counts above it still say how many run.
 MAX_ITEMS = 20
 TITLE_CHARS = 200
@@ -66,7 +69,11 @@ def task_counts(live: list[Any] | None) -> TaskCounts | None:
         return None
     counts = {name: sum(record.state == name for record in live) for name in COUNTED}
     top = min((record.level_eff for record in live), default=None)
-    return TaskCounts(counts["running"], counts["queued"], counts["held"], top)
+    waiting = sum(
+        record.state == "held" and record.wait_reason in WAITS_FOR_YOU
+        for record in live
+    )
+    return TaskCounts(counts["running"], counts["queued"], counts["held"], top, waiting)
 
 
 async def _chat_items(console: Console) -> list[dict[str, str]]:

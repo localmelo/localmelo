@@ -9,6 +9,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A task's page in default mode no longer shows an empty "Recovery card"
+  heading (developer mode still does). The status row in default mode leaves
+  out the queue's counts, a held task's too, and says "1 task waits for you"
+  (or "N tasks wait for you") while a task waits for your approval; the status
+  route's `tasks` object gains `waiting` for that count. An Activity row for
+  an answer that opens with "Done." shows what the answer says next, as the
+  main chat's card already did ([#346]).
+- Settings is organized by subject: Model server, Memory, Chats and folders,
+  Scheduled and Appearance in a list on the left, the chosen one on the right
+  (a sheet on a phone), and Developer in developer mode. Each section has a
+  title, a line of help and labelled controls. The Model server section shows
+  the chat and embedding models' state (`Connected · <model> · checked 12 s
+  ago`) and the server address, with **Test connection** and **Change…**.
+  Every change saves on its own, says `Saved` and offers **Undo**; only the
+  connection form keeps a button (**Save connection**). Memory chooses how Melo
+  finds notes, Chats and folders the default folder (or a recent one), and in
+  the macOS app Appearance holds **Melo on the desktop**, the same choice as
+  its menu. Developer lists every setting `melo -h all` lists, by section,
+  with its value and its `config.toml` key. `GET /api/settings` adds
+  `memory_retriever`, `developer_settings` and `run_options`, `PUT
+  /api/settings` takes `memory_retriever`, and a failed `POST
+  /api/settings/test` names the model that did not answer (`failed`) ([#345]).
+
 - The main chat always works in the default folder (`[gateway] workspace`,
   else `~/localmelo-workspace`): a changed default applies at its next turn,
   where before it kept the folder of its first turn. A task works in the
@@ -142,6 +165,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   as content words of the question. The `recall` object of a turn also reports
   `block_chars`, the length of the block added to your message (0 when none)
   ([#NN]).
+- A task you continue with a message starts its next run. A done, stopped or
+  failed task (a run that used up its steps, say) that a message or a "Send"
+  card continued ended again within a moment with no turn, because its
+  worker looked for tool-capture evidence before the new run was recorded as
+  running. The run now starts as running first, then sets up its tools. A
+  run that still cannot start says why on its card in the main chat and in the
+  panel's activity list ("Could not continue: …") instead of repeating the
+  earlier run's reason ([#344]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
@@ -2808,3 +2839,6 @@ earlier milestones.
 [#335]: https://github.com/localmelo/localmelo/pull/335
 [#342]: https://github.com/localmelo/localmelo/pull/342
 [#343]: https://github.com/localmelo/localmelo/pull/343
+[#344]: https://github.com/localmelo/localmelo/pull/344
+[#345]: https://github.com/localmelo/localmelo/pull/345
+[#346]: https://github.com/localmelo/localmelo/pull/346

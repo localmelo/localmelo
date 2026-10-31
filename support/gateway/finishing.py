@@ -4,6 +4,9 @@ A worker that runs out of steps may end with "Done except for the final
 commit: git add … && git commit …". Its card then says so, with the
 command, instead of reading as done: :func:`not_committed` finds the commit
 command in the answer and checks that the folder still has changes.
+
+A task that was continued but could not start its next run says so in plain
+words: :func:`could_not_continue` makes the line its card shows.
 """
 
 from __future__ import annotations
@@ -26,6 +29,18 @@ _LEFT: Final = re.compile(
     re.I,
 )
 COMMAND_CHARS: Final = 300
+# How a card starts when a continued run could not start, and how much of the
+# error follows.
+NOT_CONTINUED: Final = "Could not continue"
+_REASON_CHARS: Final = 160
+
+
+def could_not_continue(error: BaseException) -> str:
+    """``Could not continue: <why>`` for a run that failed before its turn began."""
+    why = " ".join(str(error).split()) or type(error).__name__
+    if len(why) > _REASON_CHARS:
+        why = why[: _REASON_CHARS - 1].rsplit(" ", 1)[0] + "…"
+    return f"{NOT_CONTINUED}: {why}"
 
 
 def commit_command(answer: str) -> str:

@@ -169,10 +169,18 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
     "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
   },
   "mode": "default",
+  "across_chats": true,
+  "memory_retriever": "auto",
   "advanced_options": [
     {"option": "--host", "tier": "advanced", "issue": ""},
     {"option": "--retriever", "tier": "experimental", "issue": "#4"}
   ],
+  "developer_settings": [
+    {"section": "agent", "keys": [
+      {"key": "agent.reasoning", "value": "legacy", "default": "legacy", "flag": "--reasoning", "issue": "#183", "file": true}
+    ]}
+  ],
+  "run_options": [{"option": "--mcp PATH", "text": "MCP servers to use (mcpServers JSON file)"}],
   "file_label": "~/.cache/localmelo/config.toml",
   "revision": "5d41402abc4b2a76"
 }
@@ -182,7 +190,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `workspace` 是 `[gateway] workspace`；未设置时为 `~/localmelo-workspace`。
 - `revision` 是文件 SHA-256 的前 16 个十六进制字符；文件尚不存在时为 `""`。
 - `across_chats` 是 `[memory] across_chats`，即[跨对话记忆](#memory-across-chats)的开关。
-- `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）；控制台在开发者模式下以只读方式显示它们。
+- `mode` 是 `[ui] mode`（`default` 或 `developer`；保存的其他值都按 `default` 读取）。`advanced_options` 列出层级表中 `melo` 的高级和实验性选项（实验性选项的 `issue` 是决定它的 issue，其他为 `""`）。
+- `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
+- `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
 
@@ -197,6 +207,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 每个字符串都必须是不含控制字符的单行，`workspace` 为必填项，必须是绝对路径或以 `~/` 开头，并且不能解析为 `/` 或主目录（包括经由符号链接）；否则返回 400 `invalid_request`。`sections` 中不接受 `api_key_set`。
 - `mode` 可选：`default` 或 `developer` 会设置 `[ui] mode`（其他值返回 400 `invalid_request`）；省略时保留已保存的模式。模式只改变控制台和 `melo --help` 显示的内容。
 - `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
+- `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
+- 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
 
@@ -216,7 +228,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"ok": true}
 ```
 
-- 字段或校验错误会先返回 400。探测失败或超时会返回 HTTP 200，并附 `{"ok": false, "error": "..."}`。
+- 字段或校验错误会先返回 400。探测失败会返回 HTTP 200，并附 `{"ok": false, "error": "...", "failed": "chat"}`（嵌入探测失败时 `failed` 为 `embedding`）；超时没有 `failed`。
 
 ## GET /api/settings/key-status
 
@@ -513,13 +525,13 @@ worker 运行或终端对话从 CLI 的文件读取。
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
-  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1}
+  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1, "waiting": 0}
 }
 ```
 
-- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
+- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务；有被搁置的任务在等你批准时，最后还有一句 `1 task waits for you`（`N tasks wait for you`）。没有数据的段会被省略。
 - 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
-- 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，以及其中最高的优先级（`top_level`，没有任务时为 `null`）。
+- 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，其中最高的优先级（`top_level`，没有任务时为 `null`），以及 `waiting`（held 任务中在等你批准或回答、而不是在等调度器的任务数）。
 - 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。
 
 ## GET /api/sessions/{id}/blobs/{sha256}

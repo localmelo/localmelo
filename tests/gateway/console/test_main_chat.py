@@ -403,6 +403,37 @@ async def test_a_card_title_is_short_and_a_failed_card_gives_the_reason(
         )
 
 
+async def test_a_continued_run_that_could_not_start_says_so_on_its_card(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        store = console.store
+        record, _ = await console.workers.create(
+            {"objective": "Fix the report", "request_key": "k"}
+        )
+        task_id = record["task_id"]
+        # Its first run ran out of steps; the continued run never began.
+        started = await store.begin_turn(task_id, "Fix the report", holder=HOLDER)
+        await store.finish_turn(
+            task_id,
+            started.turn,
+            holder=HOLDER,
+            status="budget_exhausted",
+            cause="run",
+            result=run_result(),
+            answer="",
+        )
+        await console.workers.tasks.change(
+            task_id,
+            state="failed",
+            actor="scheduler",
+            failure_reason="Could not continue: the model server is not answering",
+        )
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert card["state"] == "failed"
+        assert card["line"] == "Could not continue: the model server is not answering"
+
+
 async def test_tasks_belong_to_the_main_chat_and_come_back_as_cards(
     tmp_path: Path,
 ) -> None:

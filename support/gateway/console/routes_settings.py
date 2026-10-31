@@ -8,6 +8,10 @@ reachability comes from the cached probe without waiting for the network.
 ``config.toml`` without ever returning, accepting or logging an API key value.
 ``GET /api/setup/detect`` looks for a model server on this machine, as the
 terminal's first run does, for the welcome's setup card.
+
+The console's Settings saves one change at a time: each ``PUT /api/settings``
+carries the revision it read, so a change made elsewhere meanwhile is a 409,
+and its Undo is the same request with the earlier value.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.events import EVENT_SCHEMA_VERSION
 from localmelo.melo.schema import SESSION_TEXT_CHARS
 from localmelo.support import config, onboard, onboard_probe
+from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.registry import get_backend
@@ -37,11 +42,15 @@ from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
 from localmelo.support.gateway.console.running import running_status
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
+from localmelo.support.onboard_probe import ProbeError
 from localmelo.support.option_tiers import (
     ADVANCED,
     EVERYDAY_OLD,
     EXPERIMENTAL_ISSUES,
+    EXPERIMENTAL_KEYS,
+    OPTION_ROWS,
     OPTION_TIERS,
+    SHORT_ROWS,
 )
 from localmelo.support.sessions import display
 from localmelo.support.sessions.runner import DEFAULT_RESUME_MODE
@@ -98,6 +107,8 @@ class SettingsPutBody(_SettingsBaseBody):
     mode: StrictStr | None = None
     # ``[memory] across_chats``; absent leaves it as it is.
     across_chats: StrictBool | None = None
+    # ``[memory] retriever``, how a chat finds its notes; absent leaves it as it is.
+    memory_retriever: StrictStr | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -257,6 +268,45 @@ def _advanced_options() -> list[dict[str, str]]:
     ]
 
 
+def _shown(value: Any) -> str:
+    """A setting's value as ``melo -h all`` prints it: text bare, the rest as JSON."""
+    text = value if isinstance(value, str) and value else setting_keys.show(value)
+    return _redact(text)
+
+
+def _developer_settings(cfg: config.Config) -> list[dict[str, Any]]:
+    """Every ``config.toml`` key ``melo -h all`` lists, by section, with its value.
+
+    A key for one run only (``file`` false) shows its default: the file cannot
+    hold it. ``flag`` is the old option that sets it, ``issue`` the issue that
+    decides a comparison.
+    """
+    values = setting_keys.flat(cfg)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for key in setting_keys.catalog().values():
+        default = _shown(key.default)
+        groups.setdefault(key.section, []).append(
+            {
+                "key": key.name,
+                "value": _shown(values[key.name]) if key.file else default,
+                "default": default,
+                "flag": key.flag,
+                "issue": EXPERIMENTAL_ISSUES.get(key.flag)
+                or EXPERIMENTAL_KEYS.get(key.name, ""),
+                "file": key.file,
+            }
+        )
+    return [{"section": name, "keys": keys} for name, keys in groups.items()]
+
+
+def _run_options() -> list[dict[str, str]]:
+    """The options of ``melo -h all`` past the everyday ones: they set one run."""
+    return [
+        {"option": f"{names} {meta}".strip(), "text": text}
+        for names, meta, text in OPTION_ROWS[SHORT_ROWS:]
+    ]
+
+
 def settings_json() -> dict[str, Any]:
     """The whole ``GET /api/settings`` body."""
     revision = _file_revision()
@@ -308,7 +358,10 @@ def settings_json() -> dict[str, Any]:
         },
         "mode": _ui_mode(cfg),
         "across_chats": cfg.memory.across_chats,
+        "memory_retriever": cfg.memory.retriever,
         "advanced_options": _advanced_options(),
+        "developer_settings": _developer_settings(cfg),
+        "run_options": _run_options(),
         "file_label": display.home_label(config.config_path()),
         "revision": revision,
     }
@@ -377,6 +430,13 @@ def _build_candidate(
         raise ApiError(
             400, "invalid_request", f"mode: Must be one of {config.UI_MODES}."
         )
+    retriever = getattr(body, "memory_retriever", None)
+    if retriever is not None and retriever not in config.MEMORY_RETRIEVERS:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"memory_retriever: Must be one of {config.MEMORY_RETRIEVERS}.",
+        )
 
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
@@ -394,6 +454,8 @@ def _build_candidate(
     across = getattr(body, "across_chats", None)
     if across is not None:
         candidate.memory.across_chats = across
+    if retriever is not None:
+        candidate.memory.retriever = retriever
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -457,6 +519,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("mode")
     if before.memory.across_chats != after.memory.across_chats:
         changed.append("across_chats")
+    if before.memory.retriever != after.memory.retriever:
+        changed.append("memory_retriever")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
@@ -546,7 +610,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise
         except Exception as exc:
             err = _redact(redact_userinfo(str(exc) or type(exc).__name__))
-            return JSONResponse(content={"ok": False, "error": err})
+            # Which model did not answer: the embedding probe's errors say so.
+            part = (
+                "embedding"
+                if isinstance(exc, ProbeError)
+                and str(exc).startswith("embedding probe")
+                else "chat"
+            )
+            return JSONResponse(content={"ok": False, "error": err, "failed": part})
         return JSONResponse(content={"ok": True})
 
     @app.get("/api/models")

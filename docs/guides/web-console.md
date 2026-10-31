@@ -59,19 +59,11 @@ developer mode adds it after the model). Three one-line starters under the compo
 the files in this folder**, **Plan a small project with me**, **Explain a piece of code**) fill it
 for you to send or change, and step aside once there is text.
 
-1. Use **Settings** (**Connection settings** in developer mode) to choose the model
-   server, its address, the model and the workspace (**Chat backend** and **Chat API URL**
-   in developer mode). Changes apply to your next message. With nothing saved the dialog opens on a blank **Choose a server…**, and its
-   fields, **Discover models**, **Test connection** and **Save** wait until you
-   choose one. Local model discovery lists models without starting one. A cloud backend
-   names an API-key environment variable and shows only whether it is set,
-   never the key. Saving uses the loaded settings revision; if the file changed,
-   reload the dialog and retry. **Test connection** probes the unsaved model
-   settings; **Appearance** (**Theme** in developer mode) applies System, Light or Dark
-   immediately and remembers it in this browser. Default mode stacks Model, with its test,
-   Appearance and the **Developer mode** toggle in one dialog; developer mode keeps the
-   Model, Test, Theme and Developer tabs and shows the settings file and its revision.
-   You can also use `melo setup`.
+1. Open **Settings** to connect a model server. It lists its sections on the left and shows
+   the chosen one beside them; on a phone the list comes first and a section opens as a sheet
+   (**‹ Settings** goes back). With nothing saved it opens on **Model server** with the form
+   open on a blank **Choose a server…**. You can also use `melo setup`.
+   [More on Settings](#settings).
 2. Type a message and send. The page opens on the [main chat](#the-main-chat-and-side-chats),
    which is always there; in a new side chat the first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
@@ -89,7 +81,7 @@ for you to send or change, and step aside once there is text.
 4. A status row sits above the composer: the same segments as the terminal's
    developer-mode status bar (its default mode says them in words), `cache 67% idle 3m`, `ctx 1.0k/8.0k`, `step 3`, `tasks 1 running
    2 queued`, read from `GET /api/sessions/{id}/status` so both agree. Default mode draws the context
-   segment only. The cache
+   segment, and a sentence such as `1 task waits for you` while a task waits for your approval. The cache
    share reads `cache --` when the model server reports no cached tokens, never
    0%; a local server shows its idle time, not a countdown. The row is read at
    most once a second while events arrive and on the page's polls; on a narrow
@@ -436,17 +428,39 @@ a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.
 
+## Settings
+
+**Settings** in the sidebar (or **Settings…** in the macOS app's menu) has one section per
+subject. Each change saves at once and says so at the foot (`Saved: …`) with **Undo**; the
+save carries the revision it read, so a change made elsewhere meanwhile asks you to reload.
+
+- **Model server**: the chat model and the embedding model, each with its state
+  (`Connected · <model> · checked 12 s ago`, `Not reachable`, `Off`), the server's
+  address, **Test connection** (it never shows a key) and **Change…**, the form that picks
+  the server, its address and the model (**Discover models** lists them). The form is the
+  one change saved with a button, **Save connection**; **Cancel** puts the saved one back.
+- **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
+  **By words only**; developer mode adds the other two ways, with the key
+  `memory.retriever`), and **Open Memory** for the notes themselves.
+- **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
+  folder panel, or a path field in a browser) and the recent folders, each with **Make default**.
+- **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
+- **Appearance**: the theme (System, Light, Dark, kept in this browser), **Melo on the
+  desktop** in the macOS app (the same choice as its menu), and **Developer mode**.
+- **Developer** (developer mode only): every setting `melo -h all` lists, grouped by section,
+  with its value, its `config.toml` key in small type, the old option that sets it and, for a
+  comparison, the issue that decides it; then the options that set one run. They are
+  read-only here: `melo config set KEY VALUE` changes one. The section also names the
+  settings file and its revision.
+
 ## Developer mode
 
-**Connection settings → Developer** (in default mode **Settings**, where the toggle is
-last) has one toggle, "Developer mode: show advanced settings and debug views". It is saved as `[ui] mode` in
-`config.toml`, the setting `melo --help` reads, with the same revision check as
-the other settings; a mode written in the file by hand wins the next time the
-page reads it. It changes what is shown, never what runs. When it is on:
+**Settings → Appearance → Developer mode** is saved as `[ui] mode` in `config.toml`, the
+setting `melo --help` reads, with the same revision check as the other settings; a mode
+written in the file by hand wins the next time the page reads it. It changes what is shown,
+never what runs. When it is on:
 
-- the Developer tab lists the advanced and experimental `melo` options
-  read-only, each with its tier and, for an experimental one, the issue that
-  decides it (set them with the flag or in `config.toml`);
+- Settings lists the **Developer** section (every setting with its key and value);
 - **Details** gains an **Events** tab with the stored raw events of the latest
   turn, and its **Memory** tab adds the agent state and the long-term backend;
 - the **Runs** tab adds each run's recorded counters: requests, tool calls,
@@ -456,8 +470,8 @@ page reads it. It changes what is shown, never what runs. When it is on:
   **Workers** and **Tasks**;
 - the status row adds the cache, step, phase and queue segments, and Tasks names each task's
   priority;
-- the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the settings
-  keep their technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
+- the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the
+  connection form keeps its technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
 
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:

@@ -3821,11 +3821,9 @@ test('default mode leaves out the level, Details, the GPU line and the idle sect
   assert.deepEqual(hiddenOf(plain, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => true));
   assert.match(plain.text('machine-state'), /GPU lock: bench/, 'The element and its text stay in the page');
   assert.equal(plain.element('connection-btn').hidden, false);
-  assert.equal(plain.text('settings-label'), 'Settings');
   const developer = harness(baseRoutes(listed));
   await developer.run('init()');
   assert.deepEqual(hiddenOf(developer, ONLY_DEVELOPER), ONLY_DEVELOPER.map(() => false), 'Developer mode shows all of it');
-  assert.equal(developer.text('settings-label'), 'Connection settings');
   assert.equal(developer.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'A developer never asks whether Workers has anything');
 });
 
@@ -3915,16 +3913,20 @@ test('the header chip says which model answers, or that none can, in default mod
 });
 
 test('default mode draws the plain status row and developer mode the whole one', async () => {
-  const segments = ['cache 50% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify', 'tasks 1 running 0 queued'];
-  const row = async (routes) => {
-    const h = harness(routes({'GET /sessions/a/status': {segments}}));
+  const segments = ['cache 50% idle 3m', 'ctx 1.0k/8.0k', 'step 3 attempt 2 phase Verify', 'tasks 1 running 0 queued 1 held'];
+  const row = async (routes, shown = segments) => {
+    const h = harness(routes({'GET /sessions/a/status': {segments: shown}}));
     await h.run('init()');
     await tick();
     return h.element('status-row').children.map((node) => node.textContent);
   };
+  // A task held for a free model slot shows nothing in default mode.
   assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k']);
   assert.deepEqual(await row(baseRoutes), segments);
-  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['tasks 0 running 0 queued 1 held'], 'A task held for the user is never hidden');
+  // A task held on an approval comes with a sentence of its own, drawn in both modes.
+  const waiting = [...segments, '1 task waits for you'];
+  assert.deepEqual(await row(defaultMode, waiting), ['ctx 1.0k/8.0k', '1 task waits for you']);
+  assert.deepEqual(await row(baseRoutes, waiting), waiting);
 });
 
 test('the task list and card name the priority in developer mode only', async () => {
