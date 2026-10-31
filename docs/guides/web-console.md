@@ -439,6 +439,10 @@ The console speaks English or Simplified Chinese (简体中文).
 - To choose one, open **Settings → Appearance → Language**: **Automatic**, **English** or **简体中文**. The page reloads in it. In a terminal, `melo config set console.language zh-Hans` (or `en`, or `auto`) does the same; reload the page after it.
 - Every screen follows: the main chat and its cards, the panel's tabs, Tasks, Workers, Settings and the sign-in page.
 - The gateway writes its own words for the page in the same language: error messages, the panel's rows, the main chat's cards and the lines it adds after your messages (`Started: …`, `Saved: …`). The terminal and other API clients stay English.
+- Times and dates are written in the page's language, not your computer's: `2:06 AM` and `Oct 31` in English, `上午 2:06`, `10月31日` and `星期五` in Chinese. In English the clock follows your computer, so a 24-hour computer keeps its 24-hour clock.
+- A failed run's details and the line **Copy details** copies read in the language; the status, the cause, the error text and the run id are copied as they are. The status row's words (the context, and in developer mode the cache, step and queue) read in it too, while the terminal prints the same figures in English.
+- In Chinese, Auto mode's card for a blocked step says what kind of step it was in Chinese; the step itself stays on the card as written, and so does anything your model wrote.
+- In the macOS app the menus, the pill and Melo's menu change the moment the page reloads in the new language; nothing needs a restart.
 - Commands, paths, model names and the levels P0-P5 are never translated; the terms follow the [Chinese interface glossary](../zh-CN/STYLE.md#interface-glossary). Melo answers in the language you write in, whatever the setting.
 
 ## Settings

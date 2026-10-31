@@ -129,7 +129,9 @@ output or log the header; same-user processes can still read the token file.
   `config_errors` is `Config.validate()` on the settings in use.
 - `model.backend_label` is the backend registry's label; for the `vllm` backend it
   is `oMLX` when the config file says `omlx` or a model listing of the server
-  did, else `OpenAI-compatible server`. `model.embedding`
+  did, else `OpenAI-compatible server` (in the language of the request when it
+  sends `X-LocalMelo-Language: zh-Hans`; a client that sends none reads
+  English). `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the
@@ -1053,6 +1055,12 @@ the CLI's file.
   "session_id": "3f9c2a7b1d4e",
   "local": true,
   "segments": ["cache 67% idle 3m", "ctx 1.0k/8.0k", "step 3", "tasks 1 running 2 queued"],
+  "parts": [
+    {"key": "status.cacheIdle", "params": {"share": "67%", "idle": "3m"}},
+    {"key": "status.ctx", "params": {"used": "1.0k", "limit": "8.0k"}},
+    {"key": "status.step", "params": {"step": 3}},
+    {"key": "status.tasks", "params": {"running": 1, "queued": 2, "held": 0}}
+  ],
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
@@ -1064,6 +1072,10 @@ the CLI's file.
   right: cache, context, step, tasks, then a sentence such as `1 task waits for
   you` (`N tasks wait for you`) while a held task waits for your approval. A
   segment with no data is left out.
+- `parts` is the same segments as words: a key of the console's catalogs
+  (`status.*`) and its parameters, one for each segment and in the same order.
+  `segments` is those words in English, as the terminal prints them; the web
+  console writes them in its own language.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is

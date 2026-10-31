@@ -46,6 +46,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Chinese, finished. Times and dates follow the page's language, not the
+  computer's: `上午 2:06`, `10月31日` and `星期五` in Chinese, `2:06 AM` and
+  `Oct 31` in English (an English computer on 24 hours keeps its clock), on
+  cards, the panel, task pages, Scheduled, Settings and the details of a
+  run. The panel's tab and every other place that said "Worker" say 助手;
+  the model server's kind and the Settings choices read in Chinese; the
+  status row (the context, and in developer mode the cache, step and queue),
+  a failed run's details and the line **Copy details** copies, chore errors
+  and Auto mode's reasons for a blocked step read in the page's language.
+  The status, the error text and the run id are copied as they are, and the
+  terminal and API clients keep English. In the macOS app the menus, the
+  pill and Melo's menu change language at once when Settings changes it,
+  without a restart. `GET /api/sessions/{id}/status` also returns `parts`
+  (the segments as catalog keys and parameters); `segments` is unchanged
+  ([#NN]).
+
 - A run ends with a usable answer more often. The patient reflection gate
   (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
   defaults: a next step that is not new still continues once per run, and a
