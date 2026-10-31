@@ -1492,6 +1492,28 @@ class TaskStore:
             raise TaskNotFoundError(f"No task has id {task_id}")
         return dict(json.loads(row[0]))
 
+    async def keep_stash_floor(self, task_id: str, floor: int) -> None:
+        """Hold the task's later runs to *floor* stashes until it ends ready.
+
+        Kept beside the owed baseline (the lowest floor stays); nothing is kept
+        when no baseline is.
+        """
+        async with self._store.component_transaction("task_work_base") as conn:
+            row = await _first(
+                conn, "SELECT work_base FROM tasks WHERE task_id = ?", (task_id,)
+            )
+            if row is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            if not row[0]:
+                return
+            kept = json.loads(row[0])
+            known = kept.get("stash_floor")
+            kept["stash_floor"] = floor if type(known) is not int else min(known, floor)
+            await conn.execute(
+                "UPDATE tasks SET work_base = ? WHERE task_id = ?",
+                (json.dumps(kept), task_id),
+            )
+
     async def request_pending_pause(
         self,
         task_id: str,

@@ -18,7 +18,8 @@ its reason:
 - ``commit_missing``: a commit was asked and changes since the baseline are not
   committed;
 - ``unchecked``: git could not be read, the folder lists too many changes, or
-  the run grew ``git stash list``.
+  ``git stash list`` grew in this run (or in an earlier one, while it stays
+  above the count that run started with).
 
 A test is one shape only: a plain test-runner command (no shell operators) or a
 ``python_exec`` that is imports plus one ``sys.exit(subprocess.run([...]).
@@ -582,30 +583,40 @@ class _Call:
 
 @dataclass(frozen=True)
 class Baseline:
-    """A task folder's git state: changed files under it, HEAD and its stash count."""
+    """A task folder's git state: changed files under it, HEAD and its stash count.
+
+    *floor*: the stash count an earlier run grew past; later runs stay unchecked
+    while the stash is above it (kept until the task ends ready).
+    """
 
     stamps: Mapping[str, FileStamp] | None
     head: str = ""
     stash: int = 0
     git: bool = False
     error: bool = False
+    floor: int | None = None
 
     def to_json(self) -> dict[str, Any]:
-        """What is kept until the task ends ready: code paths and HEAD, no stash."""
-        code = {
-            k: list(v) for k, v in (self.stamps or {}).items() if not _DOC.search(k)
-        }
-        return {"git": self.git, "head": self.head, "stamps": code}
+        """What is kept until the task ends ready: changed files and HEAD, no stash."""
+        stamps = {k: list(v) for k, v in (self.stamps or {}).items()}
+        return {"git": self.git, "head": self.head, "stamps": stamps}
 
     def since(self, kept: Mapping[str, Any]) -> Baseline:
-        """This run's baseline: *kept* code and HEAD, and this run's docs and stash."""
+        """This run's baseline: *kept* files, HEAD and floor, and this run's stash."""
         git = bool(kept.get("git"))
         files = {
             k: (int(v[0]), int(v[1])) for k, v in (kept.get("stamps") or {}).items()
         }
-        docs = {k: v for k, v in (self.stamps or {}).items() if _DOC.search(k)}
-        stamps = {**files, **docs} if git else None
-        return Baseline(stamps, str(kept.get("head") or ""), self.stash, git)
+        floor = kept.get("stash_floor")
+        floor = floor if type(floor) is int else None
+        return Baseline(
+            files if git else None,
+            str(kept.get("head") or ""),
+            self.stash,
+            git,
+            False,
+            floor,
+        )
 
 
 _ERROR: Final = Baseline(None, git=True, error=True)
@@ -724,7 +735,24 @@ async def _changes(
             return True, [], own
         committed = [name for name in names[1].split("\0") if name]
     code = sorted(p for p in {*own, *committed} if not _DOC.search(p))
-    return now.stash > base.stash, code, own
+    stashed = now.stash > (
+        base.stash if base.floor is None else min(base.floor, base.stash)
+    )
+    return stashed, code, own
+
+
+async def stash_floor(folder: str | None, base: Baseline) -> int | None:
+    """The stash count later runs are held to when this run grew ``git stash list``.
+
+    Work a run stashed stays unchecked, whatever the run ended as, until the
+    stash is back at this count or the task ends ready.
+    """
+    if not folder or base.error or not base.git:
+        return None
+    now = await baseline(folder)
+    if now.error or not now.git or now.stash <= base.stash:
+        return None
+    return base.stash if base.floor is None else min(base.floor, base.stash)
 
 
 async def _evidence(

@@ -315,12 +315,23 @@ async def test_a_message_the_run_read_counts_as_asked(
     assert seen == [True]
 
 
+README = call("file_write", {"path": "README.md", "content": "# Calc\n"})
+
+
+@pytest.mark.parametrize(
+    ("edit", "objective", "owed"),
+    [
+        (EDIT, "Fix add in calc.py", (["tests_missing"], ["calc.py"])),
+        (README, "Write a README and commit it", (["commit_missing"], ["README.md"])),
+    ],
+    ids=["code", "docs"],
+)
 async def test_work_a_stopped_run_left_is_owed_by_the_run_that_continues_it(
-    setup: Setup,
+    setup: Setup, edit: Reply, objective: str, owed: tuple[list[str], list[str]]
 ) -> None:
     workers, llm, repo = setup
     held = asyncio.Event()
-    script = [EDIT]
+    script = [edit]
 
     async def edit_then_hang(
         messages: list[Message], tools: list[ToolDef] | None = None
@@ -333,7 +344,7 @@ async def test_work_a_stopped_run_left_is_owed_by_the_run_that_continues_it(
 
     plain = llm.chat
     llm.chat = edit_then_hang  # type: ignore[method-assign]
-    task_id = await start(workers, repo, "Fix add in calc.py")
+    task_id = await start(workers, repo, objective)
 
     async def editing() -> bool:
         for request in workers.broker.pending(task_id):
@@ -341,7 +352,6 @@ async def test_work_a_stopped_run_left_is_owed_by_the_run_that_continues_it(
         return held.is_set()
 
     await until(editing)
-    assert "a + b" in (repo / "calc.py").read_text()
     await workers.update(task_id, state="stop")
 
     async def stopped() -> bool:
@@ -353,8 +363,10 @@ async def test_work_a_stopped_run_left_is_owed_by_the_run_that_continues_it(
     _, how = await workers.message(task_id, "Go on")
     assert how == "continued"
     ending = (await ended(workers, task_id, turns=2))["ending"]
-    assert (ending["state"], ending["reasons"]) == ("draft", ["tests_missing"])
-    assert ending["uncommitted"] == ["calc.py"]
+    assert (ending["state"], ending["reasons"], ending["uncommitted"]) == (
+        "draft",
+        *owed,
+    )
 
 
 @pytest.mark.parametrize("how", ["unreadable", "raises"])
@@ -384,3 +396,23 @@ async def test_a_folder_unreadable_at_the_start_is_not_kept(
     await workers.continue_stopped(task_id)
     second = (await ended(workers, task_id, turns=2))["ending"]
     assert (second["state"], second["reasons"]) == ("ready", [])
+
+
+STASH = call(
+    "python_exec", {"code": "import subprocess\nsubprocess.run(['git', 'stash'])\n"}
+)
+
+
+async def test_work_a_run_stashed_stays_unchecked_in_the_next_run(
+    setup: Setup,
+) -> None:
+    workers, llm, repo = setup
+    llm.replies = [EDIT, STASH, says("Fixed add.\nEnding: ready")]
+    task_id = await start(workers, repo, "Fix add in calc.py")
+    first = (await ended(workers, task_id))["ending"]
+    assert (first["state"], first["reasons"]) == ("draft", ["unchecked"])
+    # The next run fixes and passes its test, but the first run's work is still stashed.
+    llm.replies = [EDIT, RUN_TEST, says("Tested.\nEnding: ready")]
+    await workers.continue_stopped(task_id)
+    second = (await ended(workers, task_id, turns=2))["ending"]
+    assert (second["state"], second["reasons"]) == ("draft", ["unchecked"])

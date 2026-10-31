@@ -77,6 +77,7 @@ from localmelo.support.gateway.task_endings import (
     can_finish,
     finish_message,
     shown,
+    stash_floor,
 )
 from localmelo.support.gateway.task_endings import decide as decide_ending
 from localmelo.support.gateway.task_policy import (
@@ -2532,6 +2533,13 @@ class TaskWorkers:
             asked.append(record.card)  # a continued task's message is asked too
         inbox = self._inboxes.get(task_id)
         asked += inbox.read if inbox is not None else []
+        try:
+            # Work this run stashed stays unchecked in later runs, however it ended.
+            floor = await stash_floor(workspace, base)
+            if floor is not None:
+                await self.tasks.keep_stash_floor(task_id, floor)
+        except Exception:
+            log.exception("Could not keep the stash count of task %s", task_id)
         try:
             return await decide_ending(
                 self.store,

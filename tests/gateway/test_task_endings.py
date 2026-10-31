@@ -29,6 +29,7 @@ from localmelo.support.gateway.task_endings import (
     python_test,
     report_text,
     shown,
+    stash_floor,
 )
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import TaskStore
@@ -844,7 +845,9 @@ async def test_a_stash_the_person_made_between_runs_is_not_the_run(repo: Path) -
     assert "unchecked" not in ending["reasons"], ending
 
 
-async def test_the_kept_baseline_holds_code_paths_only(repo: Path) -> None:
+async def test_the_kept_baseline_holds_changed_files_but_never_the_stash(
+    repo: Path,
+) -> None:
     (repo / "app.py").write_text("x = 2\n")
     (repo / "README.md").write_text("# More\n")
     git(repo, "stash", "-q")
@@ -854,7 +857,37 @@ async def test_the_kept_baseline_holds_code_paths_only(repo: Path) -> None:
     assert (now.git, now.error, now.stash) == (True, False, 1)
     kept = now.to_json()
     assert set(kept) == {"git", "head", "stamps"}, "never the stash"
-    assert list(kept["stamps"]) == ["app.py"]
+    assert sorted(kept["stamps"]) == ["README.md", "app.py"]
+
+
+async def test_docs_an_earlier_run_left_uncommitted_are_still_owed(repo: Path) -> None:
+    kept = (await baseline(str(repo))).to_json()
+    # The earlier run edited the README, a commit was asked, and it was stopped.
+    (repo / "README.md").write_text("# New\n")
+    base = (await baseline(str(repo))).since(kept)
+    ending = await end(Run(), repo, base, commit=True)
+    assert why(ending) == ("draft", ["commit_missing"])
+    assert ending["uncommitted"] == ["README.md"]
+
+
+async def test_work_a_run_stashed_stays_unchecked_until_the_stash_is_back(
+    repo: Path,
+) -> None:
+    kept = (await baseline(str(repo))).to_json()
+    first = (await baseline(str(repo))).since(kept)
+    (repo / "app.py").write_text("x = 2\n")
+    git(repo, "stash", "-q")  # the earlier run stashed its work: it ended unchecked
+    assert why(await end(Run().edit(), repo, first)) == ("draft", ["unchecked"])
+    kept["stash_floor"] = await stash_floor(str(repo), first)
+    assert kept["stash_floor"] == 0
+    later = (await baseline(str(repo))).since(kept)
+    assert await stash_floor(str(repo), later) is None, "this run grew nothing"
+    ending = await end(Run().test(), repo, later, commit=True)
+    assert why(ending) == ("draft", ["unchecked"])
+    git(repo, "stash", "pop", "-q")  # the work is back in sight: the usual rules
+    back = (await baseline(str(repo))).since(kept)
+    pop = Run().call("shell_exec", {"command": "git stash pop"}, exit_code=0).test()
+    assert why(await end(pop, repo, back)) == ("ready", [])
 
 
 async def test_a_folder_with_too_many_changes_is_unchecked(repo: Path) -> None:
@@ -865,6 +898,37 @@ async def test_a_folder_with_too_many_changes_is_unchecked(repo: Path) -> None:
         "draft",
         ["unchecked"],
     )
+
+
+def nested(repo: Path) -> Path:
+    folder = repo / "sub"
+    folder.mkdir()
+    (folder / "app.py").write_text("x = 1\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "Sub")
+    return folder
+
+
+async def test_a_file_already_changed_in_a_nested_task_folder_is_still_seen(
+    repo: Path,
+) -> None:
+    folder = nested(repo)
+    (folder / "app.py").write_text("x = 2\n")  # changed before the task started
+    base = await baseline(str(folder))
+    assert list(base.stamps or {}) == ["app.py"]
+    assert (base.stamps or {})["app.py"][0] == len("x = 2\n"), "its own stamp"
+    (folder / "app.py").write_text("x = 333\n")  # the run's edit
+    assert why(await end(Run().edit(), folder, base)) == ("draft", ["tests_missing"])
+
+
+async def test_a_commit_in_another_folder_of_the_repository_is_not_the_tasks(
+    repo: Path,
+) -> None:
+    folder = nested(repo)
+    base = await baseline(str(folder))
+    (repo / "app.py").write_text("x = 2\n")
+    git(repo, "commit", "-qam", "Elsewhere")
+    assert why(await end(Run(), folder, base, commit=True)) == ("ready", [])
 
 
 async def test_a_task_folder_inside_a_repository_sees_only_itself(repo: Path) -> None:
@@ -995,6 +1059,10 @@ async def test_the_store_keeps_an_ending_with_its_transition(tmp_path: Path) -> 
         probe = {"git": True, "head": "c"}
         owed = await tasks.keep_work_base(record.task_id, probe)
         assert owed == {"git": True, "head": "a"}, "owed until ready"
+        await tasks.keep_stash_floor(record.task_id, 2)
+        await tasks.keep_stash_floor(record.task_id, 3)
+        held = await tasks.keep_work_base(record.task_id, probe)
+        assert held == {"git": True, "head": "a", "stash_floor": 2}, "the lowest stays"
         assert not hasattr(done, "work_base"), "lists and reads never carry it"
         reopened = await tasks.reopen(record.task_id, "Finish it: run the tests")
         assert shown(reopened) is None
@@ -1003,6 +1071,13 @@ async def test_the_store_keeps_an_ending_with_its_transition(tmp_path: Path) -> 
             record.task_id, state="done", ending={"state": "ready"}
         )
         assert ready.ending is not None
+        other, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "Other"}),
+            workspace=str(tmp_path),
+            origin="user",
+        )
+        await tasks.keep_stash_floor(other.task_id, 1)  # no baseline kept: nothing
+        assert await tasks.keep_work_base(other.task_id, probe) == probe
         fresh = await tasks.keep_work_base(record.task_id, probe)
         assert fresh == probe, "a ready ending owes nothing: the next run starts anew"
     finally:
