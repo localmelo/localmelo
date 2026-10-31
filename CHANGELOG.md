@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task says honestly how it ended. When its worker finishes, code, not the
+  worker, decides: **Ready**, **Done, not finished** (it changed code and the
+  last test after the change failed, was not checked or never ran, or you asked
+  for a commit and the changes are not committed), **Needs you** (its report
+  still asks you something), **Failed** or **Stopped**. Only tests the task's own
+  run started count; tests a report claims do not, and work that was in the
+  folder before the task is not blamed on it. The card, the task page, Activity
+  and the terminal say it in plain words and colour, the task page lists the
+  tests the run ran, and **Finish it: run the tests and commit** continues a task
+  not finished with one tap. Part of #377. [#NN]
+
 - A short, read-only setup preview when terminal first run finds no model
   server: the recommendation, download/cache amounts and free space.
   `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
