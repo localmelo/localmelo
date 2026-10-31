@@ -509,6 +509,7 @@ def test_the_auto_profile_closes_the_gateway_s_files_and_port() -> None:
     )
     assert "network" not in profile(["/ws"], OwnGateway(ports=(), files=()))
     assert "file-read" not in profile(["/ws"])
+    assert "(deny lsopen)" in text and "lsopen" not in profile(["/ws"])
 
 
 def test_the_default_guard_covers_the_sign_in_and_the_store(
@@ -596,3 +597,39 @@ class TestRealGuard:
         finally:
             gateway.close()
             other.close()
+
+
+# LaunchServices asked to open a URL no app handles: nothing can start or
+# show, and the status tells a denial (-54, permErr) from "no app" (-10814).
+_LS_PROBE = """
+import ctypes, ctypes.util
+cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+cs = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+cf.CFURLCreateWithBytes.restype = ctypes.c_void_p
+cf.CFURLCreateWithBytes.argtypes = [
+    ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p
+]
+cs.LSOpenCFURLRef.restype = ctypes.c_int32
+cs.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+raw = b"x-melo-test-no-app-handles-this://probe"
+url = cf.CFURLCreateWithBytes(None, raw, len(raw), 0x08000100, None)
+print(cs.LSOpenCFURLRef(url, None))
+"""
+
+
+@pytest.mark.usefixtures("no_user_temp")
+async def test_an_auto_call_cannot_ask_macos_to_open_anything(
+    ws: Path, home: Path
+) -> None:
+    if sys.platform != "darwin":
+        pytest.skip("writes are confined only on macOS")
+    env = {"HOME": str(home)}
+    try:
+        guarded = confine(str(ws), child_env(env), guard=OwnGateway(ports=(), files=()))
+        plain = confine(str(ws), child_env(env))
+    except ConfinementError as exc:
+        pytest.skip(str(exc))
+    assert guarded is not None and plain is not None
+    for c, status in ((plain, "-10814"), (guarded, "-54")):
+        python = rooted_builtins(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        assert (await python(_LS_PROBE)).strip() == status

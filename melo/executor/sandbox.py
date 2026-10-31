@@ -183,8 +183,11 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
     """The ``sandbox-exec`` profile that allows writes only in *paths*.
 
     With *guard* (auto mode, #339) it also denies reading and writing the
-    gateway's files, and connecting to its port on this computer; these
-    rules come last, so they win over the folders allowed before them.
+    gateway's files, connecting to its port on this computer, and asking
+    macOS to open a file, an app or a URL (``lsopen``: LaunchServices then
+    answers ``permErr``); these rules come last, so they win over the
+    folders allowed before them. Apple Events are not denied: no harmless
+    check shows a rule for them taking effect, so the review judges them.
     """
     rules = [
         *(f"(literal {quote(device)})" for device in DEVICES),
@@ -199,6 +202,8 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
     if guard is not None and guard.files:
         closed = "\n  ".join(f"(subpath {quote(path)})" for path in guard.files)
         text += f"(deny file-read* file-write*\n  {closed})\n"
+    if guard is not None:
+        text += "(deny lsopen)\n"
     for port in guard.ports if guard is not None else ():
         text += f'(deny network-outbound (remote ip "localhost:{int(port)}"))\n'
     return text

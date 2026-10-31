@@ -748,6 +748,13 @@ class _Review:
             )
         ):
             self.process(node, name, attr, kw)
+        elif module == "webbrowser" and attr.startswith("open") and first:
+            # A browser opens a local file with the app it belongs to.
+            for url in self.fold(first):
+                if not isinstance(url, str):
+                    f.doubt("Opens a page or a file melo could not name.")
+                elif url.startswith("file:") or "://" not in url:
+                    shell.opened(ctx, f, url, ctx.root)
         elif attr == "open" and module != "os":
             at = 0 if method else 1
             mode = self.fold(node.args[at] if len(node.args) > at else kw.get("mode"))
@@ -1040,7 +1047,11 @@ class _Review:
             elif not in_shell and any(isinstance(p, str) for p in parts):
                 program = parts[0] if isinstance(parts[0], str) else "?"
                 rest = [p if isinstance(p, str) else "$value" for p in parts[1:]]
-                shell.run_argv(ctx.deeper(), f, [program, *rest], ctx.root)
+                # Wrappers (env, nice, xargs…) run the program they name; input
+                # given to it (input=, stdin=) is code for an interpreter.
+                given = "input" in kw or "stdin" in kw
+                ran = shell.unwrap(f, [program, *rest])
+                shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
                 f.doubt("Runs a command melo could not read.")
 

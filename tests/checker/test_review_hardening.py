@@ -906,3 +906,140 @@ def test_the_terminal_knows_the_live_gateway_too(ws: Path, tmp_path: Path) -> No
             assert "self" in sh(ws, post).categories
     finally:
         own_gateway.expect()
+
+
+# ── Code another program runs, as a class (round 4) ──
+# Judged only: none of these runs.
+
+LAUNCH = "x.command"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"perl -e 'system(\"open {LAUNCH}\")'",
+        f"perl -ne 'print' {LAUNCH}",
+        f'ruby -e \'system("open", "{LAUNCH}")\'',
+        f"node -e \"require('child_process').execSync('open {LAUNCH}')\"",
+        f"php -r 'system(\"open {LAUNCH}\");'",
+        f"swift -e 'import AppKit; NSWorkspace.shared.open(URL(fileURLWithPath: \"{LAUNCH}\"))'",
+        "swift run.swift",
+        f"lua -e 'os.execute(\"open {LAUNCH}\")'",
+        f"tclsh <<< 'exec open {LAUNCH}'",
+        f"echo 'exec(\"open {LAUNCH}\")' | node",
+        f"perl <<'EOF'\nsystem('open {LAUNCH}')\nEOF",
+        f"awk 'BEGIN{{system(\"open {LAUNCH}\")}}'",
+        "awk 'BEGIN{\"id\" | getline x; print x}'",
+        f"vim -c '!open {LAUNCH}' -c q",
+        f"git -c core.pager='open {LAUNCH}' log -1",
+        f"git -c alias.x='!open {LAUNCH}' x",
+        f"GIT_PAGER='open {LAUNCH}' git log -1",
+        f"make -f /dev/stdin <<< $'all:\\n\\topen {LAUNCH}'",
+        "sh -c \"$(printf 'op''en x.command')\"",
+        rf"find . -name {LAUNCH} -exec open {{}} \;",
+        f"echo {LAUNCH} | xargs open",
+        "xcrun swift -e 'print(1)'",
+    ],
+)
+def test_code_another_interpreter_runs_is_never_routine(ws: Path, command: str) -> None:
+    assert sh(ws, command).verdict != "routine", command
+
+
+@pytest.mark.parametrize(
+    ("command", "category"),
+    [
+        (
+            'echo \'tell application "Terminal" to do script "id"\' | osascript',
+            "system",
+        ),
+        (
+            'osascript <<\'EOF\'\ntell application "Terminal" to do script "id"\nEOF',
+            "system",
+        ),
+        ("osascript", "system"),
+        ("shortcuts run Foo", "system"),
+        ("automator x.workflow", "system"),
+        (f"/usr/bin/open {LAUNCH}", "system"),
+        (f"open file:///tmp/{LAUNCH}", "system"),
+        (f"env open {LAUNCH}", "system"),
+        (f"stdbuf -oL open {LAUNCH}", "system"),
+        (f"caffeinate -i open {LAUNCH}", "system"),
+        (f"timeout 5 open {LAUNCH}", "system"),
+        (f"command open {LAUNCH}", "system"),
+        (f"exec open {LAUNCH}", "system"),
+        (f"nice -n 5 open {LAUNCH}", "system"),
+        (f"sudo -u someone open {LAUNCH}", "system"),
+        (f"flock /tmp/l open {LAUNCH}", "system"),
+        ("docker run --rm -v $HOME/.ssh:/x alpine ls /x", "credentials"),
+        ("docker run --rm --mount type=bind,source=/etc,target=/x alpine ls", "system"),
+        ("docker run --privileged alpine id", "system"),
+        ("podman run -v /var/run/docker.sock:/s alpine id", "system"),
+        ("limactl shell default id", "system"),
+        ("colima ssh -- id", "system"),
+    ],
+)
+def test_a_step_that_hands_work_to_another_program_is_high(
+    ws: Path, command: str, category: str
+) -> None:
+    assert category in sh(ws, command).categories, command
+
+
+@pytest.mark.parametrize(
+    ("code", "category"),
+    [
+        (
+            "import webbrowser, os\nwebbrowser.open('file://' + os.path.abspath('x.command'))",
+            "system",
+        ),
+        (
+            "import subprocess\nsubprocess.run(['osascript'], input=b'tell application "
+            '"Terminal" to do script "id"\')',
+            "system",
+        ),
+        ("import os\nos.popen('osascript', 'w').write('beep')", "system"),
+        ("import subprocess\nsubprocess.run(['env', 'open', 'x.command'])", "system"),
+        (
+            "import subprocess\nsubprocess.run(['nice', 'osascript', 'x.scpt'])",
+            "system",
+        ),
+        (
+            "import webbrowser\nwebbrowser.open('http://127.0.0.1:8765/api/sessions')",
+            "self",
+        ),
+    ],
+)
+def test_python_that_hands_work_to_another_program_is_high(
+    ws: Path, gateway_port: int, code: str, category: str
+) -> None:
+    assert category in py(ws, code).categories, code
+
+
+def test_python_that_runs_another_interpreter_inline_asks(ws: Path) -> None:
+    code = "import subprocess\nsubprocess.run(['perl', '-e', 'system(\"open x.command\")'])"
+    assert py(ws, code).verdict == "undecided"
+    code = "import subprocess\nsubprocess.run(['node'], input='require(\"fs\")')"
+    assert py(ws, code).verdict == "undecided"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "node app.js",
+        "perl -v",
+        "awk '{print $1}' data.csv",
+        "awk -F'|' '{print $2}' data.csv",
+        "git -c color.ui=false log -1",
+        "git -c user.name=me log -1",
+        "vim --version",
+        "docker run --rm alpine echo hi",
+        "docker run --rm -v ./data:/data alpine ls /data",
+        "make -f build.mk",
+        "env FOO=1 python3 -c 'print(1)'",
+        "open https://example.com",
+        "frobnicate --all x",
+    ],
+)
+def test_ordinary_uses_of_those_programs_stay_routine(ws: Path, command: str) -> None:
+    # An unknown program with arguments is routine: the folder's sandbox
+    # holds what it does, and it hands nothing to another app.
+    assert sh(ws, command).verdict == "routine", command
