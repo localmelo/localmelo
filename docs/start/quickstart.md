@@ -206,7 +206,7 @@ The first row shows the package version, and on a git checkout the short commit,
 
 With no backend saved and no model server running, first-run `melo` and
 `melo setup` show a short, read-only preview: the recommendation, download upper
-bound, cached amount, free disk space and planned lifetime. On supported
+bound, cached amount and free disk space. On supported
 Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
 summary is printed once. Choose `Show how to set one up` for at most six
 numbered steps: download oMLX, move it to Applications, download the model,

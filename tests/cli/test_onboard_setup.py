@@ -824,11 +824,11 @@ def test_with_no_server_the_screen_shows_an_honest_pinned_setup_preview(
     assert "SetupPlan" not in out and "SHA256" not in out
     assert "bytes" not in out and "hf download" not in out
     assert discovery.GUIDE_URL in out and "Show manual steps" not in out
+    assert "lifetime" not in out  # Default mode has no lifetime control.
     if system == "Darwin":
-        assert "Planned lifetime: stop when melo closes." in out
         assert "Download: up to 3.2 GB · Cached: 0 GB · Free: 10.0 GB" in out
     else:
-        assert "Manual only" in out and "Cached" not in out and "lifetime" not in out
+        assert "Manual only" in out and "Cached" not in out
 
 
 def test_intro_is_visible_before_any_server_discovery(

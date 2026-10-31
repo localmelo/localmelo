@@ -398,15 +398,10 @@ def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
         "No model server is running yet.",
         "Recommended: oMLX with Qwen3 4B Instruct.",
         f"Download: up to {_size(download)} · Cached: {_size(total - d.missing_model_bytes)} · {space}: {free}",
-        (
-            "Planned lifetime: keep running after melo closes."
-            if setup.keep_running
-            else "Planned lifetime: stop when melo closes."
-        ),
         (AUTOMATIC_SOON if interactive else f"Guide: {GUIDE_URL}"),
     ]
     warnings = []
-    help_target = "Details" if interactive else "the manual guide"
+    help_target = "the manual guide"  # Default mode has no Details row.
     if d.ram_bytes is None:
         warnings.append(
             f"RAM unknown; check the 16 GB recommendation in {help_target}."

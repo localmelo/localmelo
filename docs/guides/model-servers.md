@@ -10,9 +10,9 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 
 - With no backend saved and no server found, terminal first run and `melo setup`
   show a short, read-only preview. Supported Apple-silicon Macs get oMLX with
-  Qwen3 4B Instruct (4-bit): the download upper bound, cached amount, free space
-  and planned lifetime, with one warning when needed. Other systems show manual
-  guidance without cache or lifetime estimates for an unsupported installer.
+  Qwen3 4B Instruct (4-bit): the download upper bound, cached amount and free
+  space, with one warning when needed. Other systems show manual guidance
+  without cache estimates for an unsupported installer.
   With a backend already saved and no server found, `melo setup` opens the full
   backend menu instead.
 - The summary is printed once. The list then offers `Check again`,

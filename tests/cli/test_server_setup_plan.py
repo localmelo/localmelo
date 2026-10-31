@@ -435,16 +435,16 @@ def test_all_reserved_ports_and_out_of_range_values_are_denied_without_binding()
 def test_default_preview_is_short_human_readable_and_counts_runtime_download() -> None:
     planned = setup.plan(setup.detect())
     lines = setup.preview(planned)
-    assert len(lines) == 5 and all(len(line) < 80 for line in lines)
+    assert len(lines) == 4 and all(len(line) < 80 for line in lines)
     assert lines[0] == "No model server is running yet."
     assert lines[2] == "Download: up to 3.2 GB · Cached: 0 GB · Free: 10.0 GB"
-    assert lines[3] == "Planned lifetime: stop when melo closes."
     assert "Ctrl+C" in "\n".join(setup.manual_steps(planned))
     assert (
-        lines[4]
+        lines[3]
         == "Automatic setup is coming soon; melo can show you how to do it now."
     )
     text = "\n".join(lines)
+    assert "lifetime" not in text  # Default mode has no lifetime control.
     for internal in (
         planned.digest,
         planned.recipe.runtime_commit,
@@ -504,8 +504,8 @@ def test_preview_adds_only_one_warning_line(
             ),
         )
     lines = setup.preview(setup.plan(detected), interactive=interactive)
-    assert len(lines) == 6 and expected.lower() in lines[-1].lower()
-    assert ("Details" if interactive else "the manual guide") in lines[-1]
+    assert len(lines) == 5 and expected.lower() in lines[-1].lower()
+    assert "the manual guide" in lines[-1] and "Details" not in lines[-1]
     # The piped guide line is "Guide: " plus the URL, which may be wider.
     assert all(len(line) < 80 or discovery.GUIDE_URL in line for line in lines)
 
@@ -526,11 +526,11 @@ def test_preview_combines_warnings_and_shows_multiple_volume_free_space(
     lines = setup.preview(
         setup.plan(detected, keep_running=True), interactive=interactive
     )
-    assert len(lines) == 6
+    assert len(lines) == 5
     assert "Free/volume: <0.1 GB / unknown" in lines[2]
-    assert "keep running after melo closes" in lines[3]
+    assert "lifetime" not in "\n".join(lines)  # keep_running shows in Details only
     assert "Several setup checks need attention" in lines[-1]
-    assert ("Details" if interactive else "the manual guide") in lines[-1]
+    assert "the manual guide" in lines[-1] and "Details" not in lines[-1]
     assert all(len(line) < 80 or discovery.GUIDE_URL in line for line in lines)
 
 
@@ -746,10 +746,10 @@ def test_manual_only_numbered_steps_use_the_platform_guide_in_the_same_style(
 
 def test_piped_preview_labels_the_guide_link() -> None:
     planned = setup.plan(setup.detect())
-    assert setup.preview(planned, interactive=False)[4] == (
+    assert setup.preview(planned, interactive=False)[3] == (
         f"Guide: {discovery.GUIDE_URL}"
     )
-    assert setup.preview(planned)[4] == (
+    assert setup.preview(planned)[3] == (
         "Automatic setup is coming soon; melo can show you how to do it now."
     )
 
