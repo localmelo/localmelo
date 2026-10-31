@@ -26,11 +26,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.contracts.review import ModelAnswer
+from localmelo.melo.memory.block import strip_block
 
-# How the block of notes and earlier chats that a chat's turn may carry after
-# the user's words begins (support/memory/recall.py renders it; a test keeps
-# them in step). The review reads only what comes before it.
-RECALL_PREFIX: Final = "[melo's memory ·"
 # A call longer than this is not reviewed: it counts as unreviewed.
 MAX_ACTION_CHARS: Final = 6_000
 # Characters kept of each user message, and how many earlier ones go along.
@@ -117,11 +114,9 @@ def _data(text: str) -> str:
 
 
 def own_words(text: str) -> str:
-    """*text* without the recalled notes and chats a turn may carry after it.
-
-    The block starts at :data:`RECALL_PREFIX` and runs to the end.
-    """
-    return text.split(RECALL_PREFIX, 1)[0].rstrip()
+    """*text* without the recalled notes and chats a turn may carry after it
+    (:func:`~localmelo.melo.memory.block.strip_block`)."""
+    return strip_block(text).rstrip()
 
 
 def action_text(tool_name: str, arguments: Mapping[str, Any]) -> str:
@@ -355,7 +350,6 @@ __all__ = [
     "REVIEW_TIMEOUT_S",
     "SYSTEM_PROMPT",
     "ReviewInputs",
-    "RECALL_PREFIX",
     "action_text",
     "names",
     "own_words",

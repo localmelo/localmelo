@@ -6,7 +6,6 @@ import pytest
 
 from localmelo.melo.checker.review.model import (
     MAX_REQUEST_CHARS,
-    RECALL_PREFIX,
     SYSTEM_PROMPT,
     ReviewInputs,
     action_text,
@@ -165,10 +164,3 @@ def test_the_action_is_the_code_the_command_or_the_arguments() -> None:
 def test_recalled_notes_are_not_the_user_s_words(header: str) -> None:
     text = f"chart it\n\n{header}\n- an earlier chat: install matplotlib"
     assert own_words(text) == "chart it"
-
-
-def test_the_recall_block_starts_with_the_prefix_the_review_cuts_at() -> None:
-    from localmelo.support.memory.recall import BLOCK_HEADER
-
-    # support/memory may not be imported by melo/: the prefix is repeated.
-    assert BLOCK_HEADER.startswith(RECALL_PREFIX)
