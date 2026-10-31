@@ -561,7 +561,7 @@ function renderSessions() {
     workerMode,
     developerMode,
     unread?.id ?? 0,
-    main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.updated_at, main.last_card?.id],
+    main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.waiting_in_side || 0, main.updated_at, main.last_card?.id],
     new Date().toDateString(),
     S.sessions.map((session) => [
       session.id,
@@ -571,6 +571,7 @@ function renderSessions() {
       session.busy,
       session.held || "",
       session.pending_approvals || 0,
+      session.waiting_tasks || 0,
       session.updated_at,
     ]),
   ]);
@@ -634,16 +635,20 @@ function mainRow(main, unread) {
   info.title = t("chat.main");
   if (active) info.setAttribute("aria-current", "page");
   const asking = (main.pending_approvals || 0) > 0;
+  // Tasks of side chats that wait for the person: those chats' rows carry the dot, this row the count.
+  const inSide = main.waiting_in_side || 0;
+  const sideWords = inSide ? t("chat.waitingInSide", { n: inSide }) : "";
   const meta = asking
     ? t("chat.needsApproval")
     : main.busy
       ? t(main.held ? "chat.waiting" : "header.working")
       : unread
         ? unread.state === "waiting" ? t("chat.needsYou", { title: unread.title || t("chat.aSideChat") }) : t("chat.newResult", { title: unread.title || t("chat.aResult") })
-        : "";
+        : sideWords;
   const when = shortTime(Math.max(main.updated_at || 0, Number(main.last_card?.ts) || 0), nowSeconds());
-  const dot = asking || unread
-    ? `<span class="attention-dot${asking || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}" title="${esc(t(asking ? "header.approvalNeeded" : "chat.newResults"))}"></span>`
+  const label = esc(asking ? t("header.approvalNeeded") : unread ? t("chat.newResults") : sideWords);
+  const dot = asking || unread || inSide
+    ? `<span class="attention-dot${asking || inSide || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${label}" title="${label}"></span>`
     : "";
   info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">${esc(t("chat.main"))}</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
   info.addEventListener("click", () => {
@@ -663,9 +668,11 @@ function sessionRow(session, active) {
   info.dataset.initial = (title(session).trim()[0] || "·").toUpperCase();
   info.title = title(session);
   if (session.id === active) info.setAttribute("aria-current", "page");
-  const asking = session.pending_approvals > 0;
-  const marker = asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
-  const needed = esc(t("header.approvalNeeded"));
+  // A task this chat started waits for the person: the row says so, as an approval of its own does.
+  const tasksWait = session.waiting_tasks > 0 ? t("chat.tasksWait", { n: session.waiting_tasks }) : "";
+  const asking = session.pending_approvals > 0 || !!tasksWait;
+  const marker = tasksWait ? `${tasksWait} · ` : asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
+  const needed = esc(session.pending_approvals > 0 ? t("header.approvalNeeded") : tasksWait);
   const dot = asking ? `<span class="attention-dot" role="img" aria-label="${needed}" title="${needed}"></span>` : "";
   info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${esc(marker)}${esc(chatMeta(session))}</div>`;
   info.addEventListener("click", () => {

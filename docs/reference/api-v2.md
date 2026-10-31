@@ -729,7 +729,11 @@ side chats of the main chat, which the list names in `main`.
   object, plus `last_card`: its newest [card](#cards-in-the-main-chat), or
   `null`. A client marks the main chat unread while `last_card.id` is newer
   than the last card it showed. `main` is `null` only while the store cannot
-  be read.
+  be read. A side chat in the list has `waiting_tasks` (only when above 0): how
+  many of its tasks wait for the person's answer (held on an approval or an
+  input), and `main` has `waiting_in_side` (only when above 0): the same count
+  over all side chats. A client marks the side chat's row and shows the count
+  on the main chat's.
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
   matches a session's title or any turn's user text. `has_more` says that
   older sessions exist beyond the page.

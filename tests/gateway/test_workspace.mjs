@@ -4582,6 +4582,31 @@ test('an echo about another chat\'s task says whose it is', async () => {
   assert.deepEqual(findNodes(h.element('messages'), (node) => node.className === 'echo-sub').map((node) => node.textContent), ['From Main chat', 'From Trip plan']);
 });
 
+test('a side chat whose task waits for you gets the dot, and the main chat counts them', async () => {
+  let waiting = 1;
+  const h = harness(mainRoutes({'GET /sessions': () => ({
+    sessions: [session('a', {title: 'Plan the trip', updated_at: NOW - 30, ...(waiting ? {waiting_tasks: waiting} : {})}), session('b', {title: 'Fix CI', updated_at: NOW - 60})],
+    main: mainSession(waiting ? {waiting_in_side: waiting} : {}), machine: null, has_more: false,
+  })}));
+  await h.run('init()');
+  const row = (id) => findNode(h.element('session-list'), (node) => node.dataset?.sessionId === id);
+  const dot = (node) => findNode(node, (n) => /attention-dot/.test(n.innerHTML ?? ''));
+  assert.match(flatten(row('a')), /A task waits for you/);
+  assert.ok(dot(row('a')), 'The side chat\'s row carries the dot');
+  assert.equal(dot(row('b')), null, 'A calm side chat has none');
+  assert.match(flatten(h.element('main-chat-row')), /1 waiting in a side chat/);
+  assert.match(dot(h.element('main-chat-row')).innerHTML, /attention-dot waits/, 'It is the amber dot of something that waits for you');
+  waiting = 2;
+  await h.run('refreshList()');
+  assert.match(flatten(row('a')), /2 tasks wait for you/);
+  assert.match(flatten(h.element('main-chat-row')), /2 waiting in side chats/);
+  waiting = 0;
+  await h.run('refreshList()');
+  assert.equal(dot(row('a')), null);
+  assert.equal(dot(h.element('main-chat-row')), null, 'Nothing waits: no dot, no count');
+  assert.doesNotMatch(flatten(h.element('main-chat-row')), /waiting in/);
+});
+
 test('a side chat that started no task stays a plain list of turns', async () => {
   const h = harness(sideRoutes());
   await h.run('init()');

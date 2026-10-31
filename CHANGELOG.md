@@ -16,7 +16,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   that chat, and a chat acts on its own tasks first, then on the other chats'
   (the line says whose). The main chat's Activity still lists every task and
   names the side chat on the ones it did not start (`From Trip plan`), and its
-  next message reads one line when a side chat finished work. [#NN]
+  next message reads one line when a side chat finished work. A side chat whose
+  task waits for you gets the dot on its row, and the main chat's row counts
+  them (`1 waiting in a side chat`). The terminal's `/task` works in a side
+  chat too. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

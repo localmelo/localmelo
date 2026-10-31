@@ -173,6 +173,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **A task comes back to the chat that started it.** Its line (`Started: Find hotels · P2`, with **Change** and **Undo**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
 - **The main chat still sees everything.** Activity and Workers list every task; one a side chat started reads `From Trip plan`.
 - **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. A task of another chat can still be named: its line reads `From Main chat` or `From Trip plan`.
+- **A task that waits for you shows on the list.** The side chat's row gets the dot and reads `A task waits for you`; the main chat's row reads `1 waiting in a side chat`.
 - **The main chat hears when a side chat finishes work.** With your next message it reads one line, the side chat's name and a short summary, when that chat answered or one of its tasks finished. It is information, not a message.
 - **Chores and reminders belong to the chat that made them.** One saved in a side chat runs as that chat's task and reports there, not in the main chat's check-in.
 - The terminal's `/task …` starts a task in a side chat too, once the chat has its first message.
