@@ -27,7 +27,7 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from typing import Literal
+from typing import Final, Literal
 
 from .chore_schedule import (
     _PART_HOUR,
@@ -40,6 +40,8 @@ from .chore_schedule import (
 )
 
 Problem = Literal["", "time", "past", "far"]
+# A longer message is no reminder (and is not scanned, whatever it holds).
+MAX_CHARS: Final = 1000
 
 _I = re.IGNORECASE
 _N = r"(?:\d{1,3}|[零〇一二两三四五六七八九十]{1,3})"
@@ -345,6 +347,8 @@ def parse_reminder(text: str, now: datetime) -> Reminder | None:
     cue with no usable time gives a :class:`Reminder` whose ``problem`` says why.
     """
     text = unicodedata.normalize("NFKC", text).strip()
+    if len(text) > MAX_CHARS:
+        return None
     cue = _STRONG.search(text)
     weak = cue is None
     cue = cue or _WEAK.search(text)
@@ -369,7 +373,8 @@ def parse_reminder(text: str, now: datetime) -> Reminder | None:
 
 def parse_when(text: str, now: datetime) -> Reminder | None:
     """A message that is only a time ("Friday at 9", "in 2 hours"), else ``None``."""
-    when, rest = _read(unicodedata.normalize("NFKC", text).strip(), now)
+    text = unicodedata.normalize("NFKC", text).strip()
+    when, rest = _read(text, now) if len(text) <= MAX_CHARS else (_When(), text)
     if not when.named or _tidy(rest):
         return None
     on, minute, problem = _settle(when, now)

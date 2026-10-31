@@ -285,3 +285,13 @@ def test_an_answer_with_more_than_a_time_is_not_one(text: str) -> None:
 
 def test_full_width_digits_and_colons_are_read() -> None:
     assert read("提醒我明天９：３０开会") == ("开会", "2026-10-29", "09:30", "")
+
+
+def test_a_long_message_is_not_scanned() -> None:
+    long = "remind me to call mom tomorrow at 9 " + "-" * 5000
+    assert parse_reminder(long, NOW) is None
+    assert parse_when("tomorrow " + "-" * 5000, NOW) is None
+    assert (
+        parse_reminder("remind me to call mom tomorrow at 9 " + "-" * 900, NOW)
+        is not None
+    )
