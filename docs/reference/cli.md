@@ -135,7 +135,8 @@ dot. `melo -h all` lists the keys with their defaults.
   `agent.reflection_gate`, `agent.tool_exposure`, `memory.dir`,
   `memory.keep_decision_text`, `retrieval.extra_body`, `endpoint.embedding_url`,
   `endpoint.embedding_model` and `endpoint.reasoning_field`.
-- `-X agent.answer_on_stop=on` also answers a run whose request the server refused for a
+- `agent.answer_on_stop` is on by default (`-X agent.answer_on_stop=off` turns it off): it
+  also answers a run whose request the server refused for a
   budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends
   `provider_error`, but `result` holds the answer. See [Run results](run-results.md#statuses).
 - `melo config` shows the file and what differs from the defaults. `melo config keys
@@ -424,7 +425,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
-| `--reflection-gate flags\|utility\|patient` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option), or as `flags`, but once per run also when the next step is not novel (`patient`, a developer setting). |
+| `--reflection-gate flags\|utility\|patient` | `patient` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option), or as `flags`, but once per run also when the next step is not novel (`patient`, the default). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
 | `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
@@ -468,13 +469,13 @@ accepts the options named in [Interactive UI](#interactive-ui).
   model request instead (planning, reflection and the rest), set `-X agent.max_calls=N`
   (a developer setting, a whole number of 2 or more, no option of its own): the run
   stops itself before the request that would pass `N` and ends `budget_exhausted` with
-  the error `Call budget reached: ...`. With `-X agent.answer_on_stop=on` the last call
+  the error `Call budget reached: ...`. With `agent.answer_on_stop` on (the default) the last call
   is kept to ask once, without tools, for the final answer from the evidence, so the
   run sends `N - 1` requests and then that one. Both appear in `melo -h all`, and
   [Run results](run-results.md#statuses) says what the record holds.
 - `--reflection-gate`: see [Reflection](../concepts/how-it-works.md#reflection). It has
-  no effect with `--attempt-policy none`. `patient` is a developer setting
-  (`-X agent.reflection_gate=patient` for one run).
+  no effect with `--attempt-policy none`. `--reflection-gate flags` gives the gate from
+  before `patient` became the default (`-X agent.reflection_gate=flags` for one run).
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
   `file_write`, `list_files`, `python_exec` and `shell_exec`. A direct run's default set

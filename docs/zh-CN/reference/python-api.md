@@ -40,8 +40,8 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `attempt_policy` | `"reflect"` | `"reflect"`：分多次尝试，每次之后有一次反思。`"none"`：只有一次尝试。 |
 | `steps_per_attempt` | `10` | 使用 `"reflect"` 时每次尝试最多的步骤数。 |
 | `max_attempts` | `5` | 使用 `"reflect"` 时每次运行最多的尝试次数。 |
-| `reflection_gate` | `"flags"` | 使用 `"reflect"` 时为 `"flags"`、`"utility"` 或 `"patient"`；见[反思](../concepts/how-it-works.md#reflection)。 |
-| `answer_on_stop` | `False` | `True`：以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的证据索要答案；见[运行结果](run-results.md#statuses)。 |
+| `reflection_gate` | `"patient"` | 使用 `"reflect"` 时为 `"patient"`、`"flags"` 或 `"utility"`；见[反思](../concepts/how-it-works.md#reflection)。 |
+| `answer_on_stop` | `True` | `True`：以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的证据索要答案；答案里没有任务要求的收尾行时，再发出一次请求把它加上；`False` 两种请求都不发。见[运行结果](run-results.md#statuses)。 |
 | `max_calls` | `None` | 不小于 2 的整数：一次运行最多发出的模型请求数；在会超出它的那个请求之前运行以 `budget_exhausted` 结束（开启 `answer_on_stop` 时，最后一次调用留给答案）。`None`：没有上限。见[运行结果](run-results.md#statuses)。 |
 | `tool_exposure` | `"retrieve"` | `"retrieve"` 或 `"all"`；见[如何提供工具](tools.md#how-tools-are-offered)。 |
 | `builtins` | `None` | 要注册的内置工具：`None` 表示该模式的默认集合，空集合表示没有，或者给出一个名称集合。 |

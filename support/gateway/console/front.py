@@ -175,13 +175,18 @@ def answer_head(answer: str, chars: int = ANSWER_CHARS) -> str:
 
 
 def front_options(settings: Config | None) -> AgentOptions:
-    """The main chat's options: at most 4 steps, no reflection, read-only file tools."""
+    """The main chat's options: at most 4 steps, no reflection, read-only file tools.
+
+    A turn that runs out of steps is handed off to a task, so the chat does not
+    spend a request asking for an answer first (``answer_on_stop``).
+    """
     options = configured_session_options(settings, AgentOptions(mode="gateway"))
     return dataclasses.replace(
         options,
         max_steps=FRONT_STEPS,
         attempt_policy="none",
         builtins=frozenset({"file_read", "list_files"}),
+        answer_on_stop=False,
     )
 
 

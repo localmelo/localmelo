@@ -53,7 +53,7 @@ from localmelo.tests.agent.test_phase1a_compat import (
     result_json,
     window_json,
 )
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, LEGACY_CACHE_OPTIONS
 
 GOLDEN_DIR = Path(__file__).parent / "goldens" / "legacy"
 
@@ -400,7 +400,8 @@ async def record_run(
     agent = Agent(
         llm=_llm(provider, httpx.MockTransport(server.handler)),
         options=AgentOptions(
-            memory_dir=memory_dir, **{**LEGACY_CACHE_OPTIONS, **scenario.options}
+            memory_dir=memory_dir,
+            **{**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS, **scenario.options},
         ),
     )
     try:
