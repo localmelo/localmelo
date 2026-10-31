@@ -8,34 +8,38 @@
  * list. `root` is mounted in the panel's body while the tab is open; `show()` reads the notes again.
  * `askAboutNotes` is the question a deleted chat with notes asks.
  */
-export const TOPICS = {about: 'About you', preferences: 'Preferences', people: 'People', projects: 'Projects', decisions: 'Decisions'};
-const EMPTY = 'Nothing remembered yet.';
-const HOW = 'melo keeps a note when you tell it something about yourself, such as “I prefer short answers”, or ask it to remember something. Notes show up here, and you can reword or delete them.';
-const NEVER = 'Never kept: passwords, keys, codes and page contents.';
+import {t} from './i18n.mjs';
+
+export const TOPICS = ['about', 'preferences', 'people', 'projects', 'decisions'];
+
+/** A topic's name in the page's language, or '' for a topic the page does not know. */
+export function topicName(topic) {
+  return TOPICS.includes(topic) ? t(`memoryTab.topic.${topic}`) : '';
+}
 
 const capital = (text) => String(text ?? '').charAt(0).toUpperCase() + String(text ?? '').slice(1);
-const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
 
 /** How the search finds a note: every word typed is in its text, topic or source. */
 export function matches(row, query) {
   const words = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = `${row.text} ${TOPICS[row.topic] ?? ''} ${row.from ?? ''}`.toLowerCase();
+  const hay = `${row.text} ${topicName(row.topic)} ${row.from ?? ''}`.toLowerCase();
   return words.every((word) => hay.includes(word));
 }
 
 /** What melo says about how it searches: by meaning with the embedding model, else by words only. */
 export function searchLine(on, model, retriever = 'auto') {
-  if (!on) return 'Off. Notes stay on this computer but are not used in chats.';
-  if (retriever === 'bm25') return 'Searching by words only, as the memory retriever setting says.';
-  if (retriever === 'llm') return 'Searching by words, and your chat model picks the notes that matter.';
-  return model ? `Searching by meaning with ${model}, and by words.` : 'Searching by words only. An embedding model in Settings adds search by meaning.';
+  if (!on) return t('memoryTab.search.off');
+  if (retriever === 'bm25') return t('memoryTab.search.words');
+  if (retriever === 'llm') return t('memoryTab.search.model');
+  return model ? t('memoryTab.search.meaning', {model}) : t('memoryTab.search.wordsOnly');
 }
 
 /** What "Forget everything" will remove, in the confirm's words. */
 export function forgetLine(notes, turns) {
-  const parts = [plural(notes, 'note', 'notes')];
-  if (turns) parts.push(`melo's search index of ${plural(turns, 'chat turn', 'chat turns')}`);
-  return `This removes ${parts.join(' and ')}. Your chats stay. It cannot be undone.`;
+  const what = t('memoryTab.notes', {n: notes});
+  return turns
+    ? t('memoryTab.forgetLineIndex', {notes: what, index: t('memoryTab.index', {n: turns})})
+    : t('memoryTab.forgetLine', {notes: what});
 }
 
 export function setupMemoryTab({doc, api, developer = () => false}) {
@@ -59,8 +63,8 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   const head = node('div', 'memory-head');
   const search = node('input', 'memory-search');
   search.type = 'search';
-  search.placeholder = 'Search what melo remembers';
-  search.setAttribute('aria-label', 'Search what melo remembers');
+  search.placeholder = t('memoryTab.searchBox');
+  search.setAttribute('aria-label', t('memoryTab.searchBox'));
   search.addEventListener('input', () => { state.query = search.value; drawList(); });
   const searchBox = node('div', 'memory-searchbox');
   searchBox.append(search);
@@ -77,7 +81,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
         model: page.embedding_model ?? '', retriever: page.retriever ?? 'auto', loaded: true, error: ''});
     } catch (error) {
       if (mine !== reads || quiet) return;
-      state.error = error?.message || 'Could not read what melo remembers.';
+      state.error = error?.message || t('memoryTab.readFailed');
     }
     draw();
   }
@@ -102,14 +106,14 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     toggle.type = 'button';
     toggle.setAttribute('role', 'switch');
     toggle.setAttribute('aria-checked', String(state.on));
-    toggle.setAttribute('aria-label', 'Remember across chats');
+    toggle.setAttribute('aria-label', t('memoryTab.switch'));
     toggle.append(node('span', 'memory-knob'));
     toggle.addEventListener('click', async () => {
-      const done = await call('/memory', {method: 'PUT', body: {on: !state.on}}, 'Could not change this. Try again.');
+      const done = await call('/memory', {method: 'PUT', body: {on: !state.on}}, t('memoryTab.switchFailed'));
       if (done) state.on = done.on !== false;
       draw();
     });
-    row.append(node('strong', '', 'Remember across chats'), toggle);
+    row.append(node('strong', '', t('memoryTab.switch')), toggle);
     head.replaceChildren(row, node('p', 'memory-line', searchLine(state.on, state.model, state.retriever)));
   }
   function noteNode(row) {
@@ -121,7 +125,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
       area.rows = 3;
       area.maxLength = 300;
       area.value = state.draft;
-      area.setAttribute('aria-label', 'The note, in your words');
+      area.setAttribute('aria-label', t('memoryTab.editLabel'));
       area.addEventListener('input', () => { state.draft = area.value; });
       area.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.stopPropagation(); state.edit = null; draw(); }
@@ -129,57 +133,57 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
       item.append(area);
       if (state.fault) item.append(node('p', 'memory-fault', state.fault));
       const buttons = node('div', 'memory-actions');
-      buttons.append(button('outline-button', 'Save', () => save(row)), button('quiet-button', 'Cancel', () => { state.edit = null; draw(); }));
+      buttons.append(button('outline-button', t('memoryTab.save'), () => save(row)), button('quiet-button', t('memoryTab.cancel'), () => { state.edit = null; draw(); }));
       item.append(buttons);
       return item;
     }
     item.append(node('p', 'memory-text', row.text));
     const meta = node('p', 'memory-meta');
-    if (TOPICS[row.topic]) meta.append(node('span', 'memory-topic', TOPICS[row.topic]));
-    meta.append(node('span', row.chat_gone ? 'memory-from gone' : 'memory-from', capital(row.from) + (row.edited ? ' · edited' : '')));
+    if (topicName(row.topic)) meta.append(node('span', 'memory-topic', topicName(row.topic)));
+    meta.append(node('span', row.chat_gone ? 'memory-from gone' : 'memory-from', capital(row.from) + (row.edited ? ` · ${t('memoryTab.edited')}` : '')));
     item.append(meta);
     const actions = node('div', 'memory-actions');
     if (state.ask === row.id) {
-      actions.append(node('span', 'memory-ask', 'Forget this note?'),
-        button('quiet-button', 'Keep it', () => { state.ask = null; draw(); }),
-        button('outline-button danger', 'Forget it', () => forget(row)));
+      actions.append(node('span', 'memory-ask', t('memoryTab.forgetOne')),
+        button('quiet-button', t('memoryTab.keepIt'), () => { state.ask = null; draw(); }),
+        button('outline-button danger', t('memoryTab.forgetIt'), () => forget(row)));
     } else {
-      actions.append(button('quiet-button', 'Edit', () => { Object.assign(state, {edit: row.id, draft: row.text, fault: '', focus: true}); draw(); }, `Edit: ${row.text}`),
-        button('quiet-button', 'Delete', () => { state.ask = row.id; draw(); }, `Delete: ${row.text}`));
+      actions.append(button('quiet-button', t('memoryTab.edit'), () => { Object.assign(state, {edit: row.id, draft: row.text, fault: '', focus: true}); draw(); }, t('memoryTab.editNote', {note: row.text})),
+        button('quiet-button', t('memoryTab.delete'), () => { state.ask = row.id; draw(); }, t('memoryTab.deleteNote', {note: row.text})));
     }
     item.append(actions);
     return item;
   }
   function drawList() {
-    if (!state.loaded) { list.replaceChildren(node('p', 'panel-note', state.error || 'Reading what melo remembers…')); return; }
+    if (!state.loaded) { list.replaceChildren(node('p', 'panel-note', state.error || t('memoryTab.reading'))); return; }
     const shown = state.rows.filter((row) => matches(row, state.query));
     if (!state.rows.length) {
       const empty = node('div', 'memory-empty');
-      empty.append(node('p', 'memory-empty-title', EMPTY), node('p', 'panel-note', HOW));
+      empty.append(node('p', 'memory-empty-title', t('memoryTab.empty')), node('p', 'panel-note', t('memoryTab.how')));
       list.replaceChildren(empty);
       return;
     }
-    if (!shown.length) { list.replaceChildren(node('p', 'panel-note', `No note matches “${state.query.trim()}”.`)); return; }
+    if (!shown.length) { list.replaceChildren(node('p', 'panel-note', t('memoryTab.noMatch', {query: state.query.trim()}))); return; }
     const notes = node('ul', 'memory-notes-list');
     notes.append(...shown.map(noteNode));
     list.replaceChildren(notes);
     if (state.focus) { state.focus = false; list.querySelector?.('textarea')?.focus?.(); }
   }
   function drawFoot() {
-    const nodes = [node('p', 'memory-never', NEVER)];
+    const nodes = [node('p', 'memory-never', t('memoryTab.never'))];
     if (state.notice) nodes.push(node('p', 'memory-fault', state.notice));
     if (state.forgetting) {
       const box = node('div', 'memory-forget');
-      box.append(node('strong', '', 'Forget everything?'), node('p', '', forgetLine(state.rows.length, state.documents)));
+      box.append(node('strong', '', t('memoryTab.forgetAllAsk')), node('p', '', forgetLine(state.rows.length, state.documents)));
       const actions = node('div', 'memory-actions');
-      actions.append(button('outline-button', 'Keep everything', () => { state.forgetting = false; draw(); }),
-        button('outline-button danger', 'Forget everything', forgetAll));
+      actions.append(button('outline-button', t('memoryTab.keepAll'), () => { state.forgetting = false; draw(); }),
+        button('outline-button danger', t('memoryTab.forgetAll'), forgetAll));
       box.append(actions);
       nodes.push(box);
     } else if (state.rows.length || state.documents) {
       const links = node('div', 'panel-foot');
-      links.append(button('link-button danger', 'Forget everything…', () => { state.forgetting = true; draw(); }));
-      if (developer()) links.append(button('link-button', 'Rebuild search index', reindex));
+      links.append(button('link-button danger', t('memoryTab.forgetAllLink'), () => { state.forgetting = true; draw(); }));
+      if (developer()) links.append(button('link-button', t('memoryTab.reindex'), reindex));
       nodes.push(links);
     }
     foot.replaceChildren(...nodes);
@@ -192,20 +196,20 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   }
 
   async function save(row) {
-    const done = await call(`/memory/records/${encodeURIComponent(row.id)}`, {method: 'PATCH', body: {text: state.draft}}, 'Could not save the note. Try again.');
+    const done = await call(`/memory/records/${encodeURIComponent(row.id)}`, {method: 'PATCH', body: {text: state.draft}}, t('memoryTab.saveFailed'));
     if (done) { state.rows = state.rows.map((item) => (item.id === row.id ? done : item)); state.edit = null; state.fault = ''; }
     else state.fault = state.notice;
     state.notice = '';
     draw();
   }
   async function forget(row) {
-    const done = await call(`/memory/records/${encodeURIComponent(row.id)}`, {method: 'DELETE'}, 'Could not forget the note. Try again.');
+    const done = await call(`/memory/records/${encodeURIComponent(row.id)}`, {method: 'DELETE'}, t('memoryTab.forgetFailed'));
     if (done !== null) state.rows = state.rows.filter((item) => item.id !== row.id);
     state.ask = null;
     draw();
   }
   async function forgetAll() {
-    const done = await call('/memory/records?all=true', {method: 'DELETE'}, 'Could not forget everything. Try again.');
+    const done = await call('/memory/records?all=true', {method: 'DELETE'}, t('memoryTab.forgetAllFailed'));
     if (done) {
       Object.assign(state, {rows: [], documents: 0, forgetting: false, edit: null, ask: null, query: '', notice: ''});
       search.value = '';
@@ -213,8 +217,8 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     draw();
   }
   async function reindex() {
-    const done = await call('/memory/reindex', {method: 'POST', body: {}}, 'Could not rebuild the index. Try again.');
-    if (done) { state.notice = `Rebuilt: ${plural(done.turns, 'chat turn', 'chat turns')}.`; await load({quiet: true}); }
+    const done = await call('/memory/reindex', {method: 'POST', body: {}}, t('memoryTab.reindexFailed'));
+    if (done) { state.notice = t('memoryTab.rebuilt', {n: done.turns}); await load({quiet: true}); }
     draw();
   }
 
@@ -233,9 +237,9 @@ export function askAboutNotes({doc, count, title = ''}) {
     dialog.setAttribute('aria-labelledby', 'notes-ask-title');
     const heading = doc.createElement('h2');
     heading.id = 'notes-ask-title';
-    heading.textContent = `Also forget the ${plural(count, 'note', 'notes')} from this chat?`;
+    heading.textContent = t('memoryTab.ask.title', {n: count});
     const about = doc.createElement('p');
-    about.textContent = `${title ? `“${title}” is deleted either way. ` : ''}Notes are facts melo learned about you there; they can stay after the chat is gone.`;
+    about.textContent = title ? t('memoryTab.ask.aboutTitled', {title}) : t('memoryTab.ask.about');
     const answer = (value) => { dialog.close?.(); dialog.remove?.(); resolve(value); };
     const choose = (text, value, className) => {
       const item = doc.createElement('button');
@@ -245,9 +249,9 @@ export function askAboutNotes({doc, count, title = ''}) {
       item.addEventListener('click', () => answer(value));
       return item;
     };
-    const keep = choose('Keep the notes', 'keep', 'outline-button');
-    dialog.append(heading, about, keep, choose(`Forget the ${plural(count, 'note', 'notes')} too`, 'forget', 'outline-button danger'),
-      choose('Don’t delete the chat', 'cancel', 'quiet-button'));
+    const keep = choose(t('memoryTab.ask.keep'), 'keep', 'outline-button');
+    dialog.append(heading, about, keep, choose(t('memoryTab.ask.forget', {n: count}), 'forget', 'outline-button danger'),
+      choose(t('memoryTab.ask.cancel'), 'cancel', 'quiet-button'));
     dialog.addEventListener('cancel', (event) => { event.preventDefault(); answer('cancel'); });
     (doc.body ?? doc.documentElement).append(dialog);
     dialog.showModal?.();

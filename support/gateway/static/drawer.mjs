@@ -1,3 +1,4 @@
+import {t} from './i18n.mjs';
 import {formatDuration, statusText} from './turns.mjs';
 
 /**
@@ -31,22 +32,22 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     element.addEventListener('click', action);
     return element;
   }
-  const heading = node('h2', 'Details');
-  const closeButton = button('Close details', () => close());
+  const heading = node('h2', t('drawer.title'));
+  const closeButton = button(t('drawer.close'), () => close());
   const tabs = node('div', undefined, 'drawer-tabs');
   const content = node('div', undefined, 'drawer-content');
   const message = node('p', '', 'drawer-message');
   message.setAttribute('role', 'status');
   message.setAttribute('aria-live', 'polite');
   root.setAttribute('role', 'region');
-  root.setAttribute('aria-label', 'Session details');
+  root.setAttribute('aria-label', t('drawer.label'));
   root.hidden = true;
   root.replaceChildren(heading, closeButton, tabs, message, content);
   const tabButtons = {};
   const TABS = ['tools', 'memory', 'runs', 'events'];
   const available = (name) => name !== 'events' || developer();
   for (const name of TABS) {
-    const item = button(name[0].toUpperCase() + name.slice(1), () => selectTab(name));
+    const item = button(t(`drawer.tab.${name}`), () => selectTab(name));
     tabButtons[name] = item;
     tabs.append(item);
   }
@@ -64,42 +65,42 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     return `/sessions/${encodeURIComponent(session)}/${suffix}`;
   }
   function errorText(error) {
-    return error?.message || 'Request failed. Please try again.';
+    return error?.message || t('drawer.requestFailed');
   }
   function line(parent, label, value) {
-    parent.append(node('p', `${label}: ${value}`));
+    parent.append(node('p', t('drawer.line', {label, value})));
   }
   function toolView(data) {
-    content.append(node('p', 'Viewing tools opens the Agent if it is not already open.'));
+    content.append(node('p', t('drawer.tools.opens')));
     const tools = data.tools || [];
-    if (!tools.length) content.append(node('p', 'No tools available.'));
+    if (!tools.length) content.append(node('p', t('drawer.tools.none')));
     for (const tool of tools) {
       const row = node('div', undefined, 'drawer-tool');
-      row.append(node('strong', tool.name), node('span', ` ${tool.source || ''} · ${tool.granted ? 'Allowed' : 'Not allowed'}`));
+      row.append(node('strong', tool.name), node('span', ` ${tool.source || ''} · ${t(tool.granted ? 'drawer.tools.allowed' : 'drawer.tools.notAllowed')}`));
       if (tool.description) row.append(node('p', tool.description));
       if (tool.granted) {
-        const revoke = button('Revoke', () => revokeGrants(tool.name));
-        revoke.setAttribute('aria-label', `Revoke ${tool.name}`);
+        const revoke = button(t('drawer.tools.revoke'), () => revokeGrants(tool.name));
+        revoke.setAttribute('aria-label', t('drawer.tools.revokeOne', {tool: tool.name}));
         row.append(revoke);
       }
       content.append(row);
     }
-    if (tools.some((tool) => tool.granted)) content.append(button('Revoke all grants', () => revokeGrants()));
+    if (tools.some((tool) => tool.granted)) content.append(button(t('drawer.tools.revokeAll'), () => revokeGrants()));
     if (data.mcp_config_label) content.append(node('p', data.mcp_config_label));
     if (data.mcp_error) content.append(node('p', data.mcp_error));
   }
   function memoryView(data) {
-    line(content, 'Working memory', `${(data.working || []).length} / ${data.working_max}`);
+    line(content, t('drawer.memory.working'), `${(data.working || []).length} / ${data.working_max}`);
     const longTerm = data.long_term || {};
-    line(content, 'Long-term memory', `${longTerm.enabled ? 'Enabled' : 'Disabled'}${developer() ? ` (${longTerm.backend || 'none'})` : ''}`);
-    if (developer() && data.agent) line(content, 'Agent', typeof data.agent === 'string' ? data.agent : JSON.stringify(data.agent));
-    if (!data.working?.length) content.append(node('p', 'No working memory.'));
+    line(content, t('drawer.memory.longTerm'), `${t(longTerm.enabled ? 'drawer.memory.on' : 'drawer.memory.off')}${developer() ? ` (${longTerm.backend || 'none'})` : ''}`);
+    if (developer() && data.agent) line(content, t('drawer.memory.agent'), typeof data.agent === 'string' ? data.agent : JSON.stringify(data.agent));
+    if (!data.working?.length) content.append(node('p', t('drawer.memory.empty')));
     for (const entry of data.working || []) {
       const row = node('div', undefined, 'drawer-memory');
       row.append(node('strong', entry.role), node('p', entry.text));
-      if (entry.tool_calls?.length) line(row, 'Tools', entry.tool_calls.join(', '));
-      if (entry.tool_call_id) line(row, 'Tool call', entry.tool_call_id);
-      if (entry.images) line(row, 'Images', entry.images);
+      if (entry.tool_calls?.length) line(row, t('drawer.memory.tools'), entry.tool_calls.join(', '));
+      if (entry.tool_call_id) line(row, t('drawer.memory.toolCall'), entry.tool_call_id);
+      if (entry.images) line(row, t('drawer.memory.images'), entry.images);
       content.append(row);
     }
   }
@@ -109,15 +110,15 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
   }
   function runsView() {
-    if (!runs.length) content.append(node('p', 'No finished runs.'));
+    if (!runs.length) content.append(node('p', t('drawer.runs.none')));
     for (const run of runs) {
       const row = node('div', undefined, 'drawer-run');
       const status = statusText(run.status);
-      row.append(node('strong', `Turn ${run.turn} · ${status.word}`));
-      line(row, 'Started', timestamp(run.started_at));
-      line(row, 'Finished', timestamp(run.finished_at));
+      row.append(node('strong', t('drawer.runs.turn', {turn: run.turn, status: status.word})));
+      line(row, t('drawer.runs.started'), timestamp(run.started_at));
+      line(row, t('drawer.runs.finished'), timestamp(run.finished_at));
       if (typeof run.started_at === 'number' && typeof run.finished_at === 'number') {
-        line(row, 'Duration', formatDuration(run.finished_at - run.started_at));
+        line(row, t('drawer.runs.duration'), formatDuration(run.finished_at - run.started_at));
       }
       if (developer() && run.result && typeof run.result === 'object') {
         for (const [key, value] of Object.entries(run.result)) {
@@ -126,14 +127,14 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       }
       content.append(row);
     }
-    if (earlier && runs.length) content.append(button('Earlier runs', () => load(true)));
-    else if (earlier) content.append(node('p', 'Earlier runs cannot be loaded because this page has no finished runs.'));
+    if (earlier && runs.length) content.append(button(t('drawer.runs.earlier'), () => load(true)));
+    else if (earlier) content.append(node('p', t('drawer.runs.noEarlier')));
   }
   function eventsView(data) {
     const turn = (data.turns || []).at(-1);
     const events = turn?.events || [];
-    if (!events.length) content.append(node('p', 'No stored events.'));
-    else line(content, 'Raw events of turn', turn.turn);
+    if (!events.length) content.append(node('p', t('drawer.events.none')));
+    else line(content, t('drawer.events.ofTurn'), turn.turn);
     for (const event of events) {
       const row = node('div', undefined, 'drawer-event');
       row.append(node('strong', `#${event.id} ${event.type}`), node('pre', JSON.stringify(event, null, 1)));
@@ -157,7 +158,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     const selected = tab;
     const token = ++generation;
     busy = true;
-    message.textContent = 'Loading…';
+    message.textContent = t('drawer.loading');
     if (!append) clearContent();
     try {
       const cursor = append ? `?before=${encodeURIComponent(Math.min(...runs.map((run) => run.turn)))}` : '';
@@ -173,7 +174,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       if (!valid(token, session, selected)) return;
       message.textContent = notice ? `${notice} ${errorText(error)}` : errorText(error);
       if (!append) {
-        clearContent(button('Retry', () => load(false, notice)));
+        clearContent(button(t('drawer.retry'), () => load(false, notice)));
       }
     } finally {
       if (valid(token, session, selected)) busy = false;
@@ -184,7 +185,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     const session = id;
     const token = ++generation;
     busy = true;
-    message.textContent = 'Revoking…';
+    message.textContent = t('drawer.revoking');
     if (content.contains(doc.activeElement)) closeButton.focus();
     for (const item of content.querySelectorAll('button')) item.disabled = true;
     try {

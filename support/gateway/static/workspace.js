@@ -12,6 +12,7 @@
  * modules, served as they are.
  */
 
+import { t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
@@ -2752,7 +2753,7 @@ async function init() {
     try {
       globalThis.history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
     } catch {
-      lock("Could not clear the sign-in link. Close this tab and try again.");
+      lock(t("signIn.clearFailed"));
       return;
     }
     try {
@@ -2769,18 +2770,18 @@ async function init() {
         body: JSON.stringify({code}),
       });
       if (response.status !== 204) {
-        lock("This sign-in link is invalid or expired. Get a new link and try again.");
+        lock(t("signIn.expired"));
         return;
       }
     } catch {
-      lock("Could not sign in. Get a new link and try again.");
+      lock(t("signIn.failed"));
       return;
     }
   }
   try {
     setHealth(await api("/health", {allowLocked: true}));
   } catch (error) {
-    lock(error.status === 401 ? "" : "Could not reach the gateway. Open a new sign-in link to try again.");
+    lock(error.status === 401 ? "" : t("signIn.unreachable"));
     return;
   }
   S.authenticated = true;

@@ -507,7 +507,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
                        + "waiting=\(!self.menuBar.waitingLine.isHidden) line=\(self.menuBar.runningLine.isHidden ? "" : self.menuBar.runningLine.title)")
 """,
         "    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {": '    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {\n        record("quit-request")',
-        '                    alert.addButton(withTitle: "Cancel")': """                    alert.addButton(withTitle: "Cancel")
+        '                    alert.addButton(withTitle: L10n.t("app.quit.cancel", "Cancel"))': """                    alert.addButton(withTitle: L10n.t("app.quit.cancel", "Cancel"))
                     record("quit-prompt")
                     record("quit-title " + alert.messageText)
                     if ["quit", "idlequit"].contains(ProcessInfo.processInfo.environment["TEST_MODE"] ?? "") {
@@ -555,6 +555,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "/usr/bin/xcrun",
             "swiftc",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
+            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
             str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),

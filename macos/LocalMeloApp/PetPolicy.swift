@@ -130,18 +130,21 @@ enum PetMood: Equatable {
     var label: String {
         switch self {
         case .unknown: return "Melo"
-        case .resting: return "Melo, resting. Nothing running."
-        case .sleeping: return "Melo, sleeping. Nothing running."
-        case .working(let n): return "Melo, working. \(n) running."
-        case .waiting: return "Melo, waiting for your approval."
-        case .done: return "Melo, done."
-        case .failed: return "Melo, the last run did not finish."
-        case .stopped: return "Melo, localmelo stopped."
+        case .resting: return L10n.t("app.pet.resting", "Melo, resting. Nothing running.")
+        case .sleeping: return L10n.t("app.pet.sleeping", "Melo, sleeping. Nothing running.")
+        case .working(let n): return L10n.t("app.pet.working", "Melo, working. {n} running.", ["n": String(n)])
+        case .waiting: return L10n.t("app.pet.waiting", "Melo, waiting for your approval.")
+        case .done: return L10n.t("app.pet.done", "Melo, done.")
+        case .failed: return L10n.t("app.pet.failed", "Melo, the last run did not finish.")
+        case .stopped: return L10n.t("app.pet.stopped", "Melo, localmelo stopped.")
         }
     }
 
     /// What pressing the pet does.
-    var help: String { self == .waiting ? "Opens what waits for your approval" : "Opens localmelo" }
+    var help: String {
+        self == .waiting ? L10n.t("app.pet.helpWaiting", "Opens what waits for your approval")
+            : L10n.t("app.pet.help", "Opens localmelo")
+    }
 }
 
 /// The pet's mood from the last health reply (nil: none yet, or the gateway did not answer). First match wins:
@@ -277,9 +280,16 @@ enum DesktopMode: String, CaseIterable {
     case pill, pet, nothing
 
     var title: String {
-        ["pill": "Melo and the activity pill", "pet": "Melo only", "nothing": "Nothing"][rawValue] ?? rawValue
+        switch self {
+        case .pill: return L10n.t("app.desktop.pill", "Melo and the activity pill")
+        case .pet: return L10n.t("app.desktop.pet", "Melo only")
+        case .nothing: return L10n.t("app.desktop.nothing", "Nothing")
+        }
     }
 }
+
+/// The menu that offers the choices above.
+var desktopMenuTitle: String { L10n.t("app.desktop.menu", "On the desktop") }
 
 /// What the app remembers about the pet between launches: whether the person hid it, whether the activity pill may
 /// take its place while work runs, the screen it was last on, and its spot on each screen. A missing, damaged or

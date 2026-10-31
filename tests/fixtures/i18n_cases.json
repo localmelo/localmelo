@@ -1,0 +1,37 @@
+{
+  "format": [
+    {"language": "en", "entry": "and {n} more", "params": {"n": 3}, "text": "and 3 more"},
+    {"language": "zh-Hans", "entry": "还有 {n} 个", "params": {"n": 3}, "text": "还有 3 个"},
+    {"language": "en", "entry": {"one": "{n} chat", "other": "{n} chats"}, "params": {"n": 1}, "text": "1 chat"},
+    {"language": "en", "entry": {"one": "{n} chat", "other": "{n} chats"}, "params": {"n": 0}, "text": "0 chats"},
+    {"language": "en", "entry": {"one": "{n} chat", "other": "{n} chats"}, "params": {"n": 2}, "text": "2 chats"},
+    {"language": "en", "entry": {"one": "{n} step", "other": "{n} steps"}, "params": {"n": "1"}, "text": "1 steps"},
+    {"language": "zh-Hans", "entry": {"other": "{n} 个对话"}, "params": {"n": 1}, "text": "1 个对话"},
+    {"language": "zh-Hans", "entry": "{n} 个对话", "params": {"n": 1}, "text": "1 个对话"},
+    {"language": "en", "entry": "{label}: {value}", "params": {"label": "Started", "value": "{n}"}, "text": "Started: {n}"},
+    {"language": "en", "entry": "In a terminal, run {code}.", "params": {}, "text": "In a terminal, run {code}."},
+    {"language": "en", "entry": "{a}{a} {b}", "params": {"a": "x", "b": "y z"}, "text": "xx y z"},
+    {"language": "zh-Hans", "entry": "第 {step}/{max} 步", "params": {"step": 4, "max": 30}, "text": "第 4/30 步"},
+    {"language": "en", "entry": "No note matches “{query}”.", "params": {"query": "$1 & {x}"}, "text": "No note matches “$1 & {x}”."}
+  ],
+  "pick": [
+    {"setting": "en", "preferred": ["zh-CN"], "language": "en"},
+    {"setting": "zh-Hans", "preferred": ["en-US"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": [], "language": "en"},
+    {"setting": "auto", "preferred": ["zh-Hans-CN", "en-US"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["zh-CN"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["zh"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["zh_SG"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["ZH-hans"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["zh-Hant-TW", "en-GB"], "language": "en"},
+    {"setting": "auto", "preferred": ["zh-TW", "zh-CN"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["zh-HK"], "language": "en"},
+    {"setting": "auto", "preferred": ["zh-Hans-HK"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["fr-FR", "zh-CN", "en"], "language": "zh-Hans"},
+    {"setting": "auto", "preferred": ["ja-JP", "de"], "language": "en"},
+    {"setting": "auto", "preferred": ["en-US", "zh-CN"], "language": "en"},
+    {"setting": "auto", "preferred": ["", " zh-cn "], "language": "zh-Hans"},
+    {"setting": "fr", "preferred": ["zh-CN"], "language": "zh-Hans"},
+    {"setting": "", "preferred": ["en"], "language": "en"}
+  ]
+}

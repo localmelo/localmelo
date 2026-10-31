@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
 
+from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import pictures
 from localmelo.support.sessions.store import SessionStoreError
 
@@ -41,9 +42,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
         except SessionStoreError as exc:
             raise await console.store_api_error(exc, session_id) from exc
         if info is None:
-            raise ApiError(404, "not_found", "Session not found.")
+            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         if not info.workspace:
-            raise ApiError(404, "not_found", "This chat has no folder yet.")
+            raise ApiError(404, "not_found", t("errors.noFolder"))
         try:
             picture = await asyncio.to_thread(pictures.read, info.workspace, path)
         except pictures.PictureError as exc:

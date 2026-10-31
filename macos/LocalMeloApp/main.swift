@@ -57,6 +57,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var logHandle: FileHandle?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The console's language, before any word is shown: the setting, else the Mac's languages.
+        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
+        let config = try? String(contentsOf: home.appendingPathComponent(".cache/localmelo/config.toml"), encoding: .utf8)
+        L10n.use(pickLanguage(setting: consoleLanguageSetting(config), preferred: Locale.preferredLanguages))
         NSApp.setActivationPolicy(.regular)
         createWindow()
         createMenu()
@@ -97,19 +101,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createMenu() {
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Open localmelo", action: #selector(openWindow), keyEquivalent: "")
-        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        let signIn = appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
+        appMenu.addItem(withTitle: L10n.t("app.menu.open", "Open localmelo"), action: #selector(openWindow), keyEquivalent: "")
+        appMenu.addItem(withTitle: L10n.t("app.menu.settings", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
+        let signIn = appMenu.addItem(withTitle: L10n.t("app.menu.signIn", "Sign In Again"), action: #selector(signInAgain),
+                                     keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit localmelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: quitTitle(attached: false), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let root = NSMenu()
         let entry = NSMenuItem()
         entry.submenu = appMenu
         root.addItem(entry)
-        let edit = NSMenu(title: "Edit")
-        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"),
-                                      ("Cut", "cut:", "x"), ("Copy", "copy:", "c"),
-                                      ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+        let edit = NSMenu(title: L10n.t("app.edit.menu", "Edit"))
+        for (title, action, key) in [(L10n.t("app.edit.undo", "Undo"), "undo:", "z"), (L10n.t("app.edit.redo", "Redo"), "redo:", "Z"),
+                                      (L10n.t("app.edit.cut", "Cut"), "cut:", "x"), (L10n.t("app.edit.copy", "Copy"), "copy:", "c"),
+                                      (L10n.t("app.edit.paste", "Paste"), "paste:", "v"),
+                                      (L10n.t("app.edit.selectAll", "Select All"), "selectAll:", "a")] {
             edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
         }
         let editEntry = NSMenuItem()
@@ -288,12 +294,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             }
             guard let pids = pids else {
                 self.checking = false
-                self.fail("Cannot inspect port \(self.port). No login code was sent.")
+                self.fail(L10n.t("app.fail.inspectPort", "Cannot inspect port {port}. No login code was sent.", ["port": String(self.port)]))
                 return
             }
             guard ownsListener(pids, child: child.processIdentifier) else {
                 self.checking = false
-                self.fail("Port \(self.port) is held by another process. Stop the existing listener and try again.")
+                self.fail(portHeldMessage(self.port))
                 return
             }
             send()
@@ -369,7 +375,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func spawnGateway() {
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
-            fail("The bundled gateway is missing.")
+            fail(L10n.t("app.fail.missing", "The bundled gateway is missing."))
             return
         }
         let logs = logsDirectory
@@ -385,7 +391,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             try handle.seekToEnd()
             logHandle = handle
         } catch {
-            fail("Cannot open the gateway log: \(error.localizedDescription)")
+            fail(L10n.t("app.fail.log", "Cannot open the gateway log: {error}", ["error": error.localizedDescription]))
             return
         }
         let process = Process()
@@ -406,7 +412,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 guard !self.stopping, !self.quitPending else { return }
                 self.listenerPIDs { pids in
                     let holders = (pids ?? []).filter { $0 != process.processIdentifier }
-                    let detail = holders.isEmpty ? "" : " Port \(self.port) is held by process \(holders.map(String.init).joined(separator: ", "))."
+                    let detail = holders.isEmpty ? "" : L10n.t("app.fail.portHolders", " Port {port} is held by process {pids}.",
+                                                               ["port": String(self.port), "pids": holders.map(String.init).joined(separator: ", ")])
                     let log = gatewayExitLogLine(status: process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
                     try? self.logHandle?.write(contentsOf: Data("\n\(log)\(detail)\n".utf8))
                     self.fail(gatewayExitMessage(detail: detail))
@@ -414,7 +421,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             }
         }
         do { try process.run() } catch {
-            fail("Cannot start the bundled gateway: \(error.localizedDescription)")
+            fail(L10n.t("app.fail.start", "Cannot start the bundled gateway: {error}", ["error": error.localizedDescription]))
             return
         }
         readStartup(output, of: process)
@@ -456,7 +463,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             timer?.invalidate()
             stopping = true
             if child.owned { kill(child.processIdentifier, SIGTERM) }
-            fail(port == 0 ? "The gateway did not report its port." : "Gateway did not become ready on port \(port).")
+            fail(port == 0 ? L10n.t("app.fail.noPort", "The gateway did not report its port.")
+                 : L10n.t("app.fail.notReady", "Gateway did not become ready on port {port}.", ["port": String(port)]))
             return
         }
         guard port != 0, !checking else { return }
@@ -497,7 +505,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 guard acceptsInstance(http.value(forHTTPHeaderField: "X-LocalMelo-Instance"),
                                       expected: self.instance, childRunning: child.isRunning) else {
                     self.checking = false
-                    self.fail("Port \(self.port) is held by another process. Stop the existing listener and try again.")
+                    self.fail(portHeldMessage(self.port))
                     return
                 }
                 self.issueLoginCodes(child: child, reload: reload)
@@ -582,6 +590,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         let url = URL(string: "http://127.0.0.1:\(port)/api/health")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
+        // What the gateway writes for the pill and the menus, in the app's language.
+        request.setValue(L10n.language, forHTTPHeaderField: "X-LocalMelo-Language")
         healthSession.dataTask(with: request) { [weak self] data, response, _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -639,6 +649,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         if webView != nil { tearDownWebView() }
         guard let content = window.contentView else { return }
         let configuration = WKWebViewConfiguration()
+        // The console page picks its language as the app did, from the Mac's languages.
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: languagesScript(Locale.preferredLanguages), injectionTime: .atDocumentStart,
+                         forMainFrameOnly: true))
         configuration.userContentController.addScriptMessageHandler(
             FolderBridge(gatewayPort: { [weak self] in self?.port ?? 0 },
                          choose: { [weak self] reply in self?.chooseFolder(reply) ?? reply(nil) },
@@ -697,8 +711,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose the folder melo works in"
-        panel.prompt = "Choose"
+        panel.message = L10n.t("app.folder.message", "Choose the folder melo works in")
+        panel.prompt = L10n.t("app.folder.choose", "Choose")
         panel.beginSheetModal(for: window) { response in
             let path = response == .OK ? panel.url?.path : nil
             if let path = path { self.pickedFolders.append(path) }
@@ -741,7 +755,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                               expected: instance, childRunning: child?.isRunning == true) else {
             decisionHandler(.cancel)
             tearDownWebView()
-            fail("Port \(port) is held by another process. Stop the existing listener and try again.")
+            fail(portHeldMessage(port))
             return
         }
         decisionHandler(.allow)
@@ -803,17 +817,17 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 // flight is interrupted like any other, and the console offers to continue it on reopening.
                 if quitNeedsConfirmation(reply) {
                     let alert = NSAlert()
-                    alert.messageText = "Quit localmelo?"
+                    alert.messageText = L10n.t("app.quit.ask", "Quit localmelo?")
                     alert.informativeText = quitMessage(counts, statusKnown: running != nil)
-                    alert.addButton(withTitle: "Quit and Stop")
-                    alert.addButton(withTitle: "Cancel")
+                    alert.addButton(withTitle: L10n.t("app.quit.stop", "Quit and Stop"))
+                    alert.addButton(withTitle: L10n.t("app.quit.cancel", "Cancel"))
                     guard alert.runModal() == .alertFirstButtonReturn else {
                         self.quitPending = false
                         if !child.isRunning {
                             self.tearDownWebView()
                             sender.reply(toApplicationShouldTerminate: false)
                             DispatchQueue.main.async {
-                                self.fail("The gateway exited while the quit confirmation was open.")
+                                self.fail(L10n.t("app.fail.exitedWhileAsking", "The gateway exited while the quit confirmation was open."))
                             }
                         } else {
                             sender.reply(toApplicationShouldTerminate: false)

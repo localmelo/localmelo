@@ -130,10 +130,15 @@ def unit(vector: Iterable[float] | None) -> np.ndarray | None:
     return array / norm if array.size and norm > 0 else None
 
 
+def chat_title(title: str) -> str:
+    """A source chat's title as its label quotes it: one line, cut at 40 characters."""
+    title = " ".join(title.split())
+    return title[: _TITLE_CHARS - 1] + "…" if len(title) > _TITLE_CHARS else title
+
+
 def chat_label(kind: str, title: str, surface: str) -> str:
     """How a source chat is named: ``Main chat``, ``chat “Fix CI”``, ``task “…”``."""
-    title = " ".join(title.split())
-    title = title[: _TITLE_CHARS - 1] + "…" if len(title) > _TITLE_CHARS else title
+    title = chat_title(title)
     if kind == "front":
         return "Main chat"
     name = {"task": "task", "front_bg": "main chat task"}.get(kind, "chat")

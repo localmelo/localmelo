@@ -69,6 +69,19 @@ body {
     sans-serif;
   letter-spacing: -0.012em;
 }
+/* Simplified Chinese: PingFang SC first, and no tightened tracking, which crowds CJK glyphs. */
+:root:lang(zh-Hans) body {
+  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+/* While the server's guess is not English, words the page will translate wait for it, a second at most. */
+:root[data-i18n-pending] [data-i18n] {
+  visibility: hidden;
+  animation: i18n-show 0s 1s forwards;
+}
+@keyframes i18n-show {
+  to { visibility: visible; }
+}
 button {
   color: inherit;
 }

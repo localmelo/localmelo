@@ -19,10 +19,11 @@ final class MenuBar {
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
     init(menu: NSMenu, waiting: Selector, showPet: Selector) {
         let logo = MenuBar.logo()
-        waitingLine = NSMenuItem(title: "Waiting for your approval", action: waiting, keyEquivalent: "")
-        showPetLine = NSMenuItem(title: "Show Melo", action: showPet, keyEquivalent: "")
+        waitingLine = NSMenuItem(title: L10n.t("app.menu.waiting", "Waiting for your approval"), action: waiting, keyEquivalent: "")
+        showPetLine = NSMenuItem(title: L10n.t("app.menu.showPet", "Show Melo"), action: showPet, keyEquivalent: "")
         showPetLine.isHidden = true
-        menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.title == "Open localmelo" } ?? -1) + 1)
+        let open = L10n.t("app.menu.open", "Open localmelo")
+        menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.title == open } ?? -1) + 1)
         plain = MenuBar.image(logo, badge: false)
         badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }

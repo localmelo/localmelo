@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -15,6 +15,7 @@ from localmelo.support import config
 from localmelo.support.config import Config, SchedulerConfig
 from localmelo.support.gateway.chat_gate import call_log_dir
 from localmelo.support.gateway.guard import app_instance
+from localmelo.support.gateway.i18n import SETTINGS, page_language
 from localmelo.support.gateway.machine_monitor import read_pmset
 from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 from localmelo.support.gateway_endpoint import GATEWAY_HEADER
@@ -42,6 +43,34 @@ def _manager(app: FastAPI) -> SmokePlayground:
         )
         app.state.smoke_playground = manager
     return manager
+
+
+def _language_setting(app: FastAPI) -> str:
+    """``[console] language`` as the console holds it now (Settings may change it); a bad value is ``auto``."""
+    console = getattr(app.state, "console", None)
+    cfg = getattr(console, "cfg", None) or getattr(app.state, "config", None)
+    setting = cfg.console.language if isinstance(cfg, Config) else "auto"
+    return setting if setting in SETTINGS else "auto"
+
+
+def _page(request: Request, setting: str) -> str:
+    """``index.html`` with its first guess at the reader's language on ``<html>``.
+
+    ``data-language`` carries the setting for the page to apply. While the
+    guess is not English, ``data-i18n-pending`` keeps the words the page will
+    translate hidden (for a second at most), so they never flash in English.
+    """
+    language = page_language(setting, request.scope.get("headers", ()))
+    pending = "" if language == "en" else " data-i18n-pending"
+    return (
+        (_STATIC / "index.html")
+        .read_text(encoding="utf-8")
+        .replace(
+            '<html lang="en" data-language="auto">',
+            f'<html lang="{language}" data-language="{setting}"{pending}>',
+            1,
+        )
+    )
 
 
 def _body_text(body: dict[str, Any], key: str, default: str = "") -> str:
@@ -101,7 +130,7 @@ def mount(
     instance = app_instance()
 
     @app.get("/", response_class=HTMLResponse)
-    async def chat_ui() -> HTMLResponse:
+    async def chat_ui(request: Request) -> HTMLResponse:
         headers = (
             {"X-LocalMelo-Instance": instance, "Cache-Control": "no-store"}
             if instance
@@ -111,9 +140,7 @@ def mount(
         gateway_id = getattr(app.state, "gateway_id", "")
         if gateway_id:
             headers = {**headers, GATEWAY_HEADER: gateway_id}
-        return HTMLResponse(
-            (_STATIC / "index.html").read_text(encoding="utf-8"), headers=headers
-        )
+        return HTMLResponse(_page(request, _language_setting(app)), headers=headers)
 
     if not enable_playground:
         return

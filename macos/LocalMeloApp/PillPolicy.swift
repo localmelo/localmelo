@@ -100,15 +100,17 @@ struct PillModel: Equatable {
 
     /// What VoiceOver reads: the one line of the pill, in a sentence, and where a press goes.
     var label: String {
-        let line = text.prefix(1).lowercased() + text.dropFirst()
+        let line = L10n.language == "en" ? text.prefix(1).lowercased() + text.dropFirst() : text
         let subject: String
         switch state {
-        case .working, .waiting, .done: subject = "Melo is \(line)."
-        case .failed: subject = "Melo \(line)."
-        case .serverDown: subject = "Melo: \(line)."
+        case .working, .waiting, .done: subject = L10n.t("app.pill.is", "Melo is {line}.", ["line": line])
+        case .failed: subject = L10n.t("app.pill.failed", "Melo {line}.", ["line": line])
+        case .serverDown: subject = L10n.t("app.pill.down", "Melo: {line}.", ["line": line])
         }
-        if case .route(let route) = click, route.hasPrefix("#/tasks/") { return subject + " Opens the task." }
-        return subject + " Opens the chat."
+        if case .route(let route) = click, route.hasPrefix("#/tasks/") {
+            return subject + L10n.t("app.pill.opensTask", " Opens the task.")
+        }
+        return subject + L10n.t("app.pill.opensChat", " Opens the chat.")
     }
 }
 
@@ -158,25 +160,27 @@ func pillSnapshot(health data: Data, age: TimeInterval) -> PillSnapshot? {
         PillSnapshot(model: PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click),
                      ids: ids.isEmpty ? ["running"] : ids)
     }
-    if !waits.isEmpty { return active(.waiting, "Waiting for your approval", .wait, .waitAlert, .waiting) }
+    if !waits.isEmpty {
+        return active(.waiting, L10n.t("app.menu.waiting", "Waiting for your approval"), .wait, .waitAlert, .waiting)
+    }
     if counts.total > 0 {
         let icon = focus?.icon ?? .think
         if modelServerReachable(data) == false {
-            return active(.serverDown, "Model server not reachable", icon, .error, route)
+            return active(.serverDown, L10n.t("app.pill.serverDown", "Model server not reachable"), icon, .error, route)
         }
-        return active(.working, focus?.activity ?? "Working", icon, .working(icon), route)
+        return active(.working, focus?.activity ?? L10n.t("app.pill.working", "Working"), icon, .working(icon), route)
     }
     guard let recent = recentOutcome(data) else { return nil }
     let ended: (PillState, String, TimeInterval)
     switch recent.outcome {
-    case .done: ended = (.done, "Done", petDoneFor)
-    case .failed: ended = (.failed, "Stopped", petFailedFor)
+    case .done: ended = (.done, L10n.t("app.pill.done", "Done"), petDoneFor)
+    case .failed: ended = (.failed, L10n.t("app.pill.stopped", "Stopped"), petFailedFor)
     case .stopped: return nil
     }
     let (state, word, shownFor) = ended
     let left = shownFor - (recent.endedAgo + age)
     guard left > 0 else { return nil }
-    let text = recent.title.isEmpty ? word : "\(word): \(recent.title)"
+    let text = recent.title.isEmpty ? word : L10n.t("app.pill.ended", "{word}: {title}", ["word": word, "title": recent.title])
     let target = consoleRoute(kind: recent.kind, id: recent.id).map(PillClick.route) ?? .window
     return PillSnapshot(model: PillModel(state: state, text: text, icon: .tool, more: 0,
                                          portrait: state == .done ? .done : .error, click: target),
